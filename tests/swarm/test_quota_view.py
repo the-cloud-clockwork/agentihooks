@@ -89,7 +89,7 @@ def test_codex_routing_left_is_its_week_left():
     codex = row("personal", "REDUCE", 3, None, 35.0, "codex")
     assert quota_view.routing_left(codex) == 35.0
     assert quota_view.routing_left({**codex, "five_left": 20.0}) == 35.0
-    assert quota_view.routing_left(row("alpha", five=None)) is None
+    assert quota_view.routing_left({**row("alpha", five=None), "week_left": None}) is None
     assert quota_view.lines({**DECISION, "accounts": [codex]}, 1_000_000, LIVE, "manual")[2] == (
         "quota account codex personal  reduce  routing 35% left  sessions 3"
     )
@@ -127,10 +127,10 @@ def test_an_unknown_host_room_reads_unknown():
     assert quota_view.host_line({"room": 0, "reason": "full"}) == "host room 0: full"
 
 
-def test_routing_left_is_the_lower_window_or_none_when_either_is_unknown():
+def test_routing_left_is_the_lower_window_the_week_alone_or_none_without_a_week():
     assert quota_view.routing_left(row("a", five=30.0, week=70.0)) == 30.0
     assert quota_view.routing_left(row("a", five=90.0, week=12.0)) == 12.0
-    assert quota_view.routing_left(row("a", five=None, week=12.0)) is None
+    assert quota_view.routing_left(row("a", five=None, week=12.0)) == 12.0
     assert quota_view.routing_left(row("a", five=12.0, week=None)) is None
 
 

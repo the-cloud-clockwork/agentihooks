@@ -65,7 +65,9 @@ def test_bundle_preserves_every_shard_report_for_the_existing_aggregator(tmp_pat
     for shard in range(2):
         output = tmp_path / f"gate-{shard}"
         output.mkdir()
-        (output / "report.json").write_text(json.dumps({"files": [], "not_mutated": [], "failed": False}))
+        measurement = {"index": shard, "expected": 0, "graded": 0}
+        report = {"files": [], "not_mutated": [], "failed": False, "shard": measurement}
+        (output / "report.json").write_text(json.dumps(report))
         with patch("scripts.ci_mutation.evidence.subprocess.check_output", return_value="revision\n"):
             stage(tmp_path, output, tmp_path / "shards" / f"mutation-preflight-shard-{shard}", (shard, 2))
     from scripts.ci_mutation.merge import main

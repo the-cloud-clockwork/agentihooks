@@ -772,9 +772,53 @@ def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base(
         step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == "Hold the mapped feature tests"
     )
     assert step["if"] == "${{ !cancelled() }}"
-    assert 'cd "$RUNNER_TEMP/grader"' in step["run"]
+    assert step["run"].startswith('if ! grep -qs -- \'"--base"\' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then\n')
     assert (
         step["run"]
         .strip()
-        .endswith('python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"')
+        .endswith(
+            'exit 1\nfi\ncd "$RUNNER_TEMP/grader"\n'
+            'python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"'
+        )
     )
+
+
+@pytest.mark.feature("independent-ci-records")
+def test_feature_fragments_preserve_validation_and_retirement(
+    mapped_repo: tuple[Path, Path, dict], tmp_path: Path
+) -> None:
+    import hashlib
+
+    root, path, entry = mapped_repo
+    directory = root / "feature-map.d"
+    directory.mkdir()
+    fragment = directory / (hashlib.sha256(entry["id"].encode()).hexdigest() + ".json")
+    fragment.write_text(json.dumps(entry))
+    path.write_text(json.dumps({"features": [], "fragments": True}))
+    assert feature_map.validate(root, path) == 1
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "feature-map.json").write_text(path.read_text())
+    (base / "feature-map.d").mkdir()
+    (base / "feature-map.d" / fragment.name).write_text(fragment.read_text())
+    path.write_text(json.dumps({"features": [entry], "fragments": True}))
+    with pytest.raises(ValueError, match="duplicate feature login"):
+        feature_map.validate(root, path)
+    fragment.unlink()
+    renamed = {**entry, "id": "logout"}
+    (root / "tests/test_login.py").write_text(
+        'import pytest\n@pytest.mark.feature("logout")\ndef test_shared():\n    assert True\n'
+    )
+    path.write_text(json.dumps({"features": [renamed], "fragments": True}))
+    with pytest.raises(ValueError, match="removed feature needs a retired record"):
+        feature_map.validate(root, path, base / "feature-map.json")
+
+
+def test_feature_fragment_filename_must_match_its_id(mapped_repo: tuple[Path, Path, dict]) -> None:
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [], "fragments": True}))
+    directory = root / "feature-map.d"
+    directory.mkdir()
+    (directory / "wrong.json").write_text(json.dumps(entry))
+    with pytest.raises(ValueError, match="filename does not match id"):
+        feature_map.load(path)

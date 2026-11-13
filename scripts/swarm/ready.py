@@ -8,11 +8,13 @@ reopen the task for the next engineer, who continues from the stored handoff.
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
+from scripts.gates import intent
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import (
     claim_order,
@@ -28,6 +30,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
+from scripts.tick.deadline import Deadline
 
 AWAITING = "merge"
 FIX = claim_order.FIX
@@ -112,7 +115,7 @@ def check(
             f"this swarm runs at {autonomy} autonomy, where the operator approves each merge; "
             "follow the ship steps in your prompt"
         )
-    url = row.get("pr_url")
+    url = str(row.get("pr_url") or "")
     if not url:
         raise SwarmError("record the pull request with swarm pr before swarm ready")
     pull = github(url)
@@ -122,10 +125,14 @@ def check(
         raise SwarmError(f"pull request {url} is merged; close the task with swarm done")
     if pull.state != "OPEN":
         raise SwarmError(f"pull request {url} is {pull.state.lower()}; swarm ready carries an open pull request")
-    draft = stack.shell(["gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft"])
-    if draft.returncode != 0:
-        raise SwarmError(f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers")
-    if draft.stdout.strip() == "true":
+    try:
+        provider, reference = stack.source_control(url)
+        draft = provider.change(reference, deadline=Deadline.after(stack.PORT_SECONDS)).draft
+    except stack.PORT_ERRORS as exc:
+        raise SwarmError(
+            f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers"
+        ) from exc
+    if draft:
         raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
     staged_compatibility.require(url, pull.head, pull.body)
     top = _checkout(url, pull.head, previous)
@@ -196,8 +203,9 @@ class Pass:
     journal: Callable = queue_record.Journal
 
 
-def merge_pass(run, rows):
-    actions = []
+def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    closed: set[str] = set()
     for task_id, row in rows.items():
         row = dict(row)
         if row.get("awaiting") != AWAITING:
@@ -206,13 +214,73 @@ def merge_pass(run, rows):
                 if pull is not None and pull.state == "OPEN" and pull.merge_problem:
                     found = {"url": row["pr_url"], "agent": row.get("claimed_by")}
                     actions += _unmergeable(run, row, found, pull)
+                if pull is not None and pull.state == "MERGED" and task_id not in closed:
+                    actions += _close_merged(run, rows, row, closed)
             continue
         found = record(run.store, run.slug, task_id)
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
             actions += _leave(run, task_id, row)
             continue
-        actions += _advance(run, rows, row, found)
+        actions += _advance(run, rows, row, found, closed)
+    return actions + _dependents(run, rows, closed)
+
+
+def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str]) -> list[str]:
+    """Read each open dependent pull request of a task this pass closed fresh and tell the live owners of one that
+    no longer merges, so its restack starts before its queue turn."""
+    actions: list[str] = []
+    for task_id, row in rows.items():
+        merged = sorted(closed.intersection([*(row.get("depends_on") or []), *(row.get("parked_on") or [])]))
+        if not merged or task_id in closed or row.get("state") not in ("claimed", "pr") or not row.get("pr_url"):
+            continue
+        pull = _dependent_read(run, row["pr_url"])
+        if pull is None or pull.state != "OPEN" or not pull.merge_problem:
+            continue
+        if _working_owner(run, dict(row), pull):
+            actions.append(
+                f"task {task_id} {row['pr_url']} {pull.merge_problem} after task {merged[0]} merged, its owner was told"
+            )
     return actions
+
+
+def _dependent_read(run: Pass, url: str) -> Any:
+    """The cached read when it already shows an open pull request with a merge problem, so a notice the per task
+    branch sent this pass carries the same inbox identity and is not sent twice; otherwise a fresh read."""
+    cached = run.github(url)
+    if cached is not None and cached.state == "OPEN" and cached.merge_problem:
+        return cached
+    return run.reread(url)
+
+
+def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], closed: set[str]) -> list[str]:
+    """Close an unsplit code or ci task whose recorded pull request merged outside the merge pass.
+
+    The ledger write releases tasks parked on it at the next placement read; its worktree stays with the owner
+    that kept the seat, which removes it when it leaves.
+    """
+    task_id, url = row["id"], row["pr_url"]
+    if row.get("awaiting") or ledger_kinds.kind(row) not in GATED:
+        return []
+    if ledger_kinds.after(row) and ledger_kinds.unmet(row):
+        return []
+    if row.get("split"):
+        return []
+    if (intent.Verdicts(run.slug, intent.NAME).read(task_id) or {}).get("verdict") == intent.FAIL:
+        return []
+    fields = {"state": "done", "pr_url": url, "awaiting": ""}
+    live = run.ledger.update_task(run.slug, task_id, fields, if_state=("pr",), if_match={"pr_url": url})
+    if live.get("state") != "done":
+        return []
+    finished = [task_id]
+    for member in row.get("group_members") or []:
+        if member in rows and rows[member].get("state") != "done":
+            run.ledger.update_task(run.slug, member, fields)
+            finished.append(member)
+    closed.update(finished)
+    run.store.clear_handoff(run.slug, task_id)
+    forget(run.store, run.slug, task_id)
+    view = {**rows, **{done: {**rows[done], **fields} for done in finished}}
+    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, view)]
 
 
 def _leave(run, task_id, row):
@@ -222,13 +290,15 @@ def _leave(run, task_id, row):
     return [f"task {task_id} left the merge pass" + (f": {who} works it" if who else "")]
 
 
-def _advance(run, rows, row, found):
+def _advance(
+    run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], found: dict[str, Any], closed: set[str]
+) -> list[str]:
     url, held = found["url"], found["on"]
     pull = run.github(url)
     if pull is None:
         return []
     if pull.state == "MERGED":
-        return _finish(run, rows, row, found)
+        return _finish(run, rows, row, found, closed)
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
     if waits.dependency(found.get("dependency", {}), row, rows, run.github):
@@ -246,7 +316,7 @@ def _advance(run, rows, row, found):
         save(run.store, run.slug, row["id"], found)
         return []
     if outcome == f"pull request {url}, now merged":
-        return _finish(run, rows, row, found)
+        return _finish(run, rows, row, found, closed)
     if outcome.startswith(f"pull request {url}, now green"):
         return _requeue(run, row, found)
     red = outcome.startswith(f"pull request {url}, now red")
@@ -307,7 +377,9 @@ def _queue(run, row, found):
     return [f"queued {url} for task {task_id}"]
 
 
-def _finish(run, rows, row, found):
+def _finish(
+    run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], found: dict[str, Any], closed: set[str]
+) -> list[str]:
     task_id, url = row["id"], found["url"]
     kind = ledger_kinds.kind(row)
     verify = ledger_kinds.after(row) and ledger_kinds.unmet(row)
@@ -325,6 +397,7 @@ def _finish(run, rows, row, found):
         if member in rows and rows[member].get("state") != "done":
             run.ledger.update_task(run.slug, member, fields)
             finished.append(member)
+    closed.update(finished)
     run.store.clear_handoff(run.slug, task_id)
     forget(run.store, run.slug, task_id)
     return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows), *_remove(found)]

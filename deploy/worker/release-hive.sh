@@ -27,12 +27,18 @@ if ! published "$image:$ref"; then
   docker build -f deploy/worker/Dockerfile \
     --build-arg WORKER_IMAGE="ghcr.io/the-cloud-clockwork/agentihooks-worker:$version" \
     --build-arg AGENTIHOOKS_REF="$ref" \
+    --build-arg AGENTIHOOKS_VERSION="$version" \
     --tag "$image:$ref" .
   docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image:$ref" \
     -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"'
   docker push "$image:$ref"
 fi
 if [[ "$latest" == true ]]; then
-  docker buildx imagetools create --tag "$image:release" "$image:$ref"
+  newest="$(git ls-remote --tags --refs origin | sed -n 's#^[0-9a-f]*\trefs/tags/\(v[0-9]*\.[0-9]*\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)"
+  if [[ "$newest" == "$release" ]]; then
+    docker buildx imagetools create --tag "$image:release" "$image:$ref"
+  else
+    echo "the newest release is $newest, not $release; leaving the release tag where it is"
+  fi
 fi
 docker buildx imagetools create --tag "$image:$version" "$image:$ref"

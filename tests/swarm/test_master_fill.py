@@ -40,6 +40,29 @@ def test_a_master_that_ended_in_seat_two_is_respawned_in_seat_two(store):
     assert len(runtime.masters) == 3
 
 
+def test_a_retired_lead_whose_record_drop_was_refused_does_not_hold_its_successor(store: RedisStore) -> None:
+    from unittest.mock import patch
+
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm.tick import _master, _retire_ended
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1)
+    (lead,) = masters(store)
+    runtime.live.discard(lead.name)
+    refused = SwarmError("agent registry kept changing; retirement was not committed")
+    with patch.object(store, "drop_agent", side_effect=refused), pytest.raises(SwarmError):
+        _retire_ended("sw", store, ledger, runtime, ledger.rows, lead, 2)
+    assert [a.name for a in masters(store)] == [lead.name]
+    actions = _master("sw", store.config("sw"), store, runtime, 2 + STARTUP_GRACE_MS)
+    assert len(runtime.masters) == 2
+    successor = runtime.masters[1][0]
+    assert f"spawned master {successor}" in actions
+    assert [a.name for a in masters(store)] == [lead.name, successor]
+    _retire_ended("sw", store, ledger, runtime, ledger.rows, lead, 3 + STARTUP_GRACE_MS)
+    assert [a.name for a in masters(store)] == [successor]
+
+
 def test_a_seat_two_master_that_crashed_without_finishing_is_dropped_and_refilled(store):
     from unittest.mock import patch
 
@@ -200,16 +223,17 @@ def test_no_session_slot_holds_the_seat_and_says_why(store):
     ]
 
 
-def test_a_full_host_holds_the_seat_with_the_hold_it_names(store):
+@pytest.mark.feature("swarm-master-skips-host-hold")
+def test_a_full_host_never_holds_the_seat(store):
     from unittest.mock import patch
 
     from scripts.swarm import seat_spawn
 
     MasterSeats(store.redis).set_count("sw", 2)
+    runtime = FakeRuntime()
     with patch.object(seat_spawn, "host_hold", return_value="holding the master spawn") as held:
-        actions = master_fill.run("sw", store.config("sw"), store, FakeRuntime(), {}, 7)
-    assert actions == ["holding the master spawn"]
-    assert held.call_args.args == ("sw", store, 7, MASTER)
+        master_fill.run("sw", store.config("sw"), store, runtime, {}, 7)
+    assert held.call_count == 0 and len(runtime.masters) == 1
 
 
 class SeatTwoDown(FakeRuntime):
@@ -319,3 +343,113 @@ def test_a_finished_master_still_live_in_the_seat_does_not_clear_the_alarm(store
     assert master_seat_alarm.run("sw", store, ledger, runtime, {}) == []
     assert len(_seat_notes(ledger)) == 1
     assert store.redis.hget(store.key("sw", master_seat_alarm.KEY), "master-2")
+
+
+def _stuck_seat_two(store: RedisStore, started_at: int) -> tuple[AgentRecord, str]:
+    from scripts.inbox.store import InboxStore
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    stuck = AgentRecord(
+        "master@a1b2c3-0009",
+        MASTER,
+        "master-2",
+        started_at=started_at,
+        state="starting",
+        seat="master-2@sw",
+        launched_at=started_at,
+    )
+    store.put_agent("sw", stuck)
+    item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "master-2@sw", "a question for seat two")
+    return stuck, item.id
+
+
+def test_a_seat_two_master_starting_with_no_pane_past_its_deadline_is_retired_and_its_items_go_to_the_front_door(
+    store: RedisStore,
+) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import master_start
+
+    stuck, item_id = _stuck_seat_two(store, 1)
+    runtime = FakeRuntime()
+    actions = tick("sw", store, tasks(("t1", "eng")), runtime, master_start.DEADLINE_MS + 1)
+    assert stuck.name not in {a.name for a in masters(store) if a.state != "finished"}
+    assert f"retired stuck master {stuck.name} in seat master-2@sw" in actions
+    assert item_id in {item.id for item in InboxStore(store.redis).inbox("master@sw")}
+    (refilled,) = [a for a in masters(store) if a.seat == "master-2@sw" and a.state != "finished"]
+    assert refilled.name != stuck.name and refilled.name in runtime.live
+
+
+def test_a_seat_two_master_starting_with_no_pane_inside_its_deadline_keeps_its_seat(store: RedisStore) -> None:
+    from scripts.inbox.store import InboxStore
+
+    stuck, item_id = _stuck_seat_two(store, 1)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 2)
+    held = [(a.name, a.state) for a in masters(store) if a.seat == "master-2@sw"]
+    assert held == [(stuck.name, "starting")]
+    assert item_id in {item.id for item in InboxStore(store.redis).inbox("master-2@sw")}
+
+
+def _seat_record(name: str, seat: str, launched_at: int) -> AgentRecord:
+    return AgentRecord(name, MASTER, "master-2", started_at=1, state="starting", seat=seat, launched_at=launched_at)
+
+
+def test_a_stuck_seat_master_is_timed_from_its_launch_and_the_lead_is_never_stuck() -> None:
+    from scripts.swarm import master_start
+
+    agent = _seat_record("master@a1b2c3-0009", "master-2@sw", 1000)
+    deadline = master_start.deadline_ms(agent)
+    assert not master_fill.stuck("sw", agent, 1000 + deadline - 1)
+    assert master_fill.stuck("sw", agent, 1000 + deadline)
+    assert not master_fill.stuck("sw", replace(agent, seat="master@sw"), 1000 + deadline)
+
+
+def test_retiring_a_live_stuck_seat_master_kills_it_with_its_scratch_homes_and_moves_its_items(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import master_start, reaper
+    from scripts.swarm_v2.masters_channel import SWARM
+
+    monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
+    stuck = _seat_record("master@a1b2c3-0009", "master-2@sw", 1)
+    gone = _seat_record("master@a1b2c3-0008", "master-3@sw", 1)
+    lead = _seat_record("master@a1b2c3-0007", "master@sw", 1)
+    store.put_agent("sw", stuck)
+    inbox = InboxStore(store.redis)
+    item_id = inbox.send("engineer@a1b2c3-0001", "master-2@sw", "a question for seat two").id
+    for record in (gone, lead):
+        store.put_agent("sw", record)
+    runtime = FakeRuntime()
+    runtime.live.add(stuck.name)
+    actions = master_fill.retire_stuck("sw", store, runtime, 1 + master_start.deadline_ms(stuck))
+    assert sorted(actions) == [
+        f"retired stuck master {gone.name} in seat master-3@sw",
+        f"retired stuck master {stuck.name} in seat master-2@sw",
+    ]
+    assert (runtime.killed, runtime.homes) == ([stuck.name], {stuck.name: ["sw/master-2"]})
+    assert {a.name for a in store.agents("sw")} == {lead.name}
+    moved = inbox.get(item_id)
+    assert (moved.address, moved.reason) == ("master@sw", f"master {stuck.name} never started")
+    assert inbox.history(item_id)[-1]["by"] == SWARM
+
+
+def test_a_stuck_seat_master_its_runtime_cannot_retire_keeps_its_record_and_items(store: RedisStore) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import master_start
+
+    first = _seat_record("master@a1b2c3-0008", "master-2@sw", 1)
+    second = _seat_record("master@a1b2c3-0009", "master-3@sw", 1)
+    store.put_agent("sw", first)
+    inbox = InboxStore(store.redis)
+    item_id = inbox.send("engineer@a1b2c3-0001", "master-2@sw", "a question for seat two").id
+    store.put_agent("sw", second)
+    runtime = FakeRuntime()
+    runtime.live |= {first.name, second.name}
+    runtime.stuck |= {first.name, second.name}
+    actions = master_fill.retire_stuck("sw", store, runtime, 1 + master_start.deadline_ms(first))
+    assert sorted(actions) == [
+        f"could not retire stuck master {first.name}, retrying next tick",
+        f"could not retire stuck master {second.name}, retrying next tick",
+    ]
+    assert {a.name for a in store.agents("sw")} == {first.name, second.name}
+    assert inbox.get(item_id).address == "master-2@sw"

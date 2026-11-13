@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import PREFIX
@@ -51,9 +51,11 @@ def _update(redis, slug, stage, transform):
     return redis.transaction(apply, key(slug), value_from_callable=True)
 
 
-def _fire(old, stage, reading, now_ms):
+def _fire(old: dict[str, Any], stage: str, reading: Reading, now_ms: int) -> dict[str, Any]:
+    owned = _owned(reading.unit)
+    old = _measure(old, owned)
     episodes = old.get("episodes", [])
-    known = {*episodes, *old.get("detector", {}).get("episodes", [])}
+    known = {*episodes, *(old.get("detector", {}).get("episodes", []) if owned else ())}
     fired = old.get("fired", 0)
     if reading.episode not in known:
         episodes, fired = [*episodes, reading.episode][-EPISODES:], fired + 1
@@ -76,22 +78,34 @@ def _owned(unit):
     return SAME_MEASURE.get(unit, unit) == DETECTOR_UNIT
 
 
-def _detector(old, reading, now_ms, threshold):
+def _measure(old: dict[str, Any], owned: bool) -> dict[str, Any]:
+    """Return the row with fired and episodes counting the detector's measure when owned, else whole runs."""
+    if not old or _owned(old["unit"]) == owned:
+        return old
+    row = {key: value for key, value in old.items() if key not in ("detector_fired", "detector_episodes")}
+    if owned:
+        return {**row, "fired": old.get("detector_fired", 0), "episodes": old.get("detector_episodes", [])}
+    return {**row, "fired": 0, "episodes": [], "detector_fired": old["fired"], "detector_episodes": old["episodes"]}
+
+
+def _detector(old: dict[str, Any], reading: dict[str, Any], now_ms: int, threshold: float) -> dict[str, Any]:
     if old.get("detector") == reading and (old.get("unit") != DETECTOR_UNIT or old.get("threshold") == threshold):
         return old
-    known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
-    added = [episode for episode in reading["episodes"] if episode not in known]
     unit = old.get("unit", DETECTOR_UNIT)
     if not _owned(unit) and now_ms - old["updated_at"] >= STALE_MS:
-        old, unit = {**old, "unit": DETECTOR_UNIT, "detail": ""}, DETECTOR_UNIT
+        old, unit = {**_measure(old, True), "unit": DETECTOR_UNIT, "detail": ""}, DETECTOR_UNIT
+    fired, listed = ("fired", "episodes") if _owned(unit) else ("detector_fired", "detector_episodes")
+    episodes = old.get(listed, [])
+    known = {*episodes, *old.get("detector", {}).get("episodes", [])}
+    added = [episode for episode in reading["episodes"] if episode not in known]
     row = {
         "stage": reading["stage"],
         "unit": DETECTOR_UNIT,
         "detail": "",
         "first_at": now_ms,
         **old,
-        "fired": old.get("fired", 0) + len(added),
-        "episodes": [*old.get("episodes", []), *added][-EPISODES:],
+        fired: old.get(fired, 0) + len(added),
+        listed: [*episodes, *added][-EPISODES:],
         "detector": reading,
         "updated_at": now_ms if _owned(unit) else old["updated_at"],
     }
@@ -135,6 +149,9 @@ def _finding(row: dict) -> Finding:
             f"Current {detector['seconds'] / 3600:g} task hours, {detector['trend']},"
             f" previously {detector['previous_seconds'] / 3600:g} task hours",
         )
+    if "detector_fired" in row:
+        count = row["detector_fired"]
+        evidence += (f"Stage detector fired {count} {'time' if count == 1 else 'times'}",)
     return Finding(
         KIND,
         row["stage"],

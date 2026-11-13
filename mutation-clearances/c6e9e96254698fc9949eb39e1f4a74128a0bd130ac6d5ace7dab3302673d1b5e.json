@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/supervision_runtime.py:scripts.swarm_v2.supervision_runtime.x\u01c1Supervisor\u01c1drain:65c4c619472b3829b51249a6f0713bac7c59e8e03045d0a04ced6e800202422d": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime (its body is return val), so replacing the first argument with None passes the same checkpoint record to get transcript_end and changes no output; the cast exists only for the strict type checker."
+  }
+}

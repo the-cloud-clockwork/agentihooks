@@ -3,12 +3,22 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scripts.scheduler.core import Entry, Scheduler
-from scripts.scheduler.slots import BroadcastSlot, InboxSlot, Slot, SwarmSlot
+from scripts.scheduler.slots import (
+    HIVE,
+    LOCAL,
+    PLACEMENTS,
+    BroadcastSlot,
+    InboxSlot,
+    Slot,
+    SwarmSlot,
+    WorkflowSlot,
+)
 
-TARGETS = ("fleet", "swarm", "seat", "session")
+TARGETS = ("fleet", "swarm", "seat", "session", "workflow")
 UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 OPEN = ("ready", "active", "pending")
 
@@ -25,9 +35,13 @@ def connect() -> Scheduler:
     return scheduler
 
 
-def target_slot(target: str, name: str = "") -> Slot:
+def target_slot(target: str, name: str = "", case: str = "", placement: str = "", needs: str = "") -> Slot:
     if target not in TARGETS:
         raise CommandError(f"target must be one of {', '.join(TARGETS)}, not {target}")
+    if case and target != "workflow":
+        raise CommandError("only the workflow target takes a case")
+    if (placement or needs) and target != "workflow":
+        raise CommandError("only the workflow target takes a placement")
     if target == "fleet":
         if name:
             raise CommandError("the fleet target takes no name")
@@ -36,11 +50,32 @@ def target_slot(target: str, name: str = "") -> Slot:
         raise CommandError(f"the {target} target needs a name")
     if target == "swarm":
         return SwarmSlot(name)
+    if target == "workflow":
+        return WorkflowSlot(name, _case_file(case), str(Path.cwd()), *_placement(placement, needs))
     from scripts.inbox.seats import is_seat
 
     if is_seat(name) != (target == "seat"):
         raise CommandError(f"{name} is not a {target} address")
     return InboxSlot(name)
+
+
+def _placement(placement: str, needs: str) -> tuple[str, tuple[str, ...]]:
+    chosen = placement or LOCAL
+    if chosen not in PLACEMENTS:
+        raise CommandError(f"placement must be local or hive, not {placement}")
+    named = tuple(dict.fromkeys(need.strip() for need in needs.split(",") if need.strip()))
+    if named and chosen != HIVE:
+        raise CommandError("only a hive placement takes needs")
+    return chosen, named
+
+
+def _case_file(case: str) -> str:
+    if not case:
+        raise CommandError("the workflow target needs a case")
+    path = Path(case).resolve()
+    if not path.is_file():
+        raise CommandError(f"{case} is not a case file")
+    return str(path)
 
 
 def seconds(text: str) -> float:

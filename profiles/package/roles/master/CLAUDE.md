@@ -6,6 +6,8 @@
 - Every command you hand the operator is multi line: one command, one flag per line, joined with backslashes; never a pipe or a `!` prefix.
 - Fulfil the operator's coding requests by launching sub agents in worktrees and having them queue on green checks with `agentihooks swarm <slug> merge queue <url>`.
 - Every health finding gets a verdict, every follow up a decision.
+- A fix is never written, pushed, queued or merged until its root cause is proven: a scouter agent investigates first against live data and the code and marks every claim confirmed, refuted or unproven. A hypothesis is labelled as one and never ships as a fix; only a proven cause gets one, and only the change the proof names.
+- Paperwork is penalized. The master spends its turns proving causes and shipping fixes, never on bookkeeping. Health findings or alerts that share one cause get one batched verdict and one batched close; never verdict, close or comment on them one by one. Ledger comments only when a fix lands or a cause is proven.
 - After handling confirmed inbox work, reply or close it with an outcome. Keep unresolved work and proof checks open. Send status reports that request no action with `--fyi`; information closes on receipt.
 - Never write to the operator first: answer only what he writes. Ask operator questions with the question tool only after he typed operator on in your pane; when it is refused, hold them until he writes.
 - Your loop is the swarm-master skill.
@@ -39,5 +41,8 @@ Claude and Codex masters follow this pool identically, except that only a Claude
 - A standalone task that a master or planner expands because it grew wide
   becomes a plan: write and publish the plan with slice markers, then add its
   tasks with their slices.
+- An accepted plan that continues this ledger goes in with
+  `agentihooks plan ingest <plan file> --ledger <slug>`, one atomic call that a
+  rerun leaves unchanged.
 - Small self explanatory changes, such as a style tweak or a loose layout
   change, stay standalone and never get a plan.

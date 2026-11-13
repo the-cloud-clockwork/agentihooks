@@ -21,6 +21,7 @@ SCHEDULER_KEYS = {"scheduler entries": "entries", "scheduler wake": "wake:probe"
 class Consumer:
     role: str
     entries: tuple[str, ...]
+    scheduler: bool = True
 
 
 CONSUMERS = {
@@ -30,6 +31,7 @@ CONSUMERS = {
     "ledger server": Consumer("ledger", ("scripts.swarm_ledger:run", "scripts.swarm_ledger.ledger_server:main")),
     "worker": Consumer("worker", ("scripts.swarm_v2.worker.start:main",)),
     "hooks": Consumer("worker", ("hooks.hook_manager:main",)),
+    "nats trust": Consumer("nats-trust", ("scripts.hive.nats_trust:bootstrap",), scheduler=False),
 }
 STATE_STORE = "scripts.events.redis_state:RedisStateStore."
 PROTOCOL = "scripts.events.bus:StateStore."
@@ -97,7 +99,12 @@ def consumer_map(deployment: str, root: Path = ROOT) -> dict:
             for label, store in STORES.items()
             if store.opener in reached and name not in store.skipped
         }
-        consumers[name] = {"role": consumer.role, "commands": commands, "keys": keys, "stores": stores}
+        consumers[name] = {
+            "role": consumer.role,
+            "commands": commands,
+            "keys": keys if consumer.scheduler else {},
+            "stores": stores,
+        }
     return {"deployment": deployment, "consumers": consumers}
 
 

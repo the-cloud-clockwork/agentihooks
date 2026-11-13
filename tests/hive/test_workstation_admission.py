@@ -46,21 +46,23 @@ def test_a_root_reservation_consumes_the_same_slot_as_overflow(setup, monkeypatc
         fenced.spawn(setup.config, "eng", "second", {"id": "second"})
 
 
-def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
+def test_local_deployment_obeys_the_workstation_cap(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     with pytest.raises(SpawnError, match="the local machine runs"):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
 
 
-def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
+def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup: SimpleNamespace) -> None:
     from scripts.hive import placement_waits
     from scripts.hive.placement import LOCAL_FULL
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     before = lease.now_ms(setup.store)
     refused = fenced.placement_refusal("ci", {"id": "task"})
@@ -171,10 +173,11 @@ def test_an_existing_task_cannot_inflate_resource_room_during_a_pending_launch(s
     assert "1 of its 1" in setup.launcher.reserve_room(request, selected)
 
 
-def test_local_mode_exempts_masters_at_capacity(setup, monkeypatch):
+def test_local_mode_exempts_masters_at_capacity(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm.controller import FencedRuntime
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     assert fenced.placement_refusal("master", {"id": "master"}) == ""
     assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == setup.herdr.spawn.return_value
@@ -265,6 +268,43 @@ def test_a_quiet_workstation_admits_past_the_swarm_share_up_to_the_root_hive_max
     local_agents(setup, 12)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
     assert fenced.spawn(setup.config, "eng", "next", {"id": "task"}) == setup.herdr.spawn.return_value
+
+
+def ceiling_fenced(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: int, load1: float) -> object:
+    """A local runtime on a 16 CPU workstation with twelve agents, the given cap and one minute load."""
+    from scripts.hive import headroom
+
+    fenced = local_fenced(setup, monkeypatch, 16, load5=4.32)
+    reading = {"cpus": 16, "load5": 4.32, "load1": load1, "available_mb": 10**6, "total_mb": 10**6}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now, previous: reading)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=cap)
+    setup.store.update(setup.config.slug, local_max_agents=20)
+    local_agents(setup, 12)
+    return fenced
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_a_loaded_workstation_ceiling_keeps_the_swarm_share_under_a_higher_cap(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = ceiling_fenced(setup, monkeypatch, 20, 30.0)
+    assert isinstance(fenced, FencedRuntime)
+    assert "swarm share" in fenced.placement_refusal("eng", {"id": "task"})
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_a_cap_below_the_computed_ceiling_keeps_the_swarm_share_reason(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = ceiling_fenced(setup, monkeypatch, 12, 1.0)
+    assert isinstance(fenced, FencedRuntime)
+    refusal = fenced.placement_refusal("eng", {"id": "task"})
+    assert "swarm share" in refusal
+    assert "agents on the hive" not in refusal
 
 
 def test_a_local_launch_over_the_host_line_is_refused_when_it_is_tighter_than_the_share(setup, monkeypatch):

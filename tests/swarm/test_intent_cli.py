@@ -11,6 +11,7 @@ from tests.swarm.test_cli import env, run  # noqa: F401
 
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/9"
+TEXT = intent.text_key("T", "")
 
 
 @pytest.fixture
@@ -163,12 +164,19 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     notice = InboxStore(store.redis).send("swarm", "eng-1@sw", "red checks")
     store.redis.hset(store.key("sw", "red-notices"), notice.id, other)
     Verdicts("sw", "intent-coach").write(
-        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text="k"
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text=TEXT
     )
-    monkeypatch.setattr(intent, "pr_text", lambda url: "k")
+    texts = []
+
+    def pull_texts(urls, source=None):
+        texts.append(list(urls))
+        head = "h1" if len(texts) == 1 else "h2"
+        return {url: {"head": head, "title": "T", "body": "", "state": "OPEN", "draft": False} for url in urls}
+
+    monkeypatch.setattr(ledger_events, "pull_texts", pull_texts)
     batches, heads = [], []
 
-    def batch(urls, cache=None):
+    def batch(urls, cache=None, ttl=None):
         assert cache is store.redis
         batches.append(set(urls))
         head = "h1" if len(batches) == 1 else "h2"
@@ -184,25 +192,24 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     assert heads == [URL]
 
 
-def test_the_coach_tick_keeps_an_unchanged_head_from_the_ticks_pull_request_read(started, monkeypatch):
+def test_the_coach_tick_keeps_an_unchanged_head_from_the_batched_pull_request_read(started, monkeypatch):
     from scripts.gates.verdicts import Verdicts
 
     store, ledger, _ = started
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
     Verdicts("sw", "intent-coach").write(
-        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text="k"
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text=TEXT
     )
     from scripts.swarm import ledger_events
 
-    monkeypatch.setattr(intent, "pr_text", lambda url: "k")
     reads, views = [], []
-    pull = ledger_events.PullRequest("OPEN", None, None, False, head="h1")
-    monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url) or pull)
+    pull = {"head": "h1", "title": "T", "body": "", "state": "OPEN", "draft": False}
+    monkeypatch.setattr(ledger_events, "pull_texts", lambda urls, source=None: reads.append(urls) or {URL: pull})
     monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("a second head read"))
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     actions = cli.run_tick(store, "sw")
-    assert (reads, views) == ([URL, URL], [])
+    assert (reads, views) == ([[URL]], [])
     assert not any("intent check" in action for action in actions)
     assert Verdicts("sw", "intent").read("t1")["head"] == "h1"
 
@@ -218,8 +225,8 @@ def test_the_coach_tick_reads_the_whole_pull_request_when_the_ticks_read_has_no_
     Verdicts("sw", "intent-coach").write(
         "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
     )
-    pull = None if head is None else ledger_events.PullRequest("OPEN", None, None, False, head=head)
-    monkeypatch.setattr(ledger_events, "view", lambda url: pull)
+    found = {} if head is None else {URL: {"head": head, "title": "T", "body": "", "state": "OPEN", "draft": False}}
+    monkeypatch.setattr(ledger_events, "pull_texts", lambda urls, source=None: found)
     views = []
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     cli.run_tick(store, "sw")

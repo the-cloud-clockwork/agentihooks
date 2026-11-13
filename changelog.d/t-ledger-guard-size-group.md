@@ -1,0 +1,1 @@
+- The ledger task update guard accepts `difficulty` and `group_members`, so a task write can require the task's size and group members to be unchanged on the server.

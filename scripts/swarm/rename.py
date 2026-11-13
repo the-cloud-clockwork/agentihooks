@@ -1,23 +1,25 @@
 import json
 from dataclasses import asdict, replace
+from typing import Any, cast
 
 from scripts.swarm import commands, controller, lease, live_binding, naming
 from scripts.swarm.runtime import herdr_target
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 
 LOCK_MS = 600_000
+CONNECT_S = 5.0
 
 
 def rename_swarm(store, slug, ledger, runtime, at):
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         raise SwarmError(f"swarm {slug}: belongs to another hive")
-    token = controller.take_tick_lock(store, slug, held, LOCK_MS)
+    token = controller.take_tick_lock(store, slug, held, LOCK_MS, "rename")
     if token is None:
         raise SwarmError(f"swarm {slug}: another tick or rename is running")
 
     def keep():
-        controller.keep_tick(store, slug, held, token, LOCK_MS)
+        controller.keep_tick(store, slug, held, token, LOCK_MS, "rename")
 
     try:
         config = store.ensure_code(slug)
@@ -35,9 +37,9 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 keep()
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
-            if agent.harness == "codex" and not live_binding.managed(agent):
+            if agent.harness == "codex":
                 keep()
-                _name_session(store, slug, runtime, agent.pane_id, new)
+                _name_codex(store, slug, runtime, agent, new)
             keep()
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
@@ -55,7 +57,15 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 actions.append(f"renamed space {workspace['workspace_id']} to {label}")
         return actions
     finally:
-        controller.release_tick_lock(store, slug, token)
+        controller.release_tick_lock(store, slug, token, "rename")
+
+
+def _name_codex(store: RedisStore, slug: str, runtime: Any, agent: AgentRecord, new: str) -> None:
+    """Name a Codex agent's conversation: its app server thread when managed, else its pane session."""
+    if live_binding.managed(agent):
+        _name_thread(store, slug, agent, new)
+    else:
+        _name_session(store, slug, runtime, agent.pane_id, new)
 
 
 def _name_session(store, slug, runtime, pane_id, new):
@@ -63,6 +73,31 @@ def _name_session(store, slug, runtime, pane_id, new):
     if store.redis.get(key) != new:
         runtime.herdr(["pane", "run", pane_id, f"/rename {new}"])
         store.redis.set(key, new)
+
+
+def _name_thread(store: RedisStore, slug: str, agent: AgentRecord, new: str) -> None:
+    """Name a managed Codex agent's app server thread with the title launch gives it; a refusal retries next rename."""
+    from scripts.codex_session import protocol, supervisor
+
+    record = live_binding.transport(store, agent)
+    if record is None or not record.thread_id:
+        return
+    name = supervisor.thread_title(slug, replace(agent, name=new))
+    key = store.key(slug, "session-name", agent.pane_id)
+    redis = cast(Any, store).redis
+    if redis.get(key) == name:
+        return
+    try:
+        connection = protocol.connect(record.endpoint_ref.removeprefix(supervisor.UNIX), CONNECT_S)[0]
+        try:
+            protocol.set_thread_name(connection, record.thread_id, name)
+        finally:
+            connection.close()
+    except protocol.Refused:
+        return
+    except (OSError, TimeoutError, protocol.ProtocolError) as exc:
+        raise SwarmError(f"cannot name the thread of {agent.name}: {exc}") from exc
+    redis.set(key, name)
 
 
 def _check_pane(names, agent, pane, reserved=""):

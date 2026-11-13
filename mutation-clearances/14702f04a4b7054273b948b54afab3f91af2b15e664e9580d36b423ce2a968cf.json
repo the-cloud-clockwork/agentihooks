@@ -1,0 +1,6 @@
+{
+  "scripts/cli_parser.py:scripts.cli_parser.x\u01c1ArgumentParser\u01c1_known_options:d6b399a139e15122b42e36370939df4ecf1b86041a62d65d17135206fb5355d8": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

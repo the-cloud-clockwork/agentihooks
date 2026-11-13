@@ -21,7 +21,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Restore the runtime images saved on dev
+        id: runtime-images
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
+        with:
+          path: ${{ runner.temp }}/swarm-smoke-runtime-images
+          key: swarm-smoke-runtime-images-v1
+      - name: Load the saved runtime images
+        run: |
+          archive="$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar"
+          if [[ -f "$archive" ]] && ! docker load -i "$archive"; then
+            echo "::warning::The saved runtime images did not load; pulling them instead"
+          fi
       - name: Pull the Python base with bounded retries
+        env:
+          PULL_REUSE_LOCAL: "true"
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Restore the swarm smoke layers
         id: layers
@@ -38,6 +54,7 @@ jobs:
       - name: Build the swarm image
         id: build
         env:
+          PULL_REUSE_LOCAL: "true"
           LAYERS_FROM: ${{ steps.layers.outputs.cache-matched-key && format('type=local,src={0}/swarm-smoke-layers', runner.temp) || '' }}
           LAYERS_TO: ${{ steps.layers.outputs.cache-hit != 'true' && format('type=local,dest={0}/swarm-smoke-layers-next,mode=max,compression=uncompressed', runner.temp) || '' }}
         run: |
@@ -61,7 +78,7 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           python-version: '3.12'
-      - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task, recovery drill and swarm init scenarios in parallel
+      - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task, recovery drill, swarm init and stability scenarios in parallel
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
@@ -74,6 +91,7 @@ jobs:
           scripts/packaging/compose-task-smoke.sh
           scripts/packaging/compose-recovery-drill.sh
           scripts/packaging/swarm-init-smoke.sh
+          scripts/packaging/stability-smoke.sh
       - name: Prove image pulls tolerate an absent attestation
         if: github.event_name == 'workflow_dispatch'
         run: bash scripts/packaging/hive-launch-attestation-proof.sh
@@ -91,3 +109,18 @@ jobs:
         with:
           path: ${{ runner.temp }}/swarm-smoke-layers
           key: ${{ steps.layers.outputs.cache-primary-key }}
+      - name: Keep the runtime images
+        if: steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
+        run: |
+          mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"
+          docker save -o "$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar" \
+            mirror.gcr.io/library/python:3.12-slim-bookworm \
+            public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 \
+            public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine \
+            public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine
+      - name: Save the runtime images for later runs
+        if: steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/swarm-smoke-runtime-images
+          key: swarm-smoke-runtime-images-v1

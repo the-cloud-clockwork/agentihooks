@@ -1,0 +1,33 @@
+rules:
+  - id: feature-hive-agent-ceiling
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-08, placement admits each hive by its computed agent ceiling and a cap the operator sets bounds
+      it from above: loaded_hives must keep the cap as cap and set max_agents to ceiling.ceiling of that cap and the
+      hive's own headroom reading, and ceiling must return the computed figure when the cap is None, else the smaller.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def loaded_hives(...):
+                    ...
+              - pattern-not: |
+                  def loaded_hives(...):
+                    ...
+                    hive["cap"] = hive["max_agents"]
+                    hive["max_agents"] = ceiling.ceiling(hive["cap"], $READING)
+                    ...
+          - patterns:
+              - pattern: |
+                  def ceiling(...):
+                    ...
+              - pattern-not: |
+                  def ceiling(...):
+                    ...
+                    return $FOUND if cap is None else min(cap, $FOUND)
+    paths:
+      include:
+        - /scripts/hive/launch.py
+        - /scripts/hive/ceiling.py
+        - '*.test.py'

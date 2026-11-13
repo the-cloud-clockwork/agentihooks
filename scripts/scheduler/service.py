@@ -20,6 +20,8 @@ from scripts.scheduler.core import Scheduler
 ROOT = Path(__file__).resolve().parents[2]
 RECORD = "supervisor.json"
 DRAIN_S = 30
+UNREACHABLE_S = 300
+UNREACHABLE = 3
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
 UNIT = "agentihooks-scheduler.service"
 UNIT_ENV = "AGENTIHOOKS_SCHEDULER_UNIT"
@@ -76,25 +78,46 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
-    """Dispatch due work every second until stopped; a pass that loses or cannot take the dispatch lock ends alone."""
+async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
+    """Dispatch due work every second until stopped; a pass that loses or cannot take the dispatch lock ends alone.
+
+    Returns True when a proof swarm's runner stopped because its state store stayed silent for UNREACHABLE_S seconds.
+    """
     from scripts.events import state
     from scripts.scheduler.lease import Busy, LostLock
+    from scripts.swarm.naming import PROOF_RE
 
     transient = state.unavailable()
+    silence = state.unanswered()
     stopped = stop if stop is not None else _on_signals()
+    silent_since: float | None = None
+    scratch = PROOF_RE.fullmatch(str(os.environ.get("AGENTIHOOKS_SWARM"))) is not None
     with machine_lock("runner"):
         while not stopped.is_set():
             try:
                 await asyncio.to_thread(scheduler.run_due)
+                await asyncio.to_thread(scheduler.collect_runs)
+                silent_since = None
             except (LostLock, Busy) as exc:
+                silent_since = None
                 print(f"scheduler pass ended: {exc}", file=sys.stderr)
+            except silence:
+                now = time.monotonic()
+                silent_since = now if silent_since is None else silent_since
+                if scratch and now - silent_since >= UNREACHABLE_S:
+                    print(
+                        f"scheduler stops: the state store did not answer for {UNREACHABLE_S} seconds", file=sys.stderr
+                    )
+                    return True
+                print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             except transient:
+                silent_since = None
                 print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=1)
             except TimeoutError:
                 pass
+    return False
 
 
 def _on_signals() -> asyncio.Event:
@@ -120,12 +143,38 @@ def supervise(stop: Event | None = None) -> None:
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
-                if stopped.wait(1) or _abandoned(starter):
+                if _ends(stopped, starter):
                     child.terminate()
                     child.wait()
                     return
-            if stopped.wait(1) or _abandoned(starter):
+                current = revision(ROOT)
+                if current and current != loaded:
+                    print(
+                        f"the scheduler supervisor {os.getpid()} restarts its runner {child.pid}: "
+                        f"the checkout moved from {loaded} to {current}",
+                        file=sys.stderr,
+                    )
+                    child.terminate()
+                    child.wait()
+                    loaded = current
+                    _identify(loaded)
+            print(f"the scheduler runner {child.pid} exited with code {child.returncode}", file=sys.stderr)
+            if child.returncode == UNREACHABLE:
+                print(f"the scheduler supervisor {os.getpid()} stops: its state store did not answer", file=sys.stderr)
                 return
+            if _ends(stopped, starter):
+                return
+            print(f"the scheduler supervisor {os.getpid()} starts its runner again", file=sys.stderr)
+
+
+def _ends(stopped: Event, starter: int) -> bool:
+    """Wait one second for a stop, then end when the starter is gone; a signal prints its own line from the handler."""
+    if stopped.wait(1):
+        return True
+    if not _abandoned(starter):
+        return False
+    print(f"the scheduler supervisor {os.getpid()} stops: its starter {starter} is gone", file=sys.stderr)
+    return True
 
 
 def _mark_unit() -> None:
@@ -145,7 +194,8 @@ def _take_over() -> None:
     pid = int(cast(dict[str, int], holder(os.environ) or {}).get("pid") or 0)
     if pid and pid != os.getpid():
         print(f"the scheduler unit takes over from supervisor {pid}, started outside it", file=sys.stderr)
-        drain(pid, os.environ)
+        if not drain(pid, os.environ):
+            print(f"the scheduler supervisor {pid} still held its lock after {DRAIN_S} seconds", file=sys.stderr)
 
 
 def _unit_owns(directory: Path) -> bool:
@@ -258,10 +308,21 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
 def _supervised() -> None:
     stop = Event()
     previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+
+    def stopping(number: int, frame: object) -> None:
+        unit = " from its unit" if os.environ.get(UNIT_ENV) else ""
+        print(f"the scheduler supervisor {os.getpid()} stops on {signal.Signals(number).name}{unit}", file=sys.stderr)
+        stop.set()
+
     try:
         for sig in previous:
-            signal.signal(sig, lambda *_: stop.set())
+            signal.signal(sig, stopping)
         supervise(stop)
+    except AlreadyRunning:
+        raise
+    except BaseException as exc:
+        print(f"the scheduler supervisor {os.getpid()} exits on {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
@@ -273,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.mode == "run":
-            asyncio.run(run(Scheduler()))
+            if asyncio.run(run(Scheduler())):
+                return UNREACHABLE
         else:
             _supervised()
     except AlreadyRunning as exc:

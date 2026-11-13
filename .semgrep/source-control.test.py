@@ -1,0 +1,40 @@
+import subprocess
+
+
+def direct(url):
+    # ruleid: swarm-source-control-port
+    return subprocess.run(["gh", "pr", "view", url], capture_output=True)
+
+
+def spread(args):
+    # ruleid: swarm-source-control-port
+    return subprocess.run(["gh", *args], capture_output=True)
+
+
+def other(root):
+    # ok: swarm-source-control-port
+    return subprocess.run(["git", "-C", str(root), "status"], capture_output=True)
+
+
+def built(url):
+    from scripts.tick.adapters.github import command
+
+    # ruleid: swarm-source-control-port
+    return subprocess.run(command(["pr", "view", url]), capture_output=True)
+
+
+def aliased(url):
+    from scripts.tick.adapters import github as adapter
+
+    # ruleid: swarm-source-control-port
+    return subprocess.run(adapter.command(["pr", "view", url]), capture_output=True)
+
+
+def tick_step(context, number):
+    # ruleid: swarm-source-control-port
+    return context.run(["gh", "pr", "view", str(number)])
+
+
+def tick_port(context, number):
+    # ok: swarm-source-control-port
+    return context.source_control.pull_request(number)

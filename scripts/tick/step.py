@@ -1,0 +1,72 @@
+from dataclasses import dataclass, field
+from typing import NewType, Protocol
+
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.tools import PASS_TOOLS, Tools
+
+__all__ = ["Context", "Domain", "Lane", "Result", "Runs", "Step", "View", "Write"]
+
+Domain = NewType("Domain", str)
+Lane = NewType("Lane", str)
+
+
+class View(Protocol):
+    def read(self, domain: Domain, key: str) -> object | None: ...
+
+
+@dataclass(frozen=True)
+class Write:
+    domain: Domain
+    key: str
+    value: object
+    expected: object = None
+
+
+@dataclass(frozen=True)
+class Result:
+    writes: tuple[Write, ...] = ()
+
+
+@dataclass(frozen=True)
+class Context:
+    view: View
+    deadline: Deadline
+    tools: Tools | None = field(default_factory=PASS_TOOLS.get)
+
+
+class Runs(Protocol):
+    """A unit the tick engine runs with the pass context."""
+
+    def run(self, ctx: Context) -> Result: ...
+
+
+class Step(Runs, Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def group(self) -> str: ...
+
+    @property
+    def lane(self) -> Lane: ...
+
+    @property
+    def budget_s(self) -> float: ...
+
+    @property
+    def interval_s(self) -> float: ...
+
+    @property
+    def needs(self) -> frozenset[str]: ...
+
+    @property
+    def reads(self) -> frozenset[Domain]: ...
+
+    @property
+    def writes(self) -> frozenset[Domain]: ...
+
+    @property
+    def effects(self) -> frozenset[str]: ...
+
+    @property
+    def feature(self) -> str: ...

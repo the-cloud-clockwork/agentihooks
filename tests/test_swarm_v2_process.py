@@ -910,9 +910,9 @@ def test_an_idle_remote_agent_is_retired_through_its_runtime_without_a_typed_nud
     runtime = TickRuntime()
     runtime.statuses[agent.name] = "idle"
     for n in range(IDLE_KILL_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.nudged == []
-    assert [row["at"] for row in log.recent("sw")][:2] == [2_000, 2_001]
+    assert [row["at"] for row in log.recent("sw")][:2] == [2_000, 62_000]
     assert agent.name in runtime.homes and ledger.rows["t1"]["state"] == "open"
 
 

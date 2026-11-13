@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x__trusted_runner:1de56c44c7d130494d0e067f0957cce1da745e312e0a1974ef4b702af0e31744": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

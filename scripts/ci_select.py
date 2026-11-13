@@ -7,7 +7,7 @@ import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict, cast
 
 from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
@@ -25,6 +25,7 @@ DOCS = "docs/"
 DOC = ".md"
 # A name the workflow passes to pytest through one space separated output line.
 SAFE = re.compile(r"[A-Za-z0-9_./-]+")
+MARKDOWN_GLOB = re.compile(r"glob\(\s*['\"][^'\"]*\*\.md['\"]")
 # Changing any of these changes how every test runs, so only the full suite grades them.
 HARNESS = frozenset(
     {
@@ -75,12 +76,21 @@ def is_doc(path: str) -> bool:
 
 
 def naming_tests(root: Path, needles: set[str]) -> set[str]:
-    found = set()
+    found: set[str] = set()
     for test in sorted((root / TESTS).rglob("test_*.py")):
         text = test.read_text()
         if any(needle in text for needle in needles):
             found.add(test.relative_to(root).as_posix())
     return found
+
+
+def markdown_tests(root: Path) -> set[str]:
+    """Test files that glob markdown files, which no changed file name reaches."""
+    return {
+        test.relative_to(root).as_posix()
+        for test in sorted((root / TESTS).rglob("test_*.py"))
+        if MARKDOWN_GLOB.search(test.read_text())
+    }
 
 
 def reshaped(root: Path, base: str, head: str) -> bool:
@@ -97,7 +107,7 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
     records: dict[str, Record] = manifest["tests"]
     units = {index for index, unit in enumerate(names) if unit.partition("::")[0] in changed}
     lists = {tuple(found.get("files", [])) for found in records.values()}
-    read = set(changed) - set.intersection(*map(set, lists))
+    read = set(changed) - cast(set[str], cast("Any", set).intersection(*map(set, lists)))
     return {
         test.partition("::")[0]
         for test, found in records.items()
@@ -105,13 +115,15 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
     }
 
 
-def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest: dict | None = None) -> set[str]:
+def selected_tests(
+    root: Path, changed: list[str], tree_reshaped: bool, manifest: dict[str, Any] | None = None
+) -> set[str]:
     tests = {path for path in changed if is_test(path)}
     if manifest is not None:
         tests.update(recorded_tests(manifest, changed))
     if tree_reshaped:
         tests.update(TREE_CHECKS)
-    needles = set()
+    needles: set[str] = set()
     for path in changed:
         needles.add(path)
         if Path(path).suffix == ".js" or Path(path).suffix == ".py" and Path(path).parts[0] in (*SOURCES, TESTS):
@@ -133,6 +145,8 @@ def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest
     if any(path in locked_tests.LOCKED or path == locked_tests.MANIFEST.as_posix() for path in changed):
         tests.add(LOCKED_CHECK)
     tests |= naming_tests(root, needles)
+    if any(path.endswith(DOC) for path in changed):
+        tests |= markdown_tests(root)
     tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
     if (
         tests
@@ -157,9 +171,9 @@ def defined_tests(source: str) -> tuple[set[str], set[str], set[str]] | None:
     pytest might collect a test those names miss or refuse a class node, or the file shares xdist group state."""
     if "xdist_group" in source:
         return None
-    plain = set()
-    defined = set()
-    others = set()
+    plain: set[str] = set()
+    defined: set[str] = set()
+    others: set[str] = set()
     for statement in ast.parse(source).body:
         if isinstance(statement, ast.ClassDef) and (
             statement.bases
@@ -194,7 +208,7 @@ def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, 
     if "*" in others or any(name.startswith(("test", "Test")) for name in others):
         return {}
     units = dict.fromkeys(defined, 0.0)
-    stored = set()
+    stored: set[str] = set()
     for node, duration in durations.items():
         file, _, rest = node.partition("::")
         name = rest.partition("::")[0].partition("[")[0]
@@ -234,7 +248,7 @@ def decide(
     durations: dict[str, float],
     limit: int,
     tree_reshaped: bool = False,
-    manifest: dict | None = None,
+    manifest: dict[str, Any] | None = None,
 ) -> tuple[str, list[list[str]]]:
     if needs_full_suite(changed):
         return FULL, []
@@ -256,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     scope, legs = FULL, []
     if args.event == PULL_REQUEST:
-        durations = {}
+        durations: dict[str, float] = {}
         for path in args.durations or [args.root / DURATIONS]:
             durations.update(json.loads(path.read_text()))
         changed = changed_files(args.root, args.base, args.head)

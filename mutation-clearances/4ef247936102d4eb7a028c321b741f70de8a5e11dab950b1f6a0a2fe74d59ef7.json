@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x__role_problems:05cb4113ea983a4cabc973308b8c3478b840c9be0fc2dc9ff6072ca79d497aa8": {
+    "reader": "standards_reader",
+    "reason": "In `x__role_problems`, the mutation changes only the static type argument of `typing.cast` on cast target `roles`, from list[Any] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

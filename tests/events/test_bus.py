@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 
 from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateEntry, StateStore, WorkQueue
@@ -47,10 +49,16 @@ class _WorkQueue:
     def take(self, timeout_ms: int) -> Delivery | None:
         return None
 
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        return 0
+
 
 class _StateStore:
     def get(self, key: str) -> StateEntry | None:
         return None
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        return [None for _ in keys]
 
     def create(self, key: str, value: bytes) -> int:
         return 1

@@ -15,9 +15,11 @@ Idempotent: --ensure on a running server only prints the URL.
 """
 
 import argparse
+import email.message
 import errno
 import functools
 import html
+import http.cookies
 import http.server
 import importlib
 import itertools
@@ -32,6 +34,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -55,6 +59,7 @@ import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
+from scripts.auth import switch  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
@@ -103,6 +108,7 @@ TLS_HANDSHAKE_S = 10
 BODY_DRAIN_S = 2
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
+TICK_HEADER = "X-Ledger-Tick"
 MAX_BODY = 1 << 20
 ALLOWED_HOSTS = ledger_link.allowed_hosts()
 ALLOWED_ORIGINS = ledger_link.allowed_origins()
@@ -214,19 +220,82 @@ def index_page():
     return core.HOME.read_bytes().decode().replace("__HOME_PAGE__", served_version())
 
 
-def page_for(slug):
+def page_for(slug: str) -> str:
     """The ledger shell: the page's metadata and asset links, read without writing; the records load over the API."""
     title = repository.read(slug, "title").get("title") or slug
     values = {
-        "TOKEN": html.escape(repository.token(slug) or ""),
         "PAGE": served_version(),
         "SLUG": html.escape(slug),
         "PORT": str(PORT),
         "TITLE": html.escape(title),
     }
     return re.sub(
-        r"__LEDGER_(TOKEN|PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], core.SHELL.read_text(encoding="utf-8")
+        r"__LEDGER_(PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], core.SHELL.read_text(encoding="utf-8")
     )
+
+
+SESSION_COOKIE = "ledger-session-"
+SESSION_TARGET = re.compile(r"/api/(?:v1/ledgers/)?(?!v1/)([a-z0-9][a-z0-9-]*)")
+
+
+def session_slug(path: str, headers: email.message.Message) -> str:
+    """The ledger a request targets: its X-Ledger-Slug header, else the ledger named in its API path."""
+    match = SESSION_TARGET.match(path)
+    return headers.get("X-Ledger-Slug") or (match.group(1) if match else "")
+
+
+def session_credential(headers: email.message.Message, path: str) -> None:
+    """Carry the page session cookie of the targeted ledger as the credential of a same origin request naming none."""
+    if headers.get("Authorization") or headers.get("X-Ledger-Token") or not headers.get("Cookie"):
+        return
+    if headers.get("Sec-Fetch-Site") not in (None, "same-origin"):
+        return
+    try:
+        cookies = http.cookies.SimpleCookie(headers["Cookie"])
+    except http.cookies.CookieError:
+        return
+    morsel = cookies.get(SESSION_COOKIE + session_slug(path, headers))
+    if morsel is None or not morsel.value:
+        return
+    kind, _, value = morsel.value.partition(":")
+    if kind == "bearer" and value:
+        headers["Authorization"] = f"Bearer {value}"
+    elif kind == "page" and value:
+        headers["X-Ledger-Token"] = value
+
+
+def auth_session(url: str, slug: str, headers: email.message.Message) -> tuple[int, str | None, int | None]:
+    """Exchange the browser's operator assertion at the auth service: 200 with its signed token and lifetime, 403 when
+    it refuses the operator, 503 when it cannot answer."""
+    forwarded = {name: headers[name] for name in ("Cf-Access-Jwt-Assertion",) if headers.get(name)}
+    request = urllib.request.Request(
+        f"{url.rstrip('/')}/v1/ledgers/{slug}/token", data=b"", headers=forwarded, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            data = json.load(reply)["data"]
+    except urllib.error.HTTPError as refused:
+        return (403 if refused.code == 403 else 503), None, None
+    except (OSError, ValueError, KeyError, TypeError):
+        return 503, None, None
+    return 200, f"bearer:{data['token']}", data["expires_in"]
+
+
+def page_session(slug: str, headers: email.message.Message) -> tuple[int, str | None, int | None]:
+    """The status, session credential and lifetime for a page session on the ledger.
+
+    With an auth service and an operator assertion, or in edge mode, the credential is the auth service's signed
+    operator token; otherwise it is the page credential, only while legacy credentials are on and outside edge mode,
+    where the page credential is never read.
+    """
+    url = os.environ.get("AGENTIHOOKS_AUTH_URL")
+    edge = os.environ.get("SWARM_AUTH_MODE") == "edge"
+    if url and (edge or headers.get("Cf-Access-Jwt-Assertion")):
+        return auth_session(url, slug, headers)
+    if edge or not switch.legacy(os.environ):
+        return 503, None, None
+    credential = cast("str | None", repository.token(slug))
+    return (200, f"page:{credential}", None) if credential else (503, None, None)
 
 
 @functools.cache
@@ -904,6 +973,7 @@ class Handler(BaseHTTPRequestHandler):
         request_metrics.arrived()
         if parsed:
             self.rfile = request_body.Body(self.rfile, request_body.length(self.headers))
+            session_credential(self.headers, self.path)
         return parsed
 
     def send_response(self, code, message=None):
@@ -1153,15 +1223,22 @@ class Handler(BaseHTTPRequestHandler):
     def post_media(self, slug):
         return self.receive(slug, ledger_media.MAX_BYTES, lambda data: ledger_media.store(slug, data))
 
-    def post_artifact(self, slug):
+    def post_artifact(self, slug: str) -> None:
         name = self.headers.get("X-Artifact-Name", "")
+        try:
+            request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
+        except (ValueError, TypeError) as exc:
+            request = exc
+        plan_requested = isinstance(request, dict) and request.get("plan") is True
 
-        def store(data):
+        def store(data: bytes) -> dict:
             try:
-                request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
+                if isinstance(request, (ValueError, TypeError)):
+                    raise request
                 if not isinstance(request, dict) or set(request) - {"task", "title", "request", "plan"}:
                     raise ValueError("artifact upload takes task, title and optional request or plan")
-                op = {"op": "artifact_add", "by": self.headers.get("X-Ledger-Agent"), "task": "", **request}
+                by = self.headers.get("X-Ledger-Agent") or ("operator" if plan_requested else None)
+                op = {"op": "artifact_add", "by": by, "task": "", **request}
                 ledger_artifacts.check_add(
                     {**op, "id": "upload", "title": request.get("title", ""), "file": {"id": "0" * 64 + ".md"}}
                 )
@@ -1173,18 +1250,26 @@ class Handler(BaseHTTPRequestHandler):
                 raise ledger_media.Refused(403, reason)
             return ledger_artifacts.store(slug, name, data)
 
-        return self.receive(slug, ledger_artifacts.MAX_BYTES, store, agents_only=True)
+        return self.receive(slug, ledger_artifacts.MAX_BYTES, store, agents_only=True, operator_plan=plan_requested)
 
-    def receive(self, slug, limit, store, agents_only=False):
+    def receive(
+        self,
+        slug: str,
+        limit: int,
+        store: Callable[[bytes], dict],
+        agents_only: bool = False,
+        operator_plan: bool = False,
+    ) -> None:
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
         origin = self.headers.get("Origin")
         agent = self.headers.get("X-Ledger-Agent")
-        if origin not in ALLOWED_ORIGINS and (origin is not None or not agent):
+        operator = operator_plan and agent in (None, "operator") and not self.headers.get(TICK_HEADER)
+        if origin not in ALLOWED_ORIGINS and (origin is not None or not (agent or operator)):
             return self.send(403, "origin not allowed", "text/plain")
         if self.refused(slug):
             return None
-        if agent or agents_only:
+        if (agent or agents_only) and not (operator and self.principal == ""):
             meta = repository.read(slug, "_meta.members")["_meta"]
             if agent not in meta.get("members", {}):
                 return self.send(403, "agent must join this ledger before uploading", "text/plain")
@@ -1209,7 +1294,32 @@ class Handler(BaseHTTPRequestHandler):
         for prefix, post in (("/api/media/", self.post_media), ("/api/artifacts/", self.post_artifact)):
             if route.startswith(prefix):
                 return functools.partial(post, route.removeprefix(prefix))
+        if route.startswith("/api/") and route.endswith("/session"):
+            return functools.partial(self.post_session, route.removeprefix("/api/").removesuffix("/session"))
         return None
+
+    def post_session(self, slug: str) -> None:
+        """Open the operator's page session on the ledger as an HttpOnly cookie; the page itself carries no token."""
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+            return self.send(403, "origin not allowed", "text/plain")
+        if not self.exists(slug):
+            return self.send(404, "no such ledger", "text/plain")
+        status, credential, ttl = page_session(slug, self.headers)
+        if credential is None:
+            return self.send(status, "no operator session", "text/plain")
+        attributes = ["Path=/", "HttpOnly", "SameSite=Strict"]
+        if ttl:
+            attributes.append(f"Max-Age={int(ttl)}")
+        if self.tls is not None or os.environ.get("SWARM_AUTH_MODE") == "edge":
+            attributes.append("Secure")
+        data = json.dumps({"expires_in": ttl}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Set-Cookie", "; ".join([f"{SESSION_COOKIE}{slug}={credential}", *attributes]))
+        self.end_headers()
+        self.wfile.write(data)
 
     def probe_write(self) -> None:
         with core.LOCK:

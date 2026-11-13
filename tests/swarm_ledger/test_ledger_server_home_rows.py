@@ -248,7 +248,7 @@ class El {
 const document = { createElement: (tag) => new El(tag), querySelector: () => ({ className: "home" }), getElementById: () => new El("ul"), addEventListener: () => {} };
 const fetch = () => new Promise(() => {});
 const location = { search: "" };
-const loadTips = () => null, readCollection = fetch, readLayout = fetch, readLedgerPage = fetch, writeBin = fetch;
+const loadTips = () => null, readCollection = fetch, readLayout = fetch, openSession = fetch, writeBin = fetch;
 const writeLayout = fetch, writeLedgerSwarm = fetch;
 """
 

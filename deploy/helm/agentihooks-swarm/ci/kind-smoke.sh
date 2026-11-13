@@ -33,6 +33,7 @@ python3 tests/chart_ledger_rollout.py "$chart"
 python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
+python3 tests/chart_hive_capabilities.py "$chart"
 
 finish() {
   status=$?
@@ -524,12 +525,32 @@ if [[ $restarts != 1 ]]; then
   exit 1
 fi
 printf 'liveness probe restarted the frozen controller\n'
-terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
-current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
-if [[ $terminated != "$frozen_container" || $current == "$frozen_container" ]]; then
-  printf 'the frozen controller container has no confirmed termination record\n' >&2
+frozen_runtime_state() {
+  docker exec "$cluster-control-plane" crictl ps -a --id "${frozen_container#*://}" -o json \
+    | python3 -c 'import json, sys; found = json.load(sys.stdin).get("containers") or []; print(found[0]["state"] if found else "REMOVED")'
+}
+confirmed=""
+for _ in $(seq 60); do
+  terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
+  current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
+  if [[ $current != "$frozen_container" ]]; then
+    if [[ $terminated == "$frozen_container" ]]; then
+      confirmed="pod status"
+      break
+    fi
+    runtime="$(frozen_runtime_state)" || runtime=""
+    if [[ $runtime == CONTAINER_EXITED || $runtime == REMOVED ]]; then
+      confirmed="container runtime ($runtime)"
+      break
+    fi
+  fi
+  sleep 1
+done
+if [[ -z $confirmed ]]; then
+  printf 'the frozen controller container has no confirmed termination record (current %s, last terminated %s, runtime %s)\n' "$current" "$terminated" "${runtime:-unread}" >&2
   exit 1
 fi
+printf 'the frozen controller container terminated, confirmed by the %s\n' "$confirmed"
 kubectl exec -i "$ledger_pod" -- env SLUG="$slug" TOKEN="$frozen_lock" python - <<'RELEASE'
 import os
 
@@ -579,30 +600,18 @@ if [[ -z $built ]]; then
   exit 1
 fi
 printf 'the deployed controller built the Kubernetes runtime: %s\n' "$built"
-declare -A probe_jobs
 for probe in startup liveness readiness; do
-  wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.exec.command[*]}")"
-  want="agentihooks controller live"
-  [[ $probe == readiness ]] && want="agentihooks controller ready"
-  if [[ $wired != "$want" ]]; then
-    printf 'the controller %s probe runs %s, not %s\n' "$probe" "$wired" "$want" >&2
+  wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.httpGet.path}")"
+  want="/v2/health/live"
+  [[ $probe == readiness ]] && want="/v2/health/ready"
+  port="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.httpGet.port}")"
+  host="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.httpGet.httpHeaders[0].value}")"
+  if [[ $wired != "$want" || $port != api || $host != 127.0.0.1:8780 ]]; then
+    printf 'the controller %s HTTP probe has path %s port %s host %s\n' "$probe" "$wired" "$port" "$host" >&2
     exit 1
   fi
-  read -r -a command <<<"$wired"
-  kubectl exec "deployment/$release-controller" -c controller -- "${command[@]}" >"$ca_dir/$probe.answer" &
-  probe_jobs[$probe]=$!
-done
-declare -A probe_status
-for probe in startup liveness readiness; do
-  probe_status[$probe]=0
-  wait "${probe_jobs[$probe]}" || probe_status[$probe]=$?
-done
-for probe in startup liveness readiness; do
-  if [[ ${probe_status[$probe]} != 0 ]]; then
-    printf 'the controller %s probe failed: %s\n' "$probe" "$(<"$ca_dir/$probe.answer")" >&2
-    exit 1
-  fi
-  printf 'controller %s probe passed: %s\n' "$probe" "$(<"$ca_dir/$probe.answer")"
+  kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.request; request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]}); print(urllib.request.urlopen(request, timeout=8).read().decode())'
+  printf 'controller %s HTTP probe passed\n' "$probe"
 done
 kubectl wait pod "${controller[@]}" --for=condition=Ready --timeout 2m
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"

@@ -2,10 +2,15 @@ import json
 import subprocess
 import time
 from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
-from scripts import gh_audit
 from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
+from scripts.tick import pool
+from scripts.tick.adapters.github import GitHubSourceControl
+from scripts.tick.deadline import Deadline
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
@@ -28,48 +33,64 @@ MERGE = """mutation($id: ID!, $head: GitObjectID!) {
   }
 }"""
 POLL = 15
+TIMEOUT = 20
 ATTEMPTS = 40
 MERGEABLE = ("CLEAN", "HAS_HOOKS", "UNSTABLE")
 
 
-def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
-    command = ["gh", "api", "graphql", "-f", f"query={query}"]
-    for name, value in variables.items():
-        command += ["-f", f"{name}={value}"]
+READER = GitHubSourceControl("", Path(), "dev")
+
+
+def _port(run: Callable[..., Any]) -> GitHubSourceControl:
+    """The GitHub adapter calling one gh runner with text output and a whole second timeout."""
+
+    def gh(argv: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
+        """Run one adapter gh call through the caller's runner and return its completed process."""
+        done = run(argv, capture_output=True, text=True, timeout=round(options["timeout"]))
+        return subprocess.CompletedProcess(argv, done.returncode, done.stdout, done.stderr)
+
+    return replace(READER, gh=gh)
+
+
+def _failure(exc: subprocess.CalledProcessError) -> str:
+    """The trimmed error text of a failed gh call, as text."""
+    stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr or ""
+    return stderr.strip()
+
+
+def graphql(query: str, variables: dict[str, str], run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
     try:
-        done = run(command, capture_output=True, text=True, timeout=20)
-        if done.returncode:
-            raise SwarmError(done.stderr.strip() or "GitHub API failed")
-        response = json.loads(done.stdout)
+        with pool.limit("github"), github_reads.calling(github_reads.CALLER.get()):
+            response = _port(run).graph(query, variables, deadline=Deadline.after(TIMEOUT))
         if response.get("errors"):
             raise SwarmError("; ".join(error["message"] for error in response["errors"]))
         data = response["data"]
         if not isinstance(data, dict):
             raise SwarmError("GitHub API returned no data")
         return data
+    except subprocess.CalledProcessError as exc:
+        raise SwarmError(_failure(exc) or "GitHub API failed") from exc
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def rest(path: str, run) -> dict | list | str:
+def rest(path: str, run: Callable[..., Any]) -> Any:
+    """Read one REST resource through the adapter's download tool, charged to the reader in force."""
     if mutation_wait.backing_off():
         raise SwarmError(f"GitHub API rate limit backoff holds {path}")
-    command = ["gh", "api", path, "--allow-escape-sequences"] if path.endswith("/logs") else ["gh", "api", path]
     try:
-        with gh_audit.uncharged():
-            done = run(command, capture_output=True, text=True, timeout=20)
-        github_reads.charge(github_reads.CALLER.get(), path, time.time())
-        if done.returncode:
-            if mutation_wait.rate_limited(done.stderr):
-                mutation_wait.hold(path)
-            raise SwarmError(done.stderr.strip() or "GitHub API failed")
-        return done.stdout if path.endswith("/logs") else json.loads(done.stdout)
+        with github_reads.calling(github_reads.CALLER.get()):
+            return json.loads(_port(run).download(path, deadline=Deadline.after(TIMEOUT)))
+    except subprocess.CalledProcessError as exc:
+        if mutation_wait.rate_limited(_failure(exc)):
+            mutation_wait.hold(path)
+        raise SwarmError(_failure(exc) or "GitHub API failed") from exc
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def required_view(url: str, run) -> "ledger_events.PullRequest | None":
-    def read(command, **kwargs):
+def required_view(url: str, run: Callable[..., Any]) -> "ledger_events.PullRequest | None":
+    def read(command: list[str], **kwargs: Any) -> Any:
         try:
             done = run(command, **kwargs)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -95,7 +116,7 @@ def required_view(url: str, run) -> "ledger_events.PullRequest | None":
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]
     )
-    return ledger_events.view(url, read, required_checks=expected)
+    return ledger_events.view(url, _port(read), required_checks=expected)
 
 
 def refuse(pull: "ledger_events.PullRequest | None") -> None:

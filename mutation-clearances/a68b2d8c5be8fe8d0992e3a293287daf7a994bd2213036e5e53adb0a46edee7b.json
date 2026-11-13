@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_copilot:d36c17bb64a90befe975658006f95824c98e252476de75a1732fba36195966ea": {
+    "reader": "standards_reader",
+    "reason": "In `x_render_copilot`, the mutation changes only the static type argument of `typing.cast` on cast target `_install_module()`, from \"ModuleType\" to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

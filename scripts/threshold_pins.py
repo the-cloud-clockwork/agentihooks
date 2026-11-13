@@ -15,6 +15,8 @@ PINS = (
     ("scripts/dead_code.py", "SCOPE", "covers"),
     ("scripts/swallowed_exceptions.py", "RULES", "covers"),
     ("scripts/swallowed_exceptions.py", "SCOPE", "covers"),
+    ("scripts/no_whole_ledger.py", "SCOPE", "covers"),
+    ("scripts/tick_pattern.py", "SCOPE", "covers"),
     ("scripts/locked_tests.py", "DISABLING", "covers"),
     ("scripts/locked_tests.py", "CHECKING_CALLS", "covers"),
     ("scripts/locked_tests.py", "FIELDS", "covers"),
@@ -29,6 +31,9 @@ SHRINK_ONLY = (
     "tests/SIZE_ALLOWLIST.json",
     "tests/SWALLOWED_EXCEPTIONS_ALLOWLIST.json",
     "tests/TYPE_BASELINE.json",
+    "tests/WHOLE_LEDGER_ALLOWLIST.json",
+    "tests/TICK_PATTERN_ALLOWLIST.json",
+    "tests/DOCS_SANITY_BASELINE.json",
 )
 # Each of these moves only with its own gate's evidence, which that gate checks against the base.
 GRADED_BY = (
@@ -37,6 +42,9 @@ GRADED_BY = (
     ("tests/DEAD_CODE_ALLOWLIST.json", "scripts.dead_code"),
     ("tests/registry/FROZEN_GATES.json", "scripts.gate_protected"),
     ("tests/TYPE_BASELINE.json", "scripts.type_gate"),
+    ("tests/WHOLE_LEDGER_ALLOWLIST.json", "scripts.no_whole_ledger"),
+    ("tests/TICK_PATTERN_ALLOWLIST.json", "scripts.tick_pattern"),
+    ("tests/SIZE_ALLOWLIST.json", "scripts.size_limits"),
 )
 MUTATORS = ("update", "setdefault", "pop", "popitem", "clear", "append", "extend", "insert", "remove", "add", "discard")
 REGISTERED = ("*ALLOWLIST*.json", "*floors*.json", "*FLOOR*.json", "*MANIFEST*.json", "*BASELINE*.json")

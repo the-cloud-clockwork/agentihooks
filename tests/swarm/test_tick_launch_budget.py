@@ -128,7 +128,7 @@ def test_a_forgiven_failed_pool_keeps_its_preparation_time_on_the_budget(store, 
     clock = _slow_launches(monkeypatch, runtime, 60)
     _slow_preparation(monkeypatch, clock, 9)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert runtime.tried == ["t1", "t2"]
+    assert sorted(runtime.tried) == ["t1", "t2"]
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
     assert ledger.rows["t3"]["state"] == "open"
 

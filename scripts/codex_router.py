@@ -50,6 +50,7 @@ PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single 
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
+RECHECK_SECONDS = 5 * 60
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
@@ -103,7 +104,7 @@ class RoutingError(RuntimeError):
     pass
 
 
-def _claims(token: str) -> dict:
+def _claims(token: str) -> dict[str, object]:
     parts = token.split(".")
     if len(parts) != 3:
         return {}
@@ -147,12 +148,12 @@ def credential(account: CodexAccount, environ: Mapping[str, str]) -> CodexAccoun
     return replace(account, bearer=True) if credential_kind(account, environ) == OAUTH_KIND else account
 
 
-def refusal(account: CodexAccount, environ: Mapping[str, str]) -> str:
+def refusal(account: CodexAccount, environ: Mapping[str, str], now: float | None = None) -> str:
     try:
         credential_kind(account, environ)
     except RoutingError as exc:
         return str(exc)
-    return expiry_refusal(account, environ, time.time())
+    return expiry_refusal(account, environ, time.time() if now is None else now)
 
 
 def expiry_refusal(account: CodexAccount, environ: Mapping[str, str], now: float) -> str:
@@ -170,9 +171,28 @@ def _min_life(environ: Mapping[str, str]) -> float:
 
 def expiring(account: CodexAccount, environ: Mapping[str, str], now: float) -> bool:
     """A routed session holds only the bearer token and cannot refresh it, so it dies at the token's exp."""
+    exp = expires_at(account, environ)
+    return exp is not None and exp - now < _min_life(environ)
+
+
+def expires_at(account: CodexAccount, environ: Mapping[str, str]) -> float | None:
+    """The exp claim of this account's token, or None when the token carries none."""
     token = environ.get(account.env_name)
     exp = _claims(token).get("exp") if token else None
-    return isinstance(exp, int | float) and exp - now < _min_life(environ)
+    return exp if isinstance(exp, int | float) else None
+
+
+def recheck_expired(account: CodexAccount, quota: CodexQuota | None, environ: Mapping[str, str], now: float) -> bool:
+    """An expired reading whose bearer token exp is still ahead: one refused usage read is not a dead login."""
+    if quota is None or not quota.expired:
+        return False
+    try:
+        bearer = _bearer(account, environ)
+    except RoutingError:
+        return False
+    claims = _claims(bearer[0]) if bearer else {}
+    exp = claims.get("exp")
+    return isinstance(exp, int | float) and exp > now
 
 
 def bearer_overrides() -> list[str]:
@@ -350,7 +370,7 @@ def fingerprint(account_id: str) -> str:
     return hashlib.sha256(account_id.encode()).hexdigest()[:FINGERPRINT_LENGTH] if account_id else ""
 
 
-def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+def duplicates(pool: list[CodexAccount], environ: Mapping[str, str], now: float | None = None) -> dict[str, str]:
     """Each token account whose ChatGPT account another token account shares, mapped to the one routed for both."""
     groups: dict[str, list[CodexAccount]] = {}
     for account in pool:
@@ -359,7 +379,7 @@ def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str
             groups.setdefault(found, []).append(account)
     repeated = {}
     for group in groups.values():
-        kept = min(group, key=lambda account: (bool(refusal(account, environ)), _routed_rank(account, environ)))
+        kept = min(group, key=lambda account: (bool(refusal(account, environ, now)), _routed_rank(account, environ)))
         repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
 
@@ -396,12 +416,17 @@ def routed_live(
 
 
 def _shadowed(tokens: list[CodexAccount], environ: Mapping[str, str]) -> set[str]:
+    return set(shadows(tokens, environ))
+
+
+def shadows(tokens: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+    """Each token name dropped because a listed token account holds the identical token, mapped to that account."""
+    holder = {environ[account.env_name]: account.name for account in tokens}
     kept = {account.env_name for account in tokens}
-    held = {environ[name] for name in kept}
     return {
-        name.removeprefix(CODEX_TOKEN_PREFIX)
+        name.removeprefix(CODEX_TOKEN_PREFIX): holder[environ[name]]
         for name in environ
-        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in held
+        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in holder
     }
 
 
@@ -470,8 +495,9 @@ def fresh_quotas(
     run: Callable = subprocess.run,
     force: bool = False,
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window;
-    ``force`` probes every signed in account."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window,
+    or when it is expired while its token exp is ahead, at most once per recheck window; ``force`` probes every
+    signed in account."""
     found = quotas(pool, environ)
     attempts = _probe_attempts()
     for account in pool:
@@ -479,7 +505,10 @@ def fresh_quotas(
         stale = seen is None or quota_freshness.stale(
             seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
         )
-        due = force or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        recheck = recheck_expired(account, seen, environ, now)
+        last = attempts.get(account.name)
+        retry = recheck and (last is None or now - last >= RECHECK_SECONDS)
+        due = force or retry or (stale and not session_bands.fresh(attempts.get(account.name), now))
         if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
@@ -561,6 +590,8 @@ def select(
                     raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
                 if expired := expiry_refusal(account, environ or {}, now):
                     raise RoutingError(expired)
+                if (reading := quotas.get(route)) and reading.expired:
+                    raise RoutingError(f"Codex account '{route}' has an expired quota reading; refresh its login")
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")

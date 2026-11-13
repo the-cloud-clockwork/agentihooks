@@ -1,11 +1,13 @@
 import dataclasses
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import ledger_events, priority_sweep
+from scripts.swarm.ledger_events import views as real_views
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
 MINUTE = 60_000
@@ -1085,6 +1087,36 @@ def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gate
     assert ledger_events.pull_request(raw).gate_passed is passed
     raw["statusCheckRollup"] = [rollup[0], {"name": GATE, "conclusion": gate}, {"name": GATE, "conclusion": "FAILURE"}]
     assert ledger_events.pull_request(raw).gate_passed is False
+
+
+@pytest.mark.feature("tick-view-pull-batch-cache-ttl")
+def test_views_batch_cache_outlives_the_default_run_ttl_on_the_given_ttl(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm import github_reads
+    from scripts.tick.ports.contracts import SourceControl
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    now = [1_000.0]
+    monkeypatch.setattr(ledger_events.time, "time", lambda: now[0])
+    calls: list[str] = []
+    port = cast(SourceControl, object())
+
+    def fake_graphql(query: str, source: SourceControl, **variables: str) -> dict[str, str]:
+        calls.append(query)
+        return {"p0": "raw"}
+
+    monkeypatch.setattr(ledger_events, "_graphql", fake_graphql)
+    url = "https://github.com/o/r/pull/1"
+
+    assert real_views([url], source=port, cache=cache, ttl=180) == {url: None}
+    now[0] += github_reads.RUN_TTL_S + 1
+    assert real_views([url], source=port, cache=cache, ttl=180) == {url: None}
+    assert len(calls) == 1
+    now[0] += 180
+    assert real_views([url], source=port, cache=cache, ttl=180) == {url: None}
+    assert len(calls) == 2
 
 
 def test_distinct_failed_checks_all_stay_red():

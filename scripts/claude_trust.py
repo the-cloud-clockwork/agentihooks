@@ -2,9 +2,12 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 WAIT_NOTICE = "the session will wait at Claude's folder trust question until someone answers it in its pane"
+STALE_LOCK_SECONDS = 10.0
 
 
 def _config_path(environ: dict[str, str]) -> Path:
@@ -17,26 +20,27 @@ def allowed(environ: dict[str, str]) -> bool:
     return environ.get("AGENTIHOOKS_TRUST_LAUNCH_DIR", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
-def _read(config: Path) -> dict:
+def _read(config: Path) -> dict[str, Any]:
     if not config.exists():
         return {}
-    data = json.loads(config.read_text(encoding="utf-8"))
+    data: Any = json.loads(config.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{config} does not hold a JSON object")
-    return data
+    return cast(dict[str, Any], data)
 
 
-def _trusted(data: dict, directory: Path) -> bool:
+def _trusted(data: dict[str, Any], directory: Path) -> bool:
     projects = data.get("projects")
     if not isinstance(projects, dict):
         return False
+    projects = cast(dict[str, Any], projects)
     return any(
         isinstance(projects.get(str(path)), dict) and projects[str(path)].get("hasTrustDialogAccepted") is True
         for path in _scope(directory)
     )
 
 
-def _scope(directory: Path):
+def _scope(directory: Path) -> Iterator[Path]:
     # Claude does not count a trusted folder above the launch folder's git root.
     for path in (directory, *directory.parents):
         yield path
@@ -44,7 +48,7 @@ def _scope(directory: Path):
             return
 
 
-def _write(config: Path, data: dict) -> None:
+def _write(config: Path, data: dict[str, Any]) -> None:
     fd, temp = tempfile.mkstemp(dir=config.parent, prefix=".claude.json.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -57,6 +61,21 @@ def _write(config: Path, data: dict) -> None:
         raise
 
 
+def _reclaim(lock: Path) -> bool:
+    """Remove a lock directory left past the Claude lockfile stale bound; True when the lock is gone."""
+    try:
+        age = time.time() - lock.stat().st_mtime
+    except FileNotFoundError:
+        return True
+    if age < STALE_LOCK_SECONDS:
+        return False
+    try:
+        lock.rmdir()
+    except FileNotFoundError:
+        pass
+    return True
+
+
 def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
     # Claude Code guards this file with a proper-lockfile lock directory beside it.
     lock = config.with_name(config.name + ".lock")
@@ -66,6 +85,8 @@ def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
             lock.mkdir()
             break
         except FileExistsError:
+            if _reclaim(lock):
+                continue
             if time.monotonic() >= deadline:
                 raise OSError(f"{lock} is held") from None
             time.sleep(0.1)
@@ -76,9 +97,11 @@ def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
         projects = data.setdefault("projects", {})
         if not isinstance(projects, dict):
             raise ValueError(f"{config} projects is not a JSON object")
+        projects = cast(dict[str, Any], projects)
         entry = projects.setdefault(str(directory), {})
         if not isinstance(entry, dict):
             raise ValueError(f"{config} entry for {directory} is not a JSON object")
+        entry = cast(dict[str, Any], entry)
         entry["hasTrustDialogAccepted"] = True
         _write(config, data)
         return True

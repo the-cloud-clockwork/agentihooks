@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1expire_escape:9cb660f454447c3ae029c612826faf5ddb0c646033a0c7f8826e66d13182672f": {
+    "reader": "standards_reader",
+    "reason": "b\"\\x1b\" and b\"\\x1B\" are the same byte, so the comparison and value are unchanged."
+  }
+}

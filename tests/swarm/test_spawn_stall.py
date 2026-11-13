@@ -39,15 +39,14 @@ def stalled(env, monkeypatch):
     def broken(*args):
         raise error
 
-    monkeypatch.setattr(cli.phases, "phase_pass", broken)
+    monkeypatch.setattr(cli.task_steps.phases, "phase_changes", broken)
     return store, ledger, runtime, clock, error
 
 
 def tick_failure(stalled):
     store, ledger, runtime, _, error = stalled
-    with pytest.raises(RuntimeError) as caught:
-        cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
-    assert caught.value is error
+    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert actions == [f"pass failed: a step raised RuntimeError: {error}"]
     assert not store.redis.exists(store.key("sw", "tick-lock"))
 
 
@@ -105,7 +104,7 @@ def test_failed_ticks_publish_the_spawn_stall_alarm_for_the_page(stalled):
 
 
 @pytest.mark.parametrize("failed_tick", [True, False])
-def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stalled, monkeypatch, failed_tick):
+def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stalled, monkeypatch, capsys, failed_tick):
     from scripts.swarm import command_runner, timing
 
     store, ledger, runtime, _, tick_error = stalled
@@ -116,11 +115,16 @@ def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stal
 
     monkeypatch.setattr(command_runner, "publish", broken_publish)
     if not failed_tick:
-        monkeypatch.setattr(cli.phases, "phase_pass", lambda *args: [])
+        monkeypatch.setattr(cli.task_steps.phases, "phase_changes", lambda *args: [])
     keeping = timing.BEFORE_STEP.get()
-    with pytest.raises(RuntimeError) as caught:
-        cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
-    assert caught.value is (tick_error if failed_tick else publication_error)
+    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    failed = [f"pass failed: a step raised RuntimeError: {tick_error}"]
+    reported = capsys.readouterr().err
+    if failed_tick:
+        assert actions == failed
+    else:
+        assert actions != failed
+        assert f"RuntimeError: {publication_error}" in reported
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert timing.BEFORE_STEP.get() is keeping
 
@@ -428,7 +432,7 @@ def test_lost_controller_lease_blocks_final_alarm_delivery(stalled, monkeypatch)
         lease.acquire(store, "sw", "replacement")
         raise RuntimeError("old tick failed after takeover")
 
-    monkeypatch.setattr(cli.phases, "phase_pass", takeover)
+    monkeypatch.setattr(cli.task_steps.phases, "phase_changes", takeover)
     with pytest.raises(SwarmError):
         cli.run_tick(store, "sw", ledger, stalled[2], FakeHerdr({}))
     assert store.redis.get(store.key("sw", "spawn-stall")) == before
@@ -524,6 +528,33 @@ def test_a_quota_warning_hold_is_not_available_capacity(stalled, monkeypatch):
     account = capacity.Account("claude", "acct", "OPEN", 0, 80, 9, 6)
     monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: [account])
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_front_door_master_pinned_to_its_declared_account_holds_no_worker_seat(stalled, monkeypatch):
+    from scripts.routing.master_account import MasterAccount
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", lanes={"master": {"agent": "claude"}})
+    boss = AgentRecord(
+        "boss",
+        "master",
+        "master",
+        state="working",
+        seat="master@sw",
+        harness="claude",
+        account="pinned",
+        profile="master",
+    )
+    store.put_agent("sw", boss)
+    rows = [
+        capacity.Account("claude", "open", "OPEN", 0, 80, 80, 1),
+        capacity.Account("claude", "pinned", "OPEN", 1, 80, 5, 6),
+    ]
+    monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: rows)
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {})
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", "pinned")})
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
 
 
 def test_autoscaling_with_no_host_room_offers_no_launch_seat(stalled, monkeypatch):

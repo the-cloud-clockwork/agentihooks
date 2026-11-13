@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
@@ -19,8 +20,10 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
+SETTLED_EXITS = "exits-settled"
 # The swarm Redis over TLS closes connections mid pipeline on reads of a thousand item rows or more.
 ROW_BATCH = 500
+RAMP_ROWS = 50
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
@@ -29,6 +32,8 @@ DEFAULT_OWNER_TTL_S = 30
 REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 RECLAIMED = "returned to the master pool: its master is gone"
+ANSWER_REFUSED = "reopened: its answer was refused by the ledger page"
+LEDGER_REFUSAL = "cancelled: refused by the ledger page"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 OPEN = tuple(state for state in STATES if state not in CLOSED)
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
@@ -110,7 +115,7 @@ def replied(answer_id):
     return f"replied with message {answer_id}"
 
 
-def close_reason(kind, detail=""):
+def close_reason(kind: str, detail: str = "") -> tuple[str, str]:
     detail = detail.strip()
     if kind not in CLOSE_KINDS:
         raise InboxError(f"closing needs a reason: one of {', '.join(CLOSE_KINDS)}")
@@ -123,8 +128,28 @@ def close_reason(kind, detail=""):
     return CLOSE_KINDS[kind], CLOSE_KINDS[kind] + (f": {detail}" if detail else "")
 
 
+def ramped(item_ids: list[str]) -> list[list[str]]:
+    """item_ids in order, in chunks of RAMP_ROWS that double up to ROW_BATCH."""
+    chunks: list[list[str]] = []
+    start = 0
+    for step in range(len(item_ids)):
+        if start >= len(item_ids):
+            break
+        size = min(RAMP_ROWS << step, ROW_BATCH)
+        chunks.append(item_ids[start : start + size])
+        start += size
+    return chunks
+
+
 class InboxStore:
-    def __init__(self, redis, *, persist=None, session_id="", world=None):
+    def __init__(
+        self,
+        redis: Any,
+        *,
+        persist: Any = None,
+        session_id: str = "",
+        world: str | None = None,
+    ) -> None:
         """world is the hive member whose keys hold this inbox, '' for the controller's; it defaults to this process's
         own member."""
         from scripts.hive import scope
@@ -139,7 +164,7 @@ class InboxStore:
         self.world = scope.member() if world is None else world
         self.prefix = prefix(self.world)
 
-    def key(self, *parts):
+    def key(self, *parts: str) -> str:
         return ":".join((self.prefix, *parts))
 
     def home(self, address):
@@ -195,7 +220,8 @@ class InboxStore:
         from scripts.hive import scope
 
         requested = self.names.resolve(address)
-        sender, address = self.names.resolve(sender), self.seats.recipient(requested)
+        sender = self.names.resolve(sender)
+        requested, address = self.pool.rerouted(requested, self.seats.recipient(requested))
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
@@ -225,6 +251,7 @@ class InboxStore:
             pipe.hset(key, mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
             pipe.zadd(self.key("open", address), {item.id: at})
+            pipe.srem(self.key(SETTLED_EXITS), address)
             pipe.incr(self.key("open-size", address))
             if masters:
                 self.pool.stage_add(pipe, item)
@@ -247,8 +274,17 @@ class InboxStore:
             bus.publish(item, self.names)
         return item
 
-    def get(self, item_id):
+    def get(self, item_id: str) -> Item:
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
+
+    def locate(self, item_id: str) -> Item:
+        """The item with this id from the first of worlds() that holds it; Gone when none does."""
+        for world in self.worlds():
+            try:
+                return world.get(item_id)
+            except Gone:
+                continue
+        raise Gone(f"no message {item_id}")
 
     def find(self, item_id, by):
         """The item a tick pass stored the id of, or None once its record is gone; by names the pass in the log."""
@@ -292,6 +328,19 @@ class InboxStore:
             for address, (indexed, size, total, opened) in zip(addresses, zip(*[iter(rows)] * 4))
             if not opened and (total == 0 or _index_current(indexed, size, total))
         }
+
+    def settled_exits(self) -> set[str]:
+        """Gone agents whose exit this world settled, with no mail opened at any of them since."""
+        return set(self.redis.smembers(self.key(SETTLED_EXITS)))
+
+    def mark_exits_settled(self, names: list[str]) -> None:
+        """Mark names settled, then clear the mark of any not quiet: mail that opens after the mark clears it too."""
+        if not names:
+            return
+        self.redis.sadd(self.key(SETTLED_EXITS), *names)
+        reached = set(names) - self.quiet(names)
+        if reached:
+            self.redis.srem(self.key(SETTLED_EXITS), *reached)
 
     def _open_ids(self, address):
         from redis.exceptions import WatchError
@@ -380,13 +429,15 @@ class InboxStore:
             for row in self._batch(item_ids[start : start + ROW_BATCH])
         ]
 
-    def _batch(self, item_ids):
+    def _batch(self, item_ids: list[str]) -> list[dict[str, str]]:
+        """The rows of item_ids; after a connection reset the new connection reads them in ramped chunks, because
+        the swarm Redis path resets a young connection whose first replies are large."""
         from redis.exceptions import ConnectionError as RedisConnectionError
 
         try:
             return self._read_batch(item_ids)
         except RedisConnectionError:
-            return self._read_batch(item_ids)
+            return [row for chunk in ramped(item_ids) for row in self._read_batch(chunk)]
 
     def _read_batch(self, item_ids):
         with self.redis.pipeline(transaction=False) as pipe:
@@ -429,18 +480,22 @@ class InboxStore:
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)
 
-    def _with_seat(self, me, read):
+    def _with_seat(self, me: str, read: Callable[[str], list["Item"]]) -> list["Item"]:
         from redis.exceptions import WatchError
 
         original = me
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
+                    before = self.names.revisions(("alias", original))
                     pipe.watch(*self.names.watched("alias", original))
                     me = self.names.resolve(original, pipe)
+                    before += self.names.revisions(("aliases-of", me))
                     pipe.watch(*self.names.watched("aliases-of", me))
                     addresses = [me, *self.names.aliases(me, pipe)]
                     seat = self.seats.seat_of(me, pipe)
+                    if self.names.revisions(("alias", original), ("aliases-of", me)) != before:
+                        continue
                     pipe.multi()
                     pipe.ping()
                     pipe.execute()
@@ -475,30 +530,36 @@ class InboxStore:
             rows = pipe.execute()
         return {item_id: [json.loads(entry) for entry in row] for item_id, row in zip(item_ids, rows)}
 
-    def keys_for(self, belongs):
-        """The keys of every address belongs() accepts, its items and their histories, and those
-        addresses' memberships in the shared waiting and indexed sets."""
-        prefix = self.key("address", "")
-        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
-        seen.update(self.redis.smembers(self.key("open-indexed")))
-        size_prefix = self.key("open-size", "")
-        seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
-        addresses = sorted(a for a in seen if belongs(a))
+    def keys_at(self, addresses: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+        """The keys of the given addresses, their items and their histories, their receipts journals, and those
+        addresses' memberships in the shared waiting, indexed and wake sets, read by name with no scan."""
         keys, wake_ids = [], []
-        waiting_wakes = self.redis.smembers(self.key("wake-outbox"))
+        wake = self.key("wake-outbox")
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            wake_ids.extend(item_id for item_id in ids if item_id in waiting_wakes)
+            waiting = self.redis.smismember(wake, ids) if ids else []
+            wake_ids.extend(item_id for item_id, held in zip(ids, waiting) if held)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
             keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
-            keys += self.pool.keys_of(address)
+            keys += self.pool.keys_of(address) + self._journal_keys(address)
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
         }
-        members[self.key("wake-outbox")] = wake_ids
+        members[wake] = wake_ids
         return keys, {key: found for key, found in members.items() if found}
+
+    def _journal_keys(self, address: str) -> list[str]:
+        """The receipts journal of address: its open deliveries, their records and reservations, and its seen marks."""
+        redis = self.redis
+        keys = [self.key("deliveries", address), self.key("seen", address)]
+        for delivery_id in redis.smembers(self.key("deliveries", address)):
+            record: dict[str, str] = redis.hgetall(self.key("delivery", delivery_id))
+            keys += [self.key("delivery", delivery_id), self.key("reservation", record["item"])]
+            if record["ref"]:
+                keys.append(self.key("ref-reservation", address, record["ref"]))
+        return [key for key in keys if redis.exists(key)]
 
     def read(self, item_id, reader):
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
@@ -628,6 +689,7 @@ class InboxStore:
             pipe.set(dest.key("entry", item.id), about)
         pipe.zadd(dest.key("address", moved.address), {item.id: item.created_at})
         pipe.zadd(dest.key("open", moved.address), {item.id: item.created_at})
+        pipe.srem(dest.key(SETTLED_EXITS), moved.address)
         pipe.incr(dest.key("open-size", moved.address))
         pipe.zadd(dest.key("pending", moved.address), {item.id: item.created_at})
         pipe.sadd(dest.key("waiting"), moved.address)
@@ -676,6 +738,7 @@ class InboxStore:
                 pipe.set(target.key("entry", item_id), entry)
             pipe.zadd(target.key("address", item.address), {item_id: item.created_at})
             pipe.zadd(target.key("open", item.address), {item_id: item.created_at})
+            pipe.srem(target.key(SETTLED_EXITS), item.address)
             pipe.incr(target.key("open-size", item.address))
             pipe.zadd(target.key("pending", item.address), {item_id: item.created_at})
             pipe.sadd(target.key("waiting"), item.address)
@@ -690,6 +753,7 @@ class InboxStore:
         pipe.zrem(self.key("address", item.address), item.id)
         pipe.zadd(self.key("address", address), {item.id: item.created_at})
         pipe.zadd(self.key("open", address), {item.id: item.created_at})
+        pipe.srem(self.key(SETTLED_EXITS), address)
         if address != item.address:
             pipe.zrem(self.key("open", item.address), item.id)
             pipe.decr(self.key("open-size", item.address))
@@ -794,10 +858,7 @@ class InboxStore:
         legacy = answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id))
         if item.state in CLOSED and not self.redis.hexists(key, field) and not legacy:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
-        self.redis.hsetnx(key, field, answer_id or new_item_id())
-        reply_id = self.redis.hget(key, field)
-        if answer_id == reply_id and self.redis.hget(self.key("item", reply_id), "state") == "cancelled":
-            raise InboxError(f"answer {reply_id} to message {item_id} was refused")
+        reply_id = self._reply_slot(item_id, replier, answer_id)
         if entry := self.entry_of(item_id):
             self.about(reply_id, entry)
         try:
@@ -813,6 +874,26 @@ class InboxStore:
                 raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
         self._close_reply(item_id, replier, answer.id, answer_id)
         return answer
+
+    def _reply_slot(self, item_id: str, replier: str, answer_id: str) -> str:
+        """The answer id a reply sends under: a slot holding a refused answer is reopened for a fresh reply, and a
+        replay of the refused answer, or a slot its item no longer closes with, is refused."""
+        key = self.key("item", item_id)
+        field = f"reply:{replier}"
+        self.redis.hsetnx(key, field, answer_id or new_item_id())
+        reply_id = self.redis.hget(key, field)
+        state, reason = self.redis.hmget(self.key("item", reply_id), "state", "reason")
+        if state != "cancelled":
+            return reply_id
+        ledger_refused = str(reason).startswith(LEDGER_REFUSAL)
+        if (
+            answer_id == reply_id
+            or not ledger_refused
+            or self.reopen(self.get(reply_id), replier, ANSWER_REFUSED) is None
+        ):
+            raise InboxError(f"answer {reply_id} to message {item_id} was refused")
+        self.redis.hsetnx(key, field, answer_id or new_item_id())
+        return self.redis.hget(key, field)
 
     def _close_reply(self, item_id, replier, reply_id, operation_id):
         item = self.get(item_id)
@@ -854,6 +935,7 @@ class InboxStore:
             pipe.hset(key, mapping=_fields(moved))
             pipe.hdel(key, f"reply:{answer.sender}")
             pipe.zadd(self.key("open", item.address), {item.id: item.created_at})
+            pipe.srem(self.key(SETTLED_EXITS), item.address)
             pipe.rpush(self.key("history", item.id), _entry("read", by, reason, moved.updated_at))
             pipe.publish(NOTIFY, item.address)
             pipe.execute()
@@ -1186,7 +1268,8 @@ def _entry(state, by, reason, at, session_id=""):
     return json.dumps(entry)
 
 
-def connect(environ=None):
+def connect(environ: Any = None, client: Any = None) -> "InboxStore":
+    """Open the inbox on the swarm Redis, through `client` when the caller holds its own client factory."""
     import redis
 
     from scripts.inbox import outbox
@@ -1194,7 +1277,7 @@ def connect(environ=None):
     from scripts.swarm.store import redis_client
 
     try:
-        store = InboxStore(redis_client(environ), session_id=receiving_session(environ))
+        store = InboxStore((client or redis_client)(environ), session_id=receiving_session(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
     outbox.flush(store)

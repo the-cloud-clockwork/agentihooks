@@ -1,0 +1,6 @@
+{
+  "scripts/hive/registry.py:scripts.hive.registry.x__unique:a39d7f2c5996ab93c4231a5d8f06127d2607ce9cab9a039cc69fa36e7061fe4a": {
+    "reader": "standards_reader",
+    "reason": "name is in held and is never a candidate (candidates are name-n, n>=2), so held blocks at most len(held)-1 of the len(held) candidates in range(2, len(held)+2); a free suffix always exists within that range and next() stops at the first free one, so the +3 bound is never reached and output is identical."
+  }
+}

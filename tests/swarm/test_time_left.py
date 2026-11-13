@@ -1,11 +1,13 @@
 import json
+import sqlite3
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from scripts.doctor import loop, priming
 from scripts.swarm import ci_speed, freeze, time_left
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 
 OBSERVED = SimpleNamespace(quota_capacity=lambda *args: {})
 PLAIN = SimpleNamespace(template="")
@@ -98,6 +100,18 @@ def test_the_tick_focus_rides_with_the_inputs_only_when_set(store):
     time_left.refresh("sw", store, ledger, OBSERVED, DOCTOR, {freeze.WATCHED: ["the focus on x"]})
     time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {})
     assert ledger.sent == [("sw", 2, 4, ("fix_phase", loop.FIX_PHASE), ("watched", ["the focus on x"])), ("sw", 2, 4)]
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_a_closed_database_connection_is_a_refused_ledger_write(store: Any) -> None:
+    class Closed:
+        def time_left(self, *args: Any, **focus: Any) -> None:
+            raise sqlite3.DatabaseError("connection already closed")
+
+    with pytest.raises(LedgerRefused) as refused:
+        time_left.refresh("sw", store, Closed(), OBSERVED, PLAIN, {})
+    assert str(refused.value) == "time left write failed: connection already closed"
+    assert isinstance(refused.value.__cause__, sqlite3.DatabaseError)
 
 
 def test_the_focus_reads_the_fix_phase_from_the_template_and_the_watched_focus_from_the_doc():

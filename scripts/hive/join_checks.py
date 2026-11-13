@@ -3,7 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryFile
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from hooks.secrets import redact
 
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from redis import Redis
 
 MESSAGE_LIMIT = 200
+COMMAND_TIMEOUT_S = 20
 STATUS = re.compile(r"(?:server refused|credential): (\d{3})")
 CREDENTIAL_ENV = (
     "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL",
@@ -55,15 +56,12 @@ def failure(probe: Callable[[], object]) -> dict | None:
 
 
 def github_ready() -> bool:
+    mode = os.environ.get("HIVE_GITHUB_AUTH_MODE")
+    app = mode == "app" if mode else bool(os.environ.get("AGENTIHOOKS_HIVE_ID"))
     return checked(
         lambda: (
             subprocess.run(
-                [
-                    "gh",
-                    "api",
-                    "installation/repositories" if os.environ.get("HIVE_GITHUB_AUTH_MODE", "app") == "app" else "user",
-                    "--silent",
-                ],
+                ["gh", "api", "installation/repositories" if app else "user", "--silent"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=15,
@@ -72,6 +70,36 @@ def github_ready() -> bool:
             == 0
         )
     )
+
+
+def _output(argv: list[str]) -> str:
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S, check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def kubectl_ready() -> bool:
+    """kubectl reaches the cluster through the hive's read only config and lists its nodes."""
+    return bool(_output(["kubectl", "get", "nodes", "--request-timeout=10s", "-o", "name"]))
+
+
+def git_identity_ready() -> bool:
+    """The hive user has a global git name and email, so agent commits carry an author."""
+    return all(_output(["git", "config", "--global", f"user.{field}"]) for field in ("name", "email"))
+
+
+def headed(redis: "Redis", hive: str) -> bool:
+    """The hive hosts an operator interface, so it takes workstation tasks and runs the workstation's tools."""
+    from scripts.hive import registry
+
+    return (registry.show(redis, hive) or {}).get("ui") == "yes"
+
+
+def headed_checks(report: dict[str, Any]) -> dict[str, bool]:
+    """The kubectl and git identity checks a headed hive runs, none on a headless one."""
+    context: dict[str, Any] = report["context"]
+    if not context.get("headed"):
+        return {}
+    return {"kubectl": checked(kubectl_ready), "git_identity": checked(git_identity_ready)}
 
 
 def transcript_ready(folder: str) -> bool:
@@ -156,5 +184,5 @@ def ledger_checks(report: dict) -> dict:
     return {**passed, "errors": errors} if errors else passed
 
 
-def startup(redis: "Redis", report: dict) -> dict:
-    return {**cheap(redis, report), **ledger_checks(report), "github": github_ready()}
+def startup(redis: "Redis", report: dict[str, Any]) -> dict[str, Any]:
+    return {**cheap(redis, report), **ledger_checks(report), "github": github_ready(), **headed_checks(report)}

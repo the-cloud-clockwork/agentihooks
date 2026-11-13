@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
@@ -57,6 +57,37 @@ def deadline_ms(agent: AgentRecord) -> int:
     return max(DEADLINE_MS, agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS))
 
 
+def wrote_ledger(agent: AgentRecord, doc: dict[str, Any]) -> bool:
+    """The agent wrote a ledger event at or after its launch."""
+    since = agent.launched_at or agent.started_at
+    meta: dict[str, Any] = doc.get("_meta", {})
+    events: list[dict[str, Any]] = meta.get("events", [])
+    return any(event.get("by") == agent.name and event.get("at", 0) >= since for event in events)
+
+
+def seated(agent: AgentRecord, live: set[str], doc: dict[str, Any]) -> bool:
+    """A live master holds its seat once working, or while starting once it has written the ledger since launch,
+    because a lost hook report leaves a live master in starting."""
+    if agent.name not in live:
+        return False
+    return agent.state == "working" or (agent.state == "starting" and wrote_ledger(agent, doc))
+
+
+def dead(agent: AgentRecord, live: set[str], at: int) -> bool:
+    """A starting master with no live process past its start deadline will never report."""
+    since = agent.launched_at or agent.started_at
+    return agent.state == "starting" and agent.name not in live and at - since >= deadline_ms(agent)
+
+
+def hooked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
+    """The master's own hooks beat since its launch, which proves a live session where no hive report reaches."""
+    from scripts.swarm import idle
+
+    read = idle.heartbeat  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    beat: dict[str, int] | None = read(store.redis, slug, agent.name)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    return beat is not None and beat["at"] >= (agent.launched_at or agent.started_at)
+
+
 def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
     pending = read(store, slug)
     repeated = pending.get("alerted") and master_alarm.read(store, slug).get("error") == error
@@ -81,7 +112,7 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
     ):
         store.redis.delete(store.key(slug, "master-start"))
         return []
-    if agent and runtime.reported(agent):
+    if agent and (runtime.reported(agent) or hooked(store, slug, agent)):
         store.put_agent(slug, replace(agent, state="working"))
         store.clear_handoff(slug, MASTER)
         store.redis.delete(store.key(slug, "master-start"))

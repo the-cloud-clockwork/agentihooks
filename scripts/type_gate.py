@@ -20,7 +20,7 @@ CONFIG = {
     "strict": ["hooks", "scripts"],
 }
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
-_NODE_OPTIONS = "--max-old-space-size=6656"
+_NODE_OPTIONS = "--max-old-space-size=5120"
 
 
 class GradeError(Exception):
@@ -59,8 +59,8 @@ def sources(head: Path) -> list[str]:
 def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
 
-    An empty list measures nothing. The checker empties its type cache once the Node heap passes ninety percent of
-    its limit, and when that happens varies between runs, so the heap limit is raised well above what the check uses.
+    An empty list measures nothing. The Node heap limit keeps the checker inside the 6 GiB memory limit of the anton-oss
+    runner container; past ninety percent of it the checker empties its type cache, which slows the check.
     """
     files = sources(head) if files is None else sorted(files)
     if not files:
@@ -98,9 +98,21 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
 
 
 def load(tree: Path) -> dict[str, int] | None:
-    """Return the baseline recorded in a tree, or None when it has none."""
+    """Read legacy counts and independently owned source records."""
     path = tree / BASELINE
-    return json.loads(path.read_text()) if path.is_file() else None
+    directory = tree / "tests/type-baseline"
+    if not path.is_file() and not directory.is_dir():
+        return None
+    counts: dict[str, int] = json.loads(path.read_text()) if path.is_file() else {}
+    for record in sorted(directory.rglob("*.json")):
+        source = record.relative_to(directory).as_posix().removesuffix(".json")
+        count = json.loads(record.read_text())
+        if source in counts:
+            raise ValueError(f"duplicate type baseline entry: {source}")
+        if not source.endswith(".py") or type(count) is not int or count < 0:
+            raise ValueError(f"invalid type count in {record}")
+        counts[source] = count
+    return counts
 
 
 def changed(base: Path, head: Path, paths: set[str]) -> set[str]:
@@ -168,14 +180,39 @@ def edited(base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
 
 
 def write(head: Path) -> None:
-    """Record the head's measurement as its baseline."""
-    (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
+    """Record measurements while preserving each source's existing owner."""
+    counts = measure(head)
+    directory = head / "tests/type-baseline"
+    if not directory.is_dir():
+        (head / BASELINE).write_text(json.dumps(counts, indent=2) + "\n")
+        return
+    path = head / BASELINE
+    legacy: dict[str, int] = json.loads(path.read_text()) if path.is_file() else {}
+    owned = set(legacy)
+    refreshed = {source: counts[source] for source in legacy if source in counts}
+    if refreshed != legacy:
+        path.write_text(json.dumps(refreshed, indent=2) + "\n")
+    for record in directory.rglob("*.json"):
+        source = record.relative_to(directory).as_posix().removesuffix(".json")
+        if source not in counts or source in owned:
+            record.unlink()
+    for source, count in counts.items():
+        if source in owned:
+            continue
+        record = directory / f"{source}.json"
+        text = json.dumps(count) + "\n"
+        if not record.is_file() or record.read_text() != text:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(text)
 
 
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
-    """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
+    """Return every changed file whose errors grew against the base, a head above its baseline, or a raised baseline.
+
+    A head below its baseline passes without a rewrite, so fixing errors never forces a baseline edit that
+    conflicts with other pull requests.
 
     Growth and drift are graded on ``touched``, the files the head changes and their importers, drift also on any
     baseline entry it edits; with ``touched`` None, on every file. An untouched file keeps the
@@ -191,7 +228,11 @@ def grade(
         f"{BASELINE} records {recorded.get(path, 0)} type errors in {path}, the head has {head.get(path, 0)}; "
         "run python -m scripts.type_gate --write"
         for path in sorted(set(recorded) | set(head))
-        if recorded.get(path, 0) != head.get(path, 0)
+        if (
+            head.get(path, 0) > recorded.get(path, 0)
+            or recorded.get(path, 0) > max(base.get(path, 0), head.get(path, 0))
+            or (touched is None and recorded.get(path, 0) != head.get(path, 0))
+        )
         and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
     ]
     return errors

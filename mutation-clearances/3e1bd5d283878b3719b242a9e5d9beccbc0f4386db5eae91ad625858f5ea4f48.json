@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_fan_out:8cc2aa5b679c44e92ae940190f0c312163ac088c0ed23b66eb930873e9c030a3": {
+    "reader": "standards_reader",
+    "reason": "The fanned flag is only ever set to True inside the slotted worker and deleted afterwards, so the getattr default of None and False are both falsy in the inline check and select the same path."
+  }
+}

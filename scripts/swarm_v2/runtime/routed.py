@@ -10,6 +10,8 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import Placed, SpawnError
+from scripts.swarm_v2.kubernetes.watch import BACKEND as KUBERNETES
+from scripts.swarm_v2.runtime import pod_gone
 from scripts.swarm_v2.runtime.base import (
     HIVE_LANES,
     LOCAL,
@@ -19,6 +21,7 @@ from scripts.swarm_v2.runtime.base import (
     Runtime,
     RuntimeRouter,
     SpawnRequest,
+    Status,
     Unqualified,
 )
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
@@ -28,8 +31,15 @@ NO_LAUNCH = "a Kubernetes runtime needs a distributed launch"
 
 
 class RoutedRuntime:
-    def __init__(self, herdr: HerdrRuntime, router: RuntimeRouter, launch: Launcher | None = None):
+    def __init__(
+        self,
+        herdr: HerdrRuntime,
+        router: RuntimeRouter,
+        launch: Launcher | None = None,
+        pod_absent: Callable[[str], bool] = pod_gone.absent,
+    ) -> None:
         self.herdr_runtime, self.router, self.launch, self.refused = herdr, router, launch, {}
+        self.pod_absent = pod_absent
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.herdr_runtime, name)
@@ -61,7 +71,8 @@ class RoutedRuntime:
             self.refused[agent.name] = {"process": 0, "refusal": outcome.detail}
         else:
             self.refused.pop(agent.name, None)
-        return outcome.ok
+        gone = outcome.status is Status.UNAVAILABLE and agent.runtime_backend == KUBERNETES
+        return outcome.ok or (gone and self.pod_absent(agent.execution_id))
 
     def refusal(self, agent: AgentRecord) -> dict:
         return self.refused.get(agent.name) or self.herdr_runtime.refusal(agent)
@@ -97,8 +108,11 @@ def routed(
 def hive_controller(runtime: RoutedRuntime, store: RedisStore, slug: str, held: lease.Lease) -> RoutedRuntime:
     from scripts.hive.launch import HIVE, HiveLaunch
     from scripts.hive.reports import Reports
+    from scripts.swarm import capacity
 
     runtime.herdr_runtime.hive = Reports(store.redis)
+    if getattr(runtime.herdr_runtime, "quota_accounts", None) is None:
+        runtime.herdr_runtime.quota_accounts = capacity.hive_accounts(store)
     hive = HiveLaunch(store, slug, held, runtime.herdr_runtime)
     router = RuntimeRouter(
         [*runtime.router.runtimes.values(), hive],

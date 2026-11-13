@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/index.py:scripts.ledger_knowledge.index.x\u01c1KnowledgeIndex\u01c1counts:01dda8cea608a3e3b05e9aa996c7fd68aea4582bf8d12cae7befdf5aa3320678": {
+    "reader": "Standards",
+    "reason": "Lowercase SQL parses to the same statement, and dict reads only the kind and count values, so the output is unchanged."
+  }
+}

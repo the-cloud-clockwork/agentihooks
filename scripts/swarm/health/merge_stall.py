@@ -1,11 +1,13 @@
 import json
+import os
+import re
 import subprocess
 import time
 from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 
-from scripts.swarm import github_reads, timing
+from scripts.swarm import github_reads, holder_pod, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
@@ -14,6 +16,9 @@ HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
 STREAK = 3
+NO_GH = "merge observation skipped: this host has no gh binary"
+NO_CHECKOUT = "merge observation skipped: this pod has no repository checkout"
+REMOTE = re.compile(r"[a-z][a-z0-9+.-]*://|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
 query($owner:String!,$name:String!,$cursor:String){
@@ -33,16 +38,27 @@ def request(repo: str, args: list[str]) -> dict:
     remaining = 20 if DEADLINE.get() is None else DEADLINE.get() - time.monotonic()
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")
+    cwd = None if REMOTE.match(repo) else repo
+    skipped = NO_GH
     with timing.step("scripts.swarm.health.merge_stall.github_read"):
-        result = github_reads.rest(
-            "swarm.merge_stall",
-            args,
-            subprocess.run,
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            timeout=min(20, remaining),
-        )
+        try:
+            result = github_reads.rest(
+                "swarm.merge_stall",
+                args,
+                subprocess.run,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=min(20, remaining),
+            )
+        except FileNotFoundError as exc:
+            if exc.filename == cwd:
+                if not os.environ.get(holder_pod.ENV["name"]):
+                    raise
+                skipped = NO_CHECKOUT
+            result = None
+    if result is None:
+        raise SwarmError(skipped)
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)
@@ -63,7 +79,7 @@ def queue(repo: str, name: str) -> tuple[int, int]:
         page_args = args + (["-f", f"cursor={cursor}"] if cursor else [])
         data = request(repo, page_args)["data"]["repository"]
         length = data["mergeQueue"]["entries"]["totalCount"] if data["mergeQueue"] else 0
-        if not length:
+        if not length and "pullRequests" not in data:
             return 0, 0
         pulls = data["pullRequests"]
         nodes = pulls["nodes"]

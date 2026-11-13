@@ -1,7 +1,7 @@
 import os
 import socket
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -12,7 +12,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
 TICK_REFUSAL = "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
-STALE = "the controller lease is stale"
+STALE = document.STALE
 EPOCH = ContextVar("controller_epoch", default=None)
 T = TypeVar("T")
 
@@ -38,6 +38,10 @@ def beat_s() -> float:
     return tick_ms() / 1000
 
 
+class LeaseUnavailable(SwarmError):
+    """The hosted controller lease could not be reached or failed on the server; the lease itself was not refused."""
+
+
 @dataclass(frozen=True)
 class Lease:
     owner: str
@@ -49,10 +53,12 @@ def now_ms(store: RedisStore) -> int:
     return document.now_ms()
 
 
-def _address(slug):
+def _address(slug: str) -> str:
+    """The ledger route the lease goes through; none once the shared swarm database is configured."""
     from scripts.swarm_ledger.ledger_route import url
+    from scripts.swarm_ledger.repository import postgres
 
-    return url(slug)
+    return "" if postgres.url(os.environ) else url(slug)
 
 
 def _remote(slug, action, fields=None):
@@ -70,11 +76,12 @@ def _remote(slug, action, fields=None):
         )["data"]
     except urllib.error.HTTPError as exc:
         replay, error = failure(exc)
-        raise SwarmError(
+        refused = SwarmError if replay.code < 500 else LeaseUnavailable
+        raise refused(
             f"hosted controller lease refused: {replay.code} {error.get('code', '')} {error.get('message', '')}"
         ) from None
     except OSError as exc:
-        raise SwarmError(f"hosted controller lease is unavailable: {exc}") from exc
+        raise LeaseUnavailable(f"hosted controller lease is unavailable: {exc}") from exc
 
 
 def _recorded(doc: dict) -> Lease | None:
@@ -170,7 +177,7 @@ def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Calla
         _check(doc, now_ms(store), held)
         return change(doc)
 
-    return document.write(store, slug, guarded)
+    return document.write(store, slug, guarded, held)
 
 
 def require(store: RedisStore, slug: str, held: Lease) -> None:
@@ -211,6 +218,8 @@ def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> No
             return
         try:
             renew(store, slug, held)
+        except LeaseUnavailable:
+            continue
         except SwarmError:
             return
         except document.unavailable():
@@ -244,6 +253,36 @@ def fencing(epoch: int | None) -> Iterator[None]:
         yield
     finally:
         EPOCH.reset(token)
+
+
+PASS: ContextVar[tuple[RedisStore, str, int] | None] = ContextVar("controller_pass", default=None)
+
+
+def epoch_for(slug: str) -> int | None:
+    """The controller epoch a ledger write to slug carries: the fencing epoch in scope, else the pass's own epoch
+    for its swarm and the live owner's epoch for another swarm, else none."""
+    if (epoch := EPOCH.get()) is not None:
+        return epoch
+    held = PASS.get()
+    if held is None:
+        return None
+    store, own, epoch = held
+    if slug == own:
+        return epoch
+    owner = current(store, slug)
+    return owner.epoch if owner else None
+
+
+@contextmanager
+def held_pass(store: RedisStore, slug: str, held: Lease) -> Generator[None]:
+    """Hold the lease for one pass: renew it once, keep one beat for the whole pass and fence its ledger writes."""
+    renew(store, slug, held)
+    token = PASS.set((store, slug, held.epoch))
+    try:
+        with kept(store, slug, held):
+            yield
+    finally:
+        PASS.reset(token)
 
 
 def release(store: RedisStore, slug: str, held: Lease) -> bool:

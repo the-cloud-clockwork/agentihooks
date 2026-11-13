@@ -1,0 +1,18 @@
+name: zsh
+description: Install zsh from the Ubuntu archive for the tests that source the shell rc block under zsh
+runs:
+  using: composite
+  steps:
+    - name: Install zsh
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v zsh >/dev/null; then
+          archive=/etc/apt/sources.list.d/ubuntu.sources
+          [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+          only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+          sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing zsh from the indexes that loaded"
+          sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" zsh
+        fi
+        zsh --version
+        echo "ZSH_REQUIRED=1" >> "$GITHUB_ENV"

@@ -1,10 +1,14 @@
 import json
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest.mock import patch
 
 import pytest
 
+from scripts.inbox import relay
+from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import cli, lease
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import authority_context, ledger, ledger_link, ledger_route
@@ -42,19 +46,23 @@ def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     seen = {}
     before = dict(os.environ)
     monkeypatch.setattr(cli.outbox, "flush", lambda *_: None)
-    monkeypatch.setattr(cli.relay, "relay", lambda *_: None)
-    monkeypatch.setattr(cli.LaunchSlots, "refresh_reported", lambda *_: None)
+    monkeypatch.setattr(relay, "relay", lambda *_: None)
+    monkeypatch.setattr(LaunchSlots, "refresh_reported", lambda *_: None)
     monkeypatch.setattr(cli.outage, "providers", lambda *_: None)
     monkeypatch.setattr(cli, "_publish_tick_status", lambda *_: None)
     monkeypatch.setattr(lease, "acquire", lambda *_: lease.Lease("host", 4, 10**15))
+    monkeypatch.setattr(lease, "renew", lambda _store, _slug, held: held)
     from scripts.swarm import controller
 
     monkeypatch.setattr(controller, "take_tick_lock", lambda *_: "lock")
     monkeypatch.setattr(controller, "keep_tick", lambda *_: None)
     monkeypatch.setattr(controller, "release_tick_lock", lambda *_: None)
 
-    def probe(slug, _now, _check):
+    both = Barrier(2)
+
+    def probe(slug: str, _now: int, _check: Callable[[], bool] | None) -> bool:
         seen[slug] = (ledger.base(), ledger_link.remote())
+        both.wait(30)
         return False
 
     monkeypatch.setattr(cli.outage, "ledger_health", probe)
@@ -148,7 +156,7 @@ def test_pending_destination_stages_private_authority_without_routing_the_tick(s
     monkeypatch.setattr(hosted, "server_secret", lambda: "private-staging-fixture")
     monkeypatch.setattr(cli, "_reconcile_services", lambda: None)
 
-    def run(slugs, callback, settled, elapsed):
+    def run(slugs, callback, elapsed):
         seen.append((authority_context.secret(), ledger_link.remote()))
         return True
 
@@ -184,7 +192,7 @@ def test_the_wait_command_skips_a_remote_swarm_and_finishes_the_local_one(store,
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
     with authority_context.bound(None):
         cli.cmd_waits(store, Namespace())
-    assert acquired == ["other"]
+    assert acquired == ["other", "other"]
     assert capsys.readouterr() == ("", "")
 
 
@@ -403,7 +411,11 @@ def test_a_lifecycle_request_uses_its_own_swarm_address(monkeypatch):
         def request(self, slug, path, payload):
             return {"data": (slug, path, payload)}
 
-    fake = SimpleNamespace(base=lambda slug: f"base:{slug}", credentials=lambda slug, service: {})
+    fake = SimpleNamespace(
+        base=lambda slug: f"base:{slug}",
+        credentials=lambda slug, service: {},
+        client=lambda slug, service: client.ResourceClient(f"base:{slug}", {}),
+    )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: fake)
     monkeypatch.setattr(client, "ResourceClient", Recorder)
     result = ledger_client.LedgerClient()._lifecycle("other", {"action": "binned"})

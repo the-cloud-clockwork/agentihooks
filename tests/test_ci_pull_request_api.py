@@ -19,6 +19,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
+    ROOT / "scripts/ci_launch_hotfix.py": {"pulls_of", "timeline_of", "head_green"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
@@ -34,6 +35,7 @@ TOKEN = re.compile(
     re.IGNORECASE,
 )
 APP_TOKEN = "${{ steps.app-token.outputs.token }}"
+NO_TOKEN = "none"
 
 
 def _workflow(name: str) -> dict:
@@ -79,7 +81,7 @@ def _holds_token(step: dict) -> bool:
         or TOKEN.search(step.get("run", ""))
         or (
             step.get("uses", "").startswith("actions/github-script@")
-            and (step.get("with") or {}).get("github-token") != APP_TOKEN
+            and (step.get("with") or {}).get("github-token") not in (APP_TOKEN, NO_TOKEN)
         )
     )
 
@@ -169,7 +171,6 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "hooks/__main__.py",
         "hooks/context/conditions.py",
         "hooks/hook_manager.py",
-        "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
         "scripts/ci_batch_runner_ceiling.py",
         "scripts/ci_branch_coverage.py",
@@ -182,8 +183,17 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_gate_summary.py",
         "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
+        "scripts/ci_launch_hotfix.py",
+        "scripts/ci_marker_vectors.py",
         "scripts/ci_mutation/__main__.py",
+        "scripts/ci_mutation/arrival.py",
+        "scripts/ci_mutation/identity.py",
+        "scripts/ci_mutation/measured.py",
+        "scripts/ci_mutation/merge.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_mutation/probe.py",
+        "scripts/ci_mutation/probed.py",
+        "scripts/ci_mutation/regrade.py",
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
@@ -191,7 +201,11 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/feature_map.py",
+        "scripts/tick_pattern.py",
+        "scripts/swarm/tick.py",
+        "scripts/tick/steps/budgets.py",
         "scripts/hive/nats_grant.py",
+        "scripts/hive/rollout.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/compose-recovery-drill.sh",
         "scripts/packaging/compose-task-smoke.sh",
@@ -199,14 +213,17 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/packaging/hive-launch-attestation-proof.sh",
         "scripts/packaging/hive-launch-smoke.sh",
         "scripts/packaging/pull-runtime-image.sh",
+        "scripts/packaging/stability-smoke.sh",
         "scripts/packaging/swarm-image-clients.sh",
         "scripts/packaging/swarm-init-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
         "scripts/dead_code.py",
         "scripts/design_rules.py",
+        "scripts/docs_sanity.py",
         "scripts/locked_tests.py",
         "scripts/no_comments.py",
+        "scripts/no_whole_ledger.py",
         "scripts/size_limits.py",
         "scripts/swallowed_exceptions.py",
         "scripts/threshold_pins.py",
@@ -214,6 +231,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_examples.py",
         "tests/chart_github_auth.py",
+        "tests/chart_hive_capabilities.py",
         "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
         "tests/chart_hive_only.py",
@@ -227,6 +245,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/chart_scratch_swarms.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
+        "tests/ci_charts/chart_pod_templates.py",
         "tests/ci_charts/chart_timers.py",
         "tests/count_floor.py",
         "tests/coverage_check.py",
@@ -253,6 +272,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "tests/shard_summary.py",
+        "tests/tick_scale/gate.py",
         "scripts/ci_select.py",
         "tests/__init__.py",
         "tests/browser_coverage.py",
@@ -305,7 +325,13 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
 def test_the_reuse_factory_exemption_contains_only_command_replacements():
     for path, names in METADATA_ONLY.items():
         source = path.read_text()
-        functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+        defined = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)]
+        functions = {node.name: node for node in defined if "__mutmut_" not in node.name}
+        functions |= {
+            node.name.removeprefix("x_").removesuffix("__mutmut_orig"): node
+            for node in defined
+            if node.name.endswith("__mutmut_orig")
+        }
         for name in names:
             if path == ROOT / "scripts/ci_gate_queue.py":
                 assert name == "watcher"
@@ -438,7 +464,13 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
 
 @pytest.mark.parametrize(
     ("binding", "offends"),
-    [(APP_TOKEN, False), ("${{ github.token }}", True), ("", True), ("${{ secrets.OTHER_TOKEN }}", True)],
+    [
+        (APP_TOKEN, False),
+        (NO_TOKEN, False),
+        ("${{ github.token }}", True),
+        ("", True),
+        ("${{ secrets.OTHER_TOKEN }}", True),
+    ],
 )
 def test_github_script_requires_the_explicit_app_token(binding, offends):
     step = {"uses": "actions/github-script@v7", "with": {"github-token": binding}}

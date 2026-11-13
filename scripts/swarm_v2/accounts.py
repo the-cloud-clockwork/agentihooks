@@ -5,6 +5,7 @@ evidence; this store is the authority for distributed launches."""
 import json
 from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, replace
+from typing import Any, cast
 
 from scripts.swarm import lease
 from scripts.swarm.keyspace import ROOT
@@ -20,6 +21,9 @@ WRITE_ATTEMPTS = 5
 MAX_RESERVATION_MS = MAX_TTL_SECONDS * 1000
 FROZEN = f"{ROOT}:accounts-frozen"
 CONFLICTS = f"{ROOT}:account-reservation-conflicts"
+INDEX = f"{ROOT}:accounts-index"
+INDEX_BUILT = f"{ROOT}:accounts-index-built"
+INDEX_REWALK_S = 3600
 ACCOUNT_FULL = "account_full"
 
 
@@ -51,8 +55,24 @@ def seat_holder(name: str) -> str:
 
 
 def stored_accounts(store: RedisStore) -> list[str]:
+    """Every account with a slot hash, read from the account index; the first read on a Redis without one builds it."""
+    redis = cast(Any, store.redis)
+    if not redis.exists(INDEX_BUILT):
+        _backfill_index(store)
+    members: set[str] = redis.smembers(INDEX)
+    return sorted(members)
+
+
+def _backfill_index(store: RedisStore) -> None:
+    """Index account hashes written without the index, by an older writer, with one keyspace walk an hour at most."""
+    redis = cast(Any, store.redis)
     prefix = account_key("")
-    return sorted(key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*"), count=10000))
+    found = [cast(str, key).removeprefix(prefix) for key in redis.scan_iter(match=account_key("*"), count=10000)]
+    with redis.pipeline() as pipe:
+        if found:
+            pipe.sadd(INDEX, *found)
+        pipe.set(INDEX_BUILT, 1, ex=INDEX_REWALK_S)
+        pipe.execute()
 
 
 def encode(slot: Slot) -> str:
@@ -74,8 +94,8 @@ def fleet_held(store: RedisStore, now: int) -> dict[str, int]:
     """Per account, the slots a local process table cannot see: every live reservation and every occupancy whose
     registry record runs outside the local backend."""
     held: dict[str, int] = {}
-    for key in store.redis.scan_iter(match=account_key("*"), count=10000):
-        for slot in map(decode, store.redis.hvals(key)):
+    for account in stored_accounts(store):
+        for slot in map(decode, store.redis.hvals(account_key(account))):
             if slot.state == OCCUPIED:
                 record = live_record(store, store.redis, slot)
                 remote = record is not None and record.scope.backend != LOCAL
@@ -152,6 +172,8 @@ class AccountCapacity:
                             pipe.hdel(key, *dropped)
                         for slot in written:
                             pipe.hset(key, slot.holder, encode(slot))
+                        if written:
+                            cast(Any, pipe).sadd(INDEX, account)
                         pipe.execute()
                     return result
                 except WatchError:
@@ -288,6 +310,7 @@ class AccountCapacity:
     ) -> dict[str, int]:
         """Rebuild this swarm's occupancy from current confirmed registry records; reservations stay to expire."""
         confirmed = self._confirmed(registry, registration)
+        _backfill_index(self.store)
         stored = set(stored_accounts(self.store))
         mine = self._holder("")
         rebuilt = {}

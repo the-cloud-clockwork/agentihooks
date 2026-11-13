@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_session:014f91c42617a66ee55468064bc335c683b3a9cf7ea703e5b1c7da22c2fd7e2b": {
+    "reader": "standards_reader",
+    "reason": "headers is an email Message whose get is case insensitive, so the upper case name finds the same assertion header and the same branch is taken."
+  }
+}

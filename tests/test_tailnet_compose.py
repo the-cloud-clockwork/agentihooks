@@ -46,50 +46,41 @@ def test_tailnet_start_renders_all_fronts_with_the_current_address(tailnet, addr
     assert ledger["environment"]["SWARM_TAILNET_IP"] == address
     assert ledger["environment"]["NGINX_ENVSUBST_FILTER"] in ("^SWARM_TAILNET_IP$", "^SWARM_TAILNET_IP$$")
     assert any(v["target"] == "/etc/nginx/templates/default.conf.template" for v in ledger["volumes"])
-    assert services["hive-tailnet"]["command"][3] == f"--host={address}"
-    assert f"--redis-url=redis://{address}:6379/0" in services["hive-tailnet"]["command"]
+    assert "hive-tailnet" not in services
     assert services["redis-tailnet"]["command"] == [
         f"TCP-LISTEN:6379,bind={address},fork,reuseaddr",
         "TCP:127.0.0.1:6379",
     ]
-    for name in ("swarm-tailnet", "hive-tailnet", "redis-tailnet"):
+    for name in ("swarm-tailnet", "redis-tailnet"):
         assert services[name]["network_mode"] == "host"
     assert "100.64.0.99" not in json.dumps(services)
 
 
-SIGNER_SETTINGS = {
-    "AGENTIHOOKS_NATS_SIGNER": "agentihooks/hub/nats-signer",
-    "AGENTIHOOKS_NATS_TRUSTED_OPERATOR": "OFIXTURETRUSTEDOPERATOR",
-    "OPENBAO_URL": "https://bao.fixture.test",
-    "OPENBAO_TOKEN": secrets.token_urlsafe(),
-}
-
-
-def _hive_environment(stack, binary, settings):
-    environ = {key: value for key, value in os.environ.items() if key not in SIGNER_SETTINGS}
+@pytest.mark.parametrize("address", ["100.96.208.118", "100.101.12.34"])
+def test_tailnet_start_retires_the_workstation_hive_join_front(tailnet, address):
+    stack, binary = tailnet
+    docker = binary / "docker"
+    docker.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    docker.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(stack / "deploy/compose/start-tailnet.sh"), "config", "--format", "json"],
-        env={**environ, **settings, "PATH": f"{binary}:{os.environ['PATH']}", "FIXTURE_TAILNET_IP": "100.96.208.118"},
+        ["bash", str(stack / "deploy/compose/start-tailnet.sh")],
+        env={**os.environ, "PATH": f"{binary}:{os.environ['PATH']}", "FIXTURE_TAILNET_IP": address},
         capture_output=True,
         text=True,
         check=True,
     )
-    return json.loads(result.stdout)["services"]["hive-tailnet"]["environment"]
-
-
-def test_the_hive_front_reads_the_nats_signer_from_the_workstation_environment(tailnet):
-    stack, binary = tailnet
-    environment = _hive_environment(stack, binary, SIGNER_SETTINGS)
-    assert {key: environment[key] for key in SIGNER_SETTINGS} == SIGNER_SETTINGS
-    text = (stack / "deploy/compose/tailnet.yaml").read_text()
-    for value in SIGNER_SETTINGS.values():
-        assert value not in text
-
-
-def test_the_hive_front_runs_without_a_signer_when_the_workstation_sets_none(tailnet):
-    stack, binary = tailnet
-    environment = _hive_environment(stack, binary, {})
-    assert all(not environment.get(key) for key in SIGNER_SETTINGS)
+    arguments = result.stdout.splitlines()
+    assert arguments[-7:] == [
+        "up",
+        "--detach",
+        "--no-deps",
+        "--force-recreate",
+        "--remove-orphans",
+        "swarm-tailnet",
+        "redis-tailnet",
+    ]
+    assert "hive-tailnet" not in arguments
+    assert "8770" not in (stack / "deploy/compose/tailnet.yaml").read_text()
 
 
 @pytest.mark.parametrize("address", ["", "garbage", "0.0.0.0", "100.96.208.999", "100.96.208.1\n100.96.208.2"])

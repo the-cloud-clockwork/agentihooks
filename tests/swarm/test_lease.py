@@ -230,7 +230,7 @@ def test_controller_entrypoint_runs_once_and_reports_actions(store, monkeypatch,
         install.main()
     assert result.value.code == 0
     assert calls == [store]
-    assert capsys.readouterr().out == "sw: worked\n"
+    assert capsys.readouterr().out == 'sw: worked\n{"event": "controller_pass_end", "pass": 1, "outcome": "ok"}\n'
 
 
 def test_the_lease_expires_on_the_host_wall_clock(store, monkeypatch):
@@ -280,11 +280,59 @@ def test_release_conflict_does_not_remove_the_lease(store, monkeypatch):
     assert lease.current(store, "sw") == held
 
 
-def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys):
+def _loop_sleeps(store: RedisStore, monkeypatch: pytest.MonkeyPatch, clock: list[float]) -> list[float]:
+    from scripts import operator_env
+    from scripts.swarm import controller
+
+    sleeps: list[float] = []
+    readings = iter(clock)
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "monotonic", lambda: next(readings))
+    monkeypatch.setattr(controller, "run_once", lambda saved: {"sw": []})
+
+    def record(delay: float) -> None:
+        sleeps.append(delay)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(controller, "scheduled_wait", record)
+    with pytest.raises(KeyboardInterrupt):
+        controller.main(["run"])
+    return sleeps
+
+
+def test_controller_loop_starts_passes_one_tick_apart(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 145.0]) == [15.0]
+
+
+def test_controller_loop_waits_the_last_half_second_of_a_tick(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 159.5]) == [0.5]
+
+
+def test_controller_loop_starts_at_once_after_a_pass_longer_than_a_tick(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 170.0, 170.0, 200.0]) == [30.0]
+
+
+def test_controller_loop_starts_at_once_after_a_pass_of_exactly_one_tick(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 160.0, 160.0, 210.0]) == [10.0]
+
+
+def test_controller_loop_waits_one_tick_between_runs(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts import operator_env
     from scripts.swarm import controller
 
     calls, sleeps = [], []
+    monkeypatch.setattr(controller, "monotonic", lambda: 5.0)
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
     monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
@@ -299,7 +347,7 @@ def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys)
         controller.main(["run"])
     assert calls == [store]
     assert sleeps == [60.0]
-    assert capsys.readouterr().out == "sw: worked\n"
+    assert capsys.readouterr().out == 'sw: worked\n{"event": "controller_pass_end", "pass": 1, "outcome": "ok"}\n'
 
 
 def test_controller_reports_a_lease_error(store, monkeypatch, capsys):
@@ -418,6 +466,7 @@ def test_the_controller_never_ticks_a_host_ticked_swarm(store, monkeypatch):
     monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: ticks.append(slug) or [slug])
     monkeypatch.setenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", "workstation,doctor")
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     assert controller.run_once(store) == {"hosted": ["hosted"]}
     assert ticks == ["hosted"]
 
@@ -430,6 +479,7 @@ def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store
     monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
     monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     assert controller.run_once(store) == {"XXXX": ["XXXX"]}
 
 
@@ -446,6 +496,7 @@ def test_the_host_tick_leaves_a_swarm_the_controller_ticks_so_the_controller_tak
     monkeypatch.setattr(commands, "hive_id", lambda: "controller-hive")
     monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     controller.run_once(store)
 
     assert lease.acquire(store, "proof", "workstation-hive") is None
@@ -470,8 +521,45 @@ def test_the_controller_marks_each_swarm_for_one_lease_ttl_as_it_ticks_it(store,
         lambda saved, slug, *args, **kwargs: marks.append(saved.redis.get(saved.key(slug, "controller-host"))) or [],
     )
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     controller.run_once(store)
 
     assert marks == ["controller-hive"]
     assert 0 < store.redis.pttl(store.key("proof", "controller-host")) <= lease.ttl_ms()
     assert lease.acquire(store, "proof", "controller-hive").owner == "controller-hive"
+
+
+def test_the_lease_holds_through_the_shared_database_with_the_ledger_server_unreachable(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import ledger_route
+    from scripts.swarm_ledger.api import client
+
+    def unreachable(*args: object) -> None:
+        raise OSError("timed out")
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
+    monkeypatch.setattr(client.ResourceClient, "request", unreachable)
+    with ledger_route.scoped("sw", "https://ledger.example"):
+        held = lease.acquire(store, "sw", "home")
+        assert held is not None
+        assert lease.current(store, "sw") == held
+        assert lease.renew(store, "sw", held).epoch == held.epoch
+        assert lease.fenced(store, "sw", held, lambda doc: "written") == "written"
+        assert lease.release(store, "sw", held) is True
+        assert lease.current(store, "sw") is None
+
+
+@pytest.mark.parametrize(("folder", "address"), [("scratchpad/proof/ledger", "https://ledger.example"), ("ledger", "")])
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
+def test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, folder: str, address: str
+) -> None:
+    from pathlib import Path
+
+    from scripts.swarm_ledger import ledger_route
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
+    monkeypatch.setenv("LEDGER_DIR", str((Path.home() if folder.startswith("scratchpad") else tmp_path) / folder))
+    with ledger_route.scoped("sw", "https://ledger.example/"):
+        assert lease._address("sw") == address

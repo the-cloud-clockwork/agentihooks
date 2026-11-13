@@ -13,7 +13,7 @@ fi
 export SWARM_TAILNET_IP="$address"
 export SWARM_TAILNET_ASSETS="$assets"
 if [[ "$#" == 0 ]]; then
-  set -- up --detach --no-deps --force-recreate swarm-tailnet hive-tailnet redis-tailnet
+  set -- up --detach --no-deps --force-recreate --remove-orphans swarm-tailnet redis-tailnet
 fi
 exec docker compose --project-name "${SWARM_COMPOSE_PROJECT:-agentihooks-swarm}" \
   --project-directory "$stack" --env-file "$stack/.env" \

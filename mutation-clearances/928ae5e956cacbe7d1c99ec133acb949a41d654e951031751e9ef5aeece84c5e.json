@@ -1,0 +1,6 @@
+{
+  "scripts/ci_storage.py:scripts.ci_storage.x__run:bf16186aa4abd35a14b8a1111c72c7040bfde7d4faa3652e9715f0d87db1aa72": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

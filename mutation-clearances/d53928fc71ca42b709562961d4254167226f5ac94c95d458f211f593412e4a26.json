@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/pool.py:scripts.inbox.pool.x\u01c1MasterPool\u01c1empty:9c6ec46f4e590da7bb8dca05681cf344573e557f6b68a6b1b65d21140c6a6f10": {
+    "reader": "standards_reader",
+    "reason": "Replaces Any with None as the first argument of cast in seats = cast(Any, self.inbox).seats. typing.cast returns self.inbox unchanged and never reads the first argument at runtime, so the seats attribute read and the seat check result are identical."
+  }
+}

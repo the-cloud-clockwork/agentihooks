@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/llm.py:scripts.tick.adapters.llm.xǁApiLlmǁclassify:5c7a3502ce9a987e07a18f248d50d0de8c6c11a2b12a99e985160d956d23d6da": {
+    "reader": "standards_reader",
+    "reason": "Replaces the type argument of typing.cast with None. typing.cast returns its value argument unchanged at runtime whatever the type argument, so the value passed on is identical and no output changes; the cast exists only for the static type checker."
+  }
+}

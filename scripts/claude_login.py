@@ -15,12 +15,14 @@ import tty
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from hooks.context.account_sessions import TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv, openbao_step, term_colors
 from scripts.openbao_step import Console, StoreRefused
 
 PROG = "agentihooks claude login"
+SET_RAW: Callable[..., Any] = tty.setraw
 TOKEN = re.compile(r"sk-ant-oat01-[A-Za-z0-9_\-]{20,}")
 ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 COLUMNS = 1000
@@ -56,9 +58,9 @@ class Terminal:
     stdout: int
     tty: bool
     rows: int
-    get_mode: Callable = termios.tcgetattr
-    set_mode: Callable = termios.tcsetattr
-    raw: Callable = tty.setraw
+    get_mode: Callable[..., Any] = termios.tcgetattr
+    set_mode: Callable[..., Any] = termios.tcsetattr
+    raw: Callable[..., Any] = SET_RAW
 
     @classmethod
     def current(cls) -> "Terminal":
@@ -98,7 +100,7 @@ def _pump(master: int, terminal: Terminal, forward: bool) -> bytes:
             _write_all(terminal.stdout, data)
 
 
-def _interrupt(signum: int, frame) -> None:
+def _interrupt(signum: int, frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
@@ -116,7 +118,7 @@ def _relay(master: int, terminal: Terminal) -> bytes:
             signal.signal(number, handler)
 
 
-def _reap(child: subprocess.Popen) -> int:
+def _reap(child: subprocess.Popen[bytes]) -> int:
     try:
         return child.wait(timeout=WAIT_S)
     except subprocess.TimeoutExpired:
@@ -176,7 +178,7 @@ def _raw_slug(given: str | None, console: Console, parser: argparse.ArgumentPars
     return given if given is not None else console.ask(term_colors.yellow(ASK_SLUG)).strip()
 
 
-def _capture(runner: Callable) -> tuple[int, str]:
+def _capture(runner: Callable[[list[str]], tuple[int, bytes]]) -> tuple[int, str]:
     print(term_colors.blue(STEP_SIGN_IN))
     print(term_colors.yellow(PRIVATE_WINDOW))
     sys.stdout.flush()
@@ -196,8 +198,8 @@ def _capture(runner: Callable) -> tuple[int, str]:
 @dataclass(frozen=True)
 class Deps:
     console: Console
-    opener: Callable | None = None
-    run: Callable = subprocess.run
+    opener: Callable[..., Any] | None = None
+    run: Callable[..., Any] = subprocess.run
     render: Callable[[str], Path] | None = None
 
 
@@ -205,7 +207,7 @@ def _rendered(profile: str) -> Path:
     from scripts.profiles import render
 
     render.render_claude(profile)
-    return render.profile_dir(profile) / "claude"
+    return cast(Path, render.profile_dir(profile)) / "claude"
 
 
 def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps, slot: int | None = None) -> int:
@@ -232,7 +234,7 @@ def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps, slot: i
         _fail(MASTER_FAILED.format(code=code))
         return code
     try:
-        bao = openbao_step.target(openbao, environ, deps.console, deps.opener)
+        bao = cast("Callable[..., Any]", openbao_step.target)(openbao, environ, deps.console, deps.opener)
     except StoreRefused as exc:
         _fail(str(exc))
         return 1
@@ -268,8 +270,8 @@ def removal(number: int, openbao: bool | None, environ: Mapping[str, str], deps:
     from scripts import master_claude_login as login
 
     try:
-        bao = openbao_step.target(openbao, environ, deps.console, deps.opener)
-        if bao is None and openbao_kv.from_env(environ):
+        bao = cast("Callable[..., Any]", openbao_step.target)(openbao, environ, deps.console, deps.opener)
+        if bao is None and cast("Callable[..., Any]", openbao_kv.from_env)(environ):
             raise login.LoginRefused(KEPT.format(record=login.creds(number)))
         account = login.remove(number, bao)
     except (StoreRefused, login.LoginRefused, openbao_kv.OpenBaoError) as exc:
@@ -282,9 +284,9 @@ def removal(number: int, openbao: bool | None, environ: Mapping[str, str], deps:
 def main(
     args: list[str],
     environ: Mapping[str, str] | None = None,
-    runner: Callable = setup_token,
+    runner: Callable[[list[str]], tuple[int, bytes]] = setup_token,
     console: Console | None = None,
-    opener: Callable | None = None,
+    opener: Callable[..., Any] | None = None,
 ) -> int:
     environ = os.environ if environ is None else environ
     console = console or Console()
@@ -298,9 +300,9 @@ def main(
         return listing()
     if options.remove is not None:
         return removal(options.remove, options.openbao, environ, Deps(console=console, opener=opener))
-    from scripts.gates.entry import native
+    from scripts.gates import entry
 
-    if native("sign-ins", "claude-login", environ):
+    if cast("Callable[..., Any]", entry.native)("sign-ins", "claude-login", environ):
         return 2
     if options.master:
         return master(options.openbao, environ, Deps(console=console, opener=opener), options.slot)
@@ -322,7 +324,7 @@ def main(
     aicode_tokens.write_rc(rc, {name: token}, stale)
     print(SUMMARY.format(name=name, rc=rc, length=len(token)))
     try:
-        bao = openbao_step.target(options.openbao, environ, console, opener)
+        bao = cast("Callable[..., Any]", openbao_step.target)(options.openbao, environ, console, opener)
     except StoreRefused as exc:
         _fail(str(exc))
         return 1

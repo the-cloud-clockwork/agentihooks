@@ -17,7 +17,7 @@ DEFAULT = {
     "ephemeral": "no",
     "excluded": ["master"],
     "prefer": {},
-    "max_agents": 20,
+    "max_agents": None,
     "harnesses": [],
     "slots": [],
     "interactive": {"claude": "", "codex": ""},
@@ -28,7 +28,7 @@ DEFAULT = {
     "heartbeat_at": 0,
     "version": "",
 }
-HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": [], "max_agents": 10}
+HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": []}
 
 
 @pytest.fixture
@@ -50,6 +50,14 @@ def test_a_new_hive_gets_every_field_and_joins_the_index(redis):
     assert "roles" not in stored and "excluded" not in stored
     assert stored["interactive"] == {"claude": "", "codex": ""}
     assert stored["max_agents"] == 3
+
+
+def test_hive_set_accepts_zero_max_agents_to_scale_a_hive_fully_down(redis):
+    registry.update(redis, "box", ["max-agents=3"])
+    assert registry.update(redis, "box", ["max-agents=0"]) == {**DEFAULT, "max_agents": 0}
+    assert registry.show(redis, "box") == {**DEFAULT, "max_agents": 0}
+    stored = _record(redis, "box")
+    assert stored is not None and stored["max_agents"] == 0
 
 
 def test_a_member_updates_its_settings_without_writing_the_controller_index(redis, monkeypatch):
@@ -114,6 +122,44 @@ def test_a_heartbeat_seeded_interface_hive_reads_as_swarm_master(redis):
     assert registry.show(redis, "root")["name"] == "swarm-master"
 
 
+@pytest.mark.feature("hive-registry-unique-name-suffix")
+def test_two_headed_hives_joining_take_unique_names(redis):
+    registry.update(redis, "root", ["ui=yes"])
+    joined = registry.update(redis, "vm", ["ui=yes", "name=swarm-master"])
+    assert joined["name"] == "swarm-master-2"
+    assert sorted(hive["name"] for hive in registry.hives(redis)) == ["swarm-master", "swarm-master-2"]
+    assert registry.update(redis, "vm", ["max-agents=2"])["name"] == "swarm-master-2"
+    assert registry.update(redis, "root", ["max-agents=3"])["name"] == "swarm-master"
+
+
+@pytest.mark.feature("hive-registry-unique-name-suffix")
+def test_a_restarted_headed_hive_keeps_its_derived_name(redis):
+    registry.update(redis, "root", ["ui=yes"])
+    assert registry.update(redis, "vm", ["ui=yes"])["name"] == "swarm-master-2"
+    assert registry.update(redis, "vm", ["ui=yes", "name=vm"], keep=True)["name"] == "swarm-master-2"
+    assert registry.update(redis, "vm", ["name=Desk"])["name"] == "swarm-master-2"
+
+
+@pytest.mark.feature("hive-registry-unique-name-suffix")
+def test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix(redis):
+    registry.update(redis, "a", ["name=box"])
+    registry.update(redis, "b", ["name=box-2"])
+    assert registry.update(redis, "c", ["name=box"])["name"] == "box-3"
+    assert registry.update(redis, "a", ["name=box"])["name"] == "box"
+    assert sorted(hive["name"] for hive in registry.hives(redis)) == ["box", "box-2", "box-3"]
+
+
+@pytest.mark.feature("hive-registry-unique-name-suffix")
+def test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set(redis):
+    registry.update(redis, "root", ["ui=yes"])
+    registry.beat(redis, "vm", {"ui": "yes", "heartbeat_at": 1})
+    hive_state.indexed(redis, "vm", True)
+    assert [hive["name"] for hive in registry.hives(redis)] == ["swarm-master", "swarm-master"]
+    assert registry.update(redis, "vm", ["draining=yes"])["name"] == "swarm-master"
+    assert registry.update(redis, "vm", ["name=swarm-master"])["name"] == "swarm-master-2"
+    assert sorted(hive["name"] for hive in registry.hives(redis)) == ["swarm-master", "swarm-master-2"]
+
+
 def test_a_restarted_registration_keeps_the_stored_settings(redis):
     pod = ["ui=no", "ephemeral=yes", "excluded=master", "max-agents=9"]
     first = registry.update(redis, "box", pod, keep=True)
@@ -149,6 +195,18 @@ def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     stored = _record(redis, "box")
     assert registry.update(redis, "box", ["max-agents=9"], keep=True) == {**DEFAULT, "max_agents": 3}
     assert _record(redis, "box") == stored
+
+
+def test_a_restarted_worker_adopts_the_charted_agent_cap(redis: object) -> None:
+    start = ["ui=no", "ephemeral=yes", "excluded=master", "prefer="]
+    registry.update(redis, "box", start, keep=True)
+    registry.update(redis, "box", ["max-agents=3"])
+    registry.update(redis, "box", ["max-agents=9"])
+    registry.update(redis, "box", ["excluded=qa"])
+    assert registry.update(redis, "box", start, keep=True)["max_agents"] == 9
+    restarted = registry.update(redis, "box", ["max-agents=12"])
+    assert restarted == {**DEFAULT, "ephemeral": "yes", "excluded": ["qa"], "max_agents": 12}
+    assert _record(redis, "box") == restarted
 
 
 def test_a_declared_name_lands_on_a_new_record_and_survives_reregistration(redis):
@@ -268,10 +326,10 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
         (["excluded=eng,a:b"], "excluded takes lane roles or profiles, not 'a:b'"),
-        (["max-agents=0"], "max-agents must be a positive whole number, not '0'"),
-        (["max-agents=two"], "max-agents must be a positive whole number, not 'two'"),
-        (["max-agents=-1"], "max-agents must be a positive whole number, not '-1'"),
-        (["max-agents=²"], "max-agents must be a positive whole number, not '²'"),
+        (["max-agents="], "max-agents must be a whole number, not ''"),
+        (["max-agents=two"], "max-agents must be a whole number, not 'two'"),
+        (["max-agents=-1"], "max-agents must be a whole number, not '-1'"),
+        (["max-agents=²"], "max-agents must be a whole number, not '²'"),
         (["prefer=eng"], "prefer takes role:rank, not 'eng'"),
         (["prefer=eng:0"], "the rank of eng must be a positive whole number, not '0'"),
         (["prefer=eng:1:2"], "the rank of eng must be a positive whole number, not '1:2'"),
@@ -307,6 +365,53 @@ def test_liveness_follows_the_heartbeat_window():
     assert registry.LIVE_MS == 90_000
 
 
+def test_a_stalled_beat_turns_the_hive_not_ready_while_the_headroom_heartbeat_stays_fresh(redis):
+    registry.update(redis, "box", ["max-agents=2"])
+    registry.beat(redis, "box", {"heartbeat_at": 1_000})
+    registry.finished(redis, "box", 1_000)
+    stalled = 1_000 + registry.BEAT_WINDOW_MS + 1
+    registry.touch(redis, "box", stalled)
+    record = registry.show(redis, "box")
+    assert record is not None
+    assert record["heartbeat_at"] == stalled
+    assert record["beat_at"] == 1_000
+    assert registry.live(record, stalled) is False
+    assert registry.live(record, stalled - 1) is True
+    registry.finished(redis, "box", stalled)
+    resumed = registry.show(redis, "box")
+    assert resumed is not None
+    assert resumed["beat_at"] == stalled
+    assert registry.live(resumed, stalled) is True
+    assert registry.BEAT_WINDOW_MS == 300_000
+
+
+def test_a_finished_beat_never_creates_a_missing_hive(redis):
+    registry.finished(redis, "ghost", 5)
+    assert registry.show(redis, "ghost") is None
+
+
+def test_a_first_beat_that_never_finishes_ages_out_under_the_headroom_heartbeat(redis):
+    registry.update(redis, "box", ["max-agents=2"])
+    registry.beat(redis, "box", {"heartbeat_at": 1_000})
+    registry.touch(redis, "box", 2_000)
+    seeded = registry.show(redis, "box")
+    assert seeded is not None
+    assert seeded["beat_at"] == 2_000
+    later = 2_001 + registry.BEAT_WINDOW_MS
+    registry.touch(redis, "box", later)
+    record = registry.show(redis, "box")
+    assert record is not None
+    assert record["beat_at"] == 2_000
+    assert record["heartbeat_at"] == later
+    assert registry.live(record, later) is False
+
+
+def test_a_record_without_a_finished_beat_keeps_the_heartbeat_rule():
+    assert registry.live({"heartbeat_at": 1_000}, 1_000 + registry.LIVE_MS) is True
+    assert registry.live({"heartbeat_at": 1_000, "beat_at": 1_000}, 1_000 + registry.LIVE_MS) is True
+    assert registry.live({"heartbeat_at": 0, "beat_at": 5}, 5) is False
+
+
 def test_hives_lists_indexed_records_sorted_and_skips_missing(redis):
     names = ["zeta", "alpha", "mu", "kappa", "omega", "beta", "delta", "sigma"]
     for name in names:
@@ -328,8 +433,8 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3\texcluded=qa\theadroom=missing\n"
-        "pod\tstale\tui=no\tmax-agents=20\texcluded=eng\theadroom=missing\n"
+        "box\tname=swarm-master\tlive\tui=yes\tworkers=0 of 3 (cap 3)\texcluded=qa\theadroom=missing\trelease=unknown\n"
+        "pod\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=eng\theadroom=missing\trelease=unknown\n"
     )
 
 
@@ -376,7 +481,10 @@ def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
     registry.update(redis, "box", ["excluded=eng,ci"])
     assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=20\texcluded=eng,ci\theadroom=missing\n"
+    assert (
+        capsys.readouterr().out
+        == "box\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=eng,ci\theadroom=missing\trelease=unknown\n"
+    )
 
 
 @pytest.fixture
@@ -426,3 +534,34 @@ def test_an_existing_swarm_keeps_its_owner(home, monkeypatch):
     held = lease.acquire(store, "sw", socket.gethostname())
     assert lease.acquire(store, "sw", commands.hive_id()) == lease.Lease(held.owner, held.epoch, held.expires_at)
     assert lease.current(store, "sw").owner == socket.gethostname()
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones() -> None:
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    registry.register(redis, "member-1", "swarm-hive-007", ["o/antoncore"])
+    registered = registry.show(redis, "member-1")
+    assert registered is not None
+    assert (registered["id"], registered["name"], registered["repos"]) == (
+        "member-1",
+        "swarm-hive-007",
+        ["o/antoncore"],
+    )
+    registry.beat(redis, "member-1", {"repos": ["/home/worker/dev/x", "o/x"], "heartbeat_at": 5})
+
+    record = registry.show(redis, "member-1")
+    assert record is not None
+    assert (record["name"], record["repos"]) == ("swarm-hive-007", ["/home/worker/dev/x", "o/antoncore", "o/x"])
+    assert [found["id"] for found in registry.hives(redis)] == ["member-1"]
+
+
+def test_a_heartbeat_without_registered_repos_writes_the_reported_repos_as_given() -> None:
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    registry.beat(redis, "member-2", {"repos": ["o/z", "o/a"], "heartbeat_at": 5})
+
+    record = registry.show(redis, "member-2")
+    assert record is not None and record["repos"] == ["o/z", "o/a"]

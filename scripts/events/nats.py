@@ -1,19 +1,23 @@
 import asyncio
 import base64
 import datetime
+import logging
+import sys
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
+from typing import Any
 
 import nats as nats_client
+from nats.aio.client import Client
 from nats.aio.msg import Msg
-from nats.errors import NoRespondersError
+from nats.errors import NoRespondersError, NoServersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 from nats.js.kv import KeyValue
 
-from . import nats_payload, nkey
+from . import nats_batch, nats_payload, nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
@@ -36,7 +40,11 @@ STATE_LIMITS = {"hub-timers": {"history": 1, "max_bytes": 1 << 30}}
 MIN_FETCH_MS = 10
 LOOP_START_S = 5
 LOOP_STOP_S = 5
+FIRST_CONNECT_S = 2
+_log = logging.getLogger(__name__)
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
+FIRST_CONNECT_RETRIES = 5
+RECONNECT_WAIT_S = 2
 
 
 def queue_stream(name: str) -> str:
@@ -58,6 +66,41 @@ def auth_options(credentials: str | None) -> dict:
     }
 
 
+async def _unreported(error: Exception) -> None:
+    """Drop a connection error, which the open or the next call raises; log any other error in one line."""
+    if not isinstance(error, (OSError, asyncio.TimeoutError, NoServersError)):
+        _log.error("%s", error)
+
+
+@dataclass
+class _Lifecycle:
+    """Log a dropped and a restored bus connection; an intentional close logs nothing."""
+
+    client: Client | None = None
+
+    async def disconnected(self) -> None:
+        """Log a drop only while the client is reconnecting, since close also calls this."""
+        if self.client is not None and self.client.is_reconnecting:
+            _log.warning("NATS bus disconnected")
+
+    async def reconnected(self) -> None:
+        """Log that the shared bus connection came back."""
+        _log.info("NATS bus reconnected")
+
+
+def connect_options(config: BusConfig) -> dict[str, Any]:
+    """Bound a reconnecting client's first connect to FIRST_CONNECT_RETRIES; otherwise try twice within seconds and log no attempt."""
+    if config.reconnect:
+        return {"allow_reconnect": True, "max_reconnect_attempts": FIRST_CONNECT_RETRIES}
+    return {
+        "allow_reconnect": False,
+        "max_reconnect_attempts": 1,
+        "reconnect_time_wait": 0,
+        "connect_timeout": FIRST_CONNECT_S,
+        "error_cb": _unreported,
+    }
+
+
 class _Loop:
     def __init__(self):
         self.closed = False
@@ -70,7 +113,7 @@ class _Loop:
             self.close()
             raise RuntimeError("bus loop did not start")
 
-    def run(self, coro: Coroutine):
+    def run(self, coro: Coroutine[Any, Any, Any]) -> Any:
         if self.closed:
             coro.close()
             raise RuntimeError("bus is closed")
@@ -360,6 +403,28 @@ class NatsWorkQueue:
         deliveries = self._consumer.fetch(1, timeout_ms)
         return deliveries[0] if deliveries else None
 
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        """Reads each sequence the stream held when the sweep began once, so offers published during it wait for the
+        next sweep."""
+        info: api.StreamInfo = self._loop.run(self._js.stream_info(self._stream))
+        state = info.state
+        if not state.messages:
+            return 0
+        return sum(self._withdrawn(sequence, stale) for sequence in range(state.first_seq, state.last_seq + 1))
+
+    def _withdrawn(self, sequence: int, stale: Callable[[Envelope], bool]) -> bool:
+        msg: api.RawStreamMsg | None = self._loop.run(self._get(sequence))
+        if msg is None or not stale(Envelope.decode(msg.data)):
+            return False
+        self._loop.run(self._js.delete_msg(self._stream, sequence))
+        return True
+
+    async def _get(self, sequence: int) -> api.RawStreamMsg | None:
+        try:
+            return await self._js.get_msg(self._stream, sequence)
+        except NotFoundError:
+            return None
+
 
 class NatsStateStore:
     def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
@@ -385,6 +450,19 @@ class NatsStateStore:
             return None
         value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value or b""))
         return StateEntry(key=key, value=value, revision=entry.revision)
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        read = nats_batch.read_entries(
+            self._js, f"KV_{self._bucket}", keys, self._kv_subject, self._read_chunk, self._last_revision
+        )
+        return self._loop.run(read)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def _kv_subject(self, key: str) -> str:
+        return f"$KV.{self._bucket}.{key}"
+
+    @staticmethod
+    def _last_revision(last: nats_batch.Last) -> int:
+        return last.seq
 
     def create(self, key: str, value: bytes) -> int:
         return self._loop.run(self._write(key, value, 0, f"state key {key!r} exists"))
@@ -437,6 +515,26 @@ class NatsStateStore:
             return None
 
 
+async def _first_connect(url: str, config: BusConfig) -> Client:
+    """Connect within the configured first connect bound; once connected, every client reconnects without end."""
+    lifecycle = _Lifecycle()
+    try:
+        client = await nats_client.connect(
+            url,
+            disconnected_cb=lifecycle.disconnected,
+            reconnected_cb=lifecycle.reconnected,
+            **connect_options(config),
+            **auth_options(config.credentials),
+        )
+    except NoServersError as error:
+        raise ConnectionError(
+            f"nats: no server at {url} answered the first connect within {FIRST_CONNECT_RETRIES} retries"
+        ) from error
+    lifecycle.client = client
+    client.options.update(allow_reconnect=True, max_reconnect_attempts=-1, reconnect_time_wait=RECONNECT_WAIT_S)
+    return client
+
+
 class NatsBus:
     def __init__(self, config: BusConfig, url: str):
         self._config = config
@@ -446,14 +544,7 @@ class NatsBus:
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
         try:
-            self._nc = self._loop.run(
-                nats_client.connect(
-                    url,
-                    allow_reconnect=config.reconnect,
-                    **({"max_reconnect_attempts": -1} if config.reconnect else {}),
-                    **auth_options(config.credentials),
-                )
-            )
+            self._nc = self._loop.run(_first_connect(url, config))
             self._js = self._nc.jetstream()
             event_stream, dead_stream = EVENT_STREAM, DEAD_STREAM
             if config.provision or not config.scoped:
@@ -504,10 +595,14 @@ class NatsBus:
 
     def _logs(self, kind: str) -> list[EventLog]:
         from .nats_scope import discover_swarms
+        from .nats_state import LegacyStateUnowned
 
         if self._config.provision:
             for swarm in self._loop.run(discover_swarms(self._js)):
-                self.for_swarm(swarm)
+                try:
+                    self.for_swarm(swarm)
+                except LegacyStateUnowned as refusal:
+                    print(f"hub: swarm {swarm!r} skipped: {refusal}", file=sys.stderr)
         with self._lock:
             legacy = [getattr(self, f"_legacy_{kind}")] if self._config.provision else []
             return legacy + [getattr(view, kind) for view in self._views.values()]

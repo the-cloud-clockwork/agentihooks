@@ -1,0 +1,1 @@
+Every tick adapter method that takes a deadline now calls `deadline.live()` before its outside call, and a unit test walks the adapters by syntax tree to keep it so. `fleet_red.read` takes the caller's deadline and caps it at its own sixty seconds.

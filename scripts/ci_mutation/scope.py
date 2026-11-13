@@ -1,12 +1,16 @@
 import ast
+import json
 import re
 import subprocess
 import unicodedata
 from collections import Counter
+from collections.abc import Generator
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
+HELD: dict[Path, tuple[dict[Path, str], dict[tuple[Path, bool], list[str]]]] = {}
 PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 TESTS = "actions/workflows/test.yml/runs"
 SHARDS = (
@@ -147,6 +151,47 @@ def bindings(node: ast.stmt) -> list[str]:
     return []
 
 
+def moved_lines(root: Path, comparison: str) -> dict[str, set[int]]:
+    """Name the head lines one whole diff colours as moved unchanged, so moves between files count too."""
+    command = [
+        "git",
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--no-renames",
+        "--no-ext-diff",
+        "--color=always",
+        "--color-moved=blocks",
+        "--color-moved-ws=allow-indentation-change",
+        "--ws-error-highlight=none",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "-U0",
+        comparison,
+        "--",
+        "hooks/",
+        "scripts/",
+    ]
+    moved: dict[str, set[int]] = {}
+    current: set[int] = set()
+    line, header = 0, False
+    for raw in subprocess.check_output(command, cwd=root).decode().splitlines():
+        text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", text)
+        if text.startswith("diff --git "):
+            header = True
+        elif header and text.startswith("+++ "):
+            path = text.removeprefix("+++ ").removesuffix("\t")
+            current = moved.setdefault((json.loads(path) if path.startswith('"') else path).removeprefix("b/"), set())
+        elif hunk:
+            header, line = False, int(hunk[1])
+        elif not header and text.startswith("+"):
+            if raw.startswith("\x1b[1;36m"):
+                current.add(line)
+            line += 1
+    return moved
+
+
 def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
     comparison = f"{base}...{head}"
     names = (
@@ -158,6 +203,7 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         .split("\0")
     )
     fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root).decode().strip()
+    moved = moved_lines(root, comparison)
     changes = {}
     for name in names:
         path = Path(name)
@@ -166,7 +212,8 @@ def changes_since(root: Path, base: str, head: str) -> dict[str, set[int]]:
         if bare_tree(blob(root, fork, name)) == bare_tree(blob(root, head, name)):
             continue
         diff = subprocess.check_output(["git", "diff", "-U0", comparison, "--", name], cwd=root).decode()
-        changes[name] = changed_lines(diff)
+        if lines := changed_lines(diff) - moved[name]:
+            changes[name] = lines
     return changes
 
 
@@ -237,13 +284,45 @@ def mentioned(text: str, words: list[frozenset[str]]) -> bool:
     return relative or any(parts <= tokens for parts in words)
 
 
-def select_tests(root: Path, source: Path) -> list[str]:
+def select_tests(root: Path, source: Path, helpers: bool = True) -> list[str]:
+    """Name the test modules reaching source, read from the tests folder a plan holds or freshly otherwise."""
+    if (held := HELD.get(root)) is None:
+        return reaching_tests(root, source, helpers, read_tests(root))
+    texts, chosen = held
+    if (source, helpers) not in chosen:
+        chosen[source, helpers] = reaching_tests(root, source, helpers, texts)
+    return list(chosen[source, helpers])
+
+
+def read_tests(root: Path) -> dict[Path, str]:
+    """Return the text of every Python file under root's tests folder in path order."""
+    return {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
+
+
+@contextmanager
+def held_tests(root: Path) -> Generator[None]:
+    """Read root's tests folder once and reuse it, and each selection made from it, until the block ends."""
+    HELD[root] = (read_tests(root), {})
+    try:
+        yield
+    finally:
+        del HELD[root]
+
+
+def held_text(path: Path) -> str:
+    """Return a test file's text from the folder a plan holds, reading it when no plan holds it."""
+    for texts, _ in HELD.values():
+        if path in texts:
+            return texts[path]
+    return path.read_text()
+
+
+def reaching_tests(root: Path, source: Path, helpers: bool, texts: dict[Path, str]) -> list[str]:
+    """Name the test modules among texts that name or import source, through helper modules when helpers is set."""
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
-    texts = {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
 
     def importing(modules: set[str]) -> set[Path]:
-        # Every import of a module names each of its parts or is relative, so other files are never parsed.
         words = [frozenset(name.split(".")) for name in modules]
         return {
             path
@@ -259,7 +338,7 @@ def select_tests(root: Path, source: Path) -> list[str]:
         or source.suffix == ".js"
         and source.name in text
     } | importing({module})
-    added = reaching
+    added: set[Path] = set() if helpers is False else reaching
     while added:
         added = importing({module_name(path.relative_to(root)) for path in added}) - reaching
         reaching |= added

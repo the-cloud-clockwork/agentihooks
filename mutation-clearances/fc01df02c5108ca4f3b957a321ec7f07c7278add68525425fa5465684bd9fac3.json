@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/approved.py:scripts.swarm_v2.kubernetes.approved.x\u01c1HarnessRoutes\u01c1choose:65a9592b2f8604176ad19e50a3708d7777c222ce4d26789583be201a2bdbcd7e": {
+    "reader": "standards_reader",
+    "reason": "It forwards lane unchanged to route.choose, which forwards it to seats, so both defaults take the same path through the single lane == MASTER comparison."
+  }
+}

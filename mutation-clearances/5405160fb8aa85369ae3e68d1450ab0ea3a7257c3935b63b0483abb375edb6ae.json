@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_coverage.py:scripts.ci_branch_coverage.x_contributions:44a52e59c2ad472d78457c813b520669e1d927a4ef08509af88755773e710a11": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

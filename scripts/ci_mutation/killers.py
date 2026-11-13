@@ -2,16 +2,22 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 
 import pytest
 
 
+def is_direct(test: str, direct: Collection[str]) -> bool:
+    """Tell whether a test node is named directly, by its parameterless id or its whole file."""
+    return test.partition("[")[0] in direct or test.partition("::")[0] in direct
+
+
 class KillMemory:
-    def __init__(self, folder: Path, direct: dict[str, Iterable[str]] | None = None) -> None:
+    def __init__(self, folder: Path, direct: dict[str, Iterable[str]] | None = None, first: Iterable[str] = ()) -> None:
         self.folder = folder
         self.direct = {prefix: set(tests) for prefix, tests in (direct or {}).items()}
+        self.first = set(first)
         self.mutant: str | None = None
         self.rank: dict[str, int] = {}
 
@@ -64,7 +70,14 @@ class KillMemory:
     def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
         killer = self.killer(mutant)
         direct = self.direct.get(mutant.rpartition(".")[0] + ".", set())
-        return sorted(tests, key=lambda test: (test != killer, test.partition("[")[0] not in direct))
+        return sorted(
+            tests,
+            key=lambda test: (
+                test != killer,
+                test.partition("[")[0] not in self.first,
+                not is_direct(test, direct),
+            ),
+        )
 
     def prepare(self, mutant: str | None, tests: Iterable[str]) -> Iterable[str]:
         self.mutant = mutant

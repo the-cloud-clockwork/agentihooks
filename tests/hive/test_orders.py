@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -117,8 +118,21 @@ def test_order_ack_and_live_execution(setup):
         "account": "account",
         "model": config.codex_model,
         "effort": config.effort_min,
+        "overlays": [],
     }
     assert not setup.redis.xrange(setup.orders.stream("host"))
+
+
+@pytest.mark.feature("remote-control-token-fallback-reason")
+def test_a_hive_ack_carries_the_remote_control_its_launch_recorded(setup):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    off = {"state": "off", "detail": "subscription token fallback"}
+    placed = replace(setup.runtime.spawn.return_value.value, remote_control=off)
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    setup.orders.send("host", setup.order)
+    assert setup.consumer.poll() == 1
+    assert setup.orders.ack(setup.order).execution["remote_control"] == off
 
 
 @pytest.mark.parametrize(
@@ -160,6 +174,33 @@ def test_crashed_launch_is_ambiguous_and_never_relaunched(setup):
     assert ack.status == "failed"
     assert ack.failure == "ambiguous"
     setup.runtime.spawn.assert_called_once()
+
+
+@pytest.mark.feature("launch-order-receipt-outlives-order")
+def test_a_launch_order_outliving_a_day_starts_once_after_a_crash_before_its_ack_and_an_aged_receipt(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive.orders import RECEIPT_SECONDS
+    from scripts.swarm import lease
+
+    sent = lease.now_ms(setup.store)
+    now = [sent]
+    monkeypatch.setattr(lease, "now_ms", lambda store: now[0])
+    monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
+    order = replace(setup.order, expires_at=sent + 2 * RECEIPT_SECONDS * 1000)
+    setup.orders.send("host", order)
+    finish = setup.consumer.orders.finish
+    monkeypatch.setattr(setup.consumer.orders, "finish", Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        setup.consumer.poll()
+    monkeypatch.setattr(setup.consumer.orders, "finish", finish)
+    receipt = setup.orders.receipt(order)
+    if 0 <= setup.redis.ttl(receipt) <= RECEIPT_SECONDS:
+        setup.redis.delete(receipt)
+    now[0] = sent + RECEIPT_SECONDS * 1000 + 1000
+    setup.consumer.poll()
+    setup.runtime.spawn.assert_called_once()
+    assert setup.redis.hexists(receipt, "started")
 
 
 def test_wrong_host_cannot_admit_execution(setup):
@@ -787,7 +828,36 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
         "account": "account",
         "model": expected_model,
         "effort": expected_effort,
+        "overlays": [],
     }
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_the_member_resolves_the_overlays_on_its_own_bundle_into_the_launch_assignment(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ("frontend",)))
+    setup.store.update("fixture", overlays={"engineer": ["frontend"]})
+    ack = setup.consumer.apply(setup.order)
+    assert ack is not None and ack.status == "live"
+    assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["overlays"] == ["frontend"]
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_a_member_that_cannot_resolve_an_overlay_fails_the_order_without_launching(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.hive.orders import Ack
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ()))
+    setup.store.update("fixture", overlays={"engineer": ["frontend"]})
+    assert setup.consumer.apply(setup.order) == Ack("failed", {}, "overlays: overlay frontend not found")
+    setup.runtime.spawn.assert_not_called()
 
 
 def test_spawn_without_validation_is_reported_ambiguous(setup):
@@ -886,3 +956,29 @@ def test_pod_liveness_key_lives_under_the_hive(setup):
     from scripts.hive import registry
 
     assert setup.orders.pod("host", "abc") == f"{registry.key('host')}:pod:abc"
+
+
+def test_launch_names_the_hive_slot_for_a_secret_key_account(setup, monkeypatch):
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    slot = "nestor_coltatgmail_com"
+    monkeypatch.setattr(
+        orders.registry,
+        "show",
+        lambda client, hive: {
+            "slots": [
+                {"harness": "codex", "account": "other_account", "kind": "subscription"},
+                {"harness": "claude", "account": "nestor-coltatgmail-com", "kind": "subscription"},
+                {"harness": "codex", "account": slot, "kind": "subscription"},
+            ]
+        },
+    )
+    agent = replace(setup.agent, account="nestor-coltatgmail-com")
+    setup.store.execution_registry.update("fixture", agent)
+    order = replace(setup.order, slot="nestor-coltatgmail-com")
+    placed = replace(setup.runtime.spawn.return_value.value, account=slot)
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    ack = setup.consumer.launch(order, agent, {"id": order.task})
+    assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["account"] == slot
+    assert ack.status == "live"

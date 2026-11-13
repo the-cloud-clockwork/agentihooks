@@ -1,16 +1,21 @@
 """The one push gate: a swarm worker opens its pull request once both reviews close and its work is on origin, and does
-not push while that pull request's checks run unless one is already red, since a push cancels the running checks."""
+not push while that pull request's checks run unless one has already failed or the pull request conflicts with its
+base, since a push cancels the running checks."""
 
 import os
 import re
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Decision, Who
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.push_stop import GITHUB_RE, count, git
 from scripts.gates.subagents import READERS, SubagentBudget
 from scripts.swarm.naming import lane_of
+
+if TYPE_CHECKING:
+    from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
 OPENS = (["pr", "create"], ["pr", "ready"])
@@ -21,6 +26,7 @@ GH_VALUED = frozenset({"-R", "--repo"})
 PUSH_VALUED = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
 PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
+REDIRECT = re.compile(r"\d*&?[<>]+([^<>]*)")
 VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 ASSIGNED = re.compile(r"[A-Za-z_]\w*=.*")
 DECLARES = frozenset({"export", "declare", "typeset", "local", "readonly"})
@@ -76,12 +82,14 @@ def unsaved(path):
     return "commits not on origin" if count(path, "HEAD", "--not", "--remotes=origin") else ""
 
 
-def positionals(args):
+def positionals(args: list[str]) -> list[str]:
+    """The push's remote and refspecs: options, their values and shell redirections with their targets left out."""
     found, words = [], iter(args)
     for word in words:
-        if word in PUSH_VALUED:
+        redirect = REDIRECT.fullmatch(word)
+        if word in PUSH_VALUED or (redirect and not redirect[1]):
             next(words, None)
-        elif not word.startswith("-"):
+        elif not (redirect or word.startswith("-")):
             found.append(word)
     return found
 
@@ -129,10 +137,15 @@ def queue_refusal(slug, url):
     )
 
 
-def never_started(pull):
-    return (
-        not pull.started and not pull.required_pending and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
-    )
+def never_started(pull: "PullRequest") -> bool:
+    """Whether the pull request's required workflow never started and no check waits on its head."""
+    return not pull.started and not pull.required_pending and not pull.checks_pending
+
+
+def finished(pull: "PullRequest") -> bool:
+    """Whether a push no longer cancels checks worth waiting for: a closed pull request, a red or failed check on its
+    head, or a head that conflicts with its base."""
+    return pull.state != "OPEN" or pull.red or pull.head_red or pull.mergeable == "CONFLICTING"
 
 
 class OnePush:
@@ -163,7 +176,7 @@ class OnePush:
             f"{open_refusal(who.swarm, missing, held)}. Checked worktree: {where.resolve()}" if missing or held else ""
         )
 
-    def pushing(self, who, where, args):
+    def pushing(self, who: Who, where: Path, args: list[str]) -> str:
         task = self.ledger().task(who.swarm, who.task) or {}
         found = PULL_REPO.search(str(task.get("pr_url")))
         if not found or (
@@ -176,7 +189,7 @@ class OnePush:
         if task.get("branch") and task["branch"] not in destinations(where, args):
             return ""
         pull = self.github()(task["pr_url"])
-        if pull is None or pull.state != "OPEN" or pull.red:
+        if pull is None or finished(pull):
             return ""
         if pull.queued:
             return queue_refusal(who.swarm, task["pr_url"])

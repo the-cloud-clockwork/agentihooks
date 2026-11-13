@@ -1,0 +1,29 @@
+{
+  "not_gates": {
+    "test.yml/report": {
+      "reason": "Reports results",
+      "owner": "ci",
+      # ruleid: gate-wiring-expiry
+      "expires": "2000-01-01"
+    }
+  },
+  "outside_gate": {
+    "other.yml/grade": {
+      "reason": "Grades from the protected base",
+      "owner": "ci",
+      # ruleid: gate-wiring-expiry
+      "expires": "2999-01-01"
+    },
+    "other.yml/empty": {
+      # ruleid: gate-wiring-expiry
+      "expires": null
+    },
+    "other.yml/clean": {
+      # ok: gate-wiring-expiry
+      "reason": "Grades from the protected base",
+      "owner": "ci"
+    }
+  },
+  # ok: gate-wiring-expiry
+  "expires_at": "2000-01-01"
+}

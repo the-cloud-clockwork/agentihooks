@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/connectors.py:scripts.profiles.connectors.x__list:05caf4abf8e1d42f0edf1799c9b50fdbc920c10124d77baaead2fefdeeb045cc": {
+    "reader": "standards_reader",
+    "reason": "In `x__list`, the mutation changes only the static type argument of `typing.cast` on cast target `[]`, from list[str] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

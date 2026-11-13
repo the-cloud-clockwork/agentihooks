@@ -51,7 +51,7 @@ pulls the merge.
 |-----|---------|---------|
 | `threshold` | `30` | Live processes with one name that flag the name |
 | `timeout` | `1h` | How long a flagged name stays over the threshold before its processes are ended: `<n>h`, `<n>m`, `<n>s` or seconds |
-| `excludes` | shells, `node`, `python3`, `docker`, `claude`, `systemd` and others | Process names the guard never counts |
+| `excludes` | shells, `node`, `python`, `python3`, `docker`, `claude`, `systemd` and others | Process names the guard never counts |
 | `excludeCommands` | see below | Bash extended regular expressions matched against a process's command line |
 | `logMaxSizeMB` | `10` | Size at which `~/guard-daemon.log` moves to `~/guard-daemon.log.1` |
 | `stateFile` | `~/guard-daemon-state.json` | Where flag times are kept |
@@ -77,10 +77,80 @@ before matching it. The shipped `excludeCommands`:
 Any other `agentihooks` command, such as an old `ledger watch`, can still be
 ended once its group stays over the threshold.
 
+### The swarm tick exclusion
+
+At 22:06 UTC on 19 October the `agentihooks` group had stayed at 30 or more
+processes for an hour, and the guard ended all of them. One was the swarm tick,
+in the middle of a merge priority replay, and two pull requests were left out
+of the merge queue. The `excludes` list matches process names only, so it could
+not spare the tick without sparing every `agentihooks` process.
+[#4962](https://github.com/the-cloud-clockwork/agentihooks/pull/4962) added
+`excludeCommands` and two patterns for the tick:
+
+| Process | Process name | Pattern |
+|---------|--------------|---------|
+| A tick pass, `agentihooks swarm tick`, run by any path to the command | `agentihooks` | `(^\|[ /])agentihooks swarm tick( \|$)` |
+| The scheduled tick holder, `<python> -m scripts.swarm.scheduled_tick`, started once per scheduled tick run by the swarm timer unit or by the agentihooks scheduler | the interpreter's file name, such as `python3` or `python3.12` | ` -m scripts[.]swarm[.]scheduled_tick( \|$)` |
+
+Both patterns end at a space or the end of the command line, so a longer
+subcommand is not matched:
+
+| Command line | Matched |
+|--------------|---------|
+| `agentihooks swarm tick` | yes |
+| `/home/u/.venv/bin/agentihooks swarm tick --slug x` | yes |
+| `/usr/bin/python3 -m scripts.swarm.scheduled_tick` | yes |
+| `agentihooks swarm tick-report` | no |
+| `agentihooks swarm tick-watch` | no; kept alive by the fourth shipped pattern, from [#5107](https://github.com/the-cloud-clockwork/agentihooks/pull/5107) |
+
+`python` and `python3` are already in `excludes`; the second pattern keeps the
+holder alive when its interpreter runs under another name, such as
+`python3.12`.
+
+A skipped process still counts toward its group. When the tick keeps the
+`agentihooks` group at the threshold, the guard still ends the other processes
+in that group; the tick itself is never ended. The same holds for every
+`excludeCommands` pattern.
+
+The guard checks every `excludeCommands` entry before it counts any process.
+When the list is not an array of strings, or an entry is not a valid
+pattern, the pass logs `ERROR config_malformed excludeCommands`, with
+`pattern=<entry>` for an invalid entry, and exits 1 without ending anything.
+A typo in a pull request that changes the list stops the guard instead of
+ending the tick.
+
 `claude` is in `excludes`, but that does not protect an agent session. The
 guard counts the wrapper under the name `agentihooks`. Before [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006) a
 wrapper ended with status 143 (`SIGTERM`), the `claude` it launched kept
 running without its wrapper, and that session ended some time later.
+
+### Swarm daemons
+
+`agentihooks swarm tick-watch`, `agentihooks swarm prober` and
+`agentihooks swarm waker` run for as long as the swarm does, so they sit in the
+`agentihooks` group with the agent wrappers. Without their pattern, a group
+that stayed at the threshold for an hour would end them with the other
+`agentihooks` processes. The tick watcher is the process that alerts every seat
+when a swarm's tick goes stale, so ending it leaves a stale tick unreported.
+
+The pattern matches the joined command line text, and accepts a `/` before
+`agentihooks` so a path to the command matches too. Once the `agentihooks`
+group has stayed over the threshold for `timeout`, each command line gets this
+result:
+
+| Command line | Result |
+|--------------|--------|
+| `agentihooks swarm tick-watch` | `SKIPPED` |
+| `/home/u/.venv/bin/agentihooks swarm prober` | `SKIPPED` |
+| `agentihooks swarm waker` | `SKIPPED` |
+| `agentihooks swarm waker-report` | `KILLED`: the daemon name must be followed by a space or the end of the line |
+| `agentihooks ledger watch <slug>` | `KILLED` |
+
+To keep another long lived `agentihooks` command, add a pattern to
+`excludeCommands` in `scripts/host_guard/guard-config.json`, extend the long
+lived probes in `tests/test_host_guard.py` with that command line, and check
+the pattern against the live processes with the loop under
+[Log lines](#log-lines).
 
 ## Install and drift check
 
@@ -350,6 +420,34 @@ done
    follows a swarm Redis move; see
    [After the swarm Redis moves](#after-the-swarm-redis-moves).
 
+## Evidence for pull request 4962
+
+- The incident, the runs and the dry run below are recorded in the
+  [pull request](https://github.com/the-cloud-clockwork/agentihooks/pull/4962)
+  body.
+- Red: [Proofs run 39337608074](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337608074)
+  ran the new test against the guard as it was. The tick probe ended with
+  status `-15` (`SIGTERM`).
+- Green: [Proofs run 39337879004](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337879004),
+  and [Proofs run 39338378029](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338378029)
+  after review fixes.
+- `tests/test_host_guard.py` runs the real guard script twice against long
+  lived probes that share one process name, with `threshold` 4 and `timeout`
+  `0s`. The test adds every other process name its user runs to `excludes`,
+  so only the probe group can be ended. At #4962 the tick and scheduled tick
+  probes had to survive and be logged `SKIPPED`, while the `ledger watch` and
+  `swarm tick-watch` probes had to be logged `KILLED`. Since #5006 and
+  #5107 the same test also requires the `select-profile`, `tick-watch`, `prober`
+  and `waker` probes to survive, and the `ledger watch` and
+  `swarm waker-report` probes to be `KILLED`. `waker-report` checks that a longer
+  subcommand is not matched. A second test gives the guard an invalid pattern
+  and a string in place of the list, and checks that each pass exits 1 before
+  `TICK_START`.
+- A dry run on the workstation, with threshold 5 and timeout `0s`, compared the
+  guard before #4962 with the guard after it. Both flagged the same 32
+  processes. The only difference was the running `agentihooks swarm tick`:
+  `would_kill` before, `SKIPPED` after.
+
 ## Evidence for pull request 5006
 
 - On 19 October the guard logged `KILLED ... name=agentihooks reason=ghost_detected count=31`
@@ -368,3 +466,20 @@ done
   October. The last was at 00:06 UTC on 20 October. [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006) merged at 03:40 UTC.
   The log holds no `agentihooks` kill after it: later flags reached
   54 minutes before the group fell below the threshold.
+
+## Evidence for pull request 5107
+
+- On 20 October the guard logged `FLAGGED name=agentihooks count=30`. An hour
+  at that count would have ended the tick watcher, prober and waker.
+- The survival test also starts path-prefixed `agentihooks swarm tick-watch`,
+  `agentihooks swarm prober` and `agentihooks swarm waker` probes. They must
+  survive and be logged `SKIPPED reason=excluded_command`, while `ledger watch`
+  and
+  `swarm waker-report` probes are `KILLED`. Before the pattern the test failed
+  on the daemon probes ([Proofs run
+  39369840962](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369840962));
+  with it, [Mutation preflight
+  39369956185](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369956185)
+  passed.
+- `~/guard-config.json` links to the repository file, so the exclusion went
+  live once the primary checkout pulled the merge.

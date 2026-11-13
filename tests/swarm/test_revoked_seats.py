@@ -6,7 +6,8 @@ from scripts import claude_quota_balancer as balancer
 from scripts.handoff import transfers
 from scripts.swarm import revoked_seats
 from scripts.swarm.store import MASTER
-from scripts.swarm.tick import _reap, _watch_agent, tick
+from scripts.swarm.tick import _watch_agent, tick
+from scripts.tick.steps.agents import _reap
 from tests.swarm.test_master_stall import START, SlugLedger, master
 from tests.swarm.test_outage_resume import three_owners
 from tests.swarm.test_outage_seat_release import executing

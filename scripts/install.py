@@ -20,6 +20,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from importlib import import_module, metadata
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -304,12 +305,11 @@ def _native_layer_path(root: Path, target: str, names: dict[str, str]) -> Path |
     return candidate if candidate.exists() else None
 
 
-def _load_native_layer(path: Path) -> dict:
+def _load_native_layer(path: Path) -> dict[str, Any]:
     """Load a native settings/MCP layer as a plain dict, JSON or TOML by suffix.
 
-    TOML is parsed to a plain dict rather than a tomlkit document: this value is
-    merged and handed to an adapter, and the adapter owns the comment-preserving
-    round-trip into the live config file.
+    TOML is parsed to a plain dict rather than a tomlkit document: this value is merged and handed to an adapter,
+    and the adapter owns the comment-preserving round-trip into the live config file.
     """
     if path.suffix == ".toml":
         import tomlkit
@@ -2138,7 +2138,7 @@ _AGENTIENV_CHECK = (
 
 _AGENTIENV_MULTILINE = (
     '  local _n _m="" _r=" ${AGENTIHOOKS_MULTILINE_REPORTED:-} "\n'
-    '  for _n in $(compgen -e); do [[ "${!_n}" == *$\'\\n\'* && "$_r" != *" $_n "* ]] && _m="$_m $_n"; done\n'
+    '  for _n in $(awk \'BEGIN {for (k in ENVIRON) if (k ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && index(ENVIRON[k], "\\n")) print k}\'); do [[ "$_r" != *" $_n "* ]] && _m="$_m $_n"; done\n'
     '  [[ -n "$_m" ]] && echo "[agentienv] WARNING: these values span several lines, and line based tools'
     ' such as env print their later lines as if they were names:$_m" >&2\n'
     '  [[ -n "$_m" ]] && export AGENTIHOOKS_MULTILINE_REPORTED="${AGENTIHOOKS_MULTILINE_REPORTED:-}$_m"\n'
@@ -2153,7 +2153,7 @@ def _update_bashrc_block() -> None:
         f"{_BLOCK_START}\n"
         f"{_AGENTIENV_CHECK}"
         f"agentienv() {{\n"
-        f"  local _c=0\n"
+        f'  local _c=0; [[ -n "${{ZSH_VERSION:-}}" ]] && setopt localoptions nonomatch\n'
         f"  set -a\n"
         f'  if [[ -f "{env_file}" ]]; then\n'
         f'    _agentienv_check "{env_file}"\n'
@@ -2650,25 +2650,6 @@ def list_profiles() -> None:
 # ---------------------------------------------------------------------------
 # Settings helpers
 # ---------------------------------------------------------------------------
-
-
-def _preserve_personal_keys(existing_path: Path) -> dict:
-    """Return personal keys from an existing unmanaged settings file."""
-    personal: dict = {}
-    if not existing_path.exists():
-        return personal
-    try:
-        existing = load_json(existing_path)
-        if existing.get(MANAGED_BY_KEY) == MANAGED_BY_VALUE:
-            return personal  # Already managed — don't re-import
-        for key in PERSONAL_KEYS:
-            if key in existing:
-                personal[key] = existing[key]
-        if personal:
-            print(f"Preserving personal keys from existing settings: {sorted(personal)}")
-    except json.JSONDecodeError:
-        print("WARNING: existing settings.json is invalid JSON – skipping preservation.")
-    return personal
 
 
 def _backup_settings(existing_path: Path) -> None:
@@ -4729,11 +4710,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print("======================")
     print("Will remove:")
     if remove_settings:
-        _sb = _load_state().get("settings_original_backup")
-        if _sb and Path(_sb).exists():
-            print(f"  {settings_path}  (restore pre-agentihooks original ← {Path(_sb).name})")
-        else:
-            print(f"  {settings_path}  (managed by agentihooks)")
+        print(f"  {settings_path}  (remove agentihooks-added keys; operator keys kept)")
     else:
         print(f"  {settings_path}  [SKIP — not managed or not found]")
     print(f"  {skills_dir}/  → {n_skills} symlink(s)")
@@ -4767,19 +4744,16 @@ def uninstall_global(args: argparse.Namespace) -> None:
             print("Aborted.")
             sys.exit(0)
 
-    # --- 3. Remove settings.json; restore the pre-agentihooks original ---
     if remove_settings:
-        settings_path.unlink()
-        original = _load_state().get("settings_original_backup")
-        original_path = Path(original) if original else None
-        if original_path and original_path.exists():
-            shutil.copy2(original_path, settings_path)
-            _cprint(f"[OK] Restored pre-agentihooks {settings_path} from {original_path.name}")
-            st = _load_state()
-            st.pop("settings_original_backup", None)
-            _save_state(st)
+        from scripts.targets.claude_target import remove_managed_keys
+
+        if remove_managed_keys(settings_path):
+            _cprint(f"[OK] Removed agentihooks keys from {settings_path}; operator keys kept")
         else:
             _cprint(f"[OK] Removed {settings_path}")
+        st = _load_state()
+        st.pop("settings_original_backup", None)
+        _save_state(st)
     else:
         print(f"[--] Skipped {settings_path} (not managed)")
 
@@ -5355,7 +5329,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         launch_environment,
         render_table,
         route_requires_fable,
-        select_credential,
+        select_launch_credential,
     )
     from scripts.hive.account_slots import execute
     from scripts.master_claude_login import _token_lock
@@ -5390,7 +5364,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         decision = (
             forced(os.environ, route)
             if route
-            else select_credential(
+            else select_launch_credential(
                 os.environ,
                 include_fable=include_fable,
                 claude_bin=claude_bin,

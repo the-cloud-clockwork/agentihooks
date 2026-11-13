@@ -1,11 +1,13 @@
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from scripts.swarm import capacity, runtime
 from scripts.swarm import tick as tick_module
 from scripts.swarm.tick import SPAWN_POOL, SpawnError, tick
+from scripts.tick.adapters.calls import SpawnRuntimeCalls
 from tests.swarm.test_host_gate import _decide, _held, _ledger, _workers
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
@@ -261,14 +263,17 @@ def test_a_failed_herdr_launch_gives_its_account_seat_back(launching):
     assert engine._quota_accounts[0].sessions == 0
 
 
-def test_the_herdr_launch_room_is_the_free_quota_seats(tmp_path):
-    engine = runtime.HerdrRuntime(home=tmp_path, run=None)
+def test_the_herdr_launch_room_is_the_free_quota_seats(tmp_path: Path) -> None:
+    engine = runtime.HerdrRuntime(home=tmp_path)
     assert engine.launch_room(None) == 1
-    engine._quota_accounts = [
-        capacity.Account("claude", "one", "OPEN", 1, 90, 90, 3),
-        capacity.Account("codex", "two", "OPEN", 0, 90, 90, 2),
-        capacity.Account("claude", "full", "OPEN", 4, 90, 90, 4),
-    ]
+    engine = runtime.HerdrRuntime(
+        home=tmp_path,
+        accounts=[
+            capacity.Account("claude", "one", "OPEN", 1, 90, 90, 3),
+            capacity.Account("codex", "two", "OPEN", 0, 90, 90, 2),
+            capacity.Account("claude", "full", "OPEN", 4, 90, 90, 4),
+        ],
+    )
     assert engine.launch_room(None) == 4
 
 
@@ -296,7 +301,7 @@ def test_a_failed_preparation_is_recorded_at_the_pass_time(store, monkeypatch):
     monkeypatch.setattr(tick_module.transfers, "attach", attaching)
     monkeypatch.setattr(tick_module, "_not_launched", recording)
     tick("sw", store, ledger, pooled, now_ms=1_000)
-    assert seen == [(pooled, 1_000)]
+    assert [(type(runtime), at) for runtime, at in seen] == [(SpawnRuntimeCalls, 1_000)]
 
 
 class ConfigRoom(PooledRuntime):

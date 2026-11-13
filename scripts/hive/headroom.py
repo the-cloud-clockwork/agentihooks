@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions
 from scripts.hive import registry
@@ -27,21 +27,28 @@ def key(hive: str) -> str:
     return f"{registry.key(hive)}:headroom"
 
 
-def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dict | None = None) -> dict | None:
+def measure(
+    pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     try:
-        load5 = float((proc / "loadavg").read_text().split()[1])
-        available_mb = host_budget._memory_mb(proc)[0]
+        load1, load5 = (float(load) for load in (proc / "loadavg").read_text().split()[:2])
+        available_mb, swap_used_mb, swap_total_mb = host_budget._memory_mb(proc)
         total_mb = _total_mb(proc)
         pod = _pod(CGROUP, now_ms, previous)
         disk_free_gb = _free_gb(Path(os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"))
         disk_floor_gb = int(os.environ.get("WT_MIN_FREE_GB") or "50")
     except (OSError, ValueError, IndexError, KeyError, StopIteration):
         return None
+    cpus = os.cpu_count() or 1
     return {
-        "cpus": os.cpu_count() or 1,
+        "cpus": cpus,
+        "load1": load1,
         "load5": load5,
+        **_usage(proc, cpus, previous),
         "available_mb": available_mb,
         "total_mb": total_mb,
+        "swap_used_mb": swap_used_mb,
+        "swap_total_mb": swap_total_mb,
         **pod,
         "disk_free_gb": disk_free_gb,
         "disk_floor_gb": disk_floor_gb,
@@ -54,6 +61,24 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
 def _total_mb(proc: Path) -> int:
     line = next(line for line in (proc / "meminfo").read_text().splitlines() if line.startswith("MemTotal:"))
     return int(line.split()[1]) // 1024
+
+
+def _usage(proc: Path, cpus: int, previous: dict[str, Any] | None) -> dict[str, Any]:
+    """The node's busy and total CPU ticks from /proc/stat, and the CPUs used since the previous reading."""
+    try:
+        ticks = [int(field) for field in (proc / "stat").read_text().splitlines()[0].split()[1:]]
+    except (OSError, ValueError, IndexError):
+        return {}
+    total = sum(ticks[:8])
+    idle = sum(ticks[3:5])
+    usage: dict[str, Any] = {"cpu_ticks": [total - idle, total]}
+    if previous is None or "cpu_ticks" not in previous:
+        return usage
+    prior: list[int] = previous["cpu_ticks"]
+    busy, elapsed = total - idle - prior[0], total - prior[1]
+    if busy >= 0 and elapsed > 0:
+        usage["used_cpus"] = cpus * busy / elapsed
+    return usage
 
 
 # The same folders wt.sh new measures before it refuses a worktree below WT_MIN_FREE_GB.

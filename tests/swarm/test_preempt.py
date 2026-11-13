@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -157,18 +159,20 @@ def test_the_probe_returns_the_runtime_refusal_and_refuses_an_unresolved_profile
     )
 
 
-def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
+def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
 
     class Down(InboxStore):
         def send(self, *args, **kwargs):
             raise ConnectionError("redis went away")
 
-    monkeypatch.setattr(preempt, "InboxStore", Down)
+    monkeypatch.setattr(preempt.inbox_store, "InboxStore", Down)
     with pytest.raises(ConnectionError):
         preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)
     assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e2": '["t3", 2]'}
-    monkeypatch.setattr(preempt, "InboxStore", InboxStore)
+    monkeypatch.setattr(preempt.inbox_store, "InboxStore", InboxStore)
     assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 3) == []
 
 
@@ -295,3 +299,26 @@ def test_a_lane_focus_covers_a_normal_task_in_that_lane(store):
     graph = preempt.hierarchy.project(focused)[0]
     assert preempt.preferred(lane_task, focused, graph)
     assert not preempt.preferred({**lane_task, "lane": "ci"}, focused, graph)
+
+
+@pytest.mark.feature("swarm-preempt-claim-view-once-per-pass")
+def test_run_reads_every_full_lane_from_one_claim_view(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(preempt.dispatcher, "claim_key", lambda config, received: lambda task: (2, task["id"]))
+    for name, task, lane in (("e1", "t1", "eng"), ("e2", "t2", "eng"), ("c1", "t9", "ci")):
+        store.put_agent(SLUG, holder(name, task, lane=lane))
+    built, read = [], []
+
+    def view(slug: str, received: RedisStore, rows: dict, received_doc: dict, dispatched: Any) -> object:
+        built.append((slug, received is store, rows is ROWS, dispatched({"id": "t1"})))
+        return object()
+
+    def ready(
+        slug: str, received: RedisStore, rows: dict, received_doc: dict, lane: str, dispatched: Any, claims: object
+    ) -> list:
+        read.append((lane, claims))
+        return []
+
+    seats = preempt.Seats(ROWS, lambda *a: False, lambda *a: True, ready, preempt._places, view)
+    assert preempt.run(SLUG, store.config(SLUG), store, doc(), 1, seats) == []
+    assert built == [(SLUG, True, True, (2, "t1"))]
+    assert [lane for lane, _ in read] == ["eng", "ci"] and read[0][1] is read[1][1]

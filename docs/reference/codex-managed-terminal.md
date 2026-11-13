@@ -412,7 +412,7 @@ Count both failures for one UTC day from the swarm timer journal:
 
 ```bash
 day=2026-10-23
-TZ=UTC journalctl --user -u 'agentihooks-swarm*' \
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
   --since "$day 00:00" --until "$day 23:59:59" --no-pager -o cat \
   | grep -cE "launch deadline ran out|init-agent timed out for"
 ```

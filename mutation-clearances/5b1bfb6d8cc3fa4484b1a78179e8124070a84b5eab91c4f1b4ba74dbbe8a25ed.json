@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_session_credential:8312ed30e10ec423b4ce8a991fa2217ec9532b9ffc7ce09280f83b983b52254d": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the Authorization name set on the request Message; its sole reader in the ledger authority uses the case insensitive Message.get, and nothing in the ledger server iterates, logs or serialises the raw header names, so no output changes."
+  }
+}

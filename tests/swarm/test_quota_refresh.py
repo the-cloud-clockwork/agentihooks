@@ -1,5 +1,7 @@
 import json
 import subprocess
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -209,10 +211,35 @@ def test_run_listens_on_the_wake_channel_and_answers_every_swarm_on_each_wake(st
 
     monkeypatch.setattr(store.redis, "pubsub", PubSub)
     monkeypatch.setattr(quota_refresh, "answer_all", answer_all)
+    monkeypatch.setattr(quota_refresh, "time", SimpleNamespace(monotonic=lambda: 0.5))
     with pytest.raises(Stop):
-        quota_refresh.run(store, execute, 7)
-    assert seen == [("subscribe", quota_refresh.WAKE), ("wait", 7), ("wait", 7)]
+        quota_refresh.run(store, execute, 7, lambda: seen.append("probe"))
+    assert seen == [("subscribe", quota_refresh.WAKE), "probe", ("wait", 7), ("wait", 7)]
     assert rounds == [(store, execute), (store, execute)]
+
+
+def test_run_wakes_for_the_next_probe_a_minute_after_the_last_one_started(store, monkeypatch):
+    seen, rounds = [], []
+    clock = iter([0.5, 50.5, 60.5, 190.5])
+
+    class PubSub:
+        def subscribe(self, channel):
+            seen.append(("subscribe", channel))
+
+        def get_message(self, timeout):
+            seen.append(("wait", timeout))
+
+    def answer_all(store_, execute):
+        rounds.append(store_)
+        if len(rounds) == 2:
+            raise Stop
+
+    monkeypatch.setattr(store.redis, "pubsub", PubSub)
+    monkeypatch.setattr(quota_refresh, "answer_all", answer_all)
+    monkeypatch.setattr(quota_refresh, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    with pytest.raises(Stop):
+        quota_refresh.run(store, lambda slug, row: "", 30, lambda: seen.append("probe"))
+    assert seen == [("subscribe", quota_refresh.WAKE), "probe", ("wait", 10.0), "probe", ("wait", 0.0)]
 
 
 def test_timer_ensure_also_runs_the_quota_prober_service(tmp_path):
@@ -238,12 +265,72 @@ def test_timer_ensure_also_runs_the_quota_prober_service(tmp_path):
 def test_main_runs_the_quota_prober_without_a_slug_on_the_hive_command_runner(monkeypatch):
     from scripts.swarm import command_runner
 
-    ran, executed = [], []
+    ran, executed, probed = [], [], []
     monkeypatch.setattr(cli, "connect", lambda: "store")
-    monkeypatch.setattr(quota_refresh, "run", lambda store, execute, wait_s: ran.append((store, wait_s, execute)))
+    monkeypatch.setattr(
+        quota_refresh, "run", lambda store, execute, wait_s, probe: ran.append((store, wait_s, execute, probe))
+    )
     monkeypatch.setattr(command_runner, "execute", lambda store, slug, row: executed.append((store, slug, row)) or "")
+    monkeypatch.setattr(quota_refresh, "probe", lambda environ, now: probed.append((environ, now)) or ["probed"])
+    monkeypatch.setattr(cli.time, "time", lambda: 123.0)
+    monkeypatch.setenv("QUOTA_PROBE_MARK", "seen")
     assert cli.main(["prober"]) == 0
-    [(store, wait_s, execute)] = ran
+    [(store, wait_s, execute, probe)] = ran
     assert (store, wait_s) == ("store", 30)
     assert execute("sw", {"command": "quota"}) == ""
     assert executed == [("store", "sw", {"command": "quota"})]
+    assert probe() == ["probed"]
+    [(environ, now)] = probed
+    assert (environ["QUOTA_PROBE_MARK"], now, type(environ)) == ("seen", 123.0, dict)
+
+
+def test_the_prober_probes_once_a_minute_between_wakes():
+    probes = []
+    due = 0.0
+    for now in (0.0, 30.0, 59.9, 60.0, 61.0, 125.0):
+        due = quota_refresh.probe_due(lambda: probes.append(now), due, now)
+    assert probes == [0.0, 60.0, 125.0]
+    assert due == 185.0
+    assert quota_refresh.PROBE_S == 60
+
+
+def test_a_probe_reads_every_account_with_refresh_and_logs_one_flushed_line(monkeypatch):
+    from scripts.swarm import capacity
+
+    seen, printed = [], []
+    monkeypatch.setattr(capacity, "probe", lambda environ, now: seen.append((environ, now)) or ["a", "b"])
+    monkeypatch.setattr(quota_refresh, "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
+    assert quota_refresh.probe({"K": "v"}, 5.0) == ["quota probe read 2 accounts"]
+    assert seen == [({"K": "v"}, 5.0)]
+    assert printed == [(("quota probe read 2 accounts",), {"flush": True})]
+
+
+def test_the_quota_notice_names_a_reading_over_three_minutes_old():
+    from scripts.swarm import quota_notice
+
+    def decision(*seen):
+        return {"accounts": [{"name": "x"}] + [{"name": str(at), "observed_at": at} for at in seen]}
+
+    assert quota_notice.STALE_S == 180
+    assert quota_notice.stale({}, 500_000) == []
+    assert quota_notice.stale(decision(), 500_000) == []
+    assert quota_notice.stale(decision(100, 320), 500_000) == []
+    assert quota_notice.stale(decision(100, 319), 500_000) == [
+        "quota readings are 181 seconds old; the quota prober has not refreshed them"
+    ]
+
+
+def test_the_quota_notice_step_adds_the_reading_age(monkeypatch):
+    from scripts.swarm import capacity, quota_handoff, quota_notice
+
+    monkeypatch.setattr(capacity, "apply", lambda *args: ["capacity"])
+    monkeypatch.setattr(quota_handoff, "warn", lambda *args: ["warn"])
+    monkeypatch.setattr(capacity, "read", lambda store, slug: {"accounts": [{"name": "a", "observed_at": 1.0}]})
+    monkeypatch.setattr(quota_notice, "apply", lambda slug, store, decision: ["notice"])
+    stub: Any = None
+    assert quota_notice.refresh("sw", stub, stub, stub, stub, 1_000_000) == [
+        "capacity",
+        "warn",
+        "notice",
+        "quota readings are 999 seconds old; the quota prober has not refreshed them",
+    ]

@@ -106,7 +106,7 @@ def test_scoped_logs_receive_the_root_credential_context(monkeypatch):
 def test_root_binding_discovers_global_streams_only_for_unscoped_clients(monkeypatch, scoped):
     owned_loop = loop()
     js = object()
-    client = SimpleNamespace(jetstream=Mock(return_value=js))
+    client = SimpleNamespace(jetstream=Mock(return_value=js), options={})
     config = BusConfig(provision=False, scoped=scoped, credentials="member-creds")
     selector = AsyncMock(side_effect=["old-events", "old-dead"])
     monkeypatch.setattr(nats, "_Loop", lambda: owned_loop)

@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import io
 import json
 import subprocess
@@ -660,8 +661,11 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("action", ["install", "download"])
-@pytest.mark.parametrize("failure", [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout"])
-@pytest.mark.parametrize("failures", [1, 4, 5])
+@pytest.mark.parametrize(
+    "failure",
+    [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout", "incomplete-read", "read-reset", "wrapped-reset"],
+)
+@pytest.mark.parametrize("failures", [1, 4, 39, 40])
 def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
     path, lock, payloads = locked
     herdr = lock["tools"]["herdr"]
@@ -670,18 +674,21 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     monkeypatch.setattr("time.sleep", sleeps)
     if isinstance(failure, int):
         error = urllib.error.HTTPError(herdr["url"], failure, "Server error", {}, None)
-    elif failure == "wrapped-timeout":
-        error = urllib.error.URLError(TimeoutError("timed out"))
     else:
-        error = TimeoutError("timed out")
+        error = {
+            "wrapped-timeout": urllib.error.URLError(TimeoutError("timed out")),
+            "incomplete-read": http.client.IncompleteRead(b"partial", 29057246),
+            "read-reset": ConnectionResetError("connection reset by peer"),
+            "wrapped-reset": urllib.error.URLError(ConnectionResetError("connection reset by peer")),
+        }.get(failure, TimeoutError("timed out"))
 
     def opened(url, timeout):
         assert timeout == 120
         attempts.append(url)
         response = io.BytesIO(payloads[url])
         if attempts.count(url) <= failures:
-            if failure == "read-timeout":
-                response.read = Mock(side_effect=error)
+            if failure in {"read-timeout", "incomplete-read", "read-reset"}:
+                response.read1 = Mock(side_effect=error)
             else:
                 raise error
         return response
@@ -696,7 +703,7 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
         argv.extend(["--tool", "herdr"])
     monkeypatch.setattr("sys.argv", argv)
     selected = {"herdr": herdr} if action == "install" else lock["tools"]
-    if failures == 5:
+    if failures == 40:
         with pytest.raises(type(error)) as caught:
             worker_image.main()
         assert caught.value is error
@@ -711,7 +718,8 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     expected_attempts, delays = {
         1: (2, [1]),
         4: (5, [1, 2, 4, 8]),
-        5: (5, [1, 2, 4, 8]),
+        39: (40, [1, 2, 4, 8, 16] + [30] * 34),
+        40: (40, [1, 2, 4, 8, 16] + [30] * 34),
     }[failures]
     assert {url: attempts.count(url) for url in attempts} == {
         tool["url"]: expected_attempts for tool in selected.values()
@@ -737,6 +745,149 @@ def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeyp
     assert caught.value is error
     opened.assert_called_once_with(tool["url"], timeout=120)
     sleeps.assert_not_called()
+    assert not (tmp_path / tool["sha256"]).exists()
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+def test_tool_download_abandons_a_trickling_body_at_its_deadline(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovers: bool
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps = []
+
+    class Trickle(io.BytesIO):
+        def read1(self, size: int | None = -1, /) -> bytes:
+            now[0] += 50
+            return b"x"
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    responses = [Trickle(), io.BytesIO(payloads[tool["url"]])] if recovers else None
+    opened_mock = Mock(side_effect=responses or (lambda url, timeout: Trickle()))
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened_mock)
+    if recovers:
+        assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+        assert opened_mock.call_count == 2
+        assert sleeps == [1]
+        assert (tmp_path / tool["sha256"]).read_bytes() == payloads[tool["url"]]
+    else:
+        with pytest.raises(TimeoutError, match="deadline: herdr"):
+            worker_image.fetch("herdr", tool, tmp_path)
+        assert now[0] <= worker_image.FETCH_SECONDS + 50
+        assert opened_mock.call_count < worker_image.DOWNLOAD_ATTEMPTS
+        assert not (tmp_path / tool["sha256"]).exists()
+
+
+def test_tool_download_keeps_a_body_that_ends_exactly_at_its_deadline(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    body = payloads[tool["url"]]
+    now = [0.0]
+    parts = [body[: len(body) // 2], body[len(body) // 2 :], b""]
+
+    class Slow(io.BytesIO):
+        def read1(self, size: int | None = -1, /) -> bytes:
+            now[0] = float(worker_image.ATTEMPT_SECONDS)
+            return parts.pop(0)
+
+    opened_mock = Mock(return_value=Slow())
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", Mock(side_effect=AssertionError("no retry expected")))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened_mock)
+    assert worker_image.fetch("herdr", tool, tmp_path) == body
+    assert opened_mock.call_count == 1
+    assert (tmp_path / tool["sha256"]).read_bytes() == body
+
+
+@pytest.mark.parametrize(("failed_at", "retries"), [(899.0, True), (899.5, False)])
+def test_tool_download_retries_only_while_the_backoff_fits_its_total_budget(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_at: float, retries: bool
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+    error = urllib.error.HTTPError(tool["url"], 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        if now[0] == 0.0:
+            now[0] = failed_at
+            raise error
+        return io.BytesIO(payloads[url])
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    if retries:
+        assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+        assert sleeps == [1]
+    else:
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            worker_image.fetch("herdr", tool, tmp_path)
+        assert caught.value is error
+        assert sleeps == []
+
+
+def test_tool_download_rides_out_a_ten_minute_gateway_outage(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, payloads = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        if now[0] < 600:
+            raise urllib.error.HTTPError(url, 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+        return io.BytesIO(payloads[url])
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    assert worker_image.fetch("herdr", tool, tmp_path) == payloads[tool["url"]]
+    assert sleeps == [1, 2, 4, 8, 16] + [30] * 19
+
+
+def test_tool_download_gives_up_on_a_persistent_outage_at_its_total_budget(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, lock, _ = locked
+    tool = lock["tools"]["herdr"]
+    now = [0.0]
+    sleeps: list[float] = []
+    attempts: list[str] = []
+
+    def opened(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        raise urllib.error.HTTPError(url, 504, "Gateway Time-out", http.client.HTTPMessage(), None)
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(worker_image.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(worker_image.time, "sleep", sleep)
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    with pytest.raises(urllib.error.HTTPError):
+        worker_image.fetch("herdr", tool, tmp_path)
+    assert sleeps == [1, 2, 4, 8, 16] + [30] * 28
+    assert len(attempts) == len(sleeps) + 1
     assert not (tmp_path / tool["sha256"]).exists()
 
 

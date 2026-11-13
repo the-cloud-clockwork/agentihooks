@@ -14,18 +14,21 @@ cleanup() {
     kubectl logs deployment/hive-join --tail=100 > "$out/join.txt" 2>&1 || true
     kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
   fi
-  kill ${init_pid:-} ${tools_pid:-} 2>/dev/null || true
-  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
+  kill ${init_pid:-} ${tools_pid:-} ${browser_pid:-} 2>/dev/null || true
+  if [[ ${HIVE_REGISTRY_KEEP:-false} != true ]]; then
+    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
+  fi
   kind delete cluster --name "$cluster"
 }
 trap cleanup EXIT
 docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null
+printf '%s\n' "$cluster-registry" > "$out/registry.txt"
 {
   kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s
   docker network connect kind "$cluster-registry"
   docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001
   printf '[host."http://%s:5000"]\n' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml
-  for warm in ghcr.io/the-cloud-clockwork/agentihooks-worker:dev mirror.gcr.io/library/redis:7-alpine; do
+  for warm in mirror.gcr.io/library/redis:7-alpine; do
     docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"
   done
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
@@ -66,12 +69,28 @@ if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-wo
   worker_image="$(cat "$out/worker-base.ref")"
 else
   worker_base=rebuilt
-  worker_image=local/worker-base:dev
-  docker build -f docker/swarm-node/Dockerfile -t "$worker_image" .
+  worker_image=localhost:5001/worker-base:dev
+  docker buildx build -f docker/swarm-node/Dockerfile --output "type=image,name=$worker_image,push=true,unpack=false" .
 fi
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" --output "type=image,name=$image,push=true,unpack=false" .
-docker image inspect --format '{{.Id}}' "$image" > "$out/image.txt"
+hive_layers=()
+if [[ -n ${HIVE_LAYER_CACHE:-} ]]; then
+  if [[ -f $HIVE_LAYER_CACHE/index.json ]]; then
+    hive_layers+=(--cache-from "type=local,src=$HIVE_LAYER_CACHE")
+  fi
+  if [[ ${HIVE_LAYER_CACHE_HIT:-} != true ]]; then
+    hive_layers+=(--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max,compression=uncompressed")
+  fi
+fi
+docker buildx build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" \
+  --build-arg AGENTIHOOKS_SOURCE=local "${hive_layers[@]}" --output "type=image,name=$image,push=true,unpack=false" .
+docker buildx imagetools inspect "$image" > "$out/image.txt"
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
+if [[ -n ${HIVE_LAYER_CACHE:-} && -d $HIVE_LAYER_CACHE.next ]]; then
+  if [[ -d $HIVE_LAYER_CACHE ]]; then
+    rm -r -- "${HIVE_LAYER_CACHE:?}"
+  fi
+  mv "$HIVE_LAYER_CACHE.next" "$HIVE_LAYER_CACHE"
+fi
 wait "$cluster_pid"
 in_pod() {
   kubectl run "$1" --image="$image" --restart=Never --attach --rm --quiet --pod-running-timeout=120s --overrides="$(python3 -c '
@@ -90,6 +109,8 @@ in_pod init 'agentihooks init --profile engineer && grep -qx "<!-- profile: engi
 init_pid=$!
 in_pod tools 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(getent passwd worker | cut -d: -f7)" = /bin/bash && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' &
 tools_pid=$!
+in_pod browser 'cd "$(mktemp -d)" && npm install --no-save --no-audit --no-fund playwright@1.65.0 >/dev/null && npx playwright install --only-shell chromium >/dev/null && node -e "const {chromium} = require(\"playwright\"); (async () => { const browser = await chromium.launch(); const page = await browser.newPage({viewport: {width: 1920, height: 1080}}); await page.goto(\"about:blank\"); const size = await page.evaluate(() => [innerWidth, innerHeight].join(\" by \")); await browser.close(); if (size !== \"1920 by 1080\") throw new Error(size); console.log(\"headless browser loaded about:blank at \" + size); })().catch((error) => { console.error(error); process.exit(1); });"' &
+browser_pid=$!
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -139,6 +160,7 @@ printf '%s' "$member_env" | kubectl create secret generic hive-member --from-fil
 unset member_env
 wait "$init_pid"
 wait "$tools_pid"
+wait "$browser_pid"
 sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
   --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=120 --set workers.image.repository=localhost:5001/agentihooks-hive-worker \

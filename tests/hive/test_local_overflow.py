@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -10,7 +11,7 @@ from tests.hive.test_controller_launch import publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
 
 FULL = "no hive for eng has room"
-ANTON = "anton ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+ANTON = "anton ram: 20000 of 100000 MB available, 850 MB per agent, fits 0 more under the 80 percent line"
 HIVE_FULL = f"{FULL}: {ANTON}"
 
 
@@ -95,6 +96,7 @@ def test_a_spawn_goes_to_a_headless_hive_with_room_first(setup, monkeypatch):
     setup.herdr.spawn.assert_not_called()
 
 
+@pytest.mark.feature("hive-launch-admission-count-once")
 def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatch):
     from scripts.hive import placement_waits
 
@@ -109,6 +111,36 @@ def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatc
     _, lane, name, sent = setup.herdr.spawn.call_args.args
     assert (lane, name, sent["id"], sent["controller_epoch"]) == ("eng", "eng name", "task", setup.held.epoch)
     fenced.runtime.hive_launch.spawn.assert_not_called()
+    totals = setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS))
+    assert (totals["placement"], totals[placement_waits.ADMITTED]) == ("1", "1")
+
+
+@pytest.mark.feature("hive-launch-admission-count-once")
+def test_a_failed_local_spawn_counts_no_admission(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import placement_waits
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.herdr.spawn.side_effect = RuntimeError("herdr refused")
+    with pytest.raises(RuntimeError):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task", "seat": "eng-1@fixture"})
+    totals = setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS))
+    assert totals.get(placement_waits.ADMITTED, "0") == "0"
+
+
+@pytest.mark.feature("hive-launch-admission-count-once")
+def test_a_failed_hive_runtime_spawn_takes_back_no_admission(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import placement_waits
+
+    fenced = hybrid(setup, monkeypatch)
+    fenced.runtime.hive_launch.spawn.side_effect = RuntimeError("hive refused")
+    setup.herdr.spawn.side_effect = RuntimeError("herdr refused")
+    with pytest.raises((RuntimeError, SwarmError)):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task", "seat": "eng-1@fixture"})
+    totals = setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS))
+    assert placement_waits.ADMITTED not in totals
 
 
 def test_the_local_machine_cap_holds_the_spawn_with_the_reason(setup, monkeypatch):
@@ -144,6 +176,7 @@ def test_a_local_cap_refusal_is_recorded_for_the_spawn_stall_alarm(setup, monkey
     else:
         fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     since = lease.now_ms(setup.store)
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
@@ -194,11 +227,11 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     assert fenced.placement_refusal("eng", {"id": "task"}) == capped(2, 2, 2, cpus=3)
 
 
-def test_the_local_machine_cap_defaults_to_eight(setup):
+def test_the_local_machine_cap_defaults_to_fifteen(setup: SimpleNamespace) -> None:
     from scripts.swarm.store import SwarmConfig
 
-    assert setup.store.config(setup.config.slug).local_max_agents == 8
-    assert SwarmConfig("s", "r", 1, 1).local_max_agents == 8
+    assert setup.store.config(setup.config.slug).local_max_agents == 15
+    assert SwarmConfig("s", "r", 1, 1).local_max_agents == 15
 
 
 def test_the_swarm_setting_refuses_local_launches_even_with_spare_cpu(setup, monkeypatch):
@@ -227,13 +260,16 @@ def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci"])
-def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch, lane):
+def test_codex_local_fallback_refuses_at_the_eight_agent_cap(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
     from scripts.swarm.store import SwarmConfig
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8, slug="other-swarm", harness="codex")
     task = {"id": "task", "seat": f"{lane}-1@fixture", "launch_assignment": {"harness": "codex"}}
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal(lane, task)
@@ -243,7 +279,9 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
-def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(setup, monkeypatch):
+def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from types import SimpleNamespace
 
     from scripts import terminate_agent
@@ -254,6 +292,7 @@ def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(s
     fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8, slug="other-swarm", harness="codex")
     task = {"id": "task", "seat": "eng-1@fixture", "launch_assignment": {"harness": "codex"}}
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", task)

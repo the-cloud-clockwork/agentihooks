@@ -1,11 +1,11 @@
 """Every feature map entry's live check, run against the running swarms: a failed check is a regressed feature."""
 
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 from hooks.secrets import redact
+from scripts import feature_map
 from scripts.swarm.health.findings import Finding
 
 KIND = "feature regressed"
@@ -19,7 +19,7 @@ PYTHONS = ("python", "python3")
 def entries(path: Path) -> list[dict]:
     if not path.is_file():
         return []
-    return json.loads(path.read_text())["features"]
+    return feature_map.load(path)["features"]
 
 
 def argv(command: list[str]) -> list[str]:

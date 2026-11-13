@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import controller, lease, promotion_watch
+from scripts.swarm import lease, promotion_watch
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.store import RedisStore, SwarmConfig
 
@@ -44,7 +44,7 @@ class SchemaLedger(LedgerClient):
         with self.lock:
             doc = self.docs[slug]
             if ops is not None:
-                epoch = lease.EPOCH.get()
+                epoch = lease.epoch_for(slug)
                 for op in ops:
                     self.epochs.append((slug, op["op"], epoch))
                     if self.leases is not None and epoch is not None:
@@ -188,9 +188,9 @@ def test_a_doctor_tick_closes_watched_repairs_on_green_under_the_watched_lease(l
     ledger.leases = store
     monkeypatch.setitem(RED, "id", 901)
     monkeypatch.setitem(RED, "conclusion", "success")
-    tick = controller.FencedLedger(store, DOCTOR, doctor, ledger)
     later = NOW + promotion_watch.REFRESH_MS
-    promotion_watch.refresh(DOCTOR, store.config(DOCTOR), store, tick, tick.state(DOCTOR), later, github)
+    with lease.held_pass(store, DOCTOR, doctor):
+        promotion_watch.refresh(DOCTOR, store.config(DOCTOR), store, ledger, ledger.state(DOCTOR), later, github)
     assert ledger.docs[WATCHED]["tasks"][0]["state"] == "done"
     assert {(slug, epoch) for slug, kind, epoch in ledger.epochs if kind == "task_update"} == {(WATCHED, watched.epoch)}
     assert store.redis.get(promotion_watch.key(DOCTOR, "seen")) == "901"

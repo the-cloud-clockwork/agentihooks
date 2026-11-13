@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/codex.py:scripts.inbox.codex.x\u01c1ThreadState\u01c1observe:bce0d385071c7e40b2a74969b3f11b92d6389ea9c45537c31ef12c0bd445c958": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so cast(None, params.get(\"turn\") or {}) is the same object and body.get(\"id\", \"\") and account_refusal(body) are unchanged."
+  }
+}

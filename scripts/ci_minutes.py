@@ -6,14 +6,18 @@ import os
 import re
 import subprocess
 from collections import defaultdict
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.ci_storage import rows
 
 HOUR = timedelta(hours=1)
 LISTED_CAP = 1000
+JOB_PAGE = 100
+SMALL_JOB_PAGE = 30
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 ANTON = "anton"
 MATRIX = re.compile(r" \(.*\)$")
@@ -25,7 +29,7 @@ KEEP = timedelta(days=7)
 RESERVE = 1000
 
 
-def tier(run: dict) -> str:
+def tier(run: dict[str, Any]) -> str:
     if run["event"] in TIERS:
         return TIERS[run["event"]]
     if run["event"] == "push":
@@ -37,19 +41,24 @@ def job_name(name: str) -> str:
     return MATRIX.sub("", name)
 
 
-def seconds(job: dict) -> float:
+def seconds(job: dict[str, Any]) -> float:
     if not job.get("started_at") or not job.get("completed_at"):
         return 0.0
-    return (datetime.fromisoformat(job["completed_at"]) - datetime.fromisoformat(job["started_at"])).total_seconds()
+    spent = (datetime.fromisoformat(job["completed_at"]) - datetime.fromisoformat(job["started_at"])).total_seconds()
+    return max(spent, 0.0)
 
 
-def on_anton(job: dict) -> bool:
+def on_anton(job: dict[str, Any]) -> bool:
     return any(label.startswith(ANTON) for label in job.get("labels") or ())
 
 
-def aggregate(runs: list[dict], jobs: list[dict], merged: int) -> dict:
+def aggregate(runs: list[dict[str, Any]], jobs: list[dict[str, Any]], merged: int) -> dict[str, Any]:
     by_run = {run["id"]: run for run in runs}
-    tiers, workflows, names = defaultdict(float), defaultdict(float), defaultdict(float)
+    tiers, workflows, names = (
+        cast("defaultdict[str, float]", defaultdict(float)),
+        cast("defaultdict[str, float]", defaultdict(float)),
+        cast("defaultdict[tuple[str, str, str], float]", defaultdict(float)),
+    )
     anton = hosted = 0.0
     for job in jobs:
         run = by_run.get(job["run_id"])
@@ -64,10 +73,10 @@ def aggregate(runs: list[dict], jobs: list[dict], merged: int) -> dict:
         workflows[run["path"]] += spent
         names[(tier(run), run["path"], job_name(job["name"]))] += spent
 
-    def per(value):
+    def per(value: float) -> float | None:
         return round(value / merged, 1) if merged else None
 
-    def ranked(table, key):
+    def ranked(table: Mapping[Any, float], key: Callable[[Any], dict[str, Any]]) -> list[dict[str, Any]]:
         ordered = sorted(table.items(), key=lambda item: -item[1])
         return [{**key(name), "minutes": round(spent, 1), "per_merged": per(spent)} for name, spent in ordered]
 
@@ -84,7 +93,7 @@ def aggregate(runs: list[dict], jobs: list[dict], merged: int) -> dict:
     }
 
 
-def render(result: dict) -> str:
+def render(result: dict[str, Any]) -> str:
     lines = [
         f"## Anton runner minutes {result['since']} to {result['until']}",
         "",
@@ -111,14 +120,14 @@ def render(result: dict) -> str:
     return "\n".join(lines)
 
 
-def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
-    hours = []
+def read_runs(repo: str, since: datetime, until: datetime) -> list[dict[str, Any]]:
+    hours: list[tuple[datetime, datetime]] = []
     start = since
     while start < until:
         hours.append((start, min(start + HOUR, until) - timedelta(seconds=1)))
         start += HOUR
 
-    def read(window):
+    def read(window: tuple[datetime, datetime]) -> list[dict[str, Any]]:
         first, last = (moment.strftime(STAMP) for moment in window)
         listed = rows(f"repos/{repo}/actions/runs?created={first}..{last}&per_page=100", "workflow_runs")
         if len(listed) >= LISTED_CAP:
@@ -130,9 +139,9 @@ def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
     return list({run["id"]: run for run in found}.values())
 
 
-def read_jobs(repo: str, runs: list[dict], cache: dict) -> list[dict]:
-    def read(run):
-        return attempt(run), rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
+def read_jobs(repo: str, runs: list[dict[str, Any]], cache: dict[str, Any]) -> list[dict[str, Any]]:
+    def read(run: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+        return attempt(run), jobs_of(repo, run["id"])
 
     unread = [run for run in runs if attempt(run) not in cache]
     with ThreadPoolExecutor() as pool:
@@ -143,15 +152,24 @@ def read_jobs(repo: str, runs: list[dict], cache: dict) -> list[dict]:
     return [job for key in map(attempt, runs) for job in (fresh[key] if key in fresh else cache[key]["jobs"])]
 
 
-def attempt(run: dict) -> str:
+def jobs_of(repo: str, run_id: int) -> list[dict[str, Any]]:
+    """GitHub answers 502 for a full page of a run whose jobs carry many steps, so that run is read in small pages."""
+    path = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page="
+    try:
+        return rows(f"{path}{JOB_PAGE}", "jobs")
+    except subprocess.CalledProcessError:
+        return rows(f"{path}{SMALL_JOB_PAGE}", "jobs")
+
+
+def attempt(run: dict[str, Any]) -> str:
     return f"{run['id']}:{run['run_attempt']}"
 
 
-def load_cache(path: Path) -> dict:
-    return json.loads(path.read_text()) if path.is_file() else {}
+def load_cache(path: Path) -> dict[str, Any]:
+    return cast("dict[str, Any]", json.loads(path.read_text())) if path.is_file() else {}
 
 
-def save_cache(path: Path, cache: dict, since: datetime) -> None:
+def save_cache(path: Path, cache: dict[str, Any], since: datetime) -> None:
     oldest = (since - KEEP).strftime(STAMP)
     path.write_text(json.dumps({key: entry for key, entry in cache.items() if entry["created_at"] >= oldest}))
 

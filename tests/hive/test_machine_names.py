@@ -1,9 +1,13 @@
 import json
 import subprocess
+from typing import TYPE_CHECKING
 
 import pytest
 
 from scripts.hive import auth, cli, machine, registry, remove
+
+if TYPE_CHECKING:
+    from fakeredis import FakeRedis
 
 pytestmark = pytest.mark.unit
 
@@ -83,15 +87,6 @@ def test_a_target_saved_under_another_label_is_not_added_to_herdr_again(admin):
     machine.save(admin, "root", CLOUD, "swarm-hive-001", run)
 
     assert run.calls == []
-
-
-def test_a_name_only_looked_up_writes_nothing(admin):
-    assert machine.name(admin, "worker-001", assign=False) == "swarm-hive-001"
-    assert admin.hgetall(machine.MACHINES) == {}
-
-    machine.name(admin, "worker-001")
-    assert machine.name(admin, "worker-002", assign=False) == "swarm-hive-002"
-    assert machine.name(admin, "worker-001", assign=False) == "swarm-hive-001"
 
 
 @pytest.mark.parametrize(
@@ -193,34 +188,47 @@ def test_cli_add_names_the_hive_after_its_machine_on_every_run(admin, monkeypatc
     )
 
 
-def test_remove_deletes_the_files_of_a_hive_that_hive_create_named():
+def test_remove_deletes_the_files_of_a_hive_that_hive_create_named() -> None:
     owned = [
         "k8s/argocd/apps/swarm-hive-1792865339.yaml",
         "k8s/manifests/swarm-hive-1792865339/hive.yaml",
         "k8s/values-overlays/swarm-hive-1792865339/values.yaml",
     ]
     tree = "".join(f"{path}\n" for path in [*owned, "k8s/manifests/swarm-hive-001/hive.yaml"])
+    template = "".join(f"#@ file: {path.replace('swarm-hive-1792865339', '${name}')}\nx: 1\n" for path in owned)
 
-    def run(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, tree, "")
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(argv, 0, template if "-H" in argv else tree, "")
 
     plan = remove.Plan("m1", "swarm-hive-1792865339", "k8s/x", dry_run=True)
 
     assert remove.unmanifest(plan, run) == [
-        f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(owned)}"
+        f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(owned)} "
+        "and merge it once its checks pass"
     ]
 
 
-def test_a_new_machine_skips_every_name_a_live_hive_already_holds(admin):
-    admin.hset(machine.MACHINES, "worker-001", "swarm-hive-001")
+def test_a_saved_label_outside_the_hive_pattern_holds_no_ordinal(admin: "FakeRedis") -> None:
+    admin.hset(machine.MACHINES, "worker-001", "anton-9")
 
-    assert machine.name(admin, "worker-002", taken=lambda: {"swarm-hive-002", "anton-9"}) == "swarm-hive-003"
-    assert admin.hgetall(machine.MACHINES) == {"worker-001": "swarm-hive-001", "worker-002": "swarm-hive-003"}
+    assert machine.name(admin, "worker-002") == "swarm-hive-001"
+    assert admin.hgetall(machine.MACHINES) == {"worker-001": "anton-9", "worker-002": "swarm-hive-001"}
 
 
-def test_a_known_machine_keeps_its_name_even_when_it_is_taken(admin):
-    admin.hset(machine.MACHINES, "worker-002", "swarm-hive-002")
+def test_a_known_machine_answers_its_saved_name_and_writes_nothing(admin: "FakeRedis") -> None:
+    admin.hset(machine.MACHINES, "worker-002", "swarm-hive-005")
 
-    assert machine.name(admin, "worker-002", taken=lambda: pytest.fail("a known machine reads no taken names")) == (
-        "swarm-hive-002"
-    )
+    assert machine.name(admin, "worker-002") == "swarm-hive-005"
+    assert admin.hgetall(machine.MACHINES) == {"worker-002": "swarm-hive-005"}
+
+
+@pytest.mark.feature("hive-label-reserves-identifier")
+def test_an_interface_hive_reserves_its_settled_name_and_identifier(admin: "FakeRedis") -> None:
+    registry.update(admin, "swarm-hive-001", ["ui=yes"])
+
+    held = machine.held_names(admin, Run())
+
+    hive = registry.show(admin, "swarm-hive-001")
+    assert hive is not None
+    assert hive["name"] == f"{registry.MASTER_NAME}-2"
+    assert {registry.MASTER_NAME, f"{registry.MASTER_NAME}-2", "swarm-hive-001"} <= held

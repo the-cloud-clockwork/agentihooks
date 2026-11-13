@@ -57,6 +57,10 @@ def test_a_job_that_never_started_or_finished_costs_nothing():
     assert ci_minutes.seconds(job(1, "x", 187)) == 187.0
 
 
+def test_a_job_that_completed_before_it_started_costs_nothing():
+    assert ci_minutes.seconds({"started_at": "2026-10-24T10:05:00Z", "completed_at": "2026-10-24T10:00:00Z"}) == 0.0
+
+
 def test_only_anton_labels_count_as_anton():
     assert ci_minutes.on_anton(job(1, "x", 1, labels=("anton-oss-light",)))
     assert not ci_minutes.on_anton(job(1, "x", 1, labels=("ubuntu-latest",)))
@@ -333,6 +337,26 @@ def test_jobs_are_read_for_every_attempt_of_every_run(monkeypatch):
         {"path": "repos/o/r/actions/runs/6/jobs?filter=all&per_page=100"},
     ]
     assert {key for _, key in calls} == {"jobs"}
+
+
+@pytest.mark.feature("ci-minutes-small-job-page-fallback")
+def test_a_run_whose_full_job_page_fails_is_read_in_small_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake(path: str, key: str) -> list[dict[str, str]]:
+        assert key == "jobs"
+        calls.append(path)
+        if path.endswith("per_page=100"):
+            raise subprocess.CalledProcessError(1, ["gh"])
+        return [{"path": path}]
+
+    monkeypatch.setattr(ci_minutes, "rows", fake)
+    found = ci_minutes.read_jobs("o/r", [run(7, "push")], {})
+    assert found == [{"path": "repos/o/r/actions/runs/7/jobs?filter=all&per_page=30"}]
+    assert calls == [
+        "repos/o/r/actions/runs/7/jobs?filter=all&per_page=100",
+        "repos/o/r/actions/runs/7/jobs?filter=all&per_page=30",
+    ]
 
 
 def test_merged_pull_requests_are_counted_in_the_window(monkeypatch):

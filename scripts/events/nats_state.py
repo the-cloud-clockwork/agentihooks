@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from nats.js.errors import APIError, NotFoundError
 
-from . import nats_payload
+from . import nats_batch, nats_payload
 from .bus import StateConflict, StateEntry
 from .nats_names import existing_stream
 from .resource_names import legacy_stream_name
@@ -18,6 +18,10 @@ REVISION_BASE = "agentihooks_revision_base"
 IMPORT_PENDING = "agentihooks_import_pending"
 LAST_SUBJECT_SEQUENCE = "Nats-Expected-Last-Subject-Sequence"
 HISTORY = 64
+
+
+class LegacyStateUnowned(RuntimeError):
+    """A swarm's scoped state stream cannot be created over a legacy bucket that still holds entries."""
 
 
 class ScopedStateStore:
@@ -46,7 +50,9 @@ class ScopedStateStore:
             except NotFoundError:
                 legacy = None
             if legacy is not None and legacy.state.messages and not importing:
-                raise RuntimeError("legacy state requires explicit key ownership")
+                raise LegacyStateUnowned(
+                    f"legacy state requires explicit key ownership: swarm {self._swarm!r} bucket {self._bucket!r}"
+                )
             await self._root._js.add_stream(
                 name=self._stream,
                 subjects=[f"{subject(self._swarm, 'state', self._bucket)}.>"],
@@ -72,6 +78,11 @@ class ScopedStateStore:
             return None
         value = self._root._loop.run(nats_payload.decode(self._read_chunk, message.data or b""))
         return StateEntry(key=key, value=value, revision=self._revision(message))
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        root = self._root
+        read = nats_batch.read_entries(root._js, self._stream, keys, self._subject, self._read_chunk, self._revision)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportPrivateUsage]
+        return root._loop.run(read)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportPrivateUsage]
 
     def create(self, key: str, value: bytes) -> int:
         try:

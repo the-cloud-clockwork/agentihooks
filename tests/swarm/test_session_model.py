@@ -63,3 +63,21 @@ def test_a_report_replaces_the_recorded_model_only_when_the_session_runs_another
 def test_an_agent_without_a_report_keeps_its_record():
     agent = record("opus", "high", "luna")
     assert session_model.apply(agent, None) == agent
+
+
+@pytest.mark.parametrize(
+    ("expected", "actual", "same"),
+    [
+        ("claude-opus-4-6", "claude-opus-4-6", True),
+        ("opus", "claude-opus-4-6", True),
+        ("claude-opus-4-6", "opus", True),
+        ("claude-opus-4-6[1m]", "opus[1m]", True),
+        ("opus[1m]", "claude-opus-4-6", True),
+        ("claude-opus-4-5", "claude-opus-4-6", False),
+        ("claude-opus-4-6", "claude-opus-4-5", False),
+        ("claude-opus-4-6", "sonnet", False),
+        ("sonnet", "claude-opus-4-6", False),
+    ],
+)
+def test_a_launch_alias_names_any_model_of_its_family(expected: str, actual: str, same: bool) -> None:
+    assert session_model.same(expected, actual) is same

@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/metrics.py:scripts.tick.adapters.metrics.xǁSpoolMetricsǁemit:187029d1add33e2315431b97044f904a9efc2dddcaac30d5d4720a059c966f5d": {
+    "reader": "standards_reader",
+    "reason": "Replaces the type argument of typing.cast with None. typing.cast returns its value argument unchanged at runtime whatever the type argument, so the value passed on is identical and no output changes; the cast exists only for the static type checker."
+  }
+}

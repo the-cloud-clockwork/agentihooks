@@ -51,6 +51,8 @@ def validate(schema: dict, body: object) -> None:
         raise APIError(400, "schema_invalid", "Request does not match the resource schema")
 
 
+LEDGER_PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+
 PAGINATION = {
     "type": "object",
     "additionalProperties": False,
@@ -85,11 +87,11 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation needs",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation requires_harness needs workflow case",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
-    "task_ungroup": "by item",
+    "task_ungroup": "by item if_match",
     "task_split": "by item halves",
     "title_set": "text",
     "overview_set": "text",
@@ -99,8 +101,9 @@ FIELDS = {
     "reopen": "by",
     "size_set": "by size",
     "source_add": "by source",
+    "watchdog_copy": "by text",
     "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan not_duplicate",
-    "plan_add": "by plan title artifact url",
+    "plan_add": "by plan title artifact url source",
     "slice_add": "by phase anchor",
     "phase_update": "by item fields",
     "phase_review": "by item state note override rounds escalated",
@@ -116,7 +119,7 @@ FIELDS = {
     "alert_close": "by target item outcome",
     "alert_raise": "by source text item",
     "time_left": "by slots ci_minutes fix_phase watched",
-    "freeze_set": "by verb target reason quote",
+    "freeze_set": "by verb target reason quote position only",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
     "blocker_attempt": "by item text command output",
@@ -155,7 +158,8 @@ TYPES = {
 }
 KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
-    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
+    "freeze_set": {"only": {"type": "boolean"}, "position": {"enum": ["top", "bottom"]}},
+    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}, "source": {"type": "object"}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
 for _field in (
@@ -270,6 +274,7 @@ def target(op: dict) -> str:
         "alert_close": "alerts",
         "alert_raise": "alerts",
         "source_add": "sources",
+        "watchdog_copy": "watchdog",
         "plan_add": "plans",
         "slice_add": "slices",
         "freeze_set": "freezes",

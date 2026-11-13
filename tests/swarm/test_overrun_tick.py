@@ -1,4 +1,4 @@
-from scripts.swarm import cli
+from scripts.swarm import cli, overrun
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -9,7 +9,7 @@ def test_the_tick_runs_the_overrun_pass_on_its_live_agents(env, monkeypatch):  #
     monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
     rt.live = {"engineer@a1b2c3-0001"}
     seen = []
-    monkeypatch.setattr(cli.overrun, "overrun_pass", lambda watch, doc: seen.append((watch, doc)) or ["overrun seen"])
+    monkeypatch.setattr(overrun, "overrun_pass", lambda watch, doc: seen.append((watch, doc)) or ["overrun seen"])
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     [(watch, doc)] = seen
     assert "overrun seen" in actions

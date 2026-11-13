@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from scripts import terminate_agent
 from scripts.swarm import local_slots
@@ -83,6 +86,23 @@ def test_root_hive_reports_all_local_lane_processes_against_its_limit(setup, mon
     assert "max agents" in root["refusal"]
 
 
+def test_a_hive_with_limit_two_two_masters_and_one_worker_admits_one_more_worker(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import launch
+    from scripts.swarm import commands
+    from tests.hive.test_controller_launch import write_hive
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    rows = [session("master 1 · fixture"), session("master-bbbbbb-0002"), session("engineer@bbbbbb-0003")]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: rows)
+    write_hive(setup, id="workstation", ui="yes", max_agents=2)
+    root = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "workstation")
+    assert (root["agents"], root["room"]) == (1, 1)
+    assert local_slots.claim(setup.store, "workstation", setup.config.slug, "task", "engineer@bbbbbb-0004", 2) == 1
+    assert "fixture/engineer@bbbbbb-0004" in setup.store.redis.hgetall(local_slots.key("workstation"))
+
+
 def test_whole_machine_occupancy_includes_pending_claims_without_excluding_any_task(setup, monkeypatch):
     from scripts.swarm import lease
 
@@ -114,6 +134,25 @@ def test_root_hive_room_includes_pending_claims_before_any_process_exists(setup,
     assert hives["workstation"]["agents"] == 0
     assert hives["workstation"]["room"] == 0
     assert hives["remote"]["room"] == 3
+
+
+def test_each_loaded_hive_names_its_admission_limit_and_live_hives_drop_stale_ones(setup, monkeypatch):
+    from scripts.hive import launch, registry
+    from scripts.swarm import commands, lease
+    from tests.hive.test_controller_launch import write_hive
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session("engineer@bbbbbb-0001", "codex")])
+    write_hive(setup, id="workstation", ui="yes", max_agents=1)
+    real = lease.now_ms(setup.store)
+    write_hive(setup, id="stale", heartbeat_at=real - 2 * registry.LIVE_MS)
+    monkeypatch.setattr(lease, "now_ms", lambda found: real if found is setup.store else 0)
+    hives = {row["id"]: row for row in launch.loaded_hives(setup.store)}
+    assert hives["remote"]["limit"] == (
+        "ram: 22550 of 100000 MB available, 850 MB per agent, fits 3 more under the 80 percent line"
+    )
+    assert hives["workstation"]["limit"] == "max agents: 1 of 1 agents on the hive, fits 0 more"
+    assert sorted(row["id"] for row in launch.live_hives(setup.store)) == ["remote", "workstation"]
 
 
 def test_each_claim_journals_the_agent_names_it_counted(setup, monkeypatch, capsys):
@@ -186,7 +225,9 @@ def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recor
     )
 
 
-def _remote_agents(setup, monkeypatch, states, report):
+def _remote_agents(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, states: list[str], report: dict[str, int], account: str = "account"
+) -> int:
     import json
 
     from scripts.hive import launch, registry
@@ -204,7 +245,7 @@ def _remote_agents(setup, monkeypatch, states, report):
                 seat=f"eng-{index + 1}@{setup.config.slug}",
                 state=state,
                 harness="claude",
-                account="account",
+                account=account,
                 hive="remote",
                 runtime_target={"host_id": "remote"},
             ),
@@ -220,6 +261,13 @@ def test_finished_and_ended_agents_do_not_count_on_their_hive(setup, monkeypatch
 def test_each_unreported_live_agent_adds_to_the_processes_its_hive_reports(setup, monkeypatch):
     states = ["launching", "working", "suspect", "retiring"]
     assert _remote_agents(setup, monkeypatch, states, {"codex:other": 2}) == 5
+
+
+@pytest.mark.parametrize(("account", "reported"), [("one-x", "claude:one_x"), ("one_x", "claude:one-x")])
+def test_an_unreported_agent_is_claimed_by_its_hive_process_under_either_account_spelling(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, account: str, reported: str
+) -> None:
+    assert _remote_agents(setup, monkeypatch, ["working"], {reported: 1}, account) == 1
 
 
 def test_running_and_held_reuse_one_fleet_scan_through_a_shared_cache(setup, monkeypatch):

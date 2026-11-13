@@ -10,13 +10,17 @@ import time
 import zipfile
 import zlib
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, cast
 
+import scripts.ci_budget.jobs
 from scripts.ci_budget import rate_limit
-from scripts.ci_budget.jobs import read_jobs
-from scripts.ci_budget.rate_limit import gh_api
 from tests import dep_manifest
+
+read_jobs = cast("Callable[..., list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)
+gh_api = cast("Callable[..., subprocess.CompletedProcess[Any]]", rate_limit.gh_api)
 
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
 # Full scope runs carry these into their own coverage for the tests they reuse.
@@ -39,55 +43,62 @@ class UnusableRecord(ValueError):
 def _api(endpoint: str, timeout: int = 60) -> bytes:
     for attempt in range(SERVER_ATTEMPTS):
         try:
-            return gh_api([endpoint], timeout=timeout).stdout
+            return cast(bytes, gh_api([endpoint], timeout=timeout).stdout)
         except subprocess.CalledProcessError as error:
             stderr = error.stderr.decode()
             print(stderr, file=sys.stderr)
             if attempt + 1 == SERVER_ATTEMPTS or not SERVER_ERROR.search(stderr):
                 raise
             time.sleep(SERVER_BACKOFF * 2**attempt)
+    raise AssertionError("unreachable")
 
 
 def _strings(value: object) -> bool:
-    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    return isinstance(value, list) and all(isinstance(item, str) for item in cast(list[object], value))
 
 
 def _valid_test(record: object, unit_count: int, checked: set[int]) -> bool:
     if not isinstance(record, dict):
         return False
-    files, units = record.get("files"), record.get("units")
+    files, units = cast(dict[str, Any], record).get("files"), cast(dict[str, Any], record).get("units")
     # An unpacked manifest shares one files list across many tests; each list is checked once.
     if id(files) not in checked:
         if not _strings(files):
             return False
         checked.add(id(files))
     return (
-        isinstance(record.get("escapes"), bool)
+        isinstance(cast(dict[str, Any], record).get("escapes"), bool)
         and isinstance(units, list)
-        and set(map(type, units)) <= {int}
-        and (not units or (min(units) >= 0 and max(units) < unit_count))
+        and set(map(type, cast(list[Any], units))) <= {int}
+        and (not units or (min(cast(list[Any], units)) >= 0 and max(cast(list[Any], units)) < unit_count))
     )
 
 
 def _valid_manifest(manifest: object) -> bool:
     if not isinstance(manifest, dict):
         return False
-    tests, checked = manifest.get("tests"), set()
+    tests, checked = cast(dict[str, Any], manifest).get("tests"), cast(set[int], set())
     return (
-        isinstance(manifest.get("commit"), str)
-        and bool(manifest["commit"])
-        and _strings(manifest.get("units"))
+        isinstance(cast(dict[str, Any], manifest).get("commit"), str)
+        and bool(cast(dict[str, Any], manifest)["commit"])
+        and _strings(cast(dict[str, Any], manifest).get("units"))
         and isinstance(tests, dict)
-        and bool(tests)
-        and all(_valid_test(record, len(manifest["units"]), checked) for record in tests.values())
+        and bool(cast(dict[str, Any], tests))
+        and all(
+            _valid_test(record, len(cast(dict[str, Any], manifest)["units"]), checked)
+            for record in cast(dict[str, Any], tests).values()
+        )
     )
 
 
-def _manifest(data: bytes) -> dict:
+def _manifest(data: bytes) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             if PACKED_FILE in archive.namelist():
-                manifest = dep_manifest.unpack(json.loads(archive.read(PACKED_FILE)))
+                manifest = cast(
+                    dict[str, Any],
+                    cast("Callable[..., Any]", dep_manifest.unpack)(json.loads(archive.read(PACKED_FILE))),
+                )
             else:
                 manifest = json.loads(archive.read("manifest.json"))
     except (zipfile.BadZipFile, zlib.error, KeyError, ValueError, TypeError, IndexError, AttributeError) as error:
@@ -97,7 +108,7 @@ def _manifest(data: bytes) -> dict:
     return manifest
 
 
-def _recorded(run: dict, repository: str) -> bool:
+def _recorded(run: dict[str, Any], repository: str) -> bool:
     return (
         run["event"] == "push"
         and run["head_branch"] == "dev"
@@ -107,12 +118,14 @@ def _recorded(run: dict, repository: str) -> bool:
     )
 
 
-def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Counter) -> tuple[dict, dict] | None:
+def _usable(
+    pool: ThreadPoolExecutor, actions: str, runs: list[dict[str, Any]], tally: Counter[str]
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
     listings = [pool.submit(_api, f"{actions}/runs/{run['id']}/artifacts?per_page=100") for run in runs]
     tally["requests"] += len(runs)
     for run, listing in zip(runs, listings):
         tally["searched"] += 1
-        artifacts = json.loads(listing.result())["artifacts"]
+        artifacts = cast(list[dict[str, Any]], json.loads(listing.result())["artifacts"])
         live = {item["name"]: item for item in artifacts if not item["expired"]}
         kept = [live[name] for name in (PACKED, "dep-manifest") if name in live]
         if not kept or any(name not in live for name in COVERAGE):
@@ -136,9 +149,9 @@ def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Cou
     return None
 
 
-def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
+def find_record(repository: str, before: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     actions = f"repos/{repository}/actions"
-    tally, seen = Counter(), set()
+    tally, seen = cast(Counter[str], Counter()), cast(set[int], set())
     reason = "request budget exhausted"
     with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
         for page in itertools.count(1):
@@ -192,8 +205,11 @@ def main(argv: list[str] | None = None) -> int:
     run_id = commit = ""
     if found is not None:
         run, manifest = found
-        chosen = dep_manifest.plan(
-            manifest, dep_manifest.changes(args.repo, manifest["commit"], args.head), str(run["id"])
+        chosen = cast(
+            dict[str, Any],
+            cast("Callable[..., Any]", dep_manifest.plan)(
+                manifest, dep_manifest.changes(args.repo, manifest["commit"], args.head), str(run["id"])
+            ),
         )
         args.out.write_text(json.dumps(chosen))
         reused = len(chosen["tests"])

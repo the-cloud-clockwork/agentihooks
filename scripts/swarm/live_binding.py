@@ -7,9 +7,10 @@ import shlex
 import tomllib
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.codex_session.binding import TransportRecord
+from scripts.swarm import session_model
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -167,8 +168,23 @@ def observe_managed(record: TransportRecord | None) -> PaneObservation:
     return PaneObservation("working" if turns[-1].get("status") == "inProgress" else "idle")
 
 
+def launched(agent: AgentRecord) -> dict[str, Any]:
+    """The record's validation, with the home its launch report validated while the record still holds it pending."""
+    from scripts.profiles import binding
+
+    validation = dict[str, Any](agent.profile_decision.get("validation", {}))
+    if validation.get("home") or not validation.get("report"):
+        return validation
+    account = str(validation.get("account") or "")
+    try:
+        confirmed = dict[str, Any](binding.confirm(Path(validation["report"]), agent.profile, agent.harness, account))
+    except (OSError, ValueError, TypeError, KeyError):
+        return validation
+    return {**validation, "home": confirmed.get("home")}
+
+
 def assignment(agent: AgentRecord) -> dict:
-    validated = agent.profile_decision.get("validation", {})
+    validated = launched(agent)
     home = validated.get("home") or str(Path.home() / ".agentihooks" / "profiles" / agent.profile / agent.harness)
     return {
         "harness": agent.harness,
@@ -236,9 +252,7 @@ def hosted_home(store: RedisStore, agent: AgentRecord) -> AgentRecord:
 def _unheld(agent: AgentRecord) -> list[str]:
     from scripts.hive import reports
 
-    homeless = not agent.profile_decision.get("validation", {}).get("home") and (
-        not (agent.profile and agent.harness) or bool(reports.host(agent))
-    )
+    homeless = not launched(agent).get("home") and (not (agent.profile and agent.harness) or bool(reports.host(agent)))
     return [field for field, value in assignment(agent).items() if not value or (field == "home" and homeless)]
 
 
@@ -254,13 +268,23 @@ def unobserved(agent: AgentRecord, facts: dict) -> dict:
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
-    expected = {**assignment(agent), "hooks": True}
+    expected: dict[str, object] = {**assignment(agent), "hooks": True}
+    observed: dict[str, object] = facts
     missing = [*_unheld(agent), *unobserved(agent, facts)]
     return {
-        field: {"expected": value, "actual": facts.get(field)}
+        field: {"expected": value, "actual": observed.get(field)}
         for field, value in expected.items()
-        if field not in missing and facts.get(field) != value
+        if field not in missing and not _same(field, value, observed.get(field))
     }
+
+
+def _same(field: str, expected: object, actual: object) -> bool:
+    """Whether an observed value matches its assignment, reading account names with - as _."""
+    if field == "model":
+        return session_model.same(str(expected), str(actual))
+    if field == "account":
+        return str(expected).replace("-", "_") == str(actual).replace("-", "_")
+    return actual == expected
 
 
 def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms: int) -> dict:

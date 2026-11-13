@@ -314,3 +314,52 @@ def test_a_reservation_closes_only_a_subscription_row_of_its_harness_and_slug_pa
         held.closes_row("codex", "subscription", "default", None),
         reservation.Reservation("codex", "default", 0).closes_row("codex", "subscription", "default", 10.0),
     ] == [False] * 6
+
+
+def test_primary_login_reads_the_first_entry_of_the_order_setting(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "nestor.colt@gmail.com,thecloudclockwork@gmail.com")
+    assert reservation.primary_login() == "nestor_coltatgmail_com"
+    monkeypatch.delenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", raising=False)
+    assert reservation.primary_login() == ""
+
+
+def test_primary_reserve_pct_reads_the_setting_and_falls_back_on_nonsense():
+    assert reservation.primary_reserve_pct({}) == 2.0
+    assert reservation.primary_reserve_pct({reservation.PRIMARY_RESERVE_ENV: "35"}) == 35.0
+    assert reservation.primary_reserve_pct({reservation.PRIMARY_RESERVE_ENV: "nonsense"}) == 2.0
+
+
+def test_primary_reserved_follows_the_configured_threshold(monkeypatch):
+    monkeypatch.setattr(reservation, "primary_login", lambda: "main")
+    assert reservation.primary_reserved("main", 2.0, {}) is True
+    assert reservation.primary_reserved("main", 2.1, {}) is False
+    custom = {reservation.PRIMARY_RESERVE_ENV: "35"}
+    assert reservation.primary_reserved("main", 21.0, custom) is True
+    assert reservation.primary_reserved("main", 21.0, {}) is False
+
+
+@pytest.mark.feature("master-primary-login-reserve-2pct")
+def test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left(monkeypatch):
+    monkeypatch.setattr(reservation, "primary_login", lambda: "main")
+    assert reservation.primary_reserved("main", 10.0, {}) is False
+    assert reservation.primary_reserved("main", 2.0, {}) is True
+
+
+def test_primary_reserved_matches_account_names_across_separators_and_ignores_others(monkeypatch):
+    monkeypatch.setattr(reservation, "primary_login", lambda: "nestor_coltatgmail_com")
+    assert reservation.primary_reserved("nestor-coltatgmail-com", 2.0, {}) is True
+    assert reservation.primary_reserved("other_account", 2.0, {}) is False
+    assert reservation.primary_reserved("nestor_coltatgmail_com", None, {}) is False
+
+
+def test_primary_reserved_is_false_with_no_primary_login_configured(monkeypatch):
+    monkeypatch.setattr(reservation, "primary_login", lambda: "")
+    assert reservation.primary_reserved("main", 0.0, {}) is False
+
+
+def test_primary_login_ceiling_is_the_complement_of_the_reserve(monkeypatch):
+    monkeypatch.setattr(reservation, "primary_login", lambda: "main")
+    assert reservation.primary_login_ceiling("main", {}) == 98.0
+    assert reservation.primary_login_ceiling("other", {}) is None
+    monkeypatch.setattr(reservation, "primary_login", lambda: "")
+    assert reservation.primary_login_ceiling("main", {}) is None

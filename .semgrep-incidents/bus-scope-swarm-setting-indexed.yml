@@ -1,0 +1,12 @@
+rules:
+  - id: bus-scope-swarm-setting-indexed
+    languages: [python]
+    severity: ERROR
+    message: Read the swarm setting with get and open the unscoped state when it is missing, because the multi swarm controller runs on a scoped bus with no swarm setting and an indexed read raised KeyError after every pass.
+    pattern-either:
+      - pattern: os.environ["AGENTIHOOKS_SWARM"]
+      - pattern: environ["AGENTIHOOKS_SWARM"]
+    paths:
+      include:
+        - /scripts/events/
+        - bus-scope-swarm-setting-indexed.py

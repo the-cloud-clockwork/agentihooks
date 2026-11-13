@@ -1,0 +1,6 @@
+{
+  "scripts/claude_quota_balancer.py:scripts.claude_quota_balancer.x__read_cache:a38470a14d88708cabae9638a1b00ad03319767f6105de4aece39f5213394eaf": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) is return val on CPython 3.12 and never reads typ, so replacing its first argument with None, another string, or a builtin or typing expression already in scope changes no output and cannot raise."
+  }
+}

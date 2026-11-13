@@ -158,7 +158,7 @@ def test_the_held_spawns_gauge_counts_no_doctor_task_the_watched_focus_holds(sto
     ledger = doctor(store, [record("plans/a", "focus")])
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"configured": {"eng": 2}}))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
@@ -192,7 +192,7 @@ def test_the_host_sample_names_the_harness_its_quota_held_lane_is_pinned_to(
     if hold:
         store.redis.set(store.key("sw", metrics_swarm.SPAWN_HOLD), hold)
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)

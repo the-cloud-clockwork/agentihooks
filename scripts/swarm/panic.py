@@ -2,17 +2,28 @@
 CI cancellation that frees runners for the named fix, and the business-as-usual level that releases it.
 
 THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet.
+
+A step or a pass that merely runs long, up to the golden pass duration (`scripts.tick.engine.GOLDEN_PASS_S`),
+never reaches either counter here: `count_error` only takes a category a caller chose to report, and the one
+caller wired to a tick step (`scripts.swarm.timing.step`) reports only on a raised exception, never on a step
+recorded late; `count_pass` only takes the ``ok`` a caller computed, and that caller
+(`scripts.swarm.health.spawn_stall.watch`) sets it from whether any step raised, never from the pass's wall time.
 """
 
 import json
 import math
+import re
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from scripts.swarm.store import PREFIX, RedisStore
+from scripts.swarm.store import PREFIX, RedisStore, SwarmError
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
+from scripts.tick.ports.source_control import ChangeState, RepositoryRun
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -23,13 +34,18 @@ RELEASE_ERRORS = THRESHOLD // 4
 CANCEL_EVERY_MS = 60 * 1000
 METRIC = "agentihooks.swarm.errors"
 MERGE_QUEUE = "merge_group"
+QUEUE_BRANCH = "gh-readonly-queue/"
+PUSH = "push"
+RELEASE_EVENT = "release"
+RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
 REPOS = (
     "the-cloud-clockwork/agentihooks",
     "the-cloud-clockwork/agentihooks-bundle",
     "the-cloud-clockwork/antoncore",
 )
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
-Runner = Callable[[list[str]], str]
+TOOL_SECONDS = 60.0
+Ports = Callable[[str], SourceControl]
 
 
 @dataclass(frozen=True)
@@ -102,13 +118,14 @@ def state(store: RedisStore) -> Panic | None:
 
 
 def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now_ms: int) -> Panic:
-    """Turns panic on, or adds fixes to the panic already on and makes it manual when a person engaged it."""
+    """Turns panic on, or adds fixes to the panic already on; a person pressing on with no fix makes it manual."""
     current = state(store)
+    added = tuple(fixes)
     found = Panic(
         current.since if current else now_ms,
         current.reason if current else reason,
-        auto and (current.auto if current else True),
-        tuple(sorted({*(current.fixes if current else ()), *fixes})),
+        (current.auto and (auto or bool(added))) if current else auto,
+        tuple(sorted({*(current.fixes if current else ()), *added})),
     )
     _client(store).set(_key("panic"), json.dumps(found.__dict__))
     return found
@@ -136,39 +153,70 @@ def alarm(store: RedisStore, now_ms: int) -> str:
     return ""
 
 
-def gh(argv: list[str]) -> str:
-    return subprocess.run(argv, capture_output=True, text=True, check=True, timeout=60).stdout
+def port(repository: str) -> SourceControl:
+    """Return the source control port for one fleet repository."""
+    from scripts.tick.adapters.github import GitHubSourceControl
+
+    return GitHubSourceControl(repository, Path.cwd(), "dev")
 
 
-def _branch(url: str, run: Runner) -> str:
-    return run(["gh", "pr", "view", url, "--json", "headRefName", "--jq", ".headRefName"]).strip()
+def fix_change(url: str) -> ChangeState:
+    """Return the state of a fix pull request, read through the source control port."""
+    from scripts.swarm import stack
+
+    return stack.change(url, f"cannot read pull request {url}")
 
 
-def _spared(row: dict[str, str], branches: set[str]) -> bool:
-    return row["status"] not in ACTIVE or row["event"] == MERGE_QUEUE or row["headBranch"] in branches
+def fix_branch(url: str) -> str:
+    """Return the head branch of a fix pull request, read through the source control port."""
+    return fix_change(url).head_branch
 
 
-def cancel_runs(fixes: Iterable[str], repos: Iterable[str], run: Runner) -> list[str]:
-    """Cancels every queued or running Actions run except the merge queue and the named fix pull requests."""
-    branches = {_branch(url, run) for url in fixes}
+def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
+    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit or a
+    release tag."""
+    return (
+        row.status not in ACTIVE
+        or row.event in (MERGE_QUEUE, RELEASE_EVENT)
+        or row.branch in branches
+        or row.head_sha in commits
+        or RELEASE_TAG.fullmatch(str(row.branch)) is not None
+    )
+
+
+def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], repo: str) -> set[str]:
+    """Return the commits a fix in this repository carries onto its base: each merge queue run's head for the fix,
+    and the base branch head once the fix is merged, read from rows ordered newest first."""
+    found = [change for change in changes if change.reference.repository == repo]
+    queues = tuple(f"{QUEUE_BRANCH}{change.base}/pr-{change.reference.number}-" for change in found)
+    bases = {change.base for change in found if change.merged}
+    heads: dict[str, str] = {}
+    queued: set[str] = set()
+    for row in rows:
+        branch = str(row.branch)
+        if row.event == MERGE_QUEUE and branch.startswith(queues):
+            queued.add(row.head_sha)
+        if row.event == PUSH and branch in bases and row.head_sha:
+            heads.setdefault(branch, row.head_sha)
+    return (queued | set(heads.values())) - {""}
+
+
+def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
+    """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes and the
+    runs on a fix's merge queue commit, merge commit or merged integration branch head."""
+    changes = [fix_change(url) for url in fixes]
+    branches = {change.head_branch for change in changes}
+    commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
-        listing = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--limit",
-            "100",
-            "--json",
-            "databaseId,event,headBranch,status",
-        ]
-        for row in json.loads(run(listing)):
-            if _spared(row, branches):
+        provider = ports(repo)
+        rows = provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS))
+        spared = commits | _fix_heads(rows, changes, repo)
+        for row in rows:
+            if _spared(row, branches, spared):
                 continue
-            run(["gh", "run", "cancel", str(row["databaseId"]), "--repo", repo])
-            cancelled.append(f"{repo} run {row['databaseId']} on {row['headBranch']}")
+            provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
+            cancelled.append(f"{repo} run {row.id} on {row.branch}")
     return cancelled
 
 
@@ -176,7 +224,7 @@ def due_cancel(store: RedisStore, now_ms: int) -> bool:
     return bool(_client(store).set(_key("cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
 
 
-def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> list[str]:
+def tick_pass(store: RedisStore, ok: bool, now_ms: int, ports: Ports = port) -> list[str]:
     """Counts the pass, runs the alarm and, while panic holds, cancels the fleet's other CI runs once a minute."""
     count_pass(store, ok, now_ms)
     actions = [changed] if (changed := alarm(store, now_ms)) else []
@@ -184,7 +232,7 @@ def tick_pass(store: RedisStore, ok: bool, now_ms: int, run: Runner = gh) -> lis
     if current is None or not due_cancel(store, now_ms):
         return actions
     try:
-        cancelled = cancel_runs(current.fixes, REPOS, run)
-    except (subprocess.SubprocessError, OSError, ValueError) as error:
+        cancelled = cancel_runs(current.fixes, REPOS, ports)
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]

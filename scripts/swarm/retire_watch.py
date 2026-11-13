@@ -1,14 +1,16 @@
-"""Retires that keep failing: counted per agent each tick, a health finding for the master from the third tick."""
+"""Retires that keep failing: counted per agent each tick, a health finding for the master once they have failed for
+two minutes since the first failure."""
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from scripts.swarm import elapsed
 from scripts.swarm.health.findings import Finding
 
 if TYPE_CHECKING:
-    from scripts.swarm.store import RedisStore
+    from scripts.swarm.store import AgentRecord, RedisStore
 
-TICKS = 3
+LIMIT_MS = 2 * elapsed.PASS_MS
 
 
 def _key(store, slug):
@@ -51,9 +53,30 @@ def findings(store: "RedisStore", slug: str) -> list[Finding]:
             row["agent"],
             f"{row['agent']} is still running after {row['ticks']} retire attempts",
             _evidence(row, hosts.get(row["agent"]), indexed, absent),
-            f"a retire failing {TICKS} ticks",
+            "a retire failing for 2 minutes",
             row["ticks"],
         )
         for row in waiting
-        if row["ticks"] >= TICKS
+        if elapsed.reached(row["at"] - row["since"], LIMIT_MS)
     ]
+
+
+def reported_gone(store: Any, agent: "AgentRecord", now_ms: int) -> bool:
+    """True when a hive report observed after the launch shows the agent's process gone or no longer lists it."""
+    from scripts.hive import reports
+
+    if not agent.hive and not reports.host(agent):
+        return False
+    hives = reports.Reports(store.redis)
+    if hives.gone(agent):
+        return True
+    raw: str | None = store.redis.get(reports.key(agent.hive)) if agent.hive else None
+    launched = agent.launched_at or agent.started_at
+    return bool(raw) and json.loads(raw).get("observed_at", 0) >= launched and hives.vanished(agent, now_ms)
+
+
+def retire_unless_gone(store: "RedisStore", runtime: Any, agent: "AgentRecord", homes: Any, now_ms: int) -> bool:
+    """True when the hive report shows the agent gone, else whether the runtime retired it with ``homes``."""
+    if reported_gone(store, agent, now_ms):
+        return True
+    return runtime.retire(agent, homes=homes)

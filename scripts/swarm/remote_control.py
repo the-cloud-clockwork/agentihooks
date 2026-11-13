@@ -5,12 +5,14 @@ import os
 import time
 from collections.abc import Mapping
 
+from scripts.swarm import hash_pages
 from scripts.swarm.store import MASTER, RedisStore, connect
 
 FAILURES = "remote-control-failures"
 FALLBACK = "fallback auth"
 GATEWAY = "gateway"
 OFF = "flag"
+TOKEN = "subscription token fallback"
 FAILURES_SAID = (
     "Remote Control failed",
     "Remote Control disconnected",
@@ -38,7 +40,7 @@ def off_reason(route_kind: str, login: bool) -> str:
     return "" if route_kind == "interactive" else FALLBACK
 
 
-def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -> dict:
+def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -> dict[str, str]:
     if lane != MASTER or harness != "claude":
         return {}
     reason = off_reason(route_kind, login)
@@ -49,6 +51,10 @@ def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -
     return {"state": "on", "detail": masters.title(slug, front_door.seat(slug))}
 
 
+def landed(decided: dict[str, str], placement: str) -> dict[str, str]:
+    return {"state": "off", "detail": TOKEN} if decided.get("state") == "on" and placement == "fallback" else decided
+
+
 def arguments(decided: Mapping) -> list[str]:
     if decided.get("state") != "on":
         return []
@@ -57,7 +63,10 @@ def arguments(decided: Mapping) -> list[str]:
 
 def line(agent: Mapping) -> str:
     decided = agent.get("remote_control")
-    return f"Remote Control: {decided['state']} ({decided['detail']})" if decided else ""
+    if not decided:
+        return ""
+    phone = "available" if decided["state"] == "on" else "unavailable"
+    return f"Remote Control: {decided['state']} ({decided['detail']}), phone access {phone}"
 
 
 def failure(message: str) -> bool:
@@ -69,7 +78,7 @@ def record(store: RedisStore, slug: str, name: str, message: str, at: int) -> No
 
 
 def failures(store: RedisStore, slug: str) -> dict[str, dict]:
-    return {name: json.loads(raw) for name, raw in store.redis.hgetall(store.key(slug, FAILURES)).items()}
+    return {name: json.loads(raw) for name, raw in hash_pages.fields(store.redis, store.key(slug, FAILURES)).items()}
 
 
 def on_notification(payload: Mapping, environ: Mapping[str, str] = os.environ) -> bool:

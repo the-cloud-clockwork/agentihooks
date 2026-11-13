@@ -23,6 +23,22 @@ POD = {
 }
 
 
+PRESENCE = SimpleNamespace(read=lambda environ, now_s: None)
+
+
+@pytest.fixture(autouse=True)
+def no_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(monitor.ports, "presence", lambda: PRESENCE)
+
+
+def presence_of(monkeypatch: pytest.MonkeyPatch, present: list[dict]) -> None:
+    monkeypatch.setattr(
+        PRESENCE,
+        "read",
+        lambda environ, now_s: present if environ is monitor.os.environ and now_s == NOW / 1000 else None,
+    )
+
+
 class Redis:
     def __init__(self, sessions):
         self.sessions = sessions
@@ -44,7 +60,15 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def ports_for(hives, readings, here="", local=None, published=None, reads=None):
+def ports_for(
+    hives: list[dict],
+    readings: dict,
+    here: str = "",
+    local: dict | None = None,
+    published: dict | None = None,
+    reads: list | None = None,
+    bridges: dict | None = None,
+) -> tuple:
     registry = SimpleNamespace(
         hives=lambda redis: hives if isinstance(redis, Redis) else [],
         live=lambda hive, now: hive["live"] and now == NOW,
@@ -54,9 +78,11 @@ def ports_for(hives, readings, here="", local=None, published=None, reads=None):
         read=lambda redis, hive, now: readings.get(hive) if isinstance(redis, Redis) and now == NOW else None
     )
 
-    def read(redis, hive, now):
+    def read(redis: object, hive: str, now: int) -> dict | None:
         (reads if reads is not None else []).append((redis, hive, now))
-        return published if isinstance(redis, Redis) and hive == "root" and now == NOW else None
+        if not isinstance(redis, Redis) or now != NOW:
+            return None
+        return bridges.get(hive) if bridges is not None else (published if hive == "root" else None)
 
     herdr_stats = SimpleNamespace(read=read, MASTER="master")
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
@@ -256,16 +282,17 @@ def test_a_swarm_store_error_answers_503_storage_error():
     assert (caught.value.status, caught.value.code, str(caught.value)) == (503, "storage_error", "no store")
 
 
-def test_two_live_interface_hives_merge_into_one_swarm_master_row():
-    stale = {"id": "old-id", "name": "swarm-master", "ui": "yes", "live": True}
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_two_live_interface_hives_without_members_keep_a_row_each() -> None:
+    second = {"id": "old-id", "name": "swarm-master", "ui": "yes", "live": True}
     readings = {
         "root": {**HOST, "agents": {"claude": 6, "codex": 0}},
         "old-id": {**HOST, "agents": {"claude": 0, "codex": 0}},
     }
-    data = viewed(Store({}), *ports_for([ROOT, stale], readings))
-    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
-    assert data["hives"]["live"] == 1
-    assert data["agents"] == {"total": 6, "source": "hives", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
+    data = viewed(Store({}), *ports_for([ROOT, second], readings))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 0}, {"name": "swarm-master", "agents": 6}]
+    assert data["hives"]["live"] == 2
+    assert data["agents"] == {"total": 6, "source": "hives", "reporting": 2, "of": 2, "claude": 6, "codex": 0}
 
 
 def test_a_herdr_label_matching_a_live_hive_shows_its_current_name_not_its_raw_id():
@@ -292,3 +319,193 @@ def test_a_herdr_label_matching_a_hive_no_longer_live_is_not_listed():
     data = viewed(Store({}), *ports_for([ROOT, dead], {}, published=published))
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
     assert data["agents"] == {"total": 6, "source": "herdr", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+def test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts() -> None:
+    dead = {"id": "dead-id", "name": "dead-hive", "ui": "no", "live": False}
+    published = {
+        "machines": {"dead-hive": {"claude": 9}, "spare": {"claude": 2}, "master": {"claude": 6}},
+        "silent": [],
+        "measured_at": NOW,
+    }
+    data = viewed(Store({}), *ports_for([ROOT, dead], {}, published=published))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}, {"name": "spare", "agents": 2}]
+    assert data["agents"] == {"total": 8, "source": "herdr", "reporting": 2, "of": 2, "claude": 8, "codex": 0}
+
+
+DESK = {"id": "desk", "name": "swarm-master", "ui": "yes", "live": True}
+HIVE_003 = {"id": "w3", "name": "swarm-hive-003", "ui": "no", "live": True}
+ROOT_BRIDGE = {
+    "machines": {"master": {"claude": 3}, "swarm-hive-001": {"claude": 1}, "swarm-hive-003": {"claude": 8, "codex": 1}},
+    "silent": [],
+    "measured_at": NOW,
+}
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+@pytest.mark.parametrize("order", ["desk first", "root first"])
+def test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows(order: str) -> None:
+    interface = [DESK, {**ROOT, "name": "swarm-master"}]
+    hives = [*(interface if order == "desk first" else interface[::-1]), POD_HIVE, HIVE_003]
+    bridges = {"desk": {"machines": {"master": {"claude": 5}}, "silent": [], "measured_at": NOW}, "root": ROOT_BRIDGE}
+    data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
+    assert data["agents"] == {"total": 18, "source": "herdr", "reporting": 4, "of": 4, "claude": 17, "codex": 1}
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 5},
+        {"name": "swarm-master", "agents": 3},
+        {"name": "swarm-hive-001", "agents": 1},
+        {"name": "swarm-hive-003", "agents": 9},
+    ]
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+@pytest.mark.parametrize("order", ["desk first", "root first"])
+def test_a_hive_two_readings_count_is_counted_once_from_its_own_reading(order: str) -> None:
+    root_bridge = {**ROOT_BRIDGE, "machines": {**ROOT_BRIDGE["machines"], "desk": {"claude": 2}}}
+    bridges = {"desk": {"machines": {"master": {"claude": 5}}, "silent": [], "measured_at": NOW}, "root": root_bridge}
+    interface = [{**DESK, "name": "desk"}, ROOT]
+    hives = interface if order == "desk first" else interface[::-1]
+    data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
+    assert sorted(data["hives"]["rows"], key=lambda row: row["name"]) == [
+        {"name": "swarm-hive-001", "agents": 1},
+        {"name": "swarm-hive-003", "agents": 9},
+        {"name": "swarm-master", "agents": 5},
+        {"name": "swarm-master", "agents": 3},
+    ]
+    assert data["agents"]["total"] == 18
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+@pytest.mark.parametrize("order", ["desk first", "root first"])
+def test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives(order: str) -> None:
+    root_bridge = {**ROOT_BRIDGE, "machines": {"master": {"claude": 3}, "desk": {"claude": 2}}}
+    bridges = {"desk": {"machines": {}, "silent": ["master"], "measured_at": NOW}, "root": root_bridge}
+    interface = [{**DESK, "name": "desk"}, ROOT]
+    hives = interface if order == "desk first" else interface[::-1]
+    data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 2}, {"name": "swarm-master", "agents": 3}]
+    assert data["agents"] == {"total": 5, "source": "herdr", "reporting": 2, "of": 2, "claude": 5, "codex": 0}
+
+
+PRESENT = [
+    {"id": "anton-1", "name": "swarm-hive-001", "headed": False, "release": "9", "agents": {"claude": 3}},
+    {"id": "auto", "name": "automation", "headed": True, "release": "9", "agents": {"claude": 4, "codex": 1}},
+    {"id": "dark", "name": "dark-hive", "headed": False, "release": "9", "agents": {}},
+]
+
+
+def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_registry(monkeypatch):
+    presence_of(monkeypatch, PRESENT)
+    published = {"machines": {"master": {"claude": 99}}, "silent": [], "measured_at": NOW}
+    readings = {"anton-1": {**POD, "agents": {"claude": 50}}}
+    hives = [ROOT, {**POD_HIVE, "id": "anton-1"}, {"id": "gone", "name": "gone", "live": False}]
+    data = viewed(Store({}), *ports_for(hives, readings, published=published))
+    assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 4, "claude": 7, "codex": 1}
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": None},
+        {"name": "automation", "agents": 5},
+        {"name": "dark-hive", "agents": 0},
+        {"name": "swarm-hive-001", "agents": 3},
+    ]
+    assert data["hives"]["live"] == 4
+    assert data["hives"]["measured"] == 1
+
+
+def test_no_presence_falls_back_to_the_herdr_count(monkeypatch):
+    presence_of(monkeypatch, [])
+    published = {"machines": {"master": {"claude": 6}}, "silent": [], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for([ROOT], {}, published=published))
+    assert data["agents"]["source"] == "herdr"
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
+
+
+WORKSTATION = {**ROOT, "name": "swarm-master"}
+AUTOMATION = {
+    "id": "068ce20686954481",
+    "name": "swarm-master",
+    "ui": "yes",
+    "live": True,
+    "members": {"automation-vm": {"heartbeat_at": NOW, "draining": "no"}},
+}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+@pytest.mark.parametrize("order", ["workstation first", "automation first"])
+def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_herdr_readings(order: str) -> None:
+    interface = [WORKSTATION, AUTOMATION]
+    hives = [*(interface if order == "workstation first" else interface[::-1]), POD_HIVE, HIVE_003]
+    own = {"machines": {"master": {"claude": 7}}, "silent": [], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for(hives, {}, bridges={"root": ROOT_BRIDGE, AUTOMATION["id"]: own}))
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 3},
+        {"name": "automation-vm", "agents": 7},
+        {"name": "swarm-hive-001", "agents": 1},
+        {"name": "swarm-hive-003", "agents": 9},
+    ]
+    assert data["hives"]["live"] == 4
+    assert data["agents"] == {"total": 20, "source": "herdr", "reporting": 4, "of": 4, "claude": 19, "codex": 1}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_hive_counts() -> None:
+    readings = {
+        "root": {**HOST, "agents": {"claude": 2}},
+        AUTOMATION["id"]: {**HOST, "agents": {"claude": 9}},
+        "pod": {**POD, "agents": {"claude": 2}},
+        "w3": {**POD, "agents": {"claude": 14, "codex": 2}},
+    }
+    data = viewed(Store({}), *ports_for([WORKSTATION, AUTOMATION, POD_HIVE, HIVE_003], readings))
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 2},
+        {"name": "automation-vm", "agents": 9},
+        {"name": "swarm-hive-001", "agents": 2},
+        {"name": "swarm-hive-003", "agents": 16},
+    ]
+    assert data["agents"] == {"total": 29, "source": "hives", "reporting": 4, "of": 4, "claude": 27, "codex": 2}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_presence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    presence_of(
+        monkeypatch,
+        [
+            {"id": "root", "name": "swarm-master", "agents": {"claude": 2}},
+            {"id": AUTOMATION["id"], "name": "swarm-master", "agents": {"claude": 9}},
+            {"id": "elsewhere", "name": "unregistered", "agents": {"codex": 1}},
+        ],
+    )
+    data = viewed(Store({}), *ports_for([WORKSTATION, AUTOMATION, POD_HIVE], {}))
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 2},
+        {"name": "automation-vm", "agents": 9},
+        {"name": "swarm-hive-001", "agents": None},
+        {"name": "unregistered", "agents": 1},
+    ]
+    assert data["agents"] == {"total": 12, "source": "otel", "reporting": 3, "of": 4, "claude": 11, "codex": 1}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_are_two() -> None:
+    present = [
+        {"id": "a", "name": "twin", "agents": {"claude": 1}},
+        {"id": "b", "name": "twin", "agents": {"claude": 2}},
+        {"id": "a", "name": "twin", "agents": {"codex": 3}},
+    ]
+    agents, rows = monitor.tally("otel", [(hive["id"], hive["name"], hive["agents"]) for hive in present])
+    assert rows == [{"name": "twin", "agents": 4}, {"name": "twin", "agents": 2}]
+    assert agents == {"total": 6, "source": "otel", "reporting": 2, "of": 2, "claude": 3, "codex": 3}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names() -> None:
+    beat = {"heartbeat_at": NOW, "draining": "no"}
+    live = [
+        {"id": "a", "name": "twin", "ui": "no", "members": {"vm-b": beat, "vm-a": beat}},
+        {"id": "b", "name": "twin", "ui": "no"},
+        {"id": "c", "name": "solo", "ui": "no", "members": {"pod-c": beat}},
+        {"id": "d", "name": "desk", "ui": "yes"},
+    ]
+    assert monitor.labels(live) == {"a": "vm-a, vm-b", "b": "twin", "c": "solo", "d": "swarm-master"}

@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/chunks.py:scripts.ledger_knowledge.chunks.x__proof:a173536bd0c47c0cf3d47b27127d53d12d50072d63187c0de2c6fab0f7f90719": {
+    "reader": "Standards",
+    "reason": "json.dumps tests ensure_ascii only for truth, so None and False give the same proof text."
+  }
+}

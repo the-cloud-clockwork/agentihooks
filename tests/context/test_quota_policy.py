@@ -29,6 +29,44 @@ def _decide(five, week, others, push=False):
     )
 
 
+def test_a_session_with_only_a_week_window_still_reads_its_windows(monkeypatch):
+    from hooks.context import quota_usage
+
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: {"seven_day": {"used_percentage": 92.0}})
+    assert qp._session_windows("s") == (0.0, 92.0, None, None)
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: {"five_hour": {"used_percentage": 92.0}})
+    assert qp._session_windows("s") is None
+    week = {"used_percentage": 92.0}
+    later = time.time() + 3600
+    limits = {"five_hour": {"used_percentage": 40, "resets_at": later}, "seven_day": week}
+    monkeypatch.setattr(quota_usage, "_load_native", lambda session: limits)
+    assert qp._session_windows("s") == (40.0, 92.0, later, None)
+    past = time.time() - 60
+    limits = {"five_hour": {"used_percentage": 40, "resets_at": past}, "seven_day": week}
+    assert qp._session_windows("s") == (0.0, 92.0, past, None)
+
+
+def test_other_accounts_read_a_week_only_account_and_refuse_a_rejected_or_weekless_one(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    for account in ("open", "spent", "rejected", "weekless"):
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", f"available-{account}")
+    week = balancer.QuotaWindow(30.0, None)
+    missing = balancer.QuotaWindow()
+    spent = balancer.QuotaWindow(90.0, int(time.time()) - 60)
+    results = [
+        balancer.ProbeResult("open", "allowed", "NORMAL", 70.0, missing, week),
+        balancer.ProbeResult("spent", "allowed", "NORMAL", 70.0, spent, week),
+        balancer.ProbeResult("rejected", "rejected", "BLOCKED", 0.0, missing, week),
+        balancer.ProbeResult("weekless", "allowed", "UNKNOWN", None, spent, missing),
+    ]
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, result) for result in results])
+    found = {candidate.account: (candidate.five_used, candidate.cap) for candidate in qp._other_accounts({})}
+    assert found == {"open": (0.0, 6), "spent": (0.0, 6)}
+
+
 def test_below_both_triggers_nothing_happens():
     assert _decide(98.9, 97.9, []) is None
 
@@ -800,7 +838,14 @@ def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
 
 
-def _master_at(monkeypatch, week_used, five_used=10.0, logins=(), held=MASTER_HELD, push=False):
+def _master_at(
+    monkeypatch: pytest.MonkeyPatch,
+    week_used: float,
+    five_used: float = 10.0,
+    logins: list[tuple[str, float]] | tuple[()] = (),
+    held: Reservation | None = MASTER_HELD,
+    push: bool = False,
+) -> qp.Decision | None:
     from hooks.context import account_sessions
     from scripts.routing import reservation
     from scripts.swarm_v2 import quota
@@ -846,28 +891,33 @@ def test_a_master_off_the_reserved_account_is_never_handed_to_a_token_or_the_api
     assert [c.account for c in decision.others] == ["main"]
 
 
-def test_a_master_on_the_reserved_account_at_3_percent_hands_off_to_an_open_account(monkeypatch):
+def test_a_master_on_the_reserved_account_at_2_percent_hands_off_to_an_open_account(monkeypatch):
     from scripts.routing import reservation
 
-    assert reservation.MASTER_LEAVES == 95.0
-    decision = _master_at(monkeypatch, 97.0)
+    assert reservation.MASTER_LEAVES == 98.0
+    decision = _master_at(monkeypatch, 98.0)
     assert (decision.action, decision.trigger, decision.account, decision.target.account) == (
         "handoff",
         "week",
         "main",
         "token",
     )
-    assert (decision.week_used, decision.week_limit) == (97.0, 95.0)
+    assert (decision.week_used, decision.week_limit) == (98.0, 98.0)
     assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
-    assert _master_at(monkeypatch, 97.0, logins=[("second", 20.0)]).target.account == "second"
-    assert _master_at(monkeypatch, 94.9) is None
+    assert _master_at(monkeypatch, 98.0, logins=[("second", 20.0)]).target.account == "second"
+    assert _master_at(monkeypatch, 97.9) is None
+
+
+@pytest.mark.feature("master-primary-login-reserve-2pct")
+def test_a_master_on_the_primary_login_at_90_percent_used_gets_no_handoff(monkeypatch):
+    assert _master_at(monkeypatch, 90.0) is None
 
 
 def test_a_master_on_the_spent_reserved_account_is_never_handed_to_the_api(monkeypatch):
     monkeypatch.setattr(qp, "reserved", lambda candidates, held: [c for c in candidates if c.account != "token"])
-    decision = _master_at(monkeypatch, 97.0)
+    decision = _master_at(monkeypatch, 98.0)
     assert (decision.action, decision.target) == ("stop", None)
-    assert _master_at(monkeypatch, 97.0, push=True).action == "push"
+    assert _master_at(monkeypatch, 98.0, push=True).action == "push"
 
 
 def test_an_interactive_session_on_the_reserved_account_ignores_the_ceiling(monkeypatch):
@@ -888,6 +938,58 @@ def test_only_masters_are_limited_to_claude_ai_logins():
     assert qp.master_targets([token, login], {"AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001"}) == [login]
     assert qp.master_targets([token, login], {"AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"}) == [token, login]
     assert qp.master_targets([token, login], {}) == [token, login]
+
+
+def test_a_master_on_the_primary_login_hands_off_at_its_reserve(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
+    decision = _master_at(monkeypatch, 98.0, held=None)
+    assert decision is not None and decision.target is not None
+    assert (decision.action, decision.trigger, decision.account, decision.target.account) == (
+        "handoff",
+        "week",
+        "main",
+        "token",
+    )
+    assert (decision.week_used, decision.week_limit) == (98.0, 98.0)
+    assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
+    assert _master_at(monkeypatch, 97.9, held=None) is None
+
+
+def test_the_primary_login_reserve_setting_changes_the_handoff_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
+    monkeypatch.setenv("AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT", "35")
+    assert _master_at(monkeypatch, 64.9, held=None) is None
+    decision = _master_at(monkeypatch, 65.0, held=None)
+    assert decision is not None
+    assert (decision.action, decision.week_limit) == ("handoff", 65.0)
+
+
+@pytest.mark.parametrize("master,target", [(False, "claude"), (True, "codex")])
+def test_primary_reserve_handoff_applies_only_to_claude_masters(
+    monkeypatch: pytest.MonkeyPatch, master: bool, target: str
+) -> None:
+    from scripts.routing import reservation
+
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
+    monkeypatch.setenv(reservation.PRIMARY_RESERVE_ENV, "5")
+    assert _master_at(monkeypatch, 95.0, held=None) is not None
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    with (
+        patch.object(qp, "_master", return_value=master),
+        patch.object(reservation, "primary_login_ceiling", side_effect=AssertionError("unexpected primary reserve")),
+    ):
+        assert qp.evaluate("s") is None
+
+
+@pytest.mark.parametrize("reserve,week_used,limit", [(20.0, 80.0, 80.0), (1.0, 98.0, 98.0)])
+def test_primary_reserve_and_existing_master_ceiling_use_the_lower_limit(
+    monkeypatch: pytest.MonkeyPatch, reserve: float, week_used: float, limit: float
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
+    monkeypatch.setenv("AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT", str(reserve))
+    decision = _master_at(monkeypatch, week_used)
+    assert decision is not None
+    assert (decision.action, decision.week_limit) == ("handoff", limit)
 
 
 @pytest.mark.parametrize("five_used", [None, 100.0])

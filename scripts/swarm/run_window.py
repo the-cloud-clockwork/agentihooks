@@ -10,10 +10,11 @@ from datetime import UTC, datetime
 
 from scripts.gates import Who, modes
 from scripts.gates import log as gate_log
+from scripts.inbox import store as inbox_store
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import capacity, doc_report
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.inbox.store import DuplicateItem
+from scripts.swarm import capacity, doc_report, hash_pages
+from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_notifications
 
 MINUTE_MS = 60_000
@@ -21,6 +22,7 @@ ALERT_MINUTES = 30
 KEY, SENDER = "run-window", "swarm"
 START_KEY, MINUTES_KEY = "window-start", "window-minutes"
 KEYS = (START_KEY, MINUTES_KEY)
+MARKS = ("window", "elapsed_minutes", "remaining_minutes", "alerted", "cutoff", "mode", "published")
 HELD = ("claimed", "pr")
 UNSET = "unset"
 SPOKEN = "%d %B %H:%M UTC"
@@ -119,7 +121,7 @@ def claims_stopped(store, slug, config, now_ms: int) -> str:
     bounds = span(config.window)
     if bounds is None or now_ms < bounds[1]:
         return ""
-    marks = store.redis.hgetall(store.key(slug, KEY))
+    marks = hash_pages.picked(store.redis, store.key(slug, KEY), ("window", "mode"))
     decided = marks.get("mode") if marks.get("window") == json.dumps(bounds) else None
     if (decided or modes.configured(GATE, config.gates)) != "enforce":
         return ""
@@ -131,7 +133,7 @@ def step(slug, config, store, ledger, doc, now_ms) -> list[str]:
     if bounds is None or now_ms < bounds[0]:
         return []
     key, window = store.key(slug, KEY), json.dumps(bounds)
-    marks = store.redis.hgetall(key)
+    marks = hash_pages.picked(store.redis, key, MARKS)
     if marks.get("window") != window:
         marks = {"window": window}
     progress = report(config.window, now_ms)
@@ -247,9 +249,9 @@ def _publish(slug, mode, store, ledger, rows, bounds, watchdog):
     return "run window: published the final state to the ledger and the watchdog"
 
 
-def _send_once(store, address, text, ref, task=""):
+def _send_once(store: RedisStore, address: str, text: str, ref: str, task: str = "") -> None:
     try:
-        InboxStore(store.redis).send(SENDER, address, text, ref=ref, task=task, item_id=_item_id(ref))
+        inbox_store.InboxStore(store.redis).send(SENDER, address, text, ref=ref, task=task, item_id=_item_id(ref))
     except DuplicateItem:
         pass
 

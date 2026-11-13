@@ -21,3 +21,33 @@ def test_a_guarded_transaction_aborts_when_the_bucket_changes():
         with pytest.raises(WatchError):
             pipe.execute()
     assert client.get("probe") is None
+
+
+def test_writes_keep_current_and_only_one_prior_revision() -> None:
+    import base64
+    import json
+
+    import fakeredis
+
+    from scripts.events.bus import StateConflict
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    states = RedisStateStore(client, "probe", prefix="fixture")
+    revision = states.create("doc", b"first")
+    revision = states.update("doc", b"second", revision)
+    revision = states.update("doc", b"third", revision)
+    assert [(row.revision, row.value) for row in states.watch("doc")] == [(2, b"second"), (3, b"third")]
+    assert [(row.revision, row.value) for row in states.watch("doc", 3)] == [(3, b"third")]
+    expected = {"revision": 3, "value": base64.b64encode(b"third").decode()}
+    current = client.hget("fixture:state:probe:current", "doc")
+    latest = client.lindex("fixture:state:probe:history:doc", -1)
+    assert isinstance(current, str)
+    assert isinstance(latest, str)
+    assert json.loads(current) == expected
+    assert json.loads(latest) == expected
+    with pytest.raises(StateConflict):
+        states.update("doc", b"conflict", 1)
+    assert [(row.revision, row.value) for row in states.watch("doc")] == [(2, b"second"), (3, b"third")]
+    entry = states.get("doc")
+    assert entry is not None
+    assert entry.value == b"third"

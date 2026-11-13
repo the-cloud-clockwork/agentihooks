@@ -18,6 +18,8 @@ from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
+BEAT_WINDOW_MS = 300_000
+QUIET_MS = 3_600_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
@@ -29,16 +31,20 @@ JSON_FIELDS = {
     "interactive": dict,
     "master_login": dict,
     "repos": list,
+    "registered_repos": list,
     "capabilities": list,
     "drains": list,
+    "members": dict,
 }
 DRAINS_KEPT = 20
-INT_FIELDS = ("max_agents", "heartbeat_at")
+INT_FIELDS = ("max_agents", "heartbeat_at", "beat_at")
 LEGACY = "roles"
 LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 KEPT = (*UNSET, "ui", "ephemeral")
 MASTER_NAME = "swarm-master"
+DERIVED_MASTER = re.compile(rf"{re.escape(MASTER_NAME)}-[0-9]+")
+AUTO = "auto"
 INDEX = hive_state.LEGACY_INDEX
 
 
@@ -55,7 +61,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "ephemeral": "no",
         "excluded": ["master"] if headless else [],
         "prefer": {},
-        "max_agents": 20 if headless else 10,
+        "max_agents": None,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -83,6 +89,15 @@ def _flag(setting: str, value: str) -> str:
 def _count(setting: str, value: str) -> int:
     if not (value.isascii() and value.isdigit()) or int(value) < 1:
         raise HiveError(f"{setting} must be a positive whole number, not {value!r}")
+    return int(value)
+
+
+def _cap(setting: str, value: str) -> int | None:
+    """A whole number cap, zero scaling the hive fully down, or None for auto, which leaves the ceiling to the hive."""
+    if value == AUTO:
+        return None
+    if not (value.isascii() and value.isdigit()):
+        raise HiveError(f"{setting} must be a whole number, not {value!r}")
     return int(value)
 
 
@@ -124,7 +139,7 @@ SETTINGS = {
     "excluded": ("excluded", _excluded),
     "master-swarms": ("master_swarms", _master_swarms),
     "prefer": ("prefer", _prefer),
-    "max-agents": ("max_agents", _count),
+    "max-agents": ("max_agents", _cap),
     "capabilities": ("capabilities", _capabilities),
 }
 
@@ -178,7 +193,7 @@ def _stored(client, hive_id: str) -> dict | None:
     return hive_state.read(hive_state.records(client, hive_id), hive_id, _legacy(client, hive_id))
 
 
-def _seeded(hive_id: str) -> dict:
+def _seeded(hive_id: str) -> dict[str, Any]:
     return {field: value for field, value in _default(hive_id).items() if field not in KEPT}
 
 
@@ -186,10 +201,31 @@ def _amend(client, hive_id: str, change):
     return hive_state.amend(hive_state.records(client, hive_id), hive_id, change, _legacy(client, hive_id))
 
 
-def _settle(hive_id: str, record: dict) -> dict:
-    """The hive hosting the operator's interface runs the masters and is always named MASTER_NAME."""
-    settled = {**_default(hive_id, record.get("ui", "no")), **record}
-    return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
+def _settle(hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
+    """The hive hosting the operator's interface runs the masters and is named MASTER_NAME or a name derived from it."""
+    settled: dict[str, Any] = {**_default(hive_id, record.get("ui", "no")), **record}
+    return {**settled, "name": _read_name(settled)}
+
+
+def _read_name(record: dict[str, Any]) -> str:
+    """The name a record reads as: an interface hive keeps a derived MASTER_NAME, else reads as MASTER_NAME."""
+    name = str(record["name"])
+    if record.get("ui") != "yes" or DERIVED_MASTER.fullmatch(name):
+        return name
+    return MASTER_NAME
+
+
+def _held(client: object, hive_id: str) -> set[str]:
+    """The names every other registered hive reads as."""
+    registered: list[dict[str, Any]] = hives(client)
+    return {str(record["name"]) for record in registered if record["id"] != hive_id}
+
+
+def _unique(name: str, held: set[str]) -> str:
+    """The name itself while no other hive holds it, else the name with the first free numeric suffix from 2."""
+    if name not in held:
+        return name
+    return next(candidate for n in range(2, len(held) + 2) if (candidate := f"{name}-{n}") not in held)
 
 
 @dataclass(frozen=True)
@@ -231,17 +267,20 @@ def _drained(record: dict[str, Any], stored: dict[str, Any], drain: Drain | None
     return {**record, "drains": [*stored.get("drains", []), entry][-DRAINS_KEPT:]}
 
 
-def show(client, hive_id: str) -> dict | None:
+def show(client: Any, hive_id: str) -> dict[str, Any] | None:
     stored = _stored(client, hive_id)
     return None if stored is None else _settle(hive_id, stored)
 
 
-def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None) -> dict:
+def update(
+    client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None
+) -> dict[str, Any]:
     if not HIVE_ID.fullmatch(hive_id):
         raise HiveError(f"hive id {hive_id!r} must be letters, digits, dots, dashes or underscores")
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     parsed = parse(pairs)
+    naming = "name" in parsed or "ui" in parsed
 
     def write(stored: dict | None) -> dict:
         stored = stored or {}
@@ -251,7 +290,13 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
             if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
         }
         _check(_settle(hive_id, {**stored, **fields}))
-        return _drained({**_seeded(hive_id), **stored, **fields}, stored, drain)
+        merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
+        settled = _read_name(merged)
+        if naming and (derived := _unique(settled, _held(client, hive_id))) != settled:
+            merged["name"] = derived
+        if merged.get("max_agents") is None:
+            merged.pop("max_agents", None)
+        return _drained(merged, stored, drain)
 
     record = _settle(hive_id, _amend(client, hive_id, write))
     if hive_id != scope.member():
@@ -259,11 +304,27 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
     return record
 
 
-def beat(client, hive_id: str, fields: dict) -> None:
-    _amend(client, hive_id, lambda stored: {**_seeded(hive_id), **(stored or {}), **fields})
+def beat(client: Any, hive_id: str, fields: dict[str, Any]) -> None:
+    def write(stored: dict[str, Any] | None) -> dict[str, Any]:
+        merged = {**_seeded(hive_id), **(stored or {}), **fields}
+        registered = merged.get("registered_repos")
+        return {**merged, "repos": sorted({*merged["repos"], *registered})} if registered else merged
+
+    _amend(client, hive_id, write)
 
 
-def forget(client, hive_id: str) -> None:
+def register(client: Any, hive_id: str, name: str, repos: list[str]) -> None:
+    """Records the name and repos hive create gave a hive; every later heartbeat keeps those repos listed."""
+
+    def write(stored: dict[str, Any] | None) -> dict[str, Any]:
+        merged = {**_seeded(hive_id), **(stored or {})}
+        return {**merged, "name": name, "registered_repos": repos, "repos": sorted({*merged["repos"], *repos})}
+
+    _amend(client, hive_id, write)
+    _index(client, hive_id)
+
+
+def forget(client: Any, hive_id: str) -> None:
     _amend(client, hive_id, lambda stored: None)
     hive_state.indexed(client, hive_id, False)
 
@@ -275,20 +336,94 @@ def _index(client, hive_id: str) -> None:
         pass
 
 
-def hives(client) -> list[dict]:
+def hives(client: Any) -> list[dict[str, Any]]:
     return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
-def live(record: dict, now_ms: int) -> bool:
-    return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
+def live(record: Any, now_ms: int) -> bool:
+    """A fresh heartbeat counts only while the last finished beat, where the record carries one, is within the window."""
+    finished_at: int = record.get("beat_at", record["heartbeat_at"])
+    return (
+        record["heartbeat_at"] > 0
+        and now_ms - record["heartbeat_at"] <= LIVE_MS
+        and now_ms - finished_at <= BEAT_WINDOW_MS
+    )
 
 
-def touch(client, hive_id: str, now_ms: int) -> None:
-    def refresh(stored: dict | None):
-        return {**stored, "heartbeat_at": now_ms} if stored and "heartbeat_at" in stored else hive_state.KEEP
+def quiet(record: Mapping[str, Any], now_ms: int, window_ms: int = QUIET_MS) -> bool:
+    """A hive that has beaten at least once is quiet once its last heartbeat is older than ``window_ms``."""
+    beat: int = record.get("heartbeat_at", 0)
+    return beat > 0 and now_ms - beat > window_ms
+
+
+def touch(client: Any, hive_id: str, now_ms: int) -> None:
+    """Refreshes the heartbeat and seeds the finished beat once, so a first beat that never ends ages out."""
+
+    def refresh(stored: dict[str, Any] | None) -> object:
+        if not stored or "heartbeat_at" not in stored:
+            return hive_state.KEEP
+        return {"beat_at": now_ms, **stored, "heartbeat_at": now_ms}
 
     if "heartbeat_at" in (_amend(client, hive_id, refresh) or {}):
         client.pexpire(f"{key(hive_id)}:sessions", LIVE_MS)
+
+
+def finished(client: Any, hive_id: str, now_ms: int) -> None:
+    """Records the end of a whole daemon beat, which the headroom heartbeat never refreshes."""
+
+    def stamp(stored: dict[str, Any] | None) -> object:
+        return {**stored, "beat_at": now_ms} if stored else hive_state.KEEP
+
+    _amend(client, hive_id, stamp)
+
+
+def member_name() -> str:
+    """The pod or machine this process runs on, one member of the hive its credential names."""
+    return socket.gethostname()
+
+
+def join(client: Any, hive_id: str, member: str, now_ms: int, started: bool = False) -> None:
+    """Records member as live in hive_id, keeping its drain unless it just started, and forgets members gone quiet."""
+
+    def write(stored: dict[str, Any] | None) -> object:
+        if not stored:
+            return hive_state.KEEP
+        members = stored.get("members", {})
+        kept = {name: entry for name, entry in members.items() if now_ms - entry["heartbeat_at"] <= LIVE_MS}
+        draining = "no" if started else members.get(member, {}).get("draining", "no")
+        return {**stored, "members": {**kept, member: {"heartbeat_at": now_ms, "draining": draining}}}
+
+    _amend(client, hive_id, write)
+
+
+def _serving(members: dict[str, dict[str, Any]], now_ms: int) -> bool:
+    """True when a live member takes new agents."""
+    return any(entry["draining"] != "yes" and now_ms - entry["heartbeat_at"] <= LIVE_MS for entry in members.values())
+
+
+def leave(client: Any, hive_id: str, member: str, drain: Drain) -> bool:
+    """Stops member taking new agents; the whole hive drains only when no other live member takes them.
+
+    True when another member keeps the hive open."""
+    at = wall_ms()
+
+    def write(stored: dict[str, Any] | None) -> object:
+        stored = stored or {}
+        members = stored.get("members", {})
+        entry = {"heartbeat_at": at, **members.get(member, {}), "draining": "yes"}
+        record: dict[str, Any] = {**stored, "members": {**members, member: entry}}
+        if _serving(record["members"], at):
+            return record
+        return _drained({**record, "draining": "yes"}, stored, drain)
+
+    written: dict[str, Any] = _amend(client, hive_id, write)
+    return _serving(written["members"], at)
+
+
+def member_draining(client: Any, hive_id: str, member: str) -> bool:
+    """True when member of hive_id was told to take no new agents."""
+    record = show(client, hive_id) or {}
+    return record.get("members", {}).get(member, {}).get("draining") == "yes"
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:

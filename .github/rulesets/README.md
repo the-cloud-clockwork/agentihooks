@@ -9,10 +9,13 @@ admin role (`RepositoryRole` 5) and the agenticore GitHub App (`Integration`,
 its app id from the OpenBao `k8s/agenticore` field `GITHUB_APP_ID`), because
 GitHub honours a merge queue jump only for a bypass actor of the ruleset that
 holds the `merge_queue` rule. Pull request mode still lets those actors bypass
-linear history and the required check on a pull request merge, so
+linear history and the required check on a pull request merge.
 `dev-history.json` repeats deletion, force push, linear history and the
-`Gate — Required` check on dev with no bypass actors. A jump moves a pull
-request ahead in the queue; it still lands only on a passing gate.
+`Gate — Required` check on dev. It lists only the repository admin role
+(`RepositoryRole` 5) in `pull_request` mode, matching `dev-no-delete`, so an
+admin can merge a gate repair when a broken required check stops the queue.
+The App has no bypass in `dev-history`. Normal changes enter the queue and
+land on a passing gate.
 The antoncore reconcile also accepts the admin role in `always` mode, the
 fallback if a pull request mode jump is refused; `always` would also let an
 admin push to dev without a pull request, so it stays out of the payload

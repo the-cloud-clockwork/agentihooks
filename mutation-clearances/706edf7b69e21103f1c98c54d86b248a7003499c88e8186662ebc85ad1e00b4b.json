@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_copilot:735fe53043785a002d5af8aa56da50338feeba1607517f37eef6f4dabe67695b": {
+    "reader": "standards_reader",
+    "reason": "In `x_render_copilot`, the mutation changes only the static type argument of `typing.cast` on cast target `CopilotAdapter().mcp_entries`, from Callable[[dict[str, Any]], dict[str, Any]] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

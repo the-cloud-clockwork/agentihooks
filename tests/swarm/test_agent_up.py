@@ -174,16 +174,16 @@ def test_exit_refuses_an_operator_name_of_another_swarm(swarm):
 
 
 def test_the_tick_leaves_a_live_operator_agent_until_it_exits(swarm):
-    from scripts.swarm import tick
+    from scripts.tick.steps import agents as agent_steps
     from tests.swarm.test_tick import FakeRuntime
 
     rt = FakeRuntime()
     name = agent_up.up(swarm, "sw", OperatorRuntime(), "planner", 1000).name
     rt.live.add(name)
     config = swarm.config("sw")
-    assert tick._strays("sw", config, swarm, rt) == []
+    assert agent_steps._strays("sw", config, swarm, rt) == []
     agent_up.retire(swarm, "sw", name, 2000)
-    assert tick._strays("sw", config, swarm, rt) == [f"reaped stray {name}"]
+    assert agent_steps._strays("sw", config, swarm, rt) == [f"reaped stray {name}"]
 
 
 def _operator_launch(tmp_path, monkeypatch, **bounds):

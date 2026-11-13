@@ -267,17 +267,23 @@ def test_default_registry_preserves_timers_and_lifecycle_and_registers_reconcile
     assert callable(reactors["reconciler"].poll)
 
 
-@pytest.mark.parametrize("sweep", ["_verify", "_reap"])
-def test_legacy_tick_leaves_event_owned_execution_recovery_to_the_reconciler(rig, monkeypatch, sweep):
+@pytest.mark.parametrize(("owner", "sweep"), [("tick", "_verify"), ("agent_steps", "_reap")])
+def test_legacy_tick_leaves_event_owned_execution_recovery_to_the_reconciler(rig, monkeypatch, owner, sweep):
     from scripts.hub import reconciler
     from scripts.swarm import tick
+    from scripts.tick.steps import agents as agent_steps
 
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
     monkeypatch.setattr(reconciler, "open_bus", lambda _: rig.bus)
     runtime = Mock()
     runtime.live_names.return_value = set()
     runtime.bindings.return_value = {}
-    assert getattr(tick, sweep)("rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock()) == []
+    assert (
+        getattr(tick if owner == "tick" else agent_steps, sweep)(
+            "rig", rig.store, rig.ledger, runtime, {"task": rig.row}, rig.clock()
+        )
+        == []
+    )
     runtime.observe.assert_not_called()
     runtime.retire.assert_not_called()
     assert rig.store.agents("rig") == [rig.agent]
@@ -459,6 +465,24 @@ def test_an_exited_execution_whose_start_a_restore_removed_is_rebuilt_and_settle
     assert rig.row["claimed_by"] == ""
     assert len(rig.returned) == 1
     assert rig.store.agents("rig") == []
+
+
+def test_a_restore_orphaned_execution_waits_for_a_report_that_postdates_its_claim(rig, restored):
+    from scripts.hive import presence
+
+    rig.report["observed_at"] = rig.agent.launched_at - 1
+    rig.save()
+    restored.react.poll()
+    assert rig.row["state"] == "claimed"
+    assert rig.returned == []
+
+    rig.clock.return_value += 300_000
+    presence.beat(restored.bus, "hive", rig.clock())
+    rig.report["observed_at"] = rig.clock()
+    rig.save()
+    restored.react.poll()
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
 
 
 def test_a_running_execution_whose_start_a_restore_removed_settles_on_its_later_exit(rig, restored):

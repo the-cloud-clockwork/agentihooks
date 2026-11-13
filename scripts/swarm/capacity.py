@@ -1,6 +1,6 @@
 import json
 import sys
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -8,9 +8,10 @@ from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
-from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
-from scripts.swarm import autoscale, freeze, host_budget
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
+from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
@@ -74,11 +75,12 @@ def _known(environ: dict) -> set[str]:
     return filed | set(account_sessions.token_accounts(environ).values())
 
 
-def _claude(environ: dict, now: float) -> list[Account]:
+def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
-    fresh, _ = tokens.results(environ, now)
-    observed.update({result.account: (now, result) for result in fresh})
+    if refresh:
+        fresh, _ = tokens.results(environ, now)
+        observed.update({result.account: (now, result) for result in fresh})
     observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
     routed = _known(environ)
@@ -170,12 +172,13 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
-def _global(environ: dict, now: float) -> list[Account]:
+def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
     from scripts.routing import aggregate
 
     refused = _refused(environ)
     rows = []
-    for row in aggregate.current(now).values():
+    reports: dict[str, dict[str, Any]] = aggregate.current(now) if redis is None else aggregate.read(redis, now)
+    for row in reports.values():
         quota = row["quota"]
         five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
@@ -190,7 +193,10 @@ def _global(environ: dict, now: float) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (row["harness"], row["account"]) in refused:
+        if (quota and (quota.get("refused") or quota.get("expired"))) or (
+            row["harness"],
+            account_key(f"{row['account']}"),
+        ) in refused:
             cap = 0
         rows.append(
             Account(
@@ -212,26 +218,53 @@ def _global(environ: dict, now: float) -> list[Account]:
 
 
 def _refused(environ: dict) -> set[tuple[str, str]]:
-    """Claude accounts whose latest local probe the provider refused; hive quota reports carry no probe status."""
+    """Claude accounts whose latest local probe the provider refused; a hive reading carries its own refusal."""
     latest = {
         result.account: result
         for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
     }
-    return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
+    return {(balancer.HARNESS, account_key(account)) for account, result in latest.items() if balancer.refused(result)}
 
 
-def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
-    """Every account with its band cap; ``refresh`` probes stale Codex readings, which costs a Codex request."""
-    from scripts.routing import aggregate, reservation
+def probe(environ: dict[str, str], now: float) -> list[Account]:
+    """Probe stale Claude credentials and Codex readings, writing the caches a pass reads without ``refresh``."""
+    return _claude(environ, now, True) + _codex(environ, now, True)
+
+
+def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None) -> list[Account]:
+    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs.
+
+    A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says.
+    """
+    from scripts.routing import aggregate
 
     rows = (
-        _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
+        _global(environ, now, redis)
+        if redis is not None or aggregate.enabled(environ)
+        else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
+    return reserved_accounts(rows, environ)
+
+
+def reserved_accounts(rows: list[Account], environ: Mapping[str, str]) -> list[Account]:
+    """Close each harness's reserved master account for workers at the ceiling the quota hook enforces."""
+    from scripts.routing import reservation
+
     store = reservation._store(environ)
     for harness in LABELS:
         held = reservation.current(harness, environ)
         rows = latch(reserve(rows, held), held, store)
     return rows
+
+
+def hive_accounts(store: RedisStore) -> Callable[..., list[Account]]:
+    """A quota reader over the hive quota reports in ``store``, which a restarted hive controller reads at once."""
+
+    def read(environ: dict[str, str], now: float, refresh: bool) -> list[Account]:
+        """Every account with its band cap from the hive reports; ``refresh`` is ignored, hives probe their own."""
+        return accounts(environ, now, refresh=refresh, redis=store.redis)
+
+    return read
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
@@ -253,7 +286,11 @@ def latch(rows: list[Account], held: "Reservation | None", store: RedisStore | N
         return rows
     key = f"{ROOT}:reserved-closed:{held.harness}:{held.slug}"
     index = next(
-        (i for i, row in enumerate(rows) if (row.harness, row.name) == (held.harness, held.slug) and row.kind != API),
+        (
+            i
+            for i, row in enumerate(rows)
+            if row.harness == held.harness and account_key(row.name) == account_key(held.slug) and row.kind != API
+        ),
         None,
     )
     if index is None:
@@ -408,7 +445,7 @@ def _open(observations: list[Account], warned: dict) -> list[Account]:
     return [row for row in observations if (row.harness, row.name) not in warned]
 
 
-def _placeable(rows: list[Account]) -> dict:
+def _placeable(rows: list[Account]) -> dict[str, int]:
     return {
         h: sum(free_seats(row) for row in rows if row.harness == h and row.kind != API) for h in ("claude", "codex")
     }
@@ -451,7 +488,29 @@ def unspent(host: dict, spent: Callable[[int], int]) -> int | None:
     return max(0, host["room"] - spent(host["granted_at"]))
 
 
-def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:
+def quota_seats(observations: list[Account], warned: dict[tuple[str, str], Any]) -> int:
+    """The free quota seats autoscale places against, warned accounts and API keys left out."""
+    return sum(_placeable(_open(observations, warned)).values())
+
+
+def inputs_seats(inputs: ScaleInputs) -> int:
+    """The free quota seats of the autoscale inputs, their warned accounts left out."""
+    return quota_seats(inputs.observations, inputs.warned)
+
+
+def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dict[tuple[str, str], Any]:
+    """Each observed account past its quota handoff threshold, keyed by harness and name, with the window it crossed."""
+    from scripts.swarm import quota_handoff
+
+    thresholds = quota_handoff.Thresholds.from_env(environ)
+    return {
+        (row.harness, row.name): window for row in observations if (window := quota_handoff.trigger(row, thresholds))
+    }
+
+
+def autoscaled(
+    config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
+) -> tuple[SwarmConfig, dict[str, Any] | None]:
     if config.scaling != AUTO_SCALING:
         return config, None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
@@ -462,7 +521,9 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
     }
     demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
-    decision = autoscale.calculate(_busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous)
+    decision = autoscale.calculate(
+        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
+    )
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
@@ -472,23 +533,21 @@ def ready_work(
     slug: str, store: RedisStore, doc: dict[str, Any]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     from scripts.swarm import dispatcher
-    from scripts.swarm.tick import ready_in_order
+    from scripts.swarm.tick import ready_by_lane
 
     rows = {task["id"]: task for task in doc["tasks"]}
     dispatched = dispatcher.claim_key(store.config(slug), doc)
-    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
+    return rows, ready_by_lane(slug, store, rows, doc, LANES, dispatched)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
-    from scripts.swarm import quota_handoff
+def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:
+    """The tick's own scale inputs: ready work less fresh placement refusals, quota without a refresh, live agents."""
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
+    ready, _ = placement_ready(store, slug, ready, now_ms)
     observations = accounts(environ, now_ms / 1000, refresh=False)
-    thresholds = quota_handoff.Thresholds.from_env(environ)
-    warned = {
-        (row.harness, row.name): window for row in observations if (window := quota_handoff.trigger(row, thresholds))
-    }
+    warned = warned_accounts(observations, environ)
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     spent = spawn_counter(store, now_ms)
@@ -498,6 +557,12 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
 
         host = deployed.worker_host(environ, slug)
     return ScaleInputs(observations, agents, demand, host, read(store, slug), warned, spent, now_ms)
+
+
+def tick_host(inputs: ScaleInputs) -> dict[str, Any] | None:
+    """The host room the tick last granted, so a preview autoscales on the room the tick spawns against."""
+    stored = inputs.previous.get("host") or {}
+    return stored if stored.get("room") is not None and "granted_at" in stored else None
 
 
 def spawn_counter(store: RedisStore, now_ms: int) -> Callable[[int], int]:
@@ -551,8 +616,10 @@ def _without_work(lanes: list[str]) -> str:
 
 def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list, warned: dict) -> list:
     seats = offered(observations, warned)
-    master = config.lanes.get("master")
+    master = master_pin.lane(config)
     if master is None or master.get("agent") == "codex":
+        return seats
+    if master_pin.pinned(master, observations, agents, config.slug):
         return seats
     if any(
         agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
@@ -633,13 +700,17 @@ def placement_ready(
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     from scripts.hive import placement_waits
 
-    refused = placement_waits.read(store, slug)
+    refused: dict[str, dict[str, Any]] = placement_waits.read(store, slug)
     eligible, actions = {}, []
     for lane, tasks in ready.items():
         eligible[lane] = []
         for task in tasks:
             wait = refused.get(task["id"])
-            if wait and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS:
+            if (
+                wait
+                and wait["lane"] == lane
+                and now_ms - wait.get("seen_at", wait["started_at"]) < placement_waits.FRESH_MS
+            ):
                 actions.append(f"capacity skipped {lane} task {task['id']}: fresh placement refusal: {wait['reason']}")
             else:
                 eligible[lane].append(task)
@@ -653,7 +724,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     ready, skipped = placement_ready(store, slug, ready, now_ms)
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None

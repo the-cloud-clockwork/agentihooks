@@ -80,7 +80,7 @@ class TaskAuthority:
         return recovered
 
     def _execution(self, doc: dict, execution_id: str) -> AgentRecord:
-        row = doc["executions"].get(execution_id) or doc["archive"].get(execution_id)
+        row = fencing.execution_row(self.store, doc, execution_id)
         if not row:
             self.store.execution_registry.conflict(
                 self.slug, "unknown execution identity; display labels cannot identify attempts"

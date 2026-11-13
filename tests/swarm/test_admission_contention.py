@@ -11,7 +11,8 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("operation", ["execution", "admission", "renewal"])
 @pytest.mark.parametrize("writer", ["none", "ledger", "tick", "registry"])
 def test_admission_commits_during_controller_writes(monkeypatch, operation, writer):
-    from scripts.swarm.controller import FencedLedger, keep_tick, take_tick_lock
+    from scripts.swarm import lease
+    from scripts.swarm.controller import keep_tick, take_tick_lock
     from scripts.swarm.store import AgentRecord, SwarmError
     from tests.sv2_ctl02_cases import build
 
@@ -20,7 +21,7 @@ def test_admission_commits_during_controller_writes(monkeypatch, operation, writ
     authority.authorize(token)
     claim = authority.admit(token, 100) if operation == "renewal" else None
     lock = take_tick_lock(store, "fixture", controller.held, 1000)
-    ledger = FencedLedger(store, "fixture", controller.held, SimpleNamespace(read=lambda: None))
+    ledger = SimpleNamespace(read=lambda: lease.renew(store, "fixture", controller.held))
     original = store.redis.pipeline
     attempts = []
     active = [False]

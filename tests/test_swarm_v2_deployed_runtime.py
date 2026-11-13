@@ -3,6 +3,7 @@ import socket
 from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -527,6 +528,77 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
     ]
 
 
+@pytest.mark.parametrize(
+    ("reserved", "expected"),
+    [({}, (2, 1)), ({ACCOUNT.replace("-", "_"): 2, ACCOUNT: 1, "codex-fixtureatexample-com": 4}, (3, 4))],
+)
+def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_quota_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reserved: dict[str, int], expected: tuple[int, int]
+) -> None:
+    from scripts.hive import registry as hives
+
+    store = _store()
+    other = "codex-fixtureatexample-com"
+
+    def fleet(given: RedisStore, now: int) -> dict[str, int]:
+        assert given.redis is store.redis and now >= beat
+        return dict(reserved)
+
+    monkeypatch.setattr(deployed, "fleet_held", fleet)
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof", keys=(ACCOUNT, other)))
+    beat = lease.now_ms(store)
+    hives.update(store.redis, "hive-a", ["max-agents=8"])
+    hives.beat(
+        store.redis,
+        "hive-a",
+        {
+            "heartbeat_at": beat,
+            "beat_at": beat,
+            "slots": [
+                {"harness": "claude", "account": ACCOUNT.replace("-", "_"), "kind": "subscription", "cap": 6},
+                {"harness": "codex", "account": other, "kind": "subscription", "cap": 6},
+            ],
+        },
+    )
+    sessions = {f"claude:{ACCOUNT.replace('-', '_')}": 2, f"codex:{other}": 1}
+    store.redis.set(f"{hives.key('hive-a')}:sessions", json.dumps(sessions))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    assert service is not None
+    runtime: Any = service.runtime
+    try:
+        config = replace(store.config(SLUG), max_eng=2, max_ci=0)
+        runtime.herdr_runtime.host = lambda: None
+        decision = runtime.quota_capacity(config, [], 1_800_000_000, {"eng": 2, "ci": 0, "plan": 0})
+    finally:
+        service.stop()
+
+    assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [
+        (ACCOUNT, expected[0]),
+        (other, expected[1]),
+    ]
+
+
+def test_held_reads_hive_sessions_at_the_clock_in_seconds_and_keeps_an_idle_account_at_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = object()
+    store: Any = type("Store", (), {"redis": redis})()
+
+    def fleet(given: object, now: int) -> dict[str, int]:
+        assert given is store and now == 1_800_000_000
+        return {}
+
+    def sessions(given: object, now: float) -> dict[str, int]:
+        assert given is redis and now == 1_800_000
+        return {"idle": 0, "busy": 2}
+
+    monkeypatch.setattr(deployed, "fleet_held", fleet)
+    monkeypatch.setattr(deployed.aggregate, "sessions", sessions)
+    capacity: Any = type("Capacity", (), {"store": store, "clock": staticmethod(lambda: 1_800_000_000)})()
+
+    assert deployed._held(capacity) == {"idle": 0, "busy": 2}
+
+
 class PoolPods(Pods):
     def __init__(self, namespace, pods):
         super().__init__(namespace)
@@ -605,9 +677,9 @@ class QuotaPods(PoolPods):
 
 
 def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quota_with_no_pool_declared(
-    tmp_path, monkeypatch
-):
-    def own_node(*args, **kwargs):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def own_node(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("the deployed controller read its own node")
 
     monkeypatch.setattr(host_budget, "read_host", own_node)
@@ -620,7 +692,7 @@ def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quot
     finally:
         service.stop()
 
-    assert pods.selectors == []
+    assert pods.selectors == [""]
     assert (decision["host"]["room"], decision["host"]["limit"], decision["host"]["reason"]) == (
         2,
         "quota pods",
@@ -1069,6 +1141,7 @@ def test_a_scheduled_pass_gives_each_swarm_its_own_runtime_or_the_shared_one(mon
         lambda store, slug, ledger, runtime, messenger, scheduled: given.append((slug, runtime, scheduled)) or [],
     )
 
+    monkeypatch.setattr(loop, "tickable", lambda ledger, slug: True)
     loop.run_once(store, runtime="shared", runtimes={SLUG: "deployed"})
 
     assert sorted(given) == [(SLUG, "deployed", True), ("other", "shared", True)]
@@ -1182,6 +1255,35 @@ def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeyp
 
     assert launch.hand.handed is True
     assert json.loads(pods.maps[0]["data"]["launch.json"])["exporter"] == ["python", "-m", "exporter"]
+
+
+def test_the_tick_runtime_routes_claude_and_codex_and_reads_the_planned_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof"))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    assert service is not None
+    try:
+        runtime: Any = service.runtime
+        launcher = runtime.launch.func.__self__
+        route = runtime.herdr_runtime.quota_accounts.route
+        runtime.herdr_runtime._quota_tasks = {"t1": "codex"}
+        planned = (launcher.planned_harness("t1"), launcher.planned_harness("t2"))
+    finally:
+        service.stop()
+
+    assert planned == ("codex", None)
+    assert launcher.accounts == route.choose
+    assert {harness: (found.harness, found.keys.index) for harness, found in route.routes.items()} == {
+        "claude": ("claude", "swarm-claude-accounts"),
+        "codex": ("codex", "swarm-codex-accounts"),
+    }
+    for found in route.routes.values():
+        assert found.quota.slug == SLUG
+        with pytest.raises(GrantRefused) as refused:
+            found.quota.authorize("not-a-grant")
+        assert str(refused.value) == "launch grant is malformed"
 
 
 @pytest.mark.parametrize("value", [None, ""])
@@ -1625,3 +1727,16 @@ def test_a_controller_keeping_no_saved_machines_leaves_kubernetes_command_unsupp
         assert Capability.COMMAND not in kubernetes.capabilities
     finally:
         service.stop()
+
+
+@pytest.mark.parametrize(("task", "harness"), [({"harness": "codex"}, "codex"), ({}, "claude")])
+def test_a_launch_record_names_the_harness_its_task_was_planned_on(
+    tmp_path: Path, registry: object, task: dict[str, str], harness: str
+) -> None:
+    workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    assert workers is not None
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", {**_task(), **task}))
+
+    assert record["harness"] == harness

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_session_credential:d6309181790c0e1741a82513d401186a89024879fa40ac9ca587e1fb0c5f0748": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of a header name passed to email.message.Message.get, whose lookup is case insensitive, so the same header is read and the same credential decision follows."
+  }
+}

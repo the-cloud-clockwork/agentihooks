@@ -1,6 +1,7 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
 import json
+from typing import Any
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
@@ -606,9 +607,22 @@ def finish_steps(steps, me, name, task):
     return [f"Your task was parked on branch {branch} until its dependency finished.", *steps]
 
 
-def task_steps(task, me, led, name, phase, autonomy):
+def resumed_steps(steps: list[str], name: str, branch: str) -> list[str]:
+    """Return a parked task's kind steps cut from the branch recorded on the task."""
+    cut = f"wt.sh new {name}"
+    origin = f"{cut} --from origin/{branch}"
+    head = (
+        f"Your task was parked on branch {branch} until its dependency finished: continue its work from that "
+        f"branch with {origin}."
+    )
+    return [head, *(step.replace(cut, origin) for step in steps)]
+
+
+def task_steps(task: dict[str, Any], me: str, led: str, name: str, phase: str, autonomy: str) -> list[str]:
     kind = ledger_kinds.kind(task)
     steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
+    if kind not in STACKED_KINDS and task.get("parked_on") and task.get("branch"):
+        return resumed_steps(steps, naming.plain(name), task["branch"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
     if task.get("parked_on") and _verdict(task).get("continue_from") == "fresh":
@@ -692,11 +706,12 @@ def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     return [
         "Work it end to end, then stop:",
         "1. Read steering.md: project and mission intent, dependency phase evidence and any review note.",
-        f"2. Slice only phase {phase}. Edit no code. Write the slice as a markdown plan: the plan you leave plan mode "
-        "with, or plan.md in your work folder.",
-        f"3. Publish the plan before adding tasks: {led} publish-plan <plan file> --phase {phase}. {PUBLISHED}, links "
-        "and comments the phase, and every task you add in this phase carries the link.",
-        f"4. Add tasks with {led} task add <id> <title> --phase {phase} "
+        f"2. Slice only phase {phase}. Edit no code. Unless steering.md lists slice names, write the slice as a "
+        "markdown plan: the plan you leave plan mode with, or plan.md in your work folder.",
+        "3. When steering.md lists slice names, the phase plan is already published: reuse those slices and do not "
+        f"publish again. Otherwise publish the plan before adding tasks: {led} publish-plan <plan file> --phase "
+        f"{phase}. {PUBLISHED}, links and comments the phase, and every task you add in this phase carries the link.",
+        f"4. Add one task per slice with {led} task add <id> <title> --phase {phase} --plan-slice <slice name> "
         '--lane <eng or ci> --kind <kind> --description "<scope and Done when sentence>" '
         "--depends-on <ids> --territory <areas>; include --must, --check and --judge for work beyond code.",
         "5. Keep each code or ci task to one pull request, at most six territory areas and twelve tasks in the slice.",

@@ -670,7 +670,7 @@ def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
     monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
     store = SimpleNamespace(redis=admin)
     plan = remove.Plan("m1", "h1", "k8s/agentihooks-hive-h1", signer=signed)
-    assert remove.remove(store, None, plan, remove.Host()) == ["member: revoked"]
+    assert remove.remove(store, None, plan, remove.Host()) == ["member: revoked", f"signer: {remove.NO_SIGNER}"]
     assert calls == [(admin, "m1", signed, False)]
 
 
@@ -686,7 +686,7 @@ def _offline_signer() -> nats_grant.Signer:
     return nats_grant.Signer(operator, nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222", operator.public)
 
 
-def test_a_member_credential_carries_exactly_the_hive_member_claims():
+def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     signed = _offline_signer()
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
@@ -697,6 +697,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "hive-presence",
         "hive-executions",
         "execution-starts",
+        "inbox",
     )
     publish = [
         "swarm.*.execution.>",

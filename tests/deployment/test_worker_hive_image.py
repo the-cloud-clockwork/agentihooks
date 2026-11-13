@@ -24,9 +24,9 @@ INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm
 WHEEL = {"pyproject.toml", "README.md", "hooks/", "scripts/"}
 
 
-def builds():
+def builds() -> list[str]:
     joined = re.sub(r"\\\n\s*", " ", PROOF.read_text())
-    return [line.strip() for line in joined.splitlines() if "docker build" in line]
+    return [line.strip() for line in joined.splitlines() if re.match(r"docker build(?:x build)? ", line.strip())]
 
 
 def judge(tmp_path, *, diff=0, read=0, fetch=0):
@@ -93,6 +93,8 @@ def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
     wheel = worker_stage("wheel")
     assert wheel.startswith("FROM source-${AGENTIHOOKS_SOURCE} AS wheel\n")
     assert "COPY" not in wheel
+    assert "ARG AGENTIHOOKS_VERSION=0.0.0\n" in wheel
+    assert 'SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel' in wheel
     assert "ADD" not in wheel
 
 
@@ -104,13 +106,34 @@ def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it
     assert all(line.startswith("COPY --link=true ") for line in hive.splitlines() if line.startswith("COPY"))
     assert "COPY --link=true --from=overlay /opt/venv/ /opt/venv/\n" in hive
     overlay = worker_stage("overlay")
-    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt" in overlay
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \\\n" in overlay
     assert "lib/python3.12/site-packages/pip " in overlay
     assert (
         "useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker"
         in (ROOT / "docker/swarm-node/Dockerfile").read_text()
     )
     assert 'test "$(getent passwd worker | cut -d: -f7)" = /bin/bash' in PROOF.read_text()
+
+
+def test_hive_build_tools_install_in_a_layer_cached_apart_from_the_source() -> None:
+    env = worker_stage("build-env")
+    assert env.startswith("FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build-env\n")
+    assert re.findall(r"^COPY (.+) \S+$", env, re.M) == ["pyproject.toml"]
+    assert "['build-system']['requires']" in env
+    assert "r.startswith('ruff==')" in env
+    assert "python -m venv /opt/venv" in env
+    assert "/opt/venv/bin/pip install --no-cache-dir -r /build-env/tools.txt" in env
+    assert worker_stage("source-local").startswith("FROM build-env AS source-local\n")
+    assert worker_stage("source-git").startswith("FROM build-env AS source-git\n")
+    wheel = worker_stage("wheel")
+    assert "pip wheel --no-deps --no-build-isolation --wheel-dir /wheels ." in wheel
+    assert "open('pyproject.toml', 'rb'))['build-system']['requires']" in wheel
+    assert wheel.index("pip install --no-cache-dir -r /build-env/source-requires.txt") < wheel.index("pip wheel")
+    assert "r.startswith('ruff==')])\" > /wheels/tools.txt" in wheel
+    overlay = worker_stage("overlay")
+    assert overlay.startswith("FROM build-env AS overlay\n")
+    assert "python -m venv" not in overlay
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \\\n" in overlay
 
 
 def test_hive_image_can_install_agentihooks_from_the_local_build_context():
@@ -121,6 +144,58 @@ def test_hive_image_can_install_agentihooks_from_the_local_build_context():
     allowed = (ROOT / "deploy/worker/Dockerfile.dockerignore").read_text().splitlines()
     for source in sources:
         assert f"!{source}" in allowed or f"!{source}/" in allowed, source
+
+
+def test_kind_proof_builds_the_checkout_and_reuses_layers_without_skipping_the_pods() -> None:
+    hive = builds()[1]
+    assert "--build-arg AGENTIHOOKS_SOURCE=local" in hive
+    assert '"${hive_layers[@]}"' in hive
+    proof = PROOF.read_text()
+    assert '--cache-from "type=local,src=$HIVE_LAYER_CACHE"' in proof
+    assert '--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max,compression=uncompressed"' in proof
+    steps = hive_jobs()["kind"]["steps"]
+    restore = next(step for step in steps if step.get("uses") == "actions/cache/restore@v4")
+    save = next(step for step in steps if step.get("uses") == "actions/cache/save@v4")
+    build = next(step for step in steps if "kind-proof.sh" in step.get("run", ""))
+    assert restore["with"]["path"] == save["with"]["path"]
+    assert restore["with"]["restore-keys"].startswith("worker-hive-layers-")
+    assert "HIVE_LAYER_CACHE" in build["env"]
+    assert "if" not in build
+    assert proof.index("in_pod init ") > proof.index("worker_hive_image_build_seconds=")
+
+
+def test_kind_proof_keeps_base_layers_in_the_registry_until_the_pods_pull_them() -> None:
+    steps = hive_jobs()["kind"]["steps"]
+    builder = next(step for step in steps if step.get("uses") == "docker/setup-buildx-action@v3")
+    assert builder["with"]["driver"] == "docker-container"
+    assert builder["with"]["driver-opts"] == "network=host"
+    assert '[registry."localhost:5001"]' in builder["with"]["buildkitd-config-inline"]
+    assert "http = true" in builder["with"]["buildkitd-config-inline"]
+    proof = PROOF.read_text()
+    assert all(build.startswith("docker buildx build ") for build in builds())
+    assert "worker_image=localhost:5001/worker-base:dev" in proof
+    assert 'docker buildx imagetools inspect "$image"' in proof
+    assert "docker image inspect" not in proof
+    assert "--load" not in proof
+    assert f"for warm in {BASE}" not in proof
+    publish = next(step for step in steps if step.get("name") == "Publish the proven hive worker image")
+    assert "docker buildx imagetools create" in publish["run"]
+    assert "docker pull" not in publish["run"]
+    assert "docker tag" not in publish["run"]
+
+
+def test_kind_registry_outlives_publication_and_is_always_removed() -> None:
+    steps = hive_jobs()["kind"]["steps"]
+    build = next(step for step in steps if "kind-proof.sh" in step.get("run", ""))
+    assert build["env"]["HIVE_REGISTRY_KEEP"] == "true"
+    publish = next(i for i, step in enumerate(steps) if step.get("name") == "Publish the proven hive worker image")
+    cleanup = next(i for i, step in enumerate(steps) if step.get("name") == "Remove the worker hive image registry")
+    assert cleanup > publish
+    assert steps[cleanup]["if"] == "always()"
+    assert 'docker rm -f "$(cat "$HOME/scratchpad/worker-hive-proof/registry.txt")"' in steps[cleanup]["run"]
+    proof = PROOF.read_text()
+    assert 'if [[ ${HIVE_REGISTRY_KEEP:-false} != true ]]; then\n    docker rm -f "$cluster-registry"' in proof
+    assert proof.index('> "$out/registry.txt"') < proof.index("kind create cluster")
 
 
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
@@ -203,6 +278,37 @@ def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home(
         assert f"&& {check} " in tools[0], check
     _, spec = in_pod(tmp_path, "tools", "true")
     assert spec == {"containers": [{"name": "tools", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]}
+
+
+def test_hive_image_links_the_headless_browser_libraries_onto_the_base() -> None:
+    libraries = worker_stage("browser-libs")
+    for package in ("libglib2.0-0", "libnss3", "libnspr4", "libgbm1", "libxkbcommon0", "libasound2", "libatspi2.0-0"):
+        assert f" {package} " in libraries, package
+    assert "comm -13 /base-packages -" in libraries
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    hive = dockerfile[dockerfile.rindex("\nFROM ${WORKER_IMAGE}\n") + 1 :]
+    assert "COPY --link=true --from=browser-libs /browser-libs/ /\n" in hive
+
+
+def test_kind_proof_launches_the_headless_browser_at_the_checked_viewport(tmp_path: Path) -> None:
+    lines = PROOF.read_text().splitlines()
+    probes = [line for line in lines if line.startswith("in_pod browser '")]
+    assert len(probes) == 1
+    assert probes[0].endswith("' &")
+    for check in (
+        "npx playwright install --only-shell chromium",
+        "viewport: {width: 1920, height: 1080}",
+        'page.goto(\\"about:blank\\")',
+        'size !== \\"1920 by 1080\\"',
+        "process.exit(1)",
+    ):
+        assert check in probes[0], check
+    assert lines.index('wait "$cluster_pid"') < lines.index(probes[0])
+    assert lines.index('wait "$browser_pid"') < lines.index("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256")
+    _, spec = in_pod(tmp_path, "browser", "true")
+    assert spec == {
+        "containers": [{"name": "browser", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]
+    }
 
 
 def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
@@ -360,7 +466,7 @@ def hive_jobs():
     return yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())["jobs"]
 
 
-def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_proof():
+def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_proof() -> None:
     jobs = hive_jobs()
     kind = jobs["kind"]
     assert "publish" not in jobs
@@ -373,7 +479,8 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
     assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
     publish = next(step for step in kind["steps"] if step.get("name") == "Publish the proven hive worker image")
-    assert "docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/" in publish["run"]
+    assert "docker buildx imagetools create --tag ghcr.io/" in publish["run"]
+    assert "localhost:5001/agentihooks-hive-worker:dev" in publish["run"]
 
 
 @pytest.mark.parametrize(("installed", "downloads"), [(True, 0), (False, 2)])
@@ -416,7 +523,9 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
     assert publish["run"] == 'bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"\n'
 
 
-def release_hive(tmp_path, *, version, candidate="not found", latest="true"):
+def release_hive(
+    tmp_path: Path, *, version: str, candidate: str = "not found", latest: str = "true", newest: str = "v2.1.7"
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -428,12 +537,21 @@ def release_hive(tmp_path, *, version, candidate="not found", latest="true"):
         '  echo "ERROR: $4: $answer" >&2; exit 1\nfi\n'
     )
     (tools / "docker").chmod(0o755)
+    (tools / "git").write_text(
+        '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$GIT_LOG"\n'
+        '[[ "$1 $2 $3 $4" == "ls-remote --tags --refs origin" ]] || exit 2\n'
+        '[[ "$FAKE_NEWEST" == unreachable ]] && { echo "fatal: unable to access origin" >&2; exit 128; }\n'
+        'for tag in v2.1.6 v2.1.7 v2.1.7rc1 "$FAKE_NEWEST" v2.1.10-beta; do printf "%040d\\trefs/tags/%s\\n" 0 "$tag"; done\n'
+    )
+    (tools / "git").chmod(0o755)
     env = {
         **os.environ,
         "PATH": f"{tools}:{os.environ['PATH']}",
         "COMMAND_LOG": str(log),
+        "GIT_LOG": str(tmp_path / "git"),
         "FAKE_VERSION": version,
         "FAKE_CANDIDATE": candidate,
+        "FAKE_NEWEST": newest,
     }
     result = subprocess.run(
         ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", latest, "abc123"],
@@ -475,6 +593,7 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
     assert build.startswith("docker build -f deploy/worker/Dockerfile ")
     assert "--build-arg WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:2.1.7" in build
     assert "--build-arg AGENTIHOOKS_REF=abc123" in build
+    assert "--build-arg AGENTIHOOKS_VERSION=2.1.7" in build
     assert build.endswith("--tag registry/hive:abc123 .")
     assert proof.startswith("docker run --rm ") and "agentihooks init --profile engineer" in proof
     release = ["docker buildx imagetools create --tag registry/hive:release registry/hive:abc123"]
@@ -483,6 +602,33 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
         *(release if latest == "true" else []),
         "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
     ]
+
+
+@pytest.mark.parametrize("newest", ["v2.1.8", "v2.1.10", "v3.0.0"])
+@pytest.mark.parametrize("candidate", ["not found", "published"])
+def test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version(
+    tmp_path: Path, newest: str, candidate: str
+) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate=candidate, newest=newest)
+    assert result.returncode == 0, result.stderr
+    assert all(":release " not in command for command in commands)
+    assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
+    assert f"the newest release is {newest}, not v2.1.7" in result.stdout
+    assert (tmp_path / "git").read_text().splitlines() == ["git ls-remote --tags --refs origin"]
+
+
+def test_a_release_the_image_job_did_not_name_latest_reads_no_tags(tmp_path: Path) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate="published", latest="false")
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "git").exists()
+    assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
+
+
+def test_a_failed_newest_release_read_fails_before_moving_any_tag(tmp_path: Path) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate="published", newest="unreachable")
+    assert result.returncode != 0
+    assert "unable to access" in result.stderr
+    assert all("imagetools create" not in command for command in commands)
 
 
 @pytest.mark.parametrize(("version", "candidate"), [("unauthorized", "not found"), ("not found", "unauthorized")])
@@ -498,31 +644,32 @@ def test_the_proven_image_skips_the_artifact_round_trip():
     assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])
 
 
-def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds():
+def test_kind_proof_warms_redis_without_downloading_the_worker_base_twice() -> None:
     lines = PROOF.read_text().splitlines()
     start = lines.index("{")
     assert lines[start + 1].startswith('  kind create cluster --name "$cluster"')
     registry = (
         'docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null'
     )
-    assert lines[start - 1] == registry
+    assert lines[start - 2] == registry
+    assert lines[start - 1] == 'printf \'%s\\n\' "$cluster-registry" > "$out/registry.txt"'
     assert lines[start + 2 : start + 5] == [
         '  docker network connect kind "$cluster-registry"',
         '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
         '  printf \'[host."http://%s:5000"]\\n\' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml',
     ]
     assert lines[start + 5 : start + 8] == [
-        f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
+        "  for warm in mirror.gcr.io/library/redis:7-alpine; do",
         '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
         "  done",
     ]
     assert lines[lines.index("EOF") + 1] == '} > "$out/cluster.log" 2>&1 &'
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
-    assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
+    assert lines.index('    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
         '  kind delete cluster --name "$cluster"'
     )
-    assert lines.index('docker image inspect --format \'{{.Id}}\' "$image" > "$out/image.txt"') < lines.index(
+    assert lines.index('docker buildx imagetools inspect "$image" > "$out/image.txt"') < lines.index(
         'wait "$cluster_pid"'
     )
 

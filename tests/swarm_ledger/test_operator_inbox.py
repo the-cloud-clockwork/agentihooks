@@ -64,6 +64,38 @@ def test_an_agent_write_through_the_server_sends_nothing(inbox):
     assert ledger_server.relay_to_inbox(SLUG, state) == []
 
 
+@pytest.mark.wall_clock
+def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+    from typing import cast
+
+    from scripts.events import memory
+    from scripts.events.bus import Bus
+    from scripts.events.config import BusConfig
+    from scripts.inbox import bus
+
+    release = threading.Event()
+
+    def hanging() -> Bus:
+        release.wait(5)
+        return cast(Bus, memory.open_bus(BusConfig()))
+
+    publisher = bus.SeatPublisher(hanging)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
+    phase = make_ledger()
+    start = time.monotonic()
+    state, _ = core.sync(SLUG, ops=[comment(phase, "c-3")])
+    [item] = ledger_server.relay_to_inbox(SLUG, state)
+    took = time.monotonic() - start
+    release.set()
+    assert took < 1
+    assert inbox.get(item.id).state == "pending"
+
+
 def hook_state(*revs):
     events = [
         {

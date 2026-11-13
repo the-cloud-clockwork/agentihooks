@@ -96,10 +96,25 @@ def test_a_post_routes_the_agent_token(signing):
     assert (recorded.status, body(bare)) == (403, {"error": {"code": "forbidden", "message": "refused"}})
 
 
+def test_exchange_passes_the_page_credential_of_its_ledger(signing: None) -> None:
+    headers = {"X-Ledger-Token": "page"}
+
+    with (
+        patch.object(authority, "page_credential", return_value="page") as page,
+        patch.object(authority, "credential_caller", return_value="") as checked,
+    ):
+        reply = service.exchange(headers, SLUG)
+
+    page.assert_called_once_with(SLUG)
+    checked.assert_called_once_with(headers, "page", SLUG)
+    assert tokens.verify(SIGNING, reply["token"], SLUG) == ""
+
+
 def test_exchange_reads_the_exact_controller_header(signing):
     headers = {"X-Controller-Credential": "held"}
 
     with (
+        patch.object(authority, "page_credential", return_value=""),
         patch.object(authority, "credential_caller", return_value=None) as legacy,
         patch.object(authority, "controller_credential", return_value=True) as controller,
     ):
@@ -113,6 +128,7 @@ def test_exchange_reads_the_exact_controller_header(signing):
 
 def test_exchange_prefers_the_credential_principal(signing):
     with (
+        patch.object(authority, "page_credential", return_value=""),
         patch.object(authority, "credential_caller", return_value=WORKER),
         patch.object(authority, "controller_credential", side_effect=AssertionError("checked the controller")),
     ):

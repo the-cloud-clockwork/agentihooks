@@ -1,23 +1,31 @@
 import json
 import threading
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 from nats.js.errors import BucketNotFoundError
 
-from scripts import session_bands
+from scripts import session_bands, updater
 from scripts.hive import account_slots, daemon, registry
 
 pytestmark = pytest.mark.unit
 
 PUBLISH_HEADROOM = daemon.publish_headroom
 PUBLISH_HERDR_STATS = daemon.publish_herdr_stats
+REFRESH_READY = daemon.refresh_ready
 TIMER_STATE = daemon.timer_state
 
 
 @pytest.fixture(autouse=True)
 def timer_state(monkeypatch):
     monkeypatch.setattr(daemon, "timer_state", lambda waiter: waiter)
+
+
+@pytest.fixture(autouse=True)
+def no_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(daemon, "emit_presence", lambda redis, hive, now_ms: None)
 
 
 @pytest.fixture
@@ -71,6 +79,7 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert record["name"] == "Worker"
     assert record["max_agents"] == 8
     assert record["heartbeat_at"] == 123456
+    assert record["beat_at"] == 123456
     for field in ("slots", "interactive", "repos"):
         assert record[field] == report[field]
     for field in ("sessions", "quota"):
@@ -530,18 +539,80 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
     assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
 
 
-@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
-def test_headroom_logs_and_ends_when_its_wait_loses_the_connection(monkeypatch, capsys, error):
-    from redis import exceptions
-
+def test_headroom_emits_presence_after_each_liveness_touch(monkeypatch):
     from scripts.hive import headroom
 
-    def wait(seconds, state, timeout):
-        raise getattr(exceptions, error)("gone")
+    order = []
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: order.append(("headroom", hive, now_ms)))
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: order.append(("touch", hive, now_ms)))
+    monkeypatch.setattr(
+        daemon, "emit_presence", lambda client, hive, now_ms: order.append(("presence", client, hive, now_ms))
+    )
+    monkeypatch.setattr(daemon.time, "time", lambda: 3)
+    stop, _, _ = _paced(monkeypatch, 2)
+    client: Any = object()
+    PUBLISH_HEADROOM(client, client, "local", stop)
+    assert order == [("headroom", "local", 3_000), ("touch", "local", 3_000), ("presence", client, "local", 3_000)]
+
+
+def test_a_failed_presence_emit_is_logged_and_keeps_the_cadence(monkeypatch, capsys):
+    from scripts.hive import headroom
+
+    touched = []
+
+    def fail(client, hive, now_ms):
+        raise OSError("proc gone")
+
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: touched.append(now_ms))
+    monkeypatch.setattr(daemon, "emit_presence", fail)
+    monkeypatch.setattr(daemon.time, "time", lambda: 1)
+    stop, _, _ = _paced(monkeypatch, 3)
+    client: Any = object()
+    PUBLISH_HEADROOM(client, client, "local", stop)
+    assert touched == [1_000, 1_000]
+    assert capsys.readouterr().err == "hive presence emit failed (OSError: proc gone)\n" * 2
+
+
+@pytest.mark.feature("hive-ready-through-launch")
+def test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval(capsys: pytest.CaptureFixture[str]) -> None:
+    stop = Mock(spec=threading.Event)
+    daemon._headroom_wait_failed(OSError("gone"), stop)
+    stop.wait.assert_called_once_with(daemon.HEADROOM_SECONDS)
+    assert capsys.readouterr().err == "hive headroom wait failed (OSError: gone)\n"
+
+
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError", "NoPermissionError", "ResponseError", "OSError"])
+@pytest.mark.feature("hive-ready-through-launch")
+def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: str
+) -> None:
+    from redis import exceptions
+
+    from scripts.hive import headroom, orders
+
+    class Instant(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            return self.is_set()
+
+    stop, waits, published = Instant(), [], []
+    failure = {"OSError": OSError}.get(error) or getattr(exceptions, error)
+
+    def wait(seconds: float, state: object, timeout: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 1:
+            raise failure("gone")
+        if len(waits) == 3:
+            stop.set()
 
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
-    monkeypatch.setattr(headroom, "publish", Mock(side_effect=AssertionError("published")))
-    PUBLISH_HEADROOM(object(), object(), "local", threading.Event())
+    monkeypatch.setattr(daemon, "HEADROOM_SECONDS", 0)
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: published.append(hive))
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    assert len(waits) == 3
+    assert published == ["local"]
     assert capsys.readouterr().err == f"hive headroom wait failed ({error}: gone)\n"
 
 
@@ -576,6 +647,181 @@ def test_headroom_keeps_publishing_while_a_beat_blocks(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
     assert calls[:3] == [(connection, "local")] * 3
+
+
+def test_the_ready_marker_stays_fresh_while_a_slow_launch_blocks_the_beat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+    import time
+
+    from scripts.hive import headroom, orders, rollout
+
+    marker = tmp_path / "ready"
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "publish_headroom", PUBLISH_HEADROOM)
+    monkeypatch.setattr(daemon, "scheduled_wait", lambda seconds, state, timeout: threading.Event().wait(0.001))
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
+    monkeypatch.setattr(registry, "show", lambda client, hive: {})
+    refreshed, started, beats, fresh = threading.Event(), [], [], []
+
+    def refresh() -> None:
+        REFRESH_READY()
+        refreshed.set()
+
+    class Recorded(threading.Thread):
+        def start(self) -> None:
+            started.append(self)
+            super().start()
+
+    def beat(redis: object, hive: str) -> None:
+        beats.append(hive)
+        if len(beats) == 1:
+            return
+        stale = time.time() - 120
+        os.utime(marker, (stale, stale))
+        for _ in range(3):
+            refreshed.clear()
+            if refreshed.wait(5) and rollout.ready(marker, time.time()):
+                fresh.append(True)
+                break
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "refresh_ready", refresh)
+    monkeypatch.setattr(daemon.threading, "Thread", Recorded)
+    monkeypatch.setattr(daemon, "beat", beat)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(_once(object()))
+    for thread in started:
+        thread.join(5)
+    assert started
+    assert not any(thread.is_alive() for thread in started)
+    assert beats == ["local", "local"]
+    assert fresh == [True]
+
+
+@pytest.mark.feature("hive-ready-through-launch")
+def test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+    import time
+
+    from redis.exceptions import TimeoutError
+
+    from scripts.hive import headroom, orders, rollout
+
+    marker = tmp_path / "ready"
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "publish_headroom", PUBLISH_HEADROOM)
+    monkeypatch.setattr(daemon, "publish_herdr_stats", lambda redis, waiter, hive, stop: None)
+    monkeypatch.setattr(daemon, "HEADROOM_SECONDS", 0.001)
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
+    launching, failed, beats, fresh = threading.Event(), [], [], []
+
+    def wait(seconds: float, state: object, timeout: float) -> None:
+        if launching.is_set() and not failed and threading.current_thread() is not threading.main_thread():
+            stale = time.time() - 120
+            os.utime(marker, (stale, stale))
+            failed.append(True)
+            raise TimeoutError("Timeout reading from socket")
+        threading.Event().wait(0.001)
+
+    def beat(redis: object, hive: str) -> None:
+        beats.append(hive)
+        if len(beats) == 1:
+            return
+        launching.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not (failed and rollout.ready(marker, time.time())):
+            time.sleep(0.01)
+        fresh.append(bool(failed) and rollout.ready(marker, time.time()))
+        raise KeyboardInterrupt
+
+    started = []
+
+    class Recorded(threading.Thread):
+        def start(self) -> None:
+            started.append(self)
+            super().start()
+
+    monkeypatch.setattr(daemon.threading, "Thread", Recorded)
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    monkeypatch.setattr(daemon, "beat", beat)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(_once(object()))
+    for thread in started:
+        thread.join(5)
+    assert started
+    assert not any(thread.is_alive() for thread in started)
+    assert beats == ["local", "local"]
+    assert failed == [True]
+    assert fresh == [True]
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_headroom_refreshes_the_ready_marker_only_once_a_beat_created_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exists: bool
+) -> None:
+    import os
+
+    from scripts.hive import headroom
+
+    marker = tmp_path / "ready"
+    if exists:
+        marker.touch()
+        os.utime(marker, (5, 5))
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    stop, _, beats = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(Mock(), Mock(), "local", stop)
+    assert len(beats) == 1
+    assert marker.exists() is exists
+    if exists:
+        assert marker.stat().st_mtime > 5
+
+
+def test_headroom_leaves_the_ready_marker_alone_when_its_publish_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+
+    from redis.exceptions import ConnectionError
+
+    from scripts.hive import headroom
+
+    marker = tmp_path / "ready"
+    marker.touch()
+    os.utime(marker, (5, 5))
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    monkeypatch.setattr(headroom, "publish", Mock(side_effect=ConnectionError("gone")))
+    stop, _, _ = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(Mock(), Mock(), "local", stop)
+    assert marker.stat().st_mtime == 5
+
+
+def test_headroom_ignores_an_unset_ready_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from scripts.hive import headroom
+
+    folder = tmp_path / "work"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    monkeypatch.delenv("HIVE_READY_FILE", raising=False)
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    stop, _, beats = _paced(monkeypatch, 2)
+    PUBLISH_HEADROOM(Mock(), Mock(), "local", stop)
+    assert len(beats) == 1
+    assert list(folder.iterdir()) == []
 
 
 def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect(monkeypatch):
@@ -912,6 +1158,7 @@ def test_cli_help_describes_run_and_install():
 
 
 def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.4.2")
     monkeypatch.setattr(
         daemon,
         "observe",
@@ -924,14 +1171,16 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         },
     )
     daemon.beat(redis, "machine")
-    assert registry.show(redis, "machine") == {
+    record = registry.show(redis, "machine")
+    assert record is not None
+    assert record == {
         "id": "machine",
         "name": "machine",
         "ui": "no",
         "ephemeral": "no",
         "excluded": ["master"],
         "prefer": {},
-        "max_agents": 20,
+        "max_agents": None,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -939,8 +1188,10 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "master_login_enabled": "no",
         "repos": [],
         "capabilities": [],
-        "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
-        "version": "",
+        "heartbeat_at": record["heartbeat_at"],
+        "beat_at": record["beat_at"],
+        "version": "1.4.2",
+        "members": {registry.member_name(): {"heartbeat_at": record["heartbeat_at"], "draining": "no"}},
     }
     assert redis.smembers(registry.INDEX) == {"machine"}
 
@@ -1346,7 +1597,8 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     daemon.codex_router.quotas.assert_called_once_with([account], environ)
 
 
-def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
+@pytest.mark.feature("codex-expired-routing")
+def test_an_expired_codex_reading_publishes_its_timestamp_and_no_cap(observations: Any) -> None:
     from scripts.codex_quota import CodexQuota
 
     balancer = observations
@@ -1358,9 +1610,10 @@ def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
     slots, quota = daemon._subscriptions({"AH_CX_TOKEN_two": "sentinel"}, {"claude": {}, "codex": {}}, 122)
     assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
     assert quota["codex:two"] == {
-        "five_hour": {"used": None, "resets_at": None},
-        "seven_day": {"used": None, "resets_at": None},
-        "observed_at": None,
+        "five_hour": {"used": 30, "resets_at": 1000},
+        "seven_day": {"used": 40, "resets_at": 2000},
+        "observed_at": 121,
+        "expired": True,
     }
 
 
@@ -1752,6 +2005,59 @@ def test_named_execution_discovery_requires_a_local_matching_process(redis, monk
     assert daemon._executions(redis, "hive", processes) == ({"claude:one": expected} if expected else {})
 
 
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_dashed_agent_account_counts_once_under_its_underscore_process_slug(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
+    from hooks.proc import Process
+    from scripts import terminate_agent
+    from scripts.routing import aggregate, reservation
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    monkeypatch.setattr("time.time", lambda: 100)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    agent = store.start_execution(
+        "swarm",
+        AgentRecord(
+            store.next_name("swarm", "eng"),
+            "eng",
+            "task",
+            hive="hive",
+            harness=harness,
+            account="one-x",
+            seat="eng-1@swarm",
+        ),
+    )
+    store.put_agent("swarm", agent)
+    session = terminate_agent.Session(
+        "session", harness, agent.name, Process(10, 1, 10, 10, 7, "S", harness, (harness,)), "", "alive"
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(daemon.account_sessions, "local_processes", lambda: {harness: {10: "one_x"}})
+    dashed, reported = f"{harness}:one-x", f"{harness}:one_x"
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {
+            "slots": [{"harness": harness, "account": "one_x", "kind": "subscription", "cap": 3}],
+            "interactive": {},
+            "repos": [],
+            "quota": {},
+            "sessions": {reported: 2},
+        },
+    )
+    slots = reservation.LaunchSlots(redis)
+    assert slots.reserve(dashed, agent.execution_id, 3, 1000)
+    assert slots.acknowledge(agent.execution_id)
+    daemon.beat(redis, "hive")
+    assert json.loads(redis.get(f"{registry.key('hive')}:sessions"))["_executions"] == {reported: [agent.execution_id]}
+    assert aggregate.read(redis, 100)[dashed]["sessions"] == 2
+    assert aggregate.elsewhere(redis, harness, 100, "other") == {"one_x": 2}
+    assert slots.reserve(dashed, "next", 3, 1000)
+    assert not slots.reserve(dashed, "full", 3, 1000)
+
+
 def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):
     from dataclasses import replace
 
@@ -1828,6 +2134,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
 
 def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis, monkeypatch):
     from scripts.hive import orders, reports
+    from scripts.swarm_v2.runtime import process
 
     herdr = Mock()
     herdr.live_names.return_value = set()
@@ -1836,8 +2143,11 @@ def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
+    monkeypatch.setattr(process, "started_ms", lambda: 7)
     daemon.beat(redis, "machine")
-    assert json.loads(redis.get(reports.key("machine"))) == {"names": [], "panes": {}, "executions": {}}
+    report = json.loads(redis.get(reports.key("machine")))
+    assert isinstance(report.pop("observed_at"), int)
+    assert report == {"names": [], "panes": {}, "executions": {}, "started_at": 7}
     herdr.bindings.assert_not_called()
     herdr.conversations.assert_not_called()
 
@@ -1959,6 +2269,22 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
     assert published["claude:alone"] == _reading(None)
 
 
+@pytest.mark.feature("codex-expired-routing")
+@pytest.mark.parametrize("remote_at", [400, 600])
+def test_a_hive_keeps_its_own_expired_codex_reading(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, remote_at: int
+) -> None:
+    monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: None)
+    slot = {"harness": "codex", "account": "two", "kind": "subscription", "cap": 6}
+    _publish(redis, monkeypatch, "remote", [slot], {"codex:two": _reading(remote_at)}, 1000)
+    local = {"codex:two": _reading(500) | {"expired": True}}
+    _publish(redis, monkeypatch, "local", [slot | {"cap": 0}], local, 1000)
+    published = registry.show(redis, "local")
+    assert published is not None
+    assert published["slots"][0]["cap"] == 0
+    assert json.loads(redis.get(f"{registry.key('local')}:quota")) == local
+
+
 def test_beat_publishes_the_configuration_with_the_repo_identities(redis, monkeypatch):
     calls = []
     monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: calls.append((local_id, repos)))
@@ -2042,3 +2368,27 @@ def test_a_herdr_read_error_leaves_the_beat_running(monkeypatch):
     monkeypatch.setattr(herdr_host, "server_running", lambda environ: True)
     monkeypatch.setattr(herdr_gc, "close_dead_tabs", Mock(side_effect=herdr_gc.HerdrError("socket gone")))
     assert daemon.close_dead_tabs(set()) == []
+
+
+@pytest.mark.feature("hive-release-report")
+def test_each_beat_reports_the_release_the_hive_runs(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def observe(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "slots": [],
+            "interactive": {"claude": "", "codex": ""},
+            "repos": [],
+            "sessions": {},
+            "quota": {},
+        }
+
+    monkeypatch.setattr(daemon, "observe", observe)
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.4.2")
+    daemon.beat(redis, "machine")
+    first = registry.show(redis, "machine")
+    assert first is not None
+    assert first["version"] == "1.4.2"
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.4.3")
+    daemon.beat(redis, "machine")
+    second = registry.show(redis, "machine")
+    assert second is not None
+    assert second["version"] == "1.4.3"

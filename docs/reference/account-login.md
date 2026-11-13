@@ -161,11 +161,15 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
 
 - **Choice.** Logins are tried in `AGENTIHOOKS_MASTER_LOGIN_ORDER` (a comma
   list of emails, for example
-  `nestor.colt@gmail.com,thecloudclockwork@gmail.com`); logins it does not
-  name follow in slot order. A login with 10% or less left on its five hour or
-  week window (the shared drain floor) is skipped, and so is one whose
-  `claude auth status --text` check fails. A slot with only an OpenBao copy is
-  restored into its home first, unless a master holds that slot.
+  `operator@example.com,second@example.com`); logins it does not
+  name follow in slot order. The first entry is the primary login: at or under
+  `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` (default 2) of its week left,
+  nothing new places there and it is skipped for the next login in order,
+  above that reserve it is still offered first. A login with 10% or less left
+  on its five hour or week window (the shared drain floor) is skipped, and so
+  is one whose `claude auth status --text` check fails. A slot with only an
+  OpenBao copy is restored into its home first, unless a master holds that
+  slot.
 - **Master slots stay free.** The session never writes the slot's claim, so a
   master launch takes the same slot as if the session were not there. It runs
   in its own home, `$AGENTIHOOKS_HOME/claude-ai/<name>/claude`, where `<name>` is
@@ -176,11 +180,104 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
   writes one credential store, and a rotated refresh token never leaves a stale
   second copy behind. Whether native Claude serializes two refreshes that start
   at the same moment from different config homes is not yet proven live.
+  The rendered profile's `projects` and `sessions` folders are linked into
+  that home, so conversations are written into the profile's folders.
 - **Refusal.** With no usable login the launch prints each login's reason and
-  exits 3. It never falls back to a quota token or bare Claude.
+  exits 3. Outside [front door masters](#front-door-masters) it never falls
+  back to a quota token or bare Claude.
 
 The session gets `--settings {"forceLoginMethod":"claudeai"}` and the same
 credential scrubbing and settings refusals as the master route.
+
+### Setup
+
+Store at least one login with `agentihooks claude login --master` (see
+[Master claude ai login](#master-claude-ai-login)), then set the order in the
+environment or an `$AGENTIHOOKS_HOME/*.env` file:
+
+```bash
+export AGENTIHOOKS_MASTER_LOGIN_ORDER=operator@example.com,second@example.com
+agentihooks claude login --master --list
+```
+
+| Setting | Default | Effect on this route |
+|---|---|---|
+| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | unset | Comma list of login emails tried first, in order; each is matched by its account name, so `Operator@Example.com` and `operatoratexample_com` name the same login. Unset tries every stored login in slot order |
+| `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` | `2` | Week left at or under which the first login in the order is skipped |
+| `AGENTIHOOKS_MASTER_LOGIN_SLOTS` | `5` | Number of slots read for stored logins |
+| `OPENBAO_URL`, `OPENBAO_TOKEN` | unset | When both are set, a slot whose home holds no login is offered from its OpenBao record |
+
+The five hour and week usage comes from the same source as `--list`: the
+router cache and the quota snapshots of sessions on that login.
+
+### Launch output
+
+A routed launch prints one line, then starts Claude:
+
+```text
+[agenti] account=operatoratexample_com route=claude-ai slot=1
+```
+
+`init-agent` reads the route report the launcher writes (`status=routed`,
+`account=<name>`, `placement=forced`). Confirm the account inside the session
+with `claude auth status --text`, which prints
+`Login method: Claude account` for a claude ai login.
+
+### Front door masters
+
+A launch whose profile is `master` and whose `--name` is
+`master 1 · <slug>` is a swarm's front door. `init-agent` rewrites any route
+it was given to `--route claude-ai` for it, whatever
+`AGENTIHOOKS_MASTER_CLAUDE_LOGIN` says, and the route then takes the master
+path instead. It claims a stored slot through master login placement (see
+[Master claude ai login](#master-claude-ai-login)): the primary reserve
+applies, the 10% drain floor does not. It then runs the
+`claude auth status --text` check and a live probe. When that login is
+expired, the launch prints `[agenti] claude ai login refused: <reason>` and
+falls back to the master token route, the only case where this route reaches
+a quota token. Its other refusals print the bare reason with no account
+prefix, or one of these, and exit 3:
+
+- `no master claude ai login: run agentihooks claude login --master`
+- `every stored master claude ai login is held by a live master (...)`, listing
+  each slot as `<account> by <holder>` or `<account> reserved at <n>% of the
+  week left`
+
+Every other launch follows the rules above.
+
+### Hives
+
+On a hive (`AGENTIHOOKS_SLOT_HIVE` set) the launch also takes one of that
+hive's account slots for the chosen login, as every routed launch does. A hive
+with no free slot or a failed admission ends the launch with an uncaught
+`Unavailable` error, `No account slot available` or `Account slot admission
+failed`. The `[agenti] account=` line has already printed and the route
+report already says `status=routed`.
+
+### Refusal messages
+
+| Message after `agentihooks:` | Cause | Fix |
+|---|---|---|
+| `no claude ai login is stored: run agentihooks claude login --master` | No slot holds a login and no OpenBao record has one | Run the command it names |
+| `no usable claude ai login: <reasons>` | Every login was skipped; the reasons are joined with `; ` | Read each reason below |
+| `<account> has <n>% left` (a reason) | The tighter of the five hour and week windows is at or under 10% left | Wait for the window to reset, or store another login |
+| `<account> is the primary login reserve at <n>% of the week left` (a reason) | The first login in the order is at its week reserve | Wait for its week to reset; the next login in the order is tried meanwhile |
+| `<account>: native Claude login is expired or missing; renew the native Claude login` (a reason) | `claude auth status --text` did not report a Claude account | `agentihooks claude login --master --slot <n>` for that slot |
+| `<account>: native Claude login could not be checked` (a reason) | `claude` was missing or the check took over 30 seconds | Check that `claude` is on `PATH` and starts |
+| `<path> sets apiKeyHelper`, `<path> sets <names>`, `<path> sets forceLoginMethod <value>` | `/etc/claude-code/managed-settings.json`, the rendered profile's `settings.json`, or the project's `.claude/settings.json` or `.claude/settings.local.json` sets an `apiKeyHelper`, an `env` entry such as `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` or a `CLAUDE_CODE_OAUTH_` variable, or a `forceLoginMethod` other than `claudeai` | Remove that setting from the named file; this check runs before any login is read |
+
+Each refusal also writes `status=failed` with the message to the route report.
+
+### Checks
+
+```bash
+agentihooks claude login --master --list
+ls "$AGENTIHOOKS_HOME/claude-ai"
+```
+
+The first shows which slots hold a login, their accounts, the master holding
+each and their usage. The second lists one home per standalone session name;
+removing a home only drops that session's rendered copy, never the login.
 
 ## Codex login
 

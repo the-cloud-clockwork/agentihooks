@@ -365,3 +365,8 @@ def test_every_input_is_required(tmp_path, flag):
     with pytest.raises(SystemExit) as raised:
         ci_branch_coverage.main(argv)
     assert raised.value.code == 2
+
+
+def test__run_entry_rejects_a_non_mapping_entry() -> None:
+    assert ci_branch_coverage._run_entry("not a mapping") is False
+    assert ci_branch_coverage._run_entry([1, 2]) is False

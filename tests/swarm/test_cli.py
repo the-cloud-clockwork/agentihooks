@@ -1,20 +1,25 @@
 import json
 import multiprocessing
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
+from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, fencing, lease, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, metrics, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from scripts.tick.adapters.fakes import FakeSourceControl
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
@@ -31,6 +36,7 @@ def env(monkeypatch, tmp_path):
 
     from scripts.swarm.health import merge_stall
 
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setattr(
         merge_stall,
         "observe",
@@ -290,7 +296,7 @@ def test_the_tick_hands_the_metrics_pass_its_ledger(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     seen = []
-    monkeypatch.setattr(cli.metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
+    monkeypatch.setattr(metrics, "record_pass", lambda *args: seen.append(args[-1].ledger.state("sw")) or [])
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert [state["tasks"] for state in seen] == [ledger.state("sw")["tasks"]]
 
@@ -746,7 +752,7 @@ def test_a_tick_whose_ledger_health_probe_fails_releases_its_lock(env, monkeypat
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: False)
-    unprobed = object.__new__(cli.ledger_client.LedgerClient)
+    unprobed = cli.ledger_client.LedgerClient()
     assert cli.run_tick(store, "sw", unprobed, rt, FakeHerdr({})) == ["Ledger health probe failed"]
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
@@ -884,7 +890,7 @@ def test_tick_reports_spawn_intent_and_store_stages(env, capsys):
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
     finished = {row["step"] for row in rows if row["phase"] == "finished"}
     assert {
-        "scripts.swarm.tick._spawn",
+        "scripts.tick.steps.place._spawn",
         "scripts.gates.intent.Check.run",
         "scripts.swarm.store.RedisStore.agents",
     } <= finished
@@ -920,26 +926,15 @@ def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsy
         raise error
 
     monkeypatch.setattr(cli.phase_planning, "planning_pass", failing)
-    with pytest.raises(ValueError) as caught:
-        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert caught.value is error
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert actions == [f"pass failed: a step raised ValueError: {error}"]
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
-    assert [row["outcome"] for row in rows if row.get("outcome") == "error"] == ["error", "error"]
+    assert [row["outcome"] for row in rows if row.get("outcome") == "error"] == ["error"]
+    passes = store.redis.xrange(store.key("sw", "tick:passes"))
+    assert json.loads(passes[-1][1]["record"])["outcome"] == "error"
     assert rows[-1]["step"] == "run_tick"
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert cli.timing.SWARM.get() is None
-
-
-def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, monkeypatch):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    calls = []
-    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
-    monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
-    monkeypatch.setattr(cli.wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
-    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000)]
 
 
 def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
@@ -967,11 +962,10 @@ def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkey
     started = []
     monkeypatch.setattr(refresh_job, "spawn", started.append)
 
-    def overrun(slug: str, *args: object) -> list[str]:
-        assert slug == "sw"
+    def overrun(sites: object) -> bool:
         raise cli.tick_stop.Stopped
 
-    monkeypatch.setattr(cli, "tick", overrun)
+    monkeypatch.setattr(cli.TickSites, "_start", overrun)
     with pytest.raises(cli.tick_stop.Stopped):
         cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
     assert started == ["sw"]
@@ -1598,12 +1592,16 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
 
     ledger.relay = refuse
     ran = []
-    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "maintenance")):
+    for module, name in (
+        (cli.ledger_events, "event_pass"),
+        (cli.task_steps.phases, "phase_changes"),
+        (wake, "maintenance"),
+    ):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
     cli.run_tick(store, "sw")
-    assert ran == ["phase_pass", "event_pass", "maintenance"]
+    assert ran == ["phase_changes", "event_pass", "maintenance"]
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
 
 
@@ -1879,8 +1877,46 @@ def test_the_worktree_branch_is_read_and_checked_on_origin():
     ]
 
 
+@pytest.mark.feature("successor-upstream-branch")
+def test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks() -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    answers = {
+        "branch": (0, "engineer-a1b2c3-0002\n"),
+        "rev-parse": (0, "origin/engineer-a1b2c3-0001\n"),
+        "engineer-a1b2c3-0002": (2, ""),
+        "engineer-a1b2c3-0001": (0, "abc\trefs/heads/engineer-a1b2c3-0001\n"),
+    }
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs))
+        code, out = answers[argv[-1] if argv[1] == "ls-remote" else argv[1]]
+        return subprocess.CompletedProcess(argv, code, out, "")
+
+    assert cli.worktree_branch(None, run=run) == "engineer-a1b2c3-0001"
+    assert calls == [
+        (["git", "branch", "--show-current"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0002"], GIT_OPTS),
+        (["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
+    ]
+
+
+@pytest.mark.feature("successor-upstream-branch")
+@pytest.mark.parametrize("base", ["dev", "main", "master", "v1"])
+def test_an_unpushed_checkout_tracking_a_base_branch_is_refused(base: str) -> None:
+    calls, fake = git_answers(
+        {"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": (0, f"origin/{base}\n"), "ls-remote": (2, "")}
+    )
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(None, run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin engineer-a1b2c3-0002"
+    )
+    assert [argv[-1] for argv, _ in calls if argv[1] == "ls-remote"] == ["engineer-a1b2c3-0002"]
+
+
 def test_a_branch_missing_on_origin_is_refused():
-    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (2, "")})
+    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "rev-parse": (128, ""), "ls-remote": (2, "")})
     with pytest.raises(SwarmError) as refused:
         cli.worktree_branch(None, run=fake)
     assert str(refused.value) == (
@@ -1961,54 +1997,59 @@ def test_a_continuation_whose_recorded_branch_left_origin_is_told_to_push_head_t
     )
 
 
-HEAD_JSON = (
-    '{"headRefName": "engineer-a1b2c3-0001", "headRepository": {"name": "bundle"}, '
-    '"headRepositoryOwner": {"login": "fork-owner"}}'
-)
+PullPorts = Callable[[str], tuple[FakeSourceControl, ChangeRef]]
+PULL_READ_ERRORS = [ValueError("x"), KeyError("x"), TimeoutError("tool deadline expired"), OSError("x")]
 
 
-def test_the_pull_request_head_branch_and_repository_are_read_from_github():
-    calls = []
+def _pull_port(head_repository: str, seen: list[str] | None = None) -> tuple[PullPorts, FakeSourceControl, ChangeRef]:
+    reference = ChangeRef("o/r", 3)
+    change = ChangeState(reference, "open", "h", "dev", False, "u", "engineer-a1b2c3-0001", "", False, head_repository)
+    provider = FakeSourceControl({"change": change})
 
-    def fake(argv, **kwargs):
-        calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, HEAD_JSON, "")
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
+        if seen is not None:
+            seen.append(url)
+        return provider, reference
 
-    head = cli.pull_branch("https://github.com/o/r/pull/3", run=fake)
-    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
-    fields = "headRefName,headRepository,headRepositoryOwner"
-    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", fields], GIT_OPTS)]
+    return ports, provider, reference
+
+
+def test_the_pull_request_head_branch_and_repository_are_read_through_the_port() -> None:
+    seen: list[str] = []
+    ports, provider, reference = _pull_port("fork-owner/bundle", seen)
+
+    head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h")
+    assert seen == ["https://github.com/o/r/pull/3"]
+    [call] = provider.calls
+    assert (call.operation, call.args) == ("change", (reference,))
+    assert 19 < call.deadline.remaining <= cli.PULL_SECONDS == 20
+
+
+def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
+    ports, _, _ = _pull_port("")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h")
 
 
 @pytest.mark.parametrize(
-    "answer",
-    [
-        '{"headRefName": "x"}',
-        '{"headRefName": "x", "headRepository": null, "headRepositoryOwner": {"login": "o"}}',
-        '{"headRefName": "x", "headRepository": {"name": "r"}, "headRepositoryOwner": {"login": ""}}',
-        '{"headRefName": "x", "headRepository": {"name": ""}, "headRepositoryOwner": {"login": "o"}}',
-    ],
+    "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), *PULL_READ_ERRORS]
 )
-def test_a_pull_request_without_a_head_repository_gives_the_branch_alone(answer):
-    def fake(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, answer, "")
+def test_an_unreadable_pull_request_is_refused(error: Exception) -> None:
+    def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
+        raise error
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("x", "")
-
-
-@pytest.mark.parametrize("answer", [(1, HEAD_JSON), (0, "not json"), (0, "{}")])
-def test_an_unreadable_pull_request_gives_no_branch(answer):
-    def fake(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, answer[0], answer[1], "")
-
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
+    with pytest.raises(SwarmError) as refused:
+        cli.pull_branch("https://github.com/o/r/pull/3", ports)
+    assert str(refused.value) == f"GitHub does not confirm pull request https://github.com/o/r/pull/3: {error}"
 
 
-def test_a_failing_github_call_gives_no_branch():
-    def fake(argv, **kwargs):
-        raise subprocess.TimeoutExpired(argv, 20)
+def test_the_pull_branch_reads_through_the_stack_source_control_port() -> None:
+    import inspect
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
+    from scripts.swarm import stack
+
+    assert inspect.signature(cli.pull_branch).parameters["ports"].default is stack.source_control
 
 
 @pytest.mark.parametrize(
@@ -2362,7 +2403,7 @@ def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env
     store, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "pending", lambda url, run=None, approval=False: url.endswith("/7"))
+    monkeypatch.setattr(checks, "pending", lambda url, read=None, approval=False: url.endswith("/7"))
     assert _findings(capsys) == []
 
 
@@ -2374,7 +2415,7 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(PASSED)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=runner(PASSED)))
     for autonomy, expected in [
         ("assist", []),
         ("delegate", ["idle with claim"]),
@@ -2388,19 +2429,21 @@ def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env
     assert _findings(capsys) == []
 
 
-@pytest.mark.parametrize(
-    "out, code", [("lint\tfail\t8s\thttps://x/1\n", 1), ("", 0), ("lint\tpass\t8s\thttps://x/1\n", 1)]
-)
-def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(env, capsys, monkeypatch, tmp_path, out, code):
+@pytest.mark.parametrize("case", ["failed", "empty", "unreadable"])
+def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(
+    env: tuple, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, case: str
+) -> None:
     from functools import partial
 
-    from tests.swarm.test_health_checks import runner
+    from tests.swarm.test_health_checks import FAILED, raising, runner
+
+    read = {"failed": runner((FAILED,)), "empty": runner(()), "unreadable": raising}[case]
 
     _, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     run("sw", "set", "autonomy=assist")
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(checks, "cached", partial(checks.cached, run=runner(out, code)))
+    monkeypatch.setattr(checks, "cached", partial(checks.cached, read=read))
     assert [f["kind"] for f in _findings(capsys)] == ["idle with claim"]
 
 
@@ -2730,7 +2773,7 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
     )
 
 
-def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
+def _tick_all(monkeypatch, run_tick, slugs):
     import os
     import types
 
@@ -2752,7 +2795,6 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
             pytest.fail(f"{slug} ticked more than ten times in one pass")
         return run_tick(store, slug)
 
-    monkeypatch.setattr(cli, "TICK_SECONDS", tick_seconds)
     monkeypatch.setattr(cli, "run_tick", bounded)
     reconciled = []
     monkeypatch.setattr(timer, "reconcile", lambda binary: reconciled.append(binary) or True)
@@ -2813,7 +2855,7 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
             raise ValueError("ledger down")
         return [f"ok {slug}"]
 
-    _tick_all(monkeypatch, run_tick, ["a", "b"], tick_seconds=60)
+    _tick_all(monkeypatch, run_tick, ["a", "b"])
     captured = capsys.readouterr()
     assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
@@ -2840,98 +2882,10 @@ def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines() == ["herdr: swept"]
 
 
-def quick_beside_slow(monkeypatch, capsys):
-    import threading
-    import time
-
-    release, ticks, starts = threading.Event(), {"fast": 0, "slow": 0}, []
-
-    def run_tick(store, slug):
-        assert store.slugs() == ["slow", "fast"]
-        ticks[slug] += 1
-        if slug == "slow":
-            release.wait(2)
-        else:
-            starts.append(time.monotonic())
-            if ticks["fast"] > 3:
-                pytest.fail("extra ticks went on after every first tick ended")
-            if ticks["fast"] == 3:
-                release.set()
-        return [f"tick {ticks[slug]}"]
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
-    return ticks, starts, capsys.readouterr().out.splitlines()
-
-
-def test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs(monkeypatch, capsys):
-    ticks, _, out = quick_beside_slow(monkeypatch, capsys)
-    assert ticks == {"fast": 3, "slow": 1}
-    assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
-    assert out[-1] == "herdr: swept"
-
-
-@pytest.mark.wall_clock
-def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
-    _, starts, _ = quick_beside_slow(monkeypatch, capsys)
-    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
-
-
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
-    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"], tick_seconds=60)
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
     assert sorted(ticks) == ["a", "b", "c"]
-
-
-def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, capsys):
-    import time
-
-    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.5)
-    ticks = {"fast": 0, "slow": 0}
-
-    def run_tick(store, slug):
-        ticks[slug] += 1
-        if slug == "slow":
-            time.sleep(3.0)
-        return []
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=1.0)
-    assert ticks == {"fast": 2, "slow": 1}
-
-
-def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, capsys):
-    import threading
-    import time
-    import types
-
-    monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep))
-    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 0)
-    release, ticks = threading.Event(), {"fast": 0, "slow": 0}
-
-    def run_tick(store, slug):
-        ticks[slug] += 1
-        if slug == "slow":
-            release.wait(2)
-        elif ticks["fast"] == 2:
-            release.set()
-        return []
-
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
-    assert ticks["slow"] == 1 and ticks["fast"] >= 2
-
-
-def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
-    ticks = {"fast": 0}
-
-    def run_tick(store, slug):
-        if slug == "slow":
-            raise SystemExit(3)
-        ticks["fast"] += 1
-        if ticks["fast"] > 3:
-            pytest.fail("extra ticks went on after every first tick ended")
-        return []
-
-    with pytest.raises(SystemExit):
-        _tick_all(monkeypatch, run_tick, ["fast", "slow"])
 
 
 def test_set_stores_the_scaling_settings_and_reports_them(env, capsys):

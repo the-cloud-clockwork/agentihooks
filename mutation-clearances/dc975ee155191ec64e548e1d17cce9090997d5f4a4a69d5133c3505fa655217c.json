@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/merge_queue.py:scripts.swarm.merge_queue.x_required_view:f7031c334a641ae771fa9cb5591ace79448e81b3f111d52d7803bb323dec9982": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged and ignores the type argument at runtime, so cast(None, x) and cast(SourceControl, x) pass the same _RunGraph object to ledger_events.view; the mutant changes only a type annotation and cannot change any output."
+  }
+}

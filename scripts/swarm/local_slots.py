@@ -1,6 +1,9 @@
-from dataclasses import dataclass
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-from scripts.swarm import lease
+from scripts.swarm import hash_pages, lease
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
 from scripts.swarm_v2.runtime.base import LOCAL
 
@@ -11,7 +14,17 @@ Records = dict[str, tuple[str, AgentRecord]]
 
 @dataclass
 class PassCache:
-    records: Records | None = None
+    """One placement pass's reads, each made once and shared by every launch thread of that pass."""
+
+    values: dict[tuple[Any, ...], Any] = field(default_factory=dict[tuple[Any, ...], Any])
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def once(self, read: Callable[..., Any], *args: Any) -> Any:
+        """Return the pass's result of read on args, calling it only when no thread of the pass has yet."""
+        with self.lock:
+            if (read, *args) not in self.values:
+                self.values[read, *args] = read(*args)
+            return self.values[read, *args]
 
 
 def key(machine: str) -> str:
@@ -19,16 +32,18 @@ def key(machine: str) -> str:
 
 
 def held(store: RedisStore, machine: str, slug: str, task: str, cache: PassCache | None = None) -> int:
-    return len(_held(store, store.redis.hgetall(key(machine)), f"{slug}/{task}", lease.now_ms(store), cache)[0])
+    return len(
+        _held(store, hash_pages.fields(store.redis, key(machine)), f"{slug}/{task}", lease.now_ms(store), cache)[0]
+    )
 
 
 def running(store: RedisStore, slug: str, task: str, cache: PassCache | None = None) -> int:
-    return len(_workers(_records(store, cache), f"{slug}/{task}"))
+    return len(_workers(_records(store, cache), f"{slug}/{task}", cache))
 
 
 def occupancy(store: RedisStore, machine: str) -> tuple[int, int]:
     running = len(_workers(_records(store), None))
-    held, _ = _held(store, store.redis.hgetall(key(machine)), None, lease.now_ms(store))
+    held, _ = _held(store, hash_pages.fields(store.redis, key(machine)), None, lease.now_ms(store))
     return running, len(held)
 
 
@@ -38,10 +53,13 @@ def maximum(store: RedisStore, slug: str, ceiling: int) -> int:
 
     hive = registry.show(store.redis, hive_id())
     bound = min(ceiling, store.config(slug).local_max_agents)
-    return min(bound, hive["max_agents"]) if hive is not None else bound
+    cap = cast(int | None, hive["max_agents"]) if hive is not None else None
+    return bound if cap is None else min(bound, cap)
 
 
-def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, local_max: int) -> int:
+def claim(
+    store: RedisStore, machine: str, slug: str, task: str, name: str, local_max: int, cache: PassCache | None = None
+) -> int:
     from redis.exceptions import WatchError
 
     while True:
@@ -49,7 +67,7 @@ def claim(store: RedisStore, machine: str, slug: str, task: str, name: str, loca
             try:
                 pipe.watch(key(machine))
                 now = lease.now_ms(store)
-                taken, settled = _held(store, pipe.hgetall(key(machine)), f"{slug}/{task}", now)
+                taken, settled = _held(store, hash_pages.fields(pipe, key(machine)), f"{slug}/{task}", now, cache)
                 if len(taken) >= local_max:
                     _journal(slug, machine, task, name, local_max, taken)
                     return len(taken)
@@ -80,7 +98,7 @@ def _held(
     store: RedisStore, claims: dict, own: str | None, now: int, cache: PassCache | None = None
 ) -> tuple[list[str], list[str]]:
     records = _records(store, cache)
-    agents = _workers(records, own)
+    agents = _workers(records, own, cache)
     pending = [
         named
         for named, at in claims.items()
@@ -90,28 +108,36 @@ def _held(
 
 
 def _records(store: RedisStore, cache: PassCache | None = None) -> Records:
-    if cache is not None and cache.records is not None:
-        return cache.records
-    built: Records = {
+    if cache is not None:
+        return cache.once(_scanned, store)
+    return _scanned(store)
+
+
+def _scanned(store: RedisStore) -> Records:
+    return {
         f"{slug}/{agent.name}": (f"{slug}/{agent.task}", agent)
         for slug in store.slugs()
         for agent in store.agents(slug)
     }
-    if cache is not None:
-        cache.records = built
-    return built
 
 
 def live() -> set[str]:
     from scripts.terminate_agent import sessions
 
-    return {row.name for row in sessions() if row.name and not row.name.startswith("master@")}
+    return {row.name for row in sessions() if row.name and not is_master(row.name)}
 
 
-def _workers(records: dict, own: str | None) -> set[str]:
+def is_master(name: str) -> bool:
+    """Whether a session name is a master's, by address, plain herdr name or title; masters hold no worker slot."""
+    from scripts.swarm_v2.masters import is_title
+
+    return name.startswith(("master@", "master-")) or is_title(name)
+
+
+def _workers(records: dict, own: str | None, cache: PassCache | None = None) -> set[str]:
     excluded = {agent.name for task, agent in records.values() if task == own}
     stored = {agent.name for task, agent in records.values() if _local_worker(agent)}
-    return (stored | live()) - excluded
+    return (stored | (live() if cache is None else cache.once(live))) - excluded
 
 
 def _pending(record, own: str | None, age: int) -> bool:

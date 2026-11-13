@@ -69,6 +69,40 @@ The suite-wide autouse fixture in `tests/conftest.py` already does all of this a
 asserts nothing still resolves under the real home. Use it; don't hand-roll
 per-file isolation — that is exactly how the gap reopened twice.
 
+## Environment variables in tests
+
+Tests run in parallel xdist workers, and each worker keeps one process
+environment for every test it runs. A variable a test leaves behind changes
+every later test on that worker.
+
+Set and remove variables through `monkeypatch.setenv` and
+`monkeypatch.delenv`. A fixture that also restores the whole environment wraps
+its body in an empty `patch.dict(os.environ)` and still sets its values through
+`monkeypatch` inside it. An excerpt, imports left out:
+
+```python
+@pytest.fixture
+def tls_ledger(cert, monkeypatch):
+    with patch.dict(os.environ):
+        monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+        yield
+```
+
+Never pass values to `patch.dict(os.environ, {...})` in a fixture whose tests
+call `monkeypatch` on the same variable. The fixture's `patch.dict` exits
+first and restores the environment, then the test's `monkeypatch` undo runs
+and writes back the value it saw, which is the fixture's. The variable stays
+set for the rest of the worker.
+
+Example: the TLS ledger fixture once set `LEDGER_CA_PEM` that way, and a hive
+join test removed it with `monkeypatch.delenv`. The certificate leaked, so later
+hive refresh tests on the worker got a TLS context from the hive client, and
+their fake `urlopen(request, timeout)` failed with
+`unexpected keyword argument 'context'`. A test that fails only when it shares
+a shard with other tests, with an error that reads an environment variable its
+own body never sets, points at such a leak: run it after the suspected test in
+one pytest process in CI to prove the order.
+
 ## Pull Request Process
 
 1. Keep PRs focused -- one feature or fix per PR

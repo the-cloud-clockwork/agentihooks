@@ -6,13 +6,13 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, github_app_cli, master_claude_login, session_bands
+from scripts import codex_router, github_app_cli, master_claude_login, session_bands, updater
 from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 BEAT_SECONDS = 15
+JOINED: set[str] = set()
 TTL_SECONDS = BEAT_SECONDS * 3
 # A launch inside a beat can run for minutes, so headroom and the heartbeat publish on their own thread well
 # inside their stale windows.
@@ -44,6 +45,7 @@ REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
     from scripts.hive.orders import Consumer, alive
+    from scripts.hive.run_consumer import RunConsumer
 
     alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
@@ -64,9 +66,12 @@ def beat(redis: "Redis", local_id: str) -> None:
     fields = {name: report[name] for name in ("slots", "interactive", "repos")}
     fields["master_login"] = {"claude": master_claude_login.signed_in()}
     fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
+    fields["version"] = updater.installed_version()
     beat_ms = int(time.time() * 1000)
     fields["heartbeat_at"] = beat_ms
     registry.beat(redis, local_id, fields)
+    registry.join(redis, local_id, registry.member_name(), beat_ms, started=local_id not in JOINED)
+    JOINED.add(local_id)
     with redis.pipeline() as pipe:
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
@@ -77,8 +82,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _refresh_launch_slots(redis, executions)
     adopt_capabilities(redis, local_id)
-    if not fenced:
+    if not fenced and not registry.member_draining(redis, local_id, registry.member_name()):
         dispatch.poll(consumer)
+        RunConsumer(redis, local_id).poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -95,6 +101,7 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+    registry.finished(redis, local_id, int(time.time() * 1000))
 
 
 def poll_orders(consumer: "Consumer", apply: Callable[[], None] | None = None) -> None:
@@ -181,7 +188,7 @@ def adopt_caps(redis: "Redis", report: dict) -> None:
 
 
 def _newer(reading: dict | None, mine: dict) -> bool:
-    if reading is None or reading["observed_at"] is None:
+    if mine.get("expired") or reading is None or reading["observed_at"] is None:
         return False
     return mine["observed_at"] is None or reading["observed_at"] > mine["observed_at"]
 
@@ -218,16 +225,16 @@ def timer_state(waiter: "Redis") -> "StateStore":
 
 
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
-    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+    from redis.exceptions import RedisError
 
     from scripts.hive import headroom, orders
 
     while not stop.is_set():
         try:
             scheduled_wait(HEADROOM_SECONDS, state=timer_state(waiter), timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
-        except (ConnectionError, TimeoutError) as exc:
-            print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
-            return
+        except (RedisError, OSError) as exc:
+            _headroom_wait_failed(exc, stop)
+            continue
         if stop.is_set():
             return
         try:
@@ -235,8 +242,36 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             headroom.publish(redis, local_id, now_ms)
             registry.touch(redis, local_id, now_ms)
             orders.alive(redis, local_id)
+            refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            continue
+        try:
+            emit_presence(redis, local_id, now_ms)
+        except Exception as exc:
+            print(f"hive presence emit failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
+    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness."""
+    from hooks.observability import presence
+
+    shown = registry.show(redis, local_id) or {}
+    agents = {harness: len(pids) for harness, pids in account_sessions.local_processes().items()}
+    presence.hive(
+        local_id,
+        str(shown.get("name") or local_id),
+        shown.get("ui") == "yes",
+        updater.installed_version(),
+        agents,
+        now_ms / 1000,
+    )
+
+
+def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
+    """Logs a failed headroom wait and holds one headroom interval, so only the stop event ends the thread."""
+    print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+    stop.wait(HEADROOM_SECONDS)
 
 
 def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
@@ -258,6 +293,12 @@ def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: th
                 herdr_stats.publish(redis, local_id, int(time.time() * 1000))
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive herdr stats publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def refresh_ready() -> None:
+    """Keep the rollout readiness marker fresh once a successful beat has created it; never create it."""
+    if (marker := os.environ.get("HIVE_READY_FILE")) and (path := Path(marker)).is_file():
+        path.touch()
 
 
 def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
@@ -408,7 +449,7 @@ def claude_signed_in() -> bool:
     return result.returncode == 0 and status.get("loggedIn") is True and status.get("authMethod") == "claude.ai"
 
 
-def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
+def _subscriptions(environ: Mapping[str, str], counts: dict, now: float) -> tuple[list, dict]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     _claude_snapshots(observed)
     claude = {credential.account for credential in balancer.discover_credentials(environ)}
@@ -432,6 +473,8 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
+        if result and balancer.refused(result):
+            quota[f"claude:{account}"]["refused"] = True
     pool = codex_router.routed(
         [
             account
@@ -454,9 +497,11 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
         )
         quota[f"codex:{account.name}"] = (
             _reading(reading.five_hour, reading.seven_day, reading.observed_at)
-            if reading and not reading.expired
+            if reading
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
+        if reading and reading.expired:
+            quota[f"codex:{account.name}"]["expired"] = True
     return slots, quota
 
 
@@ -576,6 +621,14 @@ def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:
     return {"slots": slots, "interactive": interactive, "repos": repositories(), "sessions": sessions, "quota": quota}
 
 
+def _process_account(processes: dict[str, dict[int, str]], harness: str, pid: int, account: str) -> str | None:
+    """The process's own spelling of the agent's account, when the process runs on that account under either."""
+    from scripts.routing.slots import account_key
+
+    running = processes.get(harness, {}).get(pid)
+    return running if running is not None and account_key(running) == account_key(account) else None
+
+
 def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, str]]) -> dict[str, list[str]]:
     from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
@@ -596,10 +649,11 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
             identity = record.harness, record.pid
             if identity in counted or record.generation != agent.generation:
                 continue
-            if processes.get(record.harness, {}).get(record.pid) != agent.account:
+            account = _process_account(processes, record.harness, record.pid, agent.account)
+            if account is None:
                 continue
             counted.add(identity)
-            found.setdefault(f"{record.harness}:{agent.account}", []).append(record.execution_id)
+            found.setdefault(f"{record.harness}:{account}", []).append(record.execution_id)
         for agent in agents.values():
             if not agent.execution_id or (agent.hive or agent.runtime_target.get("host_id")) != local_id:
                 continue
@@ -607,10 +661,11 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
             if session is None or session.target != agent.harness:
                 continue
             identity = session.target, session.process.pid
-            if identity in counted or processes.get(session.target, {}).get(session.process.pid) != agent.account:
+            account = _process_account(processes, session.target, session.process.pid, agent.account)
+            if identity in counted or account is None:
                 continue
             counted.add(identity)
-            found.setdefault(f"{agent.harness}:{agent.account}", []).append(agent.execution_id)
+            found.setdefault(f"{agent.harness}:{account}", []).append(agent.execution_id)
     return found
 
 
@@ -633,14 +688,14 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
         for agent in store.agents(slug)
         if agent.execution_id and agent.runtime_target.get("host_id") == local_id
     ]
-    report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
-    if not hosted:
-        return report
     from scripts.swarm_v2.runtime.process import local_namespace, started_ms
 
+    report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     report["observed_at"] = int(time.time() * 1000)
-    report["process_namespace"] = local_namespace()
     report["started_at"] = started_ms()
+    if not hosted:
+        return report
+    report["process_namespace"] = local_namespace()
     report["pane_ids"] = _pane_ids(herdr)
     facts = herdr.bindings([agent for _, agent in hosted])
     report["panes"] = herdr.conversations() or {}

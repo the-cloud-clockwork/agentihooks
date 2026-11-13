@@ -3,6 +3,12 @@
 {{- $name := printf "%s-rollout" (include "swarm.fullname" .) }}
 {{- $namespace := required "workers.rollout.namespace is required" $workers.rollout.namespace }}
 {{- $lease := required "workers.rollout.leaseName is required" $workers.rollout.leaseName }}
+{{- $hookImage := $workers.image }}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" (toString .Chart.AppVersion) }}
+{{- $hookImage = merge (dict "tag" (toString .Chart.AppVersion)) $workers.image }}
+{{- else if ne (toString .Chart.AppVersion) "dev" }}
+{{- fail "appVersion must be a release version such as 2.17.467, or dev for an unreleased chart" }}
+{{- end }}
 {{- $deployments := list }}
 {{- if gt (int $workers.replicas) 0 }}
 {{- $deployments = append $deployments (printf "%s-worker-hive" (include "swarm.fullname" .)) }}
@@ -85,7 +91,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
-{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" }}
+{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" "SyncFail" "abandon" }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -96,7 +102,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
-  activeDeadlineSeconds: 1900
+  activeDeadlineSeconds: 5500
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600
   template:
@@ -107,7 +113,7 @@ spec:
       {{- include "swarm.podSecurityContext" $ | nindent 6 }}
       containers:
         - name: rollout
-          image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
+          image: {{ include "swarm.image" (dict "Values" (dict "image" $hookImage)) }}
           imagePullPolicy: {{ $workers.image.pullPolicy }}
           {{- include "swarm.containerSecurity" $ | nindent 10 }}
           command:

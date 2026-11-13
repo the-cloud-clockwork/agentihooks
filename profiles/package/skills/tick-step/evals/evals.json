@@ -1,0 +1,29 @@
+[
+  {
+    "query": "Task: add a tick step reap_stale_waits in group observe on the tick lane every 60 seconds, effects inbox, feature swarm-tick-characterisation, module observe.",
+    "files": [],
+    "expected_behavior": [
+      "Runs python -m scripts.tick.new_step with the name, group, lane, interval, effects, feature and module from the task, then --check reporting all five artefacts true.",
+      "Fills the body acting only through ctx.tools and ctx.view.read, and adds no function to scripts/swarm/tick.py.",
+      "Runs scripts.tick_pattern against an origin/dev checkout, scripts.tick.catalogue check and scripts.feature_map, each with 0 errors, before pushing."
+    ]
+  },
+  {
+    "query": "Move the _notify_masters helper and its step out of scripts/swarm/tick.py into a step module.",
+    "files": [],
+    "expected_behavior": [
+      "Keeps the move verbatim in its own pull request with glue under 50 statements.",
+      "Cites the tick equivalence run id green and a planted fault run id red in the pull request body.",
+      "Runs the pattern, catalogue and feature map checks and reports their output."
+    ]
+  },
+  {
+    "query": "The scaffold refused my step name because it already exists. I only need to change its interval.",
+    "files": [],
+    "expected_behavior": [
+      "Edits the existing floor row instead of scaffolding again.",
+      "Runs python -m scripts.tick.new_step --check on the name and requires all five artefacts true.",
+      "Reruns scripts.tick_pattern with a base checkout path, never the bare ref, and the catalogue check."
+    ]
+  }
+]

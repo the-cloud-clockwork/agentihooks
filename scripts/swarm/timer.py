@@ -8,6 +8,7 @@ import subprocess
 import sys
 import sysconfig
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 UNIT = "agentihooks-swarm"
@@ -20,6 +21,7 @@ SPOKE = "agentihooks-spoke"
 SCHEDULER = "agentihooks-scheduler"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
+SWARM_WORK = (f"{WAITS}.timer", f"{WAITS}.service", f"{TICK_WATCH}.service", f"{WAKER}.service")
 DRAIN_S = 30
 KILL_WAIT_S = 10
 STOP_TIMEOUT_S = 120
@@ -93,14 +95,17 @@ def _current(path, text):
     return path.is_file() and path.read_text() == text
 
 
-def tick_units(binary):
+def tick_units() -> dict[str, str]:
+    """The fallback tick timer, run through the tick holder so a timed out or failed pass ends its whole group."""
+    from scripts.swarm.scheduled_tick import UNIT_FLAG, UNIT_TIMEOUT_S
+
     service = (
         "[Unit]\nDescription=agentihooks swarm tick\n\n"
         "[Service]\nType=oneshot\n"
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
-        f'ExecStart="{binary}" swarm tick\n'
-        "TimeoutStartSec=540\nKillMode=process\n"
+        f'ExecStart="{sys.executable}" -m scripts.swarm.scheduled_tick {UNIT_FLAG}\n'
+        f"TimeoutStartSec={UNIT_TIMEOUT_S}\nKillMode=process\n"
     )
     timer = (
         "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"
@@ -123,7 +128,7 @@ def spoke_units(binary):
     return {f"{SPOKE}.service": spoke}
 
 
-ENGINE = (*units(""), *tick_units(""), *DROPPED)
+ENGINE = (*units(""), *tick_units(), *DROPPED)
 SYSTEMCTL = {"capture_output": True, "text": True, "timeout": 30}
 UNCHECKED = {**SYSTEMCTL, "check": False}
 SPOKE_ENABLE = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]
@@ -142,6 +147,32 @@ def _spoke_only(binary, unit_dir, run):
     if retired or stale:
         run(RELOAD, **UNCHECKED)
     return run(SPOKE_ENABLE, **SYSTEMCTL).returncode == 0
+
+
+def hosts_work() -> bool:
+    """True while a swarm in the store still needs this workstation's tick, and whenever the store cannot be read."""
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import SwarmError, connect, store_errors
+
+    try:
+        return scheduled_tick.hosts(connect())
+    except (SwarmError, *store_errors()):
+        return True
+
+
+def _anton_only(unit_dir: Path, run: Callable[..., subprocess.CompletedProcess[str]]) -> bool:
+    """Cancel the tick cron and retire the tick, waits, tick-watch and waker units, keeping the scheduler and prober."""
+    unschedule()
+    retiring = any((unit_dir / name).exists() for name in RETIRED)
+    kept = retiring and not _retire(unit_dir, run)
+    gone = [name for name in SWARM_WORK if (unit_dir / name).exists()]
+    for name in gone:
+        if name != f"{WAITS}.service":
+            run(["systemctl", "--user", "disable", "--now", name], **UNCHECKED)
+        (unit_dir / name).unlink()
+    if gone or (retiring and not kept):
+        run(RELOAD, **UNCHECKED)
+    return not kept
 
 
 def _services(names):
@@ -305,7 +336,8 @@ def _proven():
         return False
 
 
-def schedule():
+def schedule(caller: str) -> bool:
+    """Register the swarm tick cron and make sure a scheduler serves it, naming ``caller`` in what it prints."""
     from scripts.events import state
     from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
@@ -313,9 +345,13 @@ def schedule():
     try:
         scheduled_tick.ensure(Scheduler())
     except state.unavailable() as exc:
-        print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(
+            f"the scheduled swarm tick could not be registered for {caller}: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
         return False
-    supervise()
+    if supervise():
+        print(f"started the scheduler for {caller}", file=sys.stderr)
     return True
 
 
@@ -330,10 +366,13 @@ def unschedule():
         print(f"the scheduled swarm tick could not be cancelled: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
-def undelivered():
+def undelivered() -> str:
+    """Why the scheduler has not proven the swarm tick, empty when it has or when no swarm needs this workstation."""
     from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick
 
+    if not hosts_work():
+        return ""
     return scheduled_tick.undelivered(Scheduler(), _roots()[1], time.time())
 
 
@@ -372,7 +411,9 @@ def _foreign_run(unit_dir):
     )
 
 
-def ensure(binary, unit_dir=None, run=subprocess.run):
+def ensure(
+    binary: str, unit_dir: Path | None = None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+) -> bool:
     unit_dir = unit_dir or UNIT_DIR
     refusal = _foreign_run(unit_dir)
     if refusal:
@@ -383,11 +424,13 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
 
     if not workstation.runs_engine(os.environ):
         return _spoke_only(binary, unit_dir, run)
+    if not hosts_work():
+        return _anton_only(unit_dir, run)
     kept = _kept()
     expected = units(binary)
     if kept:
         print(f"the {UNIT} timer stays: {kept}", file=sys.stderr)
-        changed, expected = False, {**expected, **tick_units(binary)}
+        changed, expected = False, {**expected, **tick_units()}
     else:
         changed = _retire(unit_dir, run)
     for name, text in expected.items():
@@ -412,7 +455,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
         for name in [*_services(expected), f"{WAITS}.timer", *([f"{UNIT}.timer"] if kept else [])]
     ]
-    return schedule() and all(proc.returncode == 0 for proc in procs)
+    return schedule("the swarm timer install") and all(proc.returncode == 0 for proc in procs)
 
 
 def guard(binary, unit_dir=None, run=subprocess.run):
@@ -424,14 +467,16 @@ def guard(binary, unit_dir=None, run=subprocess.run):
             return ensure(binary, unit_dir, run)
         return True
     enabled = ["systemctl", "--user", "is-enabled", "--quiet", f"{UNIT}.timer"]
-    if all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()) and not (
+    if all(_current(unit_dir / name, text) for name, text in tick_units().items()) and not (
         run(enabled, capture_output=True, text=True, timeout=30).returncode
     ):
         return True
     return ensure(binary, unit_dir, run)
 
 
-def reconcile(binary, unit_dir=None, run=subprocess.run):
+def reconcile(
+    binary: str, unit_dir: Path | None = None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+) -> bool:
     unit_dir = unit_dir or UNIT_DIR
     if refusal := _worktree_run(unit_dir):
         print(refusal, file=sys.stderr)
@@ -443,12 +488,13 @@ def reconcile(binary, unit_dir=None, run=subprocess.run):
     if (
         current
         and workstation.runs_engine(os.environ)
+        and hosts_work()
         and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED))
     ):
         names = [*_services(expected), f"{WAITS}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
-            return schedule()
+            return schedule("the swarm timer reconcile")
     return ensure(binary, unit_dir, run)
 
 

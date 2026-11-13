@@ -51,17 +51,54 @@ def test_hive_hook_starts_and_ends_the_same_execution(monkeypatch, tmp_path):
     assert join_report.read(client.redis, replace(agent, generation=agent.generation + 1)) == {}
 
 
-def test_workstation_hook_does_not_connect(monkeypatch):
+def test_session_outside_a_swarm_does_not_connect(monkeypatch):
     from hooks.context import hive_join
     from scripts.swarm import store
 
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
 
     def unexpected():
-        raise AssertionError("workstation must not probe hive access")
+        raise AssertionError("a session outside a swarm must not probe hive access")
 
     monkeypatch.setattr(store, "connect", unexpected)
     assert hive_join.run({"session_id": "session"}, "start") is None
+
+
+@pytest.mark.feature("root-hive-join-report")
+def test_root_hive_session_writes_its_join_report_without_a_member_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from fakeredis import FakeRedis
+
+    from hooks.context import hive_join
+    from scripts.hive import join_checks, join_report
+    from scripts.swarm import commands, store
+
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "root")
+    client = store.RedisStore(FakeRedis(decode_responses=True))
+    client.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    name = client.next_name("sw", "eng")
+    agent = store.AgentRecord(name, "eng", "task", hive=commands.hive_id(), harness="claude", seat="eng-1@sw")
+    agent = client.start_execution("sw", agent)
+    client.put_agent("sw", agent)
+    for key, value in {
+        "AGENTIHOOKS_SWARM": "sw",
+        "AGENTIHOOKS_AGENT_NAME": name,
+        "CLAUDE_CONFIG_DIR": str(tmp_path),
+        "HERDR_PANE_ID": "pane",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(store, "connect", lambda: client)
+    monkeypatch.setattr(
+        join_checks, "startup", lambda *args: dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+    )
+    hive_join.run({"session_id": "session", "transcript_path": str(tmp_path / "s.jsonl")}, "start")
+    report = join_report.read(client.redis, agent)
+    assert report["grade"] == "complete"
+    assert report["session_id"] == "session"
+    assert client.redis.hexists(join_report.key("root"), agent.execution_id)
 
 
 def test_hive_reports_are_dispatched_at_start_and_end(
@@ -140,7 +177,14 @@ def test_hive_hook_reports_defaults_for_the_named_agent_once(monkeypatch):
     monkeypatch.setattr(join_checks, "startup", lambda redis, report: calls.append((redis, report)) or checks)
     hive_join.run({}, "start")
     hive_join.run({}, "start")
-    context = {"home": "", "profile": "engineer", "harness": "copilot", "pane": "task-pane", "transcript_dir": ""}
+    context = {
+        "home": "",
+        "profile": "engineer",
+        "harness": "copilot",
+        "pane": "task-pane",
+        "transcript_dir": "",
+        "headed": False,
+    }
     assert len(calls) == 1
     assert calls[0][0] is client.redis
     assert calls[0][1] == {

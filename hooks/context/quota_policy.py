@@ -164,15 +164,14 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
 
     limits = _load_native(session_id) or {}
     five, week = limits.get("five_hour") or {}, limits.get("seven_day") or {}
-    if not isinstance(five.get("used_percentage"), (int, float)) or not isinstance(
-        week.get("used_percentage"), (int, float)
-    ):
+    if not isinstance(week.get("used_percentage"), (int, float)):
         return None
+    five_used = five.get("used_percentage")
     now = time.time()
     five_reset = five.get("resets_at") if isinstance(five.get("resets_at"), (int, float)) else None
     week_reset = week.get("resets_at") if isinstance(week.get("resets_at"), (int, float)) else None
     return (
-        _effective(float(five["used_percentage"]), five_reset, now),
+        _effective(float(five_used), five_reset, now) if isinstance(five_used, (int, float)) else 0.0,
         _effective(float(week["used_percentage"]), week_reset, now),
         five_reset,
         week_reset,
@@ -195,9 +194,9 @@ def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "Prob
             newest[result.account] = (observed_at, result)
     candidates = []
     for observed_at, result in newest.values():
-        five = _effective(result.five_hour.used, result.five_hour.resets_at, now)
+        five = _effective(result.five_hour.used, result.five_hour.resets_at, now) or 0.0
         week = _effective(result.seven_day.used, result.seven_day.resets_at, now)
-        if five is None or week is None or result.provider_status == "rejected":
+        if week is None or result.provider_status == "rejected":
             continue
         fresh = session_bands.fresh(observed_at, now)
         cap = session_bands.cap(100.0 - five, 100.0 - week) if fresh else None
@@ -246,13 +245,19 @@ def evaluate(session_id: str) -> Decision | None:
     if windows is None:
         return None
     five_used, week_used, five_reset, week_reset = windows
-    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < min(QUOTA_HANDOFF_WEEK_PCT, reservation.LOWEST):
-        return None
     harness = "codex" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "claude"
-    held = reservation.current(harness, os.environ)
     account = session_account(agent_pid())
     master_seat = _master(os.environ)
+    primary_ceiling = (
+        reservation.primary_login_ceiling(account, os.environ) if master_seat and harness == "claude" else None
+    )
+    floors = [QUOTA_HANDOFF_WEEK_PCT, reservation.LOWEST, *([primary_ceiling] if primary_ceiling is not None else [])]
+    if five_used < QUOTA_HANDOFF_5H_PCT and week_used < min(floors):
+        return None
+    held = reservation.current(harness, os.environ)
     ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ), master_seat)
+    if primary_ceiling is not None:
+        ceiling = primary_ceiling if ceiling is None else min(ceiling, primary_ceiling)
     week_pct = QUOTA_HANDOFF_WEEK_PCT if ceiling is None else min(QUOTA_HANDOFF_WEEK_PCT, ceiling)
     if five_used < QUOTA_HANDOFF_5H_PCT and week_used < week_pct:
         return None

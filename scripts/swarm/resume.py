@@ -3,11 +3,12 @@
 import json
 import os
 from dataclasses import asdict, dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.swarm import deliberate_exit, fencing, idle, outage, profile_choice
+from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 AWAITING = "awaiting-decision"
-RESUMED, FRESH = "resumed", "fresh"
+RESUMED, FRESH, REFUSED = "resumed", "fresh", "refused"
 KUBERNETES = "kubernetes"
 RECOVERY_REQUESTS = "recovery-requests"
 RESUME, NATIVE, CONTEXT = "resume", "native", "context"
@@ -75,11 +76,33 @@ def restored_text(slug, agent, ledger):
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)
 
 
-def reopen(store, slug, worktrees, runtime, now_ms, ledger, has_quota=account_quota):
+def occupants_first(store: RedisStore, agents: list[AgentRecord]) -> list[AgentRecord]:
+    return sorted(agents, key=lambda a: bool(a.seat) and store.seats.occupant(a.seat).occupant != a.name)
+
+
+def waiting_peer(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    if not agent.seat:
+        return ""
+    occupant = store.seats.occupant(agent.seat).occupant
+    if occupant == agent.name:
+        return ""
+    waiting = any(a.name == occupant and a.state == AWAITING for a in store.agents(slug))
+    return occupant if waiting else ""
+
+
+def reopen(
+    store: RedisStore,
+    slug: str,
+    worktrees: dict[str, str],
+    runtime: Any,
+    now_ms: int,
+    ledger: object,
+    has_quota: object = account_quota,
+) -> list["Outcome"]:
     context = RestoreContext(runtime, now_ms, ledger, has_quota)
     store.redis.set(store.key(slug, "restore-worktrees"), json.dumps(worktrees))
     outcomes = []
-    for agent in store.agents(slug):
+    for agent in occupants_first(store, store.agents(slug)):
         if agent.state == "finished":
             continue
         worktree = store.config(slug).repo if agent.lane == MASTER else worktrees.get(agent.name, "")
@@ -98,7 +121,15 @@ class RestoreContext:
     has_quota: object = account_quota
 
 
-def _attempt(store, slug, agent, worktree, context, transfer):
+def _attempt(
+    store: RedisStore, slug: str, agent: AgentRecord, worktree: str, context: "RestoreContext", transfer: dict
+) -> "Outcome":
+    if peer := waiting_peer(store, slug, agent):
+        store.put_agent(slug, replace(agent, state="finished"))
+        reason = f"seat {agent.seat} already waits on {peer}"
+        return Outcome(
+            agent.name, agent.lane, agent.task, REFUSED, reason, agent.conversation_id, context.at, transfer["id"]
+        )
     if agent.seat:
         if store.seats.occupant(agent.seat).occupant != agent.name:
             store.seats.occupy(agent.seat, agent.name, context.at)
@@ -231,7 +262,7 @@ def _recovery_record(store, slug, agent):
     return json.loads(raw) if raw else {}
 
 
-def _recovery_owner(store, slug, agent, rows, now_ms):
+def _recovery_owner(store: RedisStore, slug: str, agent: AgentRecord, rows: dict[str, Any], now_ms: int) -> bool:
     task = rows.get(agent.task, {})
     if agent.lane == MASTER or agent.state != "working":
         return False
@@ -241,7 +272,7 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
         return False
     if agent.seat and store.seats.occupant(agent.seat).occupant != agent.name:
         return False
-    claim = fencing.read(store, slug)["claims"].get(agent.task)
+    claim = fencing.read_claims(store, slug).get(agent.task)
     if not claim:
         return not agent.execution_id or agent.runtime_backend == "local"
     return (
@@ -253,8 +284,8 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
     )
 
 
-def _recovery_identity(store, slug, agent):
-    claim = fencing.read(store, slug)["claims"].get(agent.task)
+def _recovery_identity(store: RedisStore, slug: str, agent: AgentRecord) -> list[Any]:
+    claim = fencing.read_claims(store, slug).get(agent.task)
     generation = claim["generation"] if claim else 0
     return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
 
@@ -339,7 +370,7 @@ def recovery_blocker(store: RedisStore, slug: str, agent: AgentRecord) -> str:
 
 
 def _recovery_current(store, slug, agent, context):
-    rows = {task["id"]: task for task in context.ledger.state(slug)["tasks"]}
+    rows = {task["id"]: task for task in pass_state(context.ledger, slug)["tasks"]}
     record = _recovery_record(store, slug, agent)
     return (
         record.get("state") == "pending"

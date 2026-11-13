@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator, Mapping, MutableMapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, bundle_origin, registry, server
@@ -144,7 +144,12 @@ def _invite(args: argparse.Namespace) -> str:
     )
     redis = redis_client()
     if signer_path := member_swarms.signer_path(os.environ):
-        request = replace(request, signer_path=signer_path, swarms=member_swarms.swarms(redis, args.swarm))
+        request = replace(
+            request,
+            signer_path=signer_path,
+            swarms=member_swarms.swarms(redis, args.swarm),
+            sync=member_swarms.sync_target(os.environ),
+        )
     return invite.invite(redis, bao, request, redis_url(os.environ))
 
 
@@ -172,14 +177,17 @@ def _create(args: argparse.Namespace) -> str:
     bao = openbao_kv.from_env(os.environ)
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
-    tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
-    given = {
+    tools = create.Tools(
+        redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served(), signer=_signer
+    )
+    given: dict[str, Any] = {
         "repo": args.repo,
         "base": args.base,
         "like": args.like,
         "node": args.node,
         "timeout_s": args.timeout,
         "name": args.name,
+        "repos": create.parse_repos(args.repos) if args.repos else None,
     }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
@@ -187,7 +195,7 @@ def _create(args: argparse.Namespace) -> str:
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, machine, remove
+    from scripts.hive import invite, machine, member_swarms, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
@@ -207,20 +215,37 @@ def _remove(args: argparse.Namespace) -> list[str]:
         wait_s=args.wait,
         signer=_signer(),
         dry_run=args.dry_run,
+        signer_path=member_swarms.signer_path(os.environ),
+        sync=member_swarms.sync_target(os.environ),
     )
     return remove.remove(store, bao, plan, remove.Host())
+
+
+def _unlist(member: str) -> list[str]:
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms, remove
+
+    path = member_swarms.signer_path(os.environ)
+    if path is None:
+        return []
+    bao = openbao_kv.from_env(os.environ)  # pyright: ignore[reportUnknownMemberType]
+    plan = remove.Plan(member, "", "", signer_path=path, sync=member_swarms.sync_target(os.environ))
+    return remove.unlist(None, bao, plan, remove.Host())
 
 
 def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
         from scripts.hive import nats_grant
 
+        unlisted = _unlist(args.id)
         redis, signer = redis_client(), _signer()
         bus = [nats_grant.revoke(redis, signer, args.id)] if signer is not None else []
         auth.revoke(redis, args.id)
-        return "\n".join([*bus, f"revoked {args.id}"])
+        return "\n".join([*unlisted, *bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
+    if args.command == "holders":
+        return auth.backfill_holders(redis_client())
     return "\n".join(_remove(args))
 
 
@@ -229,7 +254,7 @@ def _drain(wait_s: int) -> str:
     from scripts.swarm.commands import hive_id
     from scripts.swarm.store import RedisStore
 
-    return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host())
+    return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host(), registry.member_name())
 
 
 def _signer() -> "Signer | None":
@@ -293,7 +318,10 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
-    invited.add_argument("--bus-url", help="NATS address the new hive reaches; copied from --like when omitted")
+    invited.add_argument(
+        "--bus-url",
+        help="NATS address the new hive reaches; copied from --like, else the hub signer record, when omitted",
+    )
     invited.add_argument(
         "--swarm", action="append", default=[], help="swarm the member's bus credential reaches; every swarm if omitted"
     )
@@ -305,12 +333,16 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--like", help="OpenBao record to copy; defaults to the workstation hive's")
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
     created.add_argument("--name", help="hive name to create; defaults to the next unused swarm-hive name")
+    created.add_argument(
+        "--repos", help="comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
+    )
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
     joined.add_argument("invite", type=Path, help="private member invite file shared with Kubernetes workers")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
+    sub.add_parser("holders", help="Write the holder record of every member minted before holder records")
     removed = sub.add_parser(
         "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
     )
@@ -369,23 +401,49 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workers(reported: dict[str, list[dict[str, Any]]], local: dict[str, list[str]], record: dict[str, Any]) -> int:
+    """How many of a hive's listed agents count against its agent limit: every one but its masters."""
+    from scripts.swarm import local_slots
+
+    hive = str(record["id"])
+    names = [str(report["agent"]) for report in reported[hive]] + local.get(hive, [])
+    return sum(not local_slots.is_master(name) for name in names)
+
+
+def _ceiling_columns(record: Any, reading: Any) -> tuple[str, str]:
+    """The hive list's max agents column, the ceiling and how it is set, and its headroom column."""
+    from scripts.hive import ceiling, headroom
+
+    cap = record["max_agents"]
+    top = ceiling.shown(cap, reading)
+    marked = registry.AUTO if cap is None else f"cap {cap}"
+    return f"{'unknown' if top is None else top} ({marked})", headroom.summary(reading)
+
+
 def _list() -> None:
     from scripts.hive import headroom, join_report
 
     now = now_ms()
     redis = redis_client()
     hives = registry.hives(redis)
-    reported = {record["id"]: join_report.live(redis, record["id"]) for record in hives}
+    reported: dict[str, list[dict[str, Any]]] = {
+        record["id"]: join_report.live(redis, record["id"]) for record in hives
+    }
     local = _local_agents(redis, {(report["slug"], report["agent"]) for rows in reported.values() for report in rows})
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
-        room = headroom.summary(headroom.read(redis, record["id"], now))
+        top, room = _ceiling_columns(record, headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
+        workers = _workers(reported, local, record)
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
+            f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
+            f"\trelease={record['version'] or 'unknown'}"
         )
+        for member, entry in sorted(record.get("members", {}).items()):
+            taking = "draining" if entry["draining"] == "yes" else "taking agents"
+            print(f"  member {member}\t{taking}\theartbeat {now - entry['heartbeat_at']} ms ago")
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
         for name in local.pop(record["id"], []):
@@ -513,7 +571,7 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
-        elif args.command in ("revoke", "remove", "drain"):
+        elif args.command in ("revoke", "remove", "drain", "holders"):
             print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)

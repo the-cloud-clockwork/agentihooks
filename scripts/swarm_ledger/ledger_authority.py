@@ -6,7 +6,9 @@ binding governs the transport a session selects; any process of the operator's u
 
 import hashlib
 import hmac
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from functools import lru_cache
 from os import environ
@@ -26,7 +28,7 @@ def connect(environ=None):
     return ports.swarm().store.connect(environ)
 
 
-def agent_token(admin, slug, name):
+def agent_token(admin: str, slug: str, name: str) -> str:
     return hmac.new(admin.encode(), f"{slug}\n{name}".encode(), hashlib.sha256).hexdigest()
 
 
@@ -69,9 +71,50 @@ def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
 
 
 def hive_principal(slug: str, token: str, agent: str) -> str | None:
+    """The agent a hive token checks for; its credential store lookup is cached, its hive placement read live."""
+    member = hive_token_member(slug, token, agent)
+    return agent if member and hive_agent(member, slug, agent) else None
+
+
+HIVE_CHECK_TTL_S = 15.0
+HIVE_CHECK_MAX = 4096
+_HIVE_CHECKS: OrderedDict[tuple[str, str, str], tuple[str, float]] = OrderedDict()
+_HIVE_CHECKS_LOCK = threading.Lock()
+
+
+def hive_token_member(slug: str, token: str, agent: str) -> str | None:
+    """The member a hive token belongs to, read from the store once per HIVE_CHECK_TTL_S; refusals are never cached."""
+    key = (slug, hashlib.sha256(token.encode()).hexdigest(), agent)
+    member = _hive_checked(key)
+    if member:
+        return member
     with hive_work.bounded():
         member = ports.hive().auth.agent_member(ports.swarm().store.redis_client(), token, slug, agent)
-    return agent if member and hive_agent(member, slug, agent) else None
+    if member:
+        _remember_hive_check(key, member)
+    return member
+
+
+def _hive_checked(key: tuple[str, str, str]) -> str | None:
+    """The member a hive token check for this ledger, token digest and agent found within HIVE_CHECK_TTL_S."""
+    with _HIVE_CHECKS_LOCK:
+        checked = _HIVE_CHECKS.get(key)
+        if checked is None:
+            return None
+        member, at = checked
+        if time.monotonic() - at < HIVE_CHECK_TTL_S:
+            return member
+        del _HIVE_CHECKS[key]
+        return None
+
+
+def _remember_hive_check(key: tuple[str, str, str], member: str) -> None:
+    """Records the member a hive token check found, dropping the oldest beyond HIVE_CHECK_MAX."""
+    with _HIVE_CHECKS_LOCK:
+        _HIVE_CHECKS[key] = (member, time.monotonic())
+        _HIVE_CHECKS.move_to_end(key)
+        while len(_HIVE_CHECKS) > HIVE_CHECK_MAX:
+            del _HIVE_CHECKS[next(iter(_HIVE_CHECKS))]
 
 
 def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
@@ -100,6 +143,15 @@ def credential_caller(headers: Mapping[str, str], admin: str, slug: str) -> str 
     if not secret:
         return None
     return agent if _same(token, agent_token(secret, slug, agent)) else None
+
+
+def page_credential(slug: str) -> str:
+    """The ledger's page credential outside edge mode, the operator's local credential; edge mode never reads it."""
+    if environ.get("SWARM_AUTH_MODE") == "edge":
+        return ""
+    from scripts.swarm_ledger import storage
+
+    return storage.default().token(slug) or ""
 
 
 def access_operator(assertion) -> bool:

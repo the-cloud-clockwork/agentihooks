@@ -10,7 +10,14 @@ from tests import coverage_history, coverage_summary
 from tests import coverage_ratchet as ratchet
 from tests.coverage_grade import HISTORY
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.timeout(30, method="signal")]
+
+
+@pytest.fixture(autouse=True)
+def _one_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grade in this process, so no pool forks from a multi threaded xdist worker."""
+    monkeypatch.setattr(ratchet, "_cpus", lambda: 1)
+
 
 SOURCE = "def f(x):\n    if x:\n        return 1\n    return 2\n"
 

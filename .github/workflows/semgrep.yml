@@ -46,6 +46,31 @@ jobs:
           (cd "$copy" && semgrep --metrics off --test --config rules rules)
           semgrep scan --error --strict --metrics off --config "$RULES" .
 
+      - name: Rule exceptions only shrink
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          git rev-parse --verify --quiet "$BASE^{commit}" > /dev/null || { echo "cannot read base $BASE" >&2; exit 1; }
+          for list in .semgrep/*-allowlist.json; do
+            if ! git cat-file -e "$BASE:$list" 2>/dev/null; then
+              echo "The base holds no $list; the head list starts it"
+              continue
+            fi
+            previous="$(git show "$BASE:$list")"
+            LIST="$list" PREVIOUS="$previous" python - <<'PY'
+          import json
+          import os
+          import sys
+
+          previous = set(json.loads(os.environ["PREVIOUS"]))
+          with open(os.environ["LIST"]) as handle:
+              current = set(json.load(handle))
+          if not current <= previous:
+              sys.exit(f"{os.environ['LIST']} exceptions grew: {sorted(current - previous)}")
+          print(f"{os.environ['LIST']} exceptions: {len(current)} of {len(previous)}")
+          PY
+          done
+
       - name: Resolve the merge base of the head and the base
         id: baseline
         env:
@@ -94,17 +119,18 @@ jobs:
           python-version: "3.12"
 
       - name: Install Semgrep
-        run: python -m pip install semgrep==1.177.0 "pyyaml>=6.0"
+        run: python -m pip install semgrep==1.177.0
 
       - name: Operator feature regressions and passing fixtures
         run: semgrep --metrics off --test .semgrep/features
 
-      - name: Validate operator feature map
-        run: python -m scripts.feature_map
-
       # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
       - name: Outage rules fire on their planted faults and pass their clean cases
-        run: semgrep --metrics off --test .semgrep-incidents
+        run: |
+          copy="$(mktemp -d -p "$RUNNER_TEMP")"
+          cp -r .semgrep-incidents "$copy/rules"
+          : > "$copy/.semgrepignore"
+          (cd "$copy" && semgrep --metrics off --test --config rules rules)
 
   charts:
     concurrency:
@@ -149,6 +175,9 @@ jobs:
             git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"
           fi
           python "$grader" check --base FETCH_HEAD
+
+      - name: A chart version bump leaves every pod template unchanged
+        run: python tests/ci_charts/chart_pod_templates.py
 
       # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
       - name: Charts render no CronJob outside the scheduler

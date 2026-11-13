@@ -120,6 +120,7 @@ The recording persists: later `agentihooks swarm init` runs without `--adopt` ke
 While `SWARM_ADOPT_LEDGER_DIR` is set:
 
 - Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID and network namespaces, so server pidfiles stay valid on the host. It runs the ledger server under its reload supervisor from the recorded checkout with reload on, so a code reload hands the listening socket to a successor while the container keeps running, bound to 127.0.0.1:8765, against the recorded Redis, so every swarm keeps its ledger, inbox items and seats. Stop the legacy ledger container by its id before the bundle `swarm` service starts on that port.
+- The adopted `swarm` service sets `AGENTIHOOKS_BUS=memory` and `AGENTIHOOKS_SCHEDULER_STATE_BACKEND=redis` as fixed values, so a host shell or `.env` setting cannot change them. The base stack defaults to `AGENTIHOOKS_BUS=nats` at `nats://nats:4222` and keeps scheduler state on that bus, but on the host network with `depends_on` reset no Compose `nats` service is reachable and the name `nats` does not resolve. The memory bus matches the workstation tick and inbox on the host, and scheduler state stays in the recorded Redis instead of a store local to one server process. The adopted server therefore neither relays ledger events to NATS nor consumes them; reach a NATS hub only from a stack without adoption or from a hive.
 - `agentihooks ledger serve --ensure` and `--stop` for the adopted folder, and the Doctor and watchdog restarts built on them, start and stop the bundle `swarm` service. The legacy `ledger` service of the `agentihooks-ledger` Compose project and the host process server are not started again.
 - A shared ledger folder other than the adopted one is refused with `the swarm stack adopts <adopted>, not <folder>; the legacy ledger service stays down`.
 - The stack Redis gives the `swarm` user every command except `FLUSHALL` and `FLUSHDB` (`+@all -flushall -flushdb`). Redis answers a flush with a `NOPERM` error, so the bundle cannot empty the shared Redis data it takes over. Hive member users keep `-@dangerous` and the `default` user stays off.
@@ -132,24 +133,27 @@ To check adoption on a running stack:
 cd "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack"
 grep '^SWARM_ADOPT_\|^SWARM_PORT' .env
 project="$(sed -n 's/^SWARM_COMPOSE_PROJECT=//p' .env)"
+docker compose --project-name "${project:-agentihooks-swarm}" exec swarm sh -c 'echo "$AGENTIHOOKS_BUS $AGENTIHOOKS_SCHEDULER_STATE_BACKEND"'
 docker compose --project-name "${project:-agentihooks-swarm}" exec redis grep -c 'flushall -flushdb' /data/users.acl
 ```
 
-The count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
+The `swarm` service prints `memory redis` and the count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
+
+If the adopted `swarm` logs keep repeating NATS connect tracebacks, the stack files predate the overlay's memory bus. Run `agentihooks swarm init` from a current agentihooks install: it copies the bundled overlay over the stack files and recreates the changed `swarm` service. Then run the check above and confirm it prints `memory redis`.
 
 ## Workstation tailnet fronts
 
-The adopted workstation stack can expose its ledger, hive join and Redis fronts through Tailscale. The overlay, nginx template and startup script ship with the stack under `deploy/compose`. They require the existing hive certificate and key under the adopted user's `.agentihooks/hive-tls` folder. The ledger forwards to loopback port 8765 and Redis to loopback port 6379, preserving the workstation's adopted Redis service.
+The adopted workstation stack can expose its ledger and Redis fronts through Tailscale. The overlay, nginx template and startup script ship with the stack under `deploy/compose`. They require the existing hive certificate and key under the adopted user's `.agentihooks/hive-tls` folder. The ledger forwards to loopback port 8765 and Redis to loopback port 6379, preserving the workstation's adopted Redis service.
 
-Start or restart the three fronts with:
+Start or restart the two fronts with:
 
 ```bash
 bash "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack/deploy/compose/start-tailnet.sh"
 ```
 
-Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address and recreates only the three fronts. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener, hive listener and advertised Redis address all use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
+Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address recreates only the two fronts and removes the retired hive join front. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener and advertised Redis address both use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
 
-The hive front mints bus credentials only with the NATS signer. It reads `AGENTIHOOKS_NATS_SIGNER` (the OpenBao record under `agentihooks/hub/`), `AGENTIHOOKS_NATS_TRUSTED_OPERATOR`, `OPENBAO_URL` and `OPENBAO_TOKEN` from the environment that runs the script, or from the stack `.env`. Without them it grants no bus credential, and a member refreshing through it keeps the bus credential it already saved.
+Hives join through the hosted join endpoint on the Anton Redis, set per hive with the chart's `workers.hiveUrl`. The workstation no longer serves hive joins on the tailnet, so no hive can mint a member on the workstation Redis.
 
 ## Diagnose or stop the stack
 

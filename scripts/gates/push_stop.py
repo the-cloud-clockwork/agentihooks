@@ -1,6 +1,8 @@
-"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself, then refuses the stop over
-uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push,
-unless a checked wait on another task not yet done, or on the merge of a pull request still open, holds it."""
+"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless fleet panic holds
+or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
+refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
+ledger line since the push, unless any declared wait during fleet panic, a checked wait on another task not yet done,
+or one on the merge of a pull request still open, holds it."""
 
 import os
 import re
@@ -10,11 +12,17 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from hooks.config import CONDITIONS_TIMEOUT_SEC
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
 TEMPLATE = (
@@ -48,6 +56,11 @@ GATE_LATE = (
     "Run python -m scripts.ci_prepush there and commit."
 )
 PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
+PANIC_HELD = "Fleet panic holds, so the stop hook pushes nothing and did not push {path}."
+CHECKS = (
+    "Checks still run on {url} and none is red, so the stop hook did not push: a push now cancels them. "
+    "Wait with agentihooks swarm {swarm} wait --on checks {url}, then push once they resolve."
+)
 
 
 @dataclass(frozen=True)
@@ -202,7 +215,15 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None, github=None):
+    def __init__(
+        self,
+        connect: Any = None,
+        ledger: Any = None,
+        root: Any = None,
+        now: Any = None,
+        clock: Any = None,
+        github: Any = None,
+    ) -> None:
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
         self._github = github
         # The hook process builds its gates right after its imports; the reserve covers the startup before this.
@@ -211,7 +232,7 @@ class PushStop:
     def matches(self, call):
         return not call.tool
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: object) -> Decision:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()
@@ -219,26 +240,44 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
-        for tree in found:
-            if tree.unpushed and (refused := self.held(tree)):
+        store, progress, failed, found = self.connect(), False, [], trees(self.root(), who.name)
+        frozen, reviewing = self.frozen(store), self.reviewing(call.session)
+        holding = [tree for tree in found if tree.unpushed and own_pull(tree, task)]
+        checks = self.checks(task) if holding else ""
+        held = holding if checks else []
+        owed = any(tree.dirty and not reviewing for tree in held)
+        for tree in [tree for tree in found if tree not in held]:
+            if tree.unpushed and frozen:
+                failed.append(PANIC_HELD.format(path=tree.path))
+            elif tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree, branch)
-            owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
+            owed = owed or (tree.dirty and not reviewing) or (tree.unpushed and not self.on_origin(tree))
             progress = progress or (
                 doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, found)
             )
         if not (owed or progress):
             self.settle(store, who)
-            return Decision()
-        if self.waiting(store, who, doc, task, any(tree.dirty for tree in found)):
+            return Decision(reason=CHECKS.format(url=checks, swarm=who.swarm)) if checks else Decision()
+        if self.waiting(store, who, doc, task, any(tree.dirty for tree in found), frozen):
             return Decision()
         reason = " ".join(
             filter(None, [TEMPLATE if owed else "", PROGRESS.format(swarm=who.swarm) if progress else ""])
         )
         self.notify(store, who, reason)
         return Decision.deny(" ".join([reason, *failed]))
+
+    def checks(self, task: Any) -> str:
+        """The task pull request's link while its checks run and none is red, when the one push gate refuses a push,
+        else ''."""
+        from scripts.gates.one_push import finished, never_started
+
+        url = str(task["pr_url"])
+        pull = self.github()(url)
+        if pull is None or finished(pull) or pull.queued or not pull.running:
+            return ""
+        return "" if never_started(pull) else url
 
     def held(self, tree):
         """Why HEAD stays off origin: its pre push gate refused, or less than the reserve is left for the push."""
@@ -247,16 +286,36 @@ class PushStop:
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
-    def waiting(self, store, who, doc, task, dirty):
-        """Whether a live checked wait holds the stop, so a refused push never deadlocks: one on another unfinished
-        task, or one on the merge of a pull request still open, which a push would drop from the queue, while every
-        change is committed."""
+    def frozen(self, store: Any) -> bool:
+        """Whether fleet panic holds, which denies every push but the fix; a Redis error reads as no panic."""
+        from redis.exceptions import RedisError
+
+        from scripts.swarm import panic
+
+        try:
+            return panic.state(store) is not None
+        except RedisError:
+            return False
+
+    def reviewing(self, session: str) -> bool:
+        """Whether a live review helper of the stopping session still edits the worktree, so its changes are not
+        owed as a commit until it ends."""
+        from hooks.lifecycle import helpers
+
+        return helpers.live(session)
+
+    def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool) -> bool:
+        """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
+        fleet panic holds, one on another unfinished task, or one on the merge of a pull request still open, which a
+        push would drop from the queue, while every change is committed."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)
         on = (held or {}).get("on") or {}
         if not (held and held["until"] > self.now()):
             return False
+        if frozen:
+            return True
         if on.get("kind") == "merge" and not dirty:
             pull = self.github()(on["target"])
             return pull is not None and pull.state == "OPEN"
@@ -337,7 +396,7 @@ class PushStop:
 
         return LedgerClient()
 
-    def github(self):
+    def github(self) -> "Callable[[str], PullRequest | None]":
         from scripts.swarm.ledger_events import view
 
         return self._github or view

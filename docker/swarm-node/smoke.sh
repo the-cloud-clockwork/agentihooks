@@ -64,7 +64,7 @@ shutil.rmtree(sys.argv[1])
 PY
 }
 trap cleanup EXIT
-trap 'echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $?)" >&2' ERR
+trap 'echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $?)" >&2; case "$BASH_COMMAND" in "docker build "*rebuild.log*) tail -n 40 "$output/rebuild.log" >&2 || true ;; "docker build "*) tail -n 40 "$output/build.log" >&2 || true ;; esac' ERR
 
 bash "$context/docker/swarm-node/scan.sh" --pull-scanner > "$output/scanner-pull.log" 2>&1 &
 scanner_pid=$!
@@ -178,6 +178,8 @@ PYMODE
     exit 0
 fi
 
+docker build --network none --build-arg WORKER_IMAGE="$image" \
+    -f "$context/docker/swarm-node/rejection.Dockerfile" "$context" > "$output/valid-lock.log" 2>&1
 for rejection in missing-checksum unsupported-architecture mismatched-binary; do
     python3 - "$context/docker/swarm-node/versions.lock" "$rejection" <<'PY'
 import json, sys
@@ -195,7 +197,8 @@ else:
     lock['tools']['herdr']['sha256']='0'*64
 path.write_text(json.dumps(lock))
 PY
-    if docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} -f "$context/docker/swarm-node/Dockerfile" \
+    if docker build --network none --build-arg WORKER_IMAGE="$image" \
+        -f "$context/docker/swarm-node/rejection.Dockerfile" \
         -t "$rejected" "$context" > "$output/$rejection.log" 2>&1; then
         echo "rejection fixture unexpectedly built: $rejection" >&2
         exit 1

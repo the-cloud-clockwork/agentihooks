@@ -1,0 +1,423 @@
+"""The report steps of the tick wrapper: ledger events, watches, findings, metrics, wake, snapshot, heartbeat and status."""
+
+import os
+from collections.abc import Callable
+from typing import Any
+
+from scripts.gates import progress, quiet
+from scripts.swarm import (
+    bottleneck_status,
+    dispatcher,
+    doc_items,
+    doc_report,
+    done_gate,
+    ledger_events,
+    metrics,
+    overrun,
+    ready,
+    reaper,
+    release_wait,
+    stall_watch,
+    tick_heartbeat,
+    timing,
+    waits,
+)
+from scripts.swarm.health import early_ends, step_starvation
+from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
+from scripts.tick import registry
+from scripts.tick.engine import SLOW, cadence_s, interval_s
+from scripts.tick.pool import CLOSING_LANE
+from scripts.tick.step import Lane
+from scripts.tick.steps import CallStep, hook_domains, pass_domains
+from scripts.tick.steps.host import held, viewed
+
+Get = Callable[[str], Any]
+
+
+def _reread(get: Get) -> Callable[[str], Any]:
+    return ledger_events.fresh_reader(get("view"), cache=get("store").redis)
+
+
+def _event_pass(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        ledger_events.event_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("inbox"),
+        get("store"),
+        get("slug"),
+        get("doc"),
+        get("ledger"),
+        cli.now_ms(),
+        get("view"),
+    )
+
+
+def _done_recheck(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        done_gate.recheck_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store"),
+        get("slug"),
+        get("doc"),
+        get("ledger"),
+        cli.now_ms(),
+        get("view"),
+    )
+
+
+def _progress_checks(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        progress.checks_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store").redis,
+        get("slug"),
+        get("doc")["tasks"],
+        get("view"),
+        cli.now_ms(),
+    )
+
+
+def _waits_end(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        waits.end_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store"),
+        get("slug"),
+        get("rows"),
+        get("inbox"),
+        get("view"),
+        cli.now_ms(),
+        _reread(get),
+    )
+
+
+def _merge_pass(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        ready.merge_pass,  # pyright: ignore[reportUnknownMemberType]
+        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), _reread(get), cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
+        get("rows"),
+    )
+
+
+def _stall_watch(cli: Any, get: Get) -> Any:
+    store, slug, ledger, runtime = get("store"), get("slug"), get("ledger"), get("runtime")
+    live = runtime.live_names() | {a.name for a in get("agents") if a.runtime_backend != "local"}
+    get("box")["live"] = live
+    return cli.skip_refused(
+        stall_watch.stall_pass,  # pyright: ignore[reportUnknownMemberType]
+        stall_watch.Watch(
+            store,
+            slug,
+            ledger,
+            get("view"),
+            frozenset(live),
+            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+            stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
+            cli.now_ms(),
+            released=release_wait.checker(get("config")),  # pyright: ignore[reportUnknownMemberType]
+            reread=_reread(get),
+        ),
+        get("doc"),
+    )
+
+
+def _overrun(cli: Any, get: Get) -> Any:
+    slug, runtime = get("slug"), get("runtime")
+    return cli.skip_refused(
+        overrun.overrun_pass,  # pyright: ignore[reportUnknownMemberType]
+        overrun.Watch(
+            get("store"),
+            slug,
+            get("ledger"),
+            frozenset(get("box")["live"]),
+            lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+            cli.now_ms(),
+        ),
+        get("doc"),
+    )
+
+
+def _quiet(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(quiet.quiet_pass, get("store"), get("slug"), get("rows"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
+
+
+def _doc_report(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        doc_report.report_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("inbox"),
+        get("ledger"),
+        get("slug"),
+        get("doc")["tasks"],
+        cli.now_ms(),
+        get("config").watchdog_address,
+    )
+
+
+def _priorities(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        dispatcher.priorities,  # pyright: ignore[reportUnknownMemberType]
+        get("store"),
+        get("slug"),
+        get("doc"),
+        get("ledger"),
+        get("view"),
+        cli.now_ms(),
+    )
+
+
+def _health_findings(cli: Any, get: Get) -> None:
+    doc = get("doc")
+    get("box")["found"] = timing.call(  # pyright: ignore[reportUnknownMemberType]
+        findings,
+        get("store"),
+        get("slug"),
+        get("config"),
+        doc.get("tasks", []),
+        doc.get("_meta", {}).get("events", []),
+        get("view"),
+    )
+
+
+def _findings_pass(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(
+        ledger_events.findings_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("inbox"),
+        get("store"),
+        get("slug"),
+        get("box")["found"],
+        get("doc"),
+    )
+
+
+def _metrics(cli: Any, get: Get) -> Any:
+    return timing.call(  # pyright: ignore[reportUnknownMemberType]
+        metrics.record_pass,
+        get("slug"),
+        cli.now_ms(),
+        get("count"),
+        os.environ,
+        metrics.metrics_swarm.TickInput(get("store"), get("doc"), get("box")["found"], get("view"), get("ledger")),
+    )
+
+
+def _bottleneck_status(cli: Any, get: Get) -> Any:
+    return cli.skip_refused(bottleneck_status.refresh, get("slug"), get("store"), cli.now_ms())
+
+
+def _inbox_wake(cli: Any, get: Get) -> Any:
+    window = cli.wake.window_ms(os.environ)  # pyright: ignore[reportUnknownMemberType]
+    return cli.skip_refused(cli.wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
+
+
+def _snapshot_job(cli: Any, get: Get) -> list[str]:
+    started = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
+    return ["started automatic snapshot"] if started else []
+
+
+def _last_tick(cli: Any, get: Get) -> None:
+    if get("ended") is None:
+        return
+    store = get("store")
+    store.redis.set(store.key(get("slug"), "last-tick"), cli.now_ms())
+
+
+def _heartbeat(cli: Any, get: Get) -> None:
+    ended = get("ended")
+    if ended is None:
+        return
+    tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
+    if ended == FULL:
+        early_ends.clear(get("store"), get("slug"))
+
+
+def early_end(store: Any, slug: str, missing: KeyError, left: list[str]) -> list[str]:
+    """Count a pass that ended early because no step stored ``missing`` and return the line naming that value and the
+    ``left`` steps of the pass; the closing group stamps its last tick and heartbeat."""
+    early_ends.note(store, slug, missing.args[0])
+    steps = ", ".join(dict.fromkeys(left)) or "no recorded step"
+    return [f"pass ended early: no step stored {missing.args[0]}, the pass left {steps}"]
+
+
+def _status_publish(cli: Any, get: Get) -> None:
+    """Publish the tick status with the health findings this pass already found, when the health step found them."""
+    found = get("box").get("found")
+    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"), found)
+
+
+CLOSING_GROUP = "closing"
+CLOSING = Lane(CLOSING_LANE)
+FULL = "full"
+EARLY = "early"
+VIEWED = frozenset({"tick view"})
+FOUND = frozenset({"health findings"})
+VIEW = pass_domains("view")
+DOC = hook_domains("doc")
+ROWS = hook_domains("rows")
+CONFIGURED = hook_domains("config", "doc")
+
+STEPS = (
+    CallStep(
+        "ledger event pass",
+        "wrapper events",
+        held(viewed("ledger event pass", _event_pass)),
+        VIEWED,
+        VIEW | DOC,
+        lane=SLOW,
+    ),
+    CallStep(
+        "done recheck", "wrapper events", held(viewed("done recheck", _done_recheck)), VIEWED, VIEW | DOC, lane=SLOW
+    ),
+    CallStep(
+        "progress checks",
+        "wrapper events",
+        held(viewed("progress checks", _progress_checks)),
+        VIEWED,
+        VIEW | DOC,
+        lane=SLOW,
+    ),
+    CallStep(
+        "waits end",
+        "wrapper events",
+        held(viewed("waits end", _waits_end)),
+        VIEWED,
+        VIEW | ROWS,
+        lane=CallStep.lane,
+        kept=True,
+    ),
+    CallStep(
+        "merge pass",
+        "wrapper events",
+        held(viewed("merge pass", _merge_pass)),
+        VIEWED,
+        VIEW | ROWS,
+        lane=CallStep.lane,
+        kept=True,
+    ),
+    CallStep(
+        "stall watch",
+        "wrapper events",
+        held(viewed("stall watch", _stall_watch)),
+        VIEWED | {"page relay"},
+        pass_domains("agents", "view") | CONFIGURED,
+        pass_domains("live"),
+    ),
+    CallStep("overrun pass", "wrapper events", held(_overrun), frozenset({"stall watch"}), pass_domains("live") | DOC),
+    CallStep("quiet pass", "wrapper events", held(_quiet), reads=ROWS),
+    CallStep("doc report", "wrapper events", held(_doc_report), reads=CONFIGURED, lane=SLOW),
+    CallStep(
+        "priorities sweep",
+        "wrapper events",
+        held(viewed("priorities sweep", _priorities)),
+        VIEWED,
+        VIEW | DOC,
+        lane=SLOW,
+    ),
+    CallStep(
+        "health findings",
+        "wrapper events",
+        held(_health_findings),
+        VIEWED,
+        VIEW | CONFIGURED,
+        pass_domains("found"),
+        lane=SLOW,
+    ),
+    CallStep("findings pass", "wrapper events", held(_findings_pass), FOUND, pass_domains("found") | DOC, lane=SLOW),
+    CallStep(
+        "metrics record",
+        "wrapper metrics",
+        held(viewed("metrics record", _metrics)),
+        FOUND,
+        pass_domains("found", "view") | hook_domains("doc", "count"),
+        lane=SLOW,
+    ),
+    CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
+    CallStep(
+        "inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents"), lane=SLOW
+    ),
+    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=frozenset()),
+    CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
+    CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), reads=DOC, lane=CLOSING),
+    CallStep(
+        "status publish",
+        CLOSING_GROUP,
+        held(_status_publish),
+        FOUND,
+        pass_domains("found", "view") | DOC,
+        lane=CLOSING,
+        kept=True,
+    ),
+)
+
+for _step in STEPS:
+    registry.register(_step)
+
+
+def _doc_items_map(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Map the newest watchdog document copy on the ledger onto its tasks once each time the copy changes."""
+    return doc_items.map_changed(get("doc"), get("tools"), get("deadline"))
+
+
+registry.register(
+    CallStep(
+        "doc items map",
+        "wrapper events",
+        _doc_items_map,
+        needs=frozenset({"ledger state", "drained resume"}) | VIEWED,
+        reads=pass_domains("doc"),
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"coordination", "ledger"}),
+        feature="tick-doc-items-map",
+    )
+)
+
+
+def _step_starvation(cli: Any, get: Get) -> list[str]:
+    """Record each step's last completed run with its window and alarm the master for each starved step.
+
+    Every step's window floors to the configured cadence, critical and wide lanes included, not only the slow lane
+    `interval_s` stretches: a cadence raised above a step's declared interval must raise its starvation alarm too,
+    so three windows at the production cadence always clears the golden pass duration (`engine.GOLDEN_PASS_S`).
+    """
+    cadence = cadence_s()
+    windows = {step.name: max(interval_s(step, cadence), cadence) for step in registry.steps()}
+    return step_starvation.step(get("store"), get("slug"), cli.now_ms(), windows)
+
+
+registry.register(
+    CallStep(
+        "step starvation",
+        CLOSING_GROUP,
+        held(_step_starvation),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CLOSING,
+        effects=frozenset({"inbox"}),
+        feature="tick-step-starvation",
+    )
+)
+
+
+def _progress_heads(tick: Any, get: Get) -> Any:
+    """Return the outcomes the progress heads step recorded from the head GitHub shows for each held task."""
+    return tick.skip_refused(
+        progress.heads_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store").redis,
+        get("slug"),
+        get("doc")["tasks"],
+        get("view"),
+        tick.now_ms(),
+        progress.origin(get("config").repo),
+    )
+
+
+registry.register(
+    CallStep(
+        "progress heads",
+        "wrapper events",
+        held(viewed("progress heads", _progress_heads)),
+        needs=VIEWED,
+        reads=VIEW | CONFIGURED,
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"source_control"}),
+        feature="tick-progress-heads",
+    )
+)

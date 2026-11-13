@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 
 def path(name: str, target: str, root: Path) -> Path:
@@ -36,7 +37,7 @@ def source(file: Path) -> str:
     return _name(*_place(file.resolve()))
 
 
-def row(layer: str, file: Path) -> dict:
+def row(layer: str, file: Path) -> dict[str, Any]:
     file = file.resolve()
     data = file.read_bytes()
     repo, rel = _place(file)
@@ -54,7 +55,7 @@ def doctrine_files(
 ) -> list[Path]:
     from scripts.profiles import manifestos
 
-    files = []
+    files: list[Path] = []
     for root in (bundle, shared, user):
         if root is not None:
             directive = root / ".claude" / "CLAUDE.md"
@@ -70,12 +71,12 @@ def rows(
     rules: dict[str, Path],
     user: Path | None = None,
     shared: Path | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     return [row("doctrine", file) for file in doctrine_files(bundle, dirs, user, shared)] + [
         row("rule", file) for file in rules.values()
     ]
 
 
-def write(dst: Path, found: list[dict]) -> None:
+def write(dst: Path, found: list[dict[str, Any]]) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(json.dumps(found) + "\n")

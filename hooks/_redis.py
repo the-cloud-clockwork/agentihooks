@@ -2,7 +2,8 @@
 
 Hooks run as separate processes invoked by Claude Code, so they cannot share
 the agenticore singleton.  This lightweight module provides a standalone
-Redis connection by reading environment variables directly.
+Redis connection by reading environment variables directly. The TTL defaults
+match the agenticore settings defaults.
 
 Usage::
 
@@ -15,11 +16,9 @@ Usage::
 
 import os
 
-# Lazy singleton
 _redis_client = None
 _redis_checked = False
 
-# TTLs from environment (matching agenticore settings defaults)
 SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))  # 24h
 POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))  # 1h
 _KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
@@ -31,6 +30,8 @@ def get_redis():
 
     Lazily connects on first call.  Returns ``None`` when ``REDIS_URL`` is
     unset or when the connection cannot be established.
+
+    A KeyboardInterrupt during connect counts as a connection failure and falls back to in memory mode.
     """
     global _redis_client, _redis_checked
 
@@ -54,9 +55,6 @@ def get_redis():
         )
         _redis_client.ping()  # fail-fast on bad URL
     except (KeyboardInterrupt, Exception):
-        # KeyboardInterrupt: operator aborted mid-import (common during
-        # SessionEnd Ctrl+C). Treat the same as any other connection failure
-        # — fall back to in-memory mode silently.
         _redis_client = None
 
     return _redis_client

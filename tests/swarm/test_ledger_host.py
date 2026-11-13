@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm import ledger_host
+from scripts.tick.deadline import Deadline
 
 
 def write_stat(proc, pid, ticks, start, system=0):
@@ -106,14 +107,10 @@ def test_the_newest_commit_on_dev_counts_from_when_it_reached_dev_not_its_commit
     }
 
 
-def test_a_merge_queue_commit_is_aged_from_its_pull_request_merge_not_its_older_commit_time(monkeypatch, tmp_path):
+def test_a_merge_queue_commit_is_aged_from_its_pull_request_merge_not_its_older_commit_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     real = subprocess.run
-
-    def run(argv, **kwargs):
-        if argv[0] == "gh":
-            return subprocess.CompletedProcess(argv, 0, "2026-10-19T21:20:03Z\n", "")
-        return real(argv, **kwargs)
-
     stamp = {
         "GIT_AUTHOR_DATE": "@1792441723 +0000",
         "GIT_COMMITTER_DATE": "@1792441723 +0000",
@@ -126,7 +123,7 @@ def test_a_merge_queue_commit_is_aged_from_its_pull_request_merge_not_its_older_
     for args in (("init", "-q"), ("commit", "-q", "--allow-empty", "-m", "Queue built (#4864)")):
         real(["git", "-C", str(tmp_path), *args], check=True, capture_output=True, env=stamp)
     real(["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/dev", "HEAD"], check=True)
-    monkeypatch.setattr(ledger_host.subprocess, "run", run)
+    monkeypatch.setattr(ledger_host.stack, "origin_source_control", lambda root: MergedPort("2026-10-19T21:20:03Z"))
     assert ledger_host.newest_on_dev(tmp_path, 1_792_445_763) == {"newest": "Queue built (#4864)", "merged_minutes": 16}
 
 
@@ -189,23 +186,38 @@ def test_newest_on_dev_asks_github_for_the_merge_of_the_dev_tip(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("gh", "expected"),
+    ("answer", "expected"),
     [
-        (Git("2026-10-19T21:20:03Z\n"), 1_792_444_803.0),
-        (Git("2026-10-19T21:20:03Z\n", code=1), None),
-        (Git("\n"), None),
-        (Git(error=FileNotFoundError("gh")), None),
-        (Git(error=subprocess.TimeoutExpired("gh", 10)), None),
+        ("2026-10-19T21:20:03Z", 1_792_444_803.0),
+        (None, None),
+        (subprocess.CalledProcessError(1, []), None),
+        (TimeoutError("tool deadline expired"), None),
+        ("not a time", None),
     ],
 )
-def test_merged_at_reads_the_pull_request_merge_time_of_a_commit(monkeypatch, gh, expected):
-    monkeypatch.setattr(ledger_host.subprocess, "run", gh)
+def test_merged_at_reads_the_merge_time_of_a_commit_through_the_origin_port(
+    monkeypatch: pytest.MonkeyPatch, answer: str | Exception | None, expected: float | None
+) -> None:
+    port = MergedPort(answer)
+    roots = []
+    monkeypatch.setattr(ledger_host.stack, "origin_source_control", lambda root: roots.append(root) or port)
     assert ledger_host.merged_at(Path("/repo"), "abc123") == expected
-    [(argv, kwargs)] = gh.calls
-    assert argv == ["gh", "api", "repos/{owner}/{repo}/commits/abc123/pulls", "--jq", ledger_host.MERGED_JQ]
-    assert kwargs == {"cwd": Path("/repo"), "capture_output": True, "text": True, "timeout": ledger_host.GH_TIMEOUT_S}
+    assert roots == [Path("/repo")]
+    assert port.asked == ["abc123"]
+    assert 9 < port.remaining <= ledger_host.GH_TIMEOUT_S
     assert ledger_host.GH_TIMEOUT_S == 10
-    assert ledger_host.MERGED_JQ == 'map(.merged_at | values) | first // ""'
+
+
+class MergedPort:
+    def __init__(self, answer: str | Exception | None) -> None:
+        self.answer, self.asked, self.remaining = answer, [], 0.0
+
+    def merged_at(self, commit: str, *, deadline: Deadline) -> str | None:
+        self.asked.append(commit)
+        self.remaining = deadline.remaining
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
 
 
 def test_facts_join_the_server_named_in_the_ledger_folder_and_dev(monkeypatch, tmp_path):

@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Container
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import IO
+from typing import IO, Any, cast
 from urllib.parse import quote
 
 import yaml
@@ -36,26 +36,34 @@ def live_runners(org: str) -> set[str]:
 
 
 class ClusterRunners:
-    def __init__(self, sets: set[str], pods: list[dict], nodes: list[dict], now: datetime, bound: timedelta):
+    def __init__(
+        self,
+        sets: set[str],
+        pods: list[dict[str, Any]],
+        nodes: list[dict[str, Any]],
+        now: datetime,
+        bound: timedelta,
+    ) -> None:
         away = {node["metadata"]["name"]: _not_ready_for(node, now) for node in nodes}
         self.sets = sets
         self.live = {pod["metadata"]["name"] for pod in pods if _alive(pod, away, bound)}
+        self.kills = {pod["metadata"]["name"]: kill for pod in pods if (kill := _kill(pod))}
 
     def __contains__(self, name: str) -> bool:
         return name in self.live or name.rpartition("-runner-")[0].rpartition("-")[0] not in self.sets
 
 
-def _not_ready_for(node: dict, now: datetime) -> timedelta | None:
-    ready = next((c for c in node["status"].get("conditions", []) if c["type"] == "Ready"), None)
+def _not_ready_for(node: dict[str, Any], now: datetime) -> timedelta | None:
+    ready = next((c for c in node["status"].get("conditions", cast(list[Any], [])) if c["type"] == "Ready"), None)
     if not ready or ready["status"] == "True":
         return None
     return now - datetime.fromisoformat(ready["lastTransitionTime"])
 
 
-def _alive(pod: dict, away: dict[str, timedelta | None], bound: timedelta) -> bool:
+def _alive(pod: dict[str, Any], away: dict[str, timedelta | None], bound: timedelta) -> bool:
     node = pod["spec"].get("nodeName")
     phase = pod["status"].get("phase")
-    runner = [c for c in pod["status"].get("containerStatuses", []) if c["name"] == "runner"]
+    runner = [c for c in pod["status"].get("containerStatuses", cast(list[Any], [])) if c["name"] == "runner"]
     if (node and node not in away) or phase in ("Failed", "Succeeded"):
         return False
     if any("terminated" in c["state"] for c in runner):
@@ -64,7 +72,23 @@ def _alive(pod: dict, away: dict[str, timedelta | None], bound: timedelta) -> bo
     return phase != "Unknown" if down_for is None else down_for < bound
 
 
-def _kubectl(*args: str) -> list[dict]:
+def _kill(pod: dict[str, Any]) -> str | None:
+    """Name the runner container's termination reason and exit code, or None while it has not terminated."""
+    runner = [c for c in pod["status"].get("containerStatuses", []) if c["name"] == "runner"]
+    ended = next((c["state"]["terminated"] for c in runner if "terminated" in c["state"]), None)
+    if ended is None:
+        return None
+    return f"{ended.get('reason') or 'terminated'} exit {ended.get('exitCode')}"
+
+
+def killed(lost: list[dict[str, Any]], runners: Container[str]) -> str:
+    """Return the kill reasons of the lost jobs' runner pods as a reason suffix, empty when none is known."""
+    kills: dict[str, str] = runners.kills if isinstance(runners, ClusterRunners) else {}
+    named = [f"{job['name']} {kills[job['runner_name']]}" for job in lost if job["runner_name"] in kills]
+    return f"; runner pod ended: {', '.join(named)}" if named else ""
+
+
+def _kubectl(*args: str) -> list[dict[str, Any]]:
     command = ["kubectl", "get", *args, "-o", "json"]
     return json.loads(subprocess.run(command, check=True, capture_output=True, timeout=60).stdout)["items"]
 
@@ -75,7 +99,9 @@ def cluster_runners(_org: str) -> ClusterRunners:
     return ClusterRunners(sets, pods, _kubectl("nodes"), datetime.now(UTC), timedelta(seconds=NODE_BOUND_SECONDS))
 
 
-def lost_jobs(jobs: list[dict], runners: set[str], now: datetime, grace: timedelta) -> list[dict]:
+def lost_jobs(
+    jobs: list[dict[str, Any]], runners: Container[str], now: datetime, grace: timedelta
+) -> list[dict[str, Any]]:
     return [
         job
         for job in jobs
@@ -88,21 +114,21 @@ def lost_jobs(jobs: list[dict], runners: set[str], now: datetime, grace: timedel
     ]
 
 
-def _ran_every_step(job: dict) -> bool:
-    steps = job.get("steps") or []
+def _ran_every_step(job: dict[str, Any]) -> bool:
+    steps = job.get("steps") or cast(list[Any], [])
     return bool(steps) and all(step["status"] == "completed" for step in steps)
 
 
-def job_ids(workflow: dict) -> dict[str, str]:
+def job_ids(workflow: dict[Any, Any]) -> dict[str, str]:
     return {base_name(name): job_id for job_id, name in job_names(workflow).items()}
 
 
-def stalled(jobs: list[dict], lost: list[dict], workflow: dict) -> tuple[bool, str]:
+def stalled(jobs: list[dict[str, Any]], lost: list[dict[str, Any]], workflow: dict[Any, Any]) -> tuple[bool, str]:
     if not lost:
         return False, "no job lost its runner"
     ids = job_ids(workflow)
     names = {base_name(job["name"]) for job in lost}
-    waiting = set().union(*(dependents(workflow, ids[name]) for name in names if name in ids))
+    waiting = cast(set[str], set()).union(*(dependents(workflow, ids[name]) for name in names if name in ids))
     blocked = {base_name(name) for name in waiting}
     for job in jobs:
         if job in lost or job["status"] == "completed":
@@ -114,7 +140,7 @@ def stalled(jobs: list[dict], lost: list[dict], workflow: dict) -> tuple[bool, s
     return True, f"runner lost on {', '.join(job['name'] for job in lost)}"
 
 
-def decide(run: dict, jobs: list[dict]) -> tuple[str, str]:
+def decide(run: dict[str, Any], jobs: list[dict[str, Any]]) -> tuple[str, str]:
     failed = [job["name"] for job in jobs if job.get("conclusion") in RED]
     if failed:
         return "cancel", f"failed on its own: {', '.join(failed)}"
@@ -123,11 +149,12 @@ def decide(run: dict, jobs: list[dict]) -> tuple[str, str]:
     return "rerun", "first attempt lost its runner"
 
 
-def run_state(repo: str, run_id: int) -> dict:
+def run_state(repo: str, run_id: int) -> dict[str, Any]:
     return json.loads(_api(f"repos/{repo}/actions/runs/{run_id}"))
 
 
-def stop(repo: str, run_id: int, recovery: dict) -> dict:
+def stop(repo: str, run_id: int, recovery: dict[str, Any]) -> dict[str, Any]:
+    run: dict[str, Any] = {}
     for action, field in (("cancel", "cancel_requested_at"), ("force-cancel", "force_cancel_requested_at")):
         recovery[field] = datetime.now(UTC).isoformat()
         _api("-X", "POST", f"repos/{repo}/actions/runs/{run_id}/{action}")
@@ -140,7 +167,7 @@ def stop(repo: str, run_id: int, recovery: dict) -> dict:
     return run
 
 
-def superseded(repo: str, run: dict) -> bool:
+def superseded(repo: str, run: dict[str, Any]) -> bool:
     if run.get("event") != "pull_request":
         return False
     branch = quote(run["head_branch"], safe="")
@@ -148,17 +175,24 @@ def superseded(repo: str, run: dict) -> bool:
     return json.loads(_api(url))["workflow_runs"][0]["id"] != run["id"]
 
 
-def jobs_of(repo: str, run_id: int, cached: bool = False) -> list[dict]:
+def jobs_of(repo: str, run_id: int, cached: bool = False) -> list[dict[str, Any]]:
     url = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
     if cached:
-        from scripts.swarm.github_reads import conditional_pages
+        from scripts.swarm import github_reads
 
-        return [job for page in conditional_pages("lost_runner.jobs", url, _api) for job in page["jobs"]]
+        return [
+            job
+            for page in cast(
+                list[dict[str, Any]],
+                cast("Callable[..., Any]", github_reads.conditional_pages)("lost_runner.jobs", url, _api),
+            )
+            for job in page["jobs"]
+        ]
     return [json.loads(line) for line in _api("--paginate", url, "--jq", JOBS).splitlines()]
 
 
-def open_runs(repo: str, workflow: str) -> list[dict]:
-    runs = []
+def open_runs(repo: str, workflow: str) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
     for status in OPEN:
         url = f"repos/{repo}/actions/workflows/{workflow}/runs?per_page=100&status={status}"
         runs += [json.loads(line) for line in _api("--paginate", url, "--jq", RUNS).splitlines()]
@@ -166,26 +200,36 @@ def open_runs(repo: str, workflow: str) -> list[dict]:
 
 
 def assess(
-    repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners, cached: bool = False
-) -> tuple[bool, str, list[dict]]:
+    repo: str,
+    run: dict[str, Any],
+    workflow: dict[Any, Any],
+    grace: timedelta,
+    source: Source = live_runners,
+    cached: bool = False,
+) -> tuple[bool, str, list[dict[str, Any]]]:
     jobs = jobs_of(repo, run["id"], cached)
-    lost = lost_jobs(jobs, source(repo.split("/")[0]), datetime.now(UTC), grace)
+    runners = source(repo.split("/")[0])
+    lost = lost_jobs(jobs, runners, datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
-    return stuck, reason, jobs
+    return stuck, reason + (killed(lost, runners) if stuck else ""), jobs
 
 
-def report(run: dict, action: str, reason: str) -> dict:
+def report(run: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
     return {"run": run["id"], "attempt": run["run_attempt"], "action": action, "reason": reason}
 
 
-def first_look(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
+def first_look(
+    repo: str, run: dict[str, Any], workflow: dict[Any, Any], grace: timedelta, source: Source = live_runners
+) -> dict[str, Any] | None:
     if run["status"] == "completed":
         return report(run, "none", f"run completed with conclusion {run['conclusion']}")
     stuck, reason, _ = assess(repo, run, workflow, grace, source, cached=True)
     return None if stuck else report(run, "none", reason)
 
 
-def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict:
+def watch(
+    repo: str, run: dict[str, Any], workflow: dict[Any, Any], grace: timedelta, source: Source = live_runners
+) -> dict[str, Any]:
     stuck, reason, jobs = assess(repo, run, workflow, grace, source)
     if not stuck:
         return report(run, "none", reason)
@@ -219,7 +263,14 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source
         return recovery | {"action": "error", "reason": str(error)}
 
 
-def guarded(step, repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
+def guarded(
+    step: Callable[[str, dict[str, Any], dict[Any, Any], timedelta, Source], dict[str, Any] | None],
+    repo: str,
+    run: dict[str, Any],
+    workflow: dict[Any, Any],
+    grace: timedelta,
+    source: Source = live_runners,
+) -> dict[str, Any] | None:
     try:
         return step(repo, run, workflow, grace, source)
     except subprocess.SubprocessError as error:
@@ -247,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     workflow = yaml.safe_load((WORKFLOWS / args.workflow).read_text())
     grace = timedelta(minutes=minutes)
     runs = [run_state(args.repo, run_id) for run_id in args.run_id] or open_runs(args.repo, args.workflow)
-    reports, suspects = [], []
+    reports, suspects = cast(list[dict[str, Any]], []), cast(list[dict[str, Any]], [])
     for run in runs:
         found = guarded(first_look, args.repo, run, workflow, grace, source)
         if found:
@@ -259,12 +310,12 @@ def main(argv: list[str] | None = None) -> int:
         time.sleep(confirm)
     for run in suspects:
         found = guarded(watch, args.repo, run, workflow, grace, source)
-        reports.append(found)
+        reports.append(cast(dict[str, Any], found))
         print(json.dumps(found))
     return 1 if any(found["action"] == "error" for found in reports) else 0
 
 
-def _hold(path: str) -> IO | None:
+def _hold(path: str) -> IO[Any] | None:
     handle = open(path, "a")  # noqa: SIM115
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)

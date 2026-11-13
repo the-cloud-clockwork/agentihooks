@@ -2,8 +2,12 @@ import io
 import json
 import re
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 SLUG = "hives-2026-10-18"
 PRINCIPALS = {"admin-token": "", "agent-token": "engineer@1"}
@@ -35,7 +39,9 @@ def store(monkeypatch):
             heartbeat_at=beat,
             slots=[{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6}],
         )
-        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.hset(
+            registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items() if v is not None}
+        )
         store.redis.sadd(registry.INDEX, hive_id)
     store.redis.set(f"{registry.key('desk')}:sessions", json.dumps({"claude:luna": 2}))
     record = AgentRecord(
@@ -129,7 +135,9 @@ def test_a_hive_that_never_beat_or_went_quiet_past_a_day_is_not_listed_and_keeps
 
     for hive_id, beat in (("never", 0), ("gone", NOW_MS - hives.GONE_MS - 1), ("edge", NOW_MS - hives.GONE_MS)):
         record = {**registry._default(hive_id), "heartbeat_at": beat}
-        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.hset(
+            registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items() if v is not None}
+        )
         store.redis.sadd(registry.INDEX, hive_id)
     reply = dispatch(request("GET", token=None, slug=None), store)
     assert [hive["id"] for hive in reply["data"]] == ["desk", "edge", "pod"]
@@ -239,7 +247,7 @@ def test_settings_become_registry_pairs():
     ("body", "message"),
     [
         ({"prefer": {"master": 1}}, "prefer names master, a role this hive excludes"),
-        ({"max_agents": 0}, "max-agents must be a positive whole number, not '0'"),
+        ({"max_agents": -1}, "max-agents must be a whole number, not '-1'"),
         ({"excluded": ["bad name"]}, "excluded takes lane roles or profiles, not 'bad name'"),
     ],
 )
@@ -291,6 +299,51 @@ def test_only_the_operator_writes_hive_settings(store, token, slug, message):
         message,
     )
     assert registry.show(store.redis, "pod") == before
+
+
+def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_one_is(store: "RedisStore") -> None:
+    from scripts.hive import registry
+
+    for hive_id, ephemeral in (("proof", "yes"), ("lasting", "no")):
+        record = {
+            **registry._default(hive_id),
+            "ephemeral": ephemeral,
+            "max_agents": 4,
+            "heartbeat_at": NOW_MS - registry.QUIET_MS - 1,
+        }
+        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.sadd(registry.INDEX, hive_id)
+    reply: Any = dispatch(request("GET"), store)
+    assert [hive["id"] for hive in reply["data"]] == ["desk", "lasting", "pod"]
+    assert refusal(request("GET", "/api/v1/hives/proof"), store) == (404, "resource_missing", "No such hive")
+
+
+@pytest.mark.parametrize("reported", [True, False])
+def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_counts_none(
+    store: "RedisStore", reported: bool
+) -> None:
+    from scripts.hive import registry
+
+    sessions = {
+        "claude:luna": 3,
+        "codex:sol": 5,
+        "interactive:claude:luna": 1,
+        "interactive:codex:sol": 2,
+        "_executions": {"claude:luna": ["e1"]},
+    }
+    if reported:
+        store.redis.set(f"{registry.key('desk')}:sessions", json.dumps(sessions))
+    else:
+        store.redis.delete(f"{registry.key('desk')}:sessions")
+    store.redis.set(f"{registry.key('pod')}:sessions", json.dumps({"claude:luna": 3}))
+    reply: Any = dispatch(request("GET"), store)
+    desk, pod = reply["data"]
+    assert (desk["agents_at"], desk["agents"], desk["slots"][0]["agents"]) == (
+        NOW_MS - 1000,
+        5 if reported else 0,
+        3 if reported else 0,
+    )
+    assert (pod["agents_at"], pod["agents"], pod["slots"][0]["agents"]) == (NOW_MS - registry.LIVE_MS - 1, 0, 0)
 
 
 def test_a_write_to_an_unknown_hive_creates_nothing(store):

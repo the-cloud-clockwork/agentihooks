@@ -671,14 +671,19 @@ def test_a_full_runtime_holds_the_master_launch(swarm):
     assert run(store, runtime) == ["no session slot for the master, waiting"]
 
 
-def test_a_full_host_holds_the_master_launch(swarm, monkeypatch):
+@pytest.mark.feature("swarm-master-skips-host-hold")
+def test_an_over_budget_host_launches_the_master_and_still_holds_an_engineer(swarm):
+    from tests.swarm.test_host_gate import _decide
+
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, "")
     masters.MasterSeats(store.redis).set_count(SLUG, 2)
-    asked = []
-    monkeypatch.setattr(tick_module, "_host_full", lambda slug, s, now: asked.append((slug, now)) or "memory low")
-    assert run(store, runtime) == ["holding the master spawn: memory low"]
-    assert asked == [(SLUG, NOW)] and runtime.masters == []
+    _decide(store, 1, slug=SLUG, granted_at=NOW - MINUTE)
+    tick_module._spend_host(store, "earlier", NOW - 1)
+    run(store, runtime)
+    assert [agent.seat for agent in extras(store)] == [SECOND]
+    held = tick_module._spawn_stop(SLUG, store.config(SLUG), store, runtime, NOW)
+    assert held.startswith("holding spawns: host memory room 1, 2 spawned since it was granted")
 
 
 def test_a_regrowth_clears_the_retire_state_and_names_why(swarm):
@@ -708,6 +713,7 @@ def test_a_regrowth_leaves_an_ask_that_moved_elsewhere(swarm):
 def test_a_retired_seat_names_why_it_moved_and_withdrew_items_and_skips_closed_ones(swarm):
     store, _ = swarm
     inbox = InboxStore(store.redis)
+    store.seats.occupy(THIRD, f"{SLUG}-master-3", 1)
     done = inbox.send(f"{SLUG}-eng-1", THIRD, "already answered")
     inbox.withdraw(done.id, "swarm", "answered elsewhere")
     waiting = inbox.send(f"{SLUG}-eng-1", THIRD, "still open")

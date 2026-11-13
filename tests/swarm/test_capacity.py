@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -278,7 +279,7 @@ def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeyp
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 
-def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_drain_decisions(tmp_path, monkeypatch):
+def test_quota_capacity_with_all_zero_demand_leaves_codex_refresh_to_the_prober(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -292,10 +293,12 @@ def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_dr
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0})
+    assert calls == []
+    rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0}, refresh=True)
     assert calls == [1]
 
 
-def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatch):
+def test_quota_capacity_with_nonzero_demand_leaves_codex_refresh_to_the_prober(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -308,7 +311,7 @@ def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatc
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
-    assert calls == [1]
+    assert calls == []
 
 
 def test_one_seat_goes_to_the_empty_lane_before_another_engineer():
@@ -839,7 +842,7 @@ def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypat
     monkeypatch.setattr(
         module.profile_choice,
         "choose",
-        lambda slug, lane, chosen, task, env, overlays=None: module.profile_choice.ProfileDecision(
+        lambda config, lane, task, env, hosted=(): module.profile_choice.ProfileDecision(
             task["profile"], "task", "explicit"
         ),
     )
@@ -890,7 +893,7 @@ def _runtime_probe(tmp_path, monkeypatch, observations, reason="priority"):
     monkeypatch.setattr(
         module.profile_choice,
         "choose",
-        lambda slug, lane, chosen, task, env, overlays=None: module.profile_choice.ProfileDecision(
+        lambda config, lane, task, env, hosted=(): module.profile_choice.ProfileDecision(
             task.get("profile", "planner"), "task", "explicit"
         ),
     )
@@ -976,6 +979,26 @@ def test_master_reservation_preserves_api_capacity():
         {"index": 1, "harness": "claude", "account": "open"},
         {"index": 2, "harness": "claude", "account": "open"},
     ]
+
+
+@pytest.mark.parametrize(("declared", "expected"), [("warned", 3), ("open", 2)])
+def test_runtime_capacity_reads_the_declared_master_account(tmp_path, monkeypatch, declared, expected):
+    from scripts.routing.master_account import MasterAccount
+
+    observed = [account("open"), account("warned", left=5, sessions=1)]
+    runtime, config, _ = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime.quota_accounts = lambda *args, **kwargs: observed
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", declared)})
+    config = replace(
+        config,
+        max_eng=4,
+        max_plan=0,
+        scaling="manual",
+        lanes={"master": {"agent": "claude"}, "eng": {"agent": "claude"}},
+    )
+    previous = AgentRecord("previous", "master", "master", harness="claude", account="warned", state="working")
+    decision = runtime.quota_capacity(config, [replace(previous, profile="master")], 123)
+    assert decision["effective"]["eng"] == expected
 
 
 @pytest.mark.parametrize("state", ["starting", "working"])
@@ -1657,7 +1680,7 @@ def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp
 def test_ready_engineers_get_free_seats_instead_of_an_idle_shifted_ci_lane(tmp_path, monkeypatch, scaling):
     seen = [account("a", cap=6, sessions=4), account("b", cap=6), account("c", cap=6)]
     rt = _scaling_runtime(tmp_path, monkeypatch, seen)
-    config = SwarmConfig("sw", "/repo", max_eng=8, max_ci=12, max_plan=0, scaling=scaling, lane_shift=16)
+    config = SwarmConfig("sw", "/repo", max_eng=8, max_ci=12, max_plan=0, scaling=scaling)
     agents = [AgentRecord("engineer", "eng", "e")] + [
         AgentRecord(f"ci{index}", "ci", f"c{index}") for index in range(3)
     ]
@@ -1705,8 +1728,8 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
     _, decision = capacity.autoscaled(config, inputs)
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     previous = {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous)
-    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous, now_ms=0)
+    assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1, "since": 0}
     assert (
         decision["reason"]
         == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 5 of 13; raise held at tick 1 of 3."
@@ -1833,7 +1856,7 @@ def test_quota_capacity_autoscales_on_the_room_left_since_it_was_first_granted(t
     assert asked == [1_000]
     assert decision["host"] == {**_granted(), "held": True, "reason": BAND_HOLDS}
     assert decision["autoscale"]["host"] == decision["host"]
-    assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1}
+    assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1, "since": 100_000}
 
 
 def test_a_runtime_without_a_spawn_counter_autoscales_on_the_whole_room(tmp_path, monkeypatch):
@@ -1846,7 +1869,7 @@ def test_a_runtime_without_a_spawn_counter_autoscales_on_the_whole_room(tmp_path
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
     agents = [AgentRecord(f"eng-{n}", "eng", "") for n in range(4)]
     decision = rt.quota_capacity(config, agents, 100, {"eng": 9, "ci": 0, "plan": 0})
-    assert decision["autoscale"]["pending_raise"] == {"target": 7, "ticks": 1}
+    assert decision["autoscale"]["pending_raise"] == {"target": 7, "ticks": 1, "since": 100_000}
 
 
 def test_apply_hands_the_runtime_the_spawn_count_the_host_gate_reads(tmp_path, monkeypatch):
@@ -1881,9 +1904,9 @@ def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_
     rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
     first = _scaling_tick(store, ledger, rt, 1000)
     assert sum(first["configured"].values()) == 2
-    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
+    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1, "since": 1000}
     second = _scaling_tick(store, ledger, rt, 61_000)
-    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
+    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2, "since": 1000}
     assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
     third = _scaling_tick(store, ledger, rt, 121_000)
     assert third["configured"] == {"eng": 3, "ci": 1, "plan": 0}
@@ -2039,7 +2062,7 @@ def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
     room = host_budget.room(inputs.host(), host_budget.Thresholds(2.0, 1.5, 1000), None)
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": 9, "ticks": 1}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous)
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous, now_ms=0)
     assert decision == {
         **expected,
         "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
@@ -2068,7 +2091,7 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
     free = capacity._placeable(capacity._open(inputs.observations, {}))
     zero = {"eng": 0, "ci": 0, "plan": 0}
-    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous)
+    expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous, now_ms=0)
     assert decision == {
         **expected,
         "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
@@ -2165,6 +2188,87 @@ def test_the_autoscale_command_prints_exact_output_for_an_unknown_swarm(tmp_path
     assert capsys.readouterr().out == "\n".join(lines) + "\n"
     parsed = cli.build_parser().parse_args(["new", "autoscale"])
     assert (parsed.fixture, parsed.json) == ("", False)
+
+
+def test_the_live_autoscale_command_names_hive_admission_as_the_binding_limit(capsys, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import cli
+
+    store = _store()
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: None)
+    readings = {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0}}
+    inputs = capacity.fixture_inputs(readings)
+    monkeypatch.setattr(capacity, "live_inputs", lambda slug, found, ledger, environ, now: inputs)
+    hives = [
+        {"id": "anton", "room": 0, "limit": "cpu: load high", "refusal": "cpu: load high"},
+        {"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"},
+    ]
+    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    assert capacity.quota_seats(inputs.observations, {}) == 10
+    assert capacity.quota_seats(inputs.observations, {("codex", "cx"): "week"}) == 6
+    unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
+    _, decision = capacity.autoscaled(unknown, inputs, capacity.tick_host(inputs))
+    binding = "binding limit hive admission, room 0: hive anton cpu: load high; hive workstation max agents: 6 of 6"
+    cli.main(["new", "autoscale"])
+    assert capsys.readouterr().out.splitlines() == [
+        *cli.autoscale_lines(unknown, decision),
+        "hive anton  admission room 0  cpu: load high",
+        "hive workstation  admission room 0  max agents: 6 of 6",
+        binding,
+    ]
+    cli.main(["new", "autoscale", "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["hive_admission"] == [
+        {"hive": "anton", "room": 0, "limit": "cpu: load high"},
+        {"hive": "workstation", "room": 0, "limit": "max agents: 6 of 6"},
+    ]
+    assert shown["binding"] == binding
+
+
+def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_have_room(capsys, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import cli
+
+    store = _store()
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: None)
+    hives = [{"id": "anton", "room": 20, "limit": "ram: fits 20 more", "refusal": ""}]
+    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    roomy = {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0}}
+    monkeypatch.setattr(capacity, "live_inputs", lambda slug, found, ledger, environ, now: inputs)
+    inputs = capacity.fixture_inputs(roomy)
+    cli.main(["new", "autoscale"])
+    assert capsys.readouterr().out.splitlines()[-1] == "binding limit quota seats, room 10"
+    inputs = capacity.fixture_inputs(_readings())
+    cli.main(["new", "autoscale", "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert (shown["host"]["room"], shown["binding"]) == (0, "binding limit host room, room 0")
+
+
+def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_host_room_are_free(monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import cli
+
+    store = _store()
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": {"room": 4}}))
+    observed = [account(cap=6), account("warned", cap=6, left=1)]
+    monkeypatch.setattr(
+        capacity, "accounts", lambda env, now, refresh=True: observed if refresh is False and now > 0 else []
+    )
+    hives = [{"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"}]
+    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    assert cli.hive_admission(store, "sw") == {
+        "hives": [{"hive": "workstation", "room": 0, "limit": "max agents: 6 of 6"}],
+        "lines": [
+            "hive workstation  admission room 0  max agents: 6 of 6",
+            "binding limit hive admission, room 0: hive workstation max agents: 6 of 6",
+        ],
+    }
+    hives[0] = {**hives[0], "room": 9}
+    assert cli.hive_admission(store, "sw")["lines"][-1] == "binding limit host room, room 4"
+    store.redis.delete(store.key("sw", "quota-capacity"))
+    assert cli.hive_admission(store, "sw")["lines"][-1] == "binding limit quota seats, room 6"
 
 
 def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path, monkeypatch):
@@ -2345,7 +2449,7 @@ def test_an_api_account_round_trips_through_the_route_argument(tmp_path, monkeyp
         ("codex", None, 96, "CLOSED", 0),
         ("codex", None, 92, "DRAIN", 6),
         ("codex", 0, None, "UNKNOWN", None),
-        ("claude", None, 27, "UNKNOWN", None),
+        ("claude", None, 27, "OPEN", 8),
         ("claude", 100, 27, "CLOSED", 0),
         ("claude", 92, 27, "DRAIN", 2),
     ],
@@ -2370,6 +2474,24 @@ def test_aggregate_capacity_uses_the_codex_week_rule(monkeypatch, harness, five_
         cap,
         100,
     )
+
+
+@pytest.mark.feature("codex-expired-routing")
+@pytest.mark.parametrize("observed_at", [100, 1])
+def test_aggregate_capacity_closes_an_expired_codex_account(monkeypatch: pytest.MonkeyPatch, observed_at: int) -> None:
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": observed_at,
+        "five_hour": {"used": 0, "resets_at": None},
+        "seven_day": {"used": 15, "resets_at": None},
+        "expired": True,
+    }
+    record = {"harness": "codex", "account": "a", "kind": "pool", "sessions": 2, "quota": quota}
+    monkeypatch.setattr(aggregate, "current", lambda now: {"a": record})
+    rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    assert len(rows) == 1
+    assert (rows[0].state, rows[0].cap, rows[0].sessions) == ("CLOSED", 0, 2)
 
 
 @pytest.mark.parametrize("observed", [None, -10_000])
@@ -2559,7 +2681,8 @@ def test_a_master_snapshot_with_one_window_reads_the_other_as_unknown(monkeypatc
         "seven_day": balancer.QuotaWindow(),
         kept: balancer.QuotaWindow(20.0, 9_000),
     }
-    reading = balancer.ProbeResult("main", "allowed", "UNKNOWN", None, windows["five_hour"], windows["seven_day"])
+    state, margin = ("NORMAL", 80.0) if kept == "seven_day" else ("UNKNOWN", None)
+    reading = balancer.ProbeResult("main", "allowed", state, margin, windows["five_hour"], windows["seven_day"])
     assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_050.0, reading)}
 
 
@@ -2590,3 +2713,144 @@ def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp
 
     monkeypatch.setattr(capacity.master_account, "load", down)
     assert capacity._claude({}, 1_100.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
+
+
+def _probing(monkeypatch, ran, calls=None):
+    calls = [] if calls is None else calls
+    window = balancer.QuotaWindow(used=10)
+
+    def claude(credentials, *args, **kwargs):
+        ran.extend(f"claude -p {credential.account}" for credential in credentials)
+        return [balancer.ProbeResult(c.account, "allowed", "NORMAL", 90, window, window) for c in credentials]
+
+    monkeypatch.setattr(balancer, "collect_results", COLLECT)
+    monkeypatch.setattr(balancer, "probe_credentials", claude)
+    monkeypatch.setattr(balancer.subprocess, "run", lambda argv, *a, **k: ran.append(argv))
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "default_signed_in",
+        lambda *a, **k: calls.append(("login", a, k)) or ran.append("codex login") or True,
+    )
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "fresh_quotas",
+        lambda *a, **k: calls.append(("exec", a, k)) or ran.append("codex exec") or {},
+    )
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
+
+
+def test_a_pass_read_runs_only_the_local_codex_login_status_check(monkeypatch, tmp_path):
+    ran = []
+    _probing(monkeypatch, ran)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
+    capacity.accounts(env, 100, refresh=False)
+    assert ran == ["codex login"]
+    ran.clear()
+    capacity.accounts(env, 100)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+
+
+def test_the_quota_notice_step_runs_no_claude_or_codex_quota_probe(monkeypatch, tmp_path):
+    from scripts.swarm import quota_handoff, quota_notice
+    from scripts.swarm import runtime as module
+
+    ran = []
+    _probing(monkeypatch, ran)
+    monkeypatch.setattr(quota_handoff, "warn", lambda *args: [])
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AH_CC_TOKEN_a", "fake-a")
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    ledger: Any = FakeLedger([{"id": "e0"}])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = module.HerdrRuntime(home=tmp_path)
+    rt.host = _roomy_host
+    quota_notice.refresh("sw", store.config("sw"), store, ledger, rt, 100_000)
+    assert capacity.read(store, "sw")["observed_at"] == 100_000
+    assert set(ran) == {"codex login"}
+
+
+def test_the_pass_reader_defaults_to_cached_readings():
+    import inspect
+
+    from scripts.swarm.runtime import HerdrRuntime
+
+    assert inspect.signature(HerdrRuntime.quota_capacity).parameters["refresh"].default is False
+
+
+def test_the_prober_writes_the_claude_cache_the_pass_reads(monkeypatch, tmp_path):
+    ran, calls = [], []
+    _probing(monkeypatch, ran, calls)
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_a": "fake-a"}
+    capacity.probe(env, 100)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+    assert [(kind, env in args or env in kwargs.values()) for kind, args, kwargs in calls] == [
+        ("login", True),
+        ("exec", True),
+    ]
+    assert [(at, result.account) for at, result in balancer.cached_observations(environ=env)] == [(100, "a")]
+    (row,) = [row for row in capacity.accounts(env, 130, refresh=False) if row.harness == "claude"]
+    assert (row.name, row.observed_at) == ("a", 100)
+    ran.clear()
+    capacity.probe(env, 200)
+    assert ran == ["claude -p a", "codex login", "codex exec"]
+    assert [at for at, _ in balancer.cached_observations(environ=env)] == [200]
+
+
+def test_a_probe_refreshes_claude_and_codex_at_the_given_time(monkeypatch):
+    calls = []
+    monkeypatch.setattr(capacity, "_claude", lambda *args: calls.append(("claude", *args)) or ["c"])
+    monkeypatch.setattr(capacity, "_codex", lambda *args: calls.append(("codex", *args)) or ["x"])
+    env = {"K": "v"}
+    assert capacity.probe(env, 7.0) == ["c", "x"]
+    assert calls == [("claude", env, 7.0, True), ("codex", env, 7.0, True)]
+
+
+def test_live_inputs_leave_out_ready_work_with_a_fresh_placement_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    ledger = FakeLedger([{"id": "e0"}, {"id": "e1"}])
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
+    placement_waits.observe(store, "sw", "eng", "e0", "no hive for eng has room: h1 disk", 1_000)
+    fresh = capacity.live_inputs("sw", store, ledger, {}, 1_000 + placement_waits.FRESH_MS - 1)
+    expired = capacity.live_inputs("sw", store, ledger, {}, 1_000 + placement_waits.FRESH_MS)
+    assert fresh.demand == {"eng": 1, "ci": 0, "plan": 0}
+    assert expired.demand == {"eng": 2, "ci": 0, "plan": 0}
+
+
+def test_the_tick_host_is_the_room_the_tick_last_granted() -> None:
+    granted = {"room": 6, "reason": "quota pods", "limit": "quota pods", "held": False, "granted_at": 4_000}
+    inputs = replace(capacity.fixture_inputs(_readings()), previous={"host": granted})
+    assert capacity.tick_host(inputs) == granted
+    assert capacity.tick_host(replace(inputs, previous={"host": {**granted, "room": None}})) is None
+    assert capacity.tick_host(replace(inputs, previous={"host": {"room": 6}})) is None
+    assert capacity.tick_host(replace(inputs, previous={})) is None
+
+
+def test_a_legacy_placement_refusal_without_seen_at_is_fresh_from_its_start() -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    row = {"lane": "eng", "reason": "no hive for eng has room", "started_at": 1_000}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "e0", json.dumps(row))
+    ready = {"eng": [{"id": "e0"}, {"id": "e1"}]}
+    fresh = capacity.placement_ready(store, "sw", ready, 1_000 + placement_waits.FRESH_MS - 1)
+    expired = capacity.placement_ready(store, "sw", ready, 1_000 + placement_waits.FRESH_MS)
+    assert fresh == (
+        {"eng": [{"id": "e1"}]},
+        ["capacity skipped eng task e0: fresh placement refusal: no hive for eng has room"],
+    )
+    assert expired == (ready, [])
+
+
+def test_a_placement_refusal_seen_again_stays_fresh_from_its_last_sighting() -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    row = {"lane": "eng", "reason": "no hive", "started_at": 0, "seen_at": placement_waits.FRESH_MS}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "e0", json.dumps(row))
+    ready = {"eng": [{"id": "e0"}]}
+    fresh = capacity.placement_ready(store, "sw", ready, 2 * placement_waits.FRESH_MS - 1)
+    assert fresh == ({"eng": []}, ["capacity skipped eng task e0: fresh placement refusal: no hive"])

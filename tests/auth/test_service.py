@@ -3,6 +3,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -142,6 +143,69 @@ def test_a_cloudflare_access_operator_exchanges_for_an_operator_token(served):
     checked.assert_called_once_with("assertion")
 
 
+class PageCredential:
+    def __init__(self, credential: str | None) -> None:
+        self.credential = credential
+        self.asked: list[str] = []
+
+    def token(self, slug: str) -> str | None:
+        self.asked.append(slug)
+        return self.credential
+
+
+PAGE = "page-credential-of-the-ledger"
+
+
+def test_outside_edge_mode_the_page_credential_opens_an_operator_session(
+    served: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+    repository = PageCredential(PAGE)
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=repository):
+        status, reply = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": PAGE})
+
+    assert status == 200
+    assert reply["data"]["principal"] == ""
+    assert reply["data"]["expires_in"] == tokens.TTL_S
+    assert repository.asked == [SLUG]
+    signed = {"Authorization": f"Bearer {reply['data']['token']}"}
+    assert authority.caller(signed, "", SLUG) == ""
+
+
+def test_outside_edge_mode_a_wrong_page_credential_is_refused(served: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=PageCredential(PAGE)):
+        status, reply = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": "not-the-page-credential"})
+
+    assert status == 403
+    assert reply["error"]["code"] == "forbidden"
+
+
+def test_outside_edge_mode_a_ledger_without_a_page_credential_refuses(
+    served: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=PageCredential(None)):
+        status, _ = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": PAGE})
+
+    assert status == 403
+
+
+def test_inside_edge_mode_the_page_credential_is_never_read_or_accepted(
+    served: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SWARM_AUTH_MODE", "edge")
+    reads = patch("scripts.swarm_ledger.storage.default", side_effect=AssertionError("read the page credential"))
+
+    with reads:
+        status, _ = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": PAGE})
+
+    assert status == 403
+
+
 def test_the_service_keeps_verifying_legacy_credentials_with_the_legacy_switch_off(served, hive, monkeypatch):
     store, _ = hive
     monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "off")
@@ -160,7 +224,7 @@ def test_a_wrong_credential_is_refused(served):
     )
 
 
-def test_the_service_refuses_to_sign_without_a_key(served, monkeypatch):
+def test_the_service_refuses_to_sign_without_a_key(served: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENTIHOOKS_AUTH_KEY")
     derived = {"X-Ledger-Token": authority.agent_token(SEED, SLUG, WORKER), "X-Ledger-Agent": WORKER}
 
@@ -183,14 +247,36 @@ def test_the_health_route_answers(served):
     assert missing.value.code == 404
 
 
-def test_main_serves_on_the_given_address():
+def test_main_serves_on_the_given_address(hive):
     with patch.object(service, "server") as built:
         assert service.main(["serve", "--host", "0.0.0.0", "--port", "9000"]) == 0
     built.assert_called_once_with(("0.0.0.0", 9000))
     built.return_value.serve_forever.assert_called_once_with()
 
 
-def test_main_defaults_to_loopback_on_the_auth_port():
+def test_main_defaults_to_loopback_on_the_auth_port(hive):
     with patch.object(service, "server") as built:
         service.main(["serve"])
     built.assert_called_once_with(("127.0.0.1", 8768))
+
+
+@pytest.mark.feature("hive-agent-token-holder-only")
+def test_main_backfills_holder_records_before_it_serves(hive: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    store, grant = hive
+    auth.hive_state.amend(auth._store(store.redis), f"holder.{grant['id']}", lambda _: None)
+    order: list[str] = []
+    backfill = auth.backfill_holders
+
+    def recorded(redis: object) -> str:
+        order.append("backfill")
+        return backfill(redis)
+
+    with patch.object(auth, "backfill_holders", side_effect=recorded), patch.object(service, "server") as built:
+        built.return_value.serve_forever.side_effect = lambda: order.append("serve")
+        service.main(["serve"])
+
+    assert order == ["backfill", "serve"]
+    assert capsys.readouterr().err == f"wrote the holder record of {grant['id']}\n"
+    assert auth.hive_state.read(auth._store(store.redis), f"holder.{grant['id']}") == auth._digest(
+        grant["ledger_credential"]
+    )

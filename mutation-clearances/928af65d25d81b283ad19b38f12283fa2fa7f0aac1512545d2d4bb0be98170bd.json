@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/codex_master.py:scripts.profiles.codex_master.x_handoff:a1ff010fe4779bab727ef35102a478d24620d8c218396e65703d3606ebba62b9": {
+    "reader": "standards_reader",
+    "reason": "In `x_handoff`, the mutation changes only the static type argument of `typing.cast` on cast target `[]`, from list[str] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

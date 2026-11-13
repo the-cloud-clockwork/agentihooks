@@ -7,11 +7,23 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
-from scripts.swarm.keyspace import ROOT
+from scripts.hive import (
+    auth,
+    create,
+    create_github,
+    create_render,
+    join_report,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
+from scripts.hive.purge import FINISHED, forget, hosted, on_hive
+from scripts.hive.purge import keys as _keys
+from scripts.hive.purge import recorded as _recorded
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -19,7 +31,6 @@ if TYPE_CHECKING:
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import AgentRecord, RedisStore
 
-ENDED = ("finished", "ended")
 POLL_S = 15
 SENDER = "operator"
 ORDER = (
@@ -28,8 +39,8 @@ ORDER = (
     "successor on another hive."
 )
 ROLL = (
-    "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, then "
-    "hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
+    "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, commit "
+    "and push your branch so no work is lost with the pod, then hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
     "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
     "another hive."
 )
@@ -41,7 +52,7 @@ Continue task {task}; hive {hive} stopped for a release while {name} still worke
 unknown: {name} left no handoff document within {wait} seconds of its handoff order; its task folder records its steps and evidence.
 
 ## Stopped at
-Hive {hive} stopped with {name} still running.
+Hive {hive} stopped with {name} still running.{pushed}
 
 ## Decisions and promises
 unknown: none recorded outside the task folder and the ledger.
@@ -54,11 +65,13 @@ Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledge
 
 <!-- handoff complete -->
 """
+PREFIXED = "agentihooks-hive-{label}"
 MANIFESTS = (
     "k8s/argocd/apps/{release}.yaml",
     "k8s/manifests/{release}/",
     "k8s/values-overlays/{release}/",
 )
+NO_SIGNER = f"{nats_grant.SIGNER_ENV} names no hub signer record, so no member swarms entry to unlist"
 MEMBER_ID = re.compile("[0-9a-f]{16}")
 TREE = 'if .truncated then error("the tree listing is truncated") else .tree[] | select(.type == "blob") | .path end'
 
@@ -71,18 +84,54 @@ class Plan:
     repo: str = create.Options.repo
     base: str = create.Options.base
     wait_s: int = 3600
+    merge_s: int = create.Options.timeout_s
     signer: "nats_grant.Signer | None" = None
     dry_run: bool = False
+    signer_path: str | None = None
+    sync: str | None = None
+
+
+class TaskLedger(Protocol):
+    """The ledger reads and writes hive remove needs to reopen a released task."""
+
+    def task(self, slug: str, task_id: str) -> dict[str, Any] | None: ...
+
+    def update_task(self, slug: str, task_id: str, fields: dict[str, str], *, if_state: tuple[str, ...]) -> object: ...
+
+
+def ledger_client() -> TaskLedger:
+    """The ledger client hive remove reopens released tasks through."""
+    from scripts.swarm.ledger_client import LedgerClient
+
+    return LedgerClient()
+
+
+def process_namespace() -> str:
+    """The boot and process namespace this pod's agents record when they launch."""
+    from scripts.swarm_v2.runtime.process import local_namespace
+
+    return local_namespace()
+
+
+def wip_push(path: Path) -> str:
+    """Pushes the worktree's committed and uncommitted work to a wip branch on origin and names that branch."""
+    from hooks.lifecycle import act
+
+    return act.snapshot(path)
 
 
 @dataclass(frozen=True)
 class Host:
-    run: Callable[..., subprocess.CompletedProcess] = subprocess.run
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     wall: Callable[[], float] = time.time
     known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
     home: Path = field(default_factory=registry.home)
+    ledger: Callable[[], TaskLedger] = ledger_client
+    namespace: Callable[[], str] = process_namespace
+    worktrees: Path = field(default_factory=lambda: Path.home() / "dev" / "worktrees")
+    rescue: Callable[[Path], str] = wip_push
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
@@ -105,15 +154,6 @@ def _sole(redis: "Redis", hive: str, name: str) -> str:
     return hive
 
 
-def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [
-        (slug, agent)
-        for slug in store.slugs()
-        for agent in store.agents(slug)
-        if agent.hive == hive and agent.state not in ENDED
-    ]
-
-
 def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     from scripts.inbox.store import InboxStore
 
@@ -128,19 +168,60 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
             ["draining=yes"],
             drain=registry.Drain(registry.drain_owner(), "hive remove", deadline_at),
         )
-    inbox, ordered = InboxStore(store.redis), {}
+    inbox = InboxStore(store.redis)
+    ordered: dict[tuple[str, str], str] = {}
+    seen: dict[tuple[str, str], "AgentRecord"] = {}
     deadline = host.clock() + plan.wait_s
     while remaining := hosted(store, plan.hive):
+        seen.update(((slug, agent.name), agent) for slug, agent in remaining)
         _order(inbox, ordered, remaining, ORDER, plan.hive)
         if host.clock() >= deadline:
-            names = ", ".join(agent.name for _, agent in remaining)
-            raise auth.HiveError(
-                f"hive {plan.hive} takes no new agents, but {names} did not hand off within {plan.wait_s} seconds; "
-                "run remove again to keep waiting"
-            )
+            break
         host.sleep(POLL_S)
-    handed = ", ".join(sorted(name for _, name in ordered)) or "none"
-    return [f"drained {plan.hive}: {len(ordered)} agents handed off: {handed}"]
+    handed = sorted(name for (slug, name), agent in seen.items() if agent.task and _handed(store, slug, agent))
+    released, retired = release(store, plan.hive, host)
+    lines = [
+        f"drained {plan.hive}: {len(ordered)} agents ordered to hand off; "
+        f"{len(handed)} handed off: {', '.join(handed) or 'none'}; "
+        f"{len(released)} claims released: {', '.join(released) or 'none'}; "
+        f"{len(retired)} agents retired: {', '.join(retired) or 'none'}"
+    ]
+    if remaining:
+        names = ", ".join(sorted(agent.name for _, agent in remaining))
+        lines.append(f"{names} still ran after {plan.wait_s} seconds and were retired")
+    return lines
+
+
+def release(store: "RedisStore", hive: str, host: Host) -> tuple[list[str], list[str]]:
+    """Release every claim an agent on ``hive`` still holds without a handoff and reopen its ledger task, then retire
+    every unfinished agent on the hive; return the released tasks and the retired agents."""
+    released: list[str] = []
+    retired: list[str] = []
+    ledger = host.ledger()
+    for slug, agent in on_hive(store, hive):
+        if agent.state == FINISHED:
+            continue
+        if agent.task and not _handed(store, slug, agent):
+            if _release_claim(store, ledger, slug, agent):
+                released.append(agent.task)
+        if not store.drop_agent(slug, agent.name):
+            raise auth.HiveError(f"{agent.name} on hive {hive} kept its record; run remove again")
+        retired.append(agent.name)
+    return sorted(released), sorted(retired)
+
+
+def _release_claim(store: "RedisStore", ledger: TaskLedger, slug: str, agent: "AgentRecord") -> bool:
+    """Refund and release the claim ``agent`` holds and reopen its ledger task; return whether it held either."""
+    row = ledger.task(slug, agent.task) or {}
+    reopen = row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name
+    holder: str | None = store.claimant(slug, agent.task)
+    held = holder == agent.name
+    if reopen or held:
+        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
+    store.release(slug, agent.task, agent.name)
+    if reopen:
+        ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""}, if_state=("claimed", "pr"))
+    return reopen or held
 
 
 def _order(
@@ -156,21 +237,22 @@ def _order(
             ordered[(slug, agent.name)] = sent.id
 
 
-def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
+def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str = "") -> str:
+    """Drains hive, or only member while another live member of the hive takes its new agents."""
     from scripts.inbox.store import InboxStore
 
-    if registry.show(store.redis, hive) is None:
+    client: Any = store.redis
+    if registry.show(client, hive) is None:
         raise auth.HiveError(f"hive {hive} has no record to drain")
     deadline_at = int((host.wall() + wait_s) * 1000)
-    registry.update(
-        store.redis,
-        hive,
-        ["draining=yes"],
-        drain=registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at),
-    )
-    inbox, ordered = InboxStore(store.redis), {}
+    drain = registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at)
+    own = host.namespace() if member else ""
+    shared = bool(own) and registry.leave(client, hive, member, drain)
+    if not shared:
+        registry.update(client, hive, ["draining=yes"], drain=drain)
+    inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive):
+    while remaining := _unhanded(store, client, hive, own if shared else "", int(host.wall() * 1000)):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
@@ -179,7 +261,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     else:
         ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
     _withdraw(inbox, ordered, hive)
-    return ended
+    return f"{ended}; only member {member} drained, the hive stays open for its other members" if shared else ended
 
 
 def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
@@ -189,8 +271,28 @@ def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: st
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
-def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not _handed(store, slug, agent)]
+def _unhanded(store: "RedisStore", client: Any, hive: str, own: str, now_ms: int) -> list[tuple[str, "AgentRecord"]]:
+    """The hive's running agents still to hand off; with own, only those whose process runs in that namespace."""
+    return [
+        (slug, agent)
+        for slug, agent in hosted(store, hive)
+        if agent.task
+        and _running(client, agent, now_ms)
+        and not _handed(store, slug, agent)
+        and (not own or agent.runtime_target.get("process_namespace") == own)
+    ]
+
+
+def _running(client: Any, agent: "AgentRecord", now_ms: int) -> bool:
+    """Whether ``agent`` still runs on its hive: its join report for this generation has not ended, it launched under
+    one heartbeat ago or at no recorded time and has not reported yet, or it has no execution id and so never reports
+    joins."""
+    if not agent.execution_id:
+        return True
+    if report := join_report.read(client, agent):
+        return "ended_at" not in report
+    launched = max(agent.launched_at, agent.started_at)
+    return not launched or now_ms - launched < join_report.HEARTBEAT_MS
 
 
 def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
@@ -206,7 +308,12 @@ def _recover(
     at = int(host.wall() * 1000)
     for slug, agent in remaining:
         text = RECOVERY.format(
-            name=agent.name, task=agent.task, hive=hive, wait=wait_s, folder=folder(slug, agent.task)
+            name=agent.name,
+            task=agent.task,
+            hive=hive,
+            wait=wait_s,
+            folder=folder(slug, agent.task),
+            pushed=_pushed(agent, host),
         )
         built = envelope.build(store, slug, agent, "exit", None, at, run=host.run)
         store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
@@ -216,6 +323,31 @@ def _recover(
         f"hive {hive} stops after {wait_s} seconds; {names} did not hand off, "
         "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
+
+
+def _pushed(agent: "AgentRecord", host: Host) -> str:
+    """Pushes each worktree of agent holding unpushed work to a wip branch and names those branches."""
+    from hooks.lifecycle import gitstate
+
+    own = re.compile(rf"{re.escape(agent.name.replace('@', '-'))}(?:-\d+)?")
+    refs = [
+        _rescued(path, host)
+        for path in sorted(host.worktrees.glob("*/*"))
+        if own.fullmatch(path.name)
+        and (state := gitstate.inspect(path, host.wall())) is not None
+        and (state.dirty or state.unpushed)
+    ]
+    return f"\nIts unpushed work: {', '.join(refs)}; continue from there." if refs else ""
+
+
+def _rescued(path: Path, host: Host) -> str:
+    """The wip branch now holding the worktree's work, or why its push failed, so one failure spares the rest."""
+    from hooks.lifecycle.act import ActionError
+
+    try:
+        return f"pushed to {host.rescue(path)}"
+    except (ActionError, OSError, subprocess.TimeoutExpired) as error:
+        return f"left in worktree {path} because its push failed ({error})"
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
@@ -229,6 +361,22 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
+def unlist(store: "RedisStore | None", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
+    """Drop the plan's hive from the hub signer record's member swarms, naming what it found."""
+    if plan.signer_path is None:
+        return [NO_SIGNER]
+    if plan.dry_run:
+        return [f"would unlist {plan.hive} from the hub signer record {plan.signer_path}"]
+    if bao is None:
+        raise auth.HiveError(f"no OpenBao client to unlist {plan.hive} from {plan.signer_path}")
+    if member_swarms.unassign(bao, plan.signer_path, plan.hive):
+        return [
+            f"unlisted {plan.hive} from the hub signer record {plan.signer_path}",
+            *member_swarms.sync(plan.sync, host.run),
+        ]
+    return [f"the hub signer record {plan.signer_path} lists no member swarms for {plan.hive}"]
+
+
 def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     nodes = sorted(node for node, name in redis.hgetall(machine.MACHINES).items() if name == plan.label)
     state = home / create.STATE_FILE
@@ -237,6 +385,7 @@ def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
         held = redis.exists(*_keys(redis, plan.hive)) + _recorded(redis, plan.hive)
         lines = [f"would delete {held} registry records of {plan.hive}"]
     else:
+        machine.removal(redis, plan.label, "hive removed")
         lines = forget(redis, plan.hive)
         if nodes:
             redis.hdel(machine.MACHINES, *nodes)
@@ -256,34 +405,6 @@ def _created(state: Path) -> str | None:
         return None
 
 
-def _keys(redis: "Redis", hive: str) -> list[str]:
-    return [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
-
-
-def _recorded(redis: "Redis", hive: str) -> bool:
-    return hive_state.read(hive_state.records(redis, hive), hive) is not None
-
-
-def forget(redis: "Redis", hive: str) -> list[str]:
-    keys = _keys(redis, hive)
-    prefix = f"{registry.key(hive)}:swarm:"
-    histories = {
-        f"{ROOT}:swarm:{source.removeprefix(prefix)}": redis.hgetall(source)
-        for source in keys
-        if source.startswith(prefix) and ":wait-history:" in source
-    }
-    with redis.pipeline() as pipe:
-        for target, history in histories.items():
-            pipe.hset(target, mapping=history)
-        pipe.delete(*keys)
-        deleted = pipe.execute()[-1]
-    if _recorded(redis, hive):
-        registry.forget(redis, hive)
-        deleted += 1
-    hive_state.indexed(redis, hive, False)
-    return [f"deleted {deleted} registry records of {hive}"]
-
-
 def unbank(bao: openbao_kv.OpenBao | None, path: str, dry_run: bool = False) -> list[str]:
     if dry_run:
         return [f"would delete OpenBao {openbao_kv.MOUNT}/{path}"]
@@ -294,32 +415,64 @@ def unbank(bao: openbao_kv.OpenBao | None, path: str, dry_run: bool = False) -> 
     return [f"deleted OpenBao {openbao_kv.MOUNT}/{path}"]
 
 
-def unmanifest(plan: Plan, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
-    release = plan.label if plan.label.startswith(machine.NAME_PREFIX) else f"agentihooks-hive-{plan.label}"
-    owned = [pattern.format(release=release) for pattern in MANIFESTS]
+def unmanifest(
+    plan: Plan,
+    run: create_github.Run,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[str]:
+    template = create_github.read(run, plan.repo, create_render.TEMPLATE_PATH, plan.base)
+    written = create_render.paths(template, plan.label)
+    prefixed = [pattern.format(release=PREFIXED.format(label=plan.label)) for pattern in MANIFESTS]
     tree = create_github.gh(run, ["api", f"repos/{plan.repo}/git/trees/{plan.base}?recursive=1", "--jq", TREE])
     paths = [
         path
         for path in tree.splitlines()
-        if any(path == own or own.endswith("/") and path.startswith(own) for own in owned)
+        if path in written or any(path == own or own.endswith("/") and path.startswith(own) for own in prefixed)
     ]
     if not paths:
-        return [f"{plan.repo} {plan.base} holds no manifests of {release}"]
+        return [f"{plan.repo} {plan.base} holds no manifests of hive {plan.label}"]
     listed = ", ".join(paths)
     if plan.dry_run:
-        return [f"would open a pull request into {plan.repo} {plan.base} deleting {listed}"]
+        return [
+            f"would open a pull request into {plan.repo} {plan.base} deleting {listed} and merge it once its checks pass"
+        ]
     message = f"Remove worker hive {plan.label}\n\nOpened by agentihooks hive remove."
     url = create_github.open_pr(run, plan.repo, plan.base, f"remove-{plan.label}", dict.fromkeys(paths), message)
-    merging = "it merges once its checks pass" if create_github.merge(run, url) else "merge it once its checks pass"
-    return [f"opened pull request {url} deleting {listed}; {merging}"]
+    if create_github.merge(run, url):
+        return [f"opened pull request {url} deleting {listed}; it merges once its checks pass"]
+    required = create_github.required_checks(run, plan.repo, plan.base)
+    checks = f"pull request {url} checks to pass"
+    _until(sleep, clock, plan.merge_s, checks, lambda: create_github.checks_passed(run, url, required, "hive remove"))
+    create_github.squash(run, url)
+    _until(sleep, clock, plan.merge_s, f"pull request {url} to merge", lambda: _merged(run, url))
+    return [f"opened pull request {url} deleting {listed} and merged it"]
+
+
+def _merged(run: create_github.Run, url: str) -> bool:
+    state = create_github.pr_state(run, url)
+    if state == "CLOSED":
+        raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive remove to open a new one")
+    return state == "MERGED"
+
+
+def _until(
+    sleep: Callable[[float], None], clock: Callable[[], float], limit_s: int, what: str, check: Callable[[], bool]
+) -> None:
+    deadline = clock() + limit_s
+    while not check():
+        if clock() >= deadline:
+            raise auth.HiveError(f"timed out after {limit_s}s waiting for {what}; rerun hive remove to resume")
+        sleep(POLL_S)
 
 
 STEPS = (
     ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
+    ("signer", unlist),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
     ("registry", lambda store, bao, plan, host: unregister(store.redis, plan, host.home)),
-    ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run)),
+    ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run, host.sleep, host.clock)),
     ("openbao", lambda store, bao, plan, host: unbank(bao, plan.bao_path, plan.dry_run)),
 )
 

@@ -3,6 +3,7 @@ import json
 import threading
 import time
 from collections import deque
+from contextlib import nullcontext
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -91,6 +92,10 @@ def test_reader_groups_window_write_records_by_route(now):
                     "lock_wait_seconds": 0.25,
                     "client_wait_seconds": 0.0,
                     "postgres_wait_seconds": 0.0,
+                    "hierarchy_sync_seconds": 0.0,
+                    "outbox_write_seconds": 0.0,
+                    "refresh_record_seconds": 0.0,
+                    "event_append_seconds": 0.0,
                 },
                 {
                     "ended": START + 1820.0,
@@ -99,6 +104,10 @@ def test_reader_groups_window_write_records_by_route(now):
                     "lock_wait_seconds": 1.0,
                     "client_wait_seconds": 0.0,
                     "postgres_wait_seconds": 0.0,
+                    "hierarchy_sync_seconds": 0.0,
+                    "outbox_write_seconds": 0.0,
+                    "refresh_record_seconds": 0.0,
+                    "event_append_seconds": 0.0,
                 },
             ],
         },
@@ -114,6 +123,10 @@ def test_reader_groups_window_write_records_by_route(now):
                     "lock_wait_seconds": 0.5,
                     "client_wait_seconds": 0.0,
                     "postgres_wait_seconds": 0.0,
+                    "hierarchy_sync_seconds": 0.0,
+                    "outbox_write_seconds": 0.0,
+                    "refresh_record_seconds": 0.0,
+                    "event_append_seconds": 0.0,
                 },
             ],
         },
@@ -150,6 +163,10 @@ def test_clean_reload_keeps_every_record_readable(tmp_path, monkeypatch, now):
         "lock_wait_seconds": 0.75,
         "client_wait_seconds": 0.0,
         "postgres_wait_seconds": 0.0,
+        "hierarchy_sync_seconds": 0.0,
+        "outbox_write_seconds": 0.0,
+        "refresh_record_seconds": 0.0,
+        "event_append_seconds": 0.0,
     }
 
 
@@ -286,6 +303,7 @@ def test_a_stopping_server_persists_a_stop_before_it_releases_the_writer(tmp_pat
     monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
@@ -519,6 +537,7 @@ def test_serve_restores_then_stops_the_journal(monkeypatch, tmp_path, now):
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.legacy, "adopt", lambda *args: None)

@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ NAME = "swarm-hive-001"
 RECORD = f"k8s/agentihooks-hive-{NAME}"
 REPO = "the-cloud-clockwork/antoncore"
 PR = "https://github.com/the-cloud-clockwork/antoncore/pull/2000"
+SWARM_REPO = "github.com/the-cloud-clockwork/antoncore"
 TEMPLATE = (
     "#@ file: k8s/manifests/${name}/ssh-lan.yaml\nport: ${ssh_port}\nnode: ${node}\nkey: ${record}\nip: ${lan_ip}\n"
 )
@@ -87,8 +89,8 @@ class Run:
         if argv[:2] == ["api", f"repos/{REPO}/git/trees/dev?recursive=1"]:
             assert argv[2:] == ["--jq", create_github.TREE]
             return "\n".join(getattr(self, "tree", []))
-        if argv[:2] == ["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
-            return json.dumps(getattr(self, "required", []))
+        if argv[:2] in (["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"], ["api", "graphql"]):
+            return self._rules(argv)
         if argv[:2] == ["pr", "list"] and "open" in argv:
             return "\n".join(getattr(self, "open_heads", []))
         if argv[:2] == ["pr", "list"]:
@@ -110,6 +112,17 @@ class Run:
             self.posted = getattr(self, "posted", []) + [(argv[3], json.loads(stdin))]
         return "sha"
 
+    def _rules(self, argv: list[str]) -> str:
+        if argv[1] != "graphql":
+            return json.dumps(
+                getattr(self, "queued", False) if "merge_queue" in argv[-1] else getattr(self, "required", [])
+            )
+        if argv[3].startswith("query=mutation"):
+            self.state = "MERGED"
+            self.on_merge()
+            return "{}"
+        return json.dumps({"id": "PR_node", "headRefOid": "headsha", "mergeQueueEntry": getattr(self, "entry", None)})
+
     def named(self, *prefix):
         return [argv for argv in self.calls if argv[: len(prefix)] == list(prefix)]
 
@@ -125,8 +138,8 @@ class Store:
     def slugs(self):
         return ["demo"]
 
-    def config(self, slug):
-        return SimpleNamespace(hive_placement=Store.placing, state=Store.swarm_state)
+    def config(self, slug: str) -> SimpleNamespace:
+        return SimpleNamespace(hive_placement=Store.placing, state=Store.swarm_state, repo=SWARM_REPO)
 
     def agents(self, slug):
         hives = [
@@ -878,6 +891,32 @@ def test_cli_create_passes_its_name(monkeypatch, capsys):
     assert seen["options"] == create.Options(name="swarm-hive-009")
 
 
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_cli_create_hands_hive_create_the_nats_signer(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, create.Tools] = {}
+
+    def created(tools: create.Tools, options: create.Options) -> str:
+        seen["tools"] = tools
+        return "created"
+
+    def root() -> str:
+        return "root"
+
+    def no_redis() -> None:
+        return None
+
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", no_redis)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", root)
+    monkeypatch.setattr(create, "create", created)
+    assert cli.main(["create"]) == 0
+    assert capsys.readouterr().out == "created\n"
+    assert seen["tools"].signer is cli._signer
+
+
 def test_cli_create_names_its_name_option():
     parser = cli._parser()
     (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
@@ -904,4 +943,479 @@ def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
 
     assert create.create(world.tools, create.Options(dry_run=True)) == (
         "dry run of hive create swarm-hive-002: nothing written"
+    )
+
+
+class RacingRun(Run):
+    def __init__(self, barrier):
+        super().__init__()
+        self.barrier = barrier
+
+    def _gh(self, argv, stdin):
+        if argv[:2] == ["pr", "list"] and "open" in argv:
+            self.barrier.wait(timeout=10)
+        return super()._gh(argv, stdin)
+
+
+def _racer(world, home, barrier):
+    import dataclasses
+
+    environ = {**world.tools.environ, "AGENTIHOOKS_HOME": str(world.home / home)}
+    return dataclasses.replace(world.tools, environ=environ, run=RacingRun(barrier), state={})
+
+
+def _reserved(world, name):
+    return world.tools.redis.get(f"{create.RESERVED}:{name}")
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_two_concurrent_creates_reserve_different_names(world):
+    import threading
+
+    barrier = threading.Barrier(2)
+    racers = [_racer(world, home, barrier) for home in ("one", "two")]
+    started = {}
+
+    def start(tools):
+        started[tools.environ["AGENTIHOOKS_HOME"]] = create._start(tools, create.Options())
+
+    threads = [threading.Thread(target=start, args=(tools,)) for tools in racers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    names = sorted(state["name"] for state in started.values())
+    assert names == ["swarm-hive-001", "swarm-hive-002"]
+    for state in started.values():
+        assert _reserved(world, state["name"]) == state["reservation"]
+        assert re.fullmatch(r"root:[0-9a-f]{16}", state["reservation"])
+        assert 0 < world.tools.redis.ttl(f"{create.RESERVED}:{state['name']}") <= create.RESERVE_S
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_name_another_create_reserved_is_skipped(world):
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )
+    assert _reserved(world, "swarm-hive-002") is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_an_explicit_name_another_create_reserved_is_refused(world):
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, timeout_s=60))
+
+    assert str(refused.value) == (
+        f"hive create refuses {NAME}: it is already held by another hive create run; "
+        "pass --name with an unused hive name, or leave it out to take the next one"
+    )
+    assert _reserved(world, NAME) == "other:run"
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_failed_create_releases_its_reservation(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _state(world)["name"] == NAME
+    assert _reserved(world, NAME) is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_finished_create_releases_its_reservation(world):
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _reserved(world, NAME) is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_failed_service_read_releases_the_reservation(world, monkeypatch):
+    def broken(tools, argv):
+        raise auth.HiveError("no cluster")
+
+    monkeypatch.setattr(create, "_kubectl", broken)
+    with pytest.raises(auth.HiveError, match="no cluster"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _reserved(world, NAME) is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_release_leaves_a_reservation_another_run_took(world):
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+    world.tools.state = {"name": NAME, "reservation": "root:mine"}
+
+    create._release(world.tools)
+
+    assert _reserved(world, NAME) == "other:run"
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_resumed_create_takes_its_reservation_back(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    token = _state(world)["reservation"]
+    seen = []
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(_reserved(world, NAME)) or crash())
+
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert seen == [token]
+    assert _reserved(world, NAME) is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_resumed_create_refuses_a_name_another_run_reserved(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert str(refused.value) == (
+        f"hive create cannot resume {NAME}: another hive create run reserved it; "
+        f"remove {create.STATE_FILE} under the agentihooks home to name a new hive"
+    )
+    assert _reserved(world, NAME) == "other:run"
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_resumed_create_with_its_pull_request_reserves_nothing(world):
+    world.run.state = "CLOSED"
+    with pytest.raises(auth.HiveError, match="closed without merging"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    saved = _state(world)
+    saved["pr"] = PR
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(saved))
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+    world.run.state = "MERGED"
+
+    with pytest.raises(auth.HiveError, match="rerun hive create to resume$"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    assert _reserved(world, NAME) == "other:run"
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_the_dry_run_reserves_nothing(world):
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert world.tools.redis.keys(f"{create.RESERVED}:*") == []
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_dry_run_of_an_unfinished_create_leaves_its_reservation(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    token = _state(world)["reservation"]
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", token)
+
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert _reserved(world, NAME) == token
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_failed_port_choice_releases_the_reservation(world, monkeypatch):
+    def broken(services):
+        raise auth.HiveError("no lan address")
+
+    monkeypatch.setattr(create_render, "lan_address", broken)
+    with pytest.raises(auth.HiveError, match="no lan address"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _reserved(world, NAME) is None
+
+
+def _crashed_once(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    return crash
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_resumed_create_killed_before_its_release_keeps_its_own_reservation(world, monkeypatch):
+    crash = _crashed_once(world, monkeypatch)
+    token = _state(world)["reservation"]
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", token)
+    seen = []
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(_reserved(world, NAME)) or crash())
+
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert seen == [token]
+    assert _reserved(world, NAME) is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_a_resumed_create_saved_without_a_reservation_reserves_and_releases_one(world, monkeypatch):
+    crash = _crashed_once(world, monkeypatch)
+    saved = _state(world)
+    del saved["reservation"]
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(saved))
+    seen = []
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(_reserved(world, NAME)) or crash())
+
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    (token,) = seen
+    assert token.startswith("root:") and _state(world)["reservation"] == token
+    assert _reserved(world, NAME) is None
+
+
+@pytest.mark.feature("hive-create-name-reservation")
+def test_an_explicit_name_lost_to_a_racing_create_is_refused(world, monkeypatch):
+    monkeypatch.setattr(create, "_reserve", lambda tools, name, token: False)
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, timeout_s=60))
+
+    assert str(refused.value) == (
+        f"hive create refuses {NAME}: it is already held by another hive create run; "
+        "pass --name with an unused hive name, or leave it out to take the next one"
+    )
+
+
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import hive_state
+
+    signer, bus = object(), []
+
+    def named() -> object:
+        return signer
+
+    def revoked(redis: object, given: object, member: str) -> str:
+        bus.append((given, member))
+        return f"revoked the NATS credential of {member}"
+
+    world.tools.signer = named
+    monkeypatch.setattr(nats_grant, "revoke", revoked)
+
+    kept = _keep_member(world)
+    stray = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")["id"]
+    world.bao.records[SIGNER]["member_swarms"][stray] = ["demo"]
+    state = {**_state(world), "member": stray}
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(state))
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+    assert auth.member(world.tools.redis, stray) is None
+    assert stray not in hive_state.index(world.tools.redis)
+    assert auth.member(world.tools.redis, kept) is not None
+    assert f"hive create {NAME}: resume: revoked member {stray} and its Redis user" in world.lines
+    assert stray not in world.bao.records[SIGNER]["member_swarms"]
+    assert bus == [(signer, stray)]
+    assert f"hive create {NAME}: resume: unlisted {stray} from the hub signer record {SIGNER}" in world.lines
+    assert _state(world)["member"] == kept
+
+
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import openbao_kv
+    from scripts.hive import hive_state
+
+    real = openbao_kv.merge
+
+    def killed(bao: openbao_kv.OpenBao, path: str, entries: dict[str, str]) -> int:
+        if path == RECORD and "credential" in entries:
+            raise KeyboardInterrupt
+        return real(bao, path, entries)
+
+    monkeypatch.setattr(openbao_kv, "merge", killed)
+    with pytest.raises(KeyboardInterrupt):
+        create.create(world.tools, create.Options(timeout_s=60))
+    stray = _state(world)["member"]
+    assert auth.member(world.tools.redis, stray) is not None
+    monkeypatch.setattr(openbao_kv, "merge", real)
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+    assert auth.member(world.tools.redis, stray) is None
+    assert stray not in hive_state.index(world.tools.redis)
+    assert sorted(auth.members(world.tools.redis)) == [
+        invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    ]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_create_records_the_hive_name_and_the_swarm_repos_and_hive_list_prints_the_name(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    record = registry.show(world.tools.redis, member)
+    assert record is not None
+    assert (record["name"], record["repos"], record["registered_repos"]) == (NAME, [SWARM_REPO], [SWARM_REPO])
+    assert f"hive create {NAME}: registry: recorded hive {member} as {NAME} with {SWARM_REPO} in the hive registry" in (
+        world.lines
+    )
+    monkeypatch.setattr(cli, "redis_client", lambda: world.tools.redis)
+    monkeypatch.setattr(cli, "_local_agents", lambda redis, reported: {})
+    capsys.readouterr()
+    cli._list()
+    rows = [line for line in capsys.readouterr().out.splitlines() if line.startswith(member)]
+    assert [row.split("\t")[1] for row in rows] == [f"name={NAME}"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_create_records_the_repos_it_was_given_over_the_swarm_repos(world: SimpleNamespace) -> None:
+    given = ("github.com/o/b", "github.com/o/a", "github.com/o/b")
+    create.create(world.tools, create.Options(timeout_s=60, repos=given))
+
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    record = registry.show(world.tools.redis, member)
+    assert record is not None
+    expected = ["github.com/o/a", "github.com/o/b"]
+    assert (record["repos"], record["registered_repos"]) == (expected, expected)
+    recorded = f"recorded hive {member} as {NAME} with github.com/o/a, github.com/o/b in the hive registry"
+    assert f"hive create {NAME}: registry: {recorded}" in world.lines
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_a_resumed_create_records_the_repos_its_first_run_was_given(world: SimpleNamespace) -> None:
+    world.run.on_merge = lambda: None
+    with pytest.raises(auth.HiveError, match="waiting for hive .* to send a heartbeat; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0, repos=("github.com/o/given",)))
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    world.tools.redis.hset(registry.key(member), "heartbeat_at", NOW * 1000)
+
+    create.create(world.tools, create.Options(timeout_s=0))
+
+    record = registry.show(world.tools.redis, member)
+    assert record is not None
+    assert (record["name"], record["registered_repos"]) == (NAME, ["github.com/o/given"])
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_origin(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configs = {
+        "hosted": SimpleNamespace(repo="x/hosted"),
+        "path": SimpleNamespace(repo="/srv/checkout"),
+        "unknown": SimpleNamespace(repo="/srv/none"),
+        "off": SimpleNamespace(repo="x/off"),
+        "stopped": SimpleNamespace(repo="x/stopped"),
+    }
+
+    class Configured(Store):
+        def slugs(self) -> list[str]:
+            return list(configs)
+
+        def config(self, slug: str) -> SimpleNamespace:
+            return configs[slug]
+
+    def origin(path: Path) -> str:
+        return {"/srv/checkout": "github.com/o/checkout"}.get(str(path), "")
+
+    monkeypatch.setattr(swarm_store, "RedisStore", Configured)
+    monkeypatch.setattr("scripts.hive.daemon.origin", origin)
+    assert create._swarm_repos(world.tools) == ["github.com/o/checkout", "x/hosted", "x/off", "x/stopped"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_no_swarm_gives_no_default_repo(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Empty(Store):
+        def slugs(self) -> list[str]:
+            return []
+
+    monkeypatch.setattr(swarm_store, "RedisStore", Empty)
+    assert create._swarm_repos(world.tools) == []
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_the_dry_run_names_the_registry_record_and_writes_none(world: SimpleNamespace) -> None:
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert f"hive create {NAME}: registry: would record {NAME} with {SWARM_REPO} in the hive registry" in world.lines
+    assert [record["id"] for record in registry.hives(world.tools.redis)] == ["root"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_no_repo_is_named_as_no_repos(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(create, "_swarm_repos", lambda tools: [])
+    world.tools.state = {"name": NAME}
+    assert create._registered(world.tools, create.Options(dry_run=True)) == (
+        f"would record {NAME} with no repos in the hive registry"
+    )
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_cli_create_passes_its_repos(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, create.Options] = {}
+
+    def created(tools: create.Tools, options: create.Options) -> str:
+        seen["options"] = options
+        return "created"
+
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", lambda: None)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    monkeypatch.setattr(create, "create", created)
+    assert cli.main(["create", "--repos", " GitHub.com/o/a, ,github.com/o/b,github.com/o/a "]) == 0
+    assert seen["options"] == create.Options(repos=("github.com/o/a", "github.com/o/b"))
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_cli_create_names_its_repos_option() -> None:
+    parser = cli._parser()
+    (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
+    (option,) = [action for action in commands.choices["create"]._actions if action.dest == "repos"]
+    assert option.option_strings == ["--repos"]
+    assert option.help == (
+        "comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
+    )
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+@pytest.mark.parametrize("given", ["o/a", "/home/worker/dev/a", "github.com/o/a/b", "github.com/o a/b"])
+def test_cli_create_refuses_a_repo_that_is_not_host_owner_name(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], given: str
+) -> None:
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", lambda: None)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    assert cli.main(["create", "--repos", f"github.com/o/ok,{given}"]) == 1
+    assert capsys.readouterr().err == (
+        f"hive create refused: hive create takes repos as host/owner/name, such as github.com/o/r, not {given!r}\n"
     )

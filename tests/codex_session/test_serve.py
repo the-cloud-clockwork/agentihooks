@@ -11,6 +11,8 @@ from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.unit
 
+from pathlib import Path
+
 SWARM_ENV = {
     "AGENTIHOOKS_SWARM": "sw",
     "AGENTIHOOKS_SWARM_LANE": "eng",
@@ -347,7 +349,7 @@ def supervised(monkeypatch, wait, returncode=0):
         execution_id="exe-1", thread_id="thread-1", endpoint_ref="unix:///run/cx/s", state="connected"
     )
     started = SimpleNamespace(record=record, process=process)
-    spec = SimpleNamespace(slug="sw", cwd="/workspace", environ=dict(SWARM_ENV))
+    spec = SimpleNamespace(slug="sw", cwd="/workspace", environ=dict(SWARM_ENV), agent=SimpleNamespace(account="alpha"))
     seen = {
         "finished": [],
         "stopped": [],
@@ -424,6 +426,23 @@ def test_an_exited_pump_names_its_status_before_the_server_stops(tmp_path, monke
     assert serve.main(argv, dict(SWARM_ENV)) == 1
     assert capsys.readouterr().err == serve.PUMP_EXITED.format(1) + "\n"
     assert seen["stopped"] == [seen["pump"], started.process]
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(("pump_code", "cap"), [(4, 0), (1, None)], ids=["refused", "degraded"])
+def test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing(tmp_path, monkeypatch, pump_code, cap):
+    from scripts import codex_usage
+    from scripts.codex_quota import CodexQuota
+
+    started, seen = supervised(monkeypatch, lambda: pytest.fail("server must not wait without its pump"))
+    seen["pump"].poll = lambda: pump_code
+    seen["pump"].returncode = pump_code
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == pump_code
+    assert seen["stopped"] == [seen["pump"], started.process]
+    reading = codex_usage.cached().get("alpha")
+    assert reading == (CodexQuota(1.5, "?", expired=True) if cap == 0 else None)
+    assert codex_router.account_cap(reading, 1.5) == cap
 
 
 def test_a_failed_pump_spawn_retires_the_server_and_finishes_the_execution(tmp_path, monkeypatch):
@@ -556,3 +575,59 @@ def test_a_refused_launch_fails_the_profile_report_so_init_agent_reports_it_at_o
     with pytest.raises(ValueError) as failure:
         init_agent._binding_result(env, 90.0, {})
     assert str(failure.value) == "codex-session launch refused: replacement does not match the current execution"
+
+
+@pytest.mark.feature("codex-opening-account-refusal")
+@pytest.mark.parametrize("error_class", ["account_refused", "capacity"])
+def test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_class: str
+) -> None:
+    from scripts import codex_usage, init_agent
+    from scripts.codex_quota import CodexQuota
+    from scripts.profiles import binding
+
+    supervised(monkeypatch, lambda: pytest.fail("a refused opening must not start a pump"))
+    report = tmp_path / "profile.json"
+    binding.request(report, "engineer", "codex")
+    spec = SimpleNamespace(slug="sw", environ={binding.REPORT: str(report)}, agent=SimpleNamespace(account="alpha"))
+    monkeypatch.setattr(serve, "prepare", lambda args, flags, environ: spec)
+
+    def refused(store: object, launch: object, deps: object) -> None:
+        raise supervisor.LaunchFailure(error_class, "opening refused")
+
+    monkeypatch.setattr(supervisor, "launch", refused)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 3
+    assert codex_usage.cached().get("alpha") == (
+        CodexQuota(1.5, "?", expired=True) if error_class == "account_refused" else None
+    )
+    with pytest.raises(ValueError, match="codex-session launch refused: opening refused"):
+        init_agent._binding_result({binding.REPORT: str(report)}, 0.1, {})
+
+
+@pytest.mark.feature("codex-opening-account-refusal")
+@pytest.mark.parametrize("pump_code", [4, 1])
+def test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pump_code: int
+) -> None:
+    from scripts.profiles import binding
+
+    _, seen = supervised(monkeypatch, lambda: pytest.fail("a refused pump must stop the server"))
+    report = tmp_path / "profile.json"
+    binding.request(report, "engineer", "codex")
+    spec = SimpleNamespace(
+        slug="sw", cwd=str(tmp_path), environ={binding.REPORT: str(report)}, agent=SimpleNamespace(account="alpha")
+    )
+    monkeypatch.setattr(serve, "prepare", lambda args, flags, environ: spec)
+    seen["pump"].poll = lambda: pump_code
+    seen["pump"].returncode = pump_code
+
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == pump_code
+    data = json.loads(report.read_text())
+    assert data["state"] == ("failed" if pump_code == 4 else "pending")
+    if pump_code == 4:
+        assert data["reason"] == "Codex provider refused the routed account"
+        with pytest.raises(ValueError) as failure:
+            binding.wait(report, 0.1)
+        assert str(failure.value) == "Codex provider refused the routed account"

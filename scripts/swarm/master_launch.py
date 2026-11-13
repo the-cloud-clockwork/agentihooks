@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
+from typing import Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
@@ -20,7 +21,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
-from scripts.swarm.store import MASTER, AgentRecord, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import SUSPECT, placed_record, primed
 from scripts.swarm_v2 import master_fill
@@ -237,7 +238,10 @@ def _beside(store, slug, runtime, at, live):
     return Launched(record.name, record.pane_id, record.seat, NEW)
 
 
-def _fresh(store, slug, runtime, at, live, replace_live=False):
+def _fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool = False) -> Launched:
+    from scripts.swarm import tick_master
+
+    tick_master.finish_dead_starting(store, slug, runtime, at)
     front = _front_doors(store, slug, live)
     leads = front or _starting_leads(store, slug)
     if leads and not replace_live:

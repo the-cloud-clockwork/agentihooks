@@ -38,12 +38,13 @@ def _config(tmp_path, lane, harness):
     )
 
 
-def _spawn(tmp_path, lane, harness, kind, login=True, seat=None):
+def _spawn(tmp_path, lane, harness, kind, login=True, seat=None, reported=""):
     seen = []
 
     def run(argv, **kwargs):
         seen.append(argv)
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+        output = f"status=started\nroute_status=routed\n{reported}"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, output), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "requested"))
     task = {"id": lane, "title": "proof", "route_kind": kind} | ({"seat": seat} if seat is not None else {})
@@ -110,6 +111,66 @@ def test_a_master_placed_on_the_api_route_records_gateway(tmp_path):
     task = {"id": "master", "title": "proof"}
     placed = runtime.spawn(_config(tmp_path, "master", "claude"), "master", "agent", task)
     assert (placed.route_kind, placed.remote_control) == ("api", {"state": "off", "detail": "gateway"})
+
+
+TOKEN_OFF = {"state": "off", "detail": "subscription token fallback"}
+
+
+@pytest.mark.parametrize(("placement", "decided"), [("fallback", TOKEN_OFF), ("forced", ON)])
+@pytest.mark.feature("remote-control-token-fallback-reason")
+def test_a_front_door_master_records_remote_control_by_where_its_login_landed(tmp_path, placement, decided):
+    passed, placed = _spawn(tmp_path, "master", "claude", "interactive", reported=f"placement={placement}\n")
+    assert passed[:6] == ["--route", "claude-ai", *RC]
+    assert (placed.route_kind, placed.remote_control) == ("interactive", decided)
+
+
+@pytest.mark.parametrize(("placement", "decided"), [("fallback", TOKEN_OFF), ("forced", ON)])
+@pytest.mark.feature("remote-control-token-fallback-reason")
+def test_a_front_door_resume_records_remote_control_by_where_its_login_landed(tmp_path, placement, decided):
+    runtime, config, agent, _ = _resuming(tmp_path, "c0ffee", "claude")
+    config.slug = "proof"
+    reporting = runtime.run
+
+    def run(argv, **kwargs):
+        proc = reporting(argv, **kwargs)
+        return replace_stdout(proc, f"placement={placement}\n")
+
+    runtime.run = run
+    master = replace(agent, lane="master", task="master", profile="master", route_kind="interactive")
+    assert runtime.resume(config, master, "resume").remote_control == decided
+
+
+def replace_stdout(proc, extra):
+    return SimpleNamespace(returncode=proc.returncode, stdout=proc.stdout + extra, stderr=proc.stderr)
+
+
+@pytest.mark.feature("remote-control-phone-access-wording")
+def test_a_master_on_the_token_fallback_reports_phone_access_unavailable_with_the_reason():
+    assert remote_control.line({"remote_control": TOKEN_OFF}) == (
+        "Remote Control: off (subscription token fallback), phone access unavailable"
+    )
+
+
+@pytest.mark.feature("remote-control-phone-access-wording")
+def test_a_master_on_its_native_login_reports_phone_access_available():
+    assert remote_control.line({"remote_control": ON}) == (
+        "Remote Control: on (master 1 · proof), phone access available"
+    )
+
+
+@pytest.mark.feature("remote-control-phone-access-wording")
+def test_swarm_status_prints_phone_access_for_each_master():
+    from scripts.swarm.cli import _remote_control_text
+
+    agents = [
+        SimpleNamespace(name="m1", remote_control=TOKEN_OFF),
+        SimpleNamespace(name="m2", remote_control=ON),
+        SimpleNamespace(name="e1", remote_control={}),
+    ]
+    assert _remote_control_text(agents) == (
+        "Remote Control: off (subscription token fallback), phone access unavailable\n"
+        "Remote Control: on (master 1 · proof), phone access available\n"
+    )
 
 
 def _resumed(tmp_path, lane, harness, kind, login=True, seat=""):
@@ -220,12 +281,16 @@ def test_only_an_on_decision_produces_launch_arguments():
 @pytest.mark.parametrize(
     ("decided", "text"),
     [
-        (ON, "Remote Control: on (master 1 · proof)"),
-        ({"state": "off", "detail": "fallback auth"}, "Remote Control: off (fallback auth)"),
+        (ON, "Remote Control: on (master 1 · proof), phone access available"),
+        (
+            {"state": "off", "detail": "fallback auth"},
+            "Remote Control: off (fallback auth), phone access unavailable",
+        ),
         ({}, ""),
         (None, ""),
     ],
 )
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_status_line_reads_the_recorded_decision(decided, text):
     assert remote_control.line({"remote_control": decided}) == text
 

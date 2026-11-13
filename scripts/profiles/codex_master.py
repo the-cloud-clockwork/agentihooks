@@ -1,4 +1,5 @@
 import re
+from typing import Any, cast
 
 REARM = r"\b[Rr]e[- ]?arm (?:your |a |an |the )?`?Monitors?`?(?: on (?:the )?ledger)?"
 MONITOR = r"`?\bMonitors?\b`?"
@@ -35,10 +36,10 @@ def persona(text: str, push: bool = False) -> str:
     return text + "\n" + waiting("<slug>", push) + "\n"
 
 
-def handoff(task: dict, slug: str, push: bool = False) -> dict:
+def handoff(task: dict[str, Any], slug: str, push: bool = False) -> dict[str, Any]:
     result = dict(task)
     if "handoff" in task:
-        lines, active, fenced = [], False, False
+        lines, active, fenced = cast(list[str], []), False, False
         for line in task["handoff"].splitlines(keepends=True):
             if line.lstrip().startswith("```"):
                 fenced = not fenced

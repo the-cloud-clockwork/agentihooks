@@ -5,12 +5,16 @@ import hmac
 import json
 import os
 import secrets
+import sys
 import time
+from functools import partial
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from scripts.auth import switch
 from scripts.events import state
+from scripts.events.bus import StateStore
 from scripts.hive import hive_state, redis_acl
 from scripts.swarm.keyspace import ROOT
 
@@ -22,9 +26,11 @@ ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 # Only keys a traced worker command writes; an entry with no writer widens every member's login.
 WORKER_KEYS = (
     "swarm:*:agents",
+    "swarm:*:hosts",
     "swarm:*:executions",
     "swarm:*:lease-cache",
     "swarm:state:fencing:*",
+    "swarm:*:fence:*",
     "swarm:state:counters:*",
     "swarm:*:execution-publishing",
     "swarm:*:codex-transport",
@@ -62,15 +68,47 @@ NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
-_LEDGER_OF: dict[str, str] = {}
 
 
 class HiveError(Exception):
     pass
 
 
+class StoreRefused(HiveError):
+    """A refusal by the hive state store: its reply names what was refused, its message adds the store's own text."""
+
+    def __init__(self, reply: str, detail: str) -> None:
+        super().__init__(f"{reply} ({detail})")
+        self.reply = reply
+
+
 def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
+
+
+AGENT_TOKENS_KEPT = 8
+
+
+def _agent_key(member_id: str, slug: str, name: str) -> str:
+    """The credential store key of the one record holding an agent's newest token digests."""
+    return f"agent.{member_id}.{_digest(json.dumps([slug, name]))}"
+
+
+def _tokens(record: Any) -> list[str]:
+    """The token digests an agent record holds."""
+    return list(record["tokens"]) if record else []
+
+
+def _with_token(current: Any, digest: object, slug: str, name: str, held: str) -> dict[str, Any]:
+    """The agent record with held appended, keeping the newest AGENT_TOKENS_KEPT digests of the same ledger."""
+    kept = _tokens(current) if current and current["ledger"] == digest else []
+    return {"ledger": digest, "scope": [slug, name], "tokens": [*kept, held][-AGENT_TOKENS_KEPT:]}
+
+
+def _without_token(current: dict[str, Any] | None, held: str) -> dict[str, Any] | None:
+    """The agent record without held, or None once it holds no token."""
+    remaining = [token for token in _tokens(current) if token != held]
+    return {**current, "tokens": remaining} if current and remaining else None
 
 
 def _store(client):
@@ -100,9 +138,9 @@ def _refusals() -> tuple[type[BaseException], ...]:
     return (*state.unavailable(), redis_acl.Refused)
 
 
-def _refused(exc: BaseException, what: str) -> HiveError:
+def _refused(exc: BaseException, what: str) -> StoreRefused:
     source = "Redis" if hive_state.on_redis() else "the hive state store"
-    return HiveError(f"{source} refused {what} ({exc})")
+    return StoreRefused(f"{source} refused {what}", str(exc))
 
 
 def member(client, member_id: str) -> dict | None:
@@ -224,31 +262,59 @@ def _mapped(redis: object, store: object, digest: str | None, member_id: str) ->
     )
 
 
-def _member_ledger(redis: object, store: object, member_id: str) -> str | None:
-    """The ledger digest of a member with no holder record, cached per process and reloaded once it is unmapped."""
-    digest = _LEDGER_OF.get(member_id)
-    if _mapped(redis, store, digest, member_id):
-        return digest
-    found = member(redis, member_id)
-    if found is None:
+def _backfill(redis: object, store: StateStore, member_id: str) -> str | None:
+    """Write a member's holder record from its member record when its ledger credential still maps to it."""
+    found: dict[str, Any] | None = member(redis, member_id)
+    digest: str | None = found["ledger"] if found else None
+    if not _mapped(redis, store, digest, member_id):
         return None
-    digest = _LEDGER_OF[member_id] = found["ledger"]
+
+    def held(_: object) -> str | None:
+        return digest
+
+    hive_state.amend(store, f"holder.{member_id}", held)
+    return digest
+
+
+def backfill_holders(redis: object) -> str:
+    """Write the holder record of every indexed member that has none and whose ledger credential still maps to it."""
+    store = _store(redis)
+    written: list[str] = []
+    indexed: list[str] = hive_state.index(redis)
+    for member_id in indexed:
+        if hive_state.read(store, f"holder.{member_id}") is None and _backfill(redis, store, member_id):
+            written.append(member_id)
+    return f"wrote the holder record of {', '.join(written)}" if written else "wrote no holder record"
+
+
+def _unheld(redis: object, store: StateStore, member_id: str) -> str | None:
+    """The ledger digest for a member with no holder record: backfilled and logged until refusal is enforced."""
+    if switch.holders_enforced(os.environ):
+        return None
+    digest = _backfill(redis, store, member_id)
+    print(
+        f"hive agent token: member {member_id} had no holder record, "
+        f"{'wrote it from its member record' if digest else 'and none could be written'}; "
+        f"{switch.HOLDERS_ENV}={switch.ENFORCE} refuses it",
+        file=sys.stderr,
+    )
     return digest
 
 
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
-    """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
+    """A hive agent token scoped to one ledger and agent, recorded on its own from the member's holder record."""
     store = _store(redis)
     digest = hive_state.read(store, f"holder.{member_id}")
-    if digest is None and switch.legacy(os.environ):
-        digest = _member_ledger(redis, store, member_id)
+    if digest is None:
+        digest = _unheld(redis, store, member_id)
     if not _mapped(redis, store, digest, member_id):
         raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
-    key = f"agent.{member_id}.{_digest(token)}"
-    hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
-    if agent_member(redis, token, slug, name) != member_id:
-        hive_state.amend(store, key, lambda _: None)
+    held = _digest(token)
+    key = _agent_key(member_id, slug, name)
+    hive_state.amend(store, key, partial(_with_token, digest=digest, slug=slug, name=name, held=held))
+    if not _mapped(redis, store, digest, member_id):
+        hive_state.amend(store, key, partial(_without_token, held=held))
         raise HiveError("Hive membership was revoked")
     return token
 
@@ -256,7 +322,10 @@ def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
 def agent_member(redis: object, token: str, slug: str, name: str) -> str | None:
     member_id = token.removeprefix("hive.").partition(".")[0]
     store = _store(redis)
-    scoped = hive_state.read(store, f"agent.{member_id}.{_digest(token)}")
+    held = _digest(token)
+    scoped = hive_state.read(store, _agent_key(member_id, slug, name))
+    if held not in _tokens(scoped):
+        scoped = hive_state.read(store, f"agent.{member_id}.{held}")
     if scoped is not None:
         if scoped["scope"] != [slug, name]:
             return None

@@ -7,10 +7,11 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
-from scripts.hive import account_slots, workstation
+from scripts.hive import account_slots, registry, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
@@ -60,6 +61,12 @@ def lanes(excluded: str | None) -> tuple[str, ...]:
     return tuple(lane for lane in LANES if lane not in left_out)
 
 
+def fit(store: Any, hive: str) -> Callable[[Envelope], bool]:
+    """Offers this hive may not take stay in the queue; its declared capabilities are read only for needs."""
+    capabilities = readiness.declared(store, hive)
+    return lambda event: readiness.fits(event, hive, capabilities)
+
+
 def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> list[Spoke]:
     current = []
     for slug in readiness.Source(store).slugs():
@@ -67,7 +74,8 @@ def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> 
         for lane in taken:
             if (slug, lane) not in held:
                 tasks = LaneTasks(bus, hive, store.config)
-                held[slug, lane] = Spoke(SpokeConfig(config, lane, hive), bus, runtime, tasks, view=lambda: None)
+                spoke_config = SpokeConfig(config, lane, hive, fit=fit(store, hive))
+                held[slug, lane] = Spoke(spoke_config, bus, runtime, tasks, view=lambda: None)
                 queue = readiness.queue_name(slug, lane)
                 print(f"hive spoke for swarm {slug} lane {lane} takes {queue}", file=sys.stderr)
             current.append(held[slug, lane])
@@ -76,6 +84,12 @@ def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> 
 
 def run_once(store, bus, runtime, hive: str, taken: Iterable[str], timeout_ms: int, held: dict) -> list[str]:
     return [spoke.poll(timeout_ms) for spoke in spokes(store, bus, runtime, hive, taken, held)]
+
+
+def draining(store: Any, hive: str) -> bool:
+    """True while this pod's member of hive takes no new agents; a store without Redis has no members."""
+    redis = getattr(store, "redis", None)
+    return redis is not None and registry.member_draining(redis, hive, registry.member_name())
 
 
 def run(
@@ -89,7 +103,7 @@ def run(
 ) -> None:
     held: dict = {}
     for _ in itertools.count() if passes is None else passes:
-        if "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
+        if draining(store, hive) or "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
             wait(IDLE_S)
 
 

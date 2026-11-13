@@ -179,8 +179,8 @@ def test_an_undecodable_record_hides_no_other_account(world, monkeypatch):
     [
         None,
         {"provider_status": "error", "observed_ms": 240000},
-        {**STALE_FULL, "five_used": None},
         {**STALE_FULL, "week_used": None},
+        {**STALE_FULL, "five_used": None, "five_reset": None, "week_used": None},
         {**STALE_FULL, "provider_status": "error"},
     ],
 )
@@ -191,6 +191,19 @@ def test_missing_or_failed_quota_data_is_unknown_never_full(world, report):
     assert world.quota.reading(ACCOUNT, HARNESS) == quota.Reading(ACCOUNT, HARNESS, quota.UNKNOWN, age)
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.admit(ACCOUNT, HARNESS).action == quota.WAIT
+
+
+def test_a_claude_reading_with_no_five_hour_window_routes_by_its_week(world):
+    world.publish({**STALE_FULL, "five_used": None, "five_reset": None, "week_used": 8.0})
+    reading = world.quota.reading(ACCOUNT, HARNESS)
+    assert (reading.state, reading.routing_left, reading.five_left, reading.week_left) == (
+        quota.OBSERVED,
+        92.0,
+        None,
+        92.0,
+    )
+    assert world.quota.cap(ACCOUNT, HARNESS) == 6
+    assert world.quota.admit(ACCOUNT, HARNESS).action == quota.ADMIT
 
 
 def test_an_aged_reading_is_unknown(world):
@@ -301,6 +314,27 @@ def test_a_handoff_target_needs_the_minimum_room(world):
     assert world.quota.admit(SPARE, HARNESS).action == quota.ADMIT
     world.publish({**INPUTS["spare"], "observed_ms": 200001, "five_used": 95.5}, account=SPARE)
     assert world.quota.admit(ACCOUNT, HARNESS, SPARE).action == quota.WAIT
+
+
+def test_the_primary_login_is_refused_admission_and_capped_at_its_reserve(world, monkeypatch):
+    from scripts import master_claude_login as login
+
+    monkeypatch.setenv(login.ORDER_ENV, ACCOUNT)
+    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 98.0}, account=ACCOUNT)
+    assert world.quota.cap(ACCOUNT, HARNESS) == 0
+    assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
+
+
+@pytest.mark.feature("swarm-quota-room-primary-reserve-above-floor")
+def test_the_primary_login_is_refused_above_the_routing_floor_by_its_reserve(world, monkeypatch):
+    from scripts import master_claude_login as login
+    from scripts.routing import reservation
+
+    monkeypatch.setenv(login.ORDER_ENV, ACCOUNT)
+    monkeypatch.setenv(reservation.PRIMARY_RESERVE_ENV, "10")
+    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 92.0}, account=ACCOUNT)
+    assert world.quota.cap(ACCOUNT, HARNESS) == 0
+    assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
 
 
 def test_a_provider_outage_waits_a_bounded_time_without_new_starts(world):

@@ -27,6 +27,14 @@ Before the next action:
 Action is the acknowledgment. Quoting or summarizing a block is never a substitute
 for compliance.
 
+## Proven cause before a fix (HARD RULE)
+
+A fix is never written, pushed, queued or merged until its root cause is proven
+with evidence. A scouter agent investigates first against live data and the
+code and marks every claim confirmed, refuted or unproven; only a proven cause
+gets a fix, and only the one change the evidence names. A hypothesis is
+labelled as one and never shipped as a fix.
+
 ## Use `agentihooks`
 
 | Trigger | Action |
@@ -51,6 +59,9 @@ for compliance.
 | A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
 | A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `init-agent` sessions restart at their next stop |
 | The operator says remember, yesterday, or names earlier work | `recall_search` (scope a ledger or swarm slug, default this swarm; `all` crosses swarms), then `recall_get <ref>`; `recall_timeline` for a time span, `recall_sources` for what is indexed (`agentihooks recall` in a shell). Recall before reading ledger files. Recall holds swarm and ledger history; fleet lessons stay in the brain |
+| Which specialist profiles exist, or which declare a capability | `agentihooks agents list [--capability <x>]`, `agents show <name>`; MCP `agent_list`, `agent_show`. The installed profiles (built-in, package roles, bundles, linked) are the catalogue: a profile's `profile.yml` `description` and `capabilities` are its card |
+| Run one specialist on an input | MCP `agent_run(profile, input, wait)`, a one-stage workflow through the runner; refused inside a worker run, so runs never nest. `wait=false` returns at once; read it with `agentihooks workflow status <run id>` |
+| Run, inspect or resume a multi-stage workflow | `agentihooks workflow list\|show <name>\|validate <file>`, `workflow run <name> --case <file>`, `workflow status\|resume <run id>` |
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
@@ -90,9 +101,9 @@ investigate/refactor wording are never themselves a reason to create one.
 
 A session already bound to a ledger or swarm keeps its ledger duties. A hook
 tells a bound session, once per session, when it accepts a plan: the directive
-names its own ledger, so append the plan there as new phases with
-`agentihooks ledger --slug <slug> --as <name> plan phases <file>`, never a new
-swarm, and do not implement the plan in this session.
+names its own ledger, so ingest the plan there with
+`agentihooks plan ingest <plan file> --ledger <slug>`, never a new swarm, and
+do not implement the plan in this session. Planner seats get no directive.
 
 ## Swarms and ledgers
 
@@ -108,6 +119,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
 | A question while the operator is away (in a swarm bound session the question tool and the plan prompt stay refused until he types `operator on` in that pane; a standalone session always has them) | `agentihooks msg send master@<slug> "<text>"`; the ledger refuses agent questions, and no agent writes to the operator first |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
+| A session bound to a ledger accepts a plan that continues it | `agentihooks plan ingest <plan file> --ledger <slug>`: one atomic call that adds its phases and slices and leaves a rerun unchanged; planner seats are never told to |
 | A planner or the master has an accepted plan | `agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>` before adding its tasks: a GitHub issue where the repo has issues, else a ledger artifact (a plan counts as artifact requested); it links and comments each phase, every task added there carries the link, and a planner's slice is refused while a task lacks it |
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> ready <doc>` (the tick merges and closes the task) or `swarm <slug> done --pr <url>` |
 | A swarm agent waits at its prompt on checks, a queued pull request, a deploy or a reply | `agentihooks swarm <slug> wait --on checks <pr or Actions run url>\|merge <pr url>\|reply <inbox item>\|task <id>`. Use `--on merge <pr url>` while the pull request sits in the merge queue; it holds until the pull request merges or leaves the queue without merging, ending red in the latter case. The tick ends a checked wait when the thing resolves and tells you; else `wait <minutes> --reason "<what>"`, at most 60. The tick neither nudges nor retires it until the wait ends |

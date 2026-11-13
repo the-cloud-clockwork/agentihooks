@@ -80,6 +80,23 @@ def test_each_field_mismatch_is_named(mounted, field):
     assert differences[field]["actual"] == facts[field]
 
 
+@pytest.mark.parametrize(
+    ("recorded", "observed", "differs"),
+    [
+        ("nestor-colt", "nestor_colt", False),
+        ("nestor_colt", "nestor-colt", False),
+        ("nestor-colt", "other_account", True),
+    ],
+)
+def test_account_spellings_differing_only_in_separator_match(
+    mounted: tuple, recorded: str, observed: str, differs: bool
+) -> None:
+    agent, proc, _ = mounted
+    facts = {**live_binding.read(agent, 42, proc), "account": observed}
+    differences = live_binding.compare(replace(agent, account=recorded), facts)
+    assert differences == ({"account": {"expected": recorded, "actual": observed}} if differs else {})
+
+
 @pytest.mark.parametrize("event", EVENTS)
 def test_missing_lifecycle_hook_is_refused(mounted, event):
     agent, proc, home = mounted
@@ -134,6 +151,31 @@ def test_missing_process_is_a_named_failure(mounted):
     agent, proc, _ = mounted
     assert live_binding.read(agent, 99, proc) == {"process": False}
     assert live_binding.compare(agent, {"process": False}) == {"process": {"expected": True, "actual": False}}
+
+
+@pytest.mark.parametrize(
+    ("expected", "observed", "differs"),
+    [
+        ("claude-opus-4-6", "opus", False),
+        ("opus", "claude-opus-4-6", False),
+        ("claude-opus-4-6", "claude-opus-4-6", False),
+        ("claude-opus-4-6[1m]", "opus[1m]", False),
+        ("opus[1m]", "claude-opus-4-6", False),
+        ("claude-opus-4-5", "claude-opus-4-6", True),
+        ("claude-opus-4-6", "sonnet", True),
+        ("sonnet", "claude-opus-4-6", True),
+    ],
+)
+def test_a_launch_alias_matches_the_full_model_id_both_ways(
+    mounted: tuple[AgentRecord, Path, Path], expected: str, observed: str, differs: bool
+) -> None:
+    agent, proc, _ = mounted
+    assigned = replace(
+        agent, profile_decision={"validation": {**agent.profile_decision["validation"], "model": expected}}
+    )
+    facts = {**live_binding.read(agent, 42, proc), "model": observed}
+    differences = live_binding.compare(assigned, facts)
+    assert differences == ({"model": {"expected": expected, "actual": observed}} if differs else {})
 
 
 def test_model_and_effort_require_native_flags(mounted):
@@ -1335,6 +1377,78 @@ def test_retiring_unbound_master_without_a_live_process_is_checked(ticking):
     assert report["differences"] == {"process": {"expected": True, "actual": False}}
 
 
+@pytest.mark.parametrize(("age", "kept"), [(0, True), (600_000, True), (600_001, False)])
+def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_its_pane_lookup_fails(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, age: int, kept: bool
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import commands, idle
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    store.put_agent("sw", replace(master, state="retiring", hive="", runtime_target={}))
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root"])
+    store.redis.set(reports.key("root"), json.dumps({"names": [master.name], "executions": {}, "panes": {}}))
+    now = 10_000_000
+    idle.beat(store.redis, "sw", master.name, idle.WORKING, now - age)
+    runtime.bindings = lambda agents: {
+        a.name: {"process": False} if a.name == master.name else {**live_binding.assignment(a), "hooks": True}
+        for a in agents
+    }
+    tick("sw", store, ledger, runtime, now)
+    report = store.redis.hget(store.key("sw", "live-bindings"), master.name)
+    if kept:
+        masters = [a for a in store.agents("sw") if a.lane == "master"]
+        assert [(a.name, a.state) for a in masters] == [(master.name, "working")]
+        assert master.name not in runtime.killed
+        assert report is None
+    else:
+        assert json.loads(report)["differences"] == {"process": {"expected": True, "actual": False}}
+
+
+@pytest.mark.parametrize(
+    ("lane", "target", "holders", "kept"),
+    [
+        ("master", {}, {"root"}, True),
+        ("master", {}, {"root", "controller"}, True),
+        ("master", {}, {"controller"}, False),
+        ("master", {}, set(), False),
+        ("master", {"host_id": "stable"}, {"stable"}, False),
+        ("master", {"host_id": "controller"}, {"root"}, False),
+        ("eng", {}, {"root"}, False),
+    ],
+)
+def test_only_an_untargeted_master_another_hive_lists_is_kept_unjudged(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, lane: str, target: dict, holders: set, kept: bool
+) -> None:
+    from scripts.swarm import commands, held_elsewhere, idle
+
+    store, _, _ = ticking
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    agent = AgentRecord("held@zz", lane, "two", state="working", runtime_target=target)
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, 100)
+    listed = {agent.name: holders} if holders else {}
+    assert held_elsewhere.keep("sw", store, agent, listed, 100) is kept
+    assert agent.name not in {a.name for a in store.agents("sw")}
+
+
+def test_holders_maps_each_listed_name_to_every_hive_and_skips_a_report_without_names(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import held_elsewhere
+
+    store, _, _ = ticking
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root", "stable", "bare"])
+    store.redis.set(reports.key("root"), json.dumps({"names": ["master@a", "eng@b"]}))
+    store.redis.set(reports.key("stable"), json.dumps({"names": ["eng@b"]}))
+    store.redis.set(reports.key("bare"), json.dumps({"executions": {}}))
+    assert held_elsewhere.holders(store) == {"master@a": {"root"}, "eng@b": {"root", "stable"}}
+
+
 def test_a_kept_master_does_not_skip_later_agents(ticking):
     from scripts.swarm.tick import tick
 
@@ -1455,3 +1569,128 @@ def test_local_agent_without_validation_still_expects_the_profile_home(
         "home": {"expected": str(tmp_path / ".agentihooks" / "profiles" / "engineer" / "claude"), "actual": HIVE_HOME}
     }
     assert live_binding.unknown(agent, facts) == []
+
+
+def _login_report(path: Path, state: str, home: Path, profile: str = "master", account: str = "team") -> Path:
+    validated = {
+        "profile": profile,
+        "harness": "claude",
+        "home": str(home),
+        "state": "validated",
+        "pid": 7,
+        "persona": "persona",
+        "sources": "sources",
+        "account": account,
+    }
+    data = {"profile": profile, "harness": "claude", "state": state, "rendered": {"home": str(home)}}
+    found = {"validation": validated} if state == "validated" else {"reason": "refused"}
+    path.write_text(json.dumps({**data, **found}))
+    return path
+
+
+def _login_master(report: Path, home: str = "", account: str = "") -> AgentRecord:
+    pending = {
+        "state": "pending",
+        "report": str(report),
+        "profile": "master",
+        "harness": "claude",
+        "account": account,
+        "model": "sonnet",
+        "effort": "low",
+    }
+    return AgentRecord(
+        "master@zz-1",
+        "master",
+        "master",
+        harness="claude",
+        profile="master",
+        model="opus",
+        effort="high",
+        account="team",
+        profile_decision={"validation": {**pending, **({"home": home} if home else {})}},
+    )
+
+
+def _login_facts(home: Path) -> dict:
+    return {
+        "harness": "claude",
+        "home": str(home),
+        "profile": "master",
+        "model": "sonnet",
+        "effort": "low",
+        "account": "team",
+        "hooks": True,
+    }
+
+
+def _profile_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "operator")
+    return str(tmp_path / "operator" / ".agentihooks" / "profiles" / "master" / "claude")
+
+
+def test_master_launched_on_the_login_home_has_no_home_difference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _profile_home(monkeypatch, tmp_path)
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    master = _login_master(_login_report(tmp_path / "report.json", "validated", login))
+    expected = live_binding.assignment(master)
+    assert (expected["home"], expected["model"], expected["effort"]) == (str(login.resolve()), "sonnet", "low")
+    assert live_binding.compare(master, _login_facts(login)) == {}
+
+
+@pytest.mark.parametrize("state", ["pending", "failed"])
+def test_an_unvalidated_launch_report_keeps_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str
+) -> None:
+    default = _profile_home(monkeypatch, tmp_path)
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    expected = live_binding.assignment(_login_master(_login_report(tmp_path / "report.json", state, login)))
+    assert (expected["home"], expected["model"], expected["effort"]) == (default, "sonnet", "low")
+
+
+@pytest.mark.parametrize("content", [None, "not json", "[]", '{"state": "validated"}'])
+def test_an_unreadable_launch_report_keeps_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: str | None
+) -> None:
+    default = _profile_home(monkeypatch, tmp_path)
+    report = tmp_path / "report.json"
+    if content is not None:
+        report.write_text(content)
+    expected = live_binding.assignment(_login_master(report))
+    assert (expected["home"], expected["model"], expected["effort"]) == (default, "sonnet", "low")
+
+
+@pytest.mark.parametrize("profile, reported, recorded", [("engineer", "team", ""), ("master", "other", "team")])
+def test_a_report_of_another_launch_keeps_the_profile_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, profile: str, reported: str, recorded: str
+) -> None:
+    default = _profile_home(monkeypatch, tmp_path)
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    report = _login_report(tmp_path / "report.json", "validated", login, profile, reported)
+    assert live_binding.assignment(_login_master(report, account=recorded))["home"] == default
+
+
+def test_a_recorded_home_is_kept_over_the_launch_report(tmp_path: Path) -> None:
+    login, rendered = tmp_path / "login", tmp_path / "rendered"
+    login.mkdir()
+    rendered.mkdir()
+    master = _login_master(_login_report(tmp_path / "report.json", "validated", login), str(rendered))
+    assert live_binding.assignment(master)["home"] == str(rendered.resolve())
+
+
+def test_a_hosted_master_with_a_validated_report_compares_its_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.hive import reports
+
+    monkeypatch.setattr(reports, "host", lambda agent: "hive-1")
+    login = tmp_path / "master-login-2" / "claude"
+    login.mkdir(parents=True)
+    master = _login_master(_login_report(tmp_path / "report.json", "validated", login))
+    facts = {**_login_facts(login), "home": str(tmp_path / "elsewhere")}
+    assert list(live_binding.compare(master, facts)) == ["home"]
+    assert live_binding.unknown(master, facts) == []

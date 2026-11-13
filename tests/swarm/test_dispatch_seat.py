@@ -679,9 +679,32 @@ def test_three_fresh_reports_naming_one_share_trigger_and_a_repeat_counts_once(n
         report_at(store, named, NOW - (3 - n) * MINUTE)
         assert dispatch_seat.uncovered(store, SLUG, NOW) == []
     assert dispatch_seat.uncovered(store, SLUG, NOW) == []
-    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE}
+    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE, "since": NOW - 3 * MINUTE}
     report_at(store, named, NOW - MINUTE)
     assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [3]
+
+
+def test_reports_three_minutes_apart_trigger_on_the_second_report():
+    store = swarm()
+    report_at(store, "review", NOW - 4 * MINUTE)
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    report_at(store, "review", NOW - MINUTE)
+    assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [2]
+
+
+def test_a_stored_streak_start_wins_over_its_report_count():
+    store = swarm()
+    started = {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE, "since": NOW - 4 * MINUTE}
+    store.redis.set(store.key(SLUG, dispatch_seat.STREAK), json.dumps(started))
+    report_at(store, "review", NOW - MINUTE)
+    assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [2]
+    assert streak_of(store)["since"] == NOW - 4 * MINUTE
+
+
+def test_a_streak_older_code_kept_is_anchored_from_its_report_count():
+    older = {"named": "review", "ticks": 3, "at": NOW - MINUTE}
+    found = dispatch_seat.streak(older, {"bottleneck": "review", "at": NOW})
+    assert found == {"named": "review", "ticks": 4, "at": NOW, "since": NOW - 3 * MINUTE}
 
 
 def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing():
@@ -690,9 +713,9 @@ def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing()
     dispatch_seat.uncovered(store, SLUG, NOW)
     report_at(store, "ci", NOW - MINUTE)
     dispatch_seat.uncovered(store, SLUG, NOW, write=False)
-    assert streak_of(store) == {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE}
+    assert streak_of(store) == {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE, "since": NOW - 2 * MINUTE}
     dispatch_seat.uncovered(store, SLUG, NOW)
-    assert streak_of(store) == {"named": "ci", "ticks": 1, "at": NOW - MINUTE}
+    assert streak_of(store) == {"named": "ci", "ticks": 1, "at": NOW - MINUTE, "since": NOW - MINUTE}
 
 
 def test_no_report_leaves_the_streak_unwritten():
@@ -970,3 +993,24 @@ def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_w
         "state": "finished",
         "next": "stop now; the swarm closes this session",
     }
+
+
+class OneFreeSlot(FakeRuntime):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> tick_module.Placed:
+        if lane != tick_module.MASTER and self.spawned:
+            raise tick_module.SpawnError(
+                "no hive has room, and the local machine runs 4 of its 4 agents", "unavailable"
+            )
+        return super().spawn(config, lane, name, task)
+
+
+def test_a_pending_dispatcher_takes_the_next_free_slot_ahead_of_a_waiting_lane_task() -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0))
+    store.update(SLUG, state="running", autonomy="full")
+    runtime = OneFreeSlot()
+    tick(SLUG, store, PriorityLedger([{"id": "t1"}]), runtime, NOW)
+    assert [(lane, task) for lane, _, task in runtime.spawned] == [(dispatch_seat.LANE, dispatch_seat.SEAT)]
+    assert len(seats(store)) == 1
