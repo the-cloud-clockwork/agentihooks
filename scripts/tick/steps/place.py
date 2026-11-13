@@ -125,11 +125,7 @@ def _spawn_step(tick: Any, get: Get) -> Any:
     config, deadline, tools = get("config"), get(DEADLINE), get("tools")
     recording = _recording(tick, deadline)
     store = SpawnStoreCalls(tools.coordination, recording, tools.inbox)
-    if (
-        config.state == "running"
-        and tick.readiness.tick_places(config.engine, get("rows"))
-        and tick.panic.state(store) is None
-    ):
+    if config.state == "running" and tick.readiness.tick_launches(config.engine) and tick.panic.state(store) is None:
         rows = dict(get("rows"))
         runtime = SpawnRuntimeCalls(tools.runtime, recording)
         ledger = LedgerCalls(tools.ledger, recording)

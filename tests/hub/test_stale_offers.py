@@ -134,7 +134,9 @@ def test_publish_withdraws_the_stale_offers_of_every_lane_and_keeps_a_waiting_fr
 
 
 @pytest.mark.feature("hub-withdraws-stale-offers")
-def test_an_offer_whose_task_turned_workstation_is_withdrawn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_offer_whose_task_turned_workstation_is_withdrawn_and_offered_again_to_the_root_hive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     admit_all(monkeypatch)
     row, store, ledger = source()
     view = readiness.Source(store, ledger).snapshot("rig")
@@ -145,7 +147,11 @@ def test_an_offer_whose_task_turned_workstation_is_withdrawn(monkeypatch: pytest
     with backend("memory", None) as bus:
         eng = bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy())
         assert eng.offer(offered("task-a", 3))
-        assert readiness.publish(cast(Bus, bus), view, 73) == []
+        assert readiness.publish(cast(Bus, bus), view, 73) == ["ready:rig:task-a:3:root"]
+        delivery = eng.take(1)
+        assert delivery is not None
+        assert delivery.event.data["hive"] == "root"
+        delivery.ack()
         assert eng.take(1) is None
 
 

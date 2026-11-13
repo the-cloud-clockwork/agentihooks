@@ -941,7 +941,7 @@ the step checks it and returns no actions when it does not hold.
 | `placement` | rank pass | `tasks.rank_writes` returns `dispatcher.rank_decision` as one `rank` write; the rank applier takes it with `dispatcher.apply_ranking` only while the saved claim queue heads it read still hold, else drops it for the next pass |
 | `placement` | bottleneck remedy | `bottleneck_remedy.step` |
 | `placement` | preempt | `preempt.run` with the seats view, only when the swarm is `running`, not on the events engine and no panic is set |
-| `placement` | spawn | `_spawn` under the placement pass, only when the swarm is `running`, `readiness.tick_places` allows the engine to place and no panic is set. After it spawns, it deletes the `spawn-due` marker |
+| `placement` | spawn | `_spawn` under the placement pass, only when the swarm is `running`, `readiness.tick_launches` allows the engine to launch (never under events) and no panic is set. After it spawns, it deletes the `spawn-due` marker |
 
 The `spawn-due` marker pairs the spawn step with the `spawn due` step of the
 `observe` group (`step_spawn_due` in `scripts.tick.steps.observe`).
@@ -1432,7 +1432,7 @@ The delivered proof and limitations are recorded in
 | --- | --- |
 | `tests/tick/test_step_isolation.py` | The 300 second predecessor scenario, completed results, abandoned wall time and daemon worker, budget calculation, undeclared timing refusal, registered timings, spawn prerequisites and longest path start bound |
 | `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, a held exception skips the rest and is raised at the site, `fleet red notice` sits in lane `slow` with every other task step in lane `tick`, and a `WriteStep` keeps the lane it is given |
-| `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_places`; the `spawn-due` delete; a held exception skipping every placement step |
+| `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_launches`; the `spawn-due` delete; a held exception skipping every placement step |
 | `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget, and one abandoned when its lane expired, each journal one `swarm_tick_step_abandoned` line with the swarm, step, budget and sorted write domains; a call step abandoned with only its actions domain journals nothing |
 | `tests/tick/test_apply.py` | The dropped write and its recompute, sequential and parallel; writes without an applier pass through; both appliers write while their guard holds, drop a moved guard and turn a refused ledger call into a conflict; appliers need a ledger and a swarm; the size pass and grouping release return guarded writes and leave the document as read; a write step keeps every attribute of its call step |
 | `tests/tick/test_apply_rank.py` | The rank pass returns one write guarded on the heads it read; the applier takes it while the saved heads hold, takes a proposing pass whatever the heads, drops moved heads, and the engine keeps applied actions after the step actions and beside a later dropped write |
@@ -1480,7 +1480,7 @@ The delivered proof and limitations are recorded in
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
-| Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
+| Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_launches` refused; rank pass and bottleneck remedy still run |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |

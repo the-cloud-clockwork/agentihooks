@@ -68,7 +68,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch, pending: set[str], waiting: set[str]
     monkeypatch.setattr(launch_job, "collect", collect)
     monkeypatch.setattr(tick, "_Pass", lambda *args: ("pass", args))
     monkeypatch.setattr(
-        readiness, "tick_launches", lambda engine, row: seen.append(("ready", engine)) or row.get("ready", True)
+        readiness, "tick_launches", lambda engine: seen.append(("ready", engine)) or engine != EVENTS_ENGINE
     )
     monkeypatch.setattr(
         tick, "_acknowledging", lambda slug, store, agent: seen.append(("ack", slug, store)) or agent.name in waiting
@@ -137,7 +137,7 @@ def test_collected_acknowledgements_start_finish_fail_or_wait_each_launch(
         _agent("a12"),
     ]
     seen = _seams(
-        monkeypatch, pending={"a3"}, waiting={name for name in (f"a{n}" for n in range(1, 13)) if name != "a4"}
+        monkeypatch, pending={"a3", "a5"}, waiting={name for name in (f"a{n}" for n in range(1, 13)) if name != "a4"}
     )
     runtime = _Runtime(
         {
@@ -155,7 +155,7 @@ def test_collected_acknowledgements_start_finish_fail_or_wait_each_launch(
     )
     store = _Store(agents)
     config: Any = SimpleNamespace(engine="tick")
-    tasks = [{"id": f"task-a{n}"} for n in range(1, 12)] + [{"id": "task-a5", "ready": False}]
+    tasks = [{"id": f"task-a{n}"} for n in range(1, 12)]
     doc = {"tasks": tasks}
     actions = observe._collect_acks("sw", config, store, "ledger", runtime, doc, NOW)
     rows = sorted({task["id"] for task in tasks})
@@ -193,16 +193,14 @@ def test_collected_acknowledgements_start_finish_fail_or_wait_each_launch(
 
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
-def test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its_id(
+def test_the_events_engine_collects_no_hive_pass_and_no_acknowledgement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen = _seams(monkeypatch, pending={"a1"}, waiting={"a1"})
     runtime = _Runtime({"a1": "placed-a1"}, {})
     config: Any = SimpleNamespace(engine=EVENTS_ENGINE)
     actions = observe._collect_acks("sw", config, _Store([_agent("a1")]), "ledger", runtime, {"tasks": []}, NOW)
-    assert actions == [
-        f"started sw ledger a1 task-a1 placed-a1 ('launched', 'sw', ('record', 'a1', 'placed-a1')) {NOW}"
-    ]
+    assert actions == []
     assert _args(seen, "ready") == [(EVENTS_ENGINE,)]
     assert _args(seen, "collect") == []
-    assert runtime.collected == [(config, "eng", "a1", {"id": "task-a1", "seat": "seat-a1", tick.ACK_LATER: True})]
+    assert runtime.collected == []
