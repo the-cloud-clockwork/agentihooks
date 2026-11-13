@@ -16,7 +16,7 @@ def _all_kept() -> list[dict[str, object]]:
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
 def test_the_gate_covers_the_spawn_chain_reap_and_the_tick_view() -> None:
-    assert {"spawn", "reap", "tick view", "drained resume", "recover outages", "verify"} <= gate.GATED
+    assert {"spawn", "reap", "tick view", "preempt", "orphans", "verify"} <= gate.GATED
 
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
@@ -44,8 +44,8 @@ def test_a_cut_or_abandoned_step_is_a_miss(flag: str) -> None:
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
 def test_a_step_that_did_not_end_ok_is_a_miss() -> None:
-    records = [*_all_kept(), _record("reap", 0.5, outcome="skipped")]
-    assert gate.misses(records) == ["reap ended skipped after 0.50s"]
+    records = [*_all_kept(), _record("preempt", 0.5, outcome="skipped")]
+    assert gate.misses(records) == ["preempt ended skipped after 0.50s"]
 
 
 @pytest.mark.feature("tick-scale-gate-step-floors")

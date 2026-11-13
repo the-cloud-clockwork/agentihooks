@@ -37,6 +37,7 @@ SCENARIOS = (
     "drained",
     "finished",
     "lost",
+    "orphan",
     "failed-spawn",
     "full-capacity",
     "dependency",
@@ -150,6 +151,8 @@ def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeR
         runtime.fail = True
     if scenario == "full-capacity":
         runtime.full = True
+    if scenario == "orphan":
+        ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0099")
     if scenario == "dependency":
         ledger.rows["t1"]["depends_on"] = ["t2"]
         ledger.rows["t2"]["state"] = "blocked"

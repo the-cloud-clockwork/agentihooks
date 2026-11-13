@@ -582,7 +582,7 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
 
 def test_the_tick_spawns_nothing_while_panic_holds():
     source = Path(place.__file__).read_text()
-    assert "config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:\n" in source
+    assert "tick.readiness.tick_launches(config.engine) and tick.panic.state(store) is None:\n" in source
 
 
 def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):

@@ -66,9 +66,9 @@ def test_fifty_nine_walls_give_the_floor() -> None:
 @pytest.mark.feature("swarm-tick-live-budgets")
 def test_the_window_keeps_the_last_sixty_walls() -> None:
     store = _store()
-    _push(store, "exits sweep", [500.0] * 10 + [20.0] * 60)
-    assert store.redis.llen(store.key("sw", "tick:walls:exits sweep")) == budgets.WINDOW == 60
-    assert _resolved(store, "exits sweep") == 30.0
+    _push(store, "preempt", [500.0] * 10 + [20.0] * 60)
+    assert store.redis.llen(store.key("sw", "tick:walls:preempt")) == budgets.WINDOW == 60
+    assert _resolved(store, "preempt") == 30.0
 
 
 @pytest.mark.feature("swarm-tick-live-budgets")
@@ -124,7 +124,7 @@ def test_floors_keep_the_six_heavy_rows_and_two_seconds_elsewhere() -> None:
     heavy = {
         "reap": 22.0,
         "spawn": 33.0,
-        "stall watch": 18.0,
+        "preempt": 18.0,
         "night watch": 22.0,
         "metrics record": 29.0,
         "fleet red notice": 30.0,

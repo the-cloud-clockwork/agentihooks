@@ -67,6 +67,7 @@ def _fakes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[Any, ...]]]
     monkeypatch.setattr(tick_module.resume, "recover_outages", fake("recover", ["recovered"]))
     monkeypatch.setattr(agent_steps, "_strays", fake("strays", ["stray"]))
     monkeypatch.setattr(tick_module.failed_panes, "sweep", fake("panes", ["pane"]))
+    monkeypatch.setattr(agent_steps, "_orphans", fake("orphans", ["orphan"]))
     monkeypatch.setattr(agent_steps, "_conversations", fake("conversations", None))
     monkeypatch.setattr(agent_steps, "_session_models", fake("models", ["model"]))
     monkeypatch.setattr(tick_module.transfers, "observe", fake("transfers", ["transfer"]))
@@ -80,13 +81,13 @@ def test_the_agent_steps_sit_in_their_groups_in_legacy_order() -> None:
         "strays",
         "failed panes",
     ]
-    assert [step.name for step in engine.group_steps("tasks")] == []
+    assert [step.name for step in engine.group_steps("tasks")][:1] == ["orphans"]
     assert [step.name for step in engine.group_steps("close")][:3] == [
         "conversations",
         "session models",
         "handoff transfers",
     ]
-    assert len(agents.STEPS) == 7
+    assert len(agents.STEPS) == 8
 
 
 def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,6 +109,20 @@ def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest
         ("strays", ("sw", state["config"], "store", state["runtime"])),
         ("panes", ("sw", "store", state["runtime"], 7)),
     ]
+
+
+def test_the_orphans_step_runs_outside_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _fakes(monkeypatch)
+    step = engine.group_steps("tasks")[0]
+    assert step.run(_ctx(_state())) == Result((Write(actions_of("orphans"), "orphans", ["orphan"]),))
+    assert seen == [("orphans", ("sw", "store", "ledger", {"t1": {}}))]
+
+
+def test_the_orphans_step_is_quiet_under_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _fakes(monkeypatch)
+    step = engine.group_steps("tasks")[0]
+    assert step.run(_ctx(_state(tick_module.EVENTS_ENGINE))) == Result((Write(actions_of("orphans"), "orphans", []),))
+    assert seen == []
 
 
 def test_the_close_group_keeps_sessions_and_transfers_current(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,9 +157,14 @@ def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> No
     } | {AGENTS, TASKS}
     declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in agents.STEPS}
     assert declared["reap"] == (
-        agent_steps.LISTED,
+        frozenset({"spawn due"}),
         frozenset({AGENTS, Domain("pass:rows")}),
         frozenset({AGENTS, TASKS}),
+    )
+    assert declared["orphans"] == (
+        frozenset({"reap", "drained resume"}),
+        frozenset({TASKS, Domain("pass:config"), Domain("pass:rows")}),
+        frozenset({TASKS}),
     )
 
 

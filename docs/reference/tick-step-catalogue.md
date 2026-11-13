@@ -55,7 +55,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | spawn hold clear | pass setup | tick | 2 | 60 | none | none | none |
 | bottleneck remedy | placement | tick | 2 | 60 | ledger state | none | none |
 | rank pass | placement | tick | 7 | 60 | drained resume | none | none |
-| spawn | placement | tick | 33 | 60 | drained resume, launch checks, overrun pass, prerequisite reopen, quiet pass, reap, recover outages, track outages, verify | coordination, inbox, ledger, metrics, runtime | swarm-tick-spawn |
+| spawn | placement | tick | 33 | 60 | drained resume, launch checks, orphans, overrun pass, prerequisite reopen, quiet pass, reap, recover outages, track outages, verify | coordination, inbox, ledger, metrics, runtime | swarm-tick-spawn |
 | codex hook order | placement acks | tick | 2 | 60 | sleeping | none | none |
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
 | quota notice | placement notices | tick | 2 | 60 | drained resume | none | none |
@@ -72,6 +72,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | run window | task passes | tick | 2 | 60 | drained resume | none | none |
 | size pass | task passes | tick | 2 | 60 | ledger state | none | none |
 | verification notices | task passes | tick | 2 | 60 | ledger state | none | none |
+| orphans | tasks | tick | 2 | 60 | drained resume, reap | none | none |
 | command runner | wrapper commands | tick | 2 | 60 | none | none | none |
 | doc items map | wrapper events | slow | 2 | 60 | drained resume, ledger state, tick view | coordination, ledger | tick-doc-items-map |
 | doc report | wrapper events | slow | 2 | 600 | none | none | none |

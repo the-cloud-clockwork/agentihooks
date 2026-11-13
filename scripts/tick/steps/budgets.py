@@ -37,7 +37,7 @@ LIGHT_S = 2.0
 REBUILT = "tick:walls-rebuilt"
 _LEDGER_READ_S = 3.0
 JUDGE = frozenset({"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"})
-SPAWN_NEEDS = JUDGE | {"drained resume", "recover outages", "prerequisite reopen"}
+SPAWN_NEEDS = JUDGE | {"orphans", "drained resume", "recover outages", "prerequisite reopen"}
 LIVE: ContextVar[Mapping[str, float]] = ContextVar("tick_live_budgets", default=MappingProxyType({}))
 
 
@@ -66,6 +66,7 @@ FLOORS: dict[str, Timing] = {
     "recover outages": Timing(LIGHT_S, CRITICAL_S),
     "strays": Timing(LIGHT_S, WIDE_S),
     "failed panes": Timing(LIGHT_S, WIDE_S),
+    "orphans": Timing(LIGHT_S, CRITICAL_S),
     "spawn": Timing(33.0, CRITICAL_S),
     "conversations": Timing(LIGHT_S, WIDE_S),
     "session models": Timing(LIGHT_S, WIDE_S),
