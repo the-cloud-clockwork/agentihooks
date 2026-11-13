@@ -43,9 +43,7 @@ def test_swarm_image_lock_pins_every_distribution_the_hub_imports() -> None:
     third_party = sorted(modules - set(sys.stdlib_module_names) - {"scripts", "hooks"})
     distributions = importlib.metadata.packages_distributions()
     missing = [
-        module
-        for module in third_party
-        if not {name.lower() for name in distributions.get(module, [module])} & pinned
+        module for module in third_party if not {name.lower() for name in distributions.get(module, [module])} & pinned
     ]
     assert "packaging" in third_party
     assert missing == []
