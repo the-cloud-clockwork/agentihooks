@@ -4,7 +4,7 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 import json
 import sys
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from packaging.version import InvalidVersion, Version
 
@@ -88,6 +88,9 @@ class Admission:
                 file=sys.stderr,
             )
             return None
+        if full := self._full(request["hive"]):
+            refused(slug, request, full)
+            return None
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
@@ -134,6 +137,24 @@ class Admission:
         if not readiness.placeable(row, hive, readiness.declared(self.store, hive)):
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
+
+    def _full(self, hive: str) -> str:
+        """The hive's live worker executions across every swarm against its registry max agents; empty below the cap
+        or when none is set."""
+        from scripts.hive import registry
+
+        record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        cap = record.get("max_agents")
+        if cap is None:
+            return ""
+        slugs = cast(list[str], self.store.slugs())  # pragma: no mutate
+        live = sum(
+            1
+            for slug in slugs
+            for agent in self.store.execution_registry.agents(slug)
+            if agent.hive == hive and agent.lane != "master" and agent.state not in ("finished", "ended")
+        )
+        return f"{live} of {cap} agents on the hive" if live >= cap else ""
 
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
