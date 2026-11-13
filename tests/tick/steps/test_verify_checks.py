@@ -30,7 +30,9 @@ class _Recorder:
 
 
 def _agent(name: str, state: str = "working") -> SimpleNamespace:
-    return SimpleNamespace(name=name, task=f"task-{name}", lane="eng", state=state, profile="p")
+    return SimpleNamespace(
+        name=name, task=f"task-{name}", lane="eng", state=state, profile="p", runtime_backend="local", transport=""
+    )
 
 
 def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[Any]) -> list[tuple[Any, ...]]:
