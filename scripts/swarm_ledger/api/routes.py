@@ -5,7 +5,7 @@ import logging
 import operator
 import os
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports, request_metrics
@@ -208,12 +208,21 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path in ("export", "swarm/export"):
         return export(handler, services, slug, path, payload)
     if path == "operations":
+        request_metrics.detailed(operation_kinds(payload))
         return mutations.apply(services, slug, principal, payload, mutations.writer(handler.headers))
     if path == "architecture/actions":
         from . import architecture
 
         return architecture.act(handler, services, slug, principal, payload, os.environ)
     raise APIError(404, "resource_missing", "No such operation resource")
+
+
+def operation_kinds(payload: dict[str, Any]) -> str:
+    """The distinct operation kinds one operations write carries, sorted and joined by plus, such as ``add+set``."""
+    ops: object = payload.get("ops")
+    items: list[object] = list(cast(list[object], ops)) if isinstance(ops, list) else []
+    kinds = {str(cast(dict[str, object], op).get("op")) for op in items if isinstance(op, dict)}
+    return "+".join(sorted(kinds))
 
 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}

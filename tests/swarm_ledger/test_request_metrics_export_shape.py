@@ -1,4 +1,4 @@
-"""Export reads record their shape and caller after the route, so a full rebuild names who asked for it."""
+"""Export reads record their shape and caller, and operations writes their kinds, after the route."""
 
 from collections import deque
 from types import SimpleNamespace
@@ -56,3 +56,16 @@ def test_a_request_without_detail_keeps_its_route_and_detail_outside_a_request_i
 
     metrics.measured(handle_one_request)(handler(None))
     assert [row[2] for row in metrics.SAMPLES] == [EXPORT]
+
+
+@pytest.mark.feature("ledger-export-shape-records")
+@pytest.mark.parametrize(
+    ("payload", "kinds"),
+    [
+        ({"ops": [{"op": "set"}, {"op": "add"}, {"op": "set"}]}, "add+set"),
+        ({"ops": [{"op": "time_left"}, "junk"]}, "time_left"),
+        ({"ops": "junk"}, ""),
+    ],
+)
+def test_an_operations_write_names_its_distinct_operation_kinds(payload: dict, kinds: str) -> None:
+    assert routes.operation_kinds(payload) == kinds
