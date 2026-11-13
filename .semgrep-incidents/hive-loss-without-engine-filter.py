@@ -53,3 +53,11 @@ class ChecksEventsAfterPresence:
                 and presence.lost(self.bus.for_swarm(swarm), hive, now)
                 and swarm in self._events(now)
             )
+
+
+class GuardedByUnrelatedMembership:
+    def poll(self, now):
+        for swarm, hive in self.rows():
+            # ruleid: hive-loss-without-engine-filter
+            if hive in self.hives and presence.lost(self.bus.for_swarm(swarm), hive, now):
+                self.exit(swarm, hive)
