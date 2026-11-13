@@ -70,6 +70,7 @@ def test_a_quick_member_at_the_compact_limit_is_told_to_hand_off_into_its_seat(m
     text = recycle.directive("s1", environ)
     assert text is not None and text.startswith("HANDOFF PREPARATION")
     assert str(paths.handoff(tmp_path, "eng-1")) in text and "agentihooks quick handoff" in text
+    assert str(paths.learned(tmp_path, "eng-1")) in text
     assert "seat:<seat>" in text and "agentihooks swarm" not in text
 
 
@@ -131,37 +132,59 @@ def test_a_pending_quick_seat_closes_with_its_pane_kept_and_relaunches(monkeypat
 
 
 def test_a_quick_handoff_runs_the_close_then_the_relaunch(monkeypatch):
-    ran: list[list[str]] = []
+    ran: list[tuple[list[str], dict]] = []
 
     def run(argv, **kwargs):
-        ran.append(argv)
+        ran.append((argv, kwargs))
         return handoff_close.subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(handoff_close.subprocess, "run", run)
     handoff_close.close_and_relaunch(["close"], ["relaunch"])
-    assert ran == [["close"], ["relaunch"]]
+    assert ran == [
+        (
+            ["close"],
+            {"stdin": handoff_close.subprocess.DEVNULL, "capture_output": True, "timeout": 120, "check": False},
+        ),
+        (
+            ["relaunch"],
+            {"stdin": handoff_close.subprocess.DEVNULL, "capture_output": True, "timeout": 600, "check": False},
+        ),
+    ]
 
 
 @pytest.mark.feature("quick-swarm")
 def test_init_agent_runs_in_a_given_pane_without_opening_or_owning_it(monkeypatch, tmp_path):
-    ran: dict[str, object] = {}
+    existing_calls: list[tuple[str, dict]] = []
+    run_calls: list[tuple] = []
     monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
     monkeypatch.setattr(init_agent.herdr_host, "open_pane", lambda *a: pytest.fail("opened a pane"))
     monkeypatch.setattr(init_agent.herdr_panes, "record", lambda *a: pytest.fail("recorded the pane"))
-    monkeypatch.setattr(
-        init_agent.herdr_host,
-        "existing_pane",
-        lambda pane, environ: SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id=pane),
-    )
-    monkeypatch.setattr(init_agent.herdr_host, "run", lambda pane, launcher, environ, env=None: ran.update(pane=pane))
+
+    def existing_pane(pane, environ):
+        existing_calls.append((pane, environ))
+        return SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id=pane)
+
+    def run(pane, launcher, environ, env=None):
+        run_calls.append((pane, launcher, environ, env))
+
+    monkeypatch.setattr(init_agent.herdr_host, "existing_pane", existing_pane)
+    monkeypatch.setattr(init_agent.herdr_host, "run", run)
     args = argparse.Namespace(title="", placement="tab", workspace="", resume="", pane="w1:p3")
-    report = init_agent._start_herdr(tmp_path / "eng.sh", tmp_path, "eng", args, "claude", {})
-    assert ran == {"pane": "w1:p3"} and "pane_id=w1:p3" in report
+    launcher = tmp_path / "eng.sh"
+    report = init_agent._start_herdr(launcher, tmp_path, "eng", args, "claude", {"E": "1"})
+    assert existing_calls == [("w1:p3", {"E": "1"})]
+    assert run_calls == [("w1:p3", launcher, {"E": "1"}, {"HERDR_AGENT": "claude"})]
+    assert "pane_id=w1:p3" in report
 
 
 def test_init_agent_accepts_a_pane_option():
     assert init_agent._parser().parse_args(["--pane", "w1:p3"]).pane == "w1:p3"
     assert init_agent._parser().parse_args([]).pane == ""
+
+
+def test_init_agent_pane_option_help_text_is_exact():
+    action = next(a for a in init_agent._parser()._actions if "--pane" in a.option_strings)
+    assert action.help == "herdr: run in this existing pane instead of opening one"
 
 
 @pytest.mark.feature("quick-swarm")
