@@ -222,7 +222,7 @@ def test_rows_are_keyed_by_repo_head_and_unit_or_class() -> None:
     assert metrics.unit_row(unit(key="k2"))["event_id"] != first
     assert metrics.unit_row(replace(unit(), repo="org/other"))["event_id"] != first
     graded = metrics.grade_row(grade())["event_id"]
-    assert metrics.grade_row(grade())["event_id"] == graded
+    assert graded == hashlib.sha256(f"org/repo\0{'b' * 40}\0queue".encode()).hexdigest()
     assert metrics.grade_row(replace(grade(), priority="promotion"))["event_id"] != graded
     assert metrics.grade_row(replace(grade(), repo="org/other"))["event_id"] != graded
 
