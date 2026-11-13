@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__lead:6fb91dc68ddf34d4dc19baff406cfdf7020a29432d6517e189687174c068fc81": {
+    "reader": "standards_reader",
+    "reason": "flush=None is falsy and the controller image sets PYTHONUNBUFFERED=1, so the standby line reaches the log at the same moment as before; the printed text is identical."
+  }
+}

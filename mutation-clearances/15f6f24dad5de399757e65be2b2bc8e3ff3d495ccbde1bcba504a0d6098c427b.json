@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__lead:c5b04ed2ce4411c720eaaae50f240ba855989e806f64ea892bb08842f9f8c226": {
+    "reader": "standards_reader",
+    "reason": "Dropping flush=True leaves the default flush=False, which under PYTHONUNBUFFERED=1 writes through immediately, so the standby line's content and timing are unchanged in the shipped image."
+  }
+}

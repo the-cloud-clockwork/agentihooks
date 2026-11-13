@@ -108,6 +108,8 @@ redis:
       ephemeral-storage: 256Mi
 
 controller:
+  # Above 1, one replica runs passes and the others stand by, rolling out with one ready and a disruption budget.
+  replicas: 1
   # Durable capacity only: EC2 nodes carry anton.io/capacity-type and the autoscaler may remove them.
   affinity:
     nodeAffinity:
