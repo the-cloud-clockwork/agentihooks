@@ -152,6 +152,11 @@ def test_worker_refuses_any_github_app_variable(variable: str, capsys: pytest.Ca
     assert captured.err == f"ci-lab worker refuses to start: {variable} is set\n"
 
 
+def test_worker_refuses_before_reading_its_arguments(capsys: pytest.CaptureFixture[str]) -> None:
+    assert contract.run(contract.WORKER, [], {"GITHUB_APP_ID": "1"}) == 1
+    assert capsys.readouterr().err == "ci-lab worker refuses to start: GITHUB_APP_ID is set\n"
+
+
 def test_worker_refusal_names_every_github_app_variable(capsys: pytest.CaptureFixture[str]) -> None:
     environ = {"GITHUB_APP_PRIVATE_KEY": "k", "GITHUB_APP_ID": "1", "CI_LAB_SLOTS": "4"}
     assert contract.run(contract.WORKER, ["--self-test"], environ) == 1
