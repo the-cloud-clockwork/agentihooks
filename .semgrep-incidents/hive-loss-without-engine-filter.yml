@@ -1,0 +1,24 @@
+rules:
+  - id: hive-loss-without-engine-filter
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub poll judges hive presence without filtering swarms to the events engine. Only spokes beat presence and
+      they poll only events swarms, so on 13 November a switch to legacy left both Anton hives silent and the hub
+      hive loss pass exited four running executions. Judge presence only for swarms from event_slugs or with engine
+      equal to EVENTS_ENGINE.
+    patterns:
+      - pattern-inside: |
+          def poll(...):
+              ...
+      - pattern: presence.lost(...)
+      - pattern-not-inside: |
+          def poll(...):
+              ...
+              $E = <... event_slugs(...) ...>
+              ...
+      - pattern-not-inside: |
+          def poll(...):
+              ...
+              <... EVENTS_ENGINE ...>
+              ...

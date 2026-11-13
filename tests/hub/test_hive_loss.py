@@ -70,6 +70,7 @@ def rig():
         pane_id="hive-a:agent-a",
     )
     store.redis.sadd(f"{PREFIX}:index", "rig")
+    store.redis.hset(store.key("rig", "config"), "engine", "events")
     store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
     store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
     store.redis.set(store.key("rig", "claim", agent.task), agent.name)
@@ -84,6 +85,7 @@ def rig():
     returned = []
     life = lifecycle.Lifecycle(bus, store, ledger, release=lambda *args: returned.append(args))
     loss = hive_loss.HiveLoss(bus, clock)
+    loss._store = store
     hub = runner.HubRunner(bus, registry.Registry([loss.reactor(), life.reactor()]), "hub", clock)
     first = spoke("hive-a", "agent-a", "execution-a", 7)
     offer(0)
@@ -141,6 +143,34 @@ def test_a_killed_hive_reopens_its_running_task_for_another_claim_at_the_presenc
     second = rig.spoke("hive-b", "agent-b", "execution-b", 8, lambda: rig.row)
     assert second.spoke.poll() == "started"
     second.runtime.spawn.assert_called_once()
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_swarm_switched_to_legacy_keeps_its_running_executions_when_its_hives_stop_beating(rig, capsys):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
+    rig.loss._emit = Mock()
+    advance(rig, T0 + 4 * presence.TTL_MS)
+    rig.loss._emit.assert_not_called()
+    assert rig.row["state"] == "claimed"
+    assert rig.returned == []
+    assert claim_state(rig) == "started"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive(rig):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.loss._emit = Mock()
+    advance(rig, T0 + presence.TTL_MS)
+    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["execution-a"]
+    assert rig.loss._emit.call_args.args[1].data["reason"] == "hive-lost"
 
 
 def test_a_beating_hive_keeps_its_running_task(rig):

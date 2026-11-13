@@ -5628,6 +5628,20 @@
       ]
     },
     {
+      "id": "hive-loss-events-engine-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-loss-engine-filter",
+      "behaviour": "The hub hive loss pass judges hive presence only for swarms whose config engine is events, so a swarm switched to legacy, whose hives stop beating once no spoke polls it, keeps its running executions, while a lost hive of an events swarm still has its running executions exited.",
+      "seam": "scripts.hub.hive_loss.HiveLoss.poll",
+      "tests": [
+        "tests/hub/test_hive_loss.py::test_a_swarm_switched_to_legacy_keeps_its_running_executions_when_its_hives_stop_beating",
+        "tests/hub/test_hive_loss.py::test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive"
+      ],
+      "rules": [
+        "hive-loss-without-engine-filter"
+      ]
+    },
+    {
       "id": "successor-upstream-branch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t549",
