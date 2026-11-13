@@ -173,8 +173,16 @@ def test_a_take_counts_from_before_its_round_trip() -> None:
 @pytest.mark.feature("controller-standby-replica")
 def test_a_replica_lock_exists_only_when_the_replica_is_named() -> None:
     redis = _redis()
-    assert replica.configured({}, redis, HIVE) is None
-    named = replica.configured({replica.REPLICA_ENV: "pod-a"}, redis, HIVE)
+    reached: list[str] = []
+
+    def connect() -> Any:
+        reached.append("redis")
+        return redis
+
+    assert replica.configured({}, connect, lambda: HIVE) is None
+    assert reached == []
+    named = replica.configured({replica.REPLICA_ENV: "pod-a"}, connect, lambda: HIVE)
+    assert reached == ["redis"]
     assert named is not None
     assert (named.owner, named.key, named.lock_ms) == ("pod-a", f"{replica.PREFIX}:{HIVE}", replica.LOCK_MS)
 
@@ -421,6 +429,7 @@ def test_the_leading_control_service_publishes_its_pod_address(tmp_path: Any) ->
     service.listen, service.address = ("127.0.0.1", 0), "10.0.0.7"
     try:
         assert service.start() is True
+        assert service.server is not None
         port = service.server.server_port
         assert store.redis.get(store.key("rig", standby_api.LEADER_KEY)) == f"http://10.0.0.7:{port}"
         assert store.redis.pttl(store.key("rig", standby_api.LEADER_KEY)) > 0

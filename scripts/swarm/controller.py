@@ -817,7 +817,7 @@ def main(argv: list[str]) -> int:
     previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
         _keep_credential(os.environ, store)
-        lock = replica.configured(os.environ, cast(Any, store).redis, commands.hive_id())
+        lock = replica.configured(os.environ, lambda: cast(Any, store).redis, commands.hive_id)
         if lock is not None:
             _lead(store, os.environ, lock)
         proof_swarm.run(os.environ, store)

@@ -6,8 +6,10 @@ from collections.abc import Callable, Mapping
 from time import monotonic
 from typing import Any
 
+from scripts.swarm.keyspace import ROOT
+
 REPLICA_ENV = "AGENTIHOOKS_CONTROLLER_REPLICA"
-PREFIX = "agentihooks:controller-replica"
+PREFIX = f"{ROOT}:controller-replica"
 LOCK_MS = 30_000
 BEAT_S = 10.0
 POLL_S = 5.0
@@ -102,7 +104,7 @@ def _repeat(action: Callable[[], bool], stop: threading.Event, every_s: float, n
     return thread
 
 
-def configured(environ: Mapping[str, str], redis: Any, hive: str) -> ReplicaLock | None:
-    """Build the replica lock of a controller whose Deployment names its replica, else None."""
+def configured(environ: Mapping[str, str], redis: Callable[[], Any], hive: Callable[[], str]) -> ReplicaLock | None:
+    """Build the replica lock of a controller whose Deployment names its replica, else None without reaching Redis."""
     owner = environ.get(REPLICA_ENV, "")
-    return ReplicaLock(redis, hive, owner) if owner else None
+    return ReplicaLock(redis(), hive(), owner) if owner else None
