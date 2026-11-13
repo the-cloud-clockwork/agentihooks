@@ -801,7 +801,7 @@ class RedisStore:
         self.redis.hset(self.key(slug, "launches"), name, json.dumps(row))
 
     def launches(self, slug: str, task: str | None = None) -> list[dict]:
-        """Every launch row, or with ``task`` only rows whose raw record names that task, decoding nothing else."""
+        """Every launch row; with ``task``, launch and history rows are decoded only when their raw record names it."""
         needle = "" if task is None else json.dumps(task)
         launched = self.redis.hgetall(self.key(slug, "launches"))
         rows = {name: json.loads(raw) for name, raw in launched.items() if needle in raw}
