@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.866 · 2026-11-13
+
+### 2026-11-13 · f9462f07f300 · #11099 · @nestorcolt
+
+**Carry the ledger intent on events admissions so hives pick a profile without a ledger read**
+
+This change fixes a bug where tasks admitted through the events pipeline could be claimed repeatedly without ever running, because hives had no identity to look up the correct profile from a hosted ledger. Now the hub attaches the project's intent and the task's own phase directly onto the admitted task at admission time, so profile_choice.state can classify the task locally on the hive using that carried data instead of requiring a ledger read the hive cannot perform. This closes the gap that caused repeated claim churn on the workstation route task and includes a regression test guarding against recurrence.
+
 ## v2.17.865 · 2026-11-13
 
 ### 2026-11-13 · e6f1fb92c592 · #11093 · @agenticore-app
