@@ -5426,6 +5426,19 @@
         "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
         "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
       ]
+    },
+    {
+      "id": "ledger-task-update-takes-confirmed-pull-request",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
+      "behaviour": "The ledger task update accepts the confirmed pull request number as a positive integer and its head as a lowercase commit hash, so swarm pr on a confirmed pull request moves the task to pr instead of being refused as schema invalid; any other type for either field is refused.",
+      "seam": "ledger_tasks.check task_update fields and swarm pr through the ledger task update",
+      "tests": [
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_records_the_confirmed_pull_request_number_and_head",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_ledger_check_takes_the_fields_swarm_pr_writes",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_refuses_a_malformed_pull_request_number_or_head",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check"
+      ]
     }
   ],
   "unmapped_rules": [
