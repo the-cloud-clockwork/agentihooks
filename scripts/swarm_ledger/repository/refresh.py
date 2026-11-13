@@ -1,6 +1,6 @@
 import json
 from sqlite3 import Connection
-from typing import Any, cast
+from typing import Any
 
 from .rows import TABLES, children, encode
 
@@ -59,9 +59,7 @@ def build(
 ) -> list[tuple[Any, Any]]:
     """The children of the container at path as stored now, reusing each child of its old value that no change
     reached; given the changed paths, an object child rereads only the keys they reach."""
-    known: dict[str, Any] = {
-        encode(parts): child for child, parts, *_ in children(old, json.loads(path), cast(str, None))
-    }
+    known: dict[str, Any] = {encode(parts): child for child, parts, *_ in children(old, json.loads(path), None)}
     items: list[tuple[Any, Any]] = []
     rows: list[tuple[Any, ...]] = child_rows(connection, slug, path)
     for child, key, _, child_kind, value in rows:
@@ -71,7 +69,7 @@ def build(
         elif child in dirty:
             held = known.get(child)
             if changed is not None and child_kind == "object" and isinstance(held, dict):
-                item = patched(connection, slug, child, cast(dict[str, Any], held), beneath(changed, child))
+                item = patched(connection, slug, child, held, beneath(changed, child))
             if item is None:
                 pairs = build(connection, slug, child, held, dirty, changed)
                 item = [entry for _, entry in pairs] if child_kind == "array" else dict(pairs)

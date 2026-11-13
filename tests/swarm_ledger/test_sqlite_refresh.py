@@ -168,3 +168,53 @@ def test_touched_names_each_changed_path_and_every_container_above_it():
         '["tasks",["id","t1",0]]',
         '["tasks",["id","t1",0],"state"]',
     }
+
+
+PROBE = ["_meta", "probe"]
+
+
+def probed(tmp_path: Path, probe: dict[str, Any]) -> Any:
+    """A repository whose ledger stores probe under its meta object."""
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    state = repo.export_document("ledger")
+    repo.import_document("ledger", {**state, "_meta": {**state["_meta"], "probe": probe}}, replace=True)
+    return repo
+
+
+def reread(repo: Any, old: dict[str, Any], reached: list[list[Any]]) -> dict[str, Any] | None:
+    """The probe object as patched from old, given the paths under it that changed."""
+    paths = {refresh.encode([*PROBE, *parts]) for parts in reached}
+    with repo.connect() as connection:
+        return refresh.patched(connection, "ledger", refresh.encode(PROBE), old, paths)
+
+
+def test_new_keys_stored_last_are_patched_in_their_stored_order(tmp_path: Path) -> None:
+    stored = {"a": 1, "zeta": 2, "alpha": {"k": 1}}
+    repo = probed(tmp_path, stored)
+    served = reread(repo, {"a": 1}, [["zeta"], ["alpha"], ["alpha", "k"]])
+    assert served == stored
+    assert list(served or {}) == ["a", "zeta", "alpha"]
+
+
+def test_a_changed_array_element_is_patched_and_its_siblings_are_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = {"list": [{"id": "x", "v": 1}, {"id": "y", "v": 2, "w": {"a": 1, "b": 2}}]}
+    stored = {"list": [{"id": "x", "v": 1}, {"id": "y", "v": 2, "w": {"a": 1, "b": 3}}]}
+    repo = probed(tmp_path, stored)
+    parents: list[str] = []
+    original = refresh.child_rows
+
+    def spied(connection: sqlite3.Connection, slug: str, parent: str) -> list[Any]:
+        parents.append(parent)
+        return original(connection, slug, parent)
+
+    monkeypatch.setattr(refresh, "child_rows", spied)
+    assert reread(repo, old, [["list", ["id", "y", 0], "w", "b"]]) == stored
+    assert refresh.encode([*PROBE, "list", ["id", "y", 0]]) not in parents
+
+
+def test_a_reached_key_stored_as_an_array_is_reread_whatever_its_cached_shape(tmp_path: Path) -> None:
+    repo = probed(tmp_path, {"m": [1]})
+    assert reread(repo, {"m": {"a": 1}}, [["m", ["index", 0, 0]]]) == {"m": [1]}
