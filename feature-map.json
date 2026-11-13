@@ -4893,6 +4893,18 @@
       ]
     },
     {
+      "id": "ledger-export-shape-records",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-measure",
+      "behaviour": "Every ledger export read records its shape (bare, full or since, with parts and scope) and its caller agent after the export route in the request metrics, so a full export rebuild names the client that asked for it.",
+      "seam": "scripts.swarm_ledger.api.routes.export_shape and scripts.swarm_ledger.request_metrics.detailed, recorded by scripts.swarm_ledger.request_metrics.measured",
+      "tests": [
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_an_export_read_names_its_shape_and_caller",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_detailed_request_records_its_detail_after_the_route",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_request_without_detail_keeps_its_route_and_detail_outside_a_request_is_dropped"
+      ]
+    },
+    {
       "id": "track-outages-claims-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2487",

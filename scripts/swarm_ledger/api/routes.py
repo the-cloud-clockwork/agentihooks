@@ -8,7 +8,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from scripts.swarm_ledger import ledger_closed, ports
+from scripts.swarm_ledger import ledger_closed, ports, request_metrics
 
 from ..repository import live_rows
 from ..repository.fragments import Fragment, exported, members
@@ -222,6 +222,7 @@ PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 def export(handler: object, services: Services, slug: str, path: str, payload: dict[str, Any]) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
+        request_metrics.detailed(export_shape(handler, payload))
         parts = tuple(sorted(payload.get("parts", ())))
         changes = functools.partial(export_changes, events_after=payload.get("events_after"))
         generation, body = services.repository.export_since(
@@ -235,7 +236,19 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
         if status is None:
             raise APIError(404, "swarm_missing", "No swarm for this ledger")
         return {"data": status}
+    request_metrics.detailed(export_shape(handler, payload))
     return handler.send_export(services.repository.export_since(slug, 0, export_text, export_changes)[1])
+
+
+def export_shape(handler: object, payload: dict[str, Any]) -> str:
+    """The export read's shape and caller, such as ``since parts scoped by tick``: ``bare`` names a read with no
+    since and ``full`` a read since zero, both of which rebuild the whole export."""
+    words = ["bare" if "since" not in payload else "since" if payload["since"] else "full"]
+    words += ["parts"] if payload.get("parts") else []
+    words += ["scoped"] if scope_of(payload) is not None else []
+    headers = getattr(handler, "headers", None)
+    agent = headers.get("X-Ledger-Agent") if headers is not None else None
+    return " ".join([*words, "by", str(agent or "anonymous")])
 
 
 def scope_of(payload: dict[str, Any]) -> live_rows.Scope | None:
