@@ -4232,6 +4232,18 @@
       ]
     },
     {
+      "id": "hive-join-session-identity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-launch-check-misses",
+      "behaviour": "A hive join report for an agent whose record carries no harness or profile, such as one the events engine admitted, takes the session's own hook target and AGENTIHOOKS_PROFILE, so its profile, settings and brain checks read the mounted home instead of an empty path; a recorded harness and profile still win.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_events_agent_without_harness_or_profile_joins_with_its_session_home",
+        "tests/test_hive_join_hook.py::test_recorded_harness_and_profile_win_over_the_session_environment",
+        "tests/test_hive_join_hook.py::test_events_agent_takes_the_session_hook_target_and_no_profile_when_unset"
+      ]
+    },
+    {
       "id": "hive-join-fencing-read-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-join-fencing-scan",
