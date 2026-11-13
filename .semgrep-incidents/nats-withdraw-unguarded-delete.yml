@@ -1,0 +1,21 @@
+rules:
+  - id: nats-withdraw-unguarded-delete
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A work queue consumer can remove the offer after withdrawal reads it. Handle only the missing message
+      delete error so a completed concurrent acknowledgement does not abort fresh readiness publication.
+    paths:
+      include:
+        - /scripts/events/nats.py
+        - nats-withdraw-unguarded-delete.py
+    patterns:
+      - pattern-inside: |
+          def _withdrawn(...):
+              ...
+      - pattern: $QUEUE._loop.run($QUEUE._js.delete_msg(...))
+      - pattern-not-inside: |
+          try:
+              ...
+          except ServerError as $ERROR:
+              ...

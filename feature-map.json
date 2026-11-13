@@ -30,6 +30,19 @@
       ]
     },
     {
+      "id": "nats-withdraw-gone-message",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-withdraw-gone-message",
+      "behaviour": "An offer removed by a work queue consumer after withdrawal reads it does not abort the sweep or prevent fresh offers; only the missing message delete error is tolerated.",
+      "seam": "NatsWorkQueue.withdraw against concurrent consumer acknowledgement and termination",
+      "tests": [
+        "tests/events/test_nats_withdraw.py::test_withdraw_continues_after_a_consumer_removes_the_read_offer"
+      ],
+      "rules": [
+        "nats-withdraw-unguarded-delete"
+      ]
+    },
+    {
       "id": "account-keys-indexed-not-scanned",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
