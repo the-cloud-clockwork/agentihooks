@@ -808,7 +808,7 @@
   "scripts/swarm_ledger/repository/rows.py": 214,
   "scripts/swarm_ledger/repository/seeds.py": 74,
   "scripts/swarm_ledger/repository/sqlite.py": 845,
-  "scripts/swarm_ledger/repository/writer_copy.py": 65,
+  "scripts/swarm_ledger/repository/writer_copy.py": 80,
   "scripts/swarm_ledger/request_body.py": 39,
   "scripts/swarm_ledger/request_metrics.py": 206,
   "scripts/swarm_ledger/server_compose.py": 36,

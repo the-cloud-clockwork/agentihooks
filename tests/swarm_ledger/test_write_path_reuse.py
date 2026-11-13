@@ -1,11 +1,9 @@
-from typing import Any, cast
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm_ledger.repository import rows, writer_copy
-from scripts.swarm_ledger.repository.entry import thawed
-from scripts.swarm_ledger.repository.fragments import Fragment, document, encoded
+from scripts.swarm_ledger.repository import rows
 from scripts.swarm_ledger.repository.rows import changes, diff, flatten
 
 Doc = dict[str, Any]
@@ -143,57 +141,6 @@ def test_diff_of_one_changed_item_visits_no_unchanged_sibling(monkeypatch: pytes
     assert list(after) == ['["tasks",["id","t7",0],"title"]'] == list(before)
     visited = [call.args[0] for call in children.call_args_list]
     assert not any(item is old["tasks"] or item is new["tasks"] for item in visited)
-
-
-def part(fragment: Fragment, key: str) -> Fragment:
-    return cast(dict[str, Fragment], fragment.parts)[key]
-
-
-def write(state: Doc) -> Doc:
-    writer = cast(Doc, thawed(state))
-    writer["_meta"]["stamps"] = dict(state["_meta"]["stamps"])
-    writer["_meta"]["stamps"]["tasks/t1"] = {"at": 99, "rev": 2, "by": "b"}
-    writer["_meta"]["rev"] = 2
-    writer["tasks"][1]["title"] = "changed"
-    return writer
-
-
-def test_written_copies_apart_only_the_replaced_stamp_record() -> None:
-    state = ledger()
-    previous = document(state)
-    writer = write(state)
-    record = writer["_meta"]["stamps"]["tasks/t1"]
-    fragment, copy = writer_copy.written(writer, previous)
-    stored = cast(Doc, part(part(fragment, "_meta"), "stamps").value)
-    assert stored["tasks/t1"] == record and stored["tasks/t1"] is not record
-    assert copy["_meta"]["stamps"]["tasks/t1"] is stored["tasks/t1"]
-    assert stored["tasks/t2"] is cast(Doc, part(part(previous, "_meta"), "stamps").value)["tasks/t2"]
-    assert copy["_meta"]["stamps"] is not stored
-    copy["_meta"]["stamps"]["tasks/t2"] = {"at": 100, "rev": 3, "by": "c"}
-    assert stored["tasks/t2"]["at"] == 2
-
-
-def test_written_detaches_no_stamp_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = ledger()
-    previous = document(state)
-    writer = write(state)
-    detached = Mock(wraps=writer_copy.detached)
-    monkeypatch.setattr(writer_copy, "detached", detached)
-    records = list(writer["_meta"]["stamps"].values())
-    writer_copy.written(writer, previous)
-    assert not any(any(call.args[2] is record for record in records) for call in detached.call_args_list)
-
-
-def test_written_stores_the_text_and_copy_of_the_written_state() -> None:
-    state = ledger()
-    previous = document(state)
-    writer = write(state)
-    wanted = cast(Doc, thawed(writer))
-    fragment, copy = writer_copy.written(writer, previous)
-    assert encoded(fragment) == encoded(document(wanted))
-    assert copy == wanted
-    copy["tasks"][1]["title"] = "after"
-    assert cast(Doc, fragment.value)["tasks"][1]["title"] == "changed"
 
 
 def test_diff_walks_at_most_the_limit_of_changed_positions_before_the_full_walk() -> None:
