@@ -1273,7 +1273,7 @@
         "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
         "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal",
         "tests/tick/steps/test_collect_acks.py::test_collected_acknowledgements_start_finish_fail_or_wait_each_launch",
-        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its_id",
+        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_no_acknowledgement",
         "tests/tick/steps/test_place_outcomes.py::test_a_failed_spawn_releases_its_launch_and_reports_the_drop",
         "tests/tick/steps/test_place_outcomes.py::test_an_unresolved_profile_spawn_also_blocks_its_task",
         "tests/tick/steps/test_place_outcomes.py::test_a_full_account_reservation_reports_the_accounts_with_room",
@@ -5386,16 +5386,27 @@
       "id": "hub-withdraws-stale-offers",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-withdraw-stale-offers",
-      "behaviour": "Before the hub readiness pass publishes fresh offers, it removes from every lane work queue each waiting offer whose task is gone, claimed, no longer open, at a newer claim generation, moved lane, turned workstation or held, so a stream with thousands of withdrawn offers ahead delivers the fresh offer first.",
+      "behaviour": "Before the hub readiness pass publishes fresh offers, it removes from every lane work queue each waiting offer whose task is gone, claimed, no longer open, at a newer claim generation, moved lane, carries a pin other than its task now needs, such as an unpinned offer of a task that turned workstation, or held, so a stream with thousands of withdrawn offers ahead delivers the fresh offer first.",
       "seam": "scripts.swarm.readiness.publish through WorkQueue.withdraw on the memory and NATS work queues",
       "tests": [
         "tests/hub/test_stale_offers.py::test_a_lane_stream_with_withdrawn_offers_ahead_delivers_the_fresh_offer_first",
         "tests/hub/test_stale_offers.py::test_withdraw_removes_only_the_offers_named_stale_and_counts_them",
         "tests/hub/test_stale_offers.py::test_publish_withdraws_the_stale_offers_of_every_lane_and_keeps_a_waiting_fresh_one",
         "tests/hub/test_stale_offers.py::test_the_controller_grant_lets_the_hub_delete_a_stale_offer_from_any_lane_stream",
-        "tests/hub/test_stale_offers.py::test_an_offer_whose_task_turned_workstation_is_withdrawn",
+        "tests/hub/test_stale_offers.py::test_an_offer_whose_task_turned_workstation_is_withdrawn_and_offered_again_to_the_root_hive",
         "tests/hub/test_stale_offers.py::test_a_nats_sweep_leaves_an_offer_published_while_it_runs_for_the_next_sweep",
         "tests/hub/test_stale_offers.py::test_a_swarm_scoped_queue_withdraws_through_its_lane_queue"
+      ]
+    },
+    {
+      "id": "workstation-events-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-workstation-events-route",
+      "behaviour": "Under the events engine a workstation task is offered on its lane queue pinned to the root hive, the hub admits it only from the root hive, and the root hive's lane spoke launches it, while the tick launches no task and collects no hive launch acknowledgement.",
+      "seam": "scripts.swarm.readiness offers, placeable and tick_launches through scripts.hub.admission and scripts.hive.lanes.run_once",
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive",
+        "tests/swarm/test_events_placement.py::test_under_events_the_tick_launches_no_workstation_task"
       ]
     },
     {

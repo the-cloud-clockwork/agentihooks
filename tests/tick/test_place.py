@@ -125,9 +125,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         _current_owner="owner",
         ready_in_order="ready in order",
         claim_view="claim view",
-        readiness=SimpleNamespace(
-            tick_places=lambda engine_name, rows: log.append(("places", engine_name, rows)) or places
-        ),
+        readiness=SimpleNamespace(tick_launches=lambda engine_name: log.append(("places", engine_name)) or places),
         preempt=SimpleNamespace(probe=_probe, Seats=_Seats, run="preempt"),
         bottleneck_remedy=bottleneck_remedy,
         panic=panic,
@@ -312,7 +310,7 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
     found = _run(place.PLACEMENT, _tick(log), _pass(log), monkeypatch)
     assert found == ["ran rank_writes", "ran bottleneck remedy"]
-    assert log[-1] == ("places", "tick", ROWS)
+    assert log[-1] == ("places", "tick")
 
 
 def test_spawn_waits_until_the_tick_places(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
