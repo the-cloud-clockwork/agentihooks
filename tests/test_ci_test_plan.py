@@ -266,18 +266,48 @@ def test_a_skipped_run_whose_download_fails_does_not_stop_the_lookup(monkeypatch
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
 
 
-def test_a_failed_download_of_the_chosen_run_stays_red(monkeypatch):
+@pytest.mark.feature("ci-select-reuse-download-failure")
+@pytest.mark.parametrize(
+    "error",
+    [subprocess.TimeoutExpired(["gh"], 60), subprocess.CalledProcessError(1, ["gh"])],
+    ids=["timeout", "failure"],
+)
+def test_a_failed_download_of_the_only_run_counts_as_no_record(
+    monkeypatch: pytest.MonkeyPatch, error: subprocess.SubprocessError
+) -> None:
     _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
     api = ci_test_plan._api
 
-    def fail(endpoint):
+    def fail(endpoint: str) -> bytes:
         if endpoint.endswith("/zip"):
-            raise subprocess.CalledProcessError(1, ["gh"])
+            raise error
         return api(endpoint)
 
     monkeypatch.setattr(ci_test_plan, "_api", fail)
-    with pytest.raises(subprocess.CalledProcessError):
-        ci_test_plan.find_record(REPOSITORY, LATER)
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+
+
+@pytest.mark.feature("ci-select-reuse-download-failure")
+@pytest.mark.parametrize(
+    "error",
+    [subprocess.TimeoutExpired(["gh"], 60), subprocess.CalledProcessError(1, ["gh"])],
+    ids=["timeout", "failure"],
+)
+def test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record(
+    monkeypatch: pytest.MonkeyPatch, error: subprocess.SubprocessError
+) -> None:
+    _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)})
+    api = ci_test_plan._api
+
+    def fail(endpoint: str) -> bytes:
+        if endpoint.endswith("/artifacts/2/zip"):
+            raise error
+        return api(endpoint)
+
+    monkeypatch.setattr(ci_test_plan, "_api", fail)
+    found = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert found is not None
+    assert found[0]["id"] == 1
 
 
 def test_every_interpreter_leg_ignores_dev_runs_that_finished_after_its_run_started(monkeypatch):

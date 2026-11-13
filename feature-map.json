@@ -5463,6 +5463,17 @@
         "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
         "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
       ]
+    },
+    {
+      "id": "ci-select-reuse-download-failure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-timeout",
+      "behaviour": "When downloading a dev run's reusable test record times out or fails, test selection counts that run as having no record and moves on to older runs or to no record, so the select step never fails on a slow or broken artifact download.",
+      "seam": "scripts.ci_test_plan.find_record through scripts.ci_select.main",
+      "tests": [
+        "tests/test_ci_test_plan.py::test_a_failed_download_of_the_only_run_counts_as_no_record",
+        "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
+      ]
     }
   ],
   "unmapped_rules": [
