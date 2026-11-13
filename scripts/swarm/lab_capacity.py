@@ -1,7 +1,7 @@
 """The CI lab capacity a swarm tick reads from the lab scheduler, keeps in Redis and ships to ClickHouse."""
 
 import json
-from typing import Any
+from typing import Any, cast
 from urllib.request import urlopen
 
 from scripts.swarm import metrics_outbox
@@ -31,10 +31,10 @@ TABLE = metrics_outbox.Table(
 def read(url: str, timeout_s: float = TIMEOUT_S) -> dict[str, Any]:
     """The capacity document the lab scheduler at ``url`` serves at GET /capacity."""
     with urlopen(f"{url.rstrip('/')}/capacity", timeout=timeout_s) as reply:
-        doc = json.loads(reply.read())
-    if not isinstance(doc, dict) or not isinstance(doc.get("classes"), dict):
+        doc: Any = json.loads(reply.read())
+    if not isinstance(doc, dict) or not isinstance(cast(dict[str, Any], doc).get("classes"), dict):
         raise ValueError("lab capacity document carries no classes")
-    return doc
+    return cast(dict[str, Any], doc)
 
 
 def rows(slug: str, doc: dict[str, Any], now_ms: int) -> list[dict[str, Any]]:
