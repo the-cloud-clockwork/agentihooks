@@ -75,5 +75,19 @@ def test_a_task_update_refuses_a_malformed_pull_request_number_or_head(fields: d
 @pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
 @pytest.mark.parametrize("bad", [7, None])
 def test_the_head_check_refuses_a_head_that_is_no_string(bad: object) -> None:
-    with pytest.raises(ValueError, match="pr_head must be a lowercase commit hash"):
+    with pytest.raises(ValueError) as refused:
         ledger_tasks.check_confirmed_pull({"pr_head": bad})
+    assert str(refused.value) == "pr_head must be a lowercase commit hash of 7 to 64 characters, or empty to clear it"
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+@pytest.mark.parametrize("bad", ["7", 0, True])
+def test_the_number_check_refuses_with_its_whole_message(bad: object) -> None:
+    with pytest.raises(ValueError) as refused:
+        ledger_tasks.check_confirmed_pull({"pr_number": bad})
+    assert str(refused.value) == "pr_number must be a positive integer"
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+def test_the_confirmed_pull_check_takes_fields_without_a_number_or_head() -> None:
+    assert ledger_tasks.check_confirmed_pull({}) is None

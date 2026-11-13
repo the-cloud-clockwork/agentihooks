@@ -247,8 +247,7 @@ def check_applied(fields):
 
 def check_confirmed_pull(fields: dict[str, Any]) -> None:
     """Refuse a confirmed pull request number that is not a positive integer or a head that is not a commit hash."""
-    number = fields.get("pr_number", 1)
-    if type(number) is not int or number < 1:
+    if "pr_number" in fields and (type(fields["pr_number"]) is not int or fields["pr_number"] < 1):
         raise ValueError("pr_number must be a positive integer")
     head = fields.get("pr_head", "")
     if not (isinstance(head, str) and COMMIT_RE.fullmatch(head)):

@@ -5438,6 +5438,8 @@
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_ledger_check_takes_the_fields_swarm_pr_writes",
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_refuses_a_malformed_pull_request_number_or_head",
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_head_check_refuses_a_head_that_is_no_string",
+    "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_number_check_refuses_with_its_whole_message",
+    "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_confirmed_pull_check_takes_fields_without_a_number_or_head",
         "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check"
       ]
     }
