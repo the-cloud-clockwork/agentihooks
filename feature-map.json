@@ -3956,7 +3956,7 @@
         "tests/hive/test_hive_roll_members.py::test_a_member_drain_whose_pod_namespace_is_unreadable_drains_the_whole_hive",
         "tests/hive/test_hive_roll_members.py::test_the_pod_prestop_drain_names_this_pod_as_the_leaving_member",
         "tests/hive/test_hive_roll_members.py::test_the_member_name_is_this_host_name",
-        "tests/hive/test_hive_roll_members.py::test_a_draining_member_polls_no_lane_spoke_and_waits",
+        "tests/hive/test_hive_roll_members.py::test_a_draining_member_polls_no_lane_spoke_beats_presence_and_waits",
         "tests/hive/test_hive_roll_members.py::test_a_member_leaving_a_hive_that_never_recorded_members_drains_the_whole_hive",
         "tests/hive/test_hive_roll_members.py::test_a_sole_member_drain_waits_on_every_agent_of_the_hive",
         "tests/hive/test_hive_roll_members.py::test_a_fenced_member_that_is_not_draining_still_polls_no_launch_order",
@@ -5447,6 +5447,20 @@
       "tests": [
         "tests/swarm/test_events_placement.py::test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive",
         "tests/swarm/test_events_placement.py::test_under_events_the_tick_launches_no_workstation_task"
+      ]
+    },
+    {
+      "id": "root-hive-lane-spokes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-root-hive-spokes",
+      "behaviour": "Every hive with a NATS bus starts its eng, ci and plan lane spokes, the workstation root hive outside a distributed deployment included, so the root hive beats presence and takes the workstation offers pinned to it; hive run loads the operator env before the spokes read their bus settings, a draining hive keeps beating presence, and only a memory bus is refused.",
+      "seam": "scripts.hive.cli._daemon run through scripts.hive.lanes.serve, run_once and beat",
+      "tests": [
+        "tests/hive/test_lanes.py::test_lane_spokes_start_on_the_root_hive_outside_a_distributed_deployment",
+        "tests/hive/test_lanes.py::test_a_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why",
+        "tests/hive/test_lanes.py::test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it",
+        "tests/hive/test_lanes.py::test_a_draining_hive_beats_presence_on_every_events_swarm",
+        "tests/hive/test_lanes.py::test_hive_run_loads_the_operator_env_then_starts_the_lane_spokes_before_the_telemetry_loop"
       ]
     },
     {

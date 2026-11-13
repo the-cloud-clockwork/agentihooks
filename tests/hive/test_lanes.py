@@ -12,8 +12,8 @@ from scripts.hub import slots
 from scripts.swarm_v2.runtime.base import Outcome, Status
 
 
-def offer(task="t1", lane="eng", generation=2):
-    data = {"lane": lane, "generation": generation}
+def offer(task: str = "t1", lane: str = "eng", generation: int = 2, **pin: str) -> Envelope:
+    data = {"lane": lane, "generation": generation, **pin}
     return Envelope(
         f"ready:rig:{task}:{generation}", "task.ready", "rig", "task", task, generation, 9, "readiness", data
     )
@@ -194,6 +194,41 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     assert json.loads(claim.value)["state"] == "started"
 
 
+@pytest.mark.feature("root-hive-lane-spokes")
+@pytest.mark.parametrize(("hive", "taken"), [("root", True), ("hive-a", False)])
+def test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it(
+    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, hive: str, taken: bool
+) -> None:
+    pinned = offer(hive="root")
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(pinned)
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome(
+        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a")
+    )
+
+    polled = lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, hive, ("eng",), 0, {})
+
+    assert ("started" in polled) is taken
+    assert runtime.spawn.called is taken
+
+
+@pytest.mark.feature("root-hive-lane-spokes")
+def test_a_draining_hive_beats_presence_on_every_events_swarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import presence
+
+    bus = open_bus(BusConfig(scoped=True))
+    monkeypatch.setattr(presence, "now_ms", lambda: 1_000)
+
+    lanes.beat(configs({"a": "events", "legacy": "legacy"}), bus, "root")
+
+    entry = bus.for_swarm("a").state(presence.BUCKET).get("root")
+    assert entry is not None
+    assert json.loads(entry.value) == {"heartbeat_ms": 1_000, "expires_ms": 1_000 + presence.TTL_MS}
+    assert bus.for_swarm("legacy").state(presence.BUCKET).get("root") is None
+    bus.close()
+
+
 def test_a_hive_event_launch_resolves_the_origin_to_its_own_checkout(hub, tmp_path, monkeypatch):
     from scripts.hive.daemon import local_checkout
     from scripts.swarm.store import SwarmConfig
@@ -237,13 +272,18 @@ def test_each_lane_pass_polls_every_spoke_with_the_given_timeout(monkeypatch):
     assert [spoke.poll.call_args.args for spoke in polled] == [(17,), (17,)]
 
 
-def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
+@pytest.mark.feature("root-hive-lane-spokes")
+@pytest.mark.parametrize(
+    "deployment",
+    [{}, {"AGENTIHOOKS_DEPLOYMENT": "local"}, {"AGENTIHOOKS_DEPLOYMENT": "distributed"}],
+)
+def test_lane_spokes_start_on_the_root_hive_outside_a_distributed_deployment(
+    monkeypatch: pytest.MonkeyPatch, deployment: dict[str, str]
+) -> None:
     started = []
     monkeypatch.setattr(lanes, "_serve", lambda environ: started.append(environ))
+    environ = {**deployment, "AGENTIHOOKS_BUS": "nats", "HIVE_EXCLUDED": "master"}
 
-    assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "local"}) is None
-    assert lanes.serve({}) is None
-    environ = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_BUS": "nats", "HIVE_EXCLUDED": "master"}
     thread = lanes.serve(environ)
     thread.join(5)
 
@@ -251,17 +291,24 @@ def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
     assert started == [environ]
 
 
+@pytest.mark.feature("root-hive-lane-spokes")
+@pytest.mark.parametrize("deployment", [{}, {"AGENTIHOOKS_DEPLOYMENT": "distributed"}])
 @pytest.mark.parametrize("bus", [{}, {"AGENTIHOOKS_BUS": ""}, {"AGENTIHOOKS_BUS": "memory"}])
-def test_a_distributed_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why(monkeypatch, capsys, bus):
+def test_a_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    bus: dict[str, str],
+    deployment: dict[str, str],
+) -> None:
     started = []
     monkeypatch.setattr(lanes, "_serve", lambda environ: started.append(environ))
 
-    assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "distributed", **bus}) is None
+    assert lanes.serve({**deployment, **bus}) is None
 
     assert started == []
     assert capsys.readouterr().err == (
         "hive lane spokes refused: the memory bus never sees the hub's ready offers; "
-        "a distributed hive needs AGENTIHOOKS_BUS=nats and AGENTIHOOKS_BUS_URL\n"
+        "a hive needs AGENTIHOOKS_BUS=nats and AGENTIHOOKS_BUS_URL\n"
     )
 
 
@@ -351,14 +398,18 @@ def test_the_lane_loop_reads_no_excluded_lanes_as_every_lane(monkeypatch):
     assert served[0][4] == lanes.LANES
 
 
-def test_hive_run_starts_the_lane_spokes_before_the_telemetry_loop(monkeypatch):
+@pytest.mark.feature("root-hive-lane-spokes")
+def test_hive_run_loads_the_operator_env_then_starts_the_lane_spokes_before_the_telemetry_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
 
     from scripts.hive import cli, daemon
 
     order = []
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: order.append(("env",)))
     monkeypatch.setattr(lanes, "serve", lambda environ: order.append(("lanes", environ is os.environ)))
     monkeypatch.setattr(daemon, "run", lambda connect: order.append(("telemetry",)))
 
     assert cli._daemon("run") == 0
-    assert order == [("lanes", True), ("telemetry",)]
+    assert order == [("env",), ("lanes", True), ("telemetry",)]
