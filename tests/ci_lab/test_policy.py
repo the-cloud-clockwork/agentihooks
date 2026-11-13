@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 import pytest
 
 from scripts.ci_lab import policy
@@ -90,7 +88,10 @@ def test_debounce_honours_seconds_and_ignores_repeat_head() -> None:
 
 def test_debounce_clock_and_branches_are_independent() -> None:
     now = [0.0]
-    clock: Callable[[], float] = lambda: now[0]
+
+    def clock() -> float:
+        return now[0]
+
     debounce = policy.Debounce(quiet_window=2, clock=clock)
     debounce.observe("first", "one")
     now[0] = 1
