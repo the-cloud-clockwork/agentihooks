@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.864 · 2026-11-13
+
+### 2026-11-13 · 4f66ffcbe4cd · #11091 · @agenticore-app
+
+**Drop agents whose hive was removed from the hive index**
+
+This change fixes a bug where agents assigned to a hive that had been revoked and removed from the hive index were never reaped, because `Reports.vanished` treated a missing executions report as "not vanished," leaving retiring and suspect records stuck forever and blocking their tasks from returning to ready work. Now, past startup, `Reports.vanished` returns True when the admitting hive is absent from the hive index and has no live heartbeat, correctly releasing those agents and freeing their claimed tasks, as confirmed by live production evidence and new passing regression tests.
+
 ## v2.17.863 · 2026-11-13
 
 ### 2026-11-13 · 70f0bc23f481 · #11079 · @agenticore-app
