@@ -120,6 +120,78 @@ def test_a_row_without_a_time_reads_time_zero() -> None:
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
+def test_seat_rows_keep_the_agent_events_sorted_by_time_with_their_labels() -> None:
+    seat = health.Finding("failed launch", WORKER, "launch failed", ("refused",), "1 launch", 1)
+    events = [
+        {"by": WORKER, "at": NOW + 3, "target": "tasks/t9"},
+        {"kind": "launch failed", "by": WORKER, "at": NOW + 1, "error": "pane refused"},
+        {"kind": "task pr", "by": WORKER, "at": NOW + 2, "target": "tasks/t3"},
+        {"kind": "comment added", "by": "sw-eng-7", "at": NOW, "target": "chat"},
+    ]
+    held = {**tasks(), "t3": {"id": "t3", "state": "claimed", "claimed_by": "sw-eng-7"}}
+    [finding] = finding_rows.attach([seat], events, held, [])
+    assert [(r["kind"], r["target"], r["text"]) for r in finding.rows] == [
+        ("launch failed", "", "pane refused"),
+        ("task pr", "tasks/t3", ""),
+        ("", "tasks/t9", ""),
+    ]
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
+def test_the_last_outcome_is_the_latest_done_task_with_an_outcome() -> None:
+    seat = health.Finding("ceremony", WORKER, "s", ("e",), "t", 1)
+    done = {"state": "done", "pr_url": "u"}
+    held = {"tA": {"id": "tA", "title": "Alpha", **done}, "tB": {"id": "tB", "title": "Beta", **done}}
+    events = [
+        {"kind": "task done", "target": "tasks/tA", "by": WORKER},
+        {"kind": "task done", "target": "tasks/tB", "by": WORKER, "at": NOW + MIN},
+        {"kind": "task done", "target": "tasks/t9", "by": WORKER, "at": NOW + 3 * MIN},
+        {"kind": "comment added", "target": "tasks/tA", "by": "sw-eng-7", "at": NOW + 5 * MIN},
+    ]
+    [finding] = finding_rows.attach([seat], events, held, [])
+    assert finding.last_outcome == "Beta at 2026-11-12 16:14"
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
+def test_status_text_prints_the_whole_block_in_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    rows = [
+        {"at": NOW + MIN, "kind": "task pr", "target": "tasks/t1", "text": "Build", "required": "doctrine"},
+        {"at": NOW + 2 * MIN, "kind": "comment edited", "target": "phases/p9", "text": "", "required": ""},
+    ]
+    record = {
+        "id": f"ceremony/{WORKER}",
+        "kind": "ceremony",
+        "subject": WORKER,
+        "summary": "s",
+        "evidence": ["e"],
+        "threshold": "t",
+        "verdict": {"value": "false-positive"},
+        "last_outcome": "o",
+        "rows_total": 2,
+        "rows": rows,
+    }
+    try:
+        text = finding_rows.text(record)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    assert text == (
+        f"finding  ceremony  {WORKER}: s\n"
+        "  - e\n"
+        "  threshold t\n"
+        f"  id ceremony/{WORKER}  earlier verdict false-positive\n"
+        "  last outcome o\n"
+        "  rows 2\n"
+        "    2026-11-12 16:14  task pr  tasks/t1  Build  required by doctrine\n"
+        "    2026-11-12 16:15  comment edited  phases/p9\n"
+    )
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
 def test_an_added_event_without_a_target_queues_nothing() -> None:
     added = [{"kind": "added", "by": WORKER, "at": NOW + n} for n in range(5)]
     assert health.scope_inflation(added, tasks(), health.Limits()) == []
@@ -142,6 +214,7 @@ def test_the_verdict_record_stores_the_rows_and_the_last_outcome() -> None:
     record = json.loads(str(redis.hget("findings", finding.id)))
     assert record["rows"] == shown["rows"]
     assert record["last_outcome"] == finding.last_outcome
+    assert record["rows_total"] == 26
 
 
 @pytest.mark.feature("swarm-health-proof-loop-parks")

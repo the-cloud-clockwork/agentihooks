@@ -13,7 +13,7 @@ from scripts.swarm.health.findings import HELD, NOT_TRANSITIONS, Finding, has_ou
 ROW_LIMIT = 20
 TEXT_LIMIT = 60
 DOCTRINE = frozenset({"task claimed", "task pr", "task parked", "task unparked", "task blocked", "task done"})
-LABELS = {"doctrine": "required by doctrine", "task": "required by the task"}
+LABELS = {"": "", "doctrine": "required by doctrine", "task": "required by the task"}
 
 
 def attach(
@@ -24,26 +24,33 @@ def attach(
     return [_with_rows(finding, events, tasks, seats.get(finding.subject, finding.subject)) for finding in found]
 
 
-def _with_rows(finding: Finding, events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], actor: str) -> Finding:
+def _at(event: dict[str, Any]) -> int:
+    return event.get("at") or 0
+
+
+def _with_rows(
+    finding: Finding, events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], seated: str
+) -> Finding:
     if finding.subject in tasks:
-        actor = tasks[finding.subject].get("claimed_by") or ""
+        actor = tasks[finding.subject].get("claimed_by")
         mine = [e for e in events if e.get("target") == f"tasks/{finding.subject}"]
     else:
-        mine = [e for e in events if actor and e.get("by") == actor]
+        actor = seated
+        mine = [e for e in events if e.get("by") == actor]
     if finding.kind == "ceremony":
         mine = [e for e in mine if e.get("kind") not in NOT_TRANSITIONS]
-    mine = sorted(mine, key=lambda e: e.get("at") or 0)
+    mine = sorted(mine, key=_at)
     owned = _owned(tasks, actor)
     rows = tuple(_row(e, tasks, owned) for e in mine[-ROW_LIMIT:])
     return replace(finding, rows=rows, rows_total=len(mine), last_outcome=_last_outcome(events, tasks, actor))
 
 
-def _owned(tasks: dict[str, dict[str, Any]], actor: str) -> set[tuple[str, str]]:
+def _owned(tasks: dict[str, dict[str, Any]], actor: str | None) -> set[tuple[str, str]]:
     held = [task for task in tasks.values() if actor and task.get("claimed_by") == actor and task.get("state") in HELD]
     targets = {f"tasks/{task['id']}" for task in held} | {
         f"phases/{task['phase']}" for task in held if task.get("phase")
     }
-    return {(actor, target) for target in targets}
+    return {(str(actor), target) for target in targets}
 
 
 def _row(event: dict[str, Any], tasks: dict[str, dict[str, Any]], owned: set[tuple[str, str]]) -> dict[str, Any]:
@@ -55,7 +62,7 @@ def _row(event: dict[str, Any], tasks: dict[str, dict[str, Any]], owned: set[tup
         required = "task"
     label = " ".join(_label(event, tasks).split())
     return {
-        "at": event.get("at") or 0,
+        "at": _at(event),
         "kind": kind,
         "target": target,
         "text": label[:TEXT_LIMIT],
@@ -68,24 +75,24 @@ def _label(event: dict[str, Any], tasks: dict[str, dict[str, Any]]) -> str:
         return str(event["text"])
     if event.get("after"):
         return f"after {event['after']}"
-    tid = target_task(event.get("target") or "")
+    tid = target_task(event.get("target"))
     return (tasks.get(tid, {}).get("title") or "") if tid else str(event.get("error") or "")
 
 
-def _last_outcome(events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], actor: str) -> str:
+def _last_outcome(events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], actor: str | None) -> str:
     done = [
         e
         for e in events
         if actor
         and e.get("by") == actor
         and e.get("kind") == "task done"
-        and has_outcome(tasks.get(target_task(e.get("target") or ""), {}))
+        and has_outcome(tasks.get(target_task(e.get("target")), {}))
     ]
     if not done:
         return "none recorded"
-    last = max(done, key=lambda e: e.get("at") or 0)
+    last = max(done, key=_at)
     tid = target_task(last["target"])
-    return f"{tasks[tid].get('title') or tid} at {_stamp(last.get('at') or 0)}"
+    return f"{tasks[tid].get('title') or tid} at {_stamp(_at(last))}"
 
 
 def _stamp(at_ms: int) -> str:
@@ -104,7 +111,7 @@ def text(found: dict[str, Any]) -> str:
         lines.append(f"  last outcome {found['last_outcome']}")
         lines.append(_count(len(rows), found["rows_total"]))
         for row in rows:
-            cells = [_stamp(row["at"]), row["kind"], row["target"], row["text"], LABELS.get(row["required"], "")]
+            cells = [_stamp(row["at"]), row["kind"], row["target"], row["text"], LABELS[row["required"]]]
             lines.append("    " + "  ".join(cell for cell in cells if cell))
     return "\n".join(lines) + "\n"
 
