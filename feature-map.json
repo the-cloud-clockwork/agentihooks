@@ -2690,6 +2690,26 @@
       ]
     },
     {
+      "id": "gate-required-waits-for-aggregator",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
+      "behaviour": "The Gate Required commit status on a pull request head reads success only once the protected grade passed and the Tests aggregator check run, which needs the type gate, concluded success. It stays pending while the aggregator has no check run and fails when either half fails.",
+      "seam": "gate_required_status.decide and main; Gate Required status workflow on Tests completion; Gate Protected report step",
+      "tests": [
+        "tests/test_gate_required_status.py::test_gate_required_succeeds_only_when_both_halves_succeeded",
+        "tests/test_gate_required_status.py::test_a_passed_protected_grade_stays_pending_while_the_aggregator_has_no_check_run",
+        "tests/test_gate_required_status.py::test_a_queued_type_gate_holds_gate_required_pending",
+        "tests/test_gate_required_status.py::test_the_aggregator_failing_on_the_type_gate_fails_gate_required",
+        "tests/test_gate_required_status.py::test_the_newest_aggregator_run_decides_after_a_rerun",
+        "tests/test_gate_required_status.py::test_a_green_aggregator_never_overrides_a_refused_protected_grade",
+        "tests/test_gate_required_status.py::test_the_status_workflow_reports_after_every_pull_request_tests_run_from_trusted_code",
+        "tests/test_gate_required_status.py::test_an_aggregator_from_another_tests_run_on_the_head_never_decides",
+        "tests/test_gate_required_status.py::test_no_pull_request_tests_run_holds_gate_required_pending",
+        "tests/test_gate_required_status.py::test_the_status_workflow_waits_for_a_running_protected_grade",
+        "tests/test_gate_required_status.py::test_the_announced_protected_workflow_reports_through_the_resolver"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
