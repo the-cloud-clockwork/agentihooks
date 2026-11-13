@@ -435,9 +435,7 @@ def _collect_acks(
     for agent in [
         a
         for a in store.agents(slug)
-        if readiness.tick_launches(config.engine)
-        and tick._acknowledging(slug, store, a)
-        and a.name not in pending
+        if readiness.tick_launches(config.engine) and tick._acknowledging(slug, store, a) and a.name not in pending
     ]:
         task = rows.get(agent.task) or {"id": agent.task}
         try:

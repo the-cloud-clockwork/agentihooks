@@ -101,7 +101,7 @@ def generation(task: dict) -> int:
     return task.get("claim_generation") or 0
 
 
-def offer_id(slug: str, task: dict) -> str:
+def offer_id(slug: str, task: Mapping[str, Any]) -> str:
     """A workstation task's offer carries the root hive in its id, so the offer pinned there is never deduplicated
     against the unpinned one withdrawn when the task turned workstation."""
     pin = f":{ROOT}" if task.get("workstation") else ""
@@ -179,9 +179,7 @@ def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, A
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     rows: Any = view.rows
     return [
-        offer(task, view, now_ms)
-        for task in rows.values()
-        if task.get("lane") and claimable(task, task["lane"], view)
+        offer(task, view, now_ms) for task in rows.values() if task.get("lane") and claimable(task, task["lane"], view)
     ]
 
 
