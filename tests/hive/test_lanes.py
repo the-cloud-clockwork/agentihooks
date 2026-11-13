@@ -202,6 +202,21 @@ def test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it(
     assert runtime.spawn.called is taken
 
 
+@pytest.mark.feature("root-hive-lane-spokes")
+def test_a_draining_hive_beats_presence_on_every_events_swarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import presence
+
+    bus = open_bus(BusConfig(scoped=True))
+    monkeypatch.setattr(presence, "now_ms", lambda: 1_000)
+
+    lanes.beat(configs({"a": "events", "legacy": "legacy"}), bus, "root")
+
+    beaten = json.loads(bus.for_swarm("a").state(presence.BUCKET).get("root").value)
+    assert beaten == {"heartbeat_ms": 1_000, "expires_ms": 1_000 + presence.TTL_MS}
+    assert bus.for_swarm("legacy").state(presence.BUCKET).get("root") is None
+    bus.close()
+
+
 def test_a_hive_event_launch_resolves_the_origin_to_its_own_checkout(hub, tmp_path, monkeypatch):
     from scripts.hive.daemon import local_checkout
     from scripts.swarm.store import SwarmConfig
@@ -371,14 +386,18 @@ def test_the_lane_loop_reads_no_excluded_lanes_as_every_lane(monkeypatch):
     assert served[0][4] == lanes.LANES
 
 
-def test_hive_run_starts_the_lane_spokes_before_the_telemetry_loop(monkeypatch):
+@pytest.mark.feature("root-hive-lane-spokes")
+def test_hive_run_loads_the_operator_env_then_starts_the_lane_spokes_before_the_telemetry_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
 
     from scripts.hive import cli, daemon
 
     order = []
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: order.append(("env",)))
     monkeypatch.setattr(lanes, "serve", lambda environ: order.append(("lanes", environ is os.environ)))
     monkeypatch.setattr(daemon, "run", lambda connect: order.append(("telemetry",)))
 
     assert cli._daemon("run") == 0
-    assert order == [("lanes", True), ("telemetry",)]
+    assert order == [("env",), ("lanes", True), ("telemetry",)]

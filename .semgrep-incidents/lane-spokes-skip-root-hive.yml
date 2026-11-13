@@ -11,17 +11,32 @@ rules:
       include:
         - /scripts/hive/
         - lane-spokes-skip-root-hive.py
-    patterns:
-      - pattern-inside: |
-          def serve(...):
-              ...
-      - pattern-either:
-          - pattern: |
-              if $W.runs_engine(...):
-                  return ...
-          - pattern: |
-              if runs_engine(...):
-                  return ...
-          - pattern: |
-              if $ENV.get($DEPLOYMENT) != $DISTRIBUTED:
-                  return ...
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def serve(...):
+                  ...
+          - pattern-either:
+              - pattern: |
+                  if $W.runs_engine(...):
+                      return ...
+              - pattern: |
+                  if runs_engine(...):
+                      return ...
+              - pattern: |
+                  if $ENV.get(DEPLOYMENT_ENV) != DISTRIBUTED:
+                      return ...
+              - pattern: |
+                  if $ENV.get($W.DEPLOYMENT_ENV) != $W.DISTRIBUTED:
+                      return ...
+      - patterns:
+          - pattern-inside: |
+              def _daemon(...):
+                  ...
+          - pattern-either:
+              - pattern: |
+                  if not $W.runs_engine(...):
+                      ...
+              - pattern: |
+                  if not runs_engine(...):
+                      ...

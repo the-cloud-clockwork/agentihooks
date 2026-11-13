@@ -280,17 +280,20 @@ def test_the_member_name_is_this_host_name(monkeypatch):
 
 
 @pytest.mark.feature("hive-roll-member-drain")
-def test_a_draining_member_polls_no_lane_spoke_and_waits(monkeypatch):
+def test_a_draining_member_polls_no_lane_spoke_beats_presence_and_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     polled: list[tuple] = []
     waits: list[float] = []
     asked: list[tuple] = []
+    beaten: list[tuple] = []
     state = iter([True, False])
     monkeypatch.setattr(lanes, "run_once", lambda *args: polled.append(args) or ["started"])
     monkeypatch.setattr(lanes, "draining", lambda store, hive: asked.append((store, hive)) or next(state))
+    monkeypatch.setattr(lanes, "beat", lambda *args: beaten.append(args))
 
     lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(2))
 
     assert len(polled) == 1
+    assert beaten == [("store", "bus", "hive")]
     assert waits == [lanes.IDLE_S]
     assert asked == [("store", "hive"), ("store", "hive")]
 
