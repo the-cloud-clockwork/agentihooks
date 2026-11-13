@@ -620,4 +620,8 @@ def test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledge
         "p1",
         "build: ",
     )
+    assert admitted["task"][profile_choice.LEDGER_INTENT] == {
+        "overview": "o",
+        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
+    }
     json.dumps(admitted)
