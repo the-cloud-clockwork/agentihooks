@@ -25,7 +25,7 @@ class Reader:
         self.replies = list(replies)
         self.calls: list[tuple[int, tuple[str, ...]]] = []
 
-    def __call__(self, since: int, parts: tuple[str, ...]) -> dict:
+    def __call__(self, since: int, parts: tuple[str, ...], after: int | None = None) -> dict:
         self.calls.append((since, parts))
         return self.replies.pop(0)
 

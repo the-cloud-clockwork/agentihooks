@@ -1,3 +1,4 @@
+import functools
 import json
 import logging
 import os
@@ -220,8 +221,9 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
         parts = tuple(sorted(payload.get("parts", ())))
+        changes = functools.partial(export_changes, events_after=payload.get("events_after"))
         generation, body = services.repository.export_since(
-            slug, payload["since"], export_text, export_changes, parts, scope_of(payload)
+            slug, payload["since"], export_text, changes, parts, scope_of(payload)
         )
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
@@ -244,6 +246,7 @@ SINCE_SCHEMA = {
     "type": "object",
     "properties": {
         "since": {"type": "integer", "minimum": 0},
+        "events_after": {"type": "integer"},
         "closed": {"type": "boolean"},
         "frozen": {"type": "boolean"},
         "parts": {
@@ -258,13 +261,15 @@ SINCE_SCHEMA = {
 }
 HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
+LIVE_FIELDS = ("frozen", "focus_rank")
+META, EVENTS = encode("_meta"), encode("events")
 
 
 def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None) -> bytes:
     """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
-    scoped: dict[str, bytes] = {} if answer is None else {"tasks": encode(answer.rows).encode()}
     named: dict[str, Fragment] = fragments.parts  # pyright: ignore[reportAssignmentType]
+    scoped: dict[str, bytes] = {} if answer is None else {"tasks": scoped_rows(named.get("tasks"), answer)}
     body = b",".join(
         encode(key).encode() + b":" + (meta if key == "_meta" else scoped.get(key) or exported(part))
         for key, part in named.items()
@@ -273,6 +278,34 @@ def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_r
     if answer is not None and (not parts or "tasks" in parts):
         body += b"," + encode(live_rows.FROZEN_IDS).encode() + b":" + encode(answer.frozen_ids).encode()
     return b'{"data":{' + body + b"}}"
+
+
+def scoped_rows(tasks: Fragment | None, answer: live_rows.Answer) -> bytes:
+    """The encoded rows of answer, each joined from the cached bytes of the stored task it extends."""
+    items = tasks.parts if tasks is not None else None
+    if not isinstance(items, tuple) or len(answer.sources) != len(answer.rows):
+        return encode(answer.rows).encode()
+    return b"[" + b",".join(scoped_row(items[index], row) for index, row in zip(answer.sources, answer.rows)) + b"]"
+
+
+def scoped_row(task: Fragment, row: dict[str, Any]) -> bytes:
+    """The encoded row: the cached bytes of task with the live row fields appended, or row encoded afresh when
+    task is not a plain object without those fields."""
+    stored = task.value
+    if (
+        task.parts is not None
+        or not isinstance(stored, dict)
+        or not stored
+        or not stored.keys().isdisjoint(LIVE_FIELDS)
+    ):
+        return encode(row).encode()
+    return exported(task)[:-1] + live_suffix(*(row[key] for key in LIVE_FIELDS))
+
+
+@functools.lru_cache(maxsize=256, typed=True)
+def live_suffix(frozen: object, focus_rank: object) -> bytes:
+    """The encoded live row fields that close a scoped task row."""
+    return b',"frozen":' + encode(frozen).encode() + b',"focus_rank":' + encode(focus_rank).encode() + b"}"
 
 
 def change_unit(path: str) -> tuple[str, ...] | None:
@@ -297,9 +330,12 @@ def export_changes(
 ) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
     changed item its item identities in order with every changed item; only the top level parts named in
-    parts when there are any."""
+    parts when there are any. With events_after, the events newer than that revision and the event count
+    stand in for the whole events list."""
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
-    units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
+    units = {unit for unit in map(change_unit, paths) if unit is not None}
+    if events_after is None:
+        units.add((META, EVENTS))
     if answer is not None:
         if any(live_rows.reshapes(json.loads(path)) for path in paths):
             return None
@@ -326,7 +362,17 @@ def export_changes(
             changes["drop"].append(path)
     if answer is not None and (not named or encode("tasks") in named):
         changes["set"].append([[live_rows.FROZEN_IDS], answer.frozen_ids])
+    if events_after is not None and (not named or META in named) and not units & {(META,), (META, EVENTS)}:
+        changes["events"] = events_tail(view["_meta"].get("events", []), events_after)
     return json.dumps({"changes": changes})
+
+
+def events_tail(events: list[dict[str, Any]], after: int) -> dict[str, Any]:
+    """The events newer than revision after, read back from the newest, with the count of every event held."""
+    start = len(events)
+    while start and events[start - 1].get("rev", 0) > after:
+        start -= 1
+    return {"after": after, "tail": events[start:], "count": len(events)}
 
 
 def handle(handler: object, services: Services) -> None:

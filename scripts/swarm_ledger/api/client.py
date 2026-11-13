@@ -72,6 +72,8 @@ def patched(state: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
         located(state, path[:-1])[path[-1]] = value
     for path in changes["drop"]:
         located(state, path[:-1]).pop(path[-1], None)
+    if "events" in changes:
+        state["_meta"]["events"] = joined(state["_meta"]["events"], changes["events"])
     return state
 
 
@@ -83,7 +85,22 @@ def located(state: object, path: list) -> object:
 
 def last_revision(state: dict[str, Any] | None) -> int | None:
     """The revision of the newest event state holds, or None when it holds none."""
-    return None
+    events = (state or {}).get("_meta", {}).get("events")
+    return events[-1].get("rev", 0) if events else None
+
+
+def joined(held: list[dict[str, Any]], events: dict[str, Any]) -> list[dict[str, Any]]:
+    """The held events up to revision after with the newer tail appended, keeping the newest count of them;
+    KeyError when they do not reach count, so the reader reads the export in full."""
+    merged = [event for event in held if event.get("rev", 0) <= events["after"]] + events["tail"]
+    if len(merged) < events["count"]:
+        raise KeyError("events")
+    return merged[len(merged) - events["count"] :]
+
+
+def held_revision(revision: int | None) -> dict[str, int]:
+    """The export read field naming the newest event revision the reader holds, empty when it holds none."""
+    return {} if revision is None else {"events_after": revision}
 
 
 class ResourceClient:
@@ -150,7 +167,7 @@ class ResourceClient:
         key = (self.base, slug)
         generation, held = kept.get(key, (0, None))
         try:
-            reply = self.request(slug, "export", {"since": generation})
+            reply = self.request(slug, "export", {"since": generation} | held_revision(last_revision(held)))
         except urllib.error.HTTPError as exc:
             if exc.code != 400:
                 raise
@@ -176,7 +193,7 @@ class ResourceClient:
         longer holds every change after it."""
         scope = live_rows.Scope() if scope is None else scope
         payload = {"since": since, "parts": list(parts), "closed": scope.closed, "frozen": scope.frozen}
-        return self.request(slug, "export", payload)
+        return self.request(slug, "export", payload | held_revision(events_after))
 
     def stored_export(self, slug: str) -> dict:
         """The full export, read as the changes since the one the last command on this host stored for it."""

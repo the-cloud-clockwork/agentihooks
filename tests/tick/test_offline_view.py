@@ -339,7 +339,7 @@ def test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept(
 @pytest.mark.feature("swarm-tick-cached-ledger")
 def test_a_first_read_stores_the_view_even_at_generation_zero(tmp_path: Path) -> None:
     path = tmp_path / "view.json"
-    held = view.refreshed(path, lambda since, parts: {"generation": 0, "data": STATE})
+    held = view.refreshed(path, lambda since, parts, after: {"generation": 0, "data": STATE})
     assert held.generation == 0
     assert api.read_export_file(path) == (0, STATE)
 
