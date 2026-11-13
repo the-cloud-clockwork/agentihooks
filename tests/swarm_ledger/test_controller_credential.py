@@ -102,6 +102,19 @@ def test_the_hive_controller_command_issues_a_replica_credential_for_a_holder(hi
     assert auth.controller(hive, leader)
 
 
+@pytest.mark.feature("controller-standby-replica")
+def test_the_hive_controller_command_names_no_holder_unless_given_one():
+    import argparse
+
+    parser = cli._parser()
+    assert parser.parse_args(["controller"]).holder == ""
+    assert parser.parse_args(["controller", "--holder", "pod-a"]).holder == "pod-a"
+    commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    holder = next(action for action in commands.choices["controller"]._actions if action.dest == "holder")
+    assert holder.option_strings == ["--holder"]
+    assert holder.help == "controller replica that keeps its own credential beside the others"
+
+
 def test_a_remote_controller_presents_its_credential_for_service_writes_and_reads(controller_env):
     headers = {"X-Controller-Credential": controller_env}
     assert ledger.credentials(SLUG, service=True) == headers

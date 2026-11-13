@@ -50,7 +50,8 @@
         "tests/swarm_ledger/test_controller_credential.py::test_two_replica_controller_credentials_stay_valid_side_by_side",
         "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_issues_a_replica_credential_for_a_holder",
         "tests/test_swarm_chart_controller_rollout.py::test_the_kind_proof_checks_the_controller_rollout_before_any_cluster_starts",
-        "tests/test_swarm_chart_controller_rollout.py::test_the_chart_defaults_to_one_controller_and_rolls_more_out_with_one_always_ready"
+        "tests/test_swarm_chart_controller_rollout.py::test_the_chart_defaults_to_one_controller_and_rolls_more_out_with_one_always_ready",
+        "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_names_no_holder_unless_given_one"
       ]
     },
     {
