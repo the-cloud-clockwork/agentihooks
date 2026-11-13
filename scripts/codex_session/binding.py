@@ -11,6 +11,7 @@ SCHEMA_VERSION = 1
 TRANSPORT = "codex_app_server"
 STARTING, CONNECTED, FAILED, EXITED, DEGRADED = "starting", "connected", "failed", "exited", "degraded"
 STOOD_DOWN = "stood_down"
+SERVER_DIED = "server_died"
 RECORDS, ENDPOINTS, OPENINGS = "codex-transport", "codex-endpoints", "codex-openings"
 VIEWERS = "codex-viewers"
 PUBLISHING = "execution-publishing"
@@ -130,6 +131,13 @@ class BindingStore:
                 pipe.hdel(publishing, record.seat)
 
         transact(self.redis, release)
+
+    def settle_dead(self, slug: str, record: TransportRecord) -> TransportRecord:
+        """Move a record whose server died to failed and free its endpoint and publishing claim."""
+        ended = replace(record, state=FAILED, active_turn_id="", last_error_class=SERVER_DIED)
+        self.put(slug, ended)
+        self.release(slug, ended)
+        return ended
 
     def claim_opening(self, slug: str, execution_id: str, at: int) -> bool:
         return bool(self.redis.hsetnx(self.store.key(slug, OPENINGS), execution_id, at))

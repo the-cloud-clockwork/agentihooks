@@ -1248,7 +1248,7 @@ class HerdrRuntime:
                     facts[agent.name] = {field: value for field, value in found.items() if field != "rebound"}
                 continue
             if live_binding.managed(agent):
-                record = self._managed_record(agent)
+                record = live_binding.settle(connect(), agent, self._managed_record(agent))
                 alive = live_binding.server_alive(record)
                 facts[agent.name] = live_binding.read(agent, record.server_pid) if alive else {"process": alive}
                 continue
