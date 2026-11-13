@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.847 · 2026-11-13
+
+### 2026-11-13 · b125476a6ef1 · #10891 · @agenticore-app
+
+**Free dead managed Codex server slots and count reserved executions in host room**
+
+This change fixes two gaps found in managed Codex execution tracking: when a Codex server process dies, its transport record was staying marked as active and continuing to hold an account slot indefinitely, so the liveness check now moves dead-server records to a failed state and frees that slot automatically. Separately, host room calculations were only counting live processes, making reserved-but-not-yet-started executions invisible to capacity accounting; read_host now counts these reserved slots so memory and load room correctly reflect pending work. Together these prevent stuck slots and inaccurate capacity reporting from silently blocking the swarm.
+
 ## v2.17.845 · 2026-11-13
 
 ### 2026-11-13 · e407a5efb737 · #10990 · @nestorcolt
