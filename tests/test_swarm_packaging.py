@@ -49,6 +49,7 @@ def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
         if module in seen or source is None:
             continue
         seen.add(module)
+        pending.extend(".".join(module.split(".")[:depth]) for depth in range(1, module.count(".") + 1))
         package = module if source.name == "__init__.py" else module.rpartition(".")[0]
         for node in ast.parse(source.read_text()).body:
             names: list[str] = []
