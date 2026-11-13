@@ -1,9 +1,11 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import registry
@@ -248,7 +250,7 @@ def test_each_readiness_pass_prints_one_line_per_swarm_with_its_offer_count(
     _, store, ledger = source()
     provider = readiness.Source(store, ledger)
     with backend("memory", None) as bus:
-        reactor = Readiness(bus, provider, clock=lambda: 73)
+        reactor = Readiness(cast(Bus, bus), provider, clock=lambda: 73)
         reactor.poll()
         assert capsys.readouterr().err.splitlines() == ["hub: readiness swarm=rig offers=1 placed=1"]
         reactor.poll()
