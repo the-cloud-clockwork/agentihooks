@@ -209,6 +209,14 @@ def _swarm_exports(environ: dict[str, str]) -> str:
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
 
 
+def _quick_exports(environ: dict[str, str]) -> str:
+    """A quick swarm seat's variables, which a pane it did not create cannot receive from herdr."""
+    from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV
+
+    names = (QUICK_ENV, SEAT_ENV, DIR_ENV)
+    return "".join(f"export {name}={shlex.quote(environ[name])}\n" for name in names if environ.get(name))
+
+
 def _access_export() -> str:
     return f'eval "$({shlex.join([sys.executable, "-P", "-m", "scripts.access_env", "env"])})"\n'
 
@@ -273,6 +281,7 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
+CODEX_NO_UPDATE_PROMPT = ("-c", "check_for_update_on_startup=false")
 EFFORT_DEFAULT = "medium"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
@@ -462,6 +471,7 @@ def _agent_command(
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
+            *CODEX_NO_UPDATE_PROMPT,
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
             *(_model_args("codex", agent_args, environ) if spec.profile or spec.fallback_bare else []),
@@ -564,6 +574,7 @@ def _write_launcher(
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
         f"{_telemetry_exports(identity, environ)}"
         f"{_swarm_exports(environ)}"
+        f"{_quick_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
         f"{brain_binding.exports(environ)}"
@@ -881,6 +892,7 @@ def _parser() -> argparse.ArgumentParser:
         help="herdr: a tab in the workspace (default), a split of the calling pane, or a new workspace",
     )
     parser.add_argument("--workspace", default="", help="herdr: workspace label to place the session in (crew)")
+    parser.add_argument("--pane", default="", help="herdr: run in this existing pane instead of opening one")
     parser.add_argument(
         "--agent",
         choices=agent_choice.AGENTS,
@@ -931,13 +943,19 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
     return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
 
 
-def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
+def _start_herdr(
+    launcher: Path, directory: Path, name: str, args: argparse.Namespace, agent: str, environ: dict[str, str]
+) -> list[str]:
     started = herdr_host.ensure_server(environ)
     held = _held_prompt(launcher, agent) and not args.resume
     env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if held else {})}
-    placed = herdr_host.open_pane(directory, args.title or name, env, args.placement, args.workspace, environ)
-    herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
-    herdr_host.run(placed.pane_id, launcher, environ)
+    if args.pane:
+        placed = herdr_host.existing_pane(args.pane, environ)
+        herdr_host.run(placed.pane_id, launcher, environ, env)
+    else:
+        placed = herdr_host.open_pane(directory, args.title or name, env, args.placement, args.workspace, environ)
+        herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
+        herdr_host.run(placed.pane_id, launcher, environ)
     return [
         f"workspace_id={placed.workspace_id}",
         f"tab_id={placed.tab_id}",

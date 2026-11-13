@@ -31,6 +31,49 @@ says where the controller, ledger and Redis run. See [repository matching across
 for local checkout paths matched by origin, [workstation fallback](hives.md#workstation-fallback-for-workers) when
 a headless worker refuses, and [placement waits](hives.md#placement-waits) for the tick's refusal messages.
 
+## Quick swarm
+
+A quick swarm is the smallest swarm: one herdr tab on the workstation, with no Redis, no ledger server and no
+Docker Compose. The session that runs `agentihooks quick up` becomes the master in pane 1. Engineers open in the
+panes to its right, ordered left to right: three engineers by default and four at most, so four agents and five
+at most with the master (`--agents 2` to `--agents 5`). Every
+agent, the master included, gets an equal column. Outside herdr, or with its server down, `quick up` refuses and
+says why. An engineer whose agent exits back to a bare shell within 20 seconds of its launch, such as a Codex seat
+with no account free, fails `quick up`, which names it and leaves it pending for the next round.
+
+| Piece | Where it lives |
+|---|---|
+| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state |
+| Seat notes | `seats/<seat>/` holds `plan.md` (checkbox stages), `notes.md`, `learned.md` and `handoff.md` |
+| Culture | `culture.md`, read into every seat's injected block |
+| Room | `room/chat.jsonl`, chat between seats that share no native channel |
+
+Every launched seat carries `AGENTIHOOKS_QUICK_SWARM`, `AGENTIHOOKS_QUICK_SEAT` and `AGENTIHOOKS_QUICK_DIR`;
+the original master is found by its herdr pane. agentihooks injects a `QUICK SWARM` block (role, seat folder,
+plan state, culture) on the first prompt, after compaction, when it changes and every 40 tool calls.
+
+- The master is the operator's front door. It takes work from whatever source the operator names, tells engineers
+  at the start to wait for the operator, and tracks each seat folder.
+- An engineer is briefed by the operator, writes its plan as checkbox stages, reports it to the master before it
+  starts and works one plan at a time.
+- The master reaches a Claude engineer with Claude Code's own session messaging, addressed by the session name
+  every launched seat gets (`quick-<id>-<seat>`). Every seat reaches the master, the operator's own session, with
+  `agentihooks quick send master "<text>"`, and any pair with a Codex seat uses `agentihooks quick send <seat>
+  "<text>"`; `agentihooks quick room` reads what was sent.
+- At the compaction limit a quick seat writes its Handoff v2 to its seat folder (Read first takes `seat:<seat>`)
+  and runs `agentihooks quick handoff`. At its next stop the session ends with its pane kept and the successor
+  opens in the same pane with the seed and the handoff as its opening prompt.
+- `agentihooks quick send` tells the receiving seat at once when its pane sits idle with nothing typed; a busy
+  seat sees the waiting count in its `QUICK SWARM` block at its next tool call, because the block changes with it.
+- The quick tick runs inside the hourly safety nudge round (`agentihooks safety-nudge round`, installed by
+  `quick up`), because a quick swarm has no Redis for the agentihooks scheduler. It nudges idle engineers whose
+  plan has open stages, tells an idle seat of room lines it has not been told about and relaunches a pending seat
+  whose pane sits at a bare shell. An engineer whose agent exited, leaving its pane at a bare shell, is started
+  again in that pane with its seed; the master never is. It never types into a pane at a bare shell, where herdr
+  can still report the exited agent idle and the shell would run the text as a command, nor into a busy pane or
+  one holding typed text. It never nudges the master and retries a prompt herdr did not take on the next round.
+- `agentihooks quick stop` removes the room and the registry; the seat folders stay.
+
 ## Event driven engine
 
 Each swarm runs one of two engines, chosen by its `engine` setting:

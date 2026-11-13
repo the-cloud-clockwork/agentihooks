@@ -1,0 +1,6 @@
+{
+  "scripts/quick/seeds.py:scripts.quick.seeds.x__engineer:052f9544b82b193e295693d683ab6a977258ee6fbd341d5f4172b2fcc505010d": {
+    "reader": "standards-reader-2",
+    "reason": "_reach reads sender only when receiver.seat != MASTER; in _engineer the receiver is the master seat on every reachable path (_swarm_for always seats a master first), so the None sender is never read and the line is the same."
+  }
+}

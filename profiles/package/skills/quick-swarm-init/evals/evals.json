@@ -1,0 +1,14 @@
+[
+  {
+    "query": "start a quick swarm",
+    "expected_behavior": "Runs agentihooks quick up from this pane, reports the quick id, folder and seats, then acts as master and tells each engineer to wait for the operator."
+  },
+  {
+    "query": "open a quick swarm with 5 agents, codex engineers",
+    "expected_behavior": "Runs agentihooks quick up --agents 5 --harness codex and reports the five seats with their panes."
+  },
+  {
+    "query": "start a quick swarm (session not inside herdr)",
+    "expected_behavior": "Runs agentihooks quick up, which refuses because the session is not inside a herdr pane; reports that refusal word for word and stops."
+  }
+]

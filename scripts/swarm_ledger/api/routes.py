@@ -1,5 +1,8 @@
+import bisect
+import functools
 import json
 import logging
+import operator
 import os
 import re
 from typing import Any
@@ -220,8 +223,9 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
         parts = tuple(sorted(payload.get("parts", ())))
+        changes = functools.partial(export_changes, events_after=payload.get("events_after"))
         generation, body = services.repository.export_since(
-            slug, payload["since"], export_text, export_changes, parts, scope_of(payload)
+            slug, payload["since"], export_text, changes, parts, scope_of(payload)
         )
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
@@ -244,6 +248,7 @@ SINCE_SCHEMA = {
     "type": "object",
     "properties": {
         "since": {"type": "integer", "minimum": 0},
+        "events_after": {"type": "integer"},
         "closed": {"type": "boolean"},
         "frozen": {"type": "boolean"},
         "parts": {
@@ -258,21 +263,49 @@ SINCE_SCHEMA = {
 }
 HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
+LIVE_FIELDS = ("frozen", "focus_rank")
+META, EVENTS = encode("_meta"), encode("events")
+REVISION = operator.itemgetter("rev")
 
 
 def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None) -> bytes:
     """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
-    scoped: dict[str, bytes] = {} if answer is None else {"tasks": encode(answer.rows).encode()}
     named: dict[str, Fragment] = fragments.parts  # pyright: ignore[reportAssignmentType]
     body = b",".join(
-        encode(key).encode() + b":" + (meta if key == "_meta" else scoped.get(key) or exported(part))
+        encode(key).encode()
+        + b":"
+        + (
+            meta
+            if key == "_meta"
+            else scoped_rows(part, answer)
+            if answer is not None and key == "tasks"
+            else exported(part)
+        )
         for key, part in named.items()
         if not parts or key in parts
     )
     if answer is not None and (not parts or "tasks" in parts):
         body += b"," + encode(live_rows.FROZEN_IDS).encode() + b":" + encode(answer.frozen_ids).encode()
     return b'{"data":{' + body + b"}}"
+
+
+def scoped_rows(tasks: Fragment, answer: live_rows.Answer) -> bytes:
+    """The encoded rows of answer, each joined from the cached bytes of the stored task it extends."""
+    if not isinstance(tasks.parts, tuple):
+        return encode(answer.rows).encode()
+    items: tuple[Fragment, ...] = tasks.parts  # pyright: ignore[reportUnknownMemberType]
+    return b"[" + b",".join(scoped_row(items[index], row) for index, row in zip(answer.sources, answer.rows)) + b"]"
+
+
+def scoped_row(task: Fragment, row: dict[str, Any]) -> bytes:
+    """The encoded row: the cached bytes of task with the live row fields appended, or row encoded afresh when
+    task already holds one of those fields."""
+    stored = task.value
+    if not isinstance(stored, dict) or not stored.keys().isdisjoint(LIVE_FIELDS):
+        return encode(row).encode()
+    live = b"".join(b"," + encode(key).encode() + b":" + encode(row[key]).encode() for key in LIVE_FIELDS)
+    return exported(task)[:-1] + live + b"}"
 
 
 def change_unit(path: str) -> tuple[str, ...] | None:
@@ -289,13 +322,20 @@ def identities(items: list) -> list:
 
 
 def export_changes(
-    state: dict[str, Any], paths: set[str], parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None
+    state: dict[str, Any],
+    paths: set[str],
+    parts: tuple[str, ...] = (),
+    answer: live_rows.Answer | None = None,
+    events_after: int | None = None,
 ) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
     changed item its item identities in order with every changed item; only the top level parts named in
-    parts when there are any."""
+    parts when there are any. With events_after, the events newer than that revision and the event count
+    stand in for the whole events list."""
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
-    units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
+    units = {unit for unit in map(change_unit, paths) if unit is not None}
+    if events_after is None:
+        units.add((META, EVENTS))
     if answer is not None:
         if any(live_rows.reshapes(json.loads(path)) for path in paths):
             return None
@@ -322,7 +362,20 @@ def export_changes(
             changes["drop"].append(path)
     if answer is not None and (not named or encode("tasks") in named):
         changes["set"].append([[live_rows.FROZEN_IDS], answer.frozen_ids])
+    if events_after is not None and (not named or META in named) and not units & {(META,), (META, EVENTS)}:
+        events_change(changes, view["_meta"].get("events", []), events_after)
     return json.dumps({"changes": changes})
+
+
+def events_change(changes: dict[str, Any], events: list[dict[str, Any]], after: int) -> None:
+    """Add to changes the events newer than revision after with the count of every event held, or the whole
+    events list when the newest event older than that tail is not at revision after, so a reader holding an
+    event the server no longer has never keeps it."""
+    start = bisect.bisect_right(events, after, key=REVISION)
+    if start and events[start - 1]["rev"] != after:
+        changes["set"].append([["_meta", "events"], events])
+        return
+    changes["events"] = {"after": after, "tail": events[start:], "count": len(events)}
 
 
 def handle(handler: object, services: Services) -> None:
