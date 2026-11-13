@@ -143,6 +143,19 @@ def server_alive(record: TransportRecord | None) -> bool | None:
     return supervisor.owns(record, supervisor.start_time)
 
 
+def settle(store: RedisStore, agent: AgentRecord, record: TransportRecord | None) -> TransportRecord | None:
+    """A live record on this host whose server is proven dead moves to failed, freeing its account slot."""
+    import socket
+
+    from scripts.codex_session.binding import EXITED, FAILED, BindingStore
+
+    if record is None or record.state in {EXITED, FAILED} or record.host_id != socket.gethostname():
+        return record
+    if server_alive(record) is not False:
+        return record
+    return BindingStore(store).settle_dead(store.names.slug_of(agent.name), record)
+
+
 def observe_managed(record: TransportRecord | None) -> PaneObservation:
     from scripts.codex_session import protocol
     from scripts.codex_session.supervisor import UNIX
