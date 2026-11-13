@@ -240,7 +240,7 @@ SCALING_KEYS = {
     "swap-full-share": "swap_full_share",
     "swap-floor": "swap_floor_mb",
 }
-ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url"}
+ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url", "lab-url": "lab_url"}
 TOP_LEVEL = ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch", "spoke")
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
