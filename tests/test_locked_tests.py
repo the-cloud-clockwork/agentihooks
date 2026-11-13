@@ -206,6 +206,29 @@ def test_a_shallow_skipper_chain_scans_each_function_a_bounded_number_of_times(
     assert len(calls) < 10 * count
 
 
+def test_only_wanted_functions_are_measured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    text = (
+        "import pytest\n\n\n"
+        "def helper():\n    pytest.skip('x')\n\n\n"
+        "def test_wanted():\n    helper()\n    assert True\n\n\n"
+        "def test_other():\n    assert True\n"
+    )
+    (tmp_path / LOCKED).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / LOCKED).write_text(text)
+    checked: list[int] = []
+    checks = locked_tests._checks
+
+    def counted(nodes: list[ast.AST], helpers: frozenset[str]) -> list[ast.AST]:
+        checked.append(1)
+        return checks(nodes, helpers)
+
+    monkeypatch.setattr(locked_tests, "_checks", counted)
+    measured = locked_tests.measure(tmp_path, (LOCKED,), frozenset({f"{LOCKED}::test_wanted"}))
+    assert list(measured) == [f"{LOCKED}::test_wanted"]
+    assert measured[f"{LOCKED}::test_wanted"]["disabled"] is True
+    assert len(checked) == 4
+
+
 def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):
     text = GUARD.replace("        str(1)\n", "        def inner():\n            return 1\n        str(inner())\n")
     text = text.replace('            int("x")\n', "            int((lambda: 'x')())\n")

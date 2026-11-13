@@ -488,9 +488,20 @@ def test_unmarked_suite_tests_do_not_need_feature_entries(mapped_repo):
     assert feature_map.validate(root, path) == 1
 
 
-def test_the_repository_feature_map_is_valid():
+def test_the_repository_feature_map_is_valid() -> None:
     root = Path(__file__).resolve().parents[1]
-    assert feature_map.validate(root, root / "feature-map.json") >= 1
+    env = {key: value for key, value in os.environ.items() if not key.startswith("COV_CORE_")}
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.feature_map", "--root", str(root)],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=50,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert re.fullmatch(r"Feature map: [1-9]\d* features, all rule, test and live check links exist\n", result.stdout)
 
 
 def test_the_repository_unmapped_rule_list_only_shrinks():
