@@ -383,6 +383,7 @@ def unit(binary: str) -> str:
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        "EnvironmentFile=-%h/.agentihooks/root-bus/bus.env\n"
         f'ExecStart="{binary}" hive run\n'
         "Restart=always\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
@@ -401,6 +402,12 @@ def install(binary: str | None = None, unit_dir: Path | None = None, run: Callab
         path.write_text(text)
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
     result = run(["systemctl", "--user", "enable", "--now", UNIT], capture_output=True, text=True, timeout=30)
+    return result.returncode == 0
+
+
+def restart(run: Callable = subprocess.run) -> bool:
+    """Restart the hive user service so it loads its env files again."""
+    result = run(["systemctl", "--user", "restart", UNIT], capture_output=True, text=True, timeout=30)
     return result.returncode == 0
 
 

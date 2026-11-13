@@ -25,7 +25,7 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
     path = root_bus.write(tmp_path, signer, "root")
 
     assert path == tmp_path / "root-bus" / "bus.env"
-    values = dotenv_values(path, interpolate=False)
+    values = {key: value or "" for key, value in dotenv_values(path, interpolate=False).items()}
     creds = tmp_path / "root-bus" / "bus.creds"
     assert values == {
         "AGENTIHOOKS_BUS": "nats",
@@ -35,7 +35,7 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
     }
     config = BusConfig.from_environ(values)
     assert (config.backend, config.url, config.provision) == ("nats", URL, False)
-    jwt, user = nkey.parse_creds(config.credentials)
+    jwt, user = nkey.parse_creds(config.credentials or "")
     claims = nkey.claims(jwt)
     assert claims["name"] == "hive-root"
     assert claims["iss"] == signer.account.public

@@ -280,6 +280,23 @@ def _nats_trust(args: argparse.Namespace) -> str:
     return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
 
 
+def _root_bus() -> str:
+    import hooks.config  # noqa: F401
+    from scripts.hive import daemon, root_bus, scope
+    from scripts.swarm import commands
+
+    if member := scope.member():
+        raise auth.HiveError(f"this host joined as hive member {member}, whose hive env carries its bus settings")
+    signer = _signer()
+    if signer is None:
+        raise auth.HiveError("AGENTIHOOKS_NATS_SIGNER must name the hub NATS signer to mint the root hive credential")
+    hive = commands.hive_id()
+    path = root_bus.write(registry.home(), signer, hive)
+    if not (daemon.install() and daemon.restart()):
+        raise auth.HiveError(f"wrote {path}, but the hive user service did not restart")
+    return f"wrote the NATS bus settings of hive {hive} to {path} and restarted the hive service"
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -387,6 +404,10 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
     sub.add_parser("install", help="Write and enable the hive user service")
+    sub.add_parser(
+        "root-bus",
+        help="Mint the root hive's NATS credential with the hub signer and write the bus env its service loads",
+    )
     compare = sub.add_parser("compare", help="List each live hive's configuration against a base hive's")
     compare.add_argument("--base", help="The base hive id; defaults to this machine's hive")
     origin = sub.add_parser(
@@ -586,6 +607,8 @@ def _run(args: argparse.Namespace) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
+        elif args.command == "root-bus":
+            print(_root_bus())
         elif args.command in ("setup", "nats-trust"):
             print((_setup if args.command == "setup" else _nats_trust)(args))
         else:
