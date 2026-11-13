@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.860 · 2026-11-13
+
+### 2026-11-13 · d27434f98bc8 · #11077 · @agenticore-app
+
+**Hub readiness pass and admission log one line per offer pass and per refused or late admission**
+
+This change adds the diagnostic logging that was missing during the events no-offers incident, where both hub pods ran silent and the cause had to be reconstructed from NATS and Redis. Readiness.poll now emits one line per events swarm per pass showing offer and placement counts, and Admission.admit logs each silent refusal (held by another hive, stopped claims, withdrawn offers, lost claim races) and each late admission, naming the swarm, task and hive involved. Tests in tests/hub/test_readiness.py and tests/hub/test_admission.py cover the new log lines, so future admission gaps can be diagnosed from logs alone.
+
+### 2026-11-13 · 5c379676c83b · #11074 · @nestorcolt
+
+**Complete a retire when no herdr server runs on the host**
+
+This change fixes a stuck-engineer bug on the automation VM hive: when herdr itself has already stopped running, `_close_owned_pane` was raising an error instead of completing the retire, because it only treated "pane not found" as safe to ignore, not "no herdr server running." Now that error is handled the same way, since no server means there's no pane to close, so `HerdrRuntime.retire_process` can finish cleanly. This matters because the old behavior silently blocked over thirty retire attempts on a dead engineer process, holding a seat open despite the agent being gone and inbox/wake nudges never reaching it.
+
 ## v2.17.859 · 2026-11-13
 
 ### 2026-11-13 · b8cf932ead71 · #11068 · @agenticore-app
