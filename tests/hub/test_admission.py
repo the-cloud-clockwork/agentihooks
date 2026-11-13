@@ -506,14 +506,14 @@ def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: st
         registry.update(rig.store.redis, "hive-a", [f"max-agents={cap}"])
     rig.store.create(SwarmConfig("other", "/repo", 2, 2))
     held = [
-        ("other", AgentRecord("eng-other", "eng", "x1", seat="eng-1", state="working", started_at=1, hive="hive-a")),
-        (SLUG, AgentRecord("ci-own", "ci", "t2", seat="ci-1", state="starting", started_at=1, hive="hive-a")),
+        ("other", AgentRecord("eng-other", "eng", "x1", state="working", started_at=1, hive="hive-a")),
+        (SLUG, AgentRecord("ci-own", "ci", "t2", state="starting", started_at=1, hive="hive-a")),
     ][:live]
     ignored = [
-        (SLUG, AgentRecord("eng-done", "eng", "x2", seat="eng-2", state="finished", started_at=1, hive="hive-a")),
-        (SLUG, AgentRecord("eng-ended", "eng", "x3", seat="eng-3", state="ended", started_at=1, hive="hive-a")),
-        (SLUG, AgentRecord("master-a", "master", "", seat="master", state="working", started_at=1, hive="hive-a")),
-        ("other", AgentRecord("eng-b", "eng", "x4", seat="eng-2", state="working", started_at=1, hive="hive-b")),
+        (SLUG, AgentRecord("eng-done", "eng", "x2", state="finished", started_at=1, hive="hive-a")),
+        (SLUG, AgentRecord("eng-ended", "eng", "x3", state="ended", started_at=1, hive="hive-a")),
+        (SLUG, AgentRecord("master-a", "master", "", state="working", started_at=1, hive="hive-a")),
+        ("other", AgentRecord("eng-b", "eng", "x4", state="working", started_at=1, hive="hive-b")),
     ]
     for slug, agent in [*held, *ignored]:
         rig.store.put_agent(slug, agent)
