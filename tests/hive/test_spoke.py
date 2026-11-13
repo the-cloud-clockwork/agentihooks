@@ -252,9 +252,10 @@ def test_a_redelivered_started_offer_reports_its_stored_launch_decision_again(ri
     assert rig.spoke.poll() == "started"
 
     rig.runtime.spawn.assert_called_once()
-    assert [vars(call.args[1]) for call in rig.tasks.launched.call_args_list] == [
-        {"harness": "claude", "profile": "engineer", "account": "slot-a", "model": "", "effort": ""}
-    ] * 2
+    assert [(call.args[0].id, vars(call.args[1])) for call in rig.tasks.launched.call_args_list] == [
+        (offer, {"harness": "claude", "profile": "engineer", "account": "slot-a", "model": "", "effort": ""})
+        for offer in ("ready-a", "ready-again")
+    ]
 
 
 @pytest.mark.feature("events-launch-decision-record")
@@ -274,6 +275,25 @@ def test_a_started_claim_stored_without_a_launch_decision_reports_nothing(rig):
     rig.queue.offer(replace(rig.event, id="ready-again"))
     assert rig.spoke.poll() == "started"
     rig.tasks.launched.assert_not_called()
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_recovered_started_claim_reports_its_launch_decision_before_taking_work(rig, monkeypatch):
+    from scripts.hive import spoke
+
+    real_publish = rig.bus.events.publish
+    rig.bus.events.publish = Mock(side_effect=RuntimeError("bus unavailable"))
+    assert rig.spoke.poll() == "retry"
+    rig.tasks.launched.assert_not_called()
+    rig.bus.events.publish = real_publish
+    monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=0))
+
+    assert rig.spoke.poll() == "started"
+
+    assert [(call.args[0], vars(call.args[1])) for call in rig.tasks.launched.call_args_list] == [
+        (rig.event, {"harness": "claude", "profile": "", "account": "slot-a", "model": "", "effort": ""})
+    ]
+    rig.runtime.spawn.assert_called_once()
 
 
 @pytest.mark.feature("events-failed-launch-releases-admission")
