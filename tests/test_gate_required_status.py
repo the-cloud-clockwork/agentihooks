@@ -102,7 +102,7 @@ def test_a_passed_protected_grade_stays_pending_while_the_aggregator_has_no_chec
 ) -> None:
     github = _report(monkeypatch, [], "--protected", "success")
     assert github.state() == "pending"
-    assert github.queries == [RUNS]
+    assert github.queries == [RUNS, CHECKS["Gate — Required"]]
 
 
 @pytest.mark.feature("gate-required-waits-for-aggregator")
