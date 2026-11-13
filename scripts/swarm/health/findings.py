@@ -7,6 +7,7 @@ import dataclasses
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
+from typing import Any
 
 from scripts import quota_state
 from scripts.swarm import naming
@@ -66,18 +67,26 @@ class Finding:
     links: tuple = ()
     evidence_identity: tuple | None = None
     metrics: tuple = ()
+    rows: tuple[dict[str, object], ...] = dataclasses.field(default=(), compare=False)
+    rows_total: int = dataclasses.field(default=0, compare=False)
+    last_outcome: str = dataclasses.field(default="", compare=False)
 
     @property
     def id(self):
         return f"{self.kind.replace(' ', '-')}/{self.subject}"
 
-    def as_dict(self):
+    def as_dict(self) -> dict[str, Any]:
+        """The finding as status and the page read it; rows appear once attached."""
         found = asdict(self)
         del found["measure"], found["basis"], found["evidence_identity"], found["metrics"]
         if not self.links:
             del found["links"]
         else:
             found["links"] = list(self.links)
+        if not self.last_outcome:
+            del found["rows"], found["rows_total"], found["last_outcome"]
+        else:
+            found["rows"] = list(found["rows"])
         return {**found, "evidence": list(self.evidence)}
 
 
@@ -115,8 +124,9 @@ def _plural(n, word):
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def _task_id(target):
-    return target.split("/", 1)[1] if target.startswith("tasks/") else ""
+def target_task(target: str | None) -> str:
+    """The task id a ledger target names, or an empty string for any other target or none."""
+    return target.split("/", 1)[1] if target and target.startswith("tasks/") else ""
 
 
 def _is_master(by):
@@ -131,7 +141,8 @@ def _title(tasks, tid):
     return tasks.get(tid, {}).get("title") or tid
 
 
-def _outcome(task):
+def has_outcome(task: dict[str, Any]) -> bool:
+    """Whether a done task closed with the merged pull request or proof its kind needs."""
     if task.get("state") != "done":
         return False
     return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
@@ -150,9 +161,9 @@ def _decided(events):
 
 
 def ceremony(events, tasks, limits, green=frozenset(), talk=None):
-    finished = {tid for tid, t in tasks.items() if _outcome(t)}
+    finished = {tid for tid, t in tasks.items() if has_outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
-    closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
+    closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and target_task(e["target"]) in finished)
     decided = _decided(events)
     delivering = {tasks[tid].get("claimed_by") for tid in (*green, *finished) if tid in tasks}
     found = []
@@ -199,7 +210,7 @@ def _gain(task):
 def scope_inflation(events, tasks, limits):
     queued = {}
     for e in events:
-        tid = _task_id(e.get("target", ""))
+        tid = target_task(e.get("target"))
         if e.get("kind") == "added" and _is_worker(e["by"]) and tid in tasks:
             queued.setdefault(e["by"], []).append(tid)
     found = []
@@ -256,7 +267,7 @@ def proof_loops(
 def _lives(events: list[dict]) -> tuple[Counter, Counter]:
     starts, reruns, heads = Counter(), Counter(), {}
     for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
-        tid = _task_id(e["target"])
+        tid = target_task(e["target"])
         head, last = e.get("head"), heads.get(tid)
         moved = head is not None and last is not None and head != last
         if starts[tid] and not e.get("after") and not moved:
@@ -268,7 +279,7 @@ def _lives(events: list[dict]) -> tuple[Counter, Counter]:
 
 def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:
     failed = [e for e in events if e.get("kind") == "launch failed"]
-    counts = Counter(_task_id(e["target"]) for e in failed)
+    counts = Counter(target_task(e["target"]) for e in failed)
     return [
         Finding(
             "failed launch",
@@ -277,7 +288,7 @@ def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:
             (
                 f"task {_title(tasks, tid)}",
                 f"{count} failed launches",
-                *sorted({e["error"] for e in failed if _task_id(e["target"]) == tid}),
+                *sorted({e["error"] for e in failed if target_task(e["target"]) == tid}),
             ),
             "at least 2 failed launches",
             count,

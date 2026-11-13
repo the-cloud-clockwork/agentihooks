@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -199,7 +200,12 @@ def test_the_grace_follows_its_health_setting():
 
 
 @pytest.mark.feature("swarm-health-drain")
-def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, capsys, monkeypatch, tmp_path):  # noqa: F811
+def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(
+    env: tuple,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     from scripts.swarm import cli, status
 
     store, ledger, _ = env
@@ -219,11 +225,15 @@ def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, ca
         "quota capacity eng 2 of 4, ci 1 of 1, plan 0 of 1, changed 12 minutes ago, because accounts are closed; "
         "Claude has 1 free seats and Codex has 0 free seats"
     )
-    assert out[-5:] == [
+    head = (
         "finding  working on drain  engineer@abc-0001: still working on claude account alpha 12 minutes after its "
-        "quota handoff warning",
+        "quota handoff warning"
+    )
+    start = out.index(head)
+    assert out[start + 1 : start + 5] == [
         "  - account alpha is closed, routing 7.5% left",
         "  - task t1",
         "  threshold over 10 minutes after the quota handoff warning",
         "  id working-on-drain/engineer@abc-0001",
     ]
+    assert out[start + 5] == "  last outcome none recorded"

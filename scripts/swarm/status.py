@@ -57,6 +57,7 @@ from scripts.swarm.health import (
     verdicts,
 )
 from scripts.swarm.health import findings as health
+from scripts.swarm.health import rows as finding_rows
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import ASSIST, AgentRecord, RedisStore, SwarmError
@@ -160,6 +161,7 @@ def findings(
         + quiet_hives.findings(store.redis, now_ms())
         + restore_wait.findings(store, slug, now_ms())
     )
+    found = finding_rows.attach(found, events, {task["id"]: task for task in tasks}, rows)
     found = outage.hold_findings(store, slug, found, agents)
     if ledger_probe.holding(store, slug):
         found = [f for f in found if f.kind not in PAUSED_WHILE_SLOW]

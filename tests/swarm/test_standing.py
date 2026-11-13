@@ -151,6 +151,9 @@ def test_swarm_status_shows_the_standing_finding(stalled):
         "id": "bottleneck-stage/ci_overrun",
         "verdict": None,
         "seen_at": clock[0],
+        "last_outcome": "none recorded",
+        "rows": [],
+        "rows_total": 0,
     }
 
 
