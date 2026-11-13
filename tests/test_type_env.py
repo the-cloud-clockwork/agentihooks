@@ -146,7 +146,8 @@ def test_a_held_environment_does_not_stop_the_prune_of_older_ones(tmp_path: Path
         (root / type_env.LOCK).write_text(f"{number}\n")
         type_env.environment(root, home, _Uv())
         built.append(home / type_env.key(root))
-        os.utime(built[-1] / type_env.READY, (aged + number, aged + number))
+    for number, stale in enumerate(built):
+        os.utime(stale / type_env.READY, (aged + number, aged + number))
     (root / type_env.LOCK).write_text("moved\n")
 
     with (home / f"{built[1].name}.lock").open("a") as lock:
