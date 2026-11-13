@@ -465,6 +465,19 @@ def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_li
     assert acc.reserved_executions() == 0
 
 
+@pytest.mark.feature("host-room-counts-reserved-executions")
+def test_reserved_executions_count_none_while_the_store_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    from redis.exceptions import RedisError
+
+    from scripts.codex_session import binding
+
+    def down() -> list[str]:
+        raise RedisError("down")
+
+    monkeypatch.setattr(binding, "transport_records", down)
+    assert acc.reserved_executions() == 0
+
+
 def test_a_redis_failure_holds_what_the_store_last_held(monkeypatch):
     from redis.exceptions import RedisError
 
