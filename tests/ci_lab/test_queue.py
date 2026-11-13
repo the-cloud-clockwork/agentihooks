@@ -16,6 +16,12 @@ def jobs(client) -> queue.Queue:
     return queue.Queue(client)
 
 
+def found(jobs: queue.Queue, job: str) -> queue.Job:
+    record = jobs.job(job)
+    assert record is not None
+    return record
+
+
 def unit(key: str, kind: str = "test") -> Unit:
     return Unit(kind=kind, key=key, members=(f"tests/{key}.py::a", f"tests/{key}.py::b"))
 
@@ -30,7 +36,7 @@ def test_enqueue_records_pending_jobs_in_order_per_head(jobs: queue.Queue) -> No
     assert jobs.members("h1", "pending") == set(ids)
     assert jobs.members("h1", "leased") == set()
     assert jobs.members("h1", "done") == set()
-    job = jobs.job("h1:test:b")
+    job = found(jobs, "h1:test:b")
     assert job == queue.Job(
         id="h1:test:b",
         head="h1",
@@ -41,7 +47,7 @@ def test_enqueue_records_pending_jobs_in_order_per_head(jobs: queue.Queue) -> No
         worker="",
         outcome="",
     )
-    assert jobs.job("h1:test:a").requirement == queue.Requirement(slots=1, capabilities=frozenset())
+    assert found(jobs, "h1:test:a").requirement == queue.Requirement(slots=1, capabilities=frozenset())
 
 
 def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
@@ -51,7 +57,7 @@ def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
 
     assert jobs.enqueue([unit("a"), unit("b")], "h1", {}) == ["h1:test:b"]
     assert jobs.pending() == ["h1:test:b"]
-    assert jobs.job("h1:test:a").state == "leased"
+    assert found(jobs, "h1:test:a").state == "leased"
 
 
 def test_same_unit_on_two_heads_is_two_jobs(jobs: queue.Queue) -> None:
@@ -72,7 +78,7 @@ def test_supersede_drops_pending_and_keeps_leased(jobs: queue.Queue, client) -> 
     assert jobs.pending() == ["new:test:a"]
     assert jobs.job("old:test:a") is None
     assert jobs.job("old:test:c") is None
-    assert jobs.job("old:test:b").state == "leased"
+    assert found(jobs, "old:test:b").state == "leased"
     assert jobs.members("old", "pending") == set()
     assert jobs.members("old", "leased") == {"old:test:b"}
     assert jobs.supersede("old") == []
@@ -91,7 +97,7 @@ def test_lease_extend_release_requeue_and_finish(jobs: queue.Queue) -> None:
     assert jobs.claim("h1:test:a")
     jobs.lease("h1:test:a", "w1", "tok", 100)
 
-    leased = jobs.job("h1:test:a")
+    leased = found(jobs, "h1:test:a")
     assert (leased.state, leased.worker) == ("leased", "w1")
     assert jobs.token("h1:test:a") == "tok"
     assert jobs.members("h1", "leased") == {"h1:test:a"}
@@ -105,7 +111,7 @@ def test_lease_extend_release_requeue_and_finish(jobs: queue.Queue) -> None:
     assert jobs.extend("h1:test:a", 300) is False
     jobs.requeue("h1:test:a")
 
-    again = jobs.job("h1:test:a")
+    again = found(jobs, "h1:test:a")
     assert (again.state, again.attempts, again.worker) == ("pending", 1, "")
     assert jobs.token("h1:test:a") == ""
     assert jobs.pending() == ["h1:test:b", "h1:test:a"]
@@ -117,7 +123,7 @@ def test_lease_extend_release_requeue_and_finish(jobs: queue.Queue) -> None:
     assert jobs.release("h1:test:b")
     jobs.finish("h1:test:b", "lost", "lost")
 
-    lost = jobs.job("h1:test:b")
+    lost = found(jobs, "h1:test:b")
     assert (lost.state, lost.outcome) == ("lost", "lost")
     assert jobs.token("h1:test:b") == ""
     assert jobs.members("h1", "done") == {"h1:test:b"}

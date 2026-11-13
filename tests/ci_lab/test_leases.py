@@ -47,6 +47,12 @@ def lab(jobs: queue.Queue, clock: Clock) -> leases.Leases:
     return leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=clock.sleep, poll_ms=50)
 
 
+def found(jobs: queue.Queue, job: str) -> queue.Job:
+    record = jobs.job(job)
+    assert record is not None
+    return record
+
+
 def unit(key: str) -> Unit:
     return Unit(kind="test", key=key, members=(f"tests/{key}.py::t",))
 
@@ -69,7 +75,7 @@ def test_lease_grants_fitting_jobs_in_order_with_distinct_tokens(jobs: queue.Que
     assert len({grant.token for grant in grants}) == 2
     assert all(len(grant.token) == 32 for grant in grants)
     assert jobs.pending() == ["h1:test:big", "h1:test:web", "h1:test:b"]
-    assert jobs.job("h1:test:net").worker == "w1"
+    assert found(jobs, "h1:test:net").worker == "w1"
     assert lab.owns("h1:test:net", grants[0].token)
     assert not lab.owns("h1:test:net", grants[1].token)
 
@@ -110,7 +116,7 @@ def test_heartbeat_keeps_the_lease(jobs: queue.Queue, lab: leases.Leases, clock:
     assert lab.heartbeat(grant.job, grant.token) == 1900
     clock.now = 1800
     assert lab.reap(clock.now) == []
-    assert jobs.job(grant.job).state == "leased"
+    assert found(jobs, grant.job).state == "leased"
     assert lab.heartbeat(grant.job, "wrong") is None
     assert lab.heartbeat(grant.job, "") is None
 
@@ -121,7 +127,7 @@ def test_expired_lease_requeues_once_then_is_lost(jobs: queue.Queue, lab: leases
 
     assert lab.reap(1499) == []
     assert lab.reap(1500) == [("h1:test:a", "pending")]
-    assert jobs.job("h1:test:a").attempts == 1
+    assert found(jobs, "h1:test:a").attempts == 1
     assert jobs.pending() == ["h1:test:a"]
     assert not lab.owns(first.job, first.token)
     assert lab.heartbeat(first.job, first.token) is None
@@ -132,7 +138,7 @@ def test_expired_lease_requeues_once_then_is_lost(jobs: queue.Queue, lab: leases
     assert second.token != first.token
     assert lab.reap(2500) == [("h1:test:a", "lost")]
 
-    lost = jobs.job("h1:test:a")
+    lost = found(jobs, "h1:test:a")
     assert (lost.state, lost.outcome, lost.attempts) == ("lost", "lost", 1)
     assert jobs.members("h1", "done") == {"h1:test:a"}
     assert jobs.pending() == []
@@ -148,7 +154,7 @@ def test_complete_needs_the_lease_token(jobs: queue.Queue, lab: leases.Leases) -
     assert lab.complete(grant.job, grant.token, "failed") is True
     assert lab.complete(grant.job, grant.token, "passed") is False
 
-    done = jobs.job(grant.job)
+    done = found(jobs, grant.job)
     assert (done.state, done.outcome) == ("done", "failed")
     assert jobs.members("h1", "done") == {grant.job}
     assert lab.reap(9999) == []
@@ -168,7 +174,7 @@ def test_superseded_leased_job_still_finishes(jobs: queue.Queue, lab: leases.Lea
 
     assert jobs.supersede("old") == ["old:test:b"]
     assert lab.complete(grant.job, grant.token, "passed") is True
-    assert jobs.job(grant.job).state == "done"
+    assert found(jobs, grant.job).state == "done"
 
 
 def test_concurrent_leases_never_share_a_job(server, jobs: queue.Queue) -> None:
@@ -177,7 +183,9 @@ def test_concurrent_leases_never_share_a_job(server, jobs: queue.Queue) -> None:
     granted: list[list[str]] = [[] for _ in range(8)]
 
     def work(index: int) -> None:
-        worker = leases.Leases(queue.Queue(client(server)), ttl_ms=500, clock=lambda: 1000, sleep=lambda ms: None)
+        worker = leases.Leases(
+            queue.Queue(client(server)), ttl_ms=500, clock=lambda: 1000, sleep=lambda ms: None, poll_ms=50
+        )
         barrier.wait()
         while grants := worker.lease(f"w{index}", 2, frozenset(), 0):
             granted[index].extend(grant.job for grant in grants)
@@ -192,4 +200,4 @@ def test_concurrent_leases_never_share_a_job(server, jobs: queue.Queue) -> None:
     assert sorted(every) == sorted(f"h1:test:u{index}" for index in range(60))
     assert len(set(every)) == 60
     for index, jobs_of in enumerate(granted):
-        assert all(jobs.job(job).worker == f"w{index}" for job in jobs_of)
+        assert all(found(jobs, job).worker == f"w{index}" for job in jobs_of)

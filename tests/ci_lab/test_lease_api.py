@@ -2,6 +2,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from typing import Any
 
 import pytest
 
@@ -53,11 +54,17 @@ def signer() -> Signer:
     return Signer()
 
 
-def post(lab: leases.Leases, signer: Signer, path: str, body: object) -> tuple[int, dict[str, object]]:
+def found(jobs: queue.Queue, job: str) -> queue.Job:
+    record = jobs.job(job)
+    assert record is not None
+    return record
+
+
+def post(lab: leases.Leases, signer: Signer, path: str, body: object) -> tuple[int, dict[str, Any]]:
     return lease_api.respond(lab, signer, "POST", path, json.dumps(body).encode())
 
 
-def granted(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> dict[str, object]:
+def granted(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> dict[str, Any]:
     jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {})
     status, body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
     assert status == 200
@@ -125,7 +132,7 @@ def test_heartbeat_and_complete_need_the_token(
         200,
         {"completed": True},
     )
-    assert jobs.job(grant["job"]).outcome == "passed"
+    assert found(jobs, grant["job"]).outcome == "passed"
     assert post(lab, signer, "/complete", {"job": grant["job"], "token": grant["token"], "outcome": "passed"}) == (
         403,
         {"error": "lease token refused"},
