@@ -647,7 +647,7 @@
   "scripts/swarm/quota_notice.py": 18,
   "scripts/swarm/quota_refresh.py": 52,
   "scripts/swarm/quota_view.py": 62,
-  "scripts/swarm/readiness.py": 78,
+  "scripts/swarm/readiness.py": 77,
   "scripts/swarm/ready.py": 742,
   "scripts/swarm/reaper.py": 7,
   "scripts/swarm/reboot.py": 180,

@@ -270,12 +270,12 @@ def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus)
     assert delivery.event.key == "a"
 
 
-def test_the_launchable_filter_keeps_tasks_the_tick_launches_under_the_engine() -> None:
+def test_the_launchable_filter_keeps_no_task_under_the_events_engine() -> None:
     from scripts.swarm.store import EVENTS_ENGINE
 
     ready = [task("t1"), task("t2", workstation=True)]
     assert readiness.launchable("legacy", {}, ready) == ready
-    assert readiness.launchable(EVENTS_ENGINE, {}, ready) == [ready[1]]
+    assert readiness.launchable(EVENTS_ENGINE, {}, ready) == []
 
 
 def test_the_launchable_filter_keeps_only_the_tasks_a_capacity_decision_names() -> None:

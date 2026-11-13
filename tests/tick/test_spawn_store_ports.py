@@ -219,7 +219,7 @@ def _placement_pass(runtime: Any) -> Iterator[None]:
 
 def _tick() -> SimpleNamespace:
     return SimpleNamespace(
-        readiness=SimpleNamespace(tick_places=lambda engine_name, rows: True),
+        readiness=SimpleNamespace(tick_launches=lambda engine_name: True),
         panic=SimpleNamespace(state=lambda store: store.redis.get(store.key("sw", "panic"))),
         PLACING=nullcontext(),
         skip_refused=lambda function, *args: function(*args),
