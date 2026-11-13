@@ -388,8 +388,12 @@ def test_counting_a_first_life_decodes_only_rows_that_name_the_task(
 
     assert store.claims("smoke", "t1") == 2
     assert store.count_claim("smoke", "t1") == 3
-    assert len(decoded) == 4
-    assert all('"t1"' in raw for raw in decoded)
+    stored = [
+        *store.redis.hvals(store.key("smoke", "launches")),
+        *store.redis.lrange(store.key("smoke", "history"), 0, -1),
+    ]
+    named = sorted(raw for raw in stored if '"t1"' in raw)
+    assert sorted(raw for raw in decoded if raw in stored) == sorted(named * 2)
     assert [row["agent"] for row in store.launches("smoke")] == ["mine", "near", "old-0", "old-1", "old-2", "old-3"]
 
 
