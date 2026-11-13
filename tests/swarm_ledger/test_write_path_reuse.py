@@ -154,3 +154,15 @@ def test_diff_walks_at_most_the_limit_of_changed_positions_before_the_full_walk(
     walked = rows._changed_children(old["tasks"], within, ["tasks"])
     assert walked is not None and [change[3] for change in walked] == list(range(LIMIT))
     assert rows._changed_children(old["tasks"], beyond, ["tasks"]) is None
+
+
+def test_changed_children_of_a_list_without_ids_keeps_each_position_identity() -> None:
+    assert rows._changed_children(["a", "b", "c"], ["a", "x", "c"], ["notes"]) == [
+        ("b", "x", ["notes", ["index", 1, 0]], 1)
+    ]
+
+
+def test_changed_children_counts_an_earlier_duplicate_whose_id_is_the_word_index() -> None:
+    left = [{"id": "index", "v": 1}, {"id": "index", "v": 2}]
+    right = [left[0], {"id": "index", "v": 3}]
+    assert rows._changed_children(left, right, ["items"]) == [(left[1], right[1], ["items", ["id", "index", 1]], 1)]

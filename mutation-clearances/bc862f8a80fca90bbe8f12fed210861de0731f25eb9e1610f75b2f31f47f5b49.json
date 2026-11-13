@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x__changed_children:a9d09f02eca8398e6840c749e319832505b38f71acb62a14e8e21aed1085468f": {
+    "reader": "standards_reader",
+    "reason": "identity[0] is only ever id or index, so the mutated guard is always true; for index identities the occurrence sum is then computed but is provably 0, because an index token at an earlier position never equals the token at this position and id tokens never equal index tokens. Output identical for every input."
+  }
+}
