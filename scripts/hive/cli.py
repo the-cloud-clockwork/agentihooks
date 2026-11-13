@@ -280,23 +280,40 @@ def _nats_trust(args: argparse.Namespace) -> str:
     return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
 
 
-def _root_bus(_: argparse.Namespace) -> str:
+def _root_signer(hive: str, named: list[str]) -> tuple["Signer", list[str]]:
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms
+
+    signer = _signer()
+    if signer is None:
+        raise auth.HiveError("AGENTIHOOKS_NATS_SIGNER must name the hub NATS signer to mint the root hive credential")
+    if signer.member_swarms is None or hive in signer.member_swarms:
+        return signer, []
+    bao, path = openbao_kv.from_env(os.environ), member_swarms.signer_path(os.environ)
+    if bao is None or path is None:
+        raise auth.HiveError(f"the hub signer record lists no member swarms for {hive} and this host cannot update it")
+    member_swarms.assign(bao, path, [hive], member_swarms.swarms(redis_client(), named))
+    lines = member_swarms.sync(member_swarms.sync_target(os.environ))
+    signer = _signer()
+    if signer is None:
+        raise auth.HiveError("the hub NATS signer record disappeared while listing the root hive")
+    return signer, [f"listed hive {hive} in the hub signer record", *lines]
+
+
+def _root_bus(args: argparse.Namespace) -> str:
     from scripts import operator_env
     from scripts.hive import daemon, root_bus, scope
     from scripts.swarm import commands
 
     operator_env.fill(os.environ)
-
     if member := scope.member():
         raise auth.HiveError(f"this host joined as hive member {member}, whose hive env carries its bus settings")
-    signer = _signer()
-    if signer is None:
-        raise auth.HiveError("AGENTIHOOKS_NATS_SIGNER must name the hub NATS signer to mint the root hive credential")
     hive = commands.hive_id()
+    signer, lines = _root_signer(hive, args.swarm)
     path = root_bus.write(registry.home(), signer, hive)
     if not (daemon.install() and daemon.restart()):
         raise auth.HiveError(f"wrote {path}, but the hive user service did not restart")
-    return f"wrote the NATS bus settings of hive {hive} to {path} and restarted the hive service"
+    return "\n".join([*lines, f"wrote the NATS bus settings of hive {hive} to {path} and restarted the hive service"])
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -406,10 +423,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
     sub.add_parser("install", help="Write and enable the hive user service")
-    sub.add_parser(
+    root_bus = sub.add_parser(
         "root-bus",
         help="Mint the root hive's NATS credential with the hub signer and write the bus env its service loads",
     )
+    root_bus.add_argument("--swarm", action="append", default=[], help="swarm to list root for; every swarm if omitted")
     compare = sub.add_parser("compare", help="List each live hive's configuration against a base hive's")
     compare.add_argument("--base", help="The base hive id; defaults to this machine's hive")
     origin = sub.add_parser(

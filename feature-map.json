@@ -483,7 +483,7 @@
       "id": "hive-root-bus-settings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-bus-settings",
-      "behaviour": "hive root-bus mints the root hive's NATS member credential with the hub signer and writes a bus env the hive service loads, resolving the bus to nats with the signer url and the credential path, outside the env files every agentihooks process loads; it refuses without the signer and on a joined member host.",
+      "behaviour": "hive root-bus mints the root hive's NATS member credential with the hub signer and writes a bus env the hive service loads, resolving the bus to nats with the signer url and the credential path, outside the env files every agentihooks process loads; a signer record that scopes members gets root listed first, and the bus env then carries the scoped swarms; it refuses without the signer, on a joined member host, and when it cannot list an unlisted root.",
       "seam": "root_bus.write, daemon.unit and the hive root-bus command",
       "tests": [
         "tests/hive/test_root_bus.py::test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential",
@@ -492,7 +492,10 @@
         "tests/hive/test_root_bus.py::test_the_hive_service_loads_the_root_bus_env_after_the_hive_env",
         "tests/hive/test_root_bus.py::test_hive_root_bus_writes_the_settings_then_reinstalls_and_restarts_the_service",
         "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_without_the_hub_signer",
-        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_on_a_joined_member_host"
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_on_a_joined_member_host",
+        "tests/hive/test_root_bus.py::test_a_scoped_signer_writes_the_root_swarms_into_the_bus_env",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_lists_an_unlisted_root_in_the_signer_record_before_minting",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list"
       ]
     },
     {

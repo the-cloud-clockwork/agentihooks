@@ -131,6 +131,82 @@ def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, ca
     assert not (tmp_path / "root-bus").exists()
 
 
+@pytest.mark.feature("hive-root-bus-settings")
+def test_a_scoped_signer_writes_the_root_swarms_into_the_bus_env(tmp_path):
+    from scripts.hive import root_bus
+
+    path = root_bus.write(tmp_path, _signer({"root": ("alpha", "beta")}), "root")
+
+    values = dotenv_values(path, interpolate=False)
+    assert (values["AGENTIHOOKS_BUS_SCOPED"], values["AGENTIHOOKS_BUS_SWARMS"]) == ("1", "alpha,beta")
+    claims = nkey.claims(nkey.parse_creds((tmp_path / "root-bus" / "bus.creds").read_text())[0])
+    assert "swarm.alpha.>" in claims["nats"]["sub"]["allow"]
+
+
+@pytest.mark.feature("hive-root-bus-settings")
+def test_hive_root_bus_lists_an_unlisted_root_in_the_signer_record_before_minting(tmp_path, monkeypatch, capsys):
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms
+    from scripts.swarm import commands
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    signers = [_signer({"other": ("alpha",)}), _signer({"other": ("alpha",), "root": ("alpha",)})]
+    monkeypatch.setattr(cli, "_signer", lambda: signers.pop(0))
+    monkeypatch.setattr(cli, "redis_client", lambda: "redis")
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(member_swarms, "signer_path", lambda environ: "agentihooks/hub/nats")
+    monkeypatch.setattr(member_swarms, "sync_target", lambda environ: "ns/name")
+    monkeypatch.setattr(member_swarms, "sync", lambda target: [f"requested a sync of the signer record {target}"])
+    chosen: list[tuple[str, list[str]]] = []
+
+    def swarms(redis: str, named: list[str]) -> tuple[str, ...]:
+        chosen.append((redis, named))
+        return ("alpha",)
+
+    monkeypatch.setattr(member_swarms, "swarms", swarms)
+    assigned = []
+    monkeypatch.setattr(
+        member_swarms, "assign", lambda bao, path, members, swarms: assigned.append((bao, path, members, swarms))
+    )
+    monkeypatch.setattr(daemon, "install", lambda: True)
+    monkeypatch.setattr(daemon, "restart", lambda: True)
+
+    assert cli.main(["root-bus", "--swarm", "alpha"]) == 0
+
+    assert chosen == [("redis", ["alpha"])]
+    assert assigned == [("bao", "agentihooks/hub/nats", ["root"], ("alpha",))]
+    path = registry.home() / "root-bus" / "bus.env"
+    assert capsys.readouterr().out.splitlines() == [
+        "listed hive root in the hub signer record",
+        "requested a sync of the signer record ns/name",
+        f"wrote the NATS bus settings of hive root to {path} and restarted the hive service",
+    ]
+    assert dotenv_values(path)["AGENTIHOOKS_BUS_SWARMS"] == "alpha"
+
+
+@pytest.mark.feature("hive-root-bus-settings")
+def test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list(tmp_path, monkeypatch, capsys):
+    from scripts import openbao_kv
+    from scripts.swarm import commands
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    monkeypatch.setattr(cli, "_signer", lambda: _signer({"other": ("alpha",)}))
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+
+    assert cli.main(["root-bus"]) == 1
+
+    assert capsys.readouterr().err == (
+        "hive root-bus refused: the hub signer record lists no member swarms for root and this host cannot update it\n"
+    )
+    assert not (tmp_path / "root-bus").exists()
+
+
 def test_restart_restarts_the_hive_user_service():
     calls: list[tuple[list[str], dict[str, object]]] = []
 
