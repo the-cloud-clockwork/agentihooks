@@ -44,6 +44,18 @@
       ]
     },
     {
+      "id": "swarm-snapshot-atomic-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-snapshot-atomic-read",
+      "behaviour": "A swarm snapshot export reads the type, value and time to live of every key it selected, and which candidates the shared inbox sets hold, in one atomic Redis read, so an inbox delivery that closes while the snapshot runs is recorded wholly before or wholly after the close and never as an old item beside a newer history or a waiting address with no pending mail.",
+      "seam": "scripts.swarm.store.RedisStore.export through _dump against concurrent inbox close",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_a_delivery_closing_during_export_never_pairs_an_old_item_with_a_newer_journal",
+        "tests/swarm/test_snapshot.py::test_a_delivery_closing_during_export_never_leaves_its_address_waiting_without_pending_mail",
+        "tests/swarm/test_snapshot.py::test_export_carries_each_shared_inbox_membership_of_the_swarm_and_none_of_another"
+      ]
+    },
+    {
       "id": "ci-select-markdown-glob-tests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2484",
