@@ -289,7 +289,11 @@ def identities(items: list) -> list:
 
 
 def export_changes(
-    state: dict[str, Any], paths: set[str], parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None
+    state: dict[str, Any],
+    paths: set[str],
+    parts: tuple[str, ...] = (),
+    answer: live_rows.Answer | None = None,
+    events_after: int | None = None,
 ) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
     changed item its item identities in order with every changed item; only the top level parts named in

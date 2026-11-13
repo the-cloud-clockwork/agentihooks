@@ -81,6 +81,11 @@ def located(state: object, path: list) -> object:
     return state
 
 
+def last_revision(state: dict[str, Any] | None) -> int | None:
+    """The revision of the newest event state holds, or None when it holds none."""
+    return None
+
+
 class ResourceClient:
     def __init__(self, base: str, credentials: dict, timeout: float = 10, transport: Transport | None = None) -> None:
         self.base = base
@@ -160,7 +165,12 @@ class ResourceClient:
         return thawed(state)
 
     def changes(
-        self, slug: str, since: int, parts: tuple[str, ...], scope: live_rows.Scope | None = None
+        self,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: live_rows.Scope | None = None,
+        events_after: int | None = None,
     ) -> dict[str, Any]:
         """The export of the named parts as the changes since generation since, or in full when the server no
         longer holds every change after it."""
