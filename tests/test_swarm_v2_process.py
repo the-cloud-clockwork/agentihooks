@@ -7,6 +7,7 @@ import threading
 import time
 from contextlib import contextmanager, suppress
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -862,6 +863,27 @@ def test_retire_process_refuses_and_closes_nothing_when_herdr_cannot_name_the_pa
     assert herdr.retire_process(agent, PID, (), STARTED) is False
     assert calls == [["agent", "get", "w1:p1"]]
     assert herdr.refusal(agent) == {"process": PID, "refusal": "pane w1:p1: herdr agent get: server unavailable"}
+
+
+@pytest.mark.feature("retire-without-herdr-server")
+def test_retire_process_succeeds_when_no_herdr_server_runs_on_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+    answer = herdr.herdr
+
+    def absent(args: list[str]) -> dict[str, object]:
+        if args[:2] == ["agent", "get"]:
+            calls.append(args)
+            raise RuntimeError("herdr agent get: no herdr server is running at /home/a/.config/herdr/herdr.sock")
+        return answer(args)
+
+    herdr.herdr = absent
+    agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1")
+    assert herdr.retire_process(agent, PID, (), STARTED) is True
+    assert calls == [["agent", "get", "w1:p1"]]
+    assert ["pane", "close", "w1:p1"] not in calls
+    assert herdr.refusal(agent) == {"process": 0, "refusal": "unknown"}
 
 
 def test_each_unqualified_terminate_is_counted():

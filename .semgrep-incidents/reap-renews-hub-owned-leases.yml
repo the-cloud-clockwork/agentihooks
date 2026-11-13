@@ -1,0 +1,24 @@
+rules:
+  - id: reap-renews-hub-owned-leases
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A reap pass narrows the swarm agents to the legacy list without renewing the claim lease of the agents it leaves
+      out. On 13 November an agent admitted through a hub events offer lost its claim ten minutes after admission,
+      because its execution start took it off the legacy list and nothing else renewed its lease. Call
+      owned_leases.renew with the legacy list in the same pass.
+    patterns:
+      - pattern-inside: |
+          def $REAP(...):
+              ...
+      - metavariable-regex:
+          metavariable: $REAP
+          regex: .*reap.*
+      - pattern: legacy_agents
+      - pattern-not-inside: |
+          def $REAP(...):
+              ...
+              $AGENTS = <... legacy_agents ...>
+              ...
+              <... owned_leases.renew ...>
+              ...

@@ -66,7 +66,10 @@ def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(
     assert rig.store.claims(SLUG, "t1") == 0
     reason = refusal(lives, "recycle", "none", SLUG, "t1")
     assert rig.ledger.comments == [((SLUG, "t1", reason), {"by": "swarm"})]
-    assert f"hub: events claim cap swarm={SLUG} task=t1: blocked t1: {reason}" in capsys.readouterr().err.splitlines()
+    assert (
+        f"hub: events claim cap swarm={SLUG} task=t1 hive=hive-a: blocked t1: {reason}"
+        in capsys.readouterr().err.splitlines()
+    )
 
 
 @pytest.mark.parametrize("lives, mode", [(2, "enforce"), (3, "observe"), (3, "off")])
@@ -305,6 +308,80 @@ def late_clock(offset: int) -> Callable[[], int]:
     return clock
 
 
+@pytest.mark.feature("hub-offer-logging")
+def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wait(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.admitter.clock = late_clock(5)
+
+    with pytest.raises(admission.LateAdmission):
+        rig.admitter.admit(SLUG, ask())
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
+        f"the hive stopped waiting at {admission.ANSWER_MS} ms"
+    ]
+
+
+@pytest.mark.feature("hub-offer-logging")
+def test_an_admission_held_by_another_hive_prints_one_refusal_line(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.admitter.admit(SLUG, ask())
+    capsys.readouterr()
+
+    assert rig.admitter.admit(SLUG, ask(hive="hive-b")) is None
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-b refused: already admitted to hive hive-a"
+    ]
+
+
+@pytest.mark.feature("hub-offer-logging")
+def test_an_admission_while_claims_are_stopped_prints_one_refusal_line(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(admission.run_window, "claims_stopped", lambda *_: True)
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: claims are stopped"
+    ]
+
+
+@pytest.mark.feature("hub-offer-logging")
+def test_an_admission_for_a_withdrawn_offer_prints_its_withdrawal_reason(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.admitter.admit(SLUG, ask(generation=1)) is None
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: the offer is withdrawn, it is at generation 0"
+    ]
+
+
+@pytest.mark.feature("hub-offer-logging")
+def test_an_admission_whose_claim_another_holder_took_prints_one_refusal_line(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.ledger.update_task = lambda *args, **kwargs: {**rig.rows["t1"], "state": "claimed", "claimed_by": "other"}
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: another holder took the claim"
+    ]
+
+
+@pytest.mark.feature("hub-offer-logging")
+def test_an_admitted_offer_prints_no_refusal_line(rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert rig.admitter.admit(SLUG, ask()) is not None
+
+    assert capsys.readouterr().err == ""
+
+
 def test_the_hub_answers_inside_the_window_the_hive_waits_for_an_admission() -> None:
     assert 0 < admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
 
@@ -414,4 +491,109 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
     assert rig.rows["t1"]["state"] == "open"
-    assert capsys.readouterr().err.splitlines() == [f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused"]
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused, the hive is draining"
+    ]
+
+
+def _released(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, hub: str) -> None:
+    from scripts import updater
+    from scripts.hive import registry
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    monkeypatch.setattr(updater, "installed_version", lambda: hub)
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000, "version": member})
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+@pytest.mark.parametrize(
+    "member, hub",
+    [
+        ("2.17.825", "2.17.843"),
+        ("2.9.0", "2.17.0"),
+        ("2.17.825.dev4+g1a2b", "2.17.826"),
+        ("2", "2.17.843"),
+        ("2.17.826.dev1", "2.17.826"),
+        ("2.17.826rc1", "2.17.826"),
+        ("2.17.826a1", "2.17.826"),
+        ("2.17.826-rc1", "2.17.826"),
+        ("v2.9.0", "2.17.0"),
+    ],
+)
+def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], member: str, hub: str
+) -> None:
+    _released(rig, monkeypatch, member, hub)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: release {member} below hub release {hub}"
+    ]
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+def test_the_hub_refuses_a_held_admission_redelivered_to_a_hive_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _released(rig, monkeypatch, "", "2.17.843")
+    assert rig.admitter.admit(SLUG, ask()) is not None
+    writes = list(rig.ledger.writes)
+    capsys.readouterr()
+    _released(rig, monkeypatch, "2.17.825", "2.17.843")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is None
+    assert rig.ledger.writes == writes
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: release 2.17.825 below hub release 2.17.843"
+    ]
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+@pytest.mark.parametrize(
+    "member, hub",
+    [
+        ("2.17.843", "2.17.843"),
+        ("2.17.844", "2.17.843"),
+        ("2.18.0", "2.17.843"),
+        ("", "2.17.843"),
+        ("unknown", "2.17.843"),
+        ("2.17.0", "2.17"),
+        ("2.17.826+g1a2b", "2.17.826"),
+        ("2.17.826.post1", "2.17.826"),
+        ("2.17.827.dev1", "2.17.826"),
+        ("2.17.825", "unknown"),
+    ],
+)
+def test_the_hub_admits_a_launch_for_a_hive_on_the_hub_release_or_an_unreported_one(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], member: str, hub: str
+) -> None:
+    _released(rig, monkeypatch, member, hub)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+def test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import updater
+
+    monkeypatch.setattr(updater, "installed_version", lambda: "2.17.843")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""

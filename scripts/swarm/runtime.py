@@ -61,6 +61,7 @@ AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
 REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
+NO_HERDR_SERVER = "no herdr server is running"
 MANAGED_RESUME = "unsupported resume: a managed Codex execution continues through its supervised server"
 TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
 REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
@@ -1445,11 +1446,14 @@ class HerdrRuntime:
             if "not found" not in str(exc):
                 raise
 
-    def _close_owned_pane(self, agent):
-        """herdr reuses a closed pane's id, so a pane it lists under another owner is left open."""
+    def _close_owned_pane(self, agent: AgentRecord) -> None:
+        """herdr reuses a closed pane's id, so a pane it lists under another owner is left open; a host with no herdr
+        server holds no pane to close."""
         try:
             found = self.herdr(["agent", "get", agent.pane_id])
         except Exception as exc:
+            if NO_HERDR_SERVER in str(exc):
+                return
             if "not found" not in str(exc):
                 raise
             found = None

@@ -138,6 +138,27 @@
       ]
     },
     {
+      "id": "retire-without-herdr-server",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-automation-vm-retire",
+      "behaviour": "Retiring an agent whose process has ended on a host where no herdr server runs succeeds without closing a pane, because no pane can exist there; a running herdr that cannot name the pane owner still refuses the retire.",
+      "seam": "HerdrRuntime.retire_process",
+      "tests": [
+        "tests/test_swarm_v2_process.py::test_retire_process_succeeds_when_no_herdr_server_runs_on_the_host"
+      ]
+    },
+    {
+      "id": "removed-hive-member-reaped",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-host-agent-records",
+      "behaviour": "An agent admitted to another hive is dropped and its task reopened once that hive has left the hive index without a report or a live heartbeat, past the startup window; an indexed, beating or unreadable hive keeps it.",
+      "seam": "Reports.vanished",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_member_of_a_removed_hive_is_dropped_and_its_task_reopened",
+        "tests/hive/test_reports.py::test_an_agent_that_names_no_hive_never_reads_as_vanished"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
@@ -583,6 +604,35 @@
       "tests": [
         "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
+      ]
+    },
+    {
+      "id": "hub-admission-release-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-release-floor",
+      "behaviour": "The hub refuses an events admission request from a hive whose registry record reports a release below the hub's own installed release, compared as PEP 440 versions, before any claim, execution, seat or ledger write, including a redelivered offer whose admission the hub still holds; a dev or pre-release build ranks below its final release; a hive on the hub release or a newer one, or one with no reported release, is admitted.",
+      "seam": "Admission.admit for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_on_an_older_release",
+        "tests/hub/test_admission.py::test_the_hub_refuses_a_held_admission_redelivered_to_a_hive_on_an_older_release",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_on_the_hub_release_or_an_unreported_one",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record"
+      ]
+    },
+    {
+      "id": "hub-offer-logging",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-logging",
+      "behaviour": "Each hub readiness pass prints one line per events swarm with its offer count and placed count, and each refused or late hive admission prints one line naming the member hive, the task and the reason.",
+      "seam": "Readiness.poll and Admission.admit on the hub",
+      "tests": [
+        "tests/hub/test_readiness.py::test_each_readiness_pass_prints_one_line_per_swarm_with_its_offer_count",
+        "tests/hub/test_admission.py::test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wait",
+        "tests/hub/test_admission.py::test_an_admission_held_by_another_hive_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admission_while_claims_are_stopped_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admission_for_a_withdrawn_offer_prints_its_withdrawal_reason",
+        "tests/hub/test_admission.py::test_an_admission_whose_claim_another_holder_took_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admitted_offer_prints_no_refusal_line"
       ]
     },
     {
@@ -1095,6 +1145,23 @@
         "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
         "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
         "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
+      ]
+    },
+    {
+      "id": "hub-owned-claim-lease-renewal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-lease",
+      "behaviour": "Every tick reap pass renews the claim lease of each swarm agent the hub owns, the agents whose execution start is on the bus and that the legacy list leaves out, so an agent admitted through an events offer keeps its claim past the first ten minute lease; a claim another agent holds or one already lapsed is never touched, and the memory bus backend owns no agent.",
+      "seam": "scripts.hub.owned_leases.renew, called by the tick reap step",
+      "tests": [
+        "tests/hub/test_owned_leases.py::test_the_agent_the_legacy_list_leaves_out_gets_a_full_claim_lease",
+        "tests/hub/test_owned_leases.py::test_a_claim_another_agent_holds_is_left_alone",
+        "tests/hub/test_owned_leases.py::test_a_lapsed_claim_is_never_taken_back",
+        "tests/hub/test_owned_leases.py::test_the_memory_backend_owns_no_agent_and_reads_nothing",
+        "tests/tick/steps/test_reap.py::test_reap_renews_the_claim_lease_of_a_hub_owned_agent"
+      ],
+      "rules": [
+        "reap-renews-hub-owned-leases"
       ]
     },
     {
@@ -4880,6 +4947,23 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
+      ]
+    },
+    {
+      "id": "ledger-export-shape-records",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-measure",
+      "behaviour": "Every read on the ledger export route records its shape (bare, full, since or refused, with parts, scope and events) and its bounded request caller after the route in the request metrics, and every operations write records its distinct operation kinds, so a full export rebuild names the client that asked for it and a slow write names what it did.",
+      "seam": "scripts.swarm_ledger.api.routes.export_shape and scripts.swarm_ledger.request_metrics.detailed, recorded by scripts.swarm_ledger.request_metrics.measured",
+      "tests": [
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_an_export_read_names_its_shape_and_caller",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_tick_export_read_is_named_by_the_server_request_caller",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_detailed_request_records_its_detail_after_the_route",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_request_without_detail_keeps_its_route_and_detail_outside_a_request_is_dropped",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_an_operations_write_names_its_distinct_operation_kinds",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_the_export_route_records_the_shape_of_each_read",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_refused_export_read_is_still_recorded_with_its_shape",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_an_operations_write_records_its_operation_kinds"
       ]
     },
     {

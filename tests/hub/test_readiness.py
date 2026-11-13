@@ -1,9 +1,11 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import registry
@@ -237,6 +239,26 @@ def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
         assert queue.take(1) is None
 
 
+@pytest.mark.feature("hub-offer-logging")
+def test_each_readiness_pass_prints_one_line_per_swarm_with_its_offer_count(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hub.readiness import Readiness
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    _, store, ledger = source()
+    provider = readiness.Source(store, ledger)
+    with backend("memory", None) as bus:
+        reactor = Readiness(cast(Bus, bus), provider, clock=lambda: 73)
+        reactor.poll()
+        assert capsys.readouterr().err.splitlines() == ["hub: readiness swarm=rig offers=1 placed=1"]
+        reactor.poll()
+        assert capsys.readouterr().err.splitlines() == ["hub: readiness swarm=rig offers=1 placed=0"]
+        reactor.poll(lambda: False)
+        assert capsys.readouterr().err == ""
+
+
 def test_freeze_while_hive_waits_withdraws_the_delivered_offer(monkeypatch):
     from scripts.hub.readiness import Readiness
 
@@ -313,10 +335,11 @@ def test_default_hub_readiness_uses_the_shared_source_and_stops_after_lease_loss
     provider.slugs.return_value = ["rig", "other"]
     provider.snapshot.return_value = Mock()
     factory = Mock(return_value=provider)
-    publish = Mock()
+    publish = Mock(return_value=[])
     monkeypatch.setattr("scripts.hub.readiness.BusConfig.from_environ", lambda: BusConfig(backend="nats"))
     monkeypatch.setattr(readiness, "Source", factory)
     monkeypatch.setattr(readiness, "publish", publish)
+    monkeypatch.setattr(readiness, "offers", Mock(return_value=[]))
     with backend("memory", None) as bus:
         reactor = Readiness(bus, clock=lambda: 73)
         reactor.poll(Mock(side_effect=[True, False]))

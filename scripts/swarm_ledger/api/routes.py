@@ -5,10 +5,11 @@ import logging
 import operator
 import os
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from scripts.swarm_ledger import ledger_closed, ports
+from scripts.swarm_ledger import ledger_closed, ports, request_metrics
 
 from ..repository import live_rows
 from ..repository.fragments import Fragment, exported, members
@@ -208,6 +209,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path in ("export", "swarm/export"):
         return export(handler, services, slug, path, payload)
     if path == "operations":
+        request_metrics.detailed(operation_kinds(cast(dict[str, Any], payload)))
         return mutations.apply(services, slug, principal, payload, mutations.writer(handler.headers))
     if path == "architecture/actions":
         from . import architecture
@@ -216,10 +218,20 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     raise APIError(404, "resource_missing", "No such operation resource")
 
 
+def operation_kinds(payload: dict[str, Any]) -> str:
+    """The distinct operation kinds one operations write carries, sorted and joined by plus, such as ``add+set``."""
+    ops: object = payload.get("ops")
+    items: list[object] = list(cast(list[object], ops)) if isinstance(ops, list) else []
+    kinds = {str(cast(dict[str, object], op).get("op")) for op in items if isinstance(op, dict)}
+    return "+".join(sorted(kinds))
+
+
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
 def export(handler: object, services: Services, slug: str, path: str, payload: dict[str, Any]) -> dict | None:
+    if path == "export":
+        request_metrics.detailed(export_shape(handler, payload))
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
         parts = tuple(sorted(payload.get("parts", ())))
@@ -236,6 +248,28 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
             raise APIError(404, "swarm_missing", "No swarm for this ledger")
         return {"data": status}
     return handler.send_export(services.repository.export_since(slug, 0, export_text, export_changes)[1])
+
+
+def export_shape(handler: object, payload: object) -> str:
+    """The export read's shape and caller, such as ``since parts scoped events by tick``: ``bare`` names a read with
+    no since and ``full`` a read since zero, both of which rebuild the whole export, and ``refused`` a body that is
+    no object. The caller is the server's request caller cut to one bounded token."""
+    from scripts.swarm_ledger import ledger_server
+
+    resolve = cast(Callable[[object], str], ledger_server.request_caller)
+    caller = resolve(getattr(handler, "headers", None))
+    caller = caller if CALLER.fullmatch(caller) else "-"
+    if not isinstance(payload, dict):
+        return f"refused by {caller}"
+    read = cast(dict[str, Any], payload)
+    words = ["bare" if "since" not in read else "since" if read["since"] else "full"]
+    words += ["parts"] if read.get("parts") else []
+    words += ["scoped"] if "closed" in read or "frozen" in read else []
+    words += ["events"] if "events_after" in read else []
+    return " ".join([*words, "by", caller])
+
+
+CALLER = re.compile(r"[A-Za-z0-9@._-]{1,64}")
 
 
 def scope_of(payload: dict[str, Any]) -> live_rows.Scope | None:

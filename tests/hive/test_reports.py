@@ -1529,6 +1529,69 @@ def test_a_claim_whose_agent_its_hive_still_lists_is_kept(remote: SimpleNamespac
     assert remote.store.claimant("fixture", "task") == agent.name
 
 
+@pytest.mark.feature("removed-hive-member-reaped")
+@pytest.mark.parametrize(
+    ("protection", "retired"),
+    [
+        ("", True),
+        ("stale", True),
+        ("indexed", False),
+        ("heartbeat", False),
+        ("unreadable", False),
+        ("starting", False),
+    ],
+)
+@pytest.mark.parametrize("state", ["retiring", "suspect"])
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_a_member_of_a_removed_hive_is_dropped_and_its_task_reopened(
+    remote: SimpleNamespace, state: str, protection: str, retired: bool
+) -> None:
+    from scripts.hive import registry
+    from scripts.swarm.pane import PaneObservation
+    from scripts.tick.steps import agents as agent_steps
+
+    agent = replace(remote.agent, pane_id="", state=state)
+    remote.store.put_agent("fixture", agent)
+    remote.redis.srem(registry.INDEX, HIVE)
+    now = LAUNCHED + remote.reports.STARTUP_MS
+    if protection == "starting":
+        now -= 1
+    elif protection == "stale":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", now - registry.LIVE_MS - 1)
+    elif protection == "indexed":
+        remote.redis.sadd(registry.INDEX, HIVE)
+    elif protection == "heartbeat":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", now)
+    elif protection == "unreadable":
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", "unknown")
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    rows = {"task": {"state": "claimed", "claimed_by": agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.observe = Mock(return_value=PaneObservation("unknown"))
+    remote.runtime.retire = Mock(side_effect=AssertionError("a removed hive takes no remote command"))
+
+    actions = agent_steps._reap("fixture", remote.store, ledger, remote.runtime, rows, now)
+
+    if retired:
+        assert actions == [f"retired {agent.name}: its hive no longer lists it, task task reopened"]
+        assert remote.store.agents("fixture") == []
+        assert remote.store.claimant("fixture", "task") is None
+        assert ledger.update_task.call_args.args[2] == {"state": "open", "claimed_by": ""}
+    else:
+        assert [found.name for found in remote.store.agents("fixture")] == [agent.name]
+        assert remote.store.claimant("fixture", "task") == agent.name
+        ledger.update_task.assert_not_called()
+
+
+@pytest.mark.feature("removed-hive-member-reaped")
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_an_agent_that_names_no_hive_never_reads_as_vanished(remote: SimpleNamespace) -> None:
+    agent = replace(remote.agent, hive="")
+
+    assert remote.runtime.hive.vanished(agent, LAUNCHED + remote.reports.STARTUP_MS) is False
+
+
 @pytest.mark.parametrize(
     ("ended", "pod_started_after", "listed", "gone"),
     [
@@ -1595,7 +1658,10 @@ def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_c
 def test_a_hive_member_vanishes_only_from_a_beating_hive_that_lists_others(
     remote: SimpleNamespace, hive: str, names: object, since: int, vanished: bool
 ) -> None:
+    from scripts.hive import hive_state
+
     agent = replace(remote.agent, hive=hive, runtime_target={})
+    hive_state.indexed(remote.redis, "silent", True)
     _publish(remote, state="unknown")
     report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
     report["names"] = names
