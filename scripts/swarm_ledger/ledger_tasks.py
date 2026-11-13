@@ -20,6 +20,8 @@ UPDATABLE = (
     "claimed_by",
     "issue_url",
     "pr_url",
+    "pr_number",
+    "pr_head",
     "description",
     "depends_on",
     "territory",
@@ -63,7 +65,7 @@ HARNESSES = ("", "claude", "codex")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
-NUMBER_FIELDS = ("difficulty_confidence",)
+NUMBER_FIELDS = ("difficulty_confidence", "pr_number")
 MATCHED: dict[str, Any] = {
     "claimed_by": "",
     "claim_generation": 0,
@@ -174,6 +176,7 @@ def check(op):
     check_stack(fields)
     check_release(fields)
     check_applied(fields)
+    check_confirmed_pull(fields)
     check_bools(fields)
     check_profile(fields)
     check_requires_harness(fields)
@@ -240,6 +243,15 @@ def check_applied(fields):
     value = fields.get("applied_at", "")
     if not (isinstance(value, str) and APPLIED_RE.fullmatch(value)):
         raise ValueError("applied_at must be a UTC time such as 2026-10-18T12:00:00Z, or empty to clear it")
+
+
+def check_confirmed_pull(fields: dict[str, Any]) -> None:
+    """Refuse a confirmed pull request number that is not a positive integer or a head that is not a commit hash."""
+    number = fields.get("pr_number", 1)
+    if type(number) is not int or number < 1:
+        raise ValueError("pr_number must be a positive integer")
+    if not COMMIT_RE.fullmatch(fields.get("pr_head", "")):
+        raise ValueError("pr_head must be a lowercase commit hash of 7 to 64 characters, or empty to clear it")
 
 
 def check_rank(fields):
