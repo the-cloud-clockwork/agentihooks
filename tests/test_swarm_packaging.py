@@ -29,23 +29,57 @@ def test_swarm_image_installs_every_ledger_dependency_from_its_hashed_lock():
     assert "!docker/swarm/requirements.lock" in (root / ".dockerignore").read_text().splitlines()
 
 
-def test_swarm_image_lock_pins_every_distribution_the_hub_imports() -> None:
+def _module_file(root: Path, module: str) -> Path | None:
+    """Return the source file of a repository module, or None when it is not one."""
+    base = root.joinpath(*module.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
+    """Return the third party top level modules imported at module level from the entry points onward."""
+    seen: set[str] = set()
+    pending = list(entry_points)
+    third_party: set[str] = set()
+    while pending:
+        module = pending.pop()
+        source = _module_file(root, module)
+        if module in seen or source is None:
+            continue
+        seen.add(module)
+        package = module if source.name == "__init__.py" else module.rpartition(".")[0]
+        for node in ast.parse(source.read_text()).body:
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                parts = package.split(".")[: len(package.split(".")) - node.level + 1] if node.level else []
+                base = ".".join(parts + ([node.module] if node.module else []))
+                names = [base] + [f"{base}.{alias.name}" for alias in node.names]
+            for name in names:
+                top = name.split(".")[0]
+                if top in {"scripts", "hooks"}:
+                    pending.append(name)
+                elif top not in sys.stdlib_module_names and top != "__future__":
+                    third_party.add(top)
+    return third_party
+
+
+def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> None:
     root = Path(__file__).parents[1]
     lock = (root / "docker/swarm/requirements.lock").read_text()
     pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
-    modules: set[str] = set()
-    for source in sorted((root / "scripts/hub").glob("*.py")):
-        for node in ast.walk(ast.parse(source.read_text())):
-            if isinstance(node, ast.Import):
-                modules.update(alias.name.split(".")[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                modules.add(node.module.split(".")[0])
-    third_party = sorted(modules - set(sys.stdlib_module_names) - {"scripts", "hooks"})
+    hub = sorted(f"scripts.hub.{source.stem}" for source in (root / "scripts/hub").glob("*.py"))
+    third_party = _image_third_party_imports(root, ["scripts.install", "scripts.swarm_ledger", *hub])
     distributions = importlib.metadata.packages_distributions()
-    missing = [
-        module for module in third_party if not {name.lower() for name in distributions.get(module, [module])} & pinned
-    ]
-    assert "packaging" in third_party
+    missing = sorted(
+        module
+        for module in third_party
+        if not {name.lower().replace("_", "-") for name in distributions.get(module, [module])} & pinned
+    )
+    assert {"packaging", "yaml"} <= third_party
     assert missing == []
 
 
