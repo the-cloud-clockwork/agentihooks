@@ -70,7 +70,7 @@ class FakeGitHub:
 
     def state(self, target: str = "") -> str:
         assert len(self.posted) == 1
-        state = self.posted[0][5].removeprefix("state=")
+        state = self.posted[0][4].removeprefix("state=")
         assert self.posted[0] == [
             "gh",
             "api",
