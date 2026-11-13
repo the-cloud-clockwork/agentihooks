@@ -597,3 +597,31 @@ def test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record(
     assert admitted is not None
     assert admitted["hive"] == "hive-a"
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-carries-ledger-intent")
+def test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledger_read(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import ledger_read, profile_choice
+    from scripts.swarm.store import SwarmError
+
+    def refused(slug: str, *keys: str) -> dict:
+        raise SwarmError(f"the hosted ledger is unavailable for {slug}: a remote ledger client needs a pinned identity")
+
+    monkeypatch.setattr(ledger_read, "parts", refused)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    picked = profile_choice.state(SLUG, admitted["task"])
+    assert (picked["task"], picked["project_intent"], picked["phase"], picked["phase_intent"]) == (
+        "t1",
+        "o",
+        "p1",
+        "build: ",
+    )
+    assert admitted["task"][profile_choice.LEDGER_INTENT] == {
+        "overview": "o",
+        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
+    }
+    json.dumps(admitted)
