@@ -130,7 +130,7 @@ def reaching(path: Path, root: Path) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     """Grade every Python file under the tests folder and report each double patch."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args(argv)
     files = sorted((args.root / "tests").rglob("*.py"))
     problems: list[str] = []

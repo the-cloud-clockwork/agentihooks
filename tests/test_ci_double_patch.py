@@ -159,6 +159,35 @@ def test_a_fixture_decorator_named_through_several_modules_is_autouse(
     ]
 
 
+def test_a_module_fixture_patching_an_aliased_submodule_reaches_a_later_class(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _tree(
+        tmp_path,
+        {
+            "tests/test_eight.py": (
+                "import pytest\n"
+                "import pkg as p\n"
+                "from unittest import mock\n"
+                "@pytest.fixture(autouse=True)\n"
+                "def _isolate():\n"
+                "    with mock.patch.object(p.mod, 'get_redis'):\n"
+                "        yield\n"
+                "class TestEight:\n"
+                "    def test_eight(self, monkeypatch):\n"
+                "        monkeypatch.setattr('pkg.mod.get_redis', lambda: None)\n"
+            )
+        },
+    )
+    assert main(["--root", str(root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Double patches: 1 files, 1 problems",
+        _error(
+            "tests/test_eight.py", 10, "TestEight.test_eight", "pkg.mod.get_redis", "_isolate", "tests/test_eight.py:6"
+        ),
+    ]
+
+
 @pytest.mark.parametrize(
     ("files", "graded"),
     [

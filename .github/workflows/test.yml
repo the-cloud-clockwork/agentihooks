@@ -2811,7 +2811,7 @@ jobs:
             cd "$RUNNER_TEMP/grader"
             python -m scripts.ci_double_patch --root "$GITHUB_WORKSPACE"
           else
-            python -m scripts.ci_double_patch
+            python -m scripts.ci_double_patch --root .
           fi
 
       - name: Require trusted actors before private runner admission
