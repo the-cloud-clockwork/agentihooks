@@ -50,11 +50,9 @@ def resolved(node: ast.AST, aliases: dict[str, str]) -> str:
 def attribute_target(args: list[ast.expr], aliases: dict[str, str]) -> str:
     """Return the dotted target of an owner and attribute name pair, or an empty string."""
     match args:
-        case [owner_node, ast.Constant(value=str() as attribute), *_]:
-            owner = resolved(owner_node, aliases)
-            return f"{owner}.{attribute}" if owner else ""
-        case _:
-            return ""
+        case [owner_node, ast.Constant(value=str() as attribute), *_] if owner := resolved(owner_node, aliases):
+            return f"{owner}.{attribute}"
+    return ""
 
 
 def mock_target(call: ast.Call, aliases: dict[str, str]) -> str:
