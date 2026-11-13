@@ -1,5 +1,7 @@
 import json
 import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -53,16 +55,23 @@ def test_a_foreign_task_write_refreshes_the_task_and_its_events(tmp_path):
 
 
 @pytest.mark.parametrize("writes", WRITES.values(), ids=WRITES.keys())
-def test_a_foreign_write_rereads_only_the_reached_keys_of_an_object(tmp_path, monkeypatch, writes):
+def test_a_foreign_write_rereads_only_the_reached_keys_of_an_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writes: list[list[dict[str, Any]]]
+) -> None:
     reader, writer = store(tmp_path), store(tmp_path)
     reader.create("ledger", CONTENT)
     reader.apply_ops("ledger", ops=[chat(0), CLAIM])
     reader.current("ledger")
     for ops in writes:
         writer.apply_ops("ledger", ops=ops)
-    parents = []
+    parents: list[str] = []
     original = refresh.child_rows
-    monkeypatch.setattr(refresh, "child_rows", lambda c, s, parent: parents.append(parent) or original(c, s, parent))
+
+    def spied(connection: sqlite3.Connection, slug: str, parent: str) -> list[Any]:
+        parents.append(parent)
+        return original(connection, slug, parent)
+
+    monkeypatch.setattr(refresh, "child_rows", spied)
     served = reader.current("ledger")
     assert refresh.encode(["_meta"]) not in parents
     assert refresh.encode(["_meta", "stamps"]) not in parents
