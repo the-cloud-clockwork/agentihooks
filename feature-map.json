@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "hub-admission-hive-max-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-max-agents",
+      "behaviour": "The hub refuses an events admission request from a hive whose live worker executions across every swarm already reach its registry max agents, before any claim, execution, seat or ledger write, and still admits a hive below its cap or with none set.",
+      "seam": "Admission.admit for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents"
+      ],
+      "rules": [
+        "admission-skips-hive-max-agents"
+      ]
+    },
+    {
       "id": "controller-done-clears-awaiting",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",

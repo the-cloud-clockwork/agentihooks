@@ -1,0 +1,24 @@
+rules:
+  - id: admission-skips-hive-max-agents
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub events admission claims a task without checking the hive's registry max agents. On 13 November the hub
+      Admission admit checked only release, claims, placement and lives, and the spoke only host room, so no hive cap
+      held under the events engine. Refuse a hive whose live executions reach its max agents with self._full before
+      self._claim.
+    paths:
+      include:
+        - /scripts/hub/
+        - admission-skips-hive-max-agents.py
+    patterns:
+      - pattern-inside: |
+          def admit(self, ...):
+              ...
+      - pattern: self._claim(...)
+      - pattern-not-inside: |
+          def admit(self, ...):
+              ...
+              if <... self._full(...) ...>:
+                  ...
+              ...
