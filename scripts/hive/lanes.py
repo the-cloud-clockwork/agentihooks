@@ -57,7 +57,7 @@ class LaneTasks:
 
     def launched(self, event: Envelope, placed: Any) -> None:
         decision = {field: getattr(placed, field) for field in account_slots.LAUNCH_DECISION}
-        self._ask("launched", event, launch=decision)
+        self._ask("launched", event, launch=decision)  # pyright: ignore[reportUnknownMemberType]
 
 
 def lanes(excluded: str | None) -> tuple[str, ...]:
