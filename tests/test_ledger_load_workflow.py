@@ -68,3 +68,11 @@ def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():
     assert fetch["env"] == {"BASE": "${{ inputs.base }}"}
     assert fetch["run"] == 'git fetch --no-tags --depth=1 origin "${BASE#origin/}"'
     assert gate["run"].rstrip().endswith("--base FETCH_HEAD")
+
+
+def test_every_ledger_load_install_pins_the_pretend_version() -> None:
+    jobs = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]
+    for name in ("load", "compare"):
+        [install] = [step for step in jobs[name]["steps"] if step.get("name") == "Install dependencies"]
+        assert install["env"]["SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS"] == "0.dev${{ github.run_number }}"
+        assert '-e ".[all]"' in install["run"]
