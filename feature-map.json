@@ -14,6 +14,32 @@
       ]
     },
     {
+      "id": "controller-standby-replica",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
+      "behaviour": "Controller replicas of one hive take a Redis replica lock before running passes, so two replicas never run a pass at the same time; a standby serves health and forwards the control API to the leader, takes the lock once the leader releases it or it expires, and each replica holds its own controller credential so a second replica never retires the leader's.",
+      "seam": "replica.ReplicaLock, control_service.Standby, auth.issue_controller with a holder, and the controller chart replicas, rolling update and disruption budget",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_two_replicas_never_run_a_pass_at_the_same_time",
+        "tests/swarm/test_controller_replica.py::test_the_standby_takes_over_once_the_leader_releases",
+        "tests/swarm/test_controller_replica.py::test_the_standby_takes_over_once_the_leader_lock_expires",
+        "tests/swarm/test_controller_replica.py::test_a_replica_lock_is_scoped_to_its_hive",
+        "tests/swarm/test_controller_replica.py::test_the_beat_renews_the_lock_until_stopped",
+        "tests/swarm/test_controller_replica.py::test_the_beat_reports_a_lost_lock_once_and_ends",
+        "tests/swarm/test_controller_replica.py::test_the_beat_rides_out_a_redis_error",
+        "tests/swarm/test_controller_replica.py::test_a_replica_lock_exists_only_when_the_replica_is_named",
+        "tests/swarm/test_controller_replica.py::test_the_keeper_calls_its_action_until_stopped",
+        "tests/swarm/test_controller_replica.py::test_a_standby_answers_health_itself",
+        "tests/swarm/test_controller_replica.py::test_a_standby_forwards_every_other_request_to_the_leader",
+        "tests/swarm/test_controller_replica.py::test_a_standby_refuses_while_no_replica_leads",
+        "tests/swarm/test_controller_replica.py::test_a_standby_refuses_when_the_leader_is_unreachable",
+        "tests/swarm_ledger/test_controller_credential.py::test_two_replica_controller_credentials_stay_valid_side_by_side",
+        "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_issues_a_replica_credential_for_a_holder",
+        "tests/test_swarm_chart_controller_rollout.py::test_the_kind_proof_checks_the_controller_rollout_before_any_cluster_starts",
+        "tests/test_swarm_chart_controller_rollout.py::test_the_chart_defaults_to_one_controller_and_rolls_more_out_with_one_always_ready"
+      ]
+    },
+    {
       "id": "codex-expired-routing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
