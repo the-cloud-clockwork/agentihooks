@@ -3,6 +3,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.bus import Bus, StateConflict
 from scripts.events.envelope import Envelope
@@ -10,7 +11,8 @@ from scripts.hive import execution_events, presence
 from scripts.hub import lease
 from scripts.hub.reconciler import event_slugs
 from scripts.hub.registry import Reactor
-from scripts.swarm.store import RedisStore, connect
+from scripts.swarm import store as swarm_store
+from scripts.swarm.store import RedisStore
 
 BUCKET = "hub-hive-loss"
 INDEX = "started"
@@ -37,7 +39,7 @@ class HiveLoss:
         if event.type != "execution.started" or not key or not event.data.get("hive"):
             return
 
-        def add(rows: dict) -> bool:
+        def add(rows: dict[str, Any]) -> bool:
             if key in rows and rows[key]["data"]["claim_revision"] >= event.data["claim_revision"]:
                 return False
             rows[key] = event.to_dict()
@@ -55,7 +57,7 @@ class HiveLoss:
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
             by_hive[(raw["swarm"], raw["data"]["hive"])].append((key, Envelope.from_dict(raw)))
-        events = self._events(by_hive)
+        events = self._events() if by_hive else set[str]()
         done, losses = [], []
         for (swarm, hive), starts in by_hive.items():
             if not guard():
@@ -75,7 +77,7 @@ class HiveLoss:
                 self._pruned = now
         if done:
 
-            def drop(rows: dict) -> bool:
+            def drop(rows: dict[str, Any]) -> bool:
                 found = [key for key in done if key in rows]
                 for key in found:
                     del rows[key]
@@ -85,10 +87,8 @@ class HiveLoss:
             for line in losses:
                 print(line, file=sys.stderr)
 
-    def _events(self, watched: dict) -> set[str]:
-        if not watched:
-            return set()
-        self._store = self._store or connect()
+    def _events(self) -> set[str]:
+        self._store = self._store or swarm_store.connect()
         return set(event_slugs(self._store))
 
     def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[str]]:
@@ -113,7 +113,7 @@ class HiveLoss:
             done.append(key)
         return done, ended
 
-    def _edit(self, change: Callable[[dict], bool]) -> None:
+    def _edit(self, change: Callable[[dict[str, Any]], bool]) -> None:
         for _ in range(8):
             entry = self._state.get(INDEX)
             rows = json.loads(entry.value) if entry else {}
