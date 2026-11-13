@@ -72,6 +72,8 @@ def capture(store: Any, slug: str, url: str, now_ms: int) -> list[dict[str, Any]
     if not url:
         return []
     last = status(store, slug) or {}
+    if last.get("url") != url:
+        last = {}
     try:
         doc = read(url)
         found = rows(slug, doc, now_ms)

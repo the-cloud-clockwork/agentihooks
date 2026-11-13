@@ -173,6 +173,20 @@ def test_a_first_failed_capture_records_only_the_error(store: RedisStore, monkey
     }
 
 
+def test_a_failed_capture_of_a_new_lab_drops_the_old_labs_capacity(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(lab_capacity, "urlopen", lambda url, timeout: Reply(json.dumps(DOC).encode()))
+    lab_capacity.capture(store, "sw", "http://old-lab:8800", NOW)
+    monkeypatch.setattr(lab_capacity, "urlopen", lambda url, timeout: Reply(b"[]"))
+    assert lab_capacity.capture(store, "sw", "http://new-lab:8800", NOW + 60_000) == []
+    assert lab_capacity.status(store, "sw") == {
+        "url": "http://new-lab:8800",
+        "error": "lab capacity document carries no classes",
+        "error_at": NOW + 60_000,
+    }
+
+
 def test_status_json_carries_the_lab_block_of_the_configured_lab(env: Any, lab: str) -> None:
     store, _, _ = env
     cli.main(["sw", "create", "--repo", "/repo"])
@@ -191,6 +205,6 @@ def test_set_lab_url_refuses_an_address_that_is_not_http(env: Any, capsys: pytes
     assert cli.main(["sw", "set", "lab-url=ftp://lab"]) == 1
     assert (
         capsys.readouterr().err.strip()
-        == "swarm: api-url takes an http or https address with a host and no credentials"
+        == "swarm: lab-url takes an http or https address with a host and no credentials"
     )
     assert env[0].config("sw").lab_url == ""
