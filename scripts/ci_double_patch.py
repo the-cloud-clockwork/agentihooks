@@ -95,7 +95,7 @@ def autouse(function: FunctionNode) -> bool:
     """Tell whether a function is declared a pytest fixture with autouse true."""
     return any(
         isinstance(decorator, ast.Call)
-        and qualified(decorator.func).rsplit(".", 1)[-1] == "fixture"
+        and qualified(decorator.func).rpartition(".")[2] == "fixture"
         and any(
             keyword.arg == "autouse" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True
             for keyword in decorator.keywords
@@ -140,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     top = args.root / "conftest.py"
     for path in [*files, top] if top.is_file() else files:
         try:
-            parsed[path] = patches(ast.parse(path.read_text(), filename=str(path)), path)
+            parsed[path] = patches(ast.parse(path.read_text()), path)
         except (SyntaxError, UnicodeError) as error:
             problems.append(f"{path.relative_to(args.root)}: cannot parse: {error}")
     for path in files:
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         for patch in parsed.get(path, ([], []))[1]:
             if fixture := mocked.get(patch.target):
                 problems.append(
-                    f"{path.relative_to(args.root)}:{patch.line}: {patch.function} monkeypatches {patch.target}, "
+                    f"{patch.path.relative_to(args.root)}:{patch.line}: {patch.function} monkeypatches {patch.target}, "
                     f"which autouse fixture {fixture.function} patches with mock.patch at "
                     f"{fixture.path.relative_to(args.root)}:{fixture.line}; patch it through monkeypatch in that "
                     "fixture so one stack unwinds both"

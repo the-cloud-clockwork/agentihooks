@@ -147,6 +147,18 @@ def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
     ]
 
 
+def test_a_fixture_decorator_named_through_several_modules_is_autouse(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = _MOCKED_FIXTURE.replace("pytest.fixture", "_pytest.fixtures.fixture")
+    root = _tree(tmp_path, {"tests/test_seven.py": fixture + _MONKEYPATCH_TEST})
+    assert main(["--root", str(root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Double patches: 1 files, 1 problems",
+        _error("tests/test_seven.py", 8, "test_one", "pkg.mod.get_redis", "_isolate", "tests/test_seven.py:5"),
+    ]
+
+
 @pytest.mark.parametrize(
     ("files", "graded"),
     [
@@ -213,6 +225,15 @@ def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
             },
             1,
         ),
+        (
+            {
+                "tests/test_clean.py": _MOCKED_FIXTURE.replace("pkg.mod.get_redis", "XXXX")
+                + "def test_one(monkeypatch, other):\n"
+                "    monkeypatch.setenv('HOME', '/tmp')\n"
+                "    other.setattr('XXXX', 1)\n"
+            },
+            1,
+        ),
     ],
     ids=[
         "monkeypatch-fixture",
@@ -224,6 +245,7 @@ def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
         "not-a-fixture",
         "conftests-off-the-path",
         "unnamed-owners",
+        "calls-that-are-not-monkeypatch-setattr",
     ],
 )
 def test_clean_forms_pass(
