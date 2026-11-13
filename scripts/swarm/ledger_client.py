@@ -439,7 +439,7 @@ class LedgerClient:
             error = LedgerRefused if 400 <= exc.code < 500 else SwarmError
             raise error(f"ledger {slug}: server refused: {exc.code} {ledger.refusal_text(exc)}") from exc
         except OSError as exc:
-            raise SwarmError(f"ledger {slug}: {exc}") from exc
+            raise LedgerUnreachable(f"ledger {slug}: {exc}") from exc
 
     def bin_closed(self, slug, closed_at):
         from scripts.swarm_ledger import ledger_link
