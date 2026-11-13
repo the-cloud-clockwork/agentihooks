@@ -49,11 +49,10 @@ class Leases:
             job = self.queue.job(job_id)
             if job is None or job.requirement.slots > free_slots:
                 continue
-            if not job.requirement.capabilities <= capabilities or not self.queue.claim(job_id):
-                continue
             token = secrets.token_hex(16)
             expires_ms = self.clock() + self.ttl_ms
-            self.queue.lease(job_id, worker, token, expires_ms)
+            if not job.requirement.capabilities <= capabilities or not self.queue.claim(job, worker, token, expires_ms):
+                continue
             grants.append(Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms))
             free_slots -= job.requirement.slots
         return grants
@@ -65,28 +64,19 @@ class Leases:
 
     def heartbeat(self, job: str, token: str) -> int | None:
         """Extend the lease and return its new expiry, or None when the token does not hold it."""
-        if not self.owns(job, token):
-            return None
         expires_ms = self.clock() + self.ttl_ms
-        return expires_ms if self.queue.extend(job, expires_ms) else None
+        return expires_ms if self.queue.extend(job, token, expires_ms) else None
 
     def complete(self, job: str, token: str, outcome: str) -> bool:
         """Record the outcome of a job whose live lease the token holds."""
-        if not self.owns(job, token) or not self.queue.release(job):
-            return False
-        self.queue.finish(job, "done", outcome)
-        return True
+        record = self.queue.job(job)
+        return record is not None and self.queue.finish(record, token, outcome)
 
     def reap(self, now_ms: int) -> list[tuple[str, str]]:
         """Requeue each expired lease once; a job that expires again is lost."""
         reaped: list[tuple[str, str]] = []
         for job in self.queue.expired(now_ms):
-            if not self.queue.release(job):
-                continue
-            if self.queue.attempts(job) < REQUEUES:
-                self.queue.requeue(job)
-                reaped.append((job, "pending"))
-            else:
-                self.queue.finish(job, "lost", "lost")
-                reaped.append((job, "lost"))
+            record = self.queue.job(job)
+            if record is not None and (state := self.queue.reap(record, now_ms, REQUEUES)):
+                reaped.append((job, state))
         return reaped
