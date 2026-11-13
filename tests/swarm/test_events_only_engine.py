@@ -19,6 +19,7 @@ def test_a_stored_legacy_or_missing_engine_reads_as_events(env: tuple, stored: s
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     key = store.key("sw", "config")
+    assert store.redis.hget(key, "engine") == "events"
     if stored is None:
         store.redis.hdel(key, "engine")
     else:
