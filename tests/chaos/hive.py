@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from scripts.events.bus import StateStore
 from scripts.events.config import BusConfig
@@ -83,6 +84,9 @@ class ChaosTasks:
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         self.journal.write("failed", task=event.key, harness=harness)
+
+    def launched(self, event: Envelope, placed: Any) -> None:
+        return None
 
 
 def finish(bus, runtime: ChaosRuntime, journal: Journal) -> None:

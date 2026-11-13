@@ -24,6 +24,8 @@ class Tasks(Protocol):
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
 
+    def launched(self, event: Envelope, placed: Any) -> None: ...
+
 
 @dataclass(frozen=True)
 class SpokeConfig:
@@ -278,6 +280,7 @@ class Spoke:
             json.dumps({"state": "started", "claim_revision": revision, "event": started.to_dict()}).encode(),
             revision,
         )
+        self.tasks.launched(event, placed)
         return started
 
     def _publish(self, event: Envelope) -> None:
