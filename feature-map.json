@@ -5144,7 +5144,8 @@
         "tests/quick/test_cli.py::test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaunch",
         "tests/quick/test_room_tick_launch.py::test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending",
         "tests/quick/test_room_tick_launch.py::test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds",
-        "tests/quick/test_room_tick_launch.py::test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching"
+        "tests/quick/test_room_tick_launch.py::test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching",
+        "tests/quick/test_quick_hooks.py::test_the_quick_gate_names_the_tokens_held_and_checks_a_named_handoff_file"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
     },

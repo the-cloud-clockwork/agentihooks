@@ -91,6 +91,25 @@ def test_past_the_hard_gate_a_quick_member_may_only_read_write_its_handoff_and_h
     assert recycle.gate("Write", handoff_write, "s1", environ) is None
 
 
+@pytest.mark.feature("quick-swarm")
+def test_the_quick_gate_names_the_tokens_held_and_checks_a_named_handoff_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environ = _quick(tmp_path)
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 700_000)
+    blocked = recycle.gate("Bash", {"command": "pytest -q"}, "s1", environ)
+    assert blocked is not None and "holds 700k tokens, at or over the 650k limit" in blocked
+    document = tmp_path / "elsewhere.md"
+    document.write_text("# Handoff v2\n## Intent\nx\n")
+    refused = recycle.gate("Bash", {"command": f"agentihooks quick handoff {document}"}, "s1", environ)
+    assert refused is not None and refused.startswith("BLOCKED")
+    document.write_text(
+        "# Handoff v2\n## Intent\nx\n## Done\nNone\n## Stopped at\nx\n## Decisions and promises\nNone\n"
+        "## Next\nx\n## Read first\nNone\n<!-- handoff complete -->\n"
+    )
+    assert recycle.gate("Bash", {"command": f"agentihooks quick handoff {document}"}, "s1", environ) is None
+
+
 def test_a_session_outside_a_quick_swarm_and_any_swarm_gets_no_directive(monkeypatch, tmp_path):
     monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 700_000)
     assert recycle.directive("s1", {"AGENTIHOOKS_HOME": str(tmp_path)}) is None
