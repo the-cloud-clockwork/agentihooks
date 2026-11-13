@@ -35,7 +35,7 @@ def own_origin(redis_store: RedisStore, slug: str) -> str:
 def repo_origin(redis_store: RedisStore, slug: str) -> str:
     """The origin of the swarm a Doctor watches, else the swarm's own origin."""
     peer = watched(redis_store, slug)
-    return (own_origin(redis_store, peer) if peer else "") or own_origin(redis_store, slug)
+    return own_origin(redis_store, peer) if peer else own_origin(redis_store, slug)
 
 
 def migrate(redis_store: RedisStore) -> dict[str, str]:

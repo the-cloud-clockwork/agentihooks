@@ -78,6 +78,14 @@ def test_a_swarm_without_any_origin_stays_legacy_and_is_reported(store):
     assert configs(store) == {"orphan": ("legacy", ""), "orphan-doctor": ("legacy", "")}
 
 
+def test_a_doctor_never_takes_its_own_checkout_origin_when_the_watched_swarm_has_none(store, checkout):
+    store.create(SwarmConfig("bare", "/missing", 1, 1))
+    store.create(SwarmConfig("bare-doctor", str(checkout), 1, 0, template="doctor"))
+
+    assert engine_migration.migrate(store) == dict.fromkeys(("bare", "bare-doctor"), "skipped: no repository origin")
+    assert configs(store) == {"bare": ("legacy", ""), "bare-doctor": ("legacy", "")}
+
+
 def test_main_migrates_the_connected_store_and_prints_each_outcome(store, monkeypatch, capsys):
     store.create(replace(SwarmConfig("sw", "/missing", 1, 1), repo_origin="github.com/team/project"))
     monkeypatch.setattr(engine_migration.store, "connect", lambda: store)
