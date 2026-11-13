@@ -1861,6 +1861,9 @@
         "tests/swarm/test_health_rows.py::test_status_text_prints_every_finding_with_its_rows_and_marks",
         "tests/swarm/test_health_rows.py::test_status_text_says_when_a_finding_has_no_rows",
         "tests/swarm/test_health_rows.py::test_a_row_without_a_time_reads_time_zero",
+      "tests/swarm/test_health_rows.py::test_seat_rows_keep_the_agent_events_sorted_by_time_with_their_labels",
+      "tests/swarm/test_health_rows.py::test_the_last_outcome_is_the_latest_done_task_with_an_outcome",
+      "tests/swarm/test_health_rows.py::test_status_text_prints_the_whole_block_in_utc",
         "tests/swarm/test_health_rows.py::test_an_added_event_without_a_target_queues_nothing",
         "tests/swarm/test_health_rows.py::test_the_verdict_record_stores_the_rows_and_the_last_outcome",
         "tests/swarm_ledger/test_swarm_layout.py::test_alert_line_lists_each_open_finding_with_its_rows_and_required_marks"
