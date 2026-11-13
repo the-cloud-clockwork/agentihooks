@@ -1,9 +1,12 @@
 import inspect
 import json
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -422,6 +425,57 @@ def test_the_claim_view_admits_every_task_when_the_saved_listing_records_a_faile
 
     assert _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng") == [rows["red"]]
     assert reads == []
+
+
+def events_admits(store: RedisStore, tmp_path: Path, row: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
+    """Return the events readiness snapshot's admission of an events swarm whose ledger holds only ``row``."""
+    from scripts.swarm import readiness
+
+    store.create(SwarmConfig("ev", str(tmp_path), max_eng=2, max_ci=0, engine="events"))
+    ledger = Mock()
+    ledger.metadata.return_value = {"_meta": {"rev": 1}}
+    ledger.state.return_value = {"phases": [], "tasks": [row]}
+    return readiness.Source(store, ledger).snapshot("ev").admits
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    row = task("red", pr_url=MINE)
+
+    assert events_admits(store, tmp_path, row)(row) is True
+    assert reads == []
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    both = [run("Tests", "FAILURE", datetime.now(UTC).isoformat())]
+    listed(store, "ev", "o/r", lambda repo: fleet(both, *[both] * 3))
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    row = task("red", pr_url=MINE)
+
+    assert events_admits(store, tmp_path, row)(row) is False
+    assert reads == []
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store.create(SwarmConfig("ev", str(tmp_path), max_eng=2, max_ci=0, engine="events"))
+    monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED)
+    tick.tick("ev", store, FakeLedger([task("a", pr_url=MINE)]), FakeRuntime(), now_ms=4_321)
+
+    assert fleet_red.saved_reader(store, "ev")("o/r") == tuple(SAVED)
 
 
 def test_the_notice_step_budget_outlasts_the_live_listing_so_its_save_is_kept() -> None:

@@ -4382,6 +4382,18 @@
       ]
     },
     {
+      "id": "events-admission-saved-fleet-red-listing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-admission-saved-listing",
+      "behaviour": "The events readiness snapshot judges an open task with a pull request only from the fleet red listing the tick saved for that events swarm, admitting it when nothing is saved, so a hub admission never lists GitHub live and answers inside the hive's wait; the tick's fleet red notice step still lists and saves that listing for an events swarm.",
+      "seam": "scripts.swarm.readiness.Source.snapshot admits through scripts.swarm.fleet_red.saved_reader, and the fleet red notice step of the tick on an events swarm",
+      "tests": [
+        "tests/swarm/test_fleet_red.py::test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live",
+        "tests/swarm/test_fleet_red.py::test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live",
+        "tests/swarm/test_fleet_red.py::test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
