@@ -55,10 +55,7 @@ class HiveLoss:
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
             by_hive[(raw["swarm"], raw["data"]["hive"])].append((key, Envelope.from_dict(raw)))
-        events: set[str] = set()
-        if by_hive:
-            self._store = self._store or connect()
-            events = set(event_slugs(self._store))
+        events = self._events(by_hive)
         done, losses = [], []
         for (swarm, hive), starts in by_hive.items():
             if not guard():
@@ -87,6 +84,12 @@ class HiveLoss:
             self._edit(drop)
             for line in losses:
                 print(line, file=sys.stderr)
+
+    def _events(self, watched: dict) -> set[str]:
+        if not watched:
+            return set()
+        self._store = self._store or connect()
+        return set(event_slugs(self._store))
 
     def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[str]]:
         done, ended = [], []
