@@ -620,6 +620,16 @@
       ]
     },
     {
+      "id": "hub-admission-carries-ledger-intent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-churn",
+      "behaviour": "An events admission carries the project intent and the task's own phase on the admitted task, so the hive picks the engineer profile without a ledger read; a remote hive has no ledger identity, and the refused read used to fail every launch after the claim, reopening the task and raising its claim generation each cycle.",
+      "seam": "Admission.admit answer read by profile_choice.state on the hive",
+      "tests": [
+        "tests/hub/test_admission.py::test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledger_read"
+      ]
+    },
+    {
       "id": "hub-offer-logging",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-logging",
