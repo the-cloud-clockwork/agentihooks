@@ -607,6 +607,20 @@
       ]
     },
     {
+      "id": "events-launch-decision-record",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-record-launch-fields",
+      "behaviour": "A hive lane spoke that spawned an events admitted agent reports its launch decision to the hub before it publishes execution started, and the hub writes the harness, profile, account, model and effort onto that agent's record, which swarm status reads; a hive without the admission or a seat another agent now occupies changes no record.",
+      "seam": "Admission.launched for a hive spoke request and LaneTasks.launched from Spoke._spawn",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hive_launch_decision_reaches_the_record_swarm_status_reads",
+        "tests/hub/test_admission.py::test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record",
+        "tests/hub/test_admission.py::test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record",
+        "tests/hub/test_admission.py::test_the_hub_answers_a_launched_request_over_the_slot_subject",
+        "tests/hive/test_lanes.py::test_a_launch_is_reported_to_the_hub_with_its_harness_profile_and_account"
+      ]
+    },
+    {
       "id": "hub-admission-release-floor",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-release-floor",

@@ -119,6 +119,65 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     json.dumps(admitted)
 
 
+LAUNCH = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_the_hive_launch_decision_reaches_the_record_swarm_status_reads(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    [agent] = rig.store.agents(SLUG)
+    assert agent.name == admitted["name"]
+    assert (agent.harness, agent.profile, agent.account, agent.model, agent.effort) == (
+        "codex",
+        "engineer",
+        "work",
+        "gpt-5",
+        "high",
+    )
+    assert (agent.state, agent.seat, agent.hive) == ("starting", "eng-1@sw", "hive-a")
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record(rig):
+    rig.admitter.admit(SLUG, ask())
+    [before] = rig.store.agents(SLUG)
+
+    assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
+    assert rig.admitter.launched(SLUG, ask(generation=5, launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == [before]
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    [before] = rig.store.agents(SLUG)
+    held = rig.store.key(SLUG, "spoke-admission", "t1", "0")
+    rig.store.redis.set(held, json.dumps({**admitted, "name": "eng@sw-other"}))
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == [before]
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_the_hub_answers_a_launched_request_over_the_slot_subject(rig):
+    bus = open_bus(BusConfig(scoped=True))
+    slots.serve(bus, admitter=rig.admitter)
+    try:
+        rig.admitter.admit(SLUG, ask())
+        answered = account_slots.asker(bus.for_swarm(SLUG), SLUG, "hive-a")({"op": "launched", **ask(launch=LAUNCH)})
+    finally:
+        bus.close()
+
+    assert answered is True
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.harness, agent.profile, agent.account) == ("codex", "engineer", "work")
+
+
 def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
     admitted = rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
     assert rig.rows["t2"]["state"] == "pr"
