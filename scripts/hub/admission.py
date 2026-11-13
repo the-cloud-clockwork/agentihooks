@@ -124,7 +124,7 @@ class Admission:
         return f"release {member} below hub release {hub}" if reported and floor and reported < floor else ""
 
     def _unplaceable(self, row: dict[str, Any], hive: str) -> str:
-        """Why a draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is
+        """Why a draining hive, a workstation task off the root hive, a task pinned to another hive or one needing what the hive lacks is
         never admitted; empty when the hive may take the task."""
         from scripts.hive import placement, registry
 
@@ -132,7 +132,7 @@ class Admission:
         if record.get("draining") == placement.YES:
             return "the hive is draining"
         if not readiness.placeable(row, hive, readiness.declared(self.store, hive)):
-            return "the task is workstation, pinned to another hive or needs what the hive lacks"
+            return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
