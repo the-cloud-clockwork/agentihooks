@@ -29,6 +29,7 @@ class Clock:
 
     def sleep(self, ms: int) -> None:
         assert ms > 0
+        assert len(self.sleeps) < 1000
         self.sleeps.append(ms)
         self.now += ms
 

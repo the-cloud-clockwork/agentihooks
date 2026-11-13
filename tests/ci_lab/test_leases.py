@@ -16,6 +16,7 @@ class Clock:
 
     def sleep(self, ms: int) -> None:
         assert ms > 0
+        assert len(self.sleeps) < 100
         self.sleeps.append(ms)
         self.now += ms
 
@@ -195,15 +196,17 @@ def test_superseded_leased_job_still_finishes(jobs: queue.Queue, lab: leases.Lea
     assert found(jobs, grant.job).state == "done"
 
 
+def refuse(ms: int) -> None:
+    raise AssertionError(f"a lease without a wait slept {ms} ms")
+
+
 def test_concurrent_leases_never_share_a_job(server, jobs: queue.Queue) -> None:
     jobs.enqueue([unit(f"u{index}") for index in range(60)], "h1", {})
     barrier = threading.Barrier(8)
     granted: list[list[str]] = [[] for _ in range(8)]
 
     def work(index: int) -> None:
-        worker = leases.Leases(
-            queue.Queue(client(server)), ttl_ms=500, clock=lambda: 1000, sleep=lambda ms: None, poll_ms=50
-        )
+        worker = leases.Leases(queue.Queue(client(server)), ttl_ms=500, clock=lambda: 1000, sleep=refuse, poll_ms=50)
         barrier.wait()
         while grants := worker.lease(f"w{index}", 2, frozenset(), 0):
             granted[index].extend(grant.job for grant in grants)
