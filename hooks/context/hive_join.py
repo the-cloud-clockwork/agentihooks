@@ -8,6 +8,7 @@ def run(payload: dict, event: str) -> None:
     name = os.environ.get("AGENTIHOOKS_AGENT_NAME")
     if not (slug and name):
         return
+    from hooks.targets import current_target
     from scripts.hive import join_checks, join_report
     from scripts.profiles.binding import HOMES
     from scripts.swarm.commands import hive_id
@@ -39,10 +40,11 @@ def run(payload: dict, event: str) -> None:
     if join_report.read(store.redis, agent).get("session_id") == session:
         return
     transcript = payload.get("transcript_path")
+    harness = agent.harness or current_target()
     context = {
-        "home": os.environ.get(HOMES.get(agent.harness, ""), ""),
-        "profile": agent.profile,
-        "harness": agent.harness,
+        "home": os.environ.get(HOMES.get(harness, ""), ""),
+        "profile": agent.profile or os.environ.get("AGENTIHOOKS_PROFILE", ""),
+        "harness": harness,
         "pane": os.environ.get("HERDR_PANE_ID", agent.pane_id),
         "transcript_dir": str(Path(transcript).parent) if transcript else "",
         "headed": join_checks.headed(store.redis, hive),
