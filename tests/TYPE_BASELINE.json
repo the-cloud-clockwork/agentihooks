@@ -684,7 +684,7 @@
   "scripts/swarm/stale_nudge.py": 27,
   "scripts/swarm/stall_watch.py": 731,
   "scripts/swarm/status.py": 297,
-  "scripts/swarm/store.py": 776,
+  "scripts/swarm/store.py": 741,
   "scripts/swarm/successor_retry.py": 29,
   "scripts/swarm/swarm_init.py": 58,
   "scripts/swarm/take_master.py": 219,
