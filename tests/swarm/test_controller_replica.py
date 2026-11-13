@@ -198,7 +198,9 @@ def leader() -> Any:
 
 
 @pytest.mark.feature("controller-standby-replica")
-@pytest.mark.parametrize(("available", "ready"), [(True, (200, {"redis": "ok"})), (False, (503, {"redis": "unavailable"}))])
+@pytest.mark.parametrize(
+    ("available", "ready"), [(True, (200, {"redis": "ok"})), (False, (503, {"redis": "unavailable"}))]
+)
 def test_a_standby_answers_health_itself(
     monkeypatch: pytest.MonkeyPatch, available: bool, ready: tuple[int, dict[str, str]]
 ) -> None:
