@@ -49,20 +49,28 @@ def test_the_contract_holds_exactly_the_architecture_names() -> None:
 
 
 def test_every_contract_metric_is_emitted() -> None:
-    text = metrics.Registry().render()
+    registry = metrics.Registry()
+    empty = registry.render()
     for name in CONTRACT_NAMES:
         kind = "counter" if name in COUNTERS else "gauge"
-        assert f"# TYPE {name} {kind}\n" in text
-        assert f"# HELP {name} " in text
+        assert f"# TYPE {name} {kind}\n" in empty
+        assert f"# HELP {name} " in empty
+    assert not [line for line in empty.splitlines() if not line.startswith("#")]
     for metric in metrics.CONTRACT:
-        if not metric.labels:
-            assert f"\n{metric.name} 0.0\n" in text
+        labels = {label: "x" for label in metric.labels}
+        if metric.kind == "counter":
+            registry.inc(metric.name, 2.0, labels)
+        else:
+            registry.set(metric.name, 2.0, labels)
+    samples = [line for line in registry.render().splitlines() if not line.startswith("#")]
+    assert [line.split("{")[0].split(" ")[0] for line in samples] == list(CONTRACT_NAMES)
+    assert all(line.endswith(" 2.0") for line in samples)
 
 
 def test_every_sample_line_is_valid_exposition() -> None:
     registry = metrics.Registry()
     load = Load({"hotfix": (30.0,)}, {"hotfix": 1}, slots_total=1, slots_busy=1, budget_fraction=0.5)
-    metrics.observe_load(registry, load, {"hotfix": None, "queue": 12.5})
+    metrics.observe_load(registry, load)
     registry.inc("ci_lab_heads_graded_total", 1, {"class": "pull_request", "conclusion": "success"})
     registry.inc("ci_lab_verdict_mismatch_total", 2, {"gate": 'tests "unit"\\x'})
     registry.inc("ci_lab_verdict_mismatch_total", 1, {"gate": "a\nb"})
@@ -79,7 +87,7 @@ def test_every_sample_line_is_valid_exposition() -> None:
             assert match.group(1) in typed, line
             float(match.group(4))
     assert 'ci_lab_queue_wait_seconds{class="hotfix"} +Inf' in text
-    assert 'ci_lab_queue_wait_seconds{class="queue"} 12.5' in text
+    assert 'ci_lab_queue_wait_seconds{class="queue"} 0.0' in text
     assert 'ci_lab_verdict_mismatch_total{gate="tests \\"unit\\"\\\\x"} 2.0' in text
     assert 'ci_lab_verdict_mismatch_total{gate="a\\nb"} 1.0' in text
     assert "\nci_lab_mirror_age_seconds -Inf\n" in text
@@ -95,7 +103,7 @@ def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
         budget_fraction=0.25,
         shed=("backfill",),
     )
-    metrics.observe_load(registry, load, {name: 0.0 for name in CLASSES})
+    metrics.observe_load(registry, load)
     text = registry.render()
     for name in CLASSES:
         assert f'ci_lab_units_queued{{class="{name}"}}' in text

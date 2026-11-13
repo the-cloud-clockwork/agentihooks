@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import isfinite, isnan
 from typing import Protocol
 
-from scripts.ci_lab.capacity import Load
+from scripts.ci_lab.capacity import Load, predicted_wait
 from scripts.ci_lab.delivery import CLASSES
 from scripts.swarm import metrics_outbox
 
@@ -141,26 +141,26 @@ class Registry:
         self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
 
     def render(self) -> str:
-        """Prometheus text exposition carrying every contract metric; unlabelled ones default to zero."""
+        """Prometheus text exposition: HELP and TYPE for every contract metric, samples only once observed."""
         lines: list[str] = []
         for metric in CONTRACT:
             lines.append(f"# HELP {metric.name} {metric.help}")
             lines.append(f"# TYPE {metric.name} {metric.kind}")
             samples = self.values[metric.name]
-            if not samples and not metric.labels:
-                samples = {(): 0.0}
             lines.extend(_sample(metric.name, labels, value) for labels, value in sorted(samples.items()))
         return "\n".join(lines) + "\n"
 
 
-def observe_load(registry: Registry, load: Load, waits: Mapping[str, float | None]) -> None:
-    """Set the queue, slot, wait, budget and shed gauges from one load snapshot."""
+def observe_load(registry: Registry, load: Load) -> None:
+    """Set the queue, slot, predicted wait, budget and shed gauges from one load snapshot."""
+    free = load.slots_free
     for name in CLASSES:
         labels = {"class": name}
-        registry.set("ci_lab_units_queued", len(load.pending.get(name, ())), labels)
+        pending = load.pending.get(name, ())
+        wait = predicted_wait(pending, free)
+        registry.set("ci_lab_units_queued", len(pending), labels)
         registry.set("ci_lab_units_running", load.running.get(name, 0), labels)
         registry.set("ci_lab_class_shed", 1.0 if name in load.shed else 0.0, labels)
-        wait = waits.get(name)
         registry.set("ci_lab_queue_wait_seconds", float("inf") if wait is None else wait, labels)
     registry.set("ci_lab_slots_total", load.slots_total)
     registry.set("ci_lab_slots_busy", load.slots_busy)
