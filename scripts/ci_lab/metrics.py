@@ -20,6 +20,7 @@ __all__ = [
     "UnitRecord",
     "grade_row",
     "observe_load",
+    "observe_records",
     "record",
     "unit_row",
 ]
@@ -248,3 +249,13 @@ def record(sink: Sink, units: Iterable[UnitRecord], grades: Iterable[GradeRecord
         sink.append(UNITS, unit_rows)
     if grade_rows:
         sink.append(GRADES, grade_rows)
+
+
+def observe_records(registry: Registry, units: Iterable[UnitRecord], grades: Iterable[GradeRecord]) -> None:
+    """Set unit durations and count verdict cache use and graded heads from collected records."""
+    for unit in units:
+        registry.set("ci_lab_unit_duration_seconds", unit.seconds, {"kind": unit.kind})
+        cache = "ci_lab_cache_hits_total" if unit.cached else "ci_lab_cache_misses_total"
+        registry.inc(cache, 1.0, {"cache": "verdict"})
+    for grade in grades:
+        registry.inc("ci_lab_heads_graded_total", 1.0, {"class": grade.priority, "conclusion": grade.conclusion})

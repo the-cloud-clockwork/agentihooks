@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,17 @@ CONTRACT_NAMES = (
     "ci_lab_github_rate_remaining",
     "ci_lab_verdict_mismatch_total",
 )
-SAMPLE = re.compile(r'^([a-z_]+)(\{[a-z_]+="[^"]*"(,[a-z_]+="[^"]*")*\})? (\+Inf|-?[0-9.e+-]+)$')
+COUNTERS = {
+    "ci_lab_cache_hits_total",
+    "ci_lab_cache_misses_total",
+    "ci_lab_core_seconds_total",
+    "ci_lab_heads_graded_total",
+    "ci_lab_units_redelivered_total",
+    "ci_lab_units_lost_total",
+    "ci_lab_verdict_mismatch_total",
+}
+VALUE = r'"(?:[^"\\]|\\.)*"'
+SAMPLE = re.compile(rf"^([a-z_]+)(\{{[a-z_]+={VALUE}(,[a-z_]+={VALUE})*\}})? (\+Inf|-?[0-9.e+-]+)$")
 
 
 def test_the_contract_holds_exactly_the_architecture_names() -> None:
@@ -40,7 +51,7 @@ def test_the_contract_holds_exactly_the_architecture_names() -> None:
 def test_every_contract_metric_is_emitted() -> None:
     text = metrics.Registry().render()
     for name in CONTRACT_NAMES:
-        kind = "counter" if name.endswith("_total") else "gauge"
+        kind = "counter" if name in COUNTERS else "gauge"
         assert f"# TYPE {name} {kind}\n" in text
         assert f"# HELP {name} " in text
     for metric in metrics.CONTRACT:
@@ -194,6 +205,18 @@ def test_record_spools_units_then_grades_and_skips_empty_tables() -> None:
     empty = Spool()
     metrics.record(empty, [], [])
     assert empty.appended == []
+
+
+def test_observe_records_counts_cache_use_durations_and_graded_heads() -> None:
+    registry = metrics.Registry()
+    missed = replace(unit(), cached=False, kind="mutation", seconds=40.0)
+    metrics.observe_records(registry, [unit(), unit(key="k2"), missed], [grade(), grade()])
+    text = registry.render()
+    assert 'ci_lab_cache_hits_total{cache="verdict"} 2.0' in text
+    assert 'ci_lab_cache_misses_total{cache="verdict"} 1.0' in text
+    assert 'ci_lab_unit_duration_seconds{kind="tests"} 12.0' in text
+    assert 'ci_lab_unit_duration_seconds{kind="mutation"} 40.0' in text
+    assert 'ci_lab_heads_graded_total{class="queue",conclusion="failure"} 2.0' in text
 
 
 def test_record_ships_through_the_real_outbox(tmp_path: Path) -> None:
