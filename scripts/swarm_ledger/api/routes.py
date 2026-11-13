@@ -1,6 +1,8 @@
+import bisect
 import functools
 import json
 import logging
+import operator
 import os
 import re
 from typing import Any
@@ -263,15 +265,23 @@ HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
 LIVE_FIELDS = ("frozen", "focus_rank")
 META, EVENTS = encode("_meta"), encode("events")
+REVISION = operator.itemgetter("rev")
 
 
 def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None) -> bytes:
     """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
     named: dict[str, Fragment] = fragments.parts  # pyright: ignore[reportAssignmentType]
-    scoped: dict[str, bytes] = {} if answer is None else {"tasks": scoped_rows(named.get("tasks"), answer)}
     body = b",".join(
-        encode(key).encode() + b":" + (meta if key == "_meta" else scoped.get(key) or exported(part))
+        encode(key).encode()
+        + b":"
+        + (
+            meta
+            if key == "_meta"
+            else scoped_rows(part, answer)
+            if answer is not None and key == "tasks"
+            else exported(part)
+        )
         for key, part in named.items()
         if not parts or key in parts
     )
@@ -280,9 +290,9 @@ def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_r
     return b'{"data":{' + body + b"}}"
 
 
-def scoped_rows(tasks: Fragment | None, answer: live_rows.Answer) -> bytes:
+def scoped_rows(tasks: Fragment, answer: live_rows.Answer) -> bytes:
     """The encoded rows of answer, each joined from the cached bytes of the stored task it extends."""
-    if tasks is None or not isinstance(tasks.parts, tuple):
+    if not isinstance(tasks.parts, tuple):
         return encode(answer.rows).encode()
     items: tuple[Fragment, ...] = tasks.parts  # pyright: ignore[reportUnknownMemberType]
     return b"[" + b",".join(scoped_row(items[index], row) for index, row in zip(answer.sources, answer.rows)) + b"]"
@@ -290,22 +300,12 @@ def scoped_rows(tasks: Fragment | None, answer: live_rows.Answer) -> bytes:
 
 def scoped_row(task: Fragment, row: dict[str, Any]) -> bytes:
     """The encoded row: the cached bytes of task with the live row fields appended, or row encoded afresh when
-    task is not a plain object without those fields."""
+    task already holds one of those fields."""
     stored = task.value
-    if (
-        task.parts is not None
-        or not isinstance(stored, dict)
-        or not stored
-        or not stored.keys().isdisjoint(LIVE_FIELDS)
-    ):
+    if not isinstance(stored, dict) or not stored.keys().isdisjoint(LIVE_FIELDS):
         return encode(row).encode()
-    return exported(task)[:-1] + live_suffix(*(row[key] for key in LIVE_FIELDS))
-
-
-@functools.lru_cache(maxsize=256, typed=True)
-def live_suffix(frozen: object, focus_rank: object) -> bytes:
-    """The encoded live row fields that close a scoped task row."""
-    return b',"frozen":' + encode(frozen).encode() + b',"focus_rank":' + encode(focus_rank).encode() + b"}"
+    live = b"".join(b"," + encode(key).encode() + b":" + encode(row[key]).encode() for key in LIVE_FIELDS)
+    return exported(task)[:-1] + live + b"}"
 
 
 def change_unit(path: str) -> tuple[str, ...] | None:
@@ -371,10 +371,8 @@ def events_change(changes: dict[str, Any], events: list[dict[str, Any]], after: 
     """Add to changes the events newer than revision after with the count of every event held, or the whole
     events list when the newest event older than that tail is not at revision after, so a reader holding an
     event the server no longer has never keeps it."""
-    start = len(events)
-    while start and events[start - 1].get("rev", 0) > after:
-        start -= 1
-    if start and events[start - 1].get("rev", 0) != after:
+    start = bisect.bisect_right(events, after, key=REVISION)
+    if start and events[start - 1]["rev"] != after:
         changes["set"].append([["_meta", "events"], events])
         return
     changes["events"] = {"after": after, "tail": events[start:], "count": len(events)}

@@ -59,10 +59,25 @@ def test_a_scoped_export_equals_the_encoded_scoped_view(scope: live_rows.Scope) 
 
 
 @pytest.mark.feature("ledger-export-cost")
-def test_a_change_reply_names_only_the_events_newer_than_the_reader_holds() -> None:
-    reply = json.loads(routes.export_changes(STATE, {'["_meta","rev"]'}, events_after=2) or "")
+@pytest.mark.parametrize(("after", "tail"), [(2, EVENTS[3:]), (3, EVENTS[4:]), (4, [])])
+def test_a_change_reply_names_only_the_events_newer_than_the_reader_holds(after: int, tail: list) -> None:
+    reply = json.loads(routes.export_changes(STATE, {'["_meta","rev"]'}, events_after=after) or "")
     assert reply["changes"]["set"] == [[["_meta", "rev"], 4]]
-    assert reply["changes"]["events"] == {"after": 2, "tail": EVENTS[3:], "count": 5}
+    assert reply["changes"]["events"] == {"after": after, "tail": tail, "count": 5}
+
+
+@pytest.mark.feature("ledger-export-cost")
+def test_a_ledger_without_events_answers_an_empty_tail() -> None:
+    state = {"title": "t", "_meta": {"rev": 1}}
+    reply = json.loads(routes.export_changes(state, {'["_meta","rev"]'}, events_after=1) or "")
+    assert reply["changes"]["events"] == {"after": 1, "tail": [], "count": 0}
+
+
+@pytest.mark.feature("ledger-export-cost")
+def test_a_scoped_export_of_a_ledger_whose_tasks_are_no_list_encodes_the_rows() -> None:
+    state = {"title": "t", "tasks": {}, "_meta": {"rev": 1}}
+    answer = live_rows.answer(state, SCOPE)
+    assert json.loads(routes.export_text(document(state), (), answer))["data"]["tasks"] == []
 
 
 @pytest.mark.feature("ledger-export-cost")
@@ -171,11 +186,15 @@ def test_a_server_that_refuses_the_held_revision_is_read_again_without_it() -> N
 @pytest.mark.feature("ledger-export-cost")
 @pytest.mark.parametrize(("code", "after"), [(500, 9), (400, None)])
 def test_a_refusal_the_held_revision_did_not_cause_is_raised(code: int, after: int | None) -> None:
+    sent: list[dict | None] = []
+
     def transport(slug: str, path: str, payload: dict | None) -> dict:
+        sent.append(payload)
         raise urllib.error.HTTPError("http://ledger", code, "refused", Message(), None)
 
     with pytest.raises(urllib.error.HTTPError):
         api.ResourceClient("http://ledger", {}, transport=transport).changes("s", 3, ("tasks",), SCOPE, after)
+    assert len(sent) == 1
 
 
 @pytest.mark.feature("ledger-export-cost")
@@ -183,13 +202,51 @@ def test_the_tick_view_reads_changes_after_its_newest_held_event(tmp_path: Path)
     path = tmp_path / "view.json"
     write_export_file(path, 6, {"tasks": [], "_meta": {"rev": 3, "events": EVENTS}})
     calls: list[tuple[int, tuple[str, ...], int | None]] = []
+    unfit = {"set": [], "drop": [], "lists": {}, "events": {"after": 4, "tail": [], "count": 9}}
+    replies = [{"generation": 7, "changes": unfit}, {"generation": 7, "data": {"tasks": [], "_meta": {}}}]
 
-    def reader(since: int, parts: tuple[str, ...], after: int | None = None) -> dict:
+    def reader(since: int, parts: tuple[str, ...], after: int | None) -> dict:
         calls.append((since, parts, after))
-        return {"generation": 7, "changes": {"set": [], "drop": [], "lists": {}}}
+        return replies.pop(0)
 
     view.refreshed(path, reader)
-    assert calls == [(6, view.PARTS, 4)]
+    assert calls == [(6, view.PARTS, 4), (0, view.PARTS, None)]
+
+
+@pytest.mark.feature("ledger-export-cost")
+def test_the_pass_view_sends_the_newest_held_revision_to_the_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.scheduler import service
+    from scripts.swarm import ledger_client
+
+    ledger = types.SimpleNamespace(
+        base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4
+    )
+    write_export_file(view.view_file("http://ledger", "sw", tmp_path), 6, {"tasks": [], "_meta": {"events": EVENTS}})
+    asked: list[int | None] = []
+
+    def changes(
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
+    ) -> dict:
+        asked.append(after)
+        return {"generation": 6, "changes": {"set": [], "drop": [], "lists": {}}}
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    try:
+        assert view.start("sw", False) is not None
+    finally:
+        view.HELD.set(None)
+        view.CURRENT.set(None)
+        view.REFRESH.set(None)
+    assert asked == [4]
 
 
 @pytest.mark.feature("ledger-export-cost")

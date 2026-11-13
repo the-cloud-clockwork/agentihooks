@@ -86,15 +86,15 @@ def located(state: object, path: list) -> object:
 def last_revision(state: dict[str, Any] | None) -> int | None:
     """The revision of the newest event state holds, or None when it holds none."""
     events = (state or {}).get("_meta", {}).get("events")
-    return events[-1].get("rev", 0) if events else None
+    return events[-1]["rev"] if events else None
 
 
 def joined(held: list[dict[str, Any]], events: dict[str, Any]) -> list[dict[str, Any]]:
     """The held events up to revision after with the newer tail appended, keeping the newest count of them;
     KeyError when they do not reach count, so the reader reads the export in full."""
-    merged = [event for event in held if event.get("rev", 0) <= events["after"]] + events["tail"]
+    merged = [event for event in held if event["rev"] <= events["after"]] + events["tail"]
     if len(merged) < events["count"]:
-        raise KeyError("events")
+        raise KeyError
     return merged[len(merged) - events["count"] :]
 
 

@@ -765,7 +765,10 @@
         "tests/swarm_ledger/test_export_cost.py::test_a_server_that_refuses_the_held_revision_is_read_again_without_it",
         "tests/swarm_ledger/test_export_cost.py::test_a_refusal_the_held_revision_did_not_cause_is_raised",
         "tests/swarm_ledger/test_export_cost.py::test_the_tick_view_reads_changes_after_its_newest_held_event",
-        "tests/swarm_ledger/test_export_cost.py::test_the_export_route_answers_a_held_revision_with_only_the_newer_events"
+        "tests/swarm_ledger/test_export_cost.py::test_the_export_route_answers_a_held_revision_with_only_the_newer_events",
+        "tests/swarm_ledger/test_export_cost.py::test_a_ledger_without_events_answers_an_empty_tail",
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_of_a_ledger_whose_tasks_are_no_list_encodes_the_rows",
+        "tests/swarm_ledger/test_export_cost.py::test_the_pass_view_sends_the_newest_held_revision_to_the_ledger"
       ]
     },
     {
