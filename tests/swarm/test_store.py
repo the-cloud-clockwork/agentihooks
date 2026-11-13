@@ -366,6 +366,33 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
+@pytest.mark.feature("started-lives-task-rows-only")
+def test_counting_a_first_life_decodes_only_rows_that_name_the_task(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import store as store_module
+
+    validated = {"validation": {"state": "validated"}}
+    store.record_launch("smoke", AgentRecord("mine", "eng", "t1", started_at=1), "started")
+    store.record_launch("smoke", AgentRecord("near", "eng", "t10", started_at=2), "started")
+    for index, task in enumerate(["t1", "t10", "t2", "t2"]):
+        row = {"name": f"old-{index}", "task": task, "started_at": index, "profile_decision": validated}
+        store.redis.rpush(store.key("smoke", "history"), json.dumps(row))
+    decoded, original = [], json.loads
+
+    def loads(raw: str) -> object:
+        decoded.append(raw)
+        return original(raw)
+
+    monkeypatch.setattr(store_module.json, "loads", loads)
+
+    assert store.claims("smoke", "t1") == 2
+    assert store.count_claim("smoke", "t1") == 3
+    assert len(decoded) == 4
+    assert all('"t1"' in raw for raw in decoded)
+    assert [row["agent"] for row in store.launches("smoke")] == ["mine", "near", "old-0", "old-1", "old-2", "old-3"]
+
+
 def test_the_store_offers_no_unconditional_claim_refund(store):
     assert not hasattr(store, "refund_claim")
 
