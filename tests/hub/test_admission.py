@@ -166,7 +166,7 @@ def test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record(rig):
 @pytest.mark.feature("events-launch-decision-record")
 def test_the_hub_answers_a_launched_request_over_the_slot_subject(rig):
     bus = open_bus(BusConfig(scoped=True))
-    slots.serve(bus, admitter=rig.admitter)
+    slots.serve(bus, admitter=rig.admitter)  # pyright: ignore[reportArgumentType]
     try:
         rig.admitter.admit(SLUG, ask())
         answered = account_slots.asker(bus.for_swarm(SLUG), SLUG, "hive-a")({"op": "launched", **ask(launch=LAUNCH)})
