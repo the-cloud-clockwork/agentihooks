@@ -112,6 +112,8 @@ def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
         assert f'ci_lab_units_queued{{class="{name}"}}' in text
     assert 'ci_lab_units_queued{class="pull_request"} 2.0' in text
     assert 'ci_lab_units_running{class="queue"} 2.0' in text
+    assert 'ci_lab_units_running{class="hotfix"} 0.0' in text
+    assert 'ci_lab_units_queued{class="hotfix"} 0.0' in text
     assert 'ci_lab_queue_wait_seconds{class="pull_request"} 10.0' in text
     assert 'ci_lab_queue_wait_seconds{class="backfill"} 0.0' in text
     assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
