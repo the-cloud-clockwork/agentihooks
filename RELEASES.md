@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.844 · 2026-11-13
+
+### 2026-11-13 · 5ac8c4ecc5e3 · #11006 · @agenticore-app
+
+**Keep the controller running when the ledger closed check cannot connect**
+
+Previously, if the ledger connection dropped during the controller's binned or closed check, the raw connection error escaped as an unhandled `OSError` or a generic `SwarmError`, which the controller's pass loop didn't catch, causing the whole controller to crash. Now these failures are wrapped as `LedgerUnreachable`, which `_passes` already handles by ending that pass cleanly and letting the next pass retry. This means a temporary ledger outage no longer takes down the controller process; it just skips a pass and keeps running.
+
 ## v2.17.843 · 2026-11-13
 
 ### 2026-11-13 · 0aaa831b0a7b · #10963 · @agenticore-app
