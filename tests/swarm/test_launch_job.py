@@ -330,6 +330,21 @@ def test_a_detached_spawn_returns_its_routed_account_model_and_profile(
     started.assert_not_called()
 
 
+@pytest.mark.feature("swarm-agent-record-launch-decision-at-spawn")
+def test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks() -> None:
+    from scripts.swarm.model_pick import ModelPick
+    from scripts.swarm.runtime import _decided
+
+    job = {"path": "/jobs/e.json", "started_at": 1000, "timeout": 300}
+    placed = Placed("", "codex", account="acct-a", effort="low", launch_job=job)
+    routed = _decided(placed, ["--route", "acct-b"], ModelPick("gpt", "xhigh"), "eng")
+    assert (routed.account, routed.model, routed.effort, routed.profile) == ("acct-b", "gpt", "xhigh", "eng")
+    unrouted = _decided(placed, [], ModelPick("", None), "eng")
+    assert (unrouted.account, unrouted.model, unrouted.effort) == ("acct-a", "", "")
+    synchronous = Placed("w:p1", "claude", effort="low")
+    assert _decided(synchronous, ["--route", "acct-c"], ModelPick("opus", "high"), "eng") is synchronous
+
+
 def _job_entry(store, name, task, state="working", harness="claude"):
     from scripts.swarm.store import AgentRecord
 
