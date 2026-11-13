@@ -124,6 +124,7 @@ def test_counters_accumulate_and_gauges_replace() -> None:
     registry = metrics.Registry()
     registry.inc("ci_lab_units_lost_total")
     registry.inc("ci_lab_units_lost_total", 2)
+    registry.inc("ci_lab_units_lost_total", 0)
     registry.set("ci_lab_workers_ready", 3)
     registry.set("ci_lab_workers_ready", 1)
     text = registry.render()
@@ -202,7 +203,9 @@ def test_unit_and_grade_rows_pass_the_outbox_schema() -> None:
     assert row["cached"] == 1
     assert row["seconds"] == 12.0
     assert row["wait_s"] == 3.0
-    assert row["ledger"] == metrics.LEDGER
+    assert row["ledger"] == "ci-lab"
+    assert [row[column] for column in ("plan", "phase", "slice", "task")] == ["", "", "", ""]
+    assert row["ts_ms"] == 1_700_000_000_000
     graded = metrics.grade_row(grade())
     metrics.GRADES.check(graded)
     assert graded["class"] == "queue"

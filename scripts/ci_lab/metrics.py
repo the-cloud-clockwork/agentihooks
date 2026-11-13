@@ -3,7 +3,7 @@
 import hashlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from math import isfinite, isnan
+from math import inf, isfinite, isnan
 from typing import Protocol
 
 from scripts.ci_lab.capacity import Load, predicted_wait
@@ -112,7 +112,7 @@ def _escape(value: str) -> str:
 
 
 def _sample(name: str, labels: tuple[tuple[str, str], ...], value: float) -> str:
-    number = {float("inf"): "+Inf", float("-inf"): "-Inf"}.get(value, repr(value))
+    number = {inf: "+Inf", -inf: "-Inf"}.get(value, repr(value))
     if not labels:
         return f"{name} {number}"
     pairs = ",".join(f'{label}="{_escape(text)}"' for label, text in labels)
@@ -161,7 +161,7 @@ def observe_load(registry: Registry, load: Load) -> None:
         registry.set("ci_lab_units_queued", len(pending), labels)
         registry.set("ci_lab_units_running", load.running.get(name, 0), labels)
         registry.set("ci_lab_class_shed", 1.0 if name in load.shed else 0.0, labels)
-        registry.set("ci_lab_queue_wait_seconds", float("inf") if wait is None else wait, labels)
+        registry.set("ci_lab_queue_wait_seconds", inf if wait is None else wait, labels)
     registry.set("ci_lab_slots_total", load.slots_total)
     registry.set("ci_lab_slots_busy", load.slots_busy)
     registry.set("ci_lab_budget_fraction", load.budget_fraction)
