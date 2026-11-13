@@ -2,7 +2,7 @@
 
 from collections.abc import Collection
 from dataclasses import asdict, dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm import overlays
@@ -17,6 +17,7 @@ PURPOSE = "profile-pick"
 RESPONSIBILITIES = ("frontend", "engineer", "qa")
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
 FRESH = "fresh_spawn"
+LEDGER_INTENT = "ledger_intent"
 
 
 class ProfileUnresolved(RuntimeError):
@@ -145,7 +146,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
 
 
 def state(slug: str, task: dict) -> dict:
-    doc = _ledger(slug)
+    doc = task[LEDGER_INTENT] if LEDGER_INTENT in task else _ledger(slug)
     phases = (p for p in doc.get("phases", []) if p.get("id") == task.get("phase"))
     return {
         "task": task.get("id", ""),
@@ -157,6 +158,12 @@ def state(slug: str, task: dict) -> dict:
         "phase": task.get("phase", ""),
         "phase_intent": next((f"{p.get('title', '')}: {p.get('description', '')}" for p in phases), ""),
     }
+
+
+def carried(doc: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    """The project intent and the task's own phase a remote hive classifies with, since it has no ledger identity."""
+    phases: list[dict[str, Any]] = doc.get("phases", [])
+    return {"overview": doc.get("overview", ""), "phases": [p for p in phases if p.get("id") == task.get("phase")]}
 
 
 def anchors(task: dict) -> tuple:
