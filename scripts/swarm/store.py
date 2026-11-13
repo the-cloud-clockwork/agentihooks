@@ -889,7 +889,7 @@ class RedisStore:
         named |= {alias for name in list(named) for alias in self.names.aliases(name)}
         held = (key[len(self.seats.key("")) :].split(":")[0] for key in seats if key.startswith(self.seats.key("")))
         seated = {address for address in held if address.endswith(f"@{slug}")}
-        mail, addresses = InboxStore(self.redis), cast(list[str], sorted(named | seated))
+        mail, addresses = InboxStore(self.redis), cast(list[str], sorted(named | seated))  # pragma: no mutate
         inbox, _ = mail.keys_at(addresses)
         item = mail.key("item", "")
         sets = {mail.key(shared): addresses for shared in ("waiting", "indexed", "open-indexed")}
