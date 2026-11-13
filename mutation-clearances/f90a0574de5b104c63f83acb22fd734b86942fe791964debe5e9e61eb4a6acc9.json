@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_operation_kinds:db9f30b804559ff7eb9f0c9bce02169766e674b5396049cfa1927b9bc788dbf5": {
+    "reader": "standards_reader",
+    "reason": "Mutants replace the type argument of typing.cast with None; cast returns its value argument unchanged, so the mutant is behaviour-identical and is signed as equivalent."
+  }
+}
