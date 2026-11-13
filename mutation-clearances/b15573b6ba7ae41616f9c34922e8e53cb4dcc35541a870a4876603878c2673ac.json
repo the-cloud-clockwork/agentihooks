@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_diff:1fc1b61926d75cff5af7864e5937b6c8ed31fefbf3136eae380c73052bdad69d": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged and never inspects its type argument at runtime, so changing or removing the type argument leaves every output of diff and _changed_children identical."
+  }
+}
