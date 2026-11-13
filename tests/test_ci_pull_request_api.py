@@ -294,6 +294,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     if (ROOT / "scripts/ci_wall_clock.py").exists():
         expected.append("scripts/ci_wall_clock.py")
+    expected.append("scripts/ci_double_patch.py")
     if (ROOT / ".github/actions/browser-cache/use-image.sh").exists():
         expected.append(".github/actions/browser-cache/use-image.sh")
     routing_contracts = [
