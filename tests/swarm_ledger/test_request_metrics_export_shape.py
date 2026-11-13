@@ -18,24 +18,38 @@ def samples(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(metrics, "PENDING", [])
 
 
-def handler(agent: str | None) -> SimpleNamespace:
-    headers = {"X-Ledger-Agent": agent} if agent else {}
-    return SimpleNamespace(command="POST", path="/api/v1/ledgers/one/export", raw_requestline=b"POST", headers=headers)
+def handler(agent: str | None, **headers: str) -> SimpleNamespace:
+    named = {"X-Ledger-Agent": agent} if agent else {}
+    return SimpleNamespace(
+        command="POST", path="/api/v1/ledgers/one/export", raw_requestline=b"POST", headers=named | headers
+    )
 
 
 @pytest.mark.feature("ledger-export-shape-records")
 @pytest.mark.parametrize(
     ("payload", "agent", "shape"),
     [
-        ({}, None, "bare by anonymous"),
+        ({}, None, "bare by -"),
         ({"since": 0}, "swarm", "full by swarm"),
-        ({"since": 7}, "swarm", "since by swarm"),
-        ({"since": 7, "parts": ["tasks"], "closed": False}, "tick", "since parts scoped by tick"),
+        ({"since": 7}, "ci@323133-4175", "since by ci@323133-4175"),
+        (
+            {"since": 7, "parts": ["tasks"], "closed": False, "events_after": 3},
+            "eng",
+            "since parts scoped events by eng",
+        ),
         ({"since": 0, "frozen": True}, "eng", "full scoped by eng"),
+        ([], "eng", "refused by eng"),
+        ({"since": 7}, "two words", "since by -"),
+        ({"since": 7}, "x" * 65, "since by -"),
     ],
 )
-def test_an_export_read_names_its_shape_and_caller(payload: dict, agent: str | None, shape: str) -> None:
+def test_an_export_read_names_its_shape_and_caller(payload: object, agent: str | None, shape: str) -> None:
     assert routes.export_shape(handler(agent), payload) == shape
+
+
+@pytest.mark.feature("ledger-export-shape-records")
+def test_a_tick_export_read_is_named_by_the_server_request_caller() -> None:
+    assert routes.export_shape(handler(None, **{"X-Ledger-Tick": "1"}), {"since": 7}) == "since by tick"
 
 
 @pytest.mark.feature("ledger-export-shape-records")
@@ -51,8 +65,8 @@ def test_a_detailed_request_records_its_detail_after_the_route() -> None:
 def test_a_request_without_detail_keeps_its_route_and_detail_outside_a_request_is_dropped() -> None:
     metrics.detailed("ignored")
 
-    def handle_one_request(request: SimpleNamespace) -> None:
-        return None
+    def handle_one_request(_: SimpleNamespace) -> None:
+        pass
 
     metrics.measured(handle_one_request)(handler(None))
     assert [row[2] for row in metrics.SAMPLES] == [EXPORT]

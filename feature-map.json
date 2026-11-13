@@ -4896,10 +4896,11 @@
       "id": "ledger-export-shape-records",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-measure",
-      "behaviour": "Every ledger export read records its shape (bare, full or since, with parts and scope) and its caller agent after the export route in the request metrics, and every operations write records its distinct operation kinds, so a full export rebuild names the client that asked for it and a slow write names what it did.",
+      "behaviour": "Every read on the ledger export route records its shape (bare, full, since or refused, with parts, scope and events) and its bounded request caller after the route in the request metrics, and every operations write records its distinct operation kinds, so a full export rebuild names the client that asked for it and a slow write names what it did.",
       "seam": "scripts.swarm_ledger.api.routes.export_shape and scripts.swarm_ledger.request_metrics.detailed, recorded by scripts.swarm_ledger.request_metrics.measured",
       "tests": [
         "tests/swarm_ledger/test_request_metrics_export_shape.py::test_an_export_read_names_its_shape_and_caller",
+        "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_tick_export_read_is_named_by_the_server_request_caller",
         "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_detailed_request_records_its_detail_after_the_route",
         "tests/swarm_ledger/test_request_metrics_export_shape.py::test_a_request_without_detail_keeps_its_route_and_detail_outside_a_request_is_dropped",
         "tests/swarm_ledger/test_request_metrics_export_shape.py::test_an_operations_write_names_its_distinct_operation_kinds"
