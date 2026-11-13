@@ -3105,7 +3105,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}
     needs: [reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    timeout-minutes: 45
     env:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: maintenance.auto
@@ -3138,6 +3138,20 @@ jobs:
         run: |
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+      - name: Probe whole tree type check memory per heap limit
+        run: |
+          cat /sys/fs/cgroup/memory.max || true
+          for heap in 4096 5120; do
+            grep oom_kill /sys/fs/cgroup/memory.events || true
+            ( peak=0; while sleep 1; do c=$(cat /sys/fs/cgroup/memory.current); a=$(awk '/^anon /{print $2}' /sys/fs/cgroup/memory.stat); (( c > peak )) && peak=$c && echo "heap=$heap current_MiB=$((c/1048576)) anon_MiB=$((a/1048576))" >> "$RUNNER_TEMP/peak-$heap"; done ) &
+            sampler=$!
+            start=$(date +%s)
+            python -c "import sys; from pathlib import Path; from scripts import type_gate; type_gate._NODE_OPTIONS = '--max-old-space-size=$heap'; counts = type_gate.measure(Path.cwd()); print('heap', $heap, 'files', len(type_gate.sources(Path.cwd())), 'errors', sum(counts.values()))" || echo "heap=$heap exit=$?"
+            echo "heap=$heap wall=$(( $(date +%s) - start ))s"
+            kill "$sampler" || true
+            tail -1 "$RUNNER_TEMP/peak-$heap" || true
+            grep oom_kill /sys/fs/cgroup/memory.events || true
+          done
       - name: Hold the strict type checker's errors per file to the base baseline
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/type_gate.py" ]]; then
