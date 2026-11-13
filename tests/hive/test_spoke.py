@@ -220,8 +220,7 @@ def test_a_failing_launch_report_never_holds_back_the_started_event(rig, capsys)
     rig.tasks.launched.assert_called_once_with(rig.event, rig.runtime.spawn.return_value.value)
     assert rig.queue.take(0) is None
     assert (
-        "hive spoke for swarm rig lane eng launch report failed (TimeoutError: hub timeout)"
-        in capsys.readouterr().err
+        "hive spoke for swarm rig lane eng launch report failed (TimeoutError: hub timeout)" in capsys.readouterr().err
     )
 
 
