@@ -120,6 +120,14 @@ def test_a_row_without_a_time_reads_time_zero() -> None:
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
+def test_a_task_target_keeps_every_part_after_the_tasks_prefix() -> None:
+    assert health.target_task("tasks/t1") == "t1"
+    assert health.target_task("tasks/a/b") == "a/b"
+    assert health.target_task("phases/p1") == ""
+    assert health.target_task(None) == ""
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
 def test_seat_rows_keep_the_agent_events_sorted_by_time_with_their_labels() -> None:
     seat = health.Finding("failed launch", WORKER, "launch failed", ("refused",), "1 launch", 1)
     events = [
