@@ -66,6 +66,16 @@
       ]
     },
     {
+      "id": "swarm-history-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
+      "behaviour": "Retiring an agent appends its history row and trims the swarm history list to the newest rows it keeps, on both the watched transaction and the compare and delete fallback, so the list and every snapshot stop growing with each retired agent.",
+      "seam": "scripts.swarm.store.RedisStore.drop_agent against the store history list",
+      "tests": [
+        "tests/swarm/test_execution_retirement.py::test_retirement_keeps_only_the_newest_history_rows"
+      ]
+    },
+    {
       "id": "failed-panes-report-hash-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-share",
