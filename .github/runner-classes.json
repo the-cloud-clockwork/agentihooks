@@ -17,6 +17,7 @@
   "equivalence.yml/ledger-equivalence": "standard",
   "feature-suite.yml/features": "standard",
   "gate-protected.yml/grade": "hosted",
+  "gate-required.yml/report": "hosted",
   "github-access-audit.yml/read-back": "hosted",
   "helm-kind-published.yml/kind": "standard",
   "helm-kind.yml/kind": "standard",
