@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__lead:b2f86be78e3a89dbe2b2b49def01f32e945f3b4db7bc1ca7938932bc47eaec77": {
+    "reader": "standards_reader",
+    "reason": "flush=False is the same value as the default, and the controller image sets PYTHONUNBUFFERED=1, so the standby line's output does not change."
+  }
+}

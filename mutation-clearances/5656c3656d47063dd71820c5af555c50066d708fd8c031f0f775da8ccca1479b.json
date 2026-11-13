@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__lead:554791a56cdfc47ff0280f81051a565ab064e873bca2f8c3fa5b7c0a8072a47d": {
+    "reader": "standards_reader",
+    "reason": "flush=None is falsy, so print behaves as flush=False; the Dockerfile final stage sets PYTHONUNBUFFERED=1, so stdout is write-through and the flush argument has no effect on what reaches the pod log."
+  }
+}

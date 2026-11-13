@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/standby.py:scripts.swarm_v2.standby.x_forward:a978667d5bc86bc68c4b1b72d78d6afd1af5d446f457745fee34751b1bf20e64": {
+    "reader": "standards_reader",
+    "reason": "'content-type'.capitalize() is 'Content-type', identical to the stored key for 'Content-Type' (checked with python3 -I), so the wire headers are unchanged."
+  }
+}
