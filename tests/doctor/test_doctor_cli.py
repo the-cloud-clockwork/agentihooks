@@ -157,6 +157,27 @@ def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detac
     assert store.config(DOCTOR).state == "running" and store.agents(DOCTOR) == []
 
 
+@pytest.mark.feature("engine-config-migration")
+def test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin(env):
+    store, _, _ = env
+    store.update(WATCHED, repo_origin="github.com/team/watched")
+
+    assert doctor.main([WATCHED, "start"]) == 0
+
+    config = store.config(DOCTOR)
+    assert (config.engine, config.repo_origin) == ("events", "github.com/team/watched")
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_start_leaves_the_doctor_legacy_when_the_watched_swarm_has_no_origin(env):
+    store, _, _ = env
+
+    assert doctor.main([WATCHED, "start"]) == 0
+
+    config = store.config(DOCTOR)
+    assert (config.engine, config.repo_origin) == ("legacy", "")
+
+
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0
