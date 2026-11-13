@@ -184,7 +184,12 @@ def test_the_pass_view_reads_the_ledger_with_the_tick_scope(tmp_path: Path, monk
     asked: list[object] = []
 
     def changes(
-        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         """Answer a full read of an empty ledger and record the scope asked for."""
         asked.append(scope)
