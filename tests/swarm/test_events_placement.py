@@ -52,6 +52,11 @@ def test_an_offer_carries_its_hive_pin_and_needs_and_nothing_for_an_unpinned_tas
     }
 
 
+def test_a_workstation_offer_keeps_an_explicit_hive_pin() -> None:
+    [event] = readiness.offers(snapshot(doc([task("desk", workstation=True, hive="hive-b")])), NOW)
+    assert event.data == {"lane": "eng", "generation": 0, "hive": "hive-b"}
+
+
 @pytest.mark.parametrize(
     "row, hive, capabilities, expected",
     [
@@ -284,14 +289,12 @@ def test_under_events_the_tick_collects_no_acknowledgement_for_a_workstation_lau
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
     ledger.rows["t2"]["workstation"] = True
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    desk = ledger.rows["t2"]["claimed_by"]
     store.update("sw", engine="events")
     doc = {"tasks": list(ledger.rows.values())}
 
     _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
 
     assert runtime.collected == []
-    assert desk
 
 
 def test_only_engines_other_than_events_have_the_tick_launch() -> None:

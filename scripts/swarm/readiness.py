@@ -114,7 +114,7 @@ def queue_name(slug: str, lane: str) -> str:
 
 def offer(task: dict[str, Any], view: Snapshot, now_ms: int) -> Envelope:
     data: dict[str, Any] = {"lane": task["lane"], "generation": generation(task)}
-    if hive := ROOT if task.get("workstation") else task.get("hive"):
+    if hive := task.get("hive") or (ROOT if task.get("workstation") else None):
         data["hive"] = hive
     if needs := task.get("needs"):
         data["needs"] = list(needs)
