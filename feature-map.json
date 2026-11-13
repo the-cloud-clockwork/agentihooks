@@ -38,6 +38,7 @@
         "tests/swarm/test_controller_replica.py::test_a_published_standby_forwards_only_the_recovery_paths",
         "tests/swarm/test_controller_replica.py::test_a_standby_refuses_while_no_replica_leads",
         "tests/swarm/test_controller_replica.py::test_a_standby_refuses_when_the_leader_is_unreachable",
+        "tests/swarm/test_controller_replica.py::test_a_standby_bounds_each_forwarded_request_by_its_timeout",
         "tests/swarm/test_controller_replica.py::test_a_standby_serves_its_api_and_published_ports_until_closed",
         "tests/swarm/test_controller_replica.py::test_a_standby_without_an_api_serves_nothing",
         "tests/swarm/test_controller_replica.py::test_the_leading_control_service_publishes_its_pod_address",

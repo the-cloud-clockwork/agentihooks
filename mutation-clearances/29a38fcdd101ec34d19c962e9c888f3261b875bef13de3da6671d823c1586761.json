@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__lead:8297d858402c30c3a531dcf29e307c113d17eddeec3b187745d6a32c1f41f71f": {
+    "reader": "standards_reader",
+    "reason": "Removing the flush keyword gives the default flush=False, the same as the original under PYTHONUNBUFFERED=1 (Dockerfile final stage), so the emitted bytes and their timing in the pod log are unchanged."
+  }
+}

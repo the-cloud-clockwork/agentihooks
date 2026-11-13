@@ -723,8 +723,8 @@ def _keep_credential(environ: Mapping[str, str], store: RedisStore) -> threading
     from scripts.hive import auth
     from scripts.swarm_v2.control_service import CREDENTIAL_ENV
 
-    credential = environ.get(CREDENTIAL_ENV, "")
-    if "." not in credential:
+    credential = environ.get(CREDENTIAL_ENV)
+    if not credential or "." not in credential:
         return None
     keeping = partial(auth.keep_service, store.redis, credential)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
     return replica.keep(keeping, STOPPING, replica.KEEP_S)  # pyright: ignore[reportUnknownArgumentType]

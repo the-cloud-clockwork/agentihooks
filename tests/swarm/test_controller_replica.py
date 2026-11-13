@@ -397,6 +397,24 @@ def test_a_standby_refuses_when_the_leader_is_unreachable() -> None:
     )
 
 
+@pytest.mark.feature("controller-standby-replica")
+def test_a_standby_bounds_each_forwarded_request_by_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.request
+
+    from scripts.swarm_v2 import standby as standby_api
+
+    asked: list[Any] = []
+
+    def urlopen(request: Any, timeout: Any = "unset") -> Any:
+        asked.append((request.full_url, timeout))
+        raise OSError("refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert standby_api.forward("10.0.0.7:8780", "GET", "/v2/executions/x", "Bearer grant", None)[0] == 503
+    assert asked == [("http://10.0.0.7:8780/v2/executions/x", standby_api.FORWARD_S)]
+    assert standby_api.FORWARD_S == 30
+
+
 def _get(url: str) -> tuple[int, dict]:
     import urllib.request
 
