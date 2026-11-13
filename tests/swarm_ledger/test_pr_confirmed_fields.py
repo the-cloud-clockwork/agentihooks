@@ -38,24 +38,42 @@ def test_a_task_update_records_the_confirmed_pull_request_number_and_head() -> N
 
 
 @pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
-def test_the_ledger_check_takes_the_fields_swarm_pr_writes() -> None:
-    ledger_tasks.check(op({"state": "pr", "pr_number": 11024, "pr_head": HEAD}))
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"state": "pr", "pr_number": 11024, "pr_head": HEAD},
+        {"pr_number": 1},
+        {"pr_head": HEAD},
+        {"pr_head": ""},
+        {"state": "pr", "pr_url": "https://github.com/o/r/pull/7"},
+    ],
+)
+def test_the_ledger_check_takes_the_fields_swarm_pr_writes(fields: dict) -> None:
+    ledger_tasks.check(op(fields))
 
 
 @pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
 @pytest.mark.parametrize(
-    "fields",
+    "fields,refusal",
     [
-        {"pr_number": "7"},
-        {"pr_number": True},
-        {"pr_number": 0},
-        {"pr_number": -3},
-        {"pr_number": 7.5},
-        {"pr_head": 7},
-        {"pr_head": "not a hash"},
-        {"pr_head": "ABCDEF0123"},
+        ({"pr_number": "7"}, "task_update may set only"),
+        ({"pr_number": True}, "pr_number must be a positive integer"),
+        ({"pr_number": 0}, "pr_number must be a positive integer"),
+        ({"pr_number": -3}, "pr_number must be a positive integer"),
+        ({"pr_number": 7.5}, "pr_number must be a positive integer"),
+        ({"pr_head": 7}, "task_update may set only"),
+        ({"pr_head": "not a hash"}, "pr_head must be a lowercase commit hash"),
+        ({"pr_head": "ABCDEF0123"}, "pr_head must be a lowercase commit hash"),
+        ({"pr_head": "0123456789abcdef\n"}, "pr_head must be a lowercase commit hash"),
     ],
 )
-def test_a_task_update_refuses_a_malformed_pull_request_number_or_head(fields: dict) -> None:
-    with pytest.raises(ValueError):
+def test_a_task_update_refuses_a_malformed_pull_request_number_or_head(fields: dict, refusal: str) -> None:
+    with pytest.raises(ValueError, match=refusal):
         ledger_tasks.check(op(fields))
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+@pytest.mark.parametrize("bad", [7, None])
+def test_the_head_check_refuses_a_head_that_is_no_string(bad: object) -> None:
+    with pytest.raises(ValueError, match="pr_head must be a lowercase commit hash"):
+        ledger_tasks.check_confirmed_pull({"pr_head": bad})

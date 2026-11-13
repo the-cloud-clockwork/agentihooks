@@ -250,7 +250,8 @@ def check_confirmed_pull(fields: dict[str, Any]) -> None:
     number = fields.get("pr_number", 1)
     if type(number) is not int or number < 1:
         raise ValueError("pr_number must be a positive integer")
-    if not COMMIT_RE.fullmatch(fields.get("pr_head", "")):
+    head = fields.get("pr_head", "")
+    if not (isinstance(head, str) and COMMIT_RE.fullmatch(head)):
         raise ValueError("pr_head must be a lowercase commit hash of 7 to 64 characters, or empty to clear it")
 
 

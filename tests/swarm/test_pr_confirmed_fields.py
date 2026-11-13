@@ -28,7 +28,11 @@ def test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_chec
         return update(slug, task, fields, by, *args, **kwargs)
 
     ledger.update_task = checked
-    monkeypatch.setattr(cli, "pull_branch", lambda url: ("engineer-a1b2c3-0001", "https://github.com/o/r", 11024, HEAD))
+
+    def confirmed(url: str) -> tuple[str, str, int, str]:
+        return "engineer-a1b2c3-0001", "https://github.com/o/r", 11024, HEAD
+
+    monkeypatch.setattr(cli, "pull_branch", confirmed)
     assert run("sw", "pr", URL) == 0
     assert (sent[-1]["pr_number"], sent[-1]["pr_head"]) == (11024, HEAD)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["pr_url"]) == ("pr", URL)
