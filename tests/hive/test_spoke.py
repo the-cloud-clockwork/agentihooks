@@ -1082,6 +1082,7 @@ def test_a_spoke_settles_its_own_launch_after_nats_drops_mid_launch_and_takes_ne
         with contextlib.suppress(TypeError):
             before.close()
         after = start()
+        __import__("time").sleep(nats.RECONNECT_WAIT_S + 2)
         key = spoke.claim_key(rig.event)
         stranded = after.state("spoke-work").get(key)
         assert json.loads(stranded.value) == {"state": "launching", "owner": "hive-a", "name": "agent-a"}
