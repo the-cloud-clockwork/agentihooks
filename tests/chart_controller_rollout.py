@@ -5,7 +5,16 @@ import yaml
 
 CONTROLLER = "agentihooks-swarm-controller"
 REPLICA_ENV = "AGENTIHOOKS_CONTROLLER_REPLICA"
-API = ["--set", "controller.api.enabled=true", "--set", "controller.api.swarm=rig"]
+API = [
+    "--set",
+    "controller.api.enabled=true",
+    "--set",
+    "controller.api.swarm=rig",
+    "--set",
+    "controller.api.signingKey.keyId=kind-launch",
+    "--set",
+    "controller.api.signingKey.secretName=swarm-launch-signing",
+]
 
 
 def render(chart: str, *extra: str) -> subprocess.CompletedProcess:
