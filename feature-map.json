@@ -5469,8 +5469,9 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-timeout",
       "behaviour": "When downloading a dev run's reusable test record times out or fails, test selection counts that run as having no record and moves on to older runs or to no record, so the select step never fails on a slow or broken artifact download.",
-      "seam": "scripts.ci_test_plan.find_record through scripts.ci_select.main",
+      "seam": "scripts.ci_test_plan.find_record through scripts.ci_test_plan.main",
       "tests": [
+        "tests/test_ci_test_plan.py::test_a_failed_record_download_names_the_github_error_and_runs_every_test",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_the_only_run_counts_as_no_record",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
       ]

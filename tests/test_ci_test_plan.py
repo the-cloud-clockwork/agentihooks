@@ -93,27 +93,33 @@ def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
     ]
 
 
+@pytest.mark.feature("ci-select-reuse-download-failure")
 @pytest.mark.parametrize(
-    "message", ["HTTP 403: Resource not accessible by integration", "HTTP 404: Not Found", "HTTP 502: Bad Gateway"]
+    "message", ["HTTP 403: Resource not accessible by integration", "HTTP 404: Not Found", "HTTP 502: Bad Gateway", ""]
 )
-def test_a_failed_record_download_names_the_github_error_and_stays_red(monkeypatch, tmp_path, capsys, message):
+def test_a_failed_record_download_names_the_github_error_and_runs_every_test(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], message: str
+) -> None:
     download = ci_test_plan._api
     _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
     api = ci_test_plan._api
 
-    def fetch(endpoint):
+    def fetch(endpoint: str) -> bytes:
         return download(endpoint) if endpoint.endswith("/zip") else api(endpoint)
 
-    def fail(command, **kwargs):
+    def fail(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if not message:
+            raise subprocess.TimeoutExpired(command, 60)
         raise subprocess.CalledProcessError(1, command, stderr=message.encode())
 
     monkeypatch.setattr(ci_test_plan, "_api", fetch)
     monkeypatch.setattr(ci_test_plan.subprocess, "run", fail)
     monkeypatch.setattr(ci_test_plan.time, "sleep", lambda seconds: None)
     out = tmp_path / "reused-tests.json"
-    with pytest.raises(subprocess.CalledProcessError):
-        ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)])
-    assert message in capsys.readouterr().err
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
+    captured = capsys.readouterr()
+    assert message in captured.err
+    assert "No test record" in captured.out
     assert not out.exists()
 
 
