@@ -520,10 +520,11 @@ def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: st
 
 
 @pytest.mark.feature("hub-admission-hive-max-agents")
+@pytest.mark.parametrize("cap, live", [("2", 2), ("0", 0)])
 def test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cap: str, live: int
 ) -> None:
-    _hive_holding(rig, monkeypatch, "2", 2)
+    _hive_holding(rig, monkeypatch, cap, live)
     before = {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")}
 
     admitted = rig.admitter.admit(SLUG, ask())
@@ -534,7 +535,7 @@ def test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents(
     assert rig.ledger.writes == []
     assert rig.rows["t1"]["state"] == "open"
     assert capsys.readouterr().err.splitlines() == [
-        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: 2 of 2 agents on the hive"
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {live} of {cap} agents on the hive"
     ]
 
 

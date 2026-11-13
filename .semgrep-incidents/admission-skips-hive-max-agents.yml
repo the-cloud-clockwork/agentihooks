@@ -3,10 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A hub events admission claims a task without checking the hive's registry max agents. On 13 November the hub
-      Admission admit checked only release, claims, placement and lives, and the spoke only host room, so no hive cap
-      held under the events engine. Refuse a hive whose live executions reach its max agents with self._full before
-      self._claim.
+      A hub events admission claims a task without checking the hive's registry max agents, and the spoke checks only
+      host room, so no hive cap holds under the events engine. Refuse a hive whose live executions reach its max
+      agents with self._full before self._claim.
     paths:
       include:
         - /scripts/hub/

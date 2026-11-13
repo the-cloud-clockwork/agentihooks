@@ -12,6 +12,7 @@ from scripts import updater
 from scripts.hive import account_slots
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window, successor_fill
+from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, connect
 
@@ -152,7 +153,7 @@ class Admission:
             1
             for slug in slugs
             for agent in self.store.execution_registry.agents(slug)
-            if agent.hive == hive and agent.lane != "master" and agent.state not in ("finished", "ended")
+            if agent.hive == hive and agent.lane != "master" and agent.state not in TERMINAL_STATES
         )
         return f"{live} of {cap} agents on the hive" if live >= cap else ""
 
