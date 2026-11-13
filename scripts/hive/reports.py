@@ -73,18 +73,30 @@ class Reports:
         return bool(agent.pane_id) and agent.pane_id not in panes
 
     def vanished(self, agent: "AgentRecord", now_ms: int) -> bool:
-        """True when the beating hive that admitted ``agent`` no longer lists it past startup, while it lists others
-        or its pod started after the launch."""
+        """True past startup when the beating hive that admitted ``agent`` no longer lists it, while it lists others
+        or its pod started after the launch, or when that hive left the hive index without a live heartbeat."""
         raw = self.redis.get(key(agent.hive)) if agent.hive else None
         launched = agent.launched_at or agent.started_at
-        if not raw or not launched or now_ms - launched < STARTUP_MS:
+        if not agent.hive or not launched or now_ms - launched < STARTUP_MS:
             return False
+        if not raw:
+            return self._unlisted(agent.hive, now_ms)
         report = json.loads(cast(str, raw))
         found: object = report.get("names")
         if not isinstance(found, list):
             return False
         names = cast("list[object]", found)
         return agent.name not in names and (bool(names) or report.get("started_at", 0) > launched)
+
+    def _unlisted(self, hive: str, now_ms: int) -> bool:
+        """True when ``hive`` is out of the hive index and its record is gone or no longer beating."""
+        if hive in registry.hive_state.index(self.redis):  # pyright: ignore[reportUnknownMemberType]
+            return False
+        try:
+            record = registry.show(self.redis, hive)
+        except HiveError:
+            return False
+        return record is None or not registry.live(record, now_ms)
 
     def lost(self, agent: "AgentRecord", now_ms: int, after_ms: int) -> bool:
         hive = host(agent)
