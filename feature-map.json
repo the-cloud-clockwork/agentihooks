@@ -760,6 +760,8 @@
         "tests/swarm_ledger/test_export_cost.py::test_the_last_held_revision_is_that_of_the_newest_held_event",
         "tests/swarm_ledger/test_export_cost.py::test_the_client_export_sends_the_newest_held_revision_and_merges_the_newer_events",
         "tests/swarm_ledger/test_export_cost.py::test_the_client_changes_read_carries_the_held_revision_when_there_is_one",
+        "tests/swarm_ledger/test_export_cost.py::test_a_server_that_refuses_the_held_revision_is_read_again_without_it",
+        "tests/swarm_ledger/test_export_cost.py::test_a_refusal_the_held_revision_did_not_cause_is_raised",
         "tests/swarm_ledger/test_export_cost.py::test_the_tick_view_reads_changes_after_its_newest_held_event",
         "tests/swarm_ledger/test_export_cost.py::test_the_export_route_answers_a_held_revision_with_only_the_newer_events"
       ]

@@ -282,7 +282,7 @@ def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_r
 
 def scoped_rows(tasks: Fragment | None, answer: live_rows.Answer) -> bytes:
     """The encoded rows of answer, each joined from the cached bytes of the stored task it extends."""
-    if tasks is None or not isinstance(tasks.parts, tuple) or len(answer.sources) != len(answer.rows):
+    if tasks is None or not isinstance(tasks.parts, tuple):
         return encode(answer.rows).encode()
     items: tuple[Fragment, ...] = tasks.parts  # pyright: ignore[reportUnknownMemberType]
     return b"[" + b",".join(scoped_row(items[index], row) for index, row in zip(answer.sources, answer.rows)) + b"]"

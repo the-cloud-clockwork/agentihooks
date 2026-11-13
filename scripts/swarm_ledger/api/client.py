@@ -190,10 +190,15 @@ class ResourceClient:
         events_after: int | None = None,
     ) -> dict[str, Any]:
         """The export of the named parts as the changes since generation since, or in full when the server no
-        longer holds every change after it."""
+        longer holds every change after it; read again without events_after when a server refuses it."""
         scope = live_rows.Scope() if scope is None else scope
         payload = {"since": since, "parts": list(parts), "closed": scope.closed, "frozen": scope.frozen}
-        return self.request(slug, "export", payload | held_revision(events_after))
+        try:
+            return self.request(slug, "export", payload | held_revision(events_after))
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400 or events_after is None:
+                raise
+            return self.request(slug, "export", payload)
 
     def stored_export(self, slug: str) -> dict:
         """The full export, read as the changes since the one the last command on this host stored for it."""

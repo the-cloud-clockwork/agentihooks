@@ -2,6 +2,8 @@
 
 import json
 import types
+import urllib.error
+from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -134,6 +136,31 @@ def test_the_client_changes_read_carries_the_held_revision_when_there_is_one() -
     reader.changes("s", 3, ("tasks",), SCOPE)
     common = {"since": 3, "parts": ["tasks"], "closed": True, "frozen": True}
     assert sent == [{**common, "events_after": 9}, common]
+
+
+@pytest.mark.feature("ledger-export-cost")
+def test_a_server_that_refuses_the_held_revision_is_read_again_without_it() -> None:
+    sent: list[dict | None] = []
+
+    def transport(slug: str, path: str, payload: dict | None) -> dict:
+        sent.append(payload)
+        if payload and "events_after" in payload:
+            raise urllib.error.HTTPError("http://ledger", 400, "schema_invalid", Message(), None)
+        return {"generation": 4}
+
+    reply = api.ResourceClient("http://ledger", {}, transport=transport).changes("s", 3, ("tasks",), SCOPE, 9)
+    common = {"since": 3, "parts": ["tasks"], "closed": True, "frozen": True}
+    assert (reply, sent) == ({"generation": 4}, [{**common, "events_after": 9}, common])
+
+
+@pytest.mark.feature("ledger-export-cost")
+@pytest.mark.parametrize(("code", "after"), [(500, 9), (400, None)])
+def test_a_refusal_the_held_revision_did_not_cause_is_raised(code: int, after: int | None) -> None:
+    def transport(slug: str, path: str, payload: dict | None) -> dict:
+        raise urllib.error.HTTPError("http://ledger", code, "refused", Message(), None)
+
+    with pytest.raises(urllib.error.HTTPError):
+        api.ResourceClient("http://ledger", {}, transport=transport).changes("s", 3, ("tasks",), SCOPE, after)
 
 
 @pytest.mark.feature("ledger-export-cost")
