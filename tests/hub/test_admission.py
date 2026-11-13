@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -560,6 +561,35 @@ def test_only_the_root_hive_counts_workers_that_name_no_hive(
 
     assert admitted is not None
     assert ("held" in admitted) is held
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+def test_two_hub_pods_on_one_store_never_admit_a_hive_past_its_max_agents(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    _hive_holding(rig, monkeypatch, "2", 1)
+    monkeypatch.setattr(admission, "TURN_TRIES", 1)
+    monkeypatch.setattr(admission, "TURN_WAIT_S", 0)
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    claim = rig.admitter._claim
+    raced: list[dict[str, Any] | None] = []
+
+    def racing(*args: Any) -> dict[str, Any] | None:
+        raced.append(other.admit(SLUG, ask(task="t2", lane="ci")))
+        return claim(*args)
+
+    monkeypatch.setattr(rig.admitter, "_claim", racing)
+
+    first = rig.admitter.admit(SLUG, ask())
+
+    assert first is not None
+    assert first["hive"] == "hive-a"
+    assert raced == [{"held": admission.BUSY}]
+    assert rig.store.claimant(SLUG, "t2") is None
+    assert other.admit(SLUG, ask(task="t2", lane="ci")) == {"held": "2 of 2 agents on the hive"}
+    assert rig.store.redis.get(f"{registry.key('hive-a')}:admitting") is None
 
 
 @pytest.mark.feature("hub-admission-hive-max-agents")
