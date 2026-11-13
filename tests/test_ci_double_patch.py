@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci_double_patch import main
 
@@ -99,6 +100,29 @@ def test_a_root_conftest_autouse_fixture_reaches_the_tests(tmp_path: Path, capsy
     ]
 
 
+def test_two_double_patches_exit_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(
+        tmp_path,
+        {"tests/test_six.py": _MOCKED_FIXTURE + _MONKEYPATCH_TEST + _MONKEYPATCH_TEST.replace("test_one", "test_two")},
+    )
+    assert main(["--root", str(root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Double patches: 1 files, 2 problems",
+        _error("tests/test_six.py", 8, "test_one", "pkg.mod.get_redis", "_isolate", "tests/test_six.py:5"),
+        _error("tests/test_six.py", 10, "test_two", "pkg.mod.get_redis", "_isolate", "tests/test_six.py:5"),
+    ]
+
+
+def test_an_undecodable_file_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(tmp_path, {})
+    (root / "tests").mkdir(parents=True)
+    (root / "tests/test_bytes.py").write_bytes(b"\xff\xfe\x00")
+    assert main(["--root", str(root)]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "Double patches: 1 files, 1 problems"
+    assert out[1].startswith("::error::tests/test_bytes.py: cannot parse: ")
+
+
 def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -147,6 +171,8 @@ def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
             1,
         ),
         ({"tests/test_clean.py": _MOCKED_FIXTURE.replace("autouse=True", "autouse=False") + _MONKEYPATCH_TEST}, 1),
+        ({"tests/test_clean.py": _MOCKED_FIXTURE.replace("autouse=True", "autouse=None") + _MONKEYPATCH_TEST}, 1),
+        ({"tests/test_clean.py": _MOCKED_FIXTURE.replace("with patch(", "with helper(") + _MONKEYPATCH_TEST}, 1),
         (
             {
                 "tests/test_clean.py": _MOCKED_FIXTURE.replace("@pytest.fixture(autouse=True)", "@pytest.fixture")
@@ -192,6 +218,8 @@ def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
         "monkeypatch-fixture",
         "other-target",
         "autouse-false",
+        "autouse-none",
+        "not-a-mock",
         "plain-fixture",
         "not-a-fixture",
         "conftests-off-the-path",
@@ -220,8 +248,6 @@ def test_an_empty_tree_and_an_unparseable_file_are_red(tmp_path: Path, capsys: p
 
 
 def test_lint_grades_the_head_tree_with_the_protected_grader() -> None:
-    import yaml
-
     root = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     step = next(
