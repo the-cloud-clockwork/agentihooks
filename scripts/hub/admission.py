@@ -22,6 +22,14 @@ class LateAdmission(RuntimeError):
     """An admission finished after the asking hive stopped waiting for its answer."""
 
 
+def refused(slug: str, request: dict[str, Any], reason: str) -> None:
+    """Prints the one line naming the member hive, the task and the reason a lane admission is refused."""
+    print(
+        f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} refused: {reason}",
+        file=sys.stderr,
+    )
+
+
 class Admission:
     def __init__(
         self,
@@ -46,28 +54,43 @@ class Admission:
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
-            return admitted if admitted["hive"] == request["hive"] else None
+            if admitted["hive"] == request["hive"]:
+                return admitted
+            return refused(slug, request, f"already admitted to hive {admitted['hive']}")
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
-            return None
+            return refused(slug, request, "claims are stopped")
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
         view = self.source.snapshot(slug)
-        if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
-            return None
+        if withdrawn := readiness.withdrawal(
+            SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
+        ):
+            return refused(slug, request, f"the offer is withdrawn, {withdrawn}")
         if not self._placeable(view.rows[task_id], request["hive"]):
             print(f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused", file=sys.stderr)
             return None
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
-            print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
+            print(
+                f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
+            )
             return None
-        return self._answered(slug, request, started, self._claim(slug, request, view.rows))
+        admitted = self._claim(slug, request, view.rows)
+        if admitted is None:
+            return refused(slug, request, "another holder took the claim")
+        return self._answered(slug, request, started, admitted)
 
-    def _answered(self, slug: str, request: dict[str, Any], started: int, admitted: dict | None) -> dict | None:
+    def _answered(self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any]) -> dict[str, Any]:
         """The admission the asking hive is still waiting for; one finished past its wait is released and refused."""
-        if admitted is None or self.clock() - started < ANSWER_MS:
+        elapsed = self.clock() - started
+        if elapsed < ANSWER_MS:
             return admitted
         self.reopen(slug, request)
+        print(
+            f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} late: "
+            f"finished after {elapsed} ms, the hive stopped waiting at {ANSWER_MS} ms",
+            file=sys.stderr,
+        )
         raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
 
     def _placeable(self, row: dict[str, Any], hive: str) -> bool:
