@@ -12,6 +12,7 @@ __all__ = ["MAX_WAIT_MS", "UploadSigner", "respond", "serve"]
 
 MAX_WAIT_MS = 30_000
 MAX_BODY_BYTES = 65_536
+LENGTH = "Content-Length"
 UPLOADS = frozenset({"report", "log"})
 
 Reply = tuple[int, dict[str, Any]]
@@ -110,13 +111,13 @@ def _complete(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> R
 
 def _upload_url(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     fields = {name: values[0] for name, values in parse_qs(query).items()}
-    job = fields.get("job", "")
-    if not leases.owns(job, fields.get("token", "")):
+    job = fields.get("job")
+    token = fields.get("token")
+    if job is None or token is None or not leases.owns(job, token):
         return _refused()
-    name = fields.get("name", "")
-    if name not in UPLOADS:
+    if fields.get("name") not in UPLOADS:
         return 400, {"error": "upload name must be report or log"}
-    return 200, {"url": signer.upload_url(job, name)}
+    return 200, {"url": signer.upload_url(job, fields["name"])}
 
 
 ROUTES: dict[tuple[str, str], Callable[[Leases, UploadSigner, str, bytes], Reply]] = {
@@ -143,7 +144,7 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> Threadi
     """Bind the lease API on host and port; the caller runs serve_forever."""
 
     def answer(request: BaseHTTPRequestHandler) -> None:
-        length = request.headers.get("Content-Length") or "0"
+        length = request.headers.get(LENGTH) or "0"
         if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
             status, payload = respond(leases, signer, request.command, request.path, request.rfile.read(int(length)))
         else:
@@ -155,5 +156,5 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> Threadi
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type("Handler", (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
+    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
     return ThreadingHTTPServer((host, port), handler)

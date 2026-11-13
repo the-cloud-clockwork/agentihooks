@@ -110,6 +110,13 @@ def test_claim_records_the_lease(jobs: queue.Queue) -> None:
     assert jobs.expired(100) == ["h1:test:a"]
 
 
+def test_expired_includes_a_lease_at_time_zero(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a", expires_ms=0)
+
+    assert jobs.expired(0) == ["h1:test:a"]
+
+
 def test_extend_needs_the_token_and_a_live_lease(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {})
     assert jobs.extend("h1:test:a", "", 200) is False
@@ -164,6 +171,7 @@ def test_reap_requeues_while_attempts_remain_then_marks_lost(jobs: queue.Queue) 
     assert (lost.state, lost.outcome, lost.attempts) == ("lost", "lost", 1)
     assert jobs.token("h1:test:a") == ""
     assert jobs.members("h1", "done") == {"h1:test:a"}
+    assert jobs.client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
     assert jobs.members("h1", "leased") == set()
     assert jobs.pending() == ["h1:test:b"]
 

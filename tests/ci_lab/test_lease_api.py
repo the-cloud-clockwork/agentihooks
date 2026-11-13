@@ -152,6 +152,14 @@ def test_upload_url_needs_the_token(lab: leases.Leases, signer: Signer, jobs: qu
         403,
         {"error": "lease token refused"},
     )
+    assert lease_api.respond(lab, signer, "GET", f"/upload-url?token={grant['token']}&name=log", b"") == (
+        403,
+        {"error": "lease token refused"},
+    )
+    assert lease_api.respond(lab, signer, "GET", f"/upload-url?job={job}&token={grant['token']}", b"") == (
+        400,
+        {"error": "upload name must be report or log"},
+    )
     assert signer.calls == []
     assert lease_api.respond(lab, signer, "GET", f"/upload-url?job={job}&token={grant['token']}&name=log", b"") == (
         200,
@@ -264,9 +272,14 @@ def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=10) as response:
-            assert response.headers["Content-Type"] == "application/json"
-            grant = json.loads(response.read())["leases"][0]
+            raw = response.read()
+            assert ("Content-Type", "application/json") in response.getheaders()
+            assert ("Content-Length", str(len(raw))) in response.getheaders()
+            grant = json.loads(raw)["leases"][0]
         assert grant["job"] == "h1:test:a"
+        signed = f"{base}/upload-url?job=h1:test:a&token={grant['token']}&name=log"
+        with urllib.request.urlopen(signed, timeout=10) as response:
+            assert json.loads(response.read()) == {"url": "https://objects.test/h1:test:a/log?signed"}
         with pytest.raises(urllib.error.HTTPError) as refused:
             urllib.request.urlopen(f"{base}/upload-url?job=h1:test:a&token=wrong&name=log", timeout=10)
         assert refused.value.code == 403

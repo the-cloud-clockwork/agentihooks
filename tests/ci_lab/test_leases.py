@@ -89,6 +89,23 @@ def test_lease_stops_at_free_slots(jobs: queue.Queue, lab: leases.Leases) -> Non
     assert jobs.pending() == ["h1:test:c"]
 
 
+def test_lease_stops_reading_once_slots_run_out(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit("a"), unit("b"), unit("c"), unit("d")], "h1", {})
+    reads: list[str] = []
+    read = jobs.job
+
+    def counted(job: str) -> queue.Job | None:
+        reads.append(job)
+        return read(job)
+
+    monkeypatch.setattr(jobs, "job", counted)
+
+    assert len(lab.lease("w1", 2, frozenset(), 0)) == 2
+    assert reads == ["h1:test:a", "h1:test:b"]
+
+
 def test_long_poll_waits_until_work_arrives(jobs: queue.Queue, clock: Clock) -> None:
     def arrive(ms: int) -> None:
         clock.sleep(ms)
@@ -104,9 +121,9 @@ def test_long_poll_waits_until_work_arrives(jobs: queue.Queue, clock: Clock) -> 
 
 
 def test_long_poll_returns_empty_at_the_deadline(lab: leases.Leases, clock: Clock) -> None:
-    assert lab.lease("w1", 1, frozenset(), 120) == []
-    assert clock.sleeps == [50, 50, 20]
-    assert clock.now == 1120
+    assert lab.lease("w1", 1, frozenset(), 101) == []
+    assert clock.sleeps == [50, 50, 1]
+    assert clock.now == 1101
 
 
 def test_heartbeat_keeps_the_lease(jobs: queue.Queue, lab: leases.Leases, clock: Clock) -> None:

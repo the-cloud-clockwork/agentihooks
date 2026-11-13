@@ -130,7 +130,6 @@ class Queue:
                 "state": "pending",
                 "attempts": 0,
                 "worker": "",
-                "token": "",
                 "outcome": "",
             }
             fields = [item for pair in record.items() for item in pair]
@@ -186,7 +185,7 @@ class Queue:
         return bool(self._finish(keys=keys, args=[job.id, token, outcome]))
 
     def expired(self, now_ms: int) -> list[str]:
-        return list(self.client.zrangebyscore(_key("leased"), "-inf", now_ms))
+        return list(self.client.zrangebyscore(_key("leased"), 0, now_ms))
 
     def reap(self, job: Job, now_ms: int, requeues: int) -> str:
         """Requeue an expired lease while attempts remain, else mark it lost; empty when it no longer expired."""
