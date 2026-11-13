@@ -40,6 +40,27 @@ def send(dispatcher, bridge, delivery):
     return dispatcher.receipts.accept(delivery.id, bridge, delivery.digest)
 
 
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks(
+    store: InboxStore, dispatcher: Dispatcher
+) -> None:
+    store.send("operator", "bob", "first", ref="sw:3:a1")
+    [done] = dispatcher.reserve("bob", "bridge-1")
+    send(dispatcher, "bridge-1", done)
+    held = store.send("operator", "bob", "second", ref="sw:3:b2")
+    [open_delivery] = dispatcher.reserve("bob", "bridge-1")
+    keys, _ = store.keys_at(["alice", "bob", "carol"])
+    assert {
+        store.key("deliveries", "bob"),
+        store.key("seen", "bob"),
+        store.key("delivery", open_delivery.id),
+        store.key("reservation", held.id),
+        store.key("ref-reservation", "bob", "sw:3:b2"),
+    } <= set(keys)
+    assert store.key("delivery", done.id) not in keys
+    assert store.key("seen", "bob") == SeenMarks.key("bob")
+
+
 def states(store, item_id):
     return [entry["state"] for entry in store.history(item_id) if "state" in entry]
 

@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "controller-done-clears-awaiting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",
+      "behaviour": "The swarm v2 controller clears awaiting when committing a verified done outcome, and the ledger accepts the matching fields and receipt replay.",
+      "seam": "Outcomes.complete through ledger_tasks.complete_outcome and SQLiteLedgerRepository",
+      "tests": [
+        "tests/test_swarm_v2_outcomes.py::test_controller_completion_clears_awaiting_and_replays"
+      ],
+      "rules": [
+        "controller-done-keeps-awaiting"
+      ]
+    },
+    {
       "id": "codex-expired-routing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
@@ -366,6 +379,19 @@
         "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
         "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
         "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
+      ]
+    },
+    {
+      "id": "swarm-snapshot-inbox-receipts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t900",
+      "behaviour": "A swarm snapshot carries each inbox address's receipts journal: its open deliveries, their records, the item and ref reservations they hold and the address's seen marks, so a delivery in flight when Redis is lost is restored, recovered as unknown and delivered once instead of being reserved and sent again.",
+      "seam": "InboxStore.keys_at through RedisStore.export, snapshot.take and snapshot.restore",
+      "tests": [
+        "tests/inbox/test_dispatch.py::test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks",
+        "tests/swarm/test_snapshot.py::test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore",
+        "tests/swarm/test_snapshot.py::test_a_ref_shown_before_redis_is_lost_is_not_delivered_again_after_restore",
+        "tests/swarm/test_snapshot.py::test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore"
       ]
     },
     {
@@ -1476,6 +1502,19 @@
       ]
     },
     {
+      "id": "swarm-tick-abandoned-renewal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2494",
+      "behaviour": "A step worker its pass abandoned at the step budget never renews the tick lock once that pass released it: the late renewal returns quietly, raises no stale lock error and leaves a successor pass's lock and the activity mark untouched.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal, revoked by run_tick before it releases the tick lock",
+      "tests": [
+        "tests/swarm/test_abandoned_tick_renewal.py::test_an_abandoned_step_worker_never_renews_the_lock_its_pass_released"
+      ],
+      "rules": [
+        "pass-step-hook-unrevoked"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
@@ -1543,6 +1582,15 @@
       "tests": [
         "tests/swarm/test_startup_prompts.py::test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks",
         "tests/swarm/test_startup_prompts.py::test_a_parked_task_finishes_from_its_branch_after_a_restack"
+      ]
+    },
+    {
+      "id": "swarm-park-resume-branch",
+      "origin": "inventory",
+      "behaviour": "The spawn prompt of a resumed parked task whose kind is not code or ci names the branch recorded on the task and cuts its worktree from it.",
+      "seam": "The spawn prompt in scripts.swarm.prompt",
+      "tests": [
+        "tests/swarm/test_startup_prompts.py::test_a_resumed_parked_task_of_every_kind_names_its_recorded_branch"
       ]
     },
     {
@@ -1935,6 +1983,17 @@
       "tests": [
         "tests/swarm/test_waits.py::test_a_wait_on_intent_names_its_own_tasks_pull_request",
         "tests/swarm/test_waits.py::test_target_problem_takes_intent_only_on_the_own_tasks_pull_request"
+      ]
+    },
+    {
+      "id": "intent-split-half-own-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t976",
+      "behaviour": "On a split task, swarm done naming a half's pull request is refused unless that half carries its own intent verdict, and a merge naming a bare pull request number matches only a registered half in the command's own repository.",
+      "seam": "scripts.gates.intent.IntentGate.decide on swarm done, gh pr merge and swarm merge queue commands",
+      "tests": [
+        "tests/gates/test_intent_split_gate.py::test_done_refuses_a_registered_half_without_its_own_verdict",
+        "tests/gates/test_intent_split_gate.py::test_a_bare_number_matches_only_the_half_in_its_own_repository"
       ]
     },
     {
@@ -2637,6 +2696,17 @@
       ]
     },
     {
+      "id": "ledger-plain-words-skip-links",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plain-words-skip-links",
+      "behaviour": "The ledger plain words check counts parentheses and semicolons on prose only, so a web link carrying them stays whole, while the same marks in the prose beside it still count.",
+      "seam": "ledger comments plain words check",
+      "tests": [
+        "tests/test_ledger_comments.py::test_parentheses_and_semicolons_inside_a_web_link_are_not_counted",
+        "tests/test_ledger_comments.py::test_parentheses_and_semicolons_in_prose_beside_a_link_are_still_counted"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
@@ -2920,6 +2990,21 @@
         "tests/swarm_ledger/test_freeze_page.py::test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows",
         "tests/swarm_ledger/test_freeze_page.py::test_unfreeze_sends_the_clear_and_restores_the_rows"
       ]
+    },
+    {
+      "id": "snapshot-job-bounded-memory",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2497",
+      "behaviour": "The automatic snapshot job writes the snapshot document one entry at a time, loading the Redis export and the ledger one after the other and never building the whole document as one string, and source pruning reads the small refs file beside each kept snapshot instead of parsing every kept snapshot whole, so the job's peak memory stays near its largest single part instead of the sum of the export, the ledger, their text and two parsed snapshots.",
+      "seam": "scripts.swarm.snapshot.take, auto and referenced against the snapshot files and the refs file beside each",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_a_snapshot_is_written_one_entry_at_a_time_never_as_one_whole_string",
+        "tests/swarm/test_snapshot.py::test_pruning_reads_each_kept_snapshot_refs_without_parsing_the_snapshot",
+        "tests/swarm/test_snapshot.py::test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it",
+        "tests/swarm/test_snapshot.py::test_each_entry_down_to_the_split_depth_is_written_as_its_own_string",
+        "tests/swarm/test_snapshot.py::test_a_take_that_dies_before_its_snapshot_lands_leaves_no_refs_naming_the_old_snapshot"
+      ],
+      "rules": []
     },
     {
       "id": "swarm-tick-delta-reads",
@@ -5084,6 +5169,40 @@
         "tests/gates/test_progress.py::test_branch_head_is_unread_when_github_fails_or_the_repository_is_elsewhere",
         "tests/gates/test_progress.py::test_origin_reads_the_public_origin_address_of_a_checkout",
         "tests/tick/steps/test_progress_heads.py::test_progress_heads_reads_held_tasks_through_the_pass_view_and_the_swarm_origin"
+      ]
+    },
+    {
+      "id": "tick-progress-origin-without-git",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2510",
+      "behaviour": "The swarm origin read by the tick step progress heads is empty where the git binary is not installed, as it is for a path with no origin, so a controller image without git passes the step instead of failing the whole tick pass.",
+      "seam": "scripts.gates.progress.origin, called by scripts.tick.steps.report._progress_heads",
+      "tests": [
+        "tests/gates/test_progress.py::test_origin_is_empty_where_git_is_not_installed"
+      ]
+    },
+    {
+      "id": "swarm-auto-snapshot-size-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2500",
+      "behaviour": "After each automatic swarm snapshot the newest ten are kept only while their summed size from the newest stays within one gibibyte, the newest always kept, so the kept set fits under the controller's two gibibyte ephemeral storage limit.",
+      "seam": "scripts.swarm.snapshot.auto pruning through scripts.swarm.snapshot.stale",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest",
+        "tests/swarm/test_snapshot.py::test_the_newest_automatic_snapshot_is_kept_even_past_the_size_budget"
+      ]
+    },
+    {
+      "id": "one-push-failed-or-conflicting-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2499",
+      "behaviour": "The one push gate lets a swarm worker push while its pull request's checks still run when any check on the head has already failed, even though the required gate status passed, or when GitHub reports the pull request as conflicting with its base; a running suite with no failed check on a mergeable head still holds the push.",
+      "seam": "scripts.gates.one_push.OnePush.pushing over scripts.swarm.ledger_events.pull_request and its PullRequest.head_red field, and scripts.gates.push_stop.PushStop.checks, which shares OnePush's finished rule",
+      "tests": [
+        "tests/gates/test_one_push.py::test_a_failed_job_in_a_running_suite_lets_the_push_pass_though_the_required_status_passed",
+        "tests/gates/test_one_push.py::test_a_failed_status_context_on_the_head_lets_the_push_pass",
+        "tests/gates/test_one_push.py::test_a_running_suite_with_no_failed_job_still_holds_the_push",
+        "tests/gates/test_one_push.py::test_a_conflicting_head_lets_the_push_pass_while_its_suite_runs"
       ]
     }
   ],

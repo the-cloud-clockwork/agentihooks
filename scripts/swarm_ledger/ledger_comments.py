@@ -5,6 +5,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 """
 
 import re
+from collections.abc import Collection
 from itertools import groupby
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
@@ -48,7 +49,7 @@ def web_links():
     return re.compile(r"""\bhttps?://[^\s<>"']+""", re.I)
 
 
-def problems(text, kind, long=False, task_ids=()):
+def problems(text: str, kind: str, long: bool = False, task_ids: Collection[str] = ()) -> list[str]:
     found = []
     prose = web_links().sub(" ", text)
     hash_prose = re.sub(r"[\w-]+", lambda match: " " if match.group() in task_ids else match.group(), prose)
@@ -57,8 +58,8 @@ def problems(text, kind, long=False, task_ids=()):
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
-        if text.count(mark) > most:
-            found.append(f"{text.count(mark)} {name}, at most {most}")
+        if prose.count(mark) > most:
+            found.append(f"{prose.count(mark)} {name}, at most {most}")
     words = len(text.split())
     if words > LIMITS[kind] and not (kind == "chat" and long):
         found.append(f"{words} words, at most {LIMITS[kind]}")
