@@ -156,7 +156,7 @@ def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
     if (environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == "memory":
         print(
             "hive lane spokes refused: the memory bus never sees the hub's ready offers; "
-            f"a distributed hive needs {BACKEND_ENV}=nats and {URL_ENV}",
+            f"a hive needs {BACKEND_ENV}=nats and {URL_ENV}",
             file=sys.stderr,
         )
         return None

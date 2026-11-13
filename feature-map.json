@@ -5440,7 +5440,8 @@
       "seam": "scripts.hive.lanes.serve through scripts.hive.lanes.run_once",
       "tests": [
         "tests/hive/test_lanes.py::test_lane_spokes_start_on_the_root_hive_outside_a_distributed_deployment",
-        "tests/hive/test_lanes.py::test_a_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why"
+        "tests/hive/test_lanes.py::test_a_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why",
+        "tests/hive/test_lanes.py::test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it"
       ]
     },
     {
