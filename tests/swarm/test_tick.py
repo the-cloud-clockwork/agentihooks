@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 from tests.swarm.ledger_items import LedgerItems
 
@@ -1315,6 +1315,16 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t1"]["claimed_by"] == ""
+    assert "task t1 had no agent, reopened" in actions
+
+
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_a_claimed_task_without_an_agent_is_reopened_under_the_events_engine(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
     assert "task t1 had no agent, reopened" in actions
 
 
