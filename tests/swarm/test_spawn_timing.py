@@ -183,7 +183,7 @@ def test_spawn_order_times_every_remaining_part_inside_it(
     assert runtime.placing is True
 
 
-def test_spawn_order_queues_only_the_tasks_the_tick_launches_under_the_events_engine(store: RedisStore) -> None:
+def test_spawn_order_queues_no_task_under_the_events_engine(store: RedisStore) -> None:
     from dataclasses import replace
 
     from scripts.swarm.store import EVENTS_ENGINE
@@ -191,7 +191,7 @@ def test_spawn_order_queues_only_the_tasks_the_tick_launches_under_the_events_en
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng", "workstation": True}])
     config = replace(store.config("sw"), engine=EVENTS_ENGINE)
     order, _ = tick_module._spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), FakeRuntime())
-    assert [task["id"] for _, task in order] == ["t2"]
+    assert order == []
 
 
 def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):

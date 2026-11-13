@@ -14,6 +14,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.scope import LANES
 from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.probe import ROOT
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -100,8 +101,11 @@ def generation(task: dict) -> int:
     return task.get("claim_generation") or 0
 
 
-def offer_id(slug: str, task: dict) -> str:
-    return f"ready:{slug}:{task['id']}:{generation(task)}"
+def offer_id(slug: str, task: Mapping[str, Any]) -> str:
+    """A workstation task's offer carries the root hive in its id, so the offer pinned there is never deduplicated
+    against the unpinned one withdrawn when the task turned workstation."""
+    pin = f":{ROOT}" if task.get("workstation") else ""
+    return f"ready:{slug}:{task['id']}:{generation(task)}{pin}"
 
 
 def queue_name(slug: str, lane: str) -> str:
@@ -110,7 +114,7 @@ def queue_name(slug: str, lane: str) -> str:
 
 def offer(task: dict[str, Any], view: Snapshot, now_ms: int) -> Envelope:
     data: dict[str, Any] = {"lane": task["lane"], "generation": generation(task)}
-    if hive := task.get("hive"):
+    if hive := task.get("hive") or (ROOT if task.get("workstation") else None):
         data["hive"] = hive
     if needs := task.get("needs"):
         data["needs"] = list(needs)
@@ -128,11 +132,11 @@ def offer(task: dict[str, Any], view: Snapshot, now_ms: int) -> Envelope:
 
 
 def placeable(task: Mapping[str, Any], hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
-    """A hive never takes a workstation task, a task pinned to another hive or one needing what it lacks; its
-    capabilities are read only for a task that names needs."""
+    """Only the root hive takes a workstation task, and no hive takes a task pinned to another hive or one needing what
+    it lacks; its capabilities are read only for a task that names needs."""
     needs: set[str] = set(task.get("needs") or ())
     return (
-        not task.get("workstation")
+        (hive == ROOT or not task.get("workstation"))
         and task.get("hive") in (None, "", hive)
         and (not needs or needs <= set(capabilities()))
     )
@@ -159,22 +163,17 @@ def anywhere(event: Envelope) -> bool:
     return True
 
 
-def tick_launches(engine: str, task: Mapping[str, Any]) -> bool:
-    """Under the events engine hives take every task but a workstation task, which the workstation tick launches."""
-    return engine != EVENTS_ENGINE or bool(task.get("workstation"))
+def tick_launches(engine: str) -> bool:
+    """Under the events engine hives take every task, a workstation task on the root hive, so the tick launches
+    none."""
+    return engine != EVENTS_ENGINE
 
 
 def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The ready tasks the tick launches under ``engine``, narrowed to the capacity decision's tasks when it names
     any."""
-    ready = [task for task in ready if tick_launches(engine, task)]
+    ready = ready if tick_launches(engine) else []
     return [task for task in ready if task["id"] in decision["tasks"]] if "tasks" in decision else ready
-
-
-def tick_places(engine: str, rows: Mapping[str, Mapping[str, Any]]) -> bool:
-    return engine != EVENTS_ENGINE or any(
-        row.get("state") == "open" and tick_launches(engine, row) for row in rows.values()
-    )
 
 
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
@@ -182,7 +181,9 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     return [
         offer(task, view, now_ms)
         for task in rows.values()
-        if task.get("lane") and not task.get("workstation") and claimable(task, task["lane"], view)
+        if task.get("lane")
+        and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
+        and claimable(task, task["lane"], view)
     ]
 
 
@@ -202,9 +203,9 @@ def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePo
 
 
 def stale(event: Envelope, view: Snapshot) -> bool:
-    """An offer ``withdrawal`` names against the snapshot, or one whose task turned workstation, which hives never
-    take."""
-    return bool(withdrawal(event, view) or view.rows[event.key].get("workstation"))
+    """An offer ``withdrawal`` names against the snapshot, or one whose pin differs from its task's, as when the task
+    turned workstation and only the root hive may take it."""
+    return bool(withdrawal(event, view) or event.id != offer_id(view.slug, view.rows[event.key]))
 
 
 def withdrawal(event: Envelope, view: Snapshot) -> str:
