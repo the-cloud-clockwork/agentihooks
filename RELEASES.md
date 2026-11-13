@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.848 · 2026-11-13
+
+### 2026-11-13 · c2e574bf3730 · #11030 · @agenticore-app
+
+**Preserve readiness publication after concurrent offer removal**
+
+This change fixes a race where a consumer's acknowledgement or termination deletes a work queue offer right after readiness withdrawal has already read it, causing NATS to raise ServerError 10057 on the subsequent delete and aborting the sweep before fresh offers could publish. Now that specific "message already gone" error is treated as zero removals so the sweep continues normally, while any other server error still propagates and fails loudly. This prevents silent stalls in offer publication caused by benign timing overlaps, backed by real acknowledgement and termination regressions, a feature map entry, and a Semgrep rule guarding against regressions.
+
 ## v2.17.847 · 2026-11-13
 
 ### 2026-11-13 · b125476a6ef1 · #10891 · @agenticore-app
