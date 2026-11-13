@@ -138,7 +138,7 @@ class SwarmConfig:
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
-    engine: str = "legacy"
+    engine: str = EVENTS_ENGINE
     window: dict = field(default_factory=dict)
     focus_weight: int = 50
     watchdog_address: str = ""
@@ -157,8 +157,8 @@ class SwarmConfig:
             raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
         if type(self.placement_nodes) is not int or self.placement_nodes < 0:
             raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
-        if self.engine not in ("legacy", "events"):
-            raise SwarmError("engine must be one of legacy, events")
+        if self.engine != EVENTS_ENGINE:
+            raise SwarmError("engine must be events")
 
 
 def scaling_refusal(config):
@@ -313,7 +313,7 @@ class RedisStore:
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
-            raw.get("engine", "legacy"),
+            EVENTS_ENGINE,
             json.loads(raw.get("window") or "{}"),
             int(raw.get("focus_weight", 50)),
             raw.get("watchdog_address", ""),

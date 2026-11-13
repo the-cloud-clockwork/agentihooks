@@ -1,4 +1,4 @@
-"""The placement steps of the tick pass, run at their sites in today's order: acks, ranking, preempt and spawn."""
+"""The placement steps of the tick pass, run at their sites in today's order: acks, ranking and spawn."""
 
 # pyright: reportUnusedFunction=false, reportUnusedClass=false
 
@@ -14,7 +14,7 @@ from importlib import import_module
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm import ack_pass, hash_pages, ledger_client, lost_runner, quota_notice, time_left
+from scripts.swarm import hash_pages, ledger_client, lost_runner, quota_notice, time_left
 from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -53,13 +53,12 @@ timing: Any = import_module("scripts.swarm.timing")
 ledger_rank: Any = import_module("scripts.swarm_ledger.ledger_rank")
 ledger_workspace: Any = import_module("scripts.swarm_ledger.ledger_workspace")
 
-__all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
+__all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "STEPS"]
 
 Get = Callable[[str], Any]
 NOTICES = "placement notices"
 ACKS = "placement acks"
 PLACEMENT = "placement"
-PREEMPT_NEEDS = frozenset({"reap", "drained resume", "recover outages", "prerequisite reopen"})
 RESUMED = frozenset({"drained resume"})
 CONFIG_DOC = pass_domains("config", "doc")
 TASK_STATE = pass_domains("config", "rows", "doc")
@@ -87,12 +86,6 @@ def _time_left(tick: Any, get: Get) -> Any:
     return tick.skip_refused(time_left.refresh, *map(get, keys))  # pyright: ignore[reportUnknownMemberType]
 
 
-def _collect_acks(tick: Any, get: Get) -> Any:
-    keys = ("slug", "config", "store", "ledger", "runtime", "doc", "now_ms")
-    with ack_pass.collecting(get("store"), get("slug")) as taken:
-        return tick.skip_refused(tick._collect_acks, *map(get, keys)) if taken else []
-
-
 def _codex_hook_order(tick: Any, get: Get) -> Any:
     if not get("sleeping"):
         return tick.skip_refused(tick._codex_hook_order)
@@ -108,17 +101,6 @@ def _bottleneck_remedy(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         tick.bottleneck_remedy.step, get("slug"), get("store"), get("ledger"), get("doc"), get("now_ms")
     )
-
-
-def _preempt(tick: Any, get: Get) -> Any:
-    config, store = get("config"), get("store")
-    if config.state == "running" and config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:
-        placement = partial(tick.preempt.probe, get("runtime"))
-        seats = tick.preempt.Seats(
-            get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement, tick.claim_view
-        )
-        return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
-    return []
 
 
 def _spawn_step(tick: Any, get: Get) -> Any:
@@ -833,7 +815,6 @@ STEPS = (
     CallStep("quota notice", NOTICES, held(placing(_quota_notice)), RESUMED, CONFIG_DOC),
     CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
     CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
-    CallStep("collect acks", ACKS, held(placing(_collect_acks)), RESUMED, CONFIG_DOC),
     CallStep(
         "codex hook order", ACKS, held(placing(_codex_hook_order)), frozenset({"sleeping"}), pass_domains("sleeping")
     ),
@@ -842,14 +823,6 @@ STEPS = (
     ),
     CallStep(
         "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")
-    ),
-    CallStep(
-        "preempt",
-        PLACEMENT,
-        held(placing(_preempt)),
-        PREEMPT_NEEDS,
-        frozenset({AGENTS}) | TASK_STATE,
-        frozenset({AGENTS}),
     ),
     CallStep(
         "spawn",

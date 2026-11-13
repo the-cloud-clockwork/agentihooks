@@ -93,21 +93,6 @@ def _strays(slug: Any, config: Any, store: Any, runtime: Any) -> Any:
     return actions
 
 
-def _orphans(slug: Any, store: Any, ledger: Any, rows: Any) -> Any:
-    known = {a.name for a in store.agents(slug)}
-    actions: list[str] = []
-    for task_id, row in rows.items():
-        if (
-            row.get("state") in tick.ACTIVE
-            and row.get("claimed_by") not in known
-            and store.claimant(slug, task_id) is None
-            and not tick.awaiting_merge(row)
-        ):
-            if tick._reopen(slug, ledger, rows, task_id):
-                actions.append(f"task {task_id} had no agent, reopened")
-    return actions
-
-
 def _restore_owner(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any) -> None:
     row = rows.get(agent.task, {})
     if (
@@ -591,12 +576,6 @@ def _failed_panes(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick.failed_panes.sweep, get("slug"), get("store"), get("runtime"), get("now_ms"))
 
 
-def _orphans_step(tick: Any, get: Get) -> Any:
-    if get("config").engine == tick.EVENTS_ENGINE:
-        return []
-    return tick.skip_refused(_orphans, get("slug"), get("store"), get("ledger"), get("rows"))
-
-
 def _conversations_step(tick: Any, get: Get) -> Any:
     return tick.skip_refused(_conversations, get("slug"), get("store"), get("runtime"))
 
@@ -609,7 +588,7 @@ def _transfers(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick.transfers.observe, get("store"), get("slug"), get("runtime").live_names())
 
 
-LISTED = frozenset({"spawn due"})
+LISTED = frozenset({"stopped branch", "ledger state", "automated cleanup"})
 ROWS = pass_domains("rows")
 
 STEPS = (
@@ -627,14 +606,6 @@ STEPS = (
     CallStep("recover outages", "agents", _recover_outages, LISTED, ROWS),
     CallStep("strays", "agents", _strays_step, frozenset({"drained resume"}), pass_domains("config"), lane=SLOW),
     CallStep("failed panes", "agents", _failed_panes, lane=SLOW),
-    CallStep(
-        "orphans",
-        "tasks",
-        _orphans_step,
-        frozenset({"reap", "drained resume"}),
-        frozenset({TASKS}) | pass_domains("config", "rows"),
-        frozenset({TASKS}),
-    ),
     CallStep("conversations", "close", _conversations_step, lane=SLOW),
     CallStep("session models", "close", _session_models_step, lane=SLOW),
     CallStep("handoff transfers", "close", _transfers),

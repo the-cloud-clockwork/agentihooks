@@ -161,11 +161,8 @@ from scripts.tick.steps.common import (
 )
 from scripts.tick.steps.observe import (  # noqa: F401
     _acknowledging,
-    _collect_acks,
-    _expire_launch,
     _failed_hive_launch,
     _failed_launch,
-    _finished_launch,
     _launch_checks,
     _retire_launch,
     _verify,
@@ -242,7 +239,6 @@ SPAWN_POOL = 8
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
 ACKNOWLEDGING = "acknowledging"
-ACK_EXPIRED = "no hive acknowledged the launch within the claim lease"
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"

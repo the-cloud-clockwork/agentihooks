@@ -515,7 +515,7 @@ DRAINED_RESUME_NEEDS = frozenset(
         "stopped branch",
         "master move fail over",
         "recover master",
-        "spawn due",
+        "automated cleanup",
         "master start watch",
         "master wake",
     }
@@ -527,7 +527,12 @@ CONFIG_DOC = pass_domains("config", "doc")
 
 STEPS = (
     CallStep(
-        "sleeping", DRAINED, held(_sleeping), frozenset({"spawn due"}), pass_domains("rows"), pass_domains("sleeping")
+        "sleeping",
+        DRAINED,
+        held(_sleeping),
+        frozenset({"stopped branch", "automated cleanup"}),
+        pass_domains("rows"),
+        pass_domains("sleeping"),
     ),
     CallStep(
         "drained resume",

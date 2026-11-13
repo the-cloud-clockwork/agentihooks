@@ -90,7 +90,6 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
-    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -833,7 +832,7 @@ def cmd_waits(store, args):
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits,)]
     if jobs:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             list(pool.map(check, jobs))
@@ -1431,7 +1430,7 @@ def cmd_set(store, args):
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
-                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events, tick-mode=sequential|parallel"
+                f"or {', '.join(LANE_KEYS)}=<value>, engine=events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
