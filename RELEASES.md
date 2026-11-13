@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.845 · 2026-11-13
+
+### 2026-11-13 · e407a5efb737 · #10990 · @nestorcolt
+
+**Report Gate Required from the Tests aggregator and announce the protected report step**
+
+This change closes the gap that let PR 10904 merge with a known type-gate failure: Gate Required now only reports success once both the protected grade and the newest Tests aggregator check run have actually succeeded, stays pending while the aggregator has no run yet, and fails if either side fails. A new workflow reports this status from trusted default-branch code on every completed pull request Tests run, with a frozen gate-protected.yml blob and added checks:read permission. Tests, feature map, and runner registry entries back the change; checks are green on the head commit.
+
 ## v2.17.844 · 2026-11-13
 
 ### 2026-11-13 · 5ac8c4ecc5e3 · #11006 · @agenticore-app
