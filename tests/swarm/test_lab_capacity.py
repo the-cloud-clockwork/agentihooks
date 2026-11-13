@@ -84,7 +84,8 @@ def test_read_asks_the_capacity_route_within_the_timeout(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(lab_capacity, "urlopen", answer)
     assert lab_capacity.read("http://lab:8800/") == DOC
-    assert asked == [("http://lab:8800/capacity", 3)]
+    assert lab_capacity.read("http://lab-X") == DOC
+    assert asked == [("http://lab:8800/capacity", 3), ("http://lab-X/capacity", 3)]
 
 
 @pytest.mark.parametrize("body", [b"[]", b'{"slots": {}}', b'{"classes": []}'], ids=["list", "missing", "not-a-map"])
