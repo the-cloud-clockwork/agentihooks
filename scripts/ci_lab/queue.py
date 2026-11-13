@@ -75,8 +75,9 @@ return 1
 REAP = """
 local expires = redis.call('ZSCORE', KEYS[2], ARGV[1])
 if not expires or tonumber(expires) > tonumber(ARGV[2]) then return '' end
+local attempts = tonumber(redis.call('HGET', KEYS[1], 'attempts') or 0)
 redis.call('ZREM', KEYS[2], ARGV[1])
-if tonumber(redis.call('HGET', KEYS[1], 'attempts')) < tonumber(ARGV[3]) then
+if attempts < tonumber(ARGV[3]) then
   redis.call('HINCRBY', KEYS[1], 'attempts', 1)
   redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'token', '')
   redis.call('ZADD', KEYS[3], redis.call('INCR', KEYS[4]), ARGV[1])

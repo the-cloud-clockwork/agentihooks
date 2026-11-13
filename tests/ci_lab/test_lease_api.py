@@ -208,7 +208,7 @@ def test_upload_url_serves_the_report(lab: leases.Leases, signer: Signer, jobs: 
     )
 
 
-@pytest.mark.parametrize("length", ["abc", "-1", str(lease_api.MAX_BODY_BYTES + 1)])
+@pytest.mark.parametrize("length", ["abc", "-1", "²", str(lease_api.MAX_BODY_BYTES + 1)])
 def test_server_refuses_a_bad_content_length(lab: leases.Leases, signer: Signer, length: str) -> None:
     import http.client
 

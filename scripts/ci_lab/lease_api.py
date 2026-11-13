@@ -151,7 +151,7 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> Threadi
 
         def answer(self) -> None:
             length = self.headers.get("Content-Length") or "0"
-            if length.isdigit() and int(length) <= MAX_BODY_BYTES:
+            if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
                 status, payload = respond(leases, signer, self.command, self.path, self.rfile.read(int(length)))
             else:
                 status, payload = 400, {"error": "bad request"}
