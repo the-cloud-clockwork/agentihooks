@@ -109,6 +109,20 @@ def test_status_text_says_when_a_finding_has_no_rows() -> None:
     [finding] = finding_rows.attach([bare], [], {}, [])
     text = finding_rows.text({"id": finding.id, **finding.as_dict(), "verdict": None})
     assert "  rows none in the ledger events" in text.splitlines()
+    assert "  id stalled/nobody" in text.splitlines()
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
+def test_a_row_without_a_time_reads_time_zero() -> None:
+    bare = health.Finding("stale claim", "t1", "quiet", ("no change",), "30 minutes", 1)
+    [finding] = finding_rows.attach([bare], [{"kind": "task pr", "target": "tasks/t1", "by": WORKER}], tasks(), [])
+    assert [row["at"] for row in finding.rows] == [0]
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
+def test_an_added_event_without_a_target_queues_nothing() -> None:
+    added = [{"kind": "added", "by": WORKER, "at": NOW + n} for n in range(5)]
+    assert health.scope_inflation(added, tasks(), health.Limits()) == []
 
 
 @pytest.mark.feature("swarm-health-finding-rows")

@@ -124,9 +124,9 @@ def _plural(n, word):
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def target_task(target: str) -> str:
-    """The task id a ledger target names, or an empty string for any other target."""
-    return target.split("/", 1)[1] if target.startswith("tasks/") else ""
+def target_task(target: str | None) -> str:
+    """The task id a ledger target names, or an empty string for any other target or none."""
+    return target.split("/", 1)[1] if target and target.startswith("tasks/") else ""
 
 
 def _is_master(by):
@@ -210,7 +210,7 @@ def _gain(task):
 def scope_inflation(events, tasks, limits):
     queued = {}
     for e in events:
-        tid = target_task(e.get("target", ""))
+        tid = target_task(e.get("target"))
         if e.get("kind") == "added" and _is_worker(e["by"]) and tid in tasks:
             queued.setdefault(e["by"], []).append(tid)
     found = []

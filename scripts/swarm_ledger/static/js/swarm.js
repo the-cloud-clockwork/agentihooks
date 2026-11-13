@@ -7,6 +7,7 @@ import { appliedCaps, renderControls, renderGates, settleCaps, showNote } from "
 import { firstPage, moreButton } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { tips } from "./state.js";
+import { renderFindingRows } from "./finding_rows.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { renderHives } from "./hives.js";
@@ -107,26 +108,6 @@ export function laneCeilings(sw) {
 
 function staleClaims(sw) {
   return openFindings(sw).filter((f) => f.kind === "stale claim").map((f) => [f.subject, ...f.evidence.slice(1)].join(" · "));
-}
-
-function findingRow(row) {
-  const mark = { doctrine: "required by doctrine", task: "required by the task" }[row.required];
-  const text = [clock(row.at), row.kind, row.target, row.text, mark].filter(Boolean).join(" · ");
-  return h("li", { class: mark ? "sw-required" : false, text });
-}
-
-function findingRows(f) {
-  const total = f.rows_total || 0, shown = (f.rows || []).length;
-  const count = !total ? "no ledger rows" : total > shown ? `latest ${shown} of ${total} rows` : `${total} rows`;
-  const head = [`${f.kind} ${f.subject}`, `last outcome ${f.last_outcome}`, count].join(" · ");
-  return h("li", {}, h("span", { text: head }), h("ul", {}, ...(f.rows || []).map(findingRow)));
-}
-
-function renderFindingRows(open) {
-  const shown = document.getElementById("alert-findings");
-  if (!open.length) return shown && shown.remove();
-  const list = shown || $("swarm-alert").appendChild(h("ul", { class: "sw-findings", id: "alert-findings" }));
-  list.replaceChildren(...open.map(findingRows));
 }
 
 function liveCaps(sw) {

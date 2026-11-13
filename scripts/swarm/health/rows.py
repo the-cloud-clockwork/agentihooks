@@ -51,7 +51,7 @@ def _row(event: dict[str, Any], tasks: dict[str, dict[str, Any]], owned: set[tup
     required = ""
     if kind in DOCTRINE:
         required = "doctrine"
-    elif kind == "comment added" and (event.get("by", ""), target) in owned:
+    elif kind == "comment added" and (event.get("by"), target) in owned:
         required = "task"
     label = " ".join(_label(event, tasks).split())
     return {
@@ -99,13 +99,13 @@ def text(found: dict[str, Any]) -> str:
     lines.append(f"  threshold {found['threshold']}")
     verdict = found.get("verdict")
     lines.append(f"  id {found['id']}" + (f"  earlier verdict {verdict['value']}" if verdict else ""))
-    rows, total = found.get("rows", []), found.get("rows_total", 0)
     if "last_outcome" in found:
+        rows = found["rows"]
         lines.append(f"  last outcome {found['last_outcome']}")
-        lines.append(_count(len(rows), total))
-    for row in rows:
-        cells = [_stamp(row["at"]), row["kind"], row["target"], row["text"], LABELS.get(row["required"], "")]
-        lines.append("    " + "  ".join(cell for cell in cells if cell))
+        lines.append(_count(len(rows), found["rows_total"]))
+        for row in rows:
+            cells = [_stamp(row["at"]), row["kind"], row["target"], row["text"], LABELS.get(row["required"], "")]
+            lines.append("    " + "  ".join(cell for cell in cells if cell))
     return "\n".join(lines) + "\n"
 
 
