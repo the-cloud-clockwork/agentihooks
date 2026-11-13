@@ -42,6 +42,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | automated cleanup | observe | tick | 2 | 60 | ledger state | none | none |
 | execution reconcile | observe | tick | 2 | 60 | none | none | none |
 | exits sweep | observe | tick | 10 | 60 | none | none | none |
+| lab capacity | observe | slow | 3 | 60 | none | metrics | lab-capacity-reader |
 | launch checks | observe | tick | 2 | 60 | spawn due | none | none |
 | ledger state | observe | tick | 3 | 60 | none | none | none |
 | master move fail over | observe | tick | 2 | 60 | stopped branch | none | none |
