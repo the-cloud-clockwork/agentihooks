@@ -1,4 +1,5 @@
 import stat
+import subprocess
 
 import pytest
 from dotenv import dotenv_values
@@ -131,11 +132,11 @@ def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, ca
 
 
 def test_restart_restarts_the_hive_user_service():
-    calls = []
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
-        return type("Done", (), {"returncode": 0})()
+        return subprocess.CompletedProcess(argv, 0)
 
     assert daemon.restart(run) is True
     assert calls == [
