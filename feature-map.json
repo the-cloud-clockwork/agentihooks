@@ -5774,6 +5774,17 @@
         "tests/test_ci_test_plan.py::test_a_failed_download_of_every_run_counts_as_no_record",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
       ]
+    },
+    {
+      "id": "lab-capacity-reader",
+      "origin": "inventory",
+      "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
+      "seam": "scripts.tick.steps.observe._lab_capacity registered as tick step lab capacity, scripts.swarm.lab_capacity and status_report",
+      "tests": [
+        "tests/tick/steps/test_lab_capacity.py::test_lab_capacity",
+        "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
+        "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
+      ]
     }
   ],
   "unmapped_rules": [

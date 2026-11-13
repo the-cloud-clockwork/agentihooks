@@ -374,6 +374,7 @@ def _isolate_real_user_paths(
     )
     monkeypatch.setattr("hooks.context.context_recycle.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.quota_usage.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.prod_lockdown.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", fake_state_dir / "controls_flags")
