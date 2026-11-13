@@ -1272,8 +1272,6 @@
         "tests/tick/steps/test_launch_cluster.py::test_a_held_back_task_follows_its_admission_decision",
         "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
         "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal",
-        "tests/tick/steps/test_collect_acks.py::test_collected_acknowledgements_start_finish_fail_or_wait_each_launch",
-        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_no_acknowledgement",
         "tests/tick/steps/test_place_outcomes.py::test_a_failed_spawn_releases_its_launch_and_reports_the_drop",
         "tests/tick/steps/test_place_outcomes.py::test_an_unresolved_profile_spawn_also_blocks_its_task",
         "tests/tick/steps/test_place_outcomes.py::test_a_full_account_reservation_reports_the_accounts_with_room",
@@ -3691,7 +3689,6 @@
       "behaviour": "While fleet panic is on, the spawn due step spawns no agent and keeps its due mark, and the dispatch seat step runs no dispatcher seat call; once panic clears both spawn again.",
       "seam": "scripts.tick.steps.observe.step_spawn_due and the dispatch seat step in scripts.tick.steps.masters",
       "tests": [
-        "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
       ]
     },
