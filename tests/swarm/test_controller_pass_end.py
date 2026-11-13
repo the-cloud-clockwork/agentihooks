@@ -1,16 +1,18 @@
 """The controller writes one structured line when each pass ends, naming the pass and its outcome."""
 
 import json
+import urllib.error
 from pathlib import Path
-from types import ModuleType
-from typing import cast
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import redis
 
 from scripts.gates import intent
-from scripts.swarm import controller, redis_grace
-from scripts.swarm.ledger_client import LedgerUnreachable
+from scripts.swarm import commands, controller, ledger_client, redis_grace
+from scripts.swarm.controller_probes import HOST_SWARMS_ENV
+from scripts.swarm.ledger_client import LedgerClient, LedgerOffline, LedgerUnreachable
 from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
@@ -127,3 +129,68 @@ def test_the_end_line_is_flushed_so_a_piped_log_reader_sees_it_at_once(
 
     assert controller._passes(STORE, None, PROOF, True, redis_grace.Outage(30, Clock())) == 0
     assert stdout.events == ['{"event": "controller_pass_end", "pass": 1, "outcome": "ok"}\n', "<flush>"]
+
+
+class RefusedLedger:
+    """A ledger that fails the first closed check with the given error and stops the loop on the second."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.reads: list[str] = []
+
+    def binned(self, slug: str) -> bool:
+        assert slug == "proof"
+        return False
+
+    def closed(self, slug: str) -> bool:
+        self.reads.append(slug)
+        if len(self.reads) > 1:
+            raise StopLoop()
+        raise self.error
+
+
+@pytest.mark.feature("controller-survives-ledger-connection-failure")
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionRefusedError("connection refused reading proof"),
+        LedgerOffline("ledger proof: connection refused reading proof"),
+    ],
+)
+def test_a_refused_closed_check_ends_the_pass_and_the_controller_runs_the_next_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], error: Exception
+) -> None:
+    ledger = RefusedLedger(error)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv(HOST_SWARMS_ENV, raising=False)
+    monkeypatch.setattr(intent, "keep_judging", lambda: None)
+    monkeypatch.setattr(controller, "scheduled_wait", lambda seconds: None)
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive")
+    monkeypatch.setattr(controller, "LedgerClient", lambda: ledger)
+    store = cast(RedisStore, SimpleNamespace(slugs=lambda: ["proof"]))
+
+    with pytest.raises(StopLoop):
+        controller._passes(store, None, PROOF, False, redis_grace.Outage(30, Clock()))
+
+    output = capsys.readouterr()
+    assert ledger.reads == ["proof", "proof"]
+    assert ended(output.out) == [{"event": "controller_pass_end", "pass": 1, "outcome": "ledger_unreachable"}]
+    assert (
+        "controller: pass ended, next pass after one tick: ledger proof: connection refused reading proof" in output.err
+    )
+
+
+@pytest.mark.feature("controller-survives-ledger-connection-failure")
+def test_an_unreachable_remote_lifecycle_read_raises_ledger_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def request(slug: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert (slug, path, payload) == ("proof", "lifecycle/actions", {"action": "binned"})
+        raise urllib.error.URLError("connection refused")
+
+    def client(slug: str, service: bool) -> SimpleNamespace:
+        assert (slug, service) == ("proof", False)
+        return SimpleNamespace(request=request)
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(client=client))
+
+    with pytest.raises(LedgerUnreachable, match=r"^ledger proof: <urlopen error connection refused>$"):
+        LedgerClient()._lifecycle("proof", {"action": "binned"})
