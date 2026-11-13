@@ -117,6 +117,17 @@ def advance(rig, to, beating=()):
         rig.hub.run_once()
 
 
+def drive(rig: SimpleNamespace, to: int, beating: tuple[str, ...] = ()) -> None:
+    """Poll the hive loss pass alone in five second steps, skipping the hub's queue waits."""
+    from scripts.hive import presence
+
+    while rig.clock() < to:
+        rig.clock.return_value = min(rig.clock() + 5_000, to)
+        for hive in beating:
+            presence.beat(rig.bus, hive, rig.clock())
+        rig.loss.poll()
+
+
 def claim_state(rig):
     from scripts.events.envelope import Envelope
     from scripts.hive.spoke import claim_key
@@ -199,13 +210,13 @@ def test_a_swarm_switched_back_to_events_waits_a_full_presence_ttl_before_judgin
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
     rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
-    advance(rig, T0 + 4 * presence.TTL_MS)
+    drive(rig, T0 + 2 * presence.TTL_MS)
     rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "events")
     rig.loss._emit = Mock()
     observed = rig.clock() + 5_000
-    advance(rig, observed + presence.TTL_MS - 1)
+    drive(rig, observed + presence.TTL_MS - 1)
     rig.loss._emit.assert_not_called()
-    advance(rig, observed + presence.TTL_MS)
+    drive(rig, observed + presence.TTL_MS)
     assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["execution-a"]
 
 
@@ -216,10 +227,10 @@ def test_a_swarm_switched_back_to_events_keeps_executions_whose_hive_beats_again
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
     rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
-    advance(rig, T0 + 4 * presence.TTL_MS)
+    drive(rig, T0 + 2 * presence.TTL_MS)
     rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "events")
     rig.loss._emit = Mock()
-    advance(rig, rig.clock() + 4 * presence.TTL_MS, beating=["hive-a"])
+    drive(rig, rig.clock() + 4 * presence.TTL_MS, beating=("hive-a",))
     rig.loss._emit.assert_not_called()
     assert claim_state(rig) == "started"
 
@@ -233,7 +244,7 @@ def test_a_swarm_missing_from_the_store_index_is_never_judged(rig):
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
     rig.loss._emit = Mock()
-    advance(rig, T0 + 4 * presence.TTL_MS)
+    drive(rig, T0 + 2 * presence.TTL_MS)
     rig.loss._emit.assert_not_called()
 
 
@@ -267,7 +278,7 @@ def test_a_failed_first_store_read_judges_no_swarm(rig, monkeypatch):
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
     rig.loss._emit = Mock()
-    advance(rig, T0 + 4 * presence.TTL_MS)
+    drive(rig, T0 + 2 * presence.TTL_MS)
     rig.loss._emit.assert_not_called()
 
 
