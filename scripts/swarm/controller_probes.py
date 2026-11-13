@@ -2,7 +2,7 @@ import json
 import urllib.request
 from collections.abc import Callable, Mapping
 
-from scripts.swarm import lease
+from scripts.swarm import lease, replica
 from scripts.swarm.store import RedisStore
 
 PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
@@ -16,13 +16,22 @@ def ticked(slugs: list[str], host_swarms: str) -> list[str]:
     return [slug for slug in slugs if slug not in left]
 
 
+def standing_by(environ: Mapping[str, str], store: RedisStore, hive: Callable[[], str]) -> bool:
+    """Tell whether another controller replica of this hive holds the replica lock, so this one runs no passes."""
+    lock = replica.configured(environ, store, hive)
+    return lock is not None and lock.holder() not in ("", lock.owner)
+
+
 def live(
     environ: Mapping[str, str],
     store: RedisStore,
     fetch: Callable = urllib.request.urlopen,
     owner: str | None = None,
 ) -> int:
-    held = ticked(store.slugs(), environ.get(HOST_SWARMS_ENV, ""))
+    from scripts.swarm import commands
+
+    standby = standing_by(environ, store, lambda: owner or commands.hive_id())
+    held = [] if standby else ticked(store.slugs(), environ.get(HOST_SWARMS_ENV, ""))
     stale = [slug for slug in held if not lease.current(store, slug)]
     if stale:
         print(f"controller: no live controller lease for {stale}")

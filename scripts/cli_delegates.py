@@ -26,6 +26,7 @@ DELEGATED_CLIS = {
     "judge": "scripts.judge.cli",
     "scout": "scripts.scout.cli",
     "safety-nudge": "scripts.swarm.safety_nudge",
+    "quick": "scripts.quick.cli",
     "ci-lab-scheduler": "scripts.ci_lab.contract:scheduler",
     "ci-lab-worker": "scripts.ci_lab.contract:worker",
 }

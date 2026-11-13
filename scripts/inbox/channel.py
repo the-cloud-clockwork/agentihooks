@@ -55,6 +55,8 @@ def register(environ: dict[str, str]) -> None:
             lock.mkdir()
             break
         except FileExistsError:
+            if claude_trust._reclaim(lock):  # pyright: ignore[reportPrivateUsage]
+                continue
             if time.monotonic() >= deadline:
                 raise OSError(f"{lock} is held") from None
             time.sleep(0.1)

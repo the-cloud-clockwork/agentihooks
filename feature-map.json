@@ -194,6 +194,20 @@
       ]
     },
     {
+      "id": "inbox-channel-lock-reclaim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-channel-lock-reclaim",
+      "behaviour": "Inbox channel registration in a shared profile home's Claude config reclaims a lock directory left past the Claude lockfile stale bound and registers the channel, while a lock younger than the bound still blocks until the timeout.",
+      "seam": "scripts.inbox.channel.register through claude_trust._reclaim on the Claude config lock directory",
+      "tests": [
+        "tests/inbox/test_channel_server.py::test_registration_reclaims_an_abandoned_native_config_lock",
+        "tests/inbox/test_channel_server.py::test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder"
+      ],
+      "rules": [
+        "mkdir-lock-without-reclaim"
+      ]
+    },
+    {
       "id": "swarm-master-skips-host-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
@@ -740,6 +754,35 @@
       "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
       "tests": [
         "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running"
+      ]
+    },
+    {
+      "id": "ledger-export-cost",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-export-cost",
+      "behaviour": "A scoped ledger export builds each live task row from the cached encoded bytes of its task, so a new generation re-encodes only the tasks that changed, and an export change read that names the newest event revision it holds gets only the newer events and the event count, which the API client and the tick view merge into the events they hold or read in full when they do not fit.",
+      "seam": "scripts.swarm_ledger.api.routes.export_text and export_changes, scripts.swarm_ledger.api.client.patched and ResourceClient.export, scripts.tick.view.refreshed",
+      "tests": [
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_builds_each_task_row_from_the_cached_bytes_of_its_task",
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_equals_the_encoded_scoped_view",
+        "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_names_only_the_events_newer_than_the_reader_holds",
+        "tests/swarm_ledger/test_export_cost.py::test_a_held_revision_the_server_no_longer_holds_gets_the_whole_events_list",
+        "tests/swarm_ledger/test_export_cost.py::test_a_reader_behind_every_held_event_gets_them_all_as_the_tail",
+        "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_without_a_held_revision_still_sets_the_whole_events_list",
+        "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_for_parts_without_meta_names_no_events",
+        "tests/swarm_ledger/test_export_cost.py::test_patching_appends_the_newer_events_and_drops_the_oldest_past_the_count",
+        "tests/swarm_ledger/test_export_cost.py::test_patching_keeps_no_event_when_the_count_is_zero",
+        "tests/swarm_ledger/test_export_cost.py::test_patching_refuses_events_that_do_not_reach_the_count",
+        "tests/swarm_ledger/test_export_cost.py::test_the_last_held_revision_is_that_of_the_newest_held_event",
+        "tests/swarm_ledger/test_export_cost.py::test_the_client_export_sends_the_newest_held_revision_and_merges_the_newer_events",
+        "tests/swarm_ledger/test_export_cost.py::test_the_client_changes_read_carries_the_held_revision_when_there_is_one",
+        "tests/swarm_ledger/test_export_cost.py::test_a_server_that_refuses_the_held_revision_is_read_again_without_it",
+        "tests/swarm_ledger/test_export_cost.py::test_a_refusal_the_held_revision_did_not_cause_is_raised",
+        "tests/swarm_ledger/test_export_cost.py::test_the_tick_view_reads_changes_after_its_newest_held_event",
+        "tests/swarm_ledger/test_export_cost.py::test_the_export_route_answers_a_held_revision_with_only_the_newer_events",
+        "tests/swarm_ledger/test_export_cost.py::test_a_ledger_without_events_answers_an_empty_tail",
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_of_a_ledger_whose_tasks_are_no_list_encodes_the_rows",
+        "tests/swarm_ledger/test_export_cost.py::test_the_pass_view_sends_the_newest_held_revision_to_the_ledger"
       ]
     },
     {
@@ -5481,6 +5524,57 @@
         "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin",
         "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head"
       ]
+    },
+    {
+      "id": "quick-swarm",
+      "origin": "inventory",
+      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly.",
+      "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, and init-agent --pane",
+      "tests": [
+        "tests/quick/test_cli.py::test_up_seats_the_caller_as_master_and_launches_the_engineers",
+        "tests/quick/test_cli.py::test_up_outside_herdr_fails_loudly",
+        "tests/quick/test_cli.py::test_an_engineer_that_fails_to_start_fails_up_and_waits_for_a_relaunch",
+        "tests/quick/test_cli.py::test_stop_forgets_the_swarm_and_its_room_but_keeps_the_seat_folders",
+        "tests/quick/test_guard_layout.py::test_the_quick_swarm_refuses_loudly_outside_a_live_herdr_pane",
+        "tests/quick/test_guard_layout.py::test_four_agents_fill_four_equal_columns_with_the_caller_first",
+        "tests/quick/test_guard_layout.py::test_the_caller_stays_first_when_other_panes_sit_left_of_it",
+        "tests/quick/test_guard_layout.py::test_seats_are_the_master_then_numbered_engineers",
+        "tests/quick/test_handoff.py::test_an_accepted_handoff_is_kept_in_the_seat_folder_and_marks_the_seat_pending",
+        "tests/quick/test_handoff.py::test_a_malformed_handoff_is_refused_and_the_seat_stays_ready",
+        "tests/quick/test_quick_hooks.py::test_a_quick_member_gets_its_block_on_the_first_prompt_and_then_on_cadence",
+        "tests/quick/test_quick_hooks.py::test_a_quick_member_at_the_compact_limit_is_told_to_hand_off_into_its_seat",
+        "tests/quick/test_quick_hooks.py::test_past_the_hard_gate_a_quick_member_may_only_read_write_its_handoff_and_hand_off",
+        "tests/quick/test_quick_hooks.py::test_a_pending_quick_seat_closes_with_its_pane_kept_and_relaunches",
+        "tests/quick/test_quick_hooks.py::test_init_agent_runs_in_a_given_pane_without_opening_or_owning_it",
+        "tests/quick/test_quick_hooks.py::test_a_quick_seat_launcher_exports_its_quick_variables",
+        "tests/quick/test_quick_skills.py::test_each_quick_skill_passes_the_skill_gate",
+        "tests/quick/test_registry.py::test_the_registry_round_trips_through_its_file",
+        "tests/quick/test_registry.py::test_a_pending_seat_is_taken_for_launch_only_once",
+        "tests/quick/test_registry.py::test_a_launched_seat_is_a_member_by_its_variables",
+        "tests/quick/test_registry.py::test_the_original_master_is_a_member_by_its_herdr_pane",
+        "tests/quick/test_room_tick_launch.py::test_room_messages_reach_their_seat_once",
+        "tests/quick/test_room_tick_launch.py::test_an_idle_engineer_with_open_stages_is_nudged_and_the_master_never_is",
+        "tests/quick/test_room_tick_launch.py::test_an_idle_master_is_told_once_about_new_room_lines",
+        "tests/quick/test_room_tick_launch.py::test_a_pending_seat_at_a_bare_shell_is_relaunched",
+        "tests/quick/test_room_tick_launch.py::test_the_hourly_safety_round_runs_the_quick_tick",
+        "tests/quick/test_room_tick_launch.py::test_the_launch_lands_in_the_seat_pane_with_the_quick_variables",
+        "tests/quick/test_room_tick_launch.py::test_relaunch_starts_the_successor_once_and_marks_the_seat_ready",
+        "tests/quick/test_seeds.py::test_the_master_seed_makes_it_the_front_door_over_its_own_panes",
+        "tests/quick/test_seeds.py::test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting",
+        "tests/quick/test_seeds.py::test_the_injected_block_names_the_seat_its_folder_and_its_next_stage",
+        "tests/quick/test_seeds.py::test_the_block_tells_a_seat_of_room_lines_waiting_for_it",
+        "tests/quick/test_guard_layout.py::test_every_agent_gets_an_equal_column_so_the_master_is_never_squeezed",
+        "tests/quick/test_room_tick_launch.py::test_a_pane_left_at_a_bare_shell_is_never_typed_into",
+        "tests/quick/test_room_tick_launch.py::test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does",
+        "tests/quick/test_room_tick_launch.py::test_a_pane_herdr_cannot_read_is_never_typed_into_nor_relaunched",
+        "tests/quick/test_room_tick_launch.py::test_up_names_the_engineers_whose_agent_exited_at_launch",
+        "tests/quick/test_cli.py::test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaunch",
+        "tests/quick/test_room_tick_launch.py::test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending",
+        "tests/quick/test_room_tick_launch.py::test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds",
+        "tests/quick/test_room_tick_launch.py::test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching",
+        "tests/quick/test_quick_hooks.py::test_the_quick_gate_names_the_tokens_held_and_checks_a_named_handoff_file"
+      ],
+      "semgrep_rule": "feature-quick-swarm-pane-typing"
     },
     {
       "id": "tick-progress-heads",

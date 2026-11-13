@@ -1,0 +1,6 @@
+{
+  "scripts/quick/cli.py:scripts.quick.cli.x__swarm_for:bd2d450ab52bd6bddabaaacc2ab9fcfd75155a068895ba47868dcf57a73480f5": {
+    "reader": "standards-reader-2",
+    "reason": "names[1:], panes[1:] and harnesses are always agents-1 long: _harnesses raises on any other count and layout.build returns exactly count panes, so zip strictness never changes output."
+  }
+}

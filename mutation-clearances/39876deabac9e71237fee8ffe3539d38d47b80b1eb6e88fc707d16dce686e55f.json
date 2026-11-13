@@ -1,0 +1,6 @@
+{
+  "scripts/quick/launch.py:scripts.quick.launch.x_relaunch:f4716dcab7b4e7ca9895e92a7cb641843d6bcfbd549513a31b00c377b3a20540": {
+    "reader": "standards-reader-2",
+    "reason": "The finally reads only gone; code is assigned from start_seat before any read on the success path, and a raising start_seat never reads the initial value."
+  }
+}

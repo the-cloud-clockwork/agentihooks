@@ -1,0 +1,6 @@
+{
+  "scripts/quick/guard.py:scripts.quick.guard.x_require:bf380df445b22b317526b6310d51dc1740515aaa413012e2297a67bf6b5bca43": {
+    "reader": "standards-reader-2",
+    "reason": "None and empty string both fail `if not pane` and raise NOT_INSIDE; a truthy pane id is returned unchanged."
+  }
+}

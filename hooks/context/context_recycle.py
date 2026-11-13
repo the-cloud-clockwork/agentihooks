@@ -2,13 +2,19 @@ import json
 import os
 import re
 import shlex
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT, HANDOFF_MARGIN
 from hooks.context.context_usage import used_tokens
 from scripts.codex_context import codex_context
 from scripts.handoff import check as handoff_check
+from scripts.quick import handoff as quick_handoff
+from scripts.quick import paths as quick_paths
+from scripts.quick.member import Member
+from scripts.quick.member import find as find_member
 from scripts.swarm import naming
 
 _INSTRUCTIONS = (
@@ -22,9 +28,19 @@ _INSTRUCTIONS = (
     '`agentihooks swarm {slug} learned "<lesson>"`, then run `agentihooks swarm {slug} handoff <doc> --recap <recap>` '
     "and stop. A successor continues the task from them."
 )
-_DIRECTIVE = (
-    "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
-    + _INSTRUCTIONS
+_HEAD = "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
+_DIRECTIVE = _HEAD + _INSTRUCTIONS
+_QUICK_INSTRUCTIONS = (
+    "in Handoff v2 form: the line # Handoff v2, then ## Intent, ## Done, ## Stopped at, ## Decisions and promises, "
+    "## Next and ## Read first, each once and in that order, None under a heading with nothing to say, and "
+    "<!-- handoff complete --> as the last line. Every Done bullet carries its evidence or the word hypothesis; "
+    "Read first lists addresses (an issue or pull request link, seat:<seat>), each with the question it answers; "
+    "no file paths, line numbers or credential values. Write it to {handoff}, put any lesson for your seat in "
+    "{learned}, then run `agentihooks quick handoff` and stop. Your successor starts in this same pane from it."
+)
+_QUICK_ALLOWED = (
+    " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
+    "log, diff, show in the shell), writing under ~/scratchpad and `agentihooks quick handoff`, each as one command."
 )
 
 _ALLOWED = (
@@ -103,9 +119,11 @@ def over_limit(session_id: str, environ=None) -> str | None:
     return overrun[0] if overrun else None
 
 
-def directive(session_id: str, environ=None, now: datetime | None = None) -> str | None:
-    slug = _swarm_of(os.environ if environ is None else environ, session_id)
-    used = _used(session_id) if slug and session_id else None
+def directive(session_id: str, environ: Mapping[str, str] | None = None, now: datetime | None = None) -> str | None:
+    env = os.environ if environ is None else environ
+    slug = _swarm_of(env, session_id)
+    found = None if slug else _quick(env)
+    used = _used(session_id) if (slug or found) and session_id else None
     if used is None or used < COMPACT_LIMIT * 1000:
         return None
     hard = used >= _gate_limit() * 1000
@@ -114,14 +132,25 @@ def directive(session_id: str, environ=None, now: datetime | None = None) -> str
         return None
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
+    instructions = _quick_instructions(found) if found else _INSTRUCTIONS.format(slug=slug)
     if hard:
-        return _DIRECTIVE.format(used=used // 1000, limit=_gate_limit(), slug=slug)
+        return _HEAD.format(used=used // 1000, limit=_gate_limit()) + instructions
     deadline = (now or datetime.now(timezone.utc)) + timedelta(minutes=25)
     return (
         f"HANDOFF PREPARATION — this session holds {used // 1000}k tokens. Write your handoff now. "
         f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {_gate_limit()}k hard gate, whichever comes first. "
-        + _INSTRUCTIONS.format(slug=slug)
+        + instructions
     )
+
+
+def _quick(environ: Mapping[str, str]) -> Member | None:
+    return find_member(environ)
+
+
+def _quick_instructions(found: Member) -> str:
+    seat = found.seat.seat
+    handoff, learned = quick_paths.handoff(found.folder, seat), quick_paths.learned(found.folder, seat)
+    return _QUICK_INSTRUCTIONS.format(handoff=handoff, learned=learned)
 
 
 def unmarked_overrun(session_id: str, compact_limit: int) -> int | None:
@@ -197,9 +226,13 @@ def _swarm_step(args: list[str], slug: str) -> bool:
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
-def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str | None:
+def gate(
+    tool_name: str, tool_input: dict[str, Any], session_id: str, environ: Mapping[str, str] | None = None
+) -> str | None:
     overrun = _overrun(session_id, environ)
-    if overrun is None or tool_name in _READ_TOOLS:
+    if overrun is None:
+        return _quick_gate(tool_name, tool_input, session_id, os.environ if environ is None else environ)
+    if tool_name in _READ_TOOLS:
         return None
     slug, used = overrun
     if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
@@ -208,6 +241,32 @@ def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str
     if tool_name == "Bash" and _allowed_command(command, slug):
         return _handoff_refusal(command, slug)
     return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=_gate_limit(), slug=slug)
+
+
+def _quick_gate(tool_name: str, tool_input: dict[str, Any], session_id: str, environ: Mapping[str, str]) -> str | None:
+    found = _quick(environ) if session_id else None
+    used = _used(session_id) if found else None
+    if found is None or used is None or used < _gate_limit() * 1000 or tool_name in _READ_TOOLS:
+        return None
+    if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
+        return None
+    tokens = _single_command(str(tool_input.get("command") or "")) if tool_name == "Bash" else None
+    if tokens and _shell_read(tokens):
+        return None
+    if tokens and os.path.basename(tokens[0]) == "agentihooks" and tokens[1:3] == ["quick", "handoff"]:
+        return _quick_refusal(tokens[3:], found)
+    head = _HEAD.format(used=used // 1000, limit=_gate_limit())
+    return "BLOCKED: " + head + _quick_instructions(found) + _QUICK_ALLOWED
+
+
+def _quick_refusal(rest: list[str], found: Member) -> str | None:
+    document = Path(rest[0]).expanduser() if rest else quick_paths.handoff(found.folder, found.seat.seat)
+    try:
+        text = document.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    problems = handoff_check.problems(text, quick_handoff.resolver(found.folder))
+    return "BLOCKED: " + handoff_check.refusal(problems) if problems else None
 
 
 def _resolver(slug: str):

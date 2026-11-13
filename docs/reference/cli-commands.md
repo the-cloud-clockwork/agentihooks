@@ -751,6 +751,21 @@ agentihooks quota            # AGENT ACCOUNT KIND STATE SESSIONS WEIGHT CAP 5H L
 agentihooks quota --json
 ```
 
+## `agentihooks quick`
+
+Start and run a [quick swarm](../pillars/swarm.md#quick-swarm) in the current herdr tab.
+
+```bash
+agentihooks quick up [--agents 4] [--harness claude|codex,claude,...] [--dir PATH]   # this session is master
+agentihooks quick status                  # one JSON line per seat
+agentihooks quick send <seat> "<text>"    # post to another seat through the room
+agentihooks quick room                    # the room lines sent to this seat since it last read
+agentihooks quick handoff [<doc>]         # accept this seat's Handoff v2; the successor starts in this pane
+agentihooks quick relaunch <seat> --folder <quick folder>   # start a pending seat's successor
+agentihooks quick tick                    # one quick tick round, as the hourly safety nudge round runs it
+agentihooks quick stop                    # remove the room and the registry; seat folders stay
+```
+
 ## `agentihooks classify`, `classifier stats`, `classifier eval`
 
 Ask the LiteLLM decision models typed questions, and read the decision log. Details in

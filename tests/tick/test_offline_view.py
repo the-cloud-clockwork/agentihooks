@@ -301,7 +301,12 @@ def test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept(
     stored: Queued, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def changes(
-        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         return {"generation": since, "changes": {"lists": {}, "set": [], "drop": []}}
 
@@ -319,7 +324,12 @@ def test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept(
     stored: Queued, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def changes(
-        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         return {"generation": since, "changes": {"lists": {}, "set": [], "drop": []}}
 
@@ -339,7 +349,7 @@ def test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept(
 @pytest.mark.feature("swarm-tick-cached-ledger")
 def test_a_first_read_stores_the_view_even_at_generation_zero(tmp_path: Path) -> None:
     path = tmp_path / "view.json"
-    held = view.refreshed(path, lambda since, parts: {"generation": 0, "data": STATE})
+    held = view.refreshed(path, lambda since, parts, after: {"generation": 0, "data": STATE})
     assert held.generation == 0
     assert api.read_export_file(path) == (0, STATE)
 
@@ -357,7 +367,12 @@ def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
     ]
 
     def changes(
-        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         reply = replies.pop(0)
         if isinstance(reply, OSError):

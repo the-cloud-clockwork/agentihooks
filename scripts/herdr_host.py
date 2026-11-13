@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm.naming import pane_label, repo_name
 from scripts.swarm.pane import typed_input
@@ -32,7 +33,7 @@ def binary() -> str | None:
     return shutil.which("herdr")
 
 
-def _cli(args: list[str], environ: dict[str, str]) -> dict:
+def _cli(args: list[str], environ: dict[str, str]) -> dict[str, Any]:
     exe = binary()
     if exe is None:
         raise HerdrError("herdr is not installed")
@@ -116,7 +117,7 @@ def _env_args(env: dict[str, str]) -> list[str]:
     return [arg for key, value in env.items() for arg in ("--env", f"{key}={value}")]
 
 
-def _placed(pane: dict) -> Placement:
+def _placed(pane: dict[str, Any]) -> Placement:
     return Placement(
         workspace_id=pane["workspace_id"],
         tab_id=pane["tab_id"],
@@ -163,8 +164,32 @@ def open_pane(
     return _placed(created["root_pane"])
 
 
-def run(pane_id: str, launcher: Path, environ: dict[str, str]) -> None:
-    _cli(["pane", "run", pane_id, f"exec {shlex.quote(str(launcher))}"], environ)
+def run(pane_id: str, launcher: Path, environ: dict[str, str], env: dict[str, str] | None = None) -> None:
+    """Run the launcher in the pane, with ``env`` set for it when the pane was not created for it."""
+    assignments = "".join(f"{key}={shlex.quote(value)} " for key, value in (env or {}).items())
+    _cli(["pane", "run", pane_id, f"{assignments}exec {shlex.quote(str(launcher))}"], environ)
+
+
+def existing_pane(pane_id: str, environ: dict[str, str]) -> Placement:
+    """Where an existing pane sits."""
+    return _placed(_cli(["pane", "get", pane_id], environ)["pane"])
+
+
+def split_right(pane_id: str, directory: Path, environ: dict[str, str], ratio: float) -> Placement:
+    """Split the pane to the right, keeping ``ratio`` of its width; the new pane opens in ``directory`` unfocused."""
+    args = ["pane", "split", pane_id, "--direction", "right", "--ratio", str(ratio), "--cwd", str(directory)]
+    return _placed(_cli([*args, "--no-focus"], environ)["pane"])
+
+
+def columns(pane_id: str, environ: dict[str, str]) -> dict[str, tuple[int, int]]:
+    """Every pane in the pane's tab with its column start and width."""
+    found = _cli(["pane", "layout", "--pane", pane_id], environ).get("layout", {}).get("panes", [])
+    return {pane["pane_id"]: (int(pane["rect"]["x"]), int(pane["rect"]["width"])) for pane in found}
+
+
+def process_info(pane_id: str, environ: dict[str, str]) -> dict[str, Any]:
+    """The processes herdr sees in the pane."""
+    return _cli(["pane", "process-info", "--pane", pane_id], environ).get("process_info", {})
 
 
 def open_command(directory: Path, title: str, argv: list[str], workspace: str, environ: dict[str, str]) -> Placement:

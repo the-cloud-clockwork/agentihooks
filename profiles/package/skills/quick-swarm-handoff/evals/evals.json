@@ -1,0 +1,14 @@
+[
+  {
+    "query": "hand off this quick seat",
+    "expected_behavior": "Writes the Handoff v2 into the seat's handoff file, records lessons in the learned file, runs agentihooks quick handoff and stops after it is accepted."
+  },
+  {
+    "query": "HANDOFF PREPARATION arrives in a quick swarm engineer",
+    "expected_behavior": "Writes the handoff into its seat folder before the deadline, runs agentihooks quick handoff, and stops; it does not run any agentihooks swarm handoff command."
+  },
+  {
+    "query": "agentihooks quick handoff refused: Read first entry 1 does not resolve",
+    "expected_behavior": "Fixes the Read first address to a seat: address of this quick swarm or a GitHub link, then runs agentihooks quick handoff again."
+  }
+]
