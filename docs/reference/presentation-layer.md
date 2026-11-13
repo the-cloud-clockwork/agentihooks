@@ -162,10 +162,10 @@ of thread CPU against 79 ms for encode and parse.
 The repository keeps each cached ledger as a tree of fragments (the
 `fragments` module of the ledger repository): one fragment per top level key,
 per row of a list, and per `_meta` member, with `_meta.events` as a list and
-`_meta.stamps` as a map of records. Exports and the stored text are joined
-from these fragments, and a fragment's UTF-8 bytes are kept on it once built,
-so a later generation that shares a fragment joins its bytes without encoding
-it again.
+`_meta.stamps` as a map of records. An export joins each fragment's UTF-8
+bytes, which are kept on the fragment once built, so the export of a later
+generation that shares a fragment joins its bytes without encoding it again.
+The stored text is encoded again from the fragments each time it is read.
 
 Each new generation builds its fragment tree from the new state and the
 previous tree. A value keeps its previous fragment when:
@@ -174,16 +174,19 @@ previous tree. A value keeps its previous fragment when:
 |---|---|---|
 | The value is the very object the previous fragment holds | None | The previous fragment is reused. Delivered by [pull request 8569](https://github.com/the-cloud-clockwork/agentihooks/pull/8569) |
 | The value equals the previous value and its `orjson` encoding hashes to the previous signature | One encode of that value | The previous fragment is reused |
-| Neither | One encode, plus the strict encoder's check | A new fragment. The strict encoder refuses NaN and Infinity, which `orjson` would write as `null` |
+| Neither | One `orjson` encode for the signature, then one strict encode | A new fragment. The strict encoder refuses NaN and Infinity, which `orjson` would write as `null` |
 
 A list or map whose parts all come back as the previous fragments, in the same
 order and number, returns the previous fragment itself, so an unchanged
-subtree costs one identity check per part. Stamp records were already reused
+subtree costs one identity check per part. A value `orjson` cannot write, such
+as an integer outside 64 bits, takes its signature from the strict encoder. Stamp records were already reused
 by identity ([pull request 8441](https://github.com/the-cloud-clockwork/agentihooks/pull/8441)).
 
 Identity reuse is safe because a stored fragment value is never changed in
 place: a write applies its operations to a separate writer copy of thawed
-values, and the stored tree is replaced, not edited.
+values, and the stored tree is replaced, not edited. Stamp records are the one
+exception: the writer's stamp map shares its records with the stored tree, and
+a write replaces a stamp record, never edits one.
 
 Three cases build a new tree:
 
@@ -191,24 +194,26 @@ Three cases build a new tree:
 |---|---|---|
 | A write on this server (`_write`) | The cached entry's tree | Rows the operations did not replace are shared objects, so they skip the encode |
 | A refresh after another server wrote (`_entry`, through the changed rows in `row_changes`) | The cached entry's tree | The refreshed state shares every unchanged row with the cached state. Before the change each of them was encoded only to compare its signature |
-| A whole rebuild: no cached entry, a gap in `row_changes`, or a write that recorded no changed rows | None | Nothing; every value is encoded once |
+| A whole rebuild: no cached entry, a gap in `row_changes`, a generation outside the kept window, or a write that changed more than 5000 paths (recorded as `null`) | None | Nothing; every value is encoded once |
 
 The hosted ledger runs several ledger servers on one
 [shared database](shared-ledger-database.md#the-writer-floor), so every write
 on one pod is a refresh on the others, under the per ledger load lock that the
-next request on that pod waits for. On a saved copy of the hosted ledger the
-refresh thread CPU fell from 0.040 to 0.049 s to 0.017 to 0.021 s per refresh,
-and the full export stayed byte equal to one built by a fresh reader. The
-hosted write p95 over one live hour on release 2.17.466, before the change,
-was 1.334 s against the 0.82 s baseline. The after hour on a release carrying it
-is measured with the command in
-[Measuring operations writes](#measuring-operations-writes) and recorded on
-ledger task t1871-measure.
+next request on that pod waits for. The figures below are recorded in
+[pull request 8569](https://github.com/the-cloud-clockwork/agentihooks/pull/8569).
+On a saved copy of the hosted ledger the refresh thread CPU per refresh was
+between 0.040 and 0.049 s before the change and between 0.017 and 0.021 s
+after it, and the full export stayed byte equal to one built by a fresh
+reader. Before the change, the hosted write p95 over the live hour from 00:55
+to 01:55 UTC on release 2.17.466 was 1.334 s, against the 0.82 s write p95
+baseline of the earlier hosted ledger load measurement. The hour after the
+change is measured with the command in
+[Measuring operations writes](#measuring-operations-writes).
 
 `tests/swarm_ledger/test_fragment_encoding.py` guards the behaviour: it builds
 a document whose state shares one row and the title with the previous one,
-counts every `orjson.dumps` call and fails unless only the changed row is
-encoded, the shared fragments are the previous objects, and the joined text
+counts every `orjson.dumps` call and fails unless the only one is for the
+changed row, the shared fragments are the previous objects, and the joined text
 equals a fresh encode of the whole state.
 
 ### Measuring operations writes
