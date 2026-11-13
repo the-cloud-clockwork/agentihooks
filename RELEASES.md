@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.843 · 2026-11-13
+
+### 2026-11-13 · 0aaa831b0a7b · #10963 · @agenticore-app
+
+**Read every key of a swarm snapshot export in one atomic read**
+
+This change fixes a race in swarm snapshot export where reading each key's type, value, and ttl as separate Redis commands could capture inconsistent state if a delivery closed mid-read, pairing stale items with newer journal entries or showing addresses as waiting with no pending mail. Now `_dump` reads every selected key plus every candidate membership across the waiting, indexed, open-indexed, and wake sets in a single Lua EVAL, making the whole read atomic. Key selection still happens beforehand, so mail sent during that window can still be missed; that gap is tracked separately as a follow-up.
+
 ## v2.17.841 · 2026-11-13
 
 ### 2026-11-13 · cbe9e4d00461 · #10972 · @agenticore-app
