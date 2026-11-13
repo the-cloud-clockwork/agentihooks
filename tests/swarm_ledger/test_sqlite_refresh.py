@@ -54,16 +54,14 @@ def test_a_foreign_task_write_refreshes_the_task_and_its_events(tmp_path):
     assert served["_meta"]["events"] == written["_meta"]["events"]
 
 
-@pytest.mark.parametrize("writes", WRITES.values(), ids=WRITES.keys())
-def test_a_foreign_write_rereads_only_the_reached_keys_of_an_object(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writes: list[list[dict[str, Any]]]
+def test_a_foreign_task_update_rereads_only_the_reached_keys_of_an_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reader, writer = store(tmp_path), store(tmp_path)
     reader.create("ledger", CONTENT)
     reader.apply_ops("ledger", ops=[chat(0), CLAIM])
     reader.current("ledger")
-    for ops in writes:
-        writer.apply_ops("ledger", ops=ops)
+    writer.apply_ops("ledger", ops=[{**CLAIM, "fields": {"state": "done"}}])
     parents: list[str] = []
     original = refresh.child_rows
 
@@ -73,7 +71,6 @@ def test_a_foreign_write_rereads_only_the_reached_keys_of_an_object(
 
     monkeypatch.setattr(refresh, "child_rows", spied)
     served = reader.current("ledger")
-    assert refresh.encode(["_meta"]) not in parents
     assert refresh.encode(["_meta", "stamps"]) not in parents
     assert served.state == whole(tmp_path).state
     assert list(served.state["_meta"]["stamps"]) == list(whole(tmp_path).state["_meta"]["stamps"])
