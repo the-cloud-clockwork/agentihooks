@@ -43,10 +43,9 @@ def migrate(redis_store: RedisStore) -> dict[str, str]:
     outcomes: dict[str, str] = {}
     for slug in slugs(redis_store):
         config = redis_store.config(slug)
-        found = repo_origin(redis_store, slug)
         if config.engine == EVENTS_ENGINE and config.repo_origin:
             outcomes[slug] = "unchanged"
-        elif found:
+        elif found := repo_origin(redis_store, slug):
             redis_store.update(slug, engine=EVENTS_ENGINE, repo_origin=found)  # pyright: ignore[reportUnknownMemberType]
             outcomes[slug] = f"migrated: {found}"
         else:

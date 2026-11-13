@@ -158,7 +158,9 @@ def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detac
 
 
 @pytest.mark.feature("engine-config-migration")
-def test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin(env):
+def test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin(
+    env: tuple[RedisStore, FakeRuntime, Path],
+) -> None:
     store, _, _ = env
     store.update(WATCHED, repo_origin="github.com/team/watched")
 
@@ -169,7 +171,9 @@ def test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin(e
 
 
 @pytest.mark.feature("engine-config-migration")
-def test_start_leaves_the_doctor_legacy_when_the_watched_swarm_has_no_origin(env):
+def test_start_leaves_the_doctor_legacy_when_the_watched_swarm_has_no_origin(
+    env: tuple[RedisStore, FakeRuntime, Path],
+) -> None:
     store, _, _ = env
 
     assert doctor.main([WATCHED, "start"]) == 0
