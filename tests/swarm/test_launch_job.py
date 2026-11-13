@@ -339,7 +339,7 @@ def test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks() -> N
     placed = Placed("", "codex", account="acct-a", effort="low", launch_job=job)
     routed = _decided(placed, ["--route", "acct-b"], ModelPick("gpt", "xhigh"), "eng")
     assert (routed.account, routed.model, routed.effort, routed.profile) == ("acct-b", "gpt", "xhigh", "eng")
-    unrouted = _decided(placed, [], ModelPick("", None), "eng")
+    unrouted = _decided(placed, [], ModelPick("", ""), "eng")
     assert (unrouted.account, unrouted.model, unrouted.effort) == ("acct-a", "", "")
     synchronous = Placed("w:p1", "claude", effort="low")
     assert _decided(synchronous, ["--route", "acct-c"], ModelPick("opus", "high"), "eng") is synchronous
