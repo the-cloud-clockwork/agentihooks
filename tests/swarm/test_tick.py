@@ -1319,10 +1319,66 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
 
 
 @pytest.mark.feature("swarm-tick-events-orphans")
-def test_a_claimed_task_without_an_agent_is_reopened_under_the_events_engine(store):
+def test_a_claimed_task_without_an_agent_is_reopened_under_the_events_engine(store: RedisStore) -> None:
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused", engine=EVENTS_ENGINE)
     ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert "task t1 had no agent, reopened" in actions
+
+
+def _claimed_by_the_hub_before_the_orphan_write(
+    ledger: FakeLedger, monkeypatch: pytest.MonkeyPatch, **taken: object
+) -> None:
+    update = ledger.update_task
+
+    def hub_claims(
+        slug: str,
+        task_id: str,
+        fields: dict[str, object],
+        by: str = "swarm",
+        if_state: tuple[str, ...] = (),
+        if_match: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        ledger.rows[task_id].update(taken)
+        return update(slug, task_id, fields, by, if_state, if_match)
+
+    monkeypatch.setattr(ledger, "update_task", hub_claims)
+
+
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_an_orphan_reopen_keeps_a_claim_a_new_holder_took_after_the_pass_read(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009", claim_generation=3)
+    _claimed_by_the_hub_before_the_orphan_write(ledger, monkeypatch, claimed_by="engineer@a1b2c3-0010")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0010")
+    assert "task t1 had no agent, reopened" not in actions
+
+
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_an_orphan_reopen_keeps_a_claim_whose_generation_moved_after_the_pass_read(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009", claim_generation=3)
+    _claimed_by_the_hub_before_the_orphan_write(ledger, monkeypatch, claim_generation=4)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claim_generation"]) == ("claimed", 4)
+    assert "task t1 had no agent, reopened" not in actions
+
+
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_a_claimed_task_with_no_claimant_field_or_generation_is_reopened(store: RedisStore) -> None:
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    ledger.rows["t1"]["state"] = "claimed"
+    del ledger.rows["t1"]["claimed_by"]
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
     assert "task t1 had no agent, reopened" in actions
