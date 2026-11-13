@@ -9,7 +9,7 @@ import pytest
 from scripts.ci_lab import metrics as lab_metrics
 from scripts.ci_lab.capacity import Load
 from scripts.swarm import cli, lab_capacity, status
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
 
 NOW = 1_800_000_000_000
@@ -131,6 +131,12 @@ def test_rows_carry_one_checked_row_per_class() -> None:
 
 def test_status_is_none_before_any_read(store: RedisStore) -> None:
     assert lab_capacity.status(store, "sw") is None
+
+
+def test_a_config_stored_before_the_lab_url_field_reads_no_lab(store: RedisStore) -> None:
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    store.redis.hdel(store.key("sw", "config"), "lab_url")
+    assert store.config("sw").lab_url == ""
 
 
 def test_capture_without_a_lab_url_reads_nothing(store: RedisStore) -> None:
