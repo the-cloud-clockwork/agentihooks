@@ -1,5 +1,6 @@
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -262,14 +263,17 @@ def test_a_failed_herdr_launch_gives_its_account_seat_back(launching):
     assert engine._quota_accounts[0].sessions == 0
 
 
-def test_the_herdr_launch_room_is_the_free_quota_seats(tmp_path):
-    engine = runtime.HerdrRuntime(home=tmp_path, run=None)
+def test_the_herdr_launch_room_is_the_free_quota_seats(tmp_path: Path) -> None:
+    engine = runtime.HerdrRuntime(home=tmp_path)
     assert engine.launch_room(None) == 1
-    engine._quota_accounts = [
-        capacity.Account("claude", "one", "OPEN", 1, 90, 90, 3),
-        capacity.Account("codex", "two", "OPEN", 0, 90, 90, 2),
-        capacity.Account("claude", "full", "OPEN", 4, 90, 90, 4),
-    ]
+    engine = runtime.HerdrRuntime(
+        home=tmp_path,
+        accounts=[
+            capacity.Account("claude", "one", "OPEN", 1, 90, 90, 3),
+            capacity.Account("codex", "two", "OPEN", 0, 90, 90, 2),
+            capacity.Account("claude", "full", "OPEN", 4, 90, 90, 4),
+        ],
+    )
     assert engine.launch_room(None) == 4
 
 

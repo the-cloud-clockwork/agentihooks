@@ -593,3 +593,35 @@ def test_orphan_ending_ends_a_starting_execution_only_past_its_startup_window(st
     orphan = starting_master(store, "fixture")
     assert store.execution_registry.end_orphan("fixture", orphan, 1 + DEADLINE_MS + offset) is ended
     assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
+
+
+@pytest.mark.feature("swarm-history-bounded")
+@pytest.mark.parametrize("contended", [False, True])
+def test_retirement_keeps_only_the_newest_history_rows(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, contended: bool
+) -> None:
+    from redis.exceptions import WatchError
+
+    from scripts.swarm import store as store_module
+
+    monkeypatch.setattr(store_module, "HISTORY_KEPT", 3)
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+
+    def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
+        if contended and any(command[0][0] == "HDEL" for command in pipe.command_stack):
+            raise WatchError
+        return execute(pipe, *args, **kwargs)
+
+    names = [
+        store.start_execution(
+            "fixture", AgentRecord(store.next_name("fixture", "eng"), "eng", f"task-{at}", seat=f"eng-{at}@fixture")
+        ).name
+        for at in range(5)
+    ]
+    with patch.object(pipe_type, "execute", commit):
+        for at, name in enumerate(names):
+            assert store.drop_agent("fixture", name, at=100 + at)
+    rows = [json.loads(raw) for raw in store.redis.lrange(store.key("fixture", "history"), 0, -1)]
+    assert [row["name"] for row in rows] == names[-3:]
+    assert [row["ended_at"] for row in rows] == [102, 103, 104]

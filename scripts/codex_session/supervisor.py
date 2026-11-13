@@ -262,8 +262,12 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
 
 
 def shown_name(launch: Launch, agent: AgentRecord) -> str:
-    title = masters.title(launch.slug, agent.seat)
-    return title if agent.lane == MASTER else agent.name
+    return thread_title(launch.slug, agent)
+
+
+def thread_title(slug: str, agent: AgentRecord) -> str:
+    """The name a managed Codex thread shows: the master title for the master lane, else the agent name."""
+    return masters.title(slug, agent.seat) if agent.lane == MASTER else agent.name
 
 
 def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:

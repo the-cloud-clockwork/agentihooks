@@ -208,7 +208,7 @@ added JSON quoted keys.
 |---|---|---|
 | 14 | `skills` | global: symlinked into `~/.agents/skills` (open agent-skills standard dir, not under `.codex`). Repo scope is `<repo>/.agents/skills`, which the project bridge points at `.claude/skills` |
 | 15 | `commands` | global: not installed; codex-cli 0.160.0 no longer reads `~/.codex/prompts` (live probe: `Unrecognized command '/prompts:<name>'`), and prompts an earlier install wrote are removed. Profile homes: hardlinked as skills (below) |
-| 16 | `agents` | **skipped** — codex has no custom-subagent registry |
+| 16 | `agents` | **skipped** by the global install; a rendered profile home writes them as Codex custom agents under `agents/` (see the rendered home table) |
 | 17 | `rules` (global) | no auto-loaded rules dir; compiled into `AGENTS.md` |
 | 18 | `rules` (repo) | no loader at all; `hooks/context/project_bridge.py` injects every `<repo>/.claude/rules/*.md` body plus the project `MEMORY.md` at SessionStart |
 
@@ -253,6 +253,7 @@ operator home:
 | `skills/<name>` | `../claude/skills/<name>` |
 | `skills/<replacement>` | the Codex replacement of a Claude plugin the chain enables: the installed plugin's own skills, a skill fetched into `~/.agentihooks/codex-skills/`, or a chain layer's `.codex/skills/<name>`. A Claude skill of the same name wins over a plugin or fetched skill; a chain layer skill wins over both |
 | `skills/<command>/SKILL.md` | hardlink to each Claude command with frontmatter, invoked as `$<command>`; a skill of the same name wins |
+| `agents/<name>.toml` | generated: each `../claude/agents/<name>.md` with a description, as a Codex custom agent (`name`, `description`, and its body as `developer_instructions`); an agent with no string description, or a link whose source is gone, is left out. The Claude model and tool list stay out: a custom agent file cannot narrow the session's sandbox, so a read only agent such as the scouter stays read only by its instructions alone |
 | `auth.json`, `sessions`, `history.jsonl`, `session_index.jsonl`, `hooks.json` | the operator `~/.codex` |
 | `config.toml` | generated: the profile's native settings, `sqlite_home` = operator home, the operator's hook trust rekeyed to this home's `hooks.json`, the operator's `[mcp_servers]` limited to the profile's servers, and `~/.agents/skills` switched off |
 

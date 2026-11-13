@@ -158,6 +158,31 @@ def test_a_heartbeat_renews_its_own_lease_from_server_time_only(world, worker):
     assert fence_of(world, marker) == {"sequence": 5, "digest": record["digest"]}
 
 
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+def test_a_completed_pod_whose_archive_the_worker_acknowledged_passes_the_retention_guard(world, worker, tmp_path):
+    from scripts.swarm_v2 import retention
+    from scripts.swarm_v2.worker import lease_renewal
+
+    agent, token = worker
+    admission = world.register(agent, token)[1]
+
+    def send(method: str, url: str, grant: str, body: dict) -> tuple[int, object]:
+        return world.api.route(method, url.removeprefix("http://controller.invalid"), f"Bearer {grant}", body)
+
+    lease = lease_renewal.Lease(tmp_path, "http://controller.invalid", admission, token)
+    renewer = lease_renewal.Renewer(lease, send, wall=lambda: world.clock[0] / 1000)
+    entry = retention.finalize(
+        world.store, "fixture", lambda: None, agent.execution_id, "completed", 10, "pods/agent/uid"
+    )
+    assert retention.waiting(world.store, "fixture", entry) == "waiting_archive"
+
+    renewer.acknowledge(10)
+
+    assert renewer.lost is None
+    assert retention.archive_watermark(world.store, "fixture", agent.execution_id) == 10
+    assert retention.waiting(world.store, "fixture", entry) == ""
+
+
 def test_a_forged_url_subject_cannot_touch_another_execution(world, worker):
     from scripts.swarm_v2.api.executions import heartbeat_rejections
 

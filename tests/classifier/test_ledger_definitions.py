@@ -14,8 +14,9 @@ from scripts.swarm_ledger import ledger_duplicates
 
 SIZES = ["trivial", "one pull request", "several pull requests", "a whole phase"]
 TRACE_SIZE = (
-    "How much source work is the plan? Judge only pieces with nonempty areas; test only pieces and the shared "
-    "mutation clearance file are supporting proof, not additional scope."
+    "How much source work is the plan's slice in {repo}? Judge only that repository's pieces with nonempty areas; "
+    "a piece without a repo field belongs to the task's own repository. Test only pieces and the shared mutation "
+    "clearance file are supporting proof, not additional scope."
 )
 CASES = [
     (
@@ -64,7 +65,11 @@ CASES = [
         "trace-plan",
         "cli",
         {"off_intent": 0.3, "covered": 0.7, "too_big_confidence": 0.7},
-        {"pieces": [{"slot": 2, "number": 3, "what": "a light"}], "covers": [], "sized": [{}]},
+        {
+            "pieces": [{"slot": 2, "number": 3, "what": "a light"}],
+            "covers": [],
+            "sized": [{"repo": "the task's own repository", "suffix": ""}, {"repo": "kernel", "suffix": "_1"}],
+        },
         {
             "piece_2": YesNo(
                 "Is piece 3, a light, needed to deliver the task? "
@@ -74,7 +79,8 @@ CASES = [
                 "the task needs it",
                 "it serves something else",
             ),
-            "size": Score(TRACE_SIZE, SIZES),
+            "size": Score(TRACE_SIZE.format(repo="the task's own repository"), SIZES),
+            "size_1": Score(TRACE_SIZE.format(repo="kernel"), SIZES),
         },
     ),
 ]
