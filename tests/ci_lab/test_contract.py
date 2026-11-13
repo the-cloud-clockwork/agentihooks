@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,25 @@ def test_self_test_reports_a_worker_granted_github_app() -> None:
     service = contract.WORKER._replace(prefixes=(*contract.WORKER.prefixes, "GITHUB_APP_"))
     assert contract.self_test(service) == ["worker environment grants GITHUB_APP_"]
     assert contract.self_test(contract.SCHEDULER) == []
+
+
+def test_worker_delegate_passes_its_arguments(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.argv", ["agentihooks"])
+    for variable in contract.github_app_variables(dict(os.environ)):
+        monkeypatch.delenv(variable)
+    assert contract.worker(["--self-test"]) == 0
+    assert json.loads(capsys.readouterr().out) == WORKER_DESCRIPTION
+
+
+def test_self_test_failure_joins_every_problem(capsys: pytest.CaptureFixture[str]) -> None:
+    service = contract.WORKER._replace(ports=(0, 0))
+    assert contract.run(service, ["--self-test"], {}) == 1
+    assert capsys.readouterr().err == (
+        "ci-lab worker self test failed: ports repeat: 0, 0; "
+        "port 0 is outside 1 to 65535; port 0 is outside 1 to 65535\n"
+    )
 
 
 def test_self_test_failure_exits_one(capsys: pytest.CaptureFixture[str]) -> None:
