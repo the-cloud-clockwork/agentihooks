@@ -295,8 +295,8 @@ def _root_signer(hive: str, named: list[str]) -> tuple["Signer", list[str]]:
     member_swarms.assign(bao, path, [hive], member_swarms.swarms(redis_client(), named))
     lines = member_swarms.sync(member_swarms.sync_target(os.environ))
     signer = _signer()
-    if signer is None:
-        raise auth.HiveError("the hub NATS signer record disappeared while listing the root hive")
+    if signer is None or signer.member_swarms is None or hive not in signer.member_swarms:
+        raise auth.HiveError(f"listed hive {hive} in the hub signer record, but a fresh read does not list it")
     return signer, [f"listed hive {hive} in the hub signer record", *lines]
 
 

@@ -495,7 +495,8 @@
         "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_on_a_joined_member_host",
         "tests/hive/test_root_bus.py::test_a_scoped_signer_writes_the_root_swarms_into_the_bus_env",
         "tests/hive/test_root_bus.py::test_hive_root_bus_lists_an_unlisted_root_in_the_signer_record_before_minting",
-        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list"
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_when_a_fresh_signer_read_still_lacks_root"
       ]
     },
     {

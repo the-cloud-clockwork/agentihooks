@@ -23,5 +23,6 @@ def write(home: Path, signer: nats_grant.Signer, member_id: str) -> Path:
     minted = nats_grant.mint(signer, member_id)
     swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
     folder = Path(home) / FOLDER
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     creds = auth.write_private(folder / CREDS_FILE, minted)
     return auth.write_private(folder / ENV_FILE, env_text(signer.url, creds, swarms))

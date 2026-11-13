@@ -42,7 +42,8 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
     assert claims["name"] == "hive-root"
     assert claims["iss"] == signer.account.public
     assert claims["sub"] == user.public == nats_grant.member_user(signer, "root").public
-    assert "scheduler-root" in " ".join(claims["nats"]["pub"]["allow"])
+    assert claims["nats"] == nats_grant.member_claims(user.public, None, member="root")
+    assert stat.S_IMODE((tmp_path / "root-bus").stat().st_mode) == 0o700
     assert stat.S_IMODE(creds.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
@@ -62,8 +63,11 @@ def test_the_root_bus_settings_stay_out_of_the_env_files_every_process_loads(tmp
 def test_a_signer_that_lists_member_swarms_without_root_mints_nothing(tmp_path):
     from scripts.hive import root_bus
 
-    with pytest.raises(auth.HiveError, match="root"):
+    with pytest.raises(auth.HiveError) as refused:
         root_bus.write(tmp_path, _signer({"other": ("alpha",)}), "root")
+    assert str(refused.value) == (
+        "the hub record lists no member swarms for hive member root; it mints no unscoped bus credential"
+    )
     assert not (tmp_path / "root-bus").exists()
 
 
@@ -96,7 +100,6 @@ def test_hive_root_bus_writes_the_settings_then_reinstalls_and_restarts_the_serv
     assert dotenv_values(path)["AGENTIHOOKS_BUS"] == "nats"
     out = capsys.readouterr().out
     assert out == f"wrote the NATS bus settings of hive root to {path} and restarted the hive service\n"
-    assert "SEED" not in out
 
 
 @pytest.mark.feature("hive-root-bus-settings")
@@ -203,6 +206,32 @@ def test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list(tmp_path, monkeyp
 
     assert capsys.readouterr().err == (
         "hive root-bus refused: the hub signer record lists no member swarms for root and this host cannot update it\n"
+    )
+    assert not (tmp_path / "root-bus").exists()
+
+
+@pytest.mark.feature("hive-root-bus-settings")
+def test_hive_root_bus_refuses_when_a_fresh_signer_read_still_lacks_root(tmp_path, monkeypatch, capsys):
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms
+    from scripts.swarm import commands
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    monkeypatch.setattr(cli, "_signer", lambda: _signer({"other": ("alpha",)}))
+    monkeypatch.setattr(cli, "redis_client", lambda: "redis")
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(member_swarms, "signer_path", lambda environ: "agentihooks/hub/nats")
+    monkeypatch.setattr(member_swarms, "swarms", lambda redis, named: ("alpha",))
+    monkeypatch.setattr(member_swarms, "assign", lambda bao, path, members, swarms: list(members))
+    monkeypatch.setattr(member_swarms, "sync", lambda target: [])
+
+    assert cli.main(["root-bus"]) == 1
+
+    assert capsys.readouterr().err == (
+        "hive root-bus refused: listed hive root in the hub signer record, but a fresh read does not list it\n"
     )
     assert not (tmp_path / "root-bus").exists()
 
