@@ -1,0 +1,6 @@
+{
+  "scripts/quick/paths.py:scripts.quick.paths.x_quick_id:5ec700ba72539171f2dbb7a82bf392b8f51199e3e8fbf7bf1a37ffbf734376e2": {
+    "reader": "standards-reader-2",
+    "reason": "'XXXX'.lower() is 'xxxx', which the hex filter reduces to an empty string, raising the same QuickError as the empty default."
+  }
+}

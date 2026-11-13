@@ -1,0 +1,6 @@
+{
+  "scripts/quick/cli.py:scripts.quick.cli.x__swarm_for:9a2bcec03ae2cbe3565a17c6e4d0031ee69871c0807954022789ab891c670656": {
+    "reader": "standards-reader-2",
+    "reason": "Dropping strict=True falls back to strict=False; the equal-length invariant (_harnesses count check, layout.build returning count panes) holds, so no output changes."
+  }
+}

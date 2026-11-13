@@ -1,3 +1,4 @@
+import argparse
 import re
 from dataclasses import replace
 from types import SimpleNamespace
@@ -118,7 +119,7 @@ def test_the_title_names_the_claude_session_and_the_herdr_tab(tmp_path, monkeypa
         lambda *args: opened.append(args) or SimpleNamespace(workspace_id="w", tab_id="t", pane_id="p"),
     )
     for title in ("master 2 · rig", ""):
-        args = SimpleNamespace(title=title, placement="split", workspace="space")
+        args = argparse.Namespace(title=title, placement="split", workspace="space", pane="")
         init_agent._start_herdr(tmp_path / "launch.sh", tmp_path, "master-a1", args, "claude", {"E": "1"})
     env = {"HERDR_AGENT": "claude"}
     assert opened == [

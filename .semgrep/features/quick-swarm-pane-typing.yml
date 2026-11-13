@@ -1,0 +1,47 @@
+rules:
+  - id: feature-quick-swarm-pane-typing
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Found by the 2026-11-12 quick swarm stress test: a Codex seat whose agent exited left a bare bash prompt that herdr
+      still reported idle, and the room notice typed into it ran as a shell command. The quick swarm types into a pane
+      only through _room_notice and _nudge, each reached only after tick._busy returned nothing, and tick._busy
+      refuses a pane unless herdr says an agent, not a bare shell, runs there, before it reads the agent status.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def _busy(...):
+                    ...
+              - pattern-not: |
+                  def _busy($SEAT, $HERDR):
+                    $SHELL = $HERDR.bare($SEAT.pane_id)
+                    if $SHELL is not False:
+                      return ...
+                    ...
+          - patterns:
+              - pattern-either:
+                  - pattern: $H.prompt(...)
+                  - pattern: herdr_host.run(...)
+              - pattern-not-inside: |
+                  class LiveHerdr:
+                    ...
+              - pattern-not-inside: |
+                  def _room_notice(...):
+                    ...
+              - pattern-not-inside: |
+                  def _nudge(...):
+                    ...
+          - patterns:
+              - pattern-either:
+                  - pattern: _room_notice(...)
+                  - pattern: _nudge(...)
+              - pattern-not-inside: |
+                  $WHY = _busy(...)
+                  if $WHY:
+                    return $WHY
+                  ...
+    paths:
+      include:
+        - /scripts/quick/
+        - '*.test.py'

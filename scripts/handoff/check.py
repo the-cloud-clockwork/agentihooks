@@ -5,6 +5,7 @@ It checks structure only and never certifies that the content is true.
 """
 
 import re
+from collections.abc import Callable
 
 from hooks import secrets
 
@@ -18,8 +19,9 @@ ADDRESS = re.compile(
     r"|workspace:[\w.-]+/(?:steering|progress|proof)"
     r"|recap:[\w.-]+@[\w.-]+"
     r"|inbox:\w+"
+    r"|seat:[\w-]+"
 )
-ADDRESS_FORMS = "a GitHub issue or pull request link, ledger:, workspace:, recap: or inbox:"
+ADDRESS_FORMS = "a GitHub issue or pull request link, ledger:, workspace:, recap:, inbox: or seat:"
 FILE_EXT = "py|md|json|jsonl|toml|ya?ml|sh|txt|js|ts|tsx|css|html|cfg|ini|lock|rs|go|sql|env|log"
 FILE_NAME = re.compile(rf"[\w.@/-]*\w\.(?:{FILE_EXT})(?::\d+)*")
 PATH_START = ("/", "~/", "./", "../")
@@ -35,7 +37,7 @@ EVIDENCE = re.compile(
 HYPOTHESIS = re.compile(r"\bhypothes[ie]s\b", re.IGNORECASE)
 
 
-def problems(text, resolves):
+def problems(text: str, resolves: Callable[[str], object]) -> list[str]:
     """Every structural problem in the document, empty when it conforms; resolves(address) says an address exists."""
     lines = text.splitlines()
     sections = _sections(lines)
@@ -51,7 +53,7 @@ def problems(text, resolves):
     ]
 
 
-def refusal(found):
+def refusal(found: list[str]) -> str:
     return "handoff refused; fix the document and run the command again:\n" + "\n".join(f"- {p}" for p in found)
 
 

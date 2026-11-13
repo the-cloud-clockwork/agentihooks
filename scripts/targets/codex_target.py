@@ -27,7 +27,7 @@ import re
 import shlex
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -222,6 +222,17 @@ _TOOL_FILTERS = ("enabled_tools", "disabled_tools")
 _WHOLE_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 
 
+_NATIVE_KEYS = (
+    "env_vars",
+    "env_http_headers",
+    "bearer_token_env_var",
+    "cwd",
+    "startup_timeout_sec",
+    "tool_timeout_sec",
+    "enabled",
+)
+
+
 def _codex_stdio(name: str, spec: dict) -> dict:
     from hooks.secrets import scan as _scan_secrets
 
@@ -287,6 +298,27 @@ def _codex_http(name: str, spec: dict) -> dict:
     return entry
 
 
+def _carry_native_keys(name: str, entry: dict[str, Any], spec: dict[str, Any]) -> None:
+    """Keep the keys a spec already writes in codex form; Claude-shaped values win, credential-shaped ones drop."""
+    from hooks.secrets import scan as _scan_secrets
+
+    say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+    native = {key: spec[key] for key in _NATIVE_KEYS if spec.get(key) is not None}
+    for key in list(native):
+        if hits := _scan_secrets(json.dumps(native[key]), mode="strict"):
+            say(
+                f"  [!!] MCP '{name}' {key} looks like a credential ({', '.join(hits)}) — dropped from "
+                "config.toml. Name an environment variable instead of writing its value."
+            )
+            del native[key]
+    if "env_vars" in native:
+        entry["env_vars"] = sorted({*native.pop("env_vars"), *entry.get("env_vars", [])})
+    if "env_http_headers" in native:
+        entry["env_http_headers"] = {**native.pop("env_http_headers"), **entry.get("env_http_headers", {})}
+    for key, value in native.items():
+        entry.setdefault(key, value)
+
+
 def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
     if drop_if_credentialed(name, spec, "config.toml"):
@@ -297,6 +329,7 @@ def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | N
             "Expose a streamable-HTTP endpoint and re-run init."
         )
         return None, "codex has no SSE transport"
+    entry: dict[str, Any]
     if spec.get("command"):
         entry = _codex_stdio(name, spec)
     elif spec.get("url"):
@@ -306,6 +339,7 @@ def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | N
     entry.update({key: list(spec[key]) for key in _TOOL_FILTERS if spec.get(key)})
     if spec.get("default_tools_approval_mode"):
         entry["default_tools_approval_mode"] = spec["default_tools_approval_mode"]
+    _carry_native_keys(name, entry, spec)
     return entry, ""
 
 

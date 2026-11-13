@@ -10,6 +10,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from scripts import herdr_host, herdr_panes
 from scripts.herdr_host import HerdrError
@@ -177,7 +178,7 @@ def _is_shell(process: dict) -> bool:
     return process.get("name") in SHELLS and all(arg.startswith("-") for arg in argv[1:])
 
 
-def bare_shell(info: dict) -> bool:
+def bare_shell(info: dict[str, Any]) -> bool:
     found = info.get("foreground_processes") or []
     return bool(found) and all(_is_shell(process) for process in found)
 
