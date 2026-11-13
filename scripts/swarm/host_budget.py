@@ -44,6 +44,7 @@ class HostSample:
     swap_total_mb: int = 0
     agent_mb: int = 0
     measured_agents: int = 0
+    reserved: int = 0
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,8 @@ def spawn_room(config: SwarmConfig, sample: HostSample | Room | None, previous: 
 def memory_room(sample: HostSample, thresholds: Thresholds) -> int:
     if swap_full(sample, thresholds):
         return 0
-    return max(0, (sample.available_mb - counted_swap_mb(sample, thresholds)) // per_agent_mb(sample, thresholds))
+    supply = sample.available_mb - counted_swap_mb(sample, thresholds)
+    return max(0, supply // per_agent_mb(sample, thresholds) - sample.reserved)
 
 
 def counted_swap_mb(sample: HostSample, thresholds: Thresholds) -> int:
@@ -116,14 +118,15 @@ def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
             f"the larger of {sample.agent_mb} MB measured over {sample.measured_agents} Claude agent trees "
             f"and the configured {thresholds.memory_per_agent_mb} MB"
         )
-    return f"{stale}{supply} fits {memory} at {per_agent_mb(sample, thresholds)} MB each, {figure}"
+    reserved = f" after {sample.reserved} reserved managed executions" if sample.reserved else ""
+    return f"{stale}{supply} fits {memory}{reserved} at {per_agent_mb(sample, thresholds)} MB each, {figure}"
 
 
 def load_room(sample: HostSample, thresholds: Thresholds) -> int | None:
     if sample.agents <= 0 or sample.load1 <= 0:
         return None
     per_agent = sample.load1 / sample.agents
-    return max(0, math.floor((thresholds.load_high * sample.cpus - sample.load1) / per_agent))
+    return max(0, math.floor((thresholds.load_high * sample.cpus - sample.load1) / per_agent) - sample.reserved)
 
 
 def room(sample: HostSample, thresholds: Thresholds = Thresholds(), previous: int | None = None) -> Room:
@@ -212,6 +215,7 @@ def read_host(proc: Path = Path("/proc")) -> HostSample | None:
         swap_total_mb=swap_total_mb,
         agent_mb=agent_mb,
         measured_agents=measured,
+        reserved=account_sessions.reserved_executions(),
     )
 
 
