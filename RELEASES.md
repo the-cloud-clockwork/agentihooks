@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.869 · 2026-11-13
+
+### 2026-11-13 · 0dc82496228c · #11108 · @agenticore-app
+
+**Use the session harness and profile in a hive join report when the agent record has none**
+
+This change fixes a false failure in hive launch checks: when admission writes an agent record without a harness or profile, `hive_join.py` was building the join context from that empty record, resolving `home` to an empty string and causing `join_checks.cheap` to wrongly flag profile, settings, and brain as missing even though the session was healthy. Now, at session start, the join context falls back to the current harness target and `AGENTIHOOKS_PROFILE` when the record has none, while still honoring a recorded harness or profile when present, eliminating spurious failures for correctly running agents like engineer 8508.
+
+### 2026-11-13 · 1fbec8b0a56f · #11105 · @agenticore-app
+
+**Download torn shard coverage again before building the dependency manifest**
+
+This change addresses a flaky failure where `download-artifact@v4` reported success but silently delivered torn shard files, corrupting coverage data and truncating dependency manifest inputs. The dep-manifest job now verifies every downloaded shard by running `tests.coverage_check` and parsing each dep-inputs line before proceeding; if anything looks incomplete or corrupt, it automatically retries the download once, following the same wait-and-attempt pattern used elsewhere. New tests confirm the check correctly catches truncated lines and torn databases, passes clean input, and properly triggers the retry. This should eliminate the intermittent SQLITE_CORRUPT and JSONDecodeError failures seen in CI without requiring manual intervention.
+
 ## v2.17.866 · 2026-11-13
 
 ### 2026-11-13 · f9462f07f300 · #11099 · @nestorcolt
