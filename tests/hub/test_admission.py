@@ -491,4 +491,6 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
     assert rig.rows["t1"]["state"] == "open"
-    assert capsys.readouterr().err.splitlines() == [f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused"]
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused, the hive is draining"
+    ]

@@ -56,17 +56,23 @@ class Admission:
             admitted = json.loads(held)
             if admitted["hive"] == request["hive"]:
                 return admitted
-            return refused(slug, request, f"already admitted to hive {admitted['hive']}")
+            refused(slug, request, f"already admitted to hive {admitted['hive']}")
+            return None
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
-            return refused(slug, request, "claims are stopped")
+            refused(slug, request, "claims are stopped")
+            return None
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
         view = self.source.snapshot(slug)
         if withdrawn := readiness.withdrawal(
             SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
         ):
-            return refused(slug, request, f"the offer is withdrawn, {withdrawn}")
-        if not self._placeable(view.rows[task_id], request["hive"]):
-            print(f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused", file=sys.stderr)
+            refused(slug, request, f"the offer is withdrawn, {withdrawn}")
+            return None
+        if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]):
+            print(
+                f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
+                file=sys.stderr,
+            )
             return None
         from scripts.swarm import tick
 
@@ -77,7 +83,8 @@ class Admission:
             return None
         admitted = self._claim(slug, request, view.rows)
         if admitted is None:
-            return refused(slug, request, "another holder took the claim")
+            refused(slug, request, "another holder took the claim")
+            return None
         return self._answered(slug, request, started, admitted)
 
     def _answered(self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any]) -> dict[str, Any]:
@@ -93,15 +100,17 @@ class Admission:
         )
         raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
 
-    def _placeable(self, row: dict[str, Any], hive: str) -> bool:
-        """A draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is
-        never admitted."""
+    def _unplaceable(self, row: dict[str, Any], hive: str) -> str:
+        """Why a draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is
+        never admitted; empty when the hive may take the task."""
         from scripts.hive import placement, registry
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
         if record.get("draining") == placement.YES:
-            return False
-        return readiness.placeable(row, hive, readiness.declared(self.store, hive))
+            return "the hive is draining"
+        if not readiness.placeable(row, hive, readiness.declared(self.store, hive)):
+            return "the task is workstation, pinned to another hive or needs what the hive lacks"
+        return ""
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
         from scripts.swarm import tick
