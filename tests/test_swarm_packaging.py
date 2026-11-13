@@ -1,4 +1,7 @@
+import ast
+import importlib.metadata
 import json
+import sys
 import tomllib
 from pathlib import Path
 
@@ -24,6 +27,28 @@ def test_swarm_image_installs_every_ledger_dependency_from_its_hashed_lock():
     dockerfile = (root / "Dockerfile").read_text()
     assert "--require-hashes -r requirements.lock" in dockerfile
     assert "!docker/swarm/requirements.lock" in (root / ".dockerignore").read_text().splitlines()
+
+
+def test_swarm_image_lock_pins_every_distribution_the_hub_imports() -> None:
+    root = Path(__file__).parents[1]
+    lock = (root / "docker/swarm/requirements.lock").read_text()
+    pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
+    modules: set[str] = set()
+    for source in sorted((root / "scripts/hub").glob("*.py")):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules.add(node.module.split(".")[0])
+    third_party = sorted(modules - set(sys.stdlib_module_names) - {"scripts", "hooks"})
+    distributions = importlib.metadata.packages_distributions()
+    missing = [
+        module
+        for module in third_party
+        if not {name.lower() for name in distributions.get(module, [module])} & pinned
+    ]
+    assert "packaging" in third_party
+    assert missing == []
 
 
 def test_the_nats_client_is_an_optional_extra_outside_a_plain_install():
