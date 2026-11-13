@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -41,7 +42,7 @@ def remove(bus: nats.NatsBus, queue: nats.NatsWorkQueue, action: str) -> None:
 
 @pytest.mark.parametrize("action", ["ack", "term"])
 def test_consumer_removal_after_get_replays_the_live_delete_error(bus: nats.NatsBus, action: str) -> None:
-    queue = bus.queue("ready.rig.eng", QueuePolicy())
+    queue = cast(nats.NatsWorkQueue, bus.queue("ready.rig.eng", QueuePolicy()))
     assert queue.offer(offer("old"))
     info = bus._loop.run(bus._js.stream_info(queue._stream))
     assert info.config.retention == nats.api.RetentionPolicy.WORK_QUEUE
@@ -59,7 +60,7 @@ def test_consumer_removal_after_get_replays_the_live_delete_error(bus: nats.Nats
 @pytest.mark.feature("nats-withdraw-gone-message")
 @pytest.mark.parametrize("action", ["ack", "term"])
 def test_withdraw_continues_after_a_consumer_removes_the_read_offer(bus: nats.NatsBus, action: str) -> None:
-    queue = bus.queue("ready.rig.eng", QueuePolicy())
+    queue = cast(nats.NatsWorkQueue, bus.queue("ready.rig.eng", QueuePolicy()))
     assert queue.offer(offer("old"))
 
     def stale(event: Envelope) -> bool:

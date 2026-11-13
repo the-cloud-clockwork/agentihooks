@@ -14,7 +14,7 @@ from nats.aio.msg import Msg
 from nats.errors import NoRespondersError, NoServersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
-from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
+from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError, ServerError
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nkey
@@ -416,7 +416,12 @@ class NatsWorkQueue:
         msg: api.RawStreamMsg | None = self._loop.run(self._get(sequence))
         if msg is None or not stale(Envelope.decode(msg.data)):
             return False
-        self._loop.run(self._js.delete_msg(self._stream, sequence))
+        try:
+            self._loop.run(self._js.delete_msg(self._stream, sequence))
+        except ServerError as error:
+            if error.err_code != 10057:
+                raise
+            return False
         return True
 
     async def _get(self, sequence: int) -> api.RawStreamMsg | None:
