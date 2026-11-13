@@ -94,10 +94,13 @@ def checks_pass(
 
 
 def origin(path: str, run: Callable[..., Any] = subprocess.run) -> str:
-    """The public address of the origin remote of the checkout at ``path``, empty where it has none."""
+    """The public address of the origin remote of the checkout at ``path``, empty where it has none or git is missing."""
     if not path:
         return ""
-    done = run(["git", "-C", path, "remote", "get-url", "origin"], capture_output=True, text=True, check=False)
+    try:
+        done = run(["git", "-C", path, "remote", "get-url", "origin"], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return ""
     if done.returncode != 0:
         return ""
     from scripts.swarm import stack

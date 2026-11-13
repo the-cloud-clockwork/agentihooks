@@ -1173,7 +1173,7 @@ def test_codex_render_links_into_the_claude_profile(world):
     assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
     assert {"bundle-skill", "role-skill"} <= set(linked)
     assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == sorted(
-        [".profile-binding.json", render.STAMP, "config.toml", "skills"]
+        [".profile-binding.json", render.STAMP, "agents", "config.toml", "skills"]
     )
     sources = render.sources.path(out.parent.name, "codex", out.parent.parent)
     assert os.readlink(sources) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))

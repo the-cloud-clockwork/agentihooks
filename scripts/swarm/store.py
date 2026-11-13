@@ -34,9 +34,13 @@ RETIRED_PARTS = (
     "retired-process",
     "unbound-since",
 )
+HISTORY_KEPT = 2000
 RETIRE_ROW = """
 if (redis.call('HGET', KEYS[1], ARGV[1]) or '') ~= ARGV[2] then return 0 end
-if ARGV[3] ~= '' then redis.call('RPUSH', KEYS[#KEYS], ARGV[3]) end
+if ARGV[3] ~= '' then
+  redis.call('RPUSH', KEYS[#KEYS], ARGV[3])
+  redis.call('LTRIM', KEYS[#KEYS], -tonumber(ARGV[4]), -1)
+end
 for index = 1, #KEYS - 1 do redis.call('HDEL', KEYS[index], ARGV[1]) end
 return 1
 """
@@ -623,6 +627,7 @@ class RedisStore:
                         before(pipe)
                     if previous:
                         pipe.rpush(self.key(slug, "history"), self._history_row(slug, name, previous, lives[1], ended))
+                        pipe.ltrim(self.key(slug, "history"), -HISTORY_KEPT, -1)
                     for part in RETIRED_PARTS:
                         pipe.hdel(self.key(slug, part), name)
                     pipe.execute()
@@ -637,7 +642,7 @@ class RedisStore:
                 return False
             row = self._history_row(slug, name, previous, lives[1], ended) if previous else ""
             keys = [self.key(slug, part) for part in (*RETIRED_PARTS, "history")]
-            if self.redis.eval(RETIRE_ROW, len(keys), *keys, name, previous or "", row):
+            if self.redis.eval(RETIRE_ROW, len(keys), *keys, name, previous or "", row, HISTORY_KEPT):
                 self.names.retire(name, ended)
                 return True
         raise SwarmError("agent registry kept changing; retirement was not committed")
