@@ -22,8 +22,9 @@ name, so a rename fails an import instead of dropping a series.
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
 a metric name is not a valid Prometheus name starting with `ci_lab_`, a port repeats or falls
-outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. Without `--self-test` the
-command exits 2: the service loops come with the scheduler and worker tasks.
+outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints usage; any
+other start without `--self-test` exits 2, because the service loops come with the scheduler and
+worker tasks.
 
 ## Environment
 
