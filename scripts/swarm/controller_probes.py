@@ -2,7 +2,7 @@ import json
 import urllib.request
 from collections.abc import Callable, Mapping
 
-from scripts.swarm import lease
+from scripts.swarm import lease, replica
 from scripts.swarm.store import RedisStore
 
 PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
@@ -14,6 +14,12 @@ LIVE_TIMEOUT = 3
 def ticked(slugs: list[str], host_swarms: str) -> list[str]:
     left = {slug.strip() for slug in host_swarms.split(",")}
     return [slug for slug in slugs if slug not in left]
+
+
+def standing_by(environ: Mapping[str, str], store: RedisStore, hive: Callable[[], str]) -> bool:
+    """Tell whether another controller replica of this hive holds the replica lock, so this one runs no passes."""
+    lock = replica.configured(environ, store, hive)
+    return lock is not None and lock.holder() not in ("", lock.owner)
 
 
 def live(

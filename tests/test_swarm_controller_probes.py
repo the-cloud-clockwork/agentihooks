@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import controller_probes
 from scripts.swarm.controller import main
+from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
 SLUG = "fixture"
@@ -131,6 +132,41 @@ def test_live_requires_every_lease_while_no_host_ticked_list_is_set(store, monke
 )
 def test_ticked_drops_exactly_the_host_ticked_swarms_in_order(host_swarms, expected):
     assert controller_probes.ticked(["a", "b", "c"], host_swarms) == expected
+
+
+def replica_held(store: RedisStore, hive: str, owner: str) -> None:
+    from scripts.swarm import replica
+
+    assert replica.ReplicaLock(store.redis, hive, owner).take()
+
+
+def test_a_replica_stands_by_while_another_replica_of_its_hive_holds_the_lock(store: RedisStore) -> None:
+    from scripts.swarm.replica import REPLICA_ENV
+
+    replica_held(store, "hive-fixture", "pod-leader")
+
+    assert controller_probes.standing_by({REPLICA_ENV: "pod-standby"}, store, lambda: "hive-fixture") is True
+
+
+def test_a_replica_does_not_stand_by_while_it_holds_the_lock_or_nobody_does(store: RedisStore) -> None:
+    from scripts.swarm.replica import REPLICA_ENV
+
+    environ = {REPLICA_ENV: "pod-leader"}
+    assert controller_probes.standing_by(environ, store, lambda: "hive-fixture") is False
+
+    replica_held(store, "hive-fixture", "pod-leader")
+
+    assert controller_probes.standing_by(environ, store, lambda: "hive-fixture") is False
+
+
+def test_a_lock_held_on_another_hive_or_an_unnamed_replica_never_stands_by(store: RedisStore) -> None:
+    from scripts.swarm.replica import REPLICA_ENV
+
+    replica_held(store, "hive-other", "pod-leader")
+
+    assert controller_probes.standing_by({REPLICA_ENV: "pod-standby"}, store, lambda: "hive-fixture") is False
+    replica_held(store, "hive-fixture", "pod-leader")
+    assert controller_probes.standing_by({}, store, lambda: "hive-fixture") is False
 
 
 def test_ready_passes_on_the_deep_report_while_the_api_and_redis_answer(store, capsys):
