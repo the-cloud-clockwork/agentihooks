@@ -338,18 +338,23 @@ def test_set_launch_never_shows_an_agent_dropped_during_the_write(store, monkeyp
 
     current = started(store, "eng-1@fixture")
     project = store.project_agent
-    held = []
+    writes = execution._writes
+    locked = []
+
+    def lock(slug):
+        locked.append(slug)
+        return writes(slug)
 
     def dropped_first(slug, *args, **kwargs):
-        held.append(execution.WRITES["fixture"]._is_owned())
         store.redis.hdel(store.key(slug, "agents"), current.name)
         return project(slug, *args, **kwargs)
 
+    monkeypatch.setattr(execution, "_writes", lock)
     monkeypatch.setattr(store, "project_agent", dropped_first)
 
     assert store.execution_registry.set_launch("fixture", current.execution_id, DECISION) is True
 
-    assert held == [True]
+    assert locked == ["fixture"]
     assert store.execution("fixture", current.execution_id).harness == "codex"
     assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
 
