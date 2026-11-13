@@ -1885,6 +1885,39 @@
       ]
     },
     {
+      "id": "swarm-health-finding-rows",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t278",
+      "behaviour": "Every health finding stores the ledger rows behind it with the agent's last outcome, marks rows doctrine or the task required, and swarm status and the Swarm health row print them.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health_rows.py::test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome",
+        "tests/swarm/test_health_rows.py::test_rows_doctrine_or_the_task_required_are_marked",
+        "tests/swarm/test_health_rows.py::test_a_task_finding_lists_its_task_rows_and_its_claimant_outcome",
+        "tests/swarm/test_health_rows.py::test_a_seat_finding_reads_the_rows_of_the_agent_in_the_seat",
+        "tests/swarm/test_health_rows.py::test_status_text_prints_every_finding_with_its_rows_and_marks",
+        "tests/swarm/test_health_rows.py::test_status_text_says_when_a_finding_has_no_rows",
+        "tests/swarm/test_health_rows.py::test_a_row_without_a_time_reads_time_zero",
+      "tests/swarm/test_health_rows.py::test_a_task_target_keeps_every_part_after_the_tasks_prefix",
+      "tests/swarm/test_health_rows.py::test_seat_rows_keep_the_agent_events_sorted_by_time_with_their_labels",
+      "tests/swarm/test_health_rows.py::test_the_last_outcome_is_the_latest_done_task_with_an_outcome",
+      "tests/swarm/test_health_rows.py::test_status_text_prints_the_whole_block_in_utc",
+        "tests/swarm/test_health_rows.py::test_an_added_event_without_a_target_queues_nothing",
+        "tests/swarm/test_health_rows.py::test_the_verdict_record_stores_the_rows_and_the_last_outcome",
+        "tests/swarm_ledger/test_swarm_layout.py::test_alert_line_lists_each_open_finding_with_its_rows_and_required_marks"
+      ]
+    },
+    {
+      "id": "swarm-health-proof-loop-parks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t278",
+      "behaviour": "A claim that ended in a park is no proof loop rerun; review rounds still count.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health_rows.py::test_a_task_claimed_four_times_with_three_parks_is_no_proof_loop"
+      ]
+    },
+    {
       "id": "swarm-health-scope-inflation",
       "origin": "inventory",
       "behaviour": "The scope inflation finding lists each self queued task with its gain.",
@@ -5462,6 +5495,22 @@
         "tests/swarm/test_launch_job.py::test_a_detached_spawn_returns_its_routed_account_model_and_profile",
         "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
         "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
+      ]
+    },
+    {
+      "id": "ledger-task-update-takes-confirmed-pull-request",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
+      "behaviour": "The ledger task update accepts the confirmed pull request number as a positive integer and its head as a lowercase commit hash, so swarm pr on a confirmed pull request moves the task to pr instead of being refused as schema invalid; any other type for either field is refused.",
+      "seam": "ledger_tasks.check task_update fields and swarm pr through the ledger task update",
+      "tests": [
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_records_the_confirmed_pull_request_number_and_head",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_ledger_check_takes_the_fields_swarm_pr_writes",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_refuses_a_malformed_pull_request_number_or_head",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_head_check_refuses_a_head_that_is_no_string",
+    "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_number_check_refuses_with_its_whole_message",
+    "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_confirmed_pull_check_takes_fields_without_a_number_or_head",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check"
       ]
     }
   ],
