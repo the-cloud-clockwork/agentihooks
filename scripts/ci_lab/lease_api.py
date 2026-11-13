@@ -142,24 +142,18 @@ def respond(leases: Leases, signer: UploadSigner, method: str, target: str, raw:
 def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> ThreadingHTTPServer:
     """Bind the lease API on host and port; the caller runs serve_forever."""
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.answer()
+    def answer(request: BaseHTTPRequestHandler) -> None:
+        length = request.headers.get("Content-Length") or "0"
+        if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
+            status, payload = respond(leases, signer, request.command, request.path, request.rfile.read(int(length)))
+        else:
+            status, payload = 400, {"error": "bad request"}
+        data = json.dumps(payload).encode()
+        request.send_response(status)
+        request.send_header("Content-Type", "application/json")
+        request.send_header("Content-Length", str(len(data)))
+        request.end_headers()
+        request.wfile.write(data)
 
-        def do_POST(self) -> None:
-            self.answer()
-
-        def answer(self) -> None:
-            length = self.headers.get("Content-Length") or "0"
-            if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
-                status, payload = respond(leases, signer, self.command, self.path, self.rfile.read(int(length)))
-            else:
-                status, payload = 400, {"error": "bad request"}
-            data = json.dumps(payload).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-    return ThreadingHTTPServer((host, port), Handler)
+    handler = type("Handler", (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
+    return ThreadingHTTPServer((host, port), handler)
