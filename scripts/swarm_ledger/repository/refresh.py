@@ -85,7 +85,8 @@ def patched(
     connection: Connection, slug: str, path: str, old: dict[str, Any], paths: set[str]
 ) -> dict[str, Any] | None:
     """The object at path as stored now, rereading only the keys paths reach in their stored order; None when the
-    object itself changed or a reached key is gone, so the caller rereads every key."""
+    object itself changed, a reached key is gone or a new key is stored anywhere but last, so the caller rereads
+    every key."""
     if path in paths:
         return None
     depth, dirty, item = len(json.loads(path)), touched(paths), dict(old)
@@ -95,8 +96,11 @@ def patched(
     ]
     if any(row is None for _, row in reached):
         return None
+    order = {key: index for index, key in enumerate(old)}
     for child, row in sorted(reached, key=lambda pair: pair[1][0]):
         key: str = json.loads(child)[-1]
+        if order.get(key, len(item)) != row[0]:
+            return None
         held: Any = old.get(key)
         under = beneath(paths, child)
         nested = (
