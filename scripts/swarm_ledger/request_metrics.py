@@ -51,6 +51,7 @@ class Timing:
     started: float = 0.0
     locking: int = 0
     steps: dict[str, float] = field(default_factory=dict)
+    detail: str = ""
 
 
 RESOURCES = frozenset(
@@ -344,7 +345,7 @@ def measured(method: Callable) -> Callable:
                 )
                 record(
                     name,
-                    route_name(handler.path),
+                    " ".join(filter(None, (route_name(handler.path), timing.detail))),
                     elapsed,
                     used,
                     timing.lock_wait,
@@ -394,6 +395,13 @@ def postgres() -> Iterator[None]:
     finally:
         if timing is not None and not timing.locking:
             timing.postgres_wait += time.perf_counter() - wall
+
+
+def detailed(text: str) -> None:
+    """Name what the current request did, recorded after its route so its records split from the route's others."""
+    timing = CURRENT.get()
+    if timing is not None:
+        timing.detail = text
 
 
 @contextmanager
