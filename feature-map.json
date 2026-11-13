@@ -138,6 +138,16 @@
       ]
     },
     {
+      "id": "retire-without-herdr-server",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-automation-vm-retire",
+      "behaviour": "Retiring an agent whose process has ended on a host where no herdr server runs succeeds without closing a pane, because no pane can exist there; a running herdr that cannot name the pane owner still refuses the retire.",
+      "seam": "HerdrRuntime.retire_process",
+      "tests": [
+        "tests/test_swarm_v2_process.py::test_retire_process_succeeds_when_no_herdr_server_runs_on_the_host"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
@@ -596,6 +606,22 @@
         "tests/hub/test_admission.py::test_the_hub_refuses_a_held_admission_redelivered_to_a_hive_on_an_older_release",
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_on_the_hub_release_or_an_unreported_one",
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record"
+      ]
+    },
+    {
+      "id": "hub-offer-logging",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-logging",
+      "behaviour": "Each hub readiness pass prints one line per events swarm with its offer count and placed count, and each refused or late hive admission prints one line naming the member hive, the task and the reason.",
+      "seam": "Readiness.poll and Admission.admit on the hub",
+      "tests": [
+        "tests/hub/test_readiness.py::test_each_readiness_pass_prints_one_line_per_swarm_with_its_offer_count",
+        "tests/hub/test_admission.py::test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wait",
+        "tests/hub/test_admission.py::test_an_admission_held_by_another_hive_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admission_while_claims_are_stopped_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admission_for_a_withdrawn_offer_prints_its_withdrawal_reason",
+        "tests/hub/test_admission.py::test_an_admission_whose_claim_another_holder_took_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admitted_offer_prints_no_refusal_line"
       ]
     },
     {
