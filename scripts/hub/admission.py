@@ -18,13 +18,16 @@ ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
-RELEASE = re.compile(r"\d+(?:\.\d+)*")
+RELEASE = re.compile(r"(\d+(?:\.\d+)*)[.-]?(dev|a|b|rc)?")
 
 
 def release_key(text: str) -> tuple[int, ...]:
-    """The dotted integer release a version string starts with; empty for an unreported or unparsable one."""
+    """The dotted integer release a version string starts with, ranking a dev or pre-release build below its final
+    release; empty for an unreported or unparsable one."""
     found = RELEASE.match(text)
-    return tuple(int(part) for part in found.group().split(".")) if found else ()
+    if not found:
+        return ()
+    return (*(int(part) for part in found.group(1).split(".")), 0 if found.group(2) else 1)
 
 
 class LateAdmission(RuntimeError):
@@ -52,6 +55,13 @@ class Admission:
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         started = self.clock()
+        if older := self._outdated(request["hive"]):
+            self.reopen(slug, request)
+            print(
+                f"hub: events release floor swarm={slug} task={request['task']} hive={request['hive']} {older}: refused",
+                file=sys.stderr,
+            )
+            return None
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
@@ -59,12 +69,6 @@ class Admission:
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             return None
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
-        if older := self._outdated(request["hive"]):
-            print(
-                f"hub: events release floor swarm={slug} task={task_id} hive={request['hive']} {older}: refused",
-                file=sys.stderr,
-            )
-            return None
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
             return None
@@ -167,7 +171,7 @@ class Admission:
         self.store.release(slug, task_id, name)
         self.store.drop_agent(slug, name)
 
-    def reopen(self, slug: str, request: dict) -> bool:
+    def reopen(self, slug: str, request: dict[str, Any]) -> bool:
         key = self._key(slug, request)
         held = self.store.redis.get(key)
         if not held or json.loads(held)["hive"] != request["hive"]:

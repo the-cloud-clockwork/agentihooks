@@ -589,10 +589,11 @@
       "id": "hub-admission-release-floor",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-release-floor",
-      "behaviour": "The hub refuses an events admission request from a hive whose registry record reports a release below the hub's own installed release, before any claim, execution, seat or ledger write; a hive on the hub release or a newer one, or one with no reported release, is admitted.",
+      "behaviour": "The hub refuses an events admission request from a hive whose registry record reports a release below the hub's own installed release, before any claim, execution, seat or ledger write, and reopens an admission it still holds for that hive; a dev or pre-release build ranks below its final release; a hive on the hub release or a newer one, or one with no reported release, is admitted.",
       "seam": "Admission.admit for a hive spoke request",
       "tests": [
         "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_on_an_older_release",
+        "tests/hub/test_admission.py::test_the_hub_reopens_a_held_admission_redelivered_to_a_hive_on_an_older_release",
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_on_the_hub_release_or_an_unreported_one"
       ]
     },

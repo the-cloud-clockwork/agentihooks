@@ -429,7 +429,14 @@ def _released(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str
 @pytest.mark.feature("hub-admission-release-floor")
 @pytest.mark.parametrize(
     "member, hub",
-    [("2.17.825", "2.17.843"), ("2.9.0", "2.17.0"), ("2.17.825.dev4+g1a2b", "2.17.826")],
+    [
+        ("2.17.825", "2.17.843"),
+        ("2.9.0", "2.17.0"),
+        ("2.17.825.dev4+g1a2b", "2.17.826"),
+        ("2", "2.17.843"),
+        ("2.17.826.dev1", "2.17.826"),
+        ("2.17.826rc1", "2.17.826"),
+    ],
 )
 def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], member: str, hub: str
@@ -449,6 +456,27 @@ def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
 
 
 @pytest.mark.feature("hub-admission-release-floor")
+def test_the_hub_reopens_a_held_admission_redelivered_to_a_hive_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _released(rig, monkeypatch, "", "2.17.843")
+    assert rig.admitter.admit(SLUG, ask()) is not None
+    _released(rig, monkeypatch, "2.17.825", "2.17.843")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert rig.rows["t1"]["claimed_by"] == ""
+    assert rig.store.redis.get(rig.admitter._key(SLUG, ask())) is None
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events release floor swarm={SLUG} task=t1 hive=hive-a release=2.17.825 below 2.17.843: refused"
+    ]
+
+
+@pytest.mark.feature("hub-admission-release-floor")
 @pytest.mark.parametrize(
     "member, hub",
     [
@@ -457,6 +485,10 @@ def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
         ("2.18.0", "2.17.843"),
         ("", "2.17.843"),
         ("unknown", "2.17.843"),
+        ("v2.9.0", "2.17.0"),
+        ("2.17.826+g1a2b", "2.17.826"),
+        ("2.17.826.post1", "2.17.826"),
+        ("2.17.827.dev1", "2.17.826"),
         ("2.17.825", "unknown"),
     ],
 )
