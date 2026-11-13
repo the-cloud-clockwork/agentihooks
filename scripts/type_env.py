@@ -15,6 +15,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from scripts.type_gate import DIRECT_IMPORTERS
+
 PYTHON = "3.12"
 LOCK = ".github/test-requirements.lock"
 CONSTRAINTS = ".github/test-constraints.txt"
@@ -114,14 +116,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--grader", type=Path, default=Path("scripts/type_gate.py"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--direct-importers", action="store_true")
     args, forwarded = parser.parse_known_args(argv)
+    env = {**os.environ, DIRECT_IMPORTERS: "1"} if args.direct_importers else None
     try:
         python = environment(args.root)
         target = python.parents[1]
         with (target.parent / f"{target.name}.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_SH)
             command = [str(python), "-I", str(args.grader.resolve()), *forwarded]
-            return subprocess.run(command, cwd=args.root).returncode
+            return subprocess.run(command, cwd=args.root, env=env).returncode
     except (OSError, subprocess.CalledProcessError) as exc:
         print(f"::error::The CI type environment could not run the type gate: {exc}")
         return 1

@@ -119,4 +119,7 @@ def test_swarm_status_shows_the_backlog_finding(stalled, tmp_path):
         "id": "prompt-backlog/sw",
         "verdict": None,
         "seen_at": clock[0],
+        "last_outcome": "none recorded",
+        "rows": [],
+        "rows_total": 0,
     }
