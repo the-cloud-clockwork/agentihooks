@@ -10,6 +10,7 @@ import pytest
 from scripts.gates import intent
 from scripts.swarm import cli, pull_head
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_tasks
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -47,9 +48,14 @@ def test_swarm_pr_refuses_a_pull_request_on_another_branch(
 
 
 def test_swarm_pr_stores_the_confirmed_number_and_head(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
-    row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, "abc123"))
+    head = "0123456789abcdef0123456789abcdef01234567"
+    row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, head))
     assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) == 0
-    assert (row["pr_url"], row["branch"], row["pr_number"], row["pr_head"]) == (URL, MINE, 3, "abc123")
+    assert (row["pr_url"], row["branch"], row["pr_number"], row["pr_head"]) == (URL, MINE, 3, head)
+    stored = {"pr_number": row["pr_number"], "pr_head": row["pr_head"]}
+    ledger_tasks.check(
+        {"op": "task_update", "id": "x", "by": "engineer@a1b2c3-0001", "item": "tasks/t1", "fields": stored}
+    )
 
 
 def test_the_pull_branch_returns_the_number_and_head_of_an_open_pull_request() -> None:
