@@ -23,7 +23,7 @@ def watched(redis_store: RedisStore, slug: str) -> str:
     """The swarm a Doctor swarm watches, from its peer or its derived name; empty for any other swarm."""
     if redis_store.config(slug).template != TEMPLATE:
         return ""
-    peer = cast("str", redis_store.peer(slug))  # pyright: ignore[reportUnknownMemberType]
+    peer = str(redis_store.peer(slug))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     return peer or next((s for s in slugs(redis_store) if s != slug and doctor_slug(s) == slug), "")
 
 
@@ -43,9 +43,10 @@ def doctor_origin(redis_store: RedisStore, doctor: str, watched_slug: str) -> st
 
 def repo_origin(redis_store: RedisStore, slug: str) -> str:
     """The swarm's stored origin; when empty, a Doctor's watched origin or any swarm's own origin."""
-    stored = redis_store.config(slug).repo_origin
-    peer = "" if stored else watched(redis_store, slug)
-    return stored or (doctor_origin(redis_store, slug, peer) if peer else own_origin(redis_store, slug))
+    if stored := redis_store.config(slug).repo_origin:
+        return stored
+    peer = watched(redis_store, slug)
+    return doctor_origin(redis_store, slug, peer) if peer else own_origin(redis_store, slug)
 
 
 def busy(redis_store: RedisStore, slug: str) -> bool:
@@ -89,7 +90,7 @@ def start_on_events(redis_store: RedisStore, doctor: str, watched_slug: str) -> 
 def main(argv: Sequence[str] | None = None) -> None:
     """Migrates every stored swarm config and prints each outcome; a second run changes nothing."""
     argparse.ArgumentParser().parse_args(argv)
-    print(json.dumps(migrate(store.connect()), indent=1))  # pyright: ignore[reportUnknownMemberType]
+    print(json.dumps(migrate(store.connect())))  # pyright: ignore[reportUnknownMemberType]
 
 
 if __name__ == "__main__":

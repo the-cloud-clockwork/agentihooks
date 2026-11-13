@@ -179,6 +179,8 @@ def test_a_new_doctor_takes_its_own_origin_when_the_watched_swarm_has_none_or_is
         "watch": ("legacy", ""),
         "watch-doctor": ("events", ORIGIN),
     }
+    assert engine_migration.watched(store, "lost-doctor") == ""
+    assert engine_migration.watched(store, "watch-doctor") == "watch"
 
 
 @pytest.mark.feature("engine-config-migration")
@@ -190,5 +192,5 @@ def test_main_migrates_the_connected_store_and_prints_each_outcome(
 
     engine_migration.main([])
 
-    assert json.loads(capsys.readouterr().out) == {"sw": "migrated: github.com/team/project"}
+    assert capsys.readouterr().out == '{"sw": "migrated: github.com/team/project"}\n'
     assert configs(store) == {"sw": ("events", "github.com/team/project")}
