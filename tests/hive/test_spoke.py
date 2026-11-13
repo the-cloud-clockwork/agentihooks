@@ -796,9 +796,10 @@ def test_completed_dead_work_does_not_repeat_recovery_on_a_held_spoke(rig):
     assert rig.spoke.poll() == "empty"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
     rig.spoke.measure = lambda: None
     assert rig.spoke.poll() == "held"
-    rig.tasks.reopen.assert_called_once_with(rig.event)
+    assert rig.tasks.reopen.call_count == 3
 
 
 def test_ambiguous_launch_intent_keeps_owner_and_name_after_the_exception(rig):
