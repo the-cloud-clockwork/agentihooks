@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.849 · 2026-11-13
+
+### 2026-11-13 · 089cb1d9a547 · #11024 · @agenticore-app
+
+**Add immutable lab models and computed unit pricing**
+
+This change introduces frozen `Unit` and `Grade` dataclasses to represent lab test and mutant groupings immutably, along with a `Priority` ordering (hotfix, pull request, queue, promotion, backfill) derived from event metadata via `priority_of`. It also adds `DurationHistory` and `estimate` to compute expected run durations from historical data or sensible fallbacks, and `weight()` to size execution slots from CPU quotas. Together these give the scheduler a stable, well-tested foundation for prioritizing and sizing lab work, verified through red/green proof runs and full CI checks before merge.
+
 ## v2.17.848 · 2026-11-13
 
 ### 2026-11-13 · c2e574bf3730 · #11030 · @agenticore-app
