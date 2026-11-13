@@ -497,6 +497,8 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
 
 
 def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: str, live: int) -> None:
+    from dataclasses import replace
+
     from scripts.hive import registry
     from scripts.swarm.store import AgentRecord
 
@@ -505,18 +507,17 @@ def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: st
     if cap:
         registry.update(rig.store.redis, "hive-a", [f"max-agents={cap}"])
     rig.store.create(SwarmConfig("other", "/repo", 2, 2))
-    held = [
-        ("other", AgentRecord("eng-other", "eng", "x1", state="working", started_at=1, hive="hive-a")),
-        (SLUG, AgentRecord("ci-own", "ci", "t2", state="starting", started_at=1, hive="hive-a")),
-    ][:live]
+    held = [("other", "eng", "eng-1", "working", "hive-a"), (SLUG, "ci", "ci-1", "starting", "hive-a")][:live]
     ignored = [
-        (SLUG, AgentRecord("eng-done", "eng", "x2", state="finished", started_at=1, hive="hive-a")),
-        (SLUG, AgentRecord("eng-ended", "eng", "x3", state="ended", started_at=1, hive="hive-a")),
-        (SLUG, AgentRecord("master-a", "master", "", state="working", started_at=1, hive="hive-a")),
-        ("other", AgentRecord("eng-b", "eng", "x4", state="working", started_at=1, hive="hive-b")),
+        ("other", "eng", "eng-2", "finished", "hive-a"),
+        ("other", "ci", "ci-1", "ended", "hive-a"),
+        (SLUG, "master", "master", "working", "hive-a"),
+        ("other", "ci", "ci-2", "working", "hive-b"),
     ]
-    for slug, agent in [*held, *ignored]:
-        rig.store.put_agent(slug, agent)
+    for slug, lane, seat, state, hive in [*held, *ignored]:
+        record = AgentRecord(rig.store.next_name(slug, lane), lane, "", seat=f"{seat}@{slug}", started_at=1, hive=hive)
+        agent = rig.store.start_execution(slug, record)
+        rig.store.put_agent(slug, replace(agent, state=state))
 
 
 @pytest.mark.feature("hub-admission-hive-max-agents")
