@@ -490,14 +490,14 @@ def test_unmarked_suite_tests_do_not_need_feature_entries(mapped_repo):
 
 def test_the_repository_feature_map_is_valid() -> None:
     root = Path(__file__).resolve().parents[1]
-    env = {key: value for key, value in os.environ.items() if not key.startswith("COV_CORE_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_"))}
     result = subprocess.run(
         [sys.executable, "-m", "scripts.feature_map", "--root", str(root)],
         cwd=root,
         env=env,
         capture_output=True,
         text=True,
-        timeout=50,
+        timeout=40,
         check=False,
     )
     assert result.returncode == 0, result.stderr
