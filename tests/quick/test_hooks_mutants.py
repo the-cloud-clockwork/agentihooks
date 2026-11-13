@@ -55,7 +55,7 @@ def test_quick_refusal_reads_the_named_document_and_resolves_against_its_folder(
     monkeypatch.setattr(
         recycle.handoff_check,
         "problems",
-        lambda text, resolver: seen.setdefault("problems", (text, resolver)) or ["p1"],
+        lambda text, resolver: seen.update(problems=(text, resolver)) or ["p1"],
     )
     monkeypatch.setattr(recycle.handoff_check, "refusal", lambda problems: f"refusal:{problems}")
     doc = tmp_path / "doc.md"
