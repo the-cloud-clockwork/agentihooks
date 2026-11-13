@@ -52,6 +52,24 @@ def test_a_foreign_task_write_refreshes_the_task_and_its_events(tmp_path):
     assert served["_meta"]["events"] == written["_meta"]["events"]
 
 
+@pytest.mark.parametrize("writes", WRITES.values(), ids=WRITES.keys())
+def test_a_foreign_write_rereads_only_the_reached_keys_of_an_object(tmp_path, monkeypatch, writes):
+    reader, writer = store(tmp_path), store(tmp_path)
+    reader.create("ledger", CONTENT)
+    reader.apply_ops("ledger", ops=[chat(0), CLAIM])
+    reader.current("ledger")
+    for ops in writes:
+        writer.apply_ops("ledger", ops=ops)
+    parents = []
+    original = refresh.child_rows
+    monkeypatch.setattr(refresh, "child_rows", lambda c, s, parent: parents.append(parent) or original(c, s, parent))
+    served = reader.current("ledger")
+    assert refresh.encode(["_meta"]) not in parents
+    assert refresh.encode(["_meta", "stamps"]) not in parents
+    assert served.state == whole(tmp_path).state
+    assert list(served.state["_meta"]["stamps"]) == list(whole(tmp_path).state["_meta"]["stamps"])
+
+
 def test_a_generation_without_its_change_record_falls_back_to_the_whole_rebuild(tmp_path, monkeypatch):
     reader, writer = store(tmp_path), store(tmp_path)
     reader.create("ledger", CONTENT)
