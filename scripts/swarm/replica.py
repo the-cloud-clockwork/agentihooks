@@ -66,11 +66,10 @@ class ReplicaLock:
         or once Redis has refused renewals for so long that the lock could expire before the next beat."""
 
         def renew() -> bool:
-            from redis.exceptions import RedisError
-
             try:
                 kept = self.take()
-            except RedisError:
+            except Exception as exc:
+                print(f"controller: renewing the replica lock failed: {exc}", file=sys.stderr, flush=True)
                 kept = self.fresh(beat_s)
             if not kept:
                 lost()

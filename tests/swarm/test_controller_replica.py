@@ -117,8 +117,9 @@ def test_the_beat_reports_a_lost_lock_once_and_ends() -> None:
 
 @pytest.mark.feature("controller-standby-replica")
 @pytest.mark.parametrize(("since_take", "renewals"), [(5.0, 3), (29.995, 1)])
-def test_the_beat_rides_out_a_redis_error_only_while_the_lock_cannot_have_expired(
-    since_take: float, renewals: int
+@pytest.mark.parametrize("failure", ["redis", "other"])
+def test_the_beat_rides_out_a_renewal_error_only_while_the_lock_cannot_have_expired(
+    since_take: float, renewals: int, failure: str
 ) -> None:
     from redis.exceptions import ConnectionError as RedisDown
 
@@ -126,7 +127,8 @@ def test_the_beat_rides_out_a_redis_error_only_while_the_lock_cannot_have_expire
     lock = replica.ReplicaLock(_redis(), HIVE, "pod-a", clock=lambda: now[0])
     assert lock.take() is True
     now[0] = since_take
-    answers = iter([RedisDown("down"), True, False])
+    error = RedisDown("down") if failure == "redis" else RuntimeError("broken")
+    answers = iter([error, True, False])
     asked: list[int] = []
 
     def take() -> bool:
@@ -286,6 +288,32 @@ def test_a_standby_refuses_a_leader_reply_that_is_not_json(leader: str, method: 
 
 
 @pytest.mark.feature("controller-standby-replica")
+def test_a_published_standby_forwards_only_the_recovery_paths(leader: str) -> None:
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import standby as standby_api
+    from scripts.swarm_v2.api.recovery import PATH
+
+    store = RedisStore(_redis())
+    standby_api.publish_leader(store, "rig", leader)
+    published = standby_api.Standby(store, "rig", PATH)
+    assert published.route("POST", "/v2/executions", "Bearer grant", {}) == (
+        404,
+        {
+            "error_class": "invalid_request",
+            "operation_id": "unknown",
+            "retry": "new_request",
+            "message": "no such endpoint on the published port",
+        },
+    )
+    assert published.route("GET", "/v2/health/live", "None", None)[0] == 404
+    path = "/v1/executions/x/restore-decision"
+    assert published.route("POST", path, "Bearer grant", {"choice": "resume"}) == (
+        201,
+        {"path": path, "authorization": "Bearer grant", "body": {"choice": "resume"}},
+    )
+
+
+@pytest.mark.feature("controller-standby-replica")
 def test_a_standby_refuses_while_no_replica_leads() -> None:
     from scripts.swarm.store import RedisStore
     from scripts.swarm_v2 import standby as standby_api
@@ -342,6 +370,9 @@ def test_a_standby_serves_its_api_and_published_ports_until_closed(monkeypatch: 
     store = RedisStore(_redis())
     servers = control_service.stand_by({control_service.PORT_ENV: "0", control_service.SWARM_ENV: "rig"}, store)
     assert [type(server).__name__ for server in servers] == ["ThreadingHTTPServer", "TLSServer"]
+    from scripts.swarm_v2.api.recovery import PATH
+
+    assert [server.RequestHandlerClass.api.only for server in servers] == [None, PATH]  # type: ignore[attr-defined]
     port = servers[0].server_port
     assert _get(f"http://127.0.0.1:{port}/v2/health/live") == (200, {"probe": "shallow", "status": "standby"})
     control_service.close(servers)
@@ -458,6 +489,36 @@ def test_a_replica_that_lost_the_lead_exits_at_once(capfd: pytest.CaptureFixture
     controller._lost(ends.append)
     assert ends == [controller.LOST_EXIT] == [75]
     assert capfd.readouterr().err == "controller: another replica took the lead; exiting\n"
+
+
+class _Ended(Exception):
+    pass
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_replica_renews_its_lock_before_every_pass_and_never_runs_one_without_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import controller
+
+    redis, passes = _redis(), []
+    monkeypatch.setattr(controller, "_pass", lambda store, service, proof_swarm: passes.append(store))
+
+    def end() -> None:
+        raise _Ended
+
+    monkeypatch.setattr(controller, "_lost", end)
+    lock = replica.ReplicaLock(redis, HIVE, "pod-a")
+    assert lock.take() is True
+    controller._finishing("store", None, None, lock)  # type: ignore[arg-type]
+    assert passes == ["store"]
+    assert redis.pttl(lock.key) > replica.LOCK_MS - 1000
+    redis.set(lock.key, "pod-b")
+    with pytest.raises(_Ended):
+        controller._finishing("store", None, None, lock)  # type: ignore[arg-type]
+    assert passes == ["store"]
+    controller._finishing("store", None, None)  # type: ignore[arg-type]
+    assert passes == ["store", "store"]
 
 
 @pytest.mark.feature("controller-standby-replica")

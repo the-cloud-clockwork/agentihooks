@@ -15,6 +15,7 @@ from scripts.swarm_ledger import ledger_link, storage
 from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, standby, telemetry
 from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
+from scripts.swarm_v2.api.recovery import PATH as RECOVERY_PATH
 from scripts.swarm_v2.api.recovery import RecoveryAPI
 from scripts.swarm_v2.api.server import Routes, serve, serve_tls
 from scripts.swarm_v2.api.tasks import TasksAPI
@@ -334,11 +335,10 @@ def stand_by(environ: Mapping[str, str], store: RedisStore) -> list[ThreadingHTT
     port, slug = environ.get(PORT_ENV), environ.get(SWARM_ENV)
     if not port or not slug:
         return []
-    api = standby.Standby(store, slug)
-    servers = [serve(api, HOST, int(port))]
+    servers = [serve(standby.Standby(store, slug), HOST, int(port))]
     secure, _ = published(environ)
     if secure is not None:
-        servers.append(serve_tls(api, *secure))
+        servers.append(serve_tls(standby.Standby(store, slug, RECOVERY_PATH), *secure))
     for server in servers:
         threading.Thread(target=server.serve_forever, name=f"{THREAD}-standby", daemon=True).start()
     return servers

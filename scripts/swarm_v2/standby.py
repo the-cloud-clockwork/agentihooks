@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any, cast
@@ -16,6 +17,8 @@ STANDBY = "standby"
 UNAVAILABLE = "dependency_unavailable"
 NO_LEADER = "no controller replica leads the swarm yet"
 UNANSWERED = "the leading controller replica did not answer"
+NOT_SERVED = "invalid_request"
+NO_ENDPOINT = "no such endpoint on the published port"
 
 
 def publish_leader(store: RedisStore, slug: str, address: str, ttl_ms: int | None = None) -> None:
@@ -24,13 +27,16 @@ def publish_leader(store: RedisStore, slug: str, address: str, ttl_ms: int | Non
 
 
 class Standby:
-    """Answer health probes on a standby replica and forward every other control API request to the leader."""
+    """Answer health probes on a standby replica and forward every other control API request to the leader;
+    with ``only`` set, refuse every path it does not match, as the leader's published port does."""
 
-    def __init__(self, store: RedisStore, slug: str) -> None:
-        self.store, self.slug = store, slug
+    def __init__(self, store: RedisStore, slug: str, only: re.Pattern[str] | None = None) -> None:
+        self.store, self.slug, self.only = store, slug, only
         self.readiness = readiness.Probe(cast(Any, store).redis)
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict[str, Any]]:
+        if self.only is not None and not self.only.fullmatch(path):
+            return 404, cast(dict[str, Any], cast(Any, GrantRefused(NOT_SERVED, NO_ENDPOINT)).detail())
         if (method, path) == ("GET", health.LIVE_PATH):
             return 200, {"probe": health.SHALLOW, "status": STANDBY}
         if (method, path) == ("GET", health.READY_PATH):

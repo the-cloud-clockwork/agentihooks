@@ -648,8 +648,16 @@ def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: Modu
     proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
 
 
-def _finishing(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
-    """Run one pass that a stop signal lets finish, then exit once the pass ends."""
+def _finishing(
+    store: RedisStore,
+    service: "ControlService | None",
+    proof_swarm: ModuleType,
+    lock: replica.ReplicaLock | None = None,
+) -> None:
+    """Run one pass that a stop signal lets finish, then exit once the pass ends; a replica first renews its lock
+    and ends the process when another replica holds it."""
+    if lock is not None and not lock.take():
+        _lost()
     RUNNING.set()
     try:
         _pass(store, service, proof_swarm)
@@ -728,6 +736,7 @@ def _passes(
     proof_swarm: ModuleType,
     once: bool,
     outage: redis_grace.Outage,
+    lock: replica.ReplicaLock | None = None,
 ) -> int:
     """Run passes one tick apart, riding out Redis errors until they outlast the grace window."""
     if not once:
@@ -737,7 +746,7 @@ def _passes(
         started = monotonic()
         number += 1
         try:
-            _finishing(store, service, proof_swarm)
+            _finishing(store, service, proof_swarm, lock)
         except LedgerUnreachable as exc:
             print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
             _journal_pass(number, "ledger_unreachable")
@@ -813,7 +822,7 @@ def main(argv: list[str]) -> int:
             _lead(store, os.environ, lock)
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
-        return _passes(store, service, proof_swarm, args.once, outage)
+        return _passes(store, service, proof_swarm, args.once, outage, lock)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
