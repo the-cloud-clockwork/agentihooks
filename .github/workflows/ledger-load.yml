@@ -90,6 +90,7 @@ jobs:
         if: steps.key.outputs.hit != 'true'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
@@ -164,6 +165,7 @@ jobs:
       - name: Install dependencies
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
