@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm import lease
-from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, LedgerUnreachable
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.api import admin
 from scripts.swarm_ledger.api.errors import APIError
@@ -141,7 +141,7 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, status):
         pytest.raises(SwarmError) as caught,
     ):
         LedgerClient().bin_closed(SLUG, 1)
-    assert type(caught.value) is (LedgerRefused if status == 400 else SwarmError)
+    assert type(caught.value) is {None: LedgerUnreachable, 400: LedgerRefused, 500: SwarmError}[status]
     expected = "offline" if status is None else f"server refused: {status} outage"
     assert str(caught.value) == f"ledger {SLUG}: {expected}"
 

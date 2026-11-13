@@ -1,4 +1,6 @@
 import json
+from collections.abc import Iterator
+from typing import cast
 
 from scripts.swarm_ledger import models
 
@@ -14,7 +16,42 @@ def encode(value: object) -> str:
     return ENCODER.encode(value)
 
 
-def children(item, parts, table):
+CHANGED_LIMIT = 64
+
+
+def _identity(child: object, index: int) -> list[object]:
+    if isinstance(child, dict) and "id" in child:
+        return ["id", cast("dict[str, object]", child)["id"]]
+    return ["index", index]
+
+
+def _token(identity: list[object]) -> tuple[object, ...] | str:
+    return tuple(identity) if identity[0] == "index" or type(identity[1]) is str else encode(identity)
+
+
+def _changed_children(
+    left: list[object], right: list[object], parts: list[object]
+) -> list[tuple[object, object, list[object], int]] | None:
+    """(old child, new child, parts, position) where equally long lists hold different objects of one identity, or
+    None when their lengths differ, an identity changed or more than CHANGED_LIMIT positions differ."""
+    if len(left) != len(right):
+        return None
+    changed: list[tuple[object, object, list[object], int]] = []
+    for index, (old, new) in enumerate(zip(left, right)):
+        if old is new:
+            continue
+        identity = _identity(new, index)
+        token = _token(identity)
+        if len(changed) == CHANGED_LIMIT or _token(_identity(old, index)) != token:
+            return None
+        occurrence = 0
+        if identity[0] != "index":
+            occurrence = sum(1 for position in range(index) if _token(_identity(right[position], position)) == token)
+        changed.append((old, new, [*parts, [*identity, occurrence]], index))
+    return changed
+
+
+def children(item: object, parts: list[object], table: str) -> Iterator[tuple[object, list[object], object, int, str]]:
     """(child, parts, key, position, table) of a container, in the path scheme flatten stores."""
     if isinstance(item, dict):
         for index, (name, child) in enumerate(item.items()):
@@ -25,8 +62,8 @@ def children(item, parts, table):
     elif isinstance(item, list):
         seen = {}
         for index, child in enumerate(item):
-            identity = ["id", child["id"]] if isinstance(child, dict) and "id" in child else ["index", index]
-            token = tuple(identity) if identity[0] == "index" or type(identity[1]) is str else encode(identity)
+            identity = _identity(child, index)
+            token = _token(identity)
             occurrence = seen.get(token, 0)
             seen[token] = occurrence + 1
             yield child, [*parts, [*identity, occurrence]], index, index, table
@@ -87,11 +124,23 @@ def diff(old: object, new: object) -> tuple[dict, dict]:
     """The stored rows of `old` and `new` under every path that differs, descending only into changed values."""
     before, after = {}, {}
 
-    def walk(left, right, parts, parent, key, position, table):
+    def walk(
+        left: object, right: object, parts: list[object], parent: str | None, key: object, position: int, table: str
+    ) -> None:
         if type(left) is type(right) and left == right:
             return
         same_shape = type(left) is type(right) and isinstance(left, (dict, list))
         if same_shape:
+            changed = (
+                _changed_children(cast("list[object]", left), cast("list[object]", right), parts)
+                if type(left) is list
+                else None
+            )
+            if changed is not None:
+                encoded_parent = encode(parts)
+                for old_child, new_child, child_parts, index in changed:
+                    walk(old_child, new_child, child_parts, encoded_parent, index, index, table)
+                return
             if type(left) is dict and _dict_paths_match(left, right):
                 _walk_dictionary(left, right, parts, table, walk, after)
                 return

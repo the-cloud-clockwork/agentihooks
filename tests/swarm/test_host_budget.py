@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.swarm import host_budget
@@ -7,8 +9,8 @@ from scripts.swarm.store import SwarmConfig
 LIMITS = Thresholds(load_high=1.5, load_low=1.0, memory_per_agent_mb=700)
 
 
-def _sample(load1: float, available_mb: int, agents: int = 0, cpus: int = 20) -> HostSample:
-    return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)
+def _sample(load1: float, available_mb: int, agents: int = 0, cpus: int = 20, reserved: int = 0) -> HostSample:
+    return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents, reserved=reserved)
 
 
 def test_high_load_gives_zero_room():
@@ -348,3 +350,25 @@ def test_a_readable_host_gives_its_sample(tmp_path):
     sample = host_budget.read_host(tmp_path)
 
     assert (sample.load1, sample.available_mb, sample.agents) == (0.5, 2000, 0)
+
+
+@pytest.mark.feature("host-room-counts-reserved-executions")
+def test_read_host_counts_reserved_managed_executions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "loadavg").write_text("0.50 0.50 0.50 1/100 42\n")
+    (tmp_path / "meminfo").write_text("MemTotal: 16000000 kB\nMemAvailable: 2867200 kB\n")
+    monkeypatch.setattr(host_budget.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(host_budget.account_sessions, "live_sessions", lambda proc: {})
+    monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 0)
+    monkeypatch.setattr(host_budget.account_sessions, "reserved_executions", lambda: 2)
+
+    sample = host_budget.read_host(tmp_path)
+
+    assert sample is not None and sample.reserved == 2
+    assert host_budget.room(sample).room == 2
+
+
+@pytest.mark.feature("host-room-counts-reserved-executions")
+def test_reserved_executions_reduce_memory_and_load_room() -> None:
+    assert host_budget.memory_room(_sample(load1=0.1, available_mb=7000, reserved=3), Thresholds()) == 7
+    assert host_budget.load_room(_sample(load1=8.0, available_mb=0, agents=4, cpus=16, reserved=3), Thresholds()) == 5
+    assert host_budget.memory_room(_sample(load1=0.1, available_mb=1400, reserved=3), Thresholds()) == 0

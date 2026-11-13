@@ -296,6 +296,7 @@ def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev(
     assert workflow["permissions"] in (
         {"contents": "read", "statuses": "write"},
         {"actions": "read", "contents": "read", "statuses": "write"},
+        {"actions": "read", "checks": "read", "contents": "read", "statuses": "write"},
     )
 
 
@@ -484,10 +485,13 @@ def test_the_required_grader_preserves_preflight_and_allows_proof_coverage(repo,
 def test_the_protected_grader_reports_gate_required_on_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     statuses = [step for step in steps if "statuses/$HEAD_SHA" in step.get("run", "")]
-    assert len(statuses) == 2
+    resolved = [step for step in steps if "python -m scripts.gate_required_status" in step.get("run", "")]
     assert all('context="$CONTEXT"' in step["run"] for step in statuses)
     assert _protected_workflow()["env"]["CONTEXT"] == gate_protected.GATE
-    assert statuses[-1]["if"] == "${{ always() }}"
+    assert len(statuses) + len(resolved) == 2
+    assert (statuses + resolved)[-1]["if"] == "${{ always() }}"
+    if resolved:
+        assert '--protected "$protected"' in resolved[0]["run"]
 
 
 @pytest.mark.parametrize("weakened", [False, True])

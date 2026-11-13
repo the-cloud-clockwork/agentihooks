@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x__changed_children:3767d05f0b12b2a815e0324a2bb18962a66d3e12c65f737633b3cb1a898930b4": {
+    "reader": "standards_reader",
+    "reason": "The sum runs only for id identities; the position argument of _identity only matters for children without an id, whose index token can never equal the outer id token whether its index is a position or None, so the count is identical for every input."
+  }
+}

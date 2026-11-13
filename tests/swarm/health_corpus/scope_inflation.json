@@ -1,0 +1,59 @@
+{
+  "detector": "scope inflation",
+  "cases": [
+    {
+      "name": "engineer that queued three of its own tasks with falling gain",
+      "label": "finding",
+      "source": "a worker chaining follow on tasks into its own lane",
+      "history": {
+        "tasks": [
+          {"id": "t50", "state": "open", "gain": 3},
+          {"id": "t51", "state": "open", "gain": 2},
+          {"id": "t52", "state": "open", "gain": 1}
+        ],
+        "events": [
+          {"kind": "added", "target": "tasks/t50", "by": "engineer@32a0c1-0840", "at": 1000},
+          {"kind": "added", "target": "tasks/t51", "by": "engineer@32a0c1-0840", "at": 2000},
+          {"kind": "added", "target": "tasks/t52", "by": "engineer@32a0c1-0840", "at": 3000}
+        ],
+        "talk": {}
+      }
+    },
+    {
+      "name": "engineer whose queued tasks raised their measured gain",
+      "label": "none",
+      "source": "follow on tasks that kept paying off",
+      "history": {
+        "tasks": [
+          {"id": "t53", "state": "open", "gain": 1},
+          {"id": "t54", "state": "open", "gain": 2},
+          {"id": "t55", "state": "open", "gain": 4}
+        ],
+        "events": [
+          {"kind": "added", "target": "tasks/t53", "by": "engineer@32a0c1-0841", "at": 1000},
+          {"kind": "added", "target": "tasks/t54", "by": "engineer@32a0c1-0841", "at": 2000},
+          {"kind": "added", "target": "tasks/t55", "by": "engineer@32a0c1-0841", "at": 3000}
+        ],
+        "talk": {}
+      }
+    },
+    {
+      "name": "master that queued the plan tasks",
+      "label": "none",
+      "source": "planning seats add tasks by design",
+      "history": {
+        "tasks": [
+          {"id": "t56", "state": "open"},
+          {"id": "t57", "state": "open"},
+          {"id": "t58", "state": "open"}
+        ],
+        "events": [
+          {"kind": "added", "target": "tasks/t56", "by": "master@32a0c1-0001", "at": 1000},
+          {"kind": "added", "target": "tasks/t57", "by": "master@32a0c1-0001", "at": 2000},
+          {"kind": "added", "target": "tasks/t58", "by": "master@32a0c1-0001", "at": 3000}
+        ],
+        "talk": {}
+      }
+    }
+  ]
+}

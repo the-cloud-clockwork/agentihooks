@@ -304,6 +304,33 @@ def managed_held() -> set[tuple[str, str]]:
     return set(_LAST_HELD)
 
 
+def _reserved_here(raw: str, host: str) -> bool:
+    from scripts.codex_session import binding, supervisor
+
+    try:
+        record = binding.decode(raw)
+    except (binding.BindingError, ValueError, TypeError, AttributeError):
+        return False
+    if record.state != binding.STARTING or record.server_pid or record.host_id != host:
+        return False
+    bridge = record.bridge_owner.rpartition(":")[2]
+    return not bridge.isdecimal() or supervisor.start_time(int(bridge)) is not None
+
+
+def reserved_executions() -> int:
+    """Managed executions reserved on this host whose server has not started; none while the store is unreadable."""
+    import socket
+
+    from scripts.codex_session import binding
+
+    try:
+        raws = binding.transport_records()
+    except _unavailable():
+        return 0
+    host = socket.gethostname()
+    return sum(_reserved_here(raw, host) for raw in raws or ())
+
+
 def codex_sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:
     """Codex sessions per account: a token slug or the default login; a managed execution counts once."""
     from scripts.routing import aggregate

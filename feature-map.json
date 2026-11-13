@@ -30,6 +30,19 @@
       ]
     },
     {
+      "id": "nats-withdraw-gone-message",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-withdraw-gone-message",
+      "behaviour": "An offer removed by a work queue consumer after withdrawal reads it does not abort the sweep or prevent fresh offers; only the missing message delete error is tolerated.",
+      "seam": "NatsWorkQueue.withdraw against concurrent consumer acknowledgement and termination",
+      "tests": [
+        "tests/events/test_nats_withdraw.py::test_withdraw_continues_after_a_consumer_removes_the_read_offer"
+      ],
+      "rules": [
+        "nats-withdraw-unguarded-delete"
+      ]
+    },
+    {
       "id": "account-keys-indexed-not-scanned",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
@@ -95,6 +108,17 @@
       "seam": "scripts.swarm.failed_panes.report against the store launches hash and history list",
       "tests": [
         "tests/swarm/test_failed_launch_panes.py::test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list"
+      ]
+    },
+    {
+      "id": "started-lives-task-rows-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1919-live",
+      "behaviour": "Counting a task's started lives, which the tick spawn step does for every launch and for a first life claim, decodes only the launch and history rows whose raw record names that task, never the whole swarm history list, which cost about six tenths of a second of CPU per count.",
+      "seam": "RedisStore._started_lives through claims and count_claim against the launches hash and history list",
+      "tests": [
+        "tests/swarm/test_store.py::test_counting_a_first_life_decodes_only_rows_that_name_the_task",
+        "tests/swarm/test_store.py::test_a_launch_row_reused_by_another_task_still_shadows_the_name_history"
       ]
     },
     {
@@ -191,6 +215,19 @@
       ]
     },
     {
+      "id": "host-room-counts-reserved-executions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
+      "behaviour": "The host budget sample counts managed Codex executions reserved on this host whose server has not started, and memory and load spawn room subtract them, so reserved launches are not invisible to host room.",
+      "seam": "scripts.swarm.host_budget.read_host, memory_room and load_room with hooks.context.account_sessions.reserved_executions",
+      "tests": [
+        "tests/swarm/test_host_budget.py::test_read_host_counts_reserved_managed_executions",
+        "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room",
+        "tests/context/test_account_sessions.py::test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher",
+        "tests/context/test_account_sessions.py::test_reserved_executions_count_none_while_the_store_is_down"
+      ]
+    },
+    {
       "id": "legacy-state-migration-command",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
@@ -236,6 +273,17 @@
         "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill",
         "tests/hive/test_holder_backfill.py::test_the_hive_help_names_the_holders_command",
         "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
+      ]
+    },
+    {
+      "id": "managed-dead-server-releases-slot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
+      "behaviour": "The runtime binding pass moves a managed Codex transport record on this host whose app server is proven dead to failed with the server died error class and frees its endpoint, so the account session count stops holding its slot; a record from another host or with unknown liveness is left as it is.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.settle and hooks.context.account_sessions.managed_held",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_its_slot",
+        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liveness"
       ]
     },
     {
@@ -1923,6 +1971,36 @@
       ]
     },
     {
+      "id": "swarm-health-corpus",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t277",
+      "behaviour": "Each health detector (ceremony, scope inflation, proof loop, idle with claim, stale claim, over monitoring) keeps a corpus of recorded agent histories labelled finding or none, with at least one of each; the replay feeds every history through the health findings the way swarm status does and fails when a labelled case flips or a detector lacks either label. The two ninth of October ceremony histories are labelled none.",
+      "seam": "scripts.swarm.health.corpus and python -m scripts.swarm.health.corpus",
+      "tests": [
+        "tests/swarm/test_health_corpus.py::test_every_detector_has_a_finding_case_and_a_none_case",
+        "tests/swarm/test_health_corpus.py::test_each_labelled_history_replays_to_its_label",
+        "tests/swarm/test_health_corpus.py::test_the_ninth_of_october_ceremony_histories_raise_no_finding",
+        "tests/swarm/test_health_corpus.py::test_the_ninth_of_october_histories_are_red_when_talk_counts_are_dropped",
+        "tests/swarm/test_health_corpus.py::test_a_flipped_label_fails_the_replay",
+        "tests/swarm/test_health_corpus.py::test_a_detector_without_both_labels_fails_the_replay",
+        "tests/swarm/test_status_talk_wiring.py::test_status_hands_the_detectors_talk_counts_as_the_corpus_replays_them",
+        "tests/swarm/test_status_talk_wiring.py::test_the_replay_reads_the_repo_corpus_when_no_directory_is_given"
+      ]
+    },
+    {
+      "id": "swarm-health-false-positives",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t277",
+      "behaviour": "Swarm status counts, per detector, the findings whose current verdict is false positive out of all judged findings and prints one false positives line when any finding is judged.",
+      "seam": "agentihooks swarm status",
+      "tests": [
+        "tests/swarm/test_health_verdicts.py::test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings",
+        "tests/swarm/test_health_report.py::test_the_false_positives_line_leads_the_findings",
+        "tests/swarm/test_health_report.py::test_no_judged_finding_prints_no_false_positives_line",
+        "tests/swarm/test_status_false_positives.py::test_status_counts_each_detector_s_false_positive_verdicts"
+      ]
+    },
+    {
       "id": "swarm-autoscale",
       "origin": "inventory",
       "behaviour": "Autoscale raises the lane ceilings only after three ticks, never past fifty, and applies a lower host room ceiling at once.",
@@ -2687,6 +2765,26 @@
         "tests/swarm_ledger/test_ledger_answer.py::test_a_worker_answer_is_refused_and_the_priority_stays",
         "tests/swarm_ledger/test_ledger_answer.py::test_cli_master_answers_at_delegate_and_full",
         "tests/swarm_ledger/test_ledger_answer.py::test_cli_refuses_below_delegate_autonomy"
+      ]
+    },
+    {
+      "id": "gate-required-waits-for-aggregator",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
+      "behaviour": "The Gate Required commit status on a pull request head reads success only once the protected grade passed and the Tests aggregator check run, which needs the type gate, concluded success. It stays pending while the aggregator has no check run and fails when either half fails.",
+      "seam": "gate_required_status.decide and main; Gate Required status workflow on Tests completion; Gate Protected report step",
+      "tests": [
+        "tests/test_gate_required_status.py::test_gate_required_succeeds_only_when_both_halves_succeeded",
+        "tests/test_gate_required_status.py::test_a_passed_protected_grade_stays_pending_while_the_aggregator_has_no_check_run",
+        "tests/test_gate_required_status.py::test_a_queued_type_gate_holds_gate_required_pending",
+        "tests/test_gate_required_status.py::test_the_aggregator_failing_on_the_type_gate_fails_gate_required",
+        "tests/test_gate_required_status.py::test_the_newest_aggregator_run_decides_after_a_rerun",
+        "tests/test_gate_required_status.py::test_a_green_aggregator_never_overrides_a_refused_protected_grade",
+        "tests/test_gate_required_status.py::test_the_status_workflow_reports_after_every_pull_request_tests_run_from_trusted_code",
+        "tests/test_gate_required_status.py::test_an_aggregator_from_another_tests_run_on_the_head_never_decides",
+        "tests/test_gate_required_status.py::test_no_pull_request_tests_run_holds_gate_required_pending",
+        "tests/test_gate_required_status.py::test_the_status_workflow_waits_for_a_running_protected_grade",
+        "tests/test_gate_required_status.py::test_the_announced_protected_workflow_reports_through_the_resolver"
       ]
     },
     {
@@ -4559,6 +4657,17 @@
       "tests": [
         "tests/swarm/test_stale_swarm_tick.py::test_the_controller_runs_no_steps_for_a_closed_or_binned_swarm_holding_a_ghost_agent",
         "tests/swarm/test_stale_swarm_tick.py::test_tickable_reads_binned_then_closed_and_ticks_a_gone_ledger"
+      ]
+    },
+    {
+      "id": "controller-survives-ledger-connection-failure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ledger-failure-survives",
+      "behaviour": "A connection failure in the controller's binned or closed check ends only that pass as ledger unreachable, and the controller runs its next pass instead of exiting.",
+      "seam": "scripts.swarm.controller.tickable and scripts.swarm.ledger_client.LedgerClient._lifecycle",
+      "tests": [
+        "tests/swarm/test_controller_pass_end.py::test_a_refused_closed_check_ends_the_pass_and_the_controller_runs_the_next_pass",
+        "tests/swarm/test_controller_pass_end.py::test_an_unreachable_remote_lifecycle_read_raises_ledger_unreachable"
       ]
     },
     {
