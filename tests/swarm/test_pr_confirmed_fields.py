@@ -15,8 +15,8 @@ HEAD = "0123456789abcdef0123456789abcdef01234567"
 
 @pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
 def test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check(
-    started: tuple[Any, Any, list],
-    monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    started: tuple[Any, Any, list],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, ledger, _ = started
     update = ledger.update_task
