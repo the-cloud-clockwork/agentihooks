@@ -1,0 +1,6 @@
+{
+  "scripts/quick/cli.py:scripts.quick.cli.x__swarm_for:e53fc421f0912084bcae567a4ca01a8149e76bac809658357bd496b36b46bc15": {
+    "reader": "standards-reader-2",
+    "reason": "strict=False under the same equal-length invariant as mutmut_74; zip yields the same pairs."
+  }
+}

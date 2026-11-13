@@ -1,0 +1,6 @@
+{
+  "scripts/quick/guard.py:scripts.quick.guard.x_require:4c9e311e6f5bec4d4ca9d8965eea66c829e671ef627df5caf8bc279c8dde360b": {
+    "reader": "standards-reader-2",
+    "reason": "Omitting the default returns None, identical to mutmut_5: falsy, so the same NOT_INSIDE error; truthy values unchanged."
+  }
+}

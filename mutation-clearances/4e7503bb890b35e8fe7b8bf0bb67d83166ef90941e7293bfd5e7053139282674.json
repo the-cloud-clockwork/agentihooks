@@ -1,0 +1,6 @@
+{
+  "hooks/context/context_recycle.py:hooks.context.context_recycle.x__quick_gate:06d1e2d6575c01132dd35421eb2dfab35c192d3ec51fbcaeef98c6b1b31caf62": {
+    "reader": "standards-reader-2",
+    "reason": "An empty command yields no tokens and 'XXXX' yields ['XXXX'], neither a read command nor agentihooks, so both reach the same BLOCKED message."
+  }
+}
