@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.859 · 2026-11-13
+
+### 2026-11-13 · b8cf932ead71 · #11068 · @agenticore-app
+
+**Keep the repository feature map validity test under the worker timeout**
+
+This change fixes an intermittent CI crash where the repository feature map validity test ran under the coverage tracer for up to 60 seconds, exceeding the worker's timeout and taking down the xdist worker. It narrows `locked_tests.measure` to only grade the mapped tests instead of all 9636 functions, cutting workstation runtime from 11.74s to 9.23s, and moves the validity test into a subprocess without the coverage tracer with a 50s timeout safely under the worker limit, plus a regression test guarding against unwanted functions being measured.
+
 ## v2.17.858 · 2026-11-13
 
 ### 2026-11-13 · 9df1a1d3620a · #11062 · @agenticore-app
