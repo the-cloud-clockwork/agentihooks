@@ -2,10 +2,11 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
-import re
 import sys
 from types import SimpleNamespace
 from typing import Any
+
+from packaging.version import InvalidVersion, Version
 
 from scripts import updater
 from scripts.hive import account_slots
@@ -18,16 +19,14 @@ ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
-RELEASE = re.compile(r"(\d+(?:\.\d+)*)[.-]?(dev|a|b|rc)?")
 
 
-def release_key(text: str) -> tuple[int, ...]:
-    """The dotted integer release a version string starts with, ranking a dev or pre-release build below its final
-    release; empty for an unreported or unparsable one."""
-    found = RELEASE.match(text)
-    if not found:
-        return ()
-    return (*(int(part) for part in found.group(1).split(".")), 0 if found.group(2) else 1)
+def release_key(text: str) -> Version | None:
+    """The PEP 440 release a version string names; None for an unreported or unparsable one."""
+    try:
+        return Version(text)
+    except InvalidVersion:
+        return None
 
 
 class LateAdmission(RuntimeError):
@@ -56,11 +55,8 @@ class Admission:
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         started = self.clock()
         if older := self._outdated(request["hive"]):
-            self.reopen(slug, request)
-            print(
-                f"hub: events release floor swarm={slug} task={request['task']} hive={request['hive']} {older}: refused",
-                file=sys.stderr,
-            )
+            task, hive = request["task"], request["hive"]
+            print(f"hub: events release floor swarm={slug} task={task} hive={hive} {older}: refused", file=sys.stderr)
             return None
         held = self.store.redis.get(self._key(slug, request))
         if held:
@@ -171,7 +167,7 @@ class Admission:
         self.store.release(slug, task_id, name)
         self.store.drop_agent(slug, name)
 
-    def reopen(self, slug: str, request: dict[str, Any]) -> bool:
+    def reopen(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)
         held = self.store.redis.get(key)
         if not held or json.loads(held)["hive"] != request["hive"]:
