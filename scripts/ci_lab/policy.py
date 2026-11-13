@@ -31,11 +31,7 @@ def _branches(pending: Sequence[Pending]) -> dict[str, deque[Pending]]:
     for unit in pending:
         heads.setdefault(unit.branch, {}).setdefault(unit.head, []).append(unit)
     return {
-        branch: deque(
-            unit
-            for units in by_head.values()
-            for unit in sorted(units, key=lambda unit: -unit.estimate)
-        )
+        branch: deque(unit for units in by_head.values() for unit in sorted(units, key=lambda unit: -unit.estimate))
         for branch, by_head in heads.items()
     }
 

@@ -113,3 +113,18 @@ def test_zero_window_and_explicit_zero_time() -> None:
 def test_invalid_quiet_window_is_rejected(quiet_window: float) -> None:
     with pytest.raises(ValueError):
         policy.Debounce(quiet_window=quiet_window)
+
+
+def test_order_rejects_unknown_priority_and_excludes_started_work() -> None:
+    with pytest.raises(ValueError, match="Unknown priority class"):
+        policy.order([work("unknown", priority="other")])
+    pending = work("pending")
+    assert policy.order([work("leased", state="leased"), pending]) == [pending]
+
+
+def test_debounce_defaults_are_the_public_quiet_window_and_clock() -> None:
+    from time import monotonic
+
+    debounce = policy.Debounce()
+    assert debounce.quiet_window == 30
+    assert debounce.clock is monotonic
