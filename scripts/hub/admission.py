@@ -6,6 +6,7 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
+from scripts.hive import account_slots
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.ledger_client import LedgerClient
@@ -14,6 +15,11 @@ from scripts.swarm.store import AgentRecord, RedisStore, connect
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
+ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
+
+
+class LateAdmission(RuntimeError):
+    """An admission finished after the asking hive stopped waiting for its answer."""
 
 
 class Admission:

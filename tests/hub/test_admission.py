@@ -271,6 +271,33 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
     assert rig.admitter.reopen(SLUG, ask()) is False
 
 
+@pytest.mark.feature("events-failed-launch-releases-admission")
+@pytest.mark.parametrize("offset, kept", [(-1, True), (0, False)])
+def test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused(rig, offset, kept):
+    readings = []
+
+    def clock():
+        readings.append(None)
+        return 7_000 if len(readings) == 1 else 7_000 + admission.ANSWER_MS + offset
+
+    rig.admitter.clock = clock
+    if kept:
+        name = rig.admitter.admit(SLUG, ask())["name"]
+        assert rig.store.claimant(SLUG, "t1") == name
+        assert rig.rows["t1"]["state"] == "claimed"
+        return
+    with pytest.raises(admission.LateAdmission, match="t1"):
+        rig.admitter.admit(SLUG, ask())
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
+    assert rig.store.redis.get(rig.admitter._key(SLUG, ask())) is None
+
+
+def test_the_hub_answers_inside_the_window_the_hive_waits_for_an_admission():
+    assert 0 < admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
+
+
 def test_an_admission_carries_no_avoided_harness_until_a_launch_fails_on_one(rig):
     assert "avoid_harness" not in rig.admitter.admit(SLUG, ask())["task"]
 
