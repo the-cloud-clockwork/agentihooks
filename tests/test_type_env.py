@@ -226,13 +226,13 @@ def test_main_runs_the_grader_with_the_environment_python_under_its_shared_lock(
     root = _root(tmp_path)
     python = tmp_path / "home" / "env" / "bin" / "python"
     python.parent.mkdir(parents=True)
-    seen: list[tuple[list[str], Path]] = []
+    seen: list[tuple[list[str], Path, dict[str, str] | None]] = []
 
-    def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
+    def run(command: list[str], cwd: Path, env: dict[str, str] | None) -> subprocess.CompletedProcess[bytes]:
         with (tmp_path / "home" / "env.lock").open("a") as lock:
             with pytest.raises(BlockingIOError):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        seen.append((command, cwd))
+        seen.append((command, cwd, env))
         return subprocess.CompletedProcess(command, 3)
 
     monkeypatch.setattr(type_env, "environment", lambda given: python if given == root else None)
@@ -241,7 +241,29 @@ def test_main_runs_the_grader_with_the_environment_python_under_its_shared_lock(
     code = type_env.main(["--grader", str(tmp_path / "gate.py"), "--root", str(root), "--base", "b", "--head", "h"])
 
     assert code == 3
-    assert seen == [([str(python), "-I", str(tmp_path / "gate.py"), "--base", "b", "--head", "h"], root)]
+    assert seen == [([str(python), "-I", str(tmp_path / "gate.py"), "--base", "b", "--head", "h"], root, None)]
+
+
+def test_direct_importers_reach_the_grader_as_its_setting_not_its_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _root(tmp_path)
+    python = tmp_path / "home" / "env" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    seen: list[tuple[list[str], dict[str, str] | None]] = []
+    monkeypatch.setattr(type_env, "environment", lambda given: python)
+    monkeypatch.setattr(
+        type_env.subprocess,
+        "run",
+        lambda command, cwd, env: seen.append((command, env)) or subprocess.CompletedProcess(command, 0),
+    )
+
+    assert type_env.main(["--grader", "g.py", "--root", str(root), "--direct-importers", "--base", "b"]) == 0
+
+    [(command, env)] = seen
+    assert command[3:] == ["--base", "b"]
+    assert env is not None and env[type_env.DIRECT_IMPORTERS] == "1"
+    assert {name: value for name, value in env.items() if name != type_env.DIRECT_IMPORTERS} == dict(os.environ)
 
 
 def test_main_defaults_to_the_current_repository_and_its_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -254,7 +276,7 @@ def test_main_defaults_to_the_current_repository_and_its_gate(tmp_path: Path, mo
     monkeypatch.setattr(
         type_env.subprocess,
         "run",
-        lambda command, cwd: seen.append(command) or subprocess.CompletedProcess(command, 0),
+        lambda command, cwd, env: seen.append(command) or subprocess.CompletedProcess(command, 0),
     )
 
     assert type_env.main(["--write"]) == 0

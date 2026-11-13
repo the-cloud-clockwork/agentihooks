@@ -6553,9 +6553,16 @@ the lease at admission and extends it on every heartbeat; once the lease lapses,
 scoped to that execution. The heartbeat and the launch grant renewal are authenticated by the worker's launch grant,
 which expires as well, so the worker renews both.
 
-A controller rollout on Anton restarts the controller (a Recreate rollout onto the new release image), and its
-endpoints answer 503 until a controller is serving again. The worker lease is sized to outlast that handover, so a
-running worker keeps its task through a release:
+A controller with one replica rolls out by Recreate, and its endpoints answer 503 until a controller is serving again.
+With `controller.replicas` above 1 (Anton runs 2), the chart rolls out with RollingUpdate (`maxSurge` 1,
+`maxUnavailable` 0) behind a PodDisruptionBudget of `minAvailable` 1. Only the replica holding the hive's replica lock
+in Redis (`agentihooks:controller-replica:<hive id>`, owned by the Pod name, renewed every 10 seconds, expiring after
+30) runs passes and the control service. A standby polls the lock every 5 seconds, answers `/v2/health/live` and
+`/v2/health/ready` itself, and forwards every other control API request to the address the leader publishes, answering
+503 while no replica leads. A stopping leader finishes its pass, then releases the lock, so the standby takes over
+within one pass interval. Each replica issues its own controller credential (`agentihooks hive controller --holder
+<pod>`) and keeps it alive, so a starting replica never retires the leader's. The worker lease is sized to outlast a
+Recreate handover, so a running worker keeps its task through a release:
 
 | Clock | Value | Role in a rollout |
 |---|---|---|

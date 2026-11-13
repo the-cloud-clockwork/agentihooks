@@ -7,6 +7,7 @@ import { appliedCaps, renderControls, renderGates, settleCaps, showNote } from "
 import { firstPage, moreButton } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { tips } from "./state.js";
+import { renderFindingRows } from "./finding_rows.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { renderHives } from "./hives.js";
@@ -338,6 +339,7 @@ export function renderSwarm(sw) {
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
   $("alert-stale").replaceChildren(...staleClaims(sw).map((text) => h("span", { text })));
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
+  renderFindingRows(open);
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);

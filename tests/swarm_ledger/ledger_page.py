@@ -40,6 +40,7 @@ ORDER += (
     "lifecycle",
     "roles",
     "agent_cells",
+    "finding_rows",
     "swarm",
     "recovery",
     "context",

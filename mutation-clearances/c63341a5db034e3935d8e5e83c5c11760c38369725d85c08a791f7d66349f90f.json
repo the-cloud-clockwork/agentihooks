@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/standby.py:scripts.swarm_v2.standby.x_forward:533ff004fcd9dfec9f39344d86d41286689aa80f5840577f5f9da53076885063": {
+    "reader": "standards_reader",
+    "reason": "'CONTENT-TYPE'.capitalize() is 'Content-type', the same stored key as the original (checked with python3 -I), so the request is unchanged."
+  }
+}

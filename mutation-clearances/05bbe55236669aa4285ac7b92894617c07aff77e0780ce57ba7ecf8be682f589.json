@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/standby.py:scripts.swarm_v2.standby.x_forward:00ad28f02cd0d2305dd13ce8f85093f97e5e56875b9e01af18b09d8498763806": {
+    "reader": "standards_reader",
+    "reason": "'AUTHORIZATION'.capitalize() is 'Authorization', the same stored key as the original (checked with python3 -I), so the request is unchanged."
+  }
+}

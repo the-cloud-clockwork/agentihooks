@@ -1,6 +1,8 @@
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -301,6 +303,39 @@ def test_alert_line_names_each_open_stale_claim_with_its_claimant_and_last_nudge
         "pb10 · claimed by eng-58 · last stale nudge 3 minutes ago"
     ]
     assert page.text("#alert-kinds") == "stale claim"
+
+
+@pytest.mark.feature("swarm-health-finding-rows")
+def test_alert_line_lists_each_open_finding_with_its_rows_and_required_marks(open_page: Callable[..., Any]) -> None:
+    at = NOW_MS - 300_000
+    ceremony = {
+        "id": "ceremony/eng-58",
+        "kind": "ceremony",
+        "subject": "eng-58",
+        "summary": "more ledger transitions than outcomes",
+        "evidence": ["26 ledger transitions", "1 outcome"],
+        "threshold": "at least 20",
+        "seen_at": at,
+        "verdict": None,
+        "last_outcome": "Earlier work at 2026-11-12 10:00",
+        "rows_total": 26,
+        "rows": [
+            {"at": at, "kind": "comment edited", "target": "phases/p9", "text": "", "required": ""},
+            {"at": at, "kind": "task pr", "target": "tasks/pb10", "text": "Build", "required": "doctrine"},
+            {"at": at, "kind": "comment added", "target": "tasks/pb10", "text": "Build", "required": "task"},
+        ],
+    }
+    page = open_page(status(findings=[ceremony]), width=1920)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    heads = page.tab.locator("#alert-findings > li > span").all_inner_texts()
+    assert heads == ["ceremony eng-58 · last outcome Earlier work at 2026-11-12 10:00 · latest 3 of 26 rows"]
+    rows = page.tab.locator("#alert-findings li li").all_inner_texts()
+    assert [row.split(" · ", 1)[1] for row in rows] == [
+        "comment edited · phases/p9",
+        "task pr · tasks/pb10 · Build · required by doctrine",
+        "comment added · tasks/pb10 · Build · required by the task",
+    ]
+    assert page.tab.locator("#alert-findings .sw-required").count() == 2
 
 
 def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
