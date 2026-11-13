@@ -98,6 +98,17 @@
       ]
     },
     {
+      "id": "started-lives-task-rows-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1919-live",
+      "behaviour": "Counting a task's started lives, which the tick spawn step does for every launch and for a first life claim, decodes only the launch and history rows whose raw record names that task, never the whole swarm history list, which cost about six tenths of a second of CPU per count.",
+      "seam": "RedisStore._started_lives through claims and count_claim against the launches hash and history list",
+      "tests": [
+        "tests/swarm/test_store.py::test_counting_a_first_life_decodes_only_rows_that_name_the_task",
+        "tests/swarm/test_store.py::test_a_launch_row_reused_by_another_task_still_shadows_the_name_history"
+      ]
+    },
+    {
       "id": "replacement-missing-occupant",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
