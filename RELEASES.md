@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.850 · 2026-11-13
+
+### 2026-11-13 · a95ac2f0f362 · #11031 · @agenticore-app
+
+**Implement lab fairness supersession and debounce policy**
+
+This change introduces a standalone library that decides which pending lab jobs should be superseded versus kept, using priority classes and deficit round robin scheduling across branches so no branch starves while busier ones still make progress, and it adds a debounce mechanism that only restarts a quiet window when the active head actually changes. Leased and running work is always preserved. Acceptance tests exercise many heads, carried credit, uneven work sizes, and exact timing boundaries, giving confidence that scheduling stays fair and stable before this logic is wired into production.
+
+### 2026-11-13 · 4d2c9746cc1e · #11029 · @agenticore-app
+
+**Run the strict type gate before push in the CI test environment**
+
+This change adds `scripts/type_env.py`, which builds the exact Python 3.12 virtual environment the CI type gate uses (via `uv venv` and locked constraints), caching and pruning per lock key, so the strict type check can run locally with CI-identical packages. `scripts/ci_prepush` now runs a "strict types" step using this environment, comparing against the merge-base baseline the same way CI grades it. This fixes false mismatches caused by the local dev venv having different stub/optional packages than CI, ensuring prepush accurately predicts whether the type gate will pass before pushing.
+
 ## v2.17.849 · 2026-11-13
 
 ### 2026-11-13 · 089cb1d9a547 · #11024 · @agenticore-app
