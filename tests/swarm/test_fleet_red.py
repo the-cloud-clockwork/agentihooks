@@ -466,16 +466,19 @@ def test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing
 
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
 def test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm(
-    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import fakeredis
+
     from scripts.swarm import tick
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-    store.create(SwarmConfig("ev", str(tmp_path), max_eng=2, max_ci=0, engine="events"))
+    events = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    events.create(SwarmConfig("sw", str(tmp_path), max_eng=2, max_ci=0, engine="events"))
     monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED)
-    tick.tick("ev", store, FakeLedger([task("a", pr_url=MINE)]), FakeRuntime(), now_ms=4_321)
+    tick.tick("sw", events, FakeLedger([task("a", pr_url=MINE)]), FakeRuntime(), now_ms=4_321)
 
-    assert fleet_red.saved_reader(store, "ev")("o/r") == tuple(SAVED)
+    assert fleet_red.saved_reader(events, "sw")("o/r") == tuple(SAVED)
 
 
 def test_the_notice_step_budget_outlasts_the_live_listing_so_its_save_is_kept() -> None:
