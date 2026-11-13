@@ -488,9 +488,41 @@ def test_unmarked_suite_tests_do_not_need_feature_entries(mapped_repo):
     assert feature_map.validate(root, path) == 1
 
 
-def test_the_repository_feature_map_is_valid():
+def test_the_disabled_check_measures_only_mapped_tests(
+    mapped_repo: tuple[Path, Path, dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, path, _ = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        (root / "tests/test_login.py").read_text() + "\n\ndef test_unmapped():\n    assert True\n"
+    )
+    measure = feature_map.locked_tests.measure
+    seen: list[dict] = []
+
+    def recorded(tree: Path, modules: tuple[str, ...], wanted: frozenset[str] | None = None) -> dict[str, dict]:
+        result = measure(tree, modules, wanted)
+        seen.append(result)
+        return result
+
+    monkeypatch.setattr(feature_map.locked_tests, "measure", recorded)
+    assert feature_map.validate(root, path) == 1
+    assert "tests/test_login.py::test_unmapped" not in seen[0]
+
+
+@pytest.mark.timeout(150)
+def test_the_repository_feature_map_is_valid() -> None:
     root = Path(__file__).resolve().parents[1]
-    assert feature_map.validate(root, root / "feature-map.json") >= 1
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_"))}
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.feature_map", "--root", str(root)],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=140,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert re.fullmatch(r"Feature map: [1-9]\d* features, all rule, test and live check links exist\n", result.stdout)
 
 
 def test_the_repository_unmapped_rule_list_only_shrinks():

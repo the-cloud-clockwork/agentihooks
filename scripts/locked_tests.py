@@ -156,7 +156,7 @@ def _functions(body: list[ast.stmt], prefix: str, inherited: list[ast.AST]):
             yield from _functions(node.body, f"{prefix}{node.name}::", [*context, *node.decorator_list])
 
 
-def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
+def measure(tree: Path, modules: tuple[str, ...] = LOCKED, wanted: frozenset[str] | None = None) -> dict[str, dict]:
     measured = {}
     for name in modules:
         path = tree / name
@@ -196,6 +196,8 @@ def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
                 break
             skippers |= grown
         for key, function, context in functions:
+            if wanted is not None and key not in wanted:
+                continue
             test = function.name.startswith("test")
             checks = _checks(bodies[key], helpers)
             if not (test or checks):

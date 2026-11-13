@@ -186,7 +186,7 @@ def _rule_coverage(rules: set[str], owned: set[str], unmapped: object) -> None:
 
 def _disabled(root: Path, nodes: set[str]) -> None:
     modules = tuple(sorted({node.split("::")[0] for node in nodes}))
-    measured = locked_tests.measure(root, modules)
+    measured = locked_tests.measure(root, modules, frozenset(nodes))
     if disabled := sorted(node for node in nodes if measured[node]["disabled"]):
         raise ValueError(f"mapped test is skipped, xfailed or returns early: {disabled}")
 
