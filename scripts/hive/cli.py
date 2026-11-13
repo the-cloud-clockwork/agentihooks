@@ -340,6 +340,13 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
     joined.add_argument("invite", type=Path, help="private member invite file shared with Kubernetes workers")
+    compacted = sub.add_parser("compact-credentials", help="Compact member documents after verifying deployed readers")
+    compacted.add_argument(
+        "--member", action="append", required=True, help="member whose deployed readers were verified"
+    )
+    compacted.add_argument(
+        "--readers-compatible", action="store_true", help="confirm independent token readers are deployed"
+    )
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     sub.add_parser("holders", help="Write the holder record of every member minted before holder records")
@@ -584,11 +591,21 @@ def _run(args: argparse.Namespace) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
-        elif args.command in ("setup", "nats-trust"):
-            print((_setup if args.command == "setup" else _nats_trust)(args))
+        elif args.command in ("setup", "nats-trust", "compact-credentials"):
+            print(
+                {"setup": _setup, "nats-trust": _nats_trust, "compact-credentials": _compact_credentials}[args.command](
+                    args
+                )
+            )
         else:
             return _serve(args)
     except auth.HiveError as exc:
         print(f"hive {args.command} refused: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _compact_credentials(args: argparse.Namespace) -> str:
+    from scripts.hive import agent_credentials
+
+    return json.dumps(agent_credentials.compact(redis_client(), args.member, args.readers_compatible))

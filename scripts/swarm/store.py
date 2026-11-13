@@ -186,7 +186,7 @@ class AgentRecord:
 
 
 class RedisStore:
-    def __init__(self, redis):
+    def __init__(self, redis: Any) -> None:
         if redis is None:
             raise SwarmError("no Redis client; the swarm refuses to run without it")
         self.redis = redis
@@ -664,7 +664,12 @@ class RedisStore:
                     doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
             return True
 
-        return (live, lives) if lease.fenced(self, slug, lease.EPOCH.get(), end) else None
+        if not lease.fenced(self, slug, lease.EPOCH.get(), end):
+            return None
+        from scripts.hive import agent_credentials
+
+        agent_credentials.retire_named(self.redis, slug, name, previous, records_of(doc))
+        return live, lives
 
     def _occupants_kept(self, slug: str, name: str, live: set[str]) -> bool:
         from scripts.swarm import fencing

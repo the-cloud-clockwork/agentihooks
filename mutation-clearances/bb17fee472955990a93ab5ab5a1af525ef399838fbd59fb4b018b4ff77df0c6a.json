@@ -1,0 +1,6 @@
+{
+  "scripts/hive/agent_credentials.py:scripts.hive.agent_credentials.x__index_legacy:e58a6448cd40dc20da5bf81d48848e855d6fa2f53cd86a13978c50e98d0a1c72": {
+    "reader": "/root/standards_reader",
+    "reason": "typing.cast returns its second argument unchanged. Replacing its type argument with None changes no runtime value or behavior."
+  }
+}

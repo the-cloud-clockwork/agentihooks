@@ -3535,6 +3535,37 @@
       ]
     },
     {
+      "id": "hive-credential-compaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2297",
+      "behaviour": "Member compaction preserves independent agent token authentication and removes legacy member maps after reader verification.",
+      "seam": "Hive credential compaction and agent authentication",
+      "tests": [
+        "tests/hive/test_credential_compaction.py::test_compaction_preserves_legacy_tokens_and_removes_member_maps",
+        "tests/hive/test_credential_compaction.py::test_ended_agent_tokens_are_removed_and_active_peers_keep_access",
+        "tests/hive/test_credential_compaction.py::test_minted_members_omit_the_obsolete_agents_map",
+        "tests/hive/test_credential_compaction.py::test_compaction_requires_explicit_members_and_verified_readers",
+        "tests/hive/test_credential_compaction.py::test_compaction_defaults_to_unverified_readers",
+        "tests/hive/test_credential_compaction.py::test_compaction_refuses_other_backends",
+        "tests/hive/test_credential_compaction.py::test_compaction_refuses_unknown_members",
+        "tests/hive/test_credential_compaction.py::test_cli_compacts_only_the_selected_members",
+        "tests/hive/test_credential_compaction.py::test_compaction_replaces_large_history_and_preserves_existing_independent_records",
+        "tests/hive/test_credential_compaction.py::test_cli_explains_the_reader_precondition",
+        "tests/hive/test_credential_compaction.py::test_recording_an_ended_execution_removes_its_token",
+        "tests/hive/test_credential_compaction.py::test_compacted_independent_tokens_are_removed_when_the_agent_ends",
+        "tests/hive/test_credential_compaction.py::test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers",
+        "tests/hive/test_credential_compaction.py::test_compaction_and_retirement_share_a_fence",
+        "tests/hive/test_credential_compaction.py::test_scoped_credential_keys_preserve_existing_record_addresses",
+        "tests/hive/test_credential_compaction.py::test_retiring_a_legacy_projection_removes_its_hive_token",
+        "tests/hive/test_credential_compaction.py::test_named_retirement_covers_recorded_and_previous_hives_only",
+        "tests/hive/test_credential_compaction.py::test_ending_an_orphan_execution_removes_its_token",
+        "tests/hive/test_credential_compaction.py::test_retiring_a_compact_member_never_scans_the_credential_store",
+        "tests/hive/test_credential_compaction.py::test_retirement_indexes_uncompacted_independent_tokens",
+        "tests/hive/test_credential_compaction.py::test_legacy_indexes_keep_separate_scopes_and_exclude_scoped_records",
+        "tests/hive/test_credential_compaction.py::test_legacy_indexing_bounds_reads_and_skips_tombstones"
+      ]
+    },
+    {
       "id": "swarm-workflow-runner",
       "origin": "inventory",
       "behaviour": "The tick step workflow runner runs in group wrapper phases on the slow lane every 60 seconds.",

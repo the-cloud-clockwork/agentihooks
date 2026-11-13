@@ -3997,3 +3997,21 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 - [Hosted ledger auth](../reference/hosted-ledger-auth.md): hive tokens and edge mode.
 - [Hive enablement record](../reference/hive-enablement-record.md): the first Anton worker hive join, where its
   time went, and the proposals that shaped this page.
+
+## Compacting member credentials
+
+`agentihooks hive compact-credentials --member ID --readers-compatible` removes the obsolete member agents map
+only for explicitly selected members. Repeat `--member` for each verified member. Before confirming, verify every
+reader in service for those members, including stable hive releases, accepts independent agent token records.
+Keep members with unknown readers out of the command. The migration preserves legacy token authentication and
+replaces retained member history with compact documents. Output maps member identifiers to document byte counts;
+it never prints credentials. The command requires the Redis state backend.
+
+New member documents omit the agents map. Retirement and authoritative execution ending remove the agent's
+scoped credential record. Compaction indexes older independent token records by agent so ending that agent
+also removes its migrated credentials without scanning every member document. Active peers keep their tokens.
+
+Compaction and token retirement hold the same per member Redis lock. Retirement also removes matching entries
+from a retained legacy map while preserving the map format and active peers. This prevents a concurrent migration
+from recreating a token after its agent ended.
+
