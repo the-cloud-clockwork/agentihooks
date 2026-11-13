@@ -32,9 +32,9 @@ def test_estimate(members: tuple[str, ...], durations: dict[str, float]) -> floa
     fallback = values[(len(values) * 99 - 1) // 100]
     per_file: dict[str, float] = {}
     for node, seconds in durations.items():
-        path = node.split("::", 1)[0]
+        path = node.partition("::")[0]
         per_file[path] = max(seconds, per_file.get(path, 0.0))
-    return sum(durations.get(node, per_file.get(node.split("::", 1)[0], fallback)) for node in members) * SLOWDOWN
+    return sum(durations.get(node, per_file.get(node.partition("::")[0], fallback)) for node in members) * SLOWDOWN
 
 
 def weight() -> int:

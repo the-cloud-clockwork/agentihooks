@@ -48,6 +48,21 @@ def test_unknown_test_uses_queue_snapshot_fallback(tmp_path: Path) -> None:
     assert pricing.estimate(unit, snapshot, History("test", "new", ())) == 18.0 * SLOWDOWN
 
 
+@pytest.mark.parametrize("size", [99, 100])
+def test_unknown_file_uses_queue_percentile_boundary(size: int) -> None:
+    durations = {f"tests/file_{number}.py::test_value": float(number) for number in range(size, 0, -1)}
+    assert pricing.test_estimate(("tests/new.py::test_new",), durations) == 99.0 * SLOWDOWN
+
+
+def test_unknown_nested_test_uses_largest_file_duration() -> None:
+    durations = {
+        "tests/a.py::TestGroup::test_slow": 0.75,
+        "tests/a.py::TestGroup::test_fast": 0.25,
+        "tests/b.py::test_other": 4.0,
+    }
+    assert pricing.test_estimate(("tests/a.py::OtherGroup::test_new",), durations) == 0.75 * SLOWDOWN
+
+
 def test_unmeasured_other_kind_has_no_typed_estimate(tmp_path: Path) -> None:
     unit = units.Unit(kind="static", key="lint", members=())
     with pytest.raises(ValueError) as error:
