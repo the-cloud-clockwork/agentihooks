@@ -1,9 +1,12 @@
 import contextlib
+import json
 import queue
 import threading
 import time
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 from redis._parsers.encoders import Encoder
@@ -452,5 +455,47 @@ def test_registration_times_out_without_changing_a_locked_native_config(tmp_path
     with pytest.raises(OSError, match="is held"):
         channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
     assert waits == [0.1]
+    assert lock.is_dir()
+    assert not (tmp_path / ".claude.json").exists()
+
+
+@pytest.mark.feature("inbox-channel-lock-reclaim")
+def test_registration_reclaims_an_abandoned_native_config_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from scripts import claude_trust
+
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    abandoned = time.time() - claude_trust.STALE_LOCK_SECONDS - 1800
+    os.utime(lock, (abandoned, abandoned))
+    monkeypatch.setattr(channel.time, "sleep", lambda delay: pytest.fail("an abandoned lock must not be waited on"))
+    channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert "inbox" in json.loads((tmp_path / ".claude.json").read_text())["mcpServers"]
+    assert not lock.exists()
+
+
+@pytest.mark.feature("inbox-channel-lock-reclaim")
+def test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder(tmp_path: Path) -> None:
+    import os
+
+    from scripts import claude_trust
+
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    recent = time.time() - claude_trust.STALE_LOCK_SECONDS + 5
+    os.utime(lock, (recent, recent))
+    reclaims: list[Path] = []
+    original = claude_trust._reclaim
+
+    def spy(path: Path) -> bool:
+        reclaims.append(path)
+        return original(path)
+
+    with mock.patch.object(claude_trust, "_reclaim", spy), mock.patch.object(channel.time, "sleep"):
+        with mock.patch.object(channel.time, "monotonic", side_effect=[0, 2, 3]):
+            with pytest.raises(OSError, match="is held"):
+                channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert reclaims == [lock, lock]
     assert lock.is_dir()
     assert not (tmp_path / ".claude.json").exists()

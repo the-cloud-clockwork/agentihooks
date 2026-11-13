@@ -194,6 +194,20 @@
       ]
     },
     {
+      "id": "inbox-channel-lock-reclaim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-channel-lock-reclaim",
+      "behaviour": "Inbox channel registration in a shared profile home's Claude config reclaims a lock directory left past the Claude lockfile stale bound and registers the channel, while a lock younger than the bound still blocks until the timeout.",
+      "seam": "scripts.inbox.channel.register through claude_trust._reclaim on the Claude config lock directory",
+      "tests": [
+        "tests/inbox/test_channel_server.py::test_registration_reclaims_an_abandoned_native_config_lock",
+        "tests/inbox/test_channel_server.py::test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder"
+      ],
+      "rules": [
+        "mkdir-lock-without-reclaim"
+      ]
+    },
+    {
       "id": "swarm-master-skips-host-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
