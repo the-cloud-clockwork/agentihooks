@@ -26,6 +26,7 @@ class HiveLoss:
     def __init__(self, bus: Bus, clock: lease.Clock = lease.wall_ms, store: RedisStore | None = None):
         self._bus = bus
         self._store = store
+        self._read: tuple[int | None, set[str]] = (None, set())
         self._state = bus.state(BUCKET)
         self._clock = clock
         self._emit = execution_events.emit
@@ -57,15 +58,14 @@ class HiveLoss:
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
             by_hive[(raw["swarm"], raw["data"]["hive"])].append((key, Envelope.from_dict(raw)))
-        events = self._events() if by_hive else set[str]()
         done, losses = [], []
         for (swarm, hive), starts in by_hive.items():
             if not guard():
                 break
             lost = (
-                swarm in events
-                and now - self._watching >= presence.TTL_MS
+                now - self._watching >= presence.TTL_MS
                 and presence.lost(self._bus.for_swarm(swarm), hive, now)
+                and swarm in self._events(now)
             )
             if lost or prune:
                 settled, ended = self._settle(starts, lost, now)
@@ -87,9 +87,11 @@ class HiveLoss:
             for line in losses:
                 print(line, file=sys.stderr)
 
-    def _events(self) -> set[str]:
-        self._store = self._store or swarm_store.connect()
-        return set(event_slugs(self._store))
+    def _events(self, now: int) -> set[str]:
+        if self._read[0] != now:
+            self._store = self._store or swarm_store.connect()
+            self._read = (now, set(event_slugs(self._store)))
+        return self._read[1]
 
     def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[str]]:
         done, ended = [], []

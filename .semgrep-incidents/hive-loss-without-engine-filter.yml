@@ -13,6 +13,7 @@ rules:
               ...
       - pattern: presence.lost(...)
       - pattern-not-inside: $SWARM in $EVENTS and ...
+      - pattern-not-inside: ... and $SWARM in $EVENTS
       - pattern-not-inside: |
           if <... EVENTS_ENGINE ...>:
               continue

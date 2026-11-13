@@ -42,3 +42,14 @@ class SkipsOtherEngines:
 def ending(bus, hive, now):
     # ok: hive-loss-without-engine-filter
     return presence.lost(bus, hive, now)
+
+
+class ChecksEventsAfterPresence:
+    def poll(self, now):
+        for swarm, hive in self.rows():
+            lost = (
+                now - self.watching >= presence.TTL_MS
+                # ok: hive-loss-without-engine-filter
+                and presence.lost(self.bus.for_swarm(swarm), hive, now)
+                and swarm in self._events(now)
+            )
