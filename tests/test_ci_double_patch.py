@@ -90,6 +90,15 @@ def test_the_nearest_autouse_fixture_is_named(tmp_path: Path, capsys: pytest.Cap
     ]
 
 
+def test_a_root_conftest_autouse_fixture_reaches_the_tests(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(tmp_path, {"conftest.py": _MOCKED_FIXTURE, "tests/test_five.py": _MONKEYPATCH_TEST})
+    assert main(["--root", str(root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Double patches: 1 files, 1 problems",
+        _error("tests/test_five.py", 2, "test_one", "pkg.mod.get_redis", "_isolate", "conftest.py:5"),
+    ]
+
+
 def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -154,7 +163,7 @@ def test_a_fixture_that_monkeypatches_under_its_own_mock_is_red(
         ),
         (
             {
-                "conftest.py": _MOCKED_FIXTURE,
+                "docs/conftest.py": _MOCKED_FIXTURE,
                 "tests/other/conftest.py": _MOCKED_FIXTURE,
                 "tests/area/test_clean.py": _MONKEYPATCH_TEST,
             },

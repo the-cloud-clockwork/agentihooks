@@ -121,9 +121,9 @@ def patches(tree: ast.Module, path: Path) -> tuple[list[Patch], list[Patch]]:
     return mocked, monkeyed
 
 
-def reaching(path: Path, tests: Path) -> list[Path]:
+def reaching(path: Path, root: Path) -> list[Path]:
     """List the conftest files whose fixtures reach a file, farthest first, then the file itself."""
-    folders = [folder for folder in path.parents if folder == tests or tests in folder.parents]
+    folders = [folder for folder in path.parents if folder == root or root in folder.parents]
     return [*(folder / "conftest.py" for folder in reversed(folders)), path]
 
 
@@ -132,20 +132,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("."))
     args = parser.parse_args(argv)
-    tests = args.root / "tests"
-    files = sorted(tests.rglob("*.py"))
+    files = sorted((args.root / "tests").rglob("*.py"))
     problems: list[str] = []
     parsed: dict[Path, tuple[list[Patch], list[Patch]]] = {}
     if not files:
         problems.append("No Python test files found")
-    for path in files:
+    top = args.root / "conftest.py"
+    for path in [*files, top] if top.is_file() else files:
         try:
             parsed[path] = patches(ast.parse(path.read_text(), filename=str(path)), path)
         except (SyntaxError, UnicodeError) as error:
             problems.append(f"{path.relative_to(args.root)}: cannot parse: {error}")
-    for path, (_, monkeyed) in parsed.items():
-        mocked = {patch.target: patch for source in reaching(path, tests) for patch in parsed.get(source, ([], []))[0]}
-        for patch in monkeyed:
+    for path in files:
+        mocked = {
+            patch.target: patch for source in reaching(path, args.root) for patch in parsed.get(source, ([], []))[0]
+        }
+        for patch in parsed.get(path, ([], []))[1]:
             if fixture := mocked.get(patch.target):
                 problems.append(
                     f"{path.relative_to(args.root)}:{patch.line}: {patch.function} monkeypatches {patch.target}, "
