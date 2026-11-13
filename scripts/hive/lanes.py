@@ -153,8 +153,6 @@ def _wait_failed(exc: BaseException | None) -> None:
 
 
 def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
-    if workstation.runs_engine(environ):
-        return None
     if (environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == "memory":
         print(
             "hive lane spokes refused: the memory bus never sees the hub's ready offers; "
