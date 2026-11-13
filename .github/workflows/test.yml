@@ -2608,6 +2608,39 @@ jobs:
         uses: actions/download-artifact@v4
         with: *dep-manifest-download-shard-coverage
 
+      - name: Check the shard coverage downloads
+        id: check-shard-coverage
+        continue-on-error: true
+        shell: bash
+        run: &dep-manifest-check-shard-coverage |
+          shopt -s nullglob
+          python -m tests.coverage_check .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
+          python -c 'import json, pathlib; [json.loads(line) for path in pathlib.Path(".coverage-shards").rglob("*.jsonl") for line in path.read_text().splitlines() if line.strip()]'
+
+      - name: Download torn shard coverage again
+        id: redownload-shard-coverage
+        if: steps.check-shard-coverage.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: *dep-manifest-download-shard-coverage
+
+      - name: Download torn shard coverage again, wait before attempt 2
+        if: steps.redownload-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download torn shard coverage again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download torn shard coverage again, attempt 2
+        if: steps.redownload-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *dep-manifest-download-shard-coverage
+
+      - name: Check the shard coverage downloaded again
+        if: steps.check-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: *dep-manifest-check-shard-coverage
+
       - name: Build the test dependency manifest
         env:
           ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
