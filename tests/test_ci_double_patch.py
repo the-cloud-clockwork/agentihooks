@@ -260,6 +260,24 @@ def test_a_module_fixture_patching_an_aliased_submodule_reaches_a_later_class(
                 + "def test_one(monkeypatch, other):\n"
                 "    monkeypatch.setenv('HOME', '/tmp')\n"
                 "    other.setattr('XXXX', 1)\n"
+                "    monkeypatch.setattr(make(), 'y', 1)\n"
+                "    monkeypatch.setattr(mod)\n"
+            },
+            1,
+        ),
+        (
+            {
+                "tests/test_clean.py": (
+                    "import pytest\n"
+                    "from unittest.mock import patch\n"
+                    "@pytest.fixture(autouse=True)\n"
+                    "def _isolate():\n"
+                    "    helper()\n"
+                    "    with patch.object(make(), 'y'), patch.object(mod), patch(name):\n"
+                    "        yield\n"
+                    "def test_one(monkeypatch):\n"
+                    "    monkeypatch.setattr('XXXX', 1)\n"
+                )
             },
             1,
         ),
@@ -275,6 +293,7 @@ def test_a_module_fixture_patching_an_aliased_submodule_reaches_a_later_class(
         "conftests-off-the-path",
         "unnamed-owners",
         "calls-that-are-not-monkeypatch-setattr",
+        "calls-that-are-not-mock-patches",
     ],
 )
 def test_clean_forms_pass(
@@ -296,6 +315,14 @@ def test_an_empty_tree_and_an_unparseable_file_are_red(tmp_path: Path, capsys: p
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "Double patches: 1 files, 1 problems"
     assert out[1].startswith("::error::tests/test_broken.py: cannot parse: ")
+
+
+def test_the_root_flag_is_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _tree(tmp_path, {"tests/test_one.py": _MOCKED_FIXTURE + _MONKEYPATCH_TEST})
+    monkeypatch.chdir(tmp_path / "tree")
+    with pytest.raises(SystemExit) as exit_info:
+        main([])
+    assert exit_info.value.code == 2
 
 
 def test_lint_grades_the_head_tree_with_the_protected_grader() -> None:
