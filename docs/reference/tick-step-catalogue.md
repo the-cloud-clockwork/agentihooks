@@ -14,8 +14,8 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | Step | Group | Lane | Floor | Interval | Needs | Effects | Feature |
 |---|---|---|---|---|---|---|---|
 | failed panes | agents | slow | 2 | 120 | none | none | none |
-| reap | agents | tick | 22 | 60 | spawn due | inbox, ledger, runtime | swarm-tick-agents-reap |
-| recover outages | agents | tick | 2 | 60 | spawn due | none | none |
+| reap | agents | tick | 22 | 60 | automated cleanup, ledger state, stopped branch | inbox, ledger, runtime | swarm-tick-agents-reap |
+| recover outages | agents | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | strays | agents | slow | 2 | 120 | drained resume | none | none |
 | close space | close | tick | 2 | 60 | drained resume | none | none |
 | conversations | close | slow | 2 | 120 | none | none | none |
@@ -27,8 +27,8 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | status publish | closing | closing | 2 | 60 | health findings | none | none |
 | step starvation | closing | closing | 2 | 60 | none | inbox | tick-step-starvation |
 | dispatch seat | dispatch seat | tick | 2 | 60 | drained resume, sleeping | none | none |
-| drained resume | drained resume | tick | 2 | 60 | master move fail over, master start watch, master wake, recover master, sleeping, spawn due, stopped branch | none | none |
-| sleeping | drained resume | tick | 2 | 60 | spawn due | none | none |
+| drained resume | drained resume | tick | 2 | 60 | automated cleanup, master move fail over, master start watch, master wake, recover master, sleeping, stopped branch | none | none |
+| sleeping | drained resume | tick | 2 | 60 | automated cleanup, stopped branch | none | none |
 | master down | master seats | tick | 2 | 60 | drained resume | none | none |
 | master scale | master seats | tick | 2 | 60 | drained resume | none | none |
 | seat alarm | master seats | tick | 2 | 60 | ledger state | none | none |
@@ -42,23 +42,21 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | automated cleanup | observe | tick | 2 | 60 | ledger state | none | none |
 | execution reconcile | observe | tick | 2 | 60 | none | none | none |
 | exits sweep | observe | tick | 10 | 60 | none | none | none |
-| launch checks | observe | tick | 2 | 60 | spawn due | none | none |
+| lab capacity | observe | slow | 3 | 60 | none | metrics | lab-capacity-reader |
+| launch checks | observe | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | ledger state | observe | tick | 3 | 60 | none | none | none |
 | master move fail over | observe | tick | 2 | 60 | stopped branch | none | none |
 | master start watch | observe | tick | 2 | 60 | stopped branch | none | none |
 | pane evidence | observe | slow | 2 | 120 | none | none | none |
 | recover master | observe | tick | 2 | 60 | stopped branch | none | none |
-| spawn due | observe | tick | 33 | 60 | automated cleanup, ledger state, stopped branch | none | none |
-| track outages | observe | tick | 6 | 60 | spawn due | none | none |
-| verify | observe | tick | 2 | 60 | spawn due | none | none |
+| track outages | observe | tick | 6 | 60 | automated cleanup, ledger state, stopped branch | none | none |
+| verify | observe | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | pass budget | pass setup | tick | 2 | 60 | none | none | none |
 | spawn hold clear | pass setup | tick | 2 | 60 | none | none | none |
 | bottleneck remedy | placement | tick | 2 | 60 | ledger state | none | none |
-| preempt | placement | tick | 18 | 60 | drained resume, prerequisite reopen, reap, recover outages | none | none |
 | rank pass | placement | tick | 7 | 60 | drained resume | none | none |
-| spawn | placement | tick | 33 | 60 | launch checks, orphans, overrun pass, preempt, quiet pass, reap, track outages, verify | coordination, inbox, ledger, metrics, runtime | swarm-tick-spawn |
+| spawn | placement | tick | 33 | 60 | drained resume, launch checks, overrun pass, prerequisite reopen, quiet pass, reap, recover outages, track outages, verify | coordination, inbox, ledger, metrics, runtime | swarm-tick-spawn |
 | codex hook order | placement acks | tick | 2 | 60 | sleeping | none | none |
-| collect acks | placement acks | tick | 7 | 60 | drained resume | none | none |
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
 | quota notice | placement notices | tick | 2 | 60 | drained resume | none | none |
 | time left | placement notices | slow | 2 | 60 | drained resume | none | none |
@@ -74,7 +72,6 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | run window | task passes | tick | 2 | 60 | drained resume | none | none |
 | size pass | task passes | tick | 2 | 60 | ledger state | none | none |
 | verification notices | task passes | tick | 2 | 60 | ledger state | none | none |
-| orphans | tasks | tick | 2 | 60 | drained resume, reap | none | none |
 | command runner | wrapper commands | tick | 2 | 60 | none | none | none |
 | doc items map | wrapper events | slow | 2 | 60 | drained resume, ledger state, tick view | coordination, ledger | tick-doc-items-map |
 | doc report | wrapper events | slow | 2 | 600 | none | none | none |

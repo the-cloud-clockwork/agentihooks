@@ -134,6 +134,7 @@ def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> No
         "launch checks",
         "track outages",
         "verify",
+        "lab capacity",
     ]
     assert len(observe.STEPS) == 15
 

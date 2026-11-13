@@ -620,6 +620,17 @@
       ]
     },
     {
+      "id": "hub-admission-carries-ledger-intent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-churn",
+      "behaviour": "An events admission carries the project intent and the task's own phase on the admitted task, so the hive picks the engineer profile without a ledger read; a remote hive has no ledger identity, and the refused read used to fail every launch after the claim, reopening the task and raising its claim generation each cycle.",
+      "seam": "Admission.admit answer read by profile_choice.state on the hive",
+      "tests": [
+        "tests/hub/test_admission.py::test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledger_read",
+        "tests/swarm/test_profile_choice.py::test_the_carried_ledger_intent_of_a_ledger_without_overview_or_phases_is_empty"
+      ]
+    },
+    {
       "id": "hub-offer-logging",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-logging",
@@ -5765,6 +5776,17 @@
         "tests/test_ci_test_plan.py::test_a_failed_record_download_names_the_github_error_and_runs_every_test",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_every_run_counts_as_no_record",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
+      ]
+    },
+    {
+      "id": "lab-capacity-reader",
+      "origin": "inventory",
+      "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
+      "seam": "scripts.tick.steps.observe._lab_capacity registered as tick step lab capacity, scripts.swarm.lab_capacity and status_report",
+      "tests": [
+        "tests/tick/steps/test_lab_capacity.py::test_lab_capacity",
+        "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
+        "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
       ]
     }
   ],

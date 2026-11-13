@@ -24,6 +24,7 @@ TODAY = {
         "launch checks",
         "track outages",
         "verify",
+        "lab capacity",
     ],
     "agents": ["reap", "recover outages", "strays", "failed panes"],
     "drained resume": ["sleeping", "drained resume"],

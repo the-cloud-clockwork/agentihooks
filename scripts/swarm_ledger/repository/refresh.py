@@ -1,5 +1,6 @@
 import json
 from sqlite3 import Connection
+from typing import Any
 
 from .rows import TABLES, children, encode
 
@@ -53,25 +54,74 @@ def child_rows(connection: Connection, slug: str, parent: str) -> list:
     return sorted(rows, key=lambda row: row[2])
 
 
-def build(connection: Connection, slug: str, path: str, old: object, dirty: set) -> list:
-    """The children of the container at path as stored now, reusing each child of its old value that no change reached."""
-    known = {encode(parts): child for child, parts, *_ in children(old, json.loads(path), None)}
-    items = []
-    for child, key, _, child_kind, value in child_rows(connection, slug, path):
+def build(
+    connection: Connection, slug: str, path: str, old: Any, dirty: set[str], changed: set[str] | None = None
+) -> list[tuple[Any, Any]]:
+    """The children of the container at path as stored now, reusing each child of its old value that no change
+    reached; given the changed paths, an object child rereads only the keys they reach."""
+    known: dict[str, Any] = {encode(parts): child for child, parts, *_ in children(old, json.loads(path), None)}
+    items: list[tuple[Any, Any]] = []
+    rows: list[tuple[Any, ...]] = child_rows(connection, slug, path)
+    for child, key, _, child_kind, value in rows:
+        item: Any = None
         if child_kind == "value":
             item = json.loads(value)
         elif child in dirty:
-            pairs = build(connection, slug, child, known.get(child), dirty)
-            item = [item for _, item in pairs] if child_kind == "array" else dict(pairs)
+            held = known.get(child)
+            if changed is not None and child_kind == "object" and isinstance(held, dict):
+                item = patched(connection, slug, child, held, beneath(changed, child))
+            if item is None:
+                pairs = build(connection, slug, child, held, dirty, changed)
+                item = [entry for _, entry in pairs] if child_kind == "array" else dict(pairs)
         else:
             item = known[child]
         items.append((json.loads(key), item))
     return items
 
 
+def patched(
+    connection: Connection, slug: str, path: str, old: dict[str, Any], paths: set[str]
+) -> dict[str, Any] | None:
+    """The object at path as stored now, rereading only the keys paths reach in their stored order; None when the
+    object itself changed, a reached key is gone or a new key is stored anywhere but last, so the caller rereads
+    every key."""
+    if path in paths:
+        return None
+    depth, dirty, item = len(json.loads(path)), touched(paths), dict(old)
+    reached: list[tuple[str, Any]] = [
+        (child, stored_row(connection, slug, child))
+        for child in {encode(json.loads(changed)[: depth + 1]) for changed in paths}
+    ]
+    if any(row is None for _, row in reached):
+        return None
+    order = {key: index for index, key in enumerate(old)}
+    for child, row in sorted(reached, key=lambda pair: pair[1][0]):
+        key: str = json.loads(child)[-1]
+        if order.get(key, len(item)) != row[0]:
+            return None
+        held: Any = old.get(key)
+        under = beneath(paths, child)
+        nested = (
+            patched(connection, slug, child, held, under) if row[1] == "object" and isinstance(held, dict) else None
+        )
+        if row[1] == "value":
+            item[key] = json.loads(row[2])
+        elif nested is not None:
+            item[key] = nested
+        else:
+            pairs = build(connection, slug, child, held, dirty, paths)
+            item[key] = [entry for _, entry in pairs] if row[1] == "array" else dict(pairs)
+    return item
+
+
+def beneath(paths: set[str], path: str) -> set[str]:
+    """The paths at or under the encoded path."""
+    return {changed for changed in paths if changed == path or changed.startswith(path[:-1] + ",")}
+
+
 def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dict | None:
     try:
-        return dict(build(connection, slug, ROOT, state, touched(paths)))
+        return dict(build(connection, slug, ROOT, state, touched(paths), paths))
     except KeyError:
         return None
 

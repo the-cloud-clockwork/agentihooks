@@ -95,7 +95,7 @@ class Admission:
                 f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
             )
             return None
-        admitted = self._claim(slug, request, view.rows)
+        admitted = self._claim(slug, request, view.rows, view.doc)
         if admitted is None:
             refused(slug, request, "another holder took the claim")
             return None
@@ -135,8 +135,10 @@ class Admission:
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
 
-    def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:
-        from scripts.swarm import tick
+    def _claim(
+        self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        from scripts.swarm import profile_choice, tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -160,7 +162,11 @@ class Admission:
         primed = tick.primed(self.store, slug, seat, {**row, **live})
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
-        identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
+        identity = {
+            "execution_id": agent.execution_id,
+            "execution_generation": agent.generation,
+            profile_choice.LEDGER_INTENT: profile_choice.carried(doc, task),
+        }
         avoid = self.store.failed_harness(slug, task_id)
         admitted = {
             "hive": request["hive"],
