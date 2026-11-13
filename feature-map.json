@@ -391,7 +391,8 @@
         "tests/inbox/test_dispatch.py::test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks",
         "tests/swarm/test_snapshot.py::test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore",
         "tests/swarm/test_snapshot.py::test_a_ref_shown_before_redis_is_lost_is_not_delivered_again_after_restore",
-        "tests/swarm/test_snapshot.py::test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore"
+        "tests/swarm/test_snapshot.py::test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore",
+        "tests/swarm/test_snapshot.py::test_an_alias_recipient_journal_is_exported_under_its_canonical_name"
       ]
     },
     {
@@ -1631,6 +1632,16 @@
       ]
     },
     {
+      "id": "verify-binds-held-managed-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-verify-settles-held-launch",
+      "behaviour": "The tick verify step passes every managed app server agent to the runtime binding pass, including one whose launch check is pending or held, so the settle that pass applies to a dead managed server reaches that agent too; judged agents are still skipped by the rest of the verify loop and a held agent that is not managed is not bound.",
+      "seam": "scripts.tick.steps.observe._verify and the runtime bindings it calls",
+      "tests": [
+        "tests/swarm/test_launch_check.py::test_verify_binds_a_managed_agent_whose_launch_check_is_held"
+      ]
+    },
+    {
       "id": "swarm-master-seat",
       "origin": "inventory",
       "behaviour": "A swarm whose master is down launches its master first and promotes one live engineer only when the forced launch fails.",
@@ -1849,6 +1860,21 @@
       "tests": [
         "tests/swarm/test_health.py::test_over_monitoring_names_the_agent_and_its_counts",
         "tests/swarm/test_health.py::test_the_master_gets_a_looser_over_monitoring_limit_than_other_agents"
+      ]
+    },
+    {
+      "id": "reopen-moves-merged-pull-request-to-history",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t485",
+      "behaviour": "Reopening a done task moves its pull request into the task's past pull requests and clears the current one, unless the reopen names a pull request to keep, so the stop gate passes the reopened task on a declared wait and swarm done refuses a past pull request until a new one merges; the swarm's own reopen of a done task whose pull request never merged keeps that pull request current.",
+      "seam": "task update in scripts.swarm_ledger.ledger_tasks, the stop gate in scripts.gates.claim_stop and swarm done in scripts.swarm.done_gate",
+      "tests": [
+        "tests/swarm/test_reopen_merged_history.py::test_reopening_a_done_task_moves_its_merged_pull_request_to_history",
+        "tests/swarm/test_reopen_merged_history.py::test_a_reopen_naming_its_pull_request_keeps_it_current",
+        "tests/swarm/test_reopen_merged_history.py::test_the_swarm_reopens_an_unmerged_done_task_with_its_pull_request_kept",
+        "tests/swarm/test_reopen_merged_history.py::test_a_reopened_task_stops_on_a_wait_and_done_refuses_until_the_new_pull_request_merges",
+        "tests/swarm/test_reopen_merged_history.py::test_a_reopen_clearing_its_pull_request_still_keeps_it_in_history",
+        "tests/swarm/test_reopen_merged_history.py::test_swarm_done_on_a_reopened_task_refuses_until_its_new_pull_request_merges"
       ]
     },
     {
@@ -2614,6 +2640,22 @@
       ]
     },
     {
+      "id": "archive-acknowledged-on-heartbeat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t961",
+      "behaviour": "Once a worker's final checkpoint is published and validated in the artifact store, the supervisor acknowledges the exported transcript end on the lease, which sends it at once on a heartbeat and on every later one, and keeps acknowledging through failed heartbeats until the controller accepts it or the checkpoint budget ends, so the controller's archive watermark reaches the completed attempt's transcript end and the retention guard stops holding its cleanup at waiting_archive.",
+      "seam": "scripts.swarm_v2.worker.lease_renewal.Renewer.acknowledge and the heartbeat archive_watermark, driven by scripts.swarm_v2.supervision_runtime.Supervisor.drain and read by scripts.swarm_v2.retention.waiting",
+      "tests": [
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_acknowledged_archive_rides_an_immediate_heartbeat_and_every_later_one",
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_archive_acknowledgement_the_controller_missed_is_resent_after_the_retry_pause",
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_unleased_worker_has_no_archive_acknowledgement_to_wait_on",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_acknowledges_the_archived_transcript_end_once_the_final_checkpoint_validates",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_keeps_acknowledging_until_the_controller_accepts_the_archived_transcript_end",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_stops_acknowledging_when_the_checkpoint_budget_ends",
+        "tests/test_swarm_v2_executions_api.py::test_a_completed_pod_whose_archive_the_worker_acknowledged_passes_the_retention_guard"
+      ]
+    },
+    {
       "id": "ledger-answer",
       "origin": "inventory",
       "behaviour": "The master answers a ledger question as itself at delegate and full autonomy and its priority clears; a worker's answer is refused.",
@@ -2623,6 +2665,17 @@
         "tests/swarm_ledger/test_ledger_answer.py::test_a_worker_answer_is_refused_and_the_priority_stays",
         "tests/swarm_ledger/test_ledger_answer.py::test_cli_master_answers_at_delegate_and_full",
         "tests/swarm_ledger/test_ledger_answer.py::test_cli_refuses_below_delegate_autonomy"
+      ]
+    },
+    {
+      "id": "trace-plan-per-repository-size",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
+      "behaviour": "Trace plan sizes each repository a plan names on its own, so a plan with one pull request per repository passes, while any single repository slice sized above one pull request fails the plan.",
+      "seam": "trace_plan.trace with the trace-plan classifier definition",
+      "tests": [
+        "tests/swarm/test_trace_plan.py::test_a_two_repository_plan_with_one_pull_request_each_is_accepted",
+        "tests/swarm/test_trace_plan.py::test_a_single_repository_plan_sized_above_one_pull_request_is_refused"
       ]
     },
     {
@@ -4989,16 +5042,19 @@
       ]
     },
     {
-      "id": "monitor-every-interface-hive",
+      "id": "monitor-counts-registered-seats",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-monitor-one-hive",
-      "behaviour": "The HOME resource monitor counts the herdr reading of every live interface hive, so a second headed hive publishing only its own panes never hides the hives the other reading counts, and a hive two readings name is counted once, from its own reading unless that one is silent.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",
+      "behaviour": "The HOME resource monitor counts every row and the total from the registered swarm seats of every swarm, masters included, split by each seat's recorded harness, so an operator's own Claude or Codex pane outside the registry never adds to the count.",
       "seam": "scripts.swarm_ledger.api.monitor.view",
       "tests": [
-        "tests/swarm_ledger/test_api_monitor.py::test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_two_readings_count_is_counted_once_from_its_own_reading",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
+        "tests/swarm_ledger/test_api_monitor.py::test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_live_hive_with_no_seat_shows_zero_never_a_missing_count",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_on_a_hive_no_longer_live_keeps_its_registered_name_and_an_unknown_hive_its_id",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_is_placed_by_its_hive_then_its_runtime_target_then_this_hive",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_counts_in_its_row_and_the_total_and_in_the_split_only_for_claude_or_codex",
+        "tests/swarm_ledger/test_api_monitor.py::test_every_seat_state_counts_except_finished",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_counts_whatever_its_lane_masters_included"
       ]
     },
     {
@@ -5008,11 +5064,8 @@
       "behaviour": "The HOME resource monitor shows one row per live hive keyed by its hive id, so two interface hives that share the swarm master name, such as the workstation and the automation VM, never fold into one row, and a hive whose name another live hive shares is shown by its member names.",
       "seam": "scripts.swarm_ledger.api.monitor.view",
       "tests": [
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_herdr_readings",
+        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_seats",
         "tests/swarm_ledger/test_api_monitor.py::test_two_live_interface_hives_without_members_keep_a_row_each",
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_hive_counts",
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_presence",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_are_two",
         "tests/swarm_ledger/test_api_monitor.py::test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names"
       ]
     },
@@ -5154,6 +5207,25 @@
       ]
     },
     {
+      "id": "shared-swarm-units-installed-binary",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t620",
+      "behaviour": "Every path that writes the shared swarm user units (ensure, reconcile, guard before it recycles or starts the scheduler supervisor, the spoke install and swarm start) refuses unless the agentihooks binary it would name and the running interpreter both live in the environment of the installed CLI that agentihooks init links into the user's local bin, so a proof swarm run from a scratch venv whose own install reports its scratch copy as installed leaves the shared tick, waker, prober, waits, tick watch, scheduler and spoke units unchanged, while a unit dir other than the shared one still takes any binary.",
+      "seam": "the shared unit refusal in the swarm timer ensure and reconcile, observed through the unit files and systemctl calls",
+      "tests": [
+        "tests/swarm/test_timer_scratch_binary.py::test_ensure_refuses_a_scratch_binary_although_the_running_root_reads_as_installed",
+        "tests/swarm/test_timer_scratch_binary.py::test_ensure_refuses_the_installed_binary_run_by_a_scratch_interpreter",
+        "tests/swarm/test_timer_scratch_binary.py::test_reconcile_refuses_a_scratch_binary_with_stale_or_current_units",
+        "tests/swarm/test_timer_scratch_binary.py::test_a_spoke_workstation_with_a_scratch_binary_leaves_the_units_alone",
+        "tests/swarm/test_timer_scratch_binary.py::test_a_swarm_started_from_a_scratch_venv_leaves_the_shared_units_unchanged",
+        "tests/swarm/test_timer_scratch_binary.py::test_the_installed_binary_and_interpreter_still_write_the_shared_units",
+        "tests/swarm/test_timer_scratch_binary.py::test_a_proof_unit_dir_still_takes_a_scratch_binary",
+        "tests/swarm/test_timer_scratch_binary.py::test_a_missing_installed_cli_link_refuses_every_binary",
+        "tests/swarm/test_timer_scratch_binary.py::test_guard_from_a_scratch_binary_leaves_the_units_and_the_scheduler_alone",
+        "tests/swarm/test_timer_scratch_binary.py::test_reconcile_refuses_the_installed_binary_run_from_a_foreign_root"
+      ]
+    },
+    {
       "id": "swarm-park-foreign-dependency-no-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
@@ -5250,5 +5322,12 @@
     "feature-front-door-runtime-check",
     "feature-stale-nudge-in-tick",
     "feature-stale-nudge-recorded"
+  ],
+  "retired": [
+    {
+      "id": "monitor-every-interface-hive",
+      "reason": "The HOME monitor no longer reads herdr pane counts; rows and the total count registered swarm seats, covered by monitor-counts-registered-seats.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2506"
+    }
   ]
 }

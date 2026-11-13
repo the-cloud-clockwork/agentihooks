@@ -577,7 +577,17 @@ def slice_refusal(item: str, plan: dict, doc: dict) -> str:
     return ""
 
 
-def _update_fields(task: dict, fields: dict) -> dict:
+def _reopened(task: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
+    """Move a done task's pull request to its past pull requests when a reopen leaves the pull request unnamed."""
+    if task.get("state") != "done" or fields.get("state", "done") == "done" or fields.get("pr_url"):
+        return fields
+    if not task.get("pr_url"):
+        return fields
+    return {**fields, "pr_url": "", "past_pulls": [*task.get("past_pulls", []), task["pr_url"]]}
+
+
+def _update_fields(task: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
+    fields = _reopened(task, fields)
     if "contract" in fields:
         fields = {**fields, "contract": {**(task.get("contract") or {}), **fields["contract"]}}
     if (

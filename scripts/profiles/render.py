@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -555,6 +556,28 @@ def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | N
         _link(out / item, cast(Path, rollouts) / item)
 
 
+def _codex_agents(claude_agents: Path, out: Path) -> None:
+    """Write each Claude home agent with a string description and a body as a Codex custom agent file in ``out``."""
+    import tomlkit
+    import yaml
+
+    out.mkdir()
+    for src in sorted(p for p in claude_agents.iterdir() if p.is_file()):
+        parts = re.split(r"^---[ \t\r]*$", src.read_text(), maxsplit=2, flags=re.M)
+        if len(parts) != 3 or parts[0]:
+            continue
+        try:
+            front: dict[str, object] | None = yaml.safe_load(parts[1])
+        except yaml.YAMLError:
+            continue
+        meta: dict[str, object] = front if isinstance(front, dict) else {}
+        name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
+        if isinstance(description, str) and description.strip() and body:
+            named = name.strip() if isinstance(name, str) and name.strip() else src.stem
+            doc = {"name": named, "description": description, "developer_instructions": body}
+            _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps(doc))
+
+
 def render_codex(
     name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False, push: bool = False
 ) -> Path | None:
@@ -613,6 +636,7 @@ def render_codex(
         _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
+    _codex_agents(claude / "agents", out / "agents")
     _link_codex_state(
         out, operator, current["login"], homes.rollouts(rendered_root(), home_key(name, overlays)) if isolate else None
     )

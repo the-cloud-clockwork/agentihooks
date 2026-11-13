@@ -38,13 +38,7 @@ function paint(box, d) {
   set("codex", String(d.agents.codex));
   set("hives", String(d.hives.live));
   hiveRows(cell("hives"), d.hives.rows);
-  const silent = d.agents.of - d.agents.reporting, where = d.agents.source === "herdr" ? "herdr machine" : "live hive";
-  cell("agents").dataset.silent = silent ? "yes" : "no";
-  cell("agents").title = silent
-    ? `${silent} of ${d.agents.of} ${where}s did not answer; their agents are not counted`
-    : d.agents.source === "herdr"
-      ? `Agent panes on the main herdr server and its ${d.agents.of - 1} plugged machine${d.agents.of === 2 ? "" : "s"}`
-      : `Agent processes on ${d.agents.of} live hive${d.agents.of === 1 ? "" : "s"}`;
+  cell("agents").title = `Swarm seats on ${d.agents.of} hive${d.agents.of === 1 ? "" : "s"}`;
   set("swarms", `${d.swarms.running} running`);
   cell("swarms").dataset.on = d.swarms.running ? "yes" : "no";
   gauge(cell("cpu"), `${d.cpu.used.toFixed(1)} of ${d.cpu.cores} cores`, share(d.cpu.used, d.cpu.cores));
@@ -59,9 +53,8 @@ function paint(box, d) {
 function hiveRows(head, rows) {
   for (const old of head.parentElement.querySelectorAll(".fm[data-hive]")) old.remove();
   const made = rows.map((row, i) => {
-    const el = h("div", { class: `fm sub${i === rows.length - 1 ? " end" : ""}`, "data-hive": row.name, "data-silent": row.agents === null ? "yes" : "no" },
-      h("dt", {}, row.name), h("dd", {}, row.agents === null ? "—" : String(row.agents)));
-    if (row.agents === null) el.title = `${row.name} did not answer; its agents are not counted`;
+    const el = h("div", { class: `fm sub${i === rows.length - 1 ? " end" : ""}`, "data-hive": row.name },
+      h("dt", {}, row.name), h("dd", {}, String(row.agents)));
     return el;
   });
   head.after(...made);
