@@ -635,3 +635,8 @@ def test_a_failed_launch_whose_placement_check_raises_is_recorded_and_the_rest_s
     assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
     assert "harness: gemini" in two.launch_failure("sw", "t1")
     assert {row["state"] for row in two.launches("sw") if row["task"] == "t1"} == {"failed"}
+
+
+@pytest.mark.feature("hub-admission-carries-ledger-intent")
+def test_the_carried_ledger_intent_of_a_ledger_without_overview_or_phases_is_empty() -> None:
+    assert profile_choice.carried({}, {"id": "t1", "phase": "p1"}) == {"overview": "", "phases": []}
