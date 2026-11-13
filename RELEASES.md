@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.858 · 2026-11-13
+
+### 2026-11-13 · 9df1a1d3620a · #11062 · @agenticore-app
+
+**Inbox channel registration reclaims an abandoned Claude config lock**
+
+Inbox channel registration previously took the Claude config lock with its own mkdir loop that never reclaimed stale locks, so one abandoned empty lock could block every later CI launch on a host, as happened on hive three. Registration now calls the same `_reclaim` helper used by trust marking whenever it hits `FileExistsError`, removing locks past `STALE_LOCK_SECONDS` while still waiting out younger ones. New regression tests cover both reclaim and non-reclaim cases, and the Semgrep incident rule and feature map entry now name this fix.
+
+### 2026-11-13 · 45cfb7e99772 · #11065 · @nestorcolt
+
+**Pass the controller liveness probe on a standby replica**
+
+This change fixes a flaky kind-smoke failure where a standby controller replica got killed by kubelet because the liveness probe demanded a live swarm lease even when another replica legitimately held the lock and was doing nothing. The probe now checks `controller_probes.standing_by` and skips the lease assertion while another replica of the same hive holds the lock, avoiding spurious restarts. Unit tests cover standby, owning the lock, no lock, another hive's lock, and unnamed replicas, and a combined kind run with the related fix confirms the issue is resolved.
+
+### 2026-11-13 · dd151d9ba8bc · #11060 · @agenticore-app
+
+**Scoped ledger export reuses cached task bytes and change replies carry only new events**
+
+Scoped ledger exports now rebuild each row from its task's cached fragment bytes instead of re-encoding everything, so only changed tasks cost CPU on a new generation—cutting scoped export time on a 41 MB ledger from 0.30 s to 0.21 s, close to the plain export's 0.15 s. Change replies also now send only events newer than the caller's held revision via `events_after`, shrinking a 5000-event reply from 634 KB to 353 bytes. Older servers reject the new parameter with a 400, and clients already handle that by retrying without it, so mixed-version deployments keep working until the server updates.
+
+### 2026-11-13 · 6b784087b046 · #10866 · @nestorcolt
+
+**Keep Codex-native MCP keys in the Codex entry and add the quick swarm**
+
+This change fixes two things together. First, `codex_mcp_entry` was silently discarding Codex-native MCP keys such as env_vars, bearer_token_env_var, cwd, and timeouts whenever an entry was rebuilt during init or profile render, undoing manual repairs; it now carries those native keys forward, merging and secret-scanning them the same way Claude-shaped keys already are. Second, it adds a lightweight "quick swarm" tier that runs entirely in one herdr tab with no Redis or ledger server, including pane setup, seat state, prompt injection, handoff, idle-nudging ticks, and messaging between master and engineers, plus fixes from a live stress test.
+
 ## v2.17.857 · 2026-11-13
 
 ### 2026-11-13 · 928bacf42a44 · #11047 · @agenticore-app
