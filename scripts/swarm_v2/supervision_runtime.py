@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 from types import FrameType
+from typing import cast
 
 from hooks.proc import _process
 from scripts.account_names import oauth_env
@@ -223,6 +224,15 @@ class Supervisor:
                 )
                 if portable and not self.validated(identifier, deadline):
                     identifier = None
+                elif portable:
+                    end = cast(dict[str, object], read(self.root / "exporter.checkpoint.json")).get("transcript_end")
+                    while (
+                        type(end) is int
+                        and not self.lease.acknowledge(end)
+                        and self.lease.lost is None
+                        and time.monotonic() < deadline
+                    ):
+                        self.wait()
                 break
             if "exporter" in self.exits:
                 break
