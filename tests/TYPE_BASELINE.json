@@ -805,7 +805,7 @@
   "scripts/swarm_ledger/repository/outbox.py": 56,
   "scripts/swarm_ledger/repository/postgres.py": 92,
   "scripts/swarm_ledger/repository/refresh.py": 90,
-  "scripts/swarm_ledger/repository/rows.py": 282,
+  "scripts/swarm_ledger/repository/rows.py": 214,
   "scripts/swarm_ledger/repository/seeds.py": 74,
   "scripts/swarm_ledger/repository/sqlite.py": 845,
   "scripts/swarm_ledger/repository/writer_copy.py": 80,
