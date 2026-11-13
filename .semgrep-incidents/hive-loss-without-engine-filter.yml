@@ -3,28 +3,17 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A hub poll judges hive presence without filtering swarms to the events engine. Only spokes beat presence and
-      they poll only events swarms, so on 13 November a switch to legacy left both Anton hives silent and the hub
-      hive loss pass exited four running executions. Judge presence only for swarms from event_slugs or with engine
-      equal to EVENTS_ENGINE.
+      A hub poll judges hive presence for a swarm that may not be on the events engine. Only spokes beat presence
+      and they poll only events swarms, so a silent hive of a legacy swarm reads as lost and its running executions
+      are exited. Guard presence.lost with membership in the events swarms or skip swarms whose engine is not
+      EVENTS_ENGINE.
     patterns:
       - pattern-inside: |
           def poll(...):
               ...
       - pattern: presence.lost(...)
+      - pattern-not-inside: $SWARM in $EVENTS and ...
       - pattern-not-inside: |
-          class $C:
-              ...
-              def $F(...):
-                  ...
-                  <... event_slugs(...) ...>
-                  ...
-              ...
-      - pattern-not-inside: |
-          class $C:
-              ...
-              def $F(...):
-                  ...
-                  <... EVENTS_ENGINE ...>
-                  ...
-              ...
+          if <... EVENTS_ENGINE ...>:
+              continue
+          ...

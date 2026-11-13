@@ -5635,7 +5635,8 @@
       "seam": "scripts.hub.hive_loss.HiveLoss.poll",
       "tests": [
         "tests/hub/test_hive_loss.py::test_a_swarm_switched_to_legacy_keeps_its_running_executions_when_its_hives_stop_beating",
-        "tests/hub/test_hive_loss.py::test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive"
+        "tests/hub/test_hive_loss.py::test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive",
+        "tests/hub/test_hive_loss.py::test_a_hub_built_without_a_store_connects_once_to_read_the_events_swarms"
       ],
       "rules": [
         "hive-loss-without-engine-filter"

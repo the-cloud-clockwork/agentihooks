@@ -6,19 +6,30 @@ class Unfiltered:
                 self.exit(swarm, hive)
 
 
-class FilteredBySlugs:
+class EventsReadButUnused:
     def poll(self, now):
         events = self._events()
         for swarm, hive in self.rows():
-            # ok: hive-loss-without-engine-filter
-            if swarm in events and presence.lost(self.bus.for_swarm(swarm), hive, now):
-                self.exit(swarm, hive)
+            # ruleid: hive-loss-without-engine-filter
+            lost = now - self.watching >= presence.TTL_MS and presence.lost(self.bus.for_swarm(swarm), hive, now)
 
     def _events(self):
         return set(event_slugs(self.store))
 
 
-class FilteredByEngine:
+class GuardedByEventsMembership:
+    def poll(self, now):
+        events = self._events()
+        for swarm, hive in self.rows():
+            lost = (
+                swarm in events
+                and now - self.watching >= presence.TTL_MS
+                # ok: hive-loss-without-engine-filter
+                and presence.lost(self.bus.for_swarm(swarm), hive, now)
+            )
+
+
+class SkipsOtherEngines:
     def poll(self, now):
         for swarm, hive in self.rows():
             if self.store.config(swarm).engine != EVENTS_ENGINE:

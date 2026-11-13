@@ -172,6 +172,26 @@ def test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive(rig):
     assert rig.loss._emit.call_args.args[1].data["reason"] == "hive-lost"
 
 
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_hub_built_without_a_store_connects_once_to_read_the_events_swarms(rig, monkeypatch):
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    connect = Mock(return_value=rig.store)
+    monkeypatch.setattr(hive_loss.swarm_store, "connect", connect)
+    loss = hive_loss.HiveLoss(rig.bus, rig.clock)
+    loss._emit = Mock()
+    loss.poll()
+    connect.assert_not_called()
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    while rig.clock() < T0 + presence.TTL_MS:
+        rig.clock.return_value = rig.clock() + 5_000
+        loss.poll()
+    connect.assert_called_once_with()
+    assert [call.args[1].key for call in loss._emit.call_args_list] == ["execution-a"]
+
+
 def test_a_beating_hive_keeps_its_running_task(rig):
     from scripts.hive import presence
 
