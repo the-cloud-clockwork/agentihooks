@@ -438,7 +438,7 @@ def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_li
     from dataclasses import replace
 
     from scripts.codex_session import supervisor
-    from scripts.codex_session.binding import BindingStore, TransportRecord
+    from scripts.codex_session.binding import RECORDS, BindingStore, TransportRecord
     from scripts.swarm.store import RedisStore
 
     monkeypatch.setattr(supervisor, "start_time", lambda pid: 7 if pid == 70 else None)
@@ -459,6 +459,7 @@ def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_li
         )
         bindings.reserve("sw", record)
         bindings.put("sw", replace(record, state=state, server_pid=pid))
+    bindings.redis.hset(bindings.store.key("sw", RECORDS), "exe-g009", "{not json")
     assert acc.reserved_executions() == 3
     monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
     assert acc.reserved_executions() == 0
