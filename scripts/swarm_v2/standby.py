@@ -1,5 +1,6 @@
 """The control API of a standby controller replica: health answered here, every other request sent to the leader."""
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -50,8 +51,11 @@ def forward(address: str, method: str, path: str, authorization: str, body: obje
         with urllib.request.urlopen(request, timeout=FORWARD_S) as response:
             return response.status, json.loads(response.read())
     except urllib.error.HTTPError as refused:
-        return refused.code, json.loads(refused.read())
-    except OSError:
+        try:
+            return refused.code, json.loads(refused.read())
+        except ValueError:
+            return 503, _refusal(UNANSWERED)
+    except (OSError, ValueError, http.client.HTTPException):
         return 503, _refusal(UNANSWERED)
 
 

@@ -3,6 +3,7 @@
 import sys
 import threading
 from collections.abc import Callable, Mapping
+from time import monotonic
 from typing import Any
 
 REPLICA_ENV = "AGENTIHOOKS_CONTROLLER_REPLICA"
@@ -11,6 +12,7 @@ LOCK_MS = 30_000
 BEAT_S = 10.0
 POLL_S = 5.0
 KEEP_S = 60.0
+NEVER = float("-inf")
 BEAT_THREAD = "controller-replica-beat"
 KEEP_THREAD = "controller-credential-keep"
 TAKE = """
@@ -28,13 +30,23 @@ return 0
 class ReplicaLock:
     """Hold the one lock that lets a controller replica of hive ``hive`` run passes."""
 
-    def __init__(self, redis: Any, hive: str, owner: str, lock_ms: int = LOCK_MS) -> None:
-        self.redis, self.owner, self.lock_ms = redis, owner, lock_ms
+    def __init__(
+        self, redis: Any, hive: str, owner: str, lock_ms: int = LOCK_MS, clock: Callable[[], float] = monotonic
+    ) -> None:
+        self.redis, self.owner, self.lock_ms, self.clock = redis, owner, lock_ms, clock
         self.key = f"{PREFIX}:{hive}"
+        self.taken_at = NEVER
 
     def take(self) -> bool:
         """Take or renew the lock; answer False while another replica holds it."""
-        return bool(self.redis.eval(TAKE, 1, self.key, self.owner, self.lock_ms))
+        taken = bool(self.redis.eval(TAKE, 1, self.key, self.owner, self.lock_ms))
+        if taken:
+            self.taken_at = self.clock()
+        return taken
+
+    def fresh(self, margin_s: float) -> bool:
+        """Tell whether the last successful take still holds the lock ``margin_s`` past now."""
+        return self.clock() - self.taken_at < self.lock_ms / 1000 - margin_s
 
     def release(self) -> bool:
         """Drop the lock when this replica holds it, so a standby takes over at its next poll."""
@@ -50,7 +62,8 @@ class ReplicaLock:
             wait(poll_s)
 
     def beat(self, lost: Callable[[], None], stop: threading.Event, beat_s: float = BEAT_S) -> threading.Thread:
-        """Renew the lock every ``beat_s`` until ``stop`` is set; call ``lost`` once if another replica holds it."""
+        """Renew the lock every ``beat_s`` until ``stop`` is set; call ``lost`` once if another replica holds it,
+        or once Redis has refused renewals for so long that the lock could expire before the next beat."""
 
         def renew() -> bool:
             from redis.exceptions import RedisError
@@ -58,7 +71,7 @@ class ReplicaLock:
             try:
                 kept = self.take()
             except RedisError:
-                return True
+                kept = self.fresh(beat_s)
             if not kept:
                 lost()
             return kept

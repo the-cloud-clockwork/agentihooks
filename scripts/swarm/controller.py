@@ -685,15 +685,14 @@ def _journal_pass(number: int, outcome: str) -> None:
 
 
 def _lead(
-    store: RedisStore, environ: Mapping[str, str], wait: Callable[[float], None] = scheduled_wait
-) -> replica.ReplicaLock | None:
+    store: RedisStore,
+    environ: Mapping[str, str],
+    lock: replica.ReplicaLock,
+    wait: Callable[[float], None] = scheduled_wait,
+) -> None:
     """Stand by behind the replica leading this hive's passes, then take the lead and keep it renewed."""
-    from scripts.swarm import commands
     from scripts.swarm_v2 import control_service
 
-    lock = replica.configured(environ, cast(Any, store).redis, commands.hive_id())
-    if lock is None:
-        return None
     servers = control_service.stand_by(environ, store)
     try:
         if not lock.take():
@@ -703,7 +702,6 @@ def _lead(
         control_service.close(servers)
     print(f"controller: replica {lock.owner} leads the passes", flush=True)
     lock.beat(_lost, STOPPING)
-    return lock
 
 
 def _lost(end: Callable[[int], None] = os._exit) -> None:
@@ -810,7 +808,9 @@ def main(argv: list[str]) -> int:
     previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
         _keep_credential(os.environ, store)
-        lock = _lead(store, os.environ)
+        lock = replica.configured(os.environ, cast(Any, store).redis, commands.hive_id())
+        if lock is not None:
+            _lead(store, os.environ, lock)
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
         return _passes(store, service, proof_swarm, args.once, outage)

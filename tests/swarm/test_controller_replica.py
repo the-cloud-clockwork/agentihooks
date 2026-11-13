@@ -116,14 +116,21 @@ def test_the_beat_reports_a_lost_lock_once_and_ends() -> None:
 
 
 @pytest.mark.feature("controller-standby-replica")
-def test_the_beat_rides_out_a_redis_error() -> None:
-    redis = _redis()
-    lock = replica.ReplicaLock(redis, HIVE, "pod-a")
+@pytest.mark.parametrize(("since_take", "renewals"), [(5.0, 3), (29.995, 1)])
+def test_the_beat_rides_out_a_redis_error_only_while_the_lock_cannot_have_expired(
+    since_take: float, renewals: int
+) -> None:
     from redis.exceptions import ConnectionError as RedisDown
 
+    now = [0.0]
+    lock = replica.ReplicaLock(_redis(), HIVE, "pod-a", clock=lambda: now[0])
+    assert lock.take() is True
+    now[0] = since_take
     answers = iter([RedisDown("down"), True, False])
+    asked: list[int] = []
 
     def take() -> bool:
+        asked.append(1)
         answer = next(answers)
         if isinstance(answer, Exception):
             raise answer
@@ -133,8 +140,24 @@ def test_the_beat_rides_out_a_redis_error() -> None:
     stop, calls = threading.Event(), []
     thread = lock.beat(lambda: calls.append(1), stop, beat_s=0.01)
     thread.join(timeout=5)
-    assert calls == [1]
+    assert (calls, len(asked)) == ([1], renewals)
     stop.set()
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_lock_is_fresh_until_its_last_take_nears_expiry() -> None:
+    now, redis = [100.0], _redis()
+    lock = replica.ReplicaLock(redis, HIVE, "pod-a", lock_ms=30_000, clock=lambda: now[0])
+    assert lock.fresh(10.0) is False
+    assert lock.take() is True
+    assert lock.taken_at == 100.0
+    now[0] = 119.9
+    assert lock.fresh(10.0) is True
+    now[0] = 120.0
+    assert lock.fresh(10.0) is False
+    standby = replica.ReplicaLock(redis, HIVE, "pod-b", clock=lambda: now[0])
+    assert standby.take() is False
+    assert standby.taken_at == replica.NEVER
 
 
 @pytest.mark.feature("controller-standby-replica")
@@ -183,6 +206,20 @@ class _Leader(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def do_PUT(self) -> None:
+        self._page(200)
+
+    def do_PATCH(self) -> None:
+        self._page(502)
+
+    def _page(self, status: int) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        payload = b"<html>bad gateway</html>"
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
@@ -227,6 +264,25 @@ def test_a_standby_forwards_every_other_request_to_the_leader(leader: str) -> No
         {"path": "/v2/executions", "authorization": "Bearer grant", "body": {"seat": "eng-1"}},
     )
     assert standby.route("GET", "/v2/executions/x", "Bearer grant", None) == (403, {"error": "refused"})
+
+
+@pytest.mark.feature("controller-standby-replica")
+@pytest.mark.parametrize("method", ["PUT", "PATCH"])
+def test_a_standby_refuses_a_leader_reply_that_is_not_json(leader: str, method: str) -> None:
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import standby as standby_api
+
+    store = RedisStore(_redis())
+    standby_api.publish_leader(store, "rig", leader)
+    assert standby_api.Standby(store, "rig").route(method, "/v2/executions/x", "Bearer grant", {}) == (
+        503,
+        {
+            "error_class": "dependency_unavailable",
+            "operation_id": "unknown",
+            "retry": "same_request",
+            "message": "the leading controller replica did not answer",
+        },
+    )
 
 
 @pytest.mark.feature("controller-standby-replica")
@@ -347,21 +403,12 @@ def test_a_control_service_without_a_pod_address_publishes_none(tmp_path: Any) -
 
 
 @pytest.mark.feature("controller-standby-replica")
-def test_a_controller_without_a_named_replica_leads_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.swarm import controller
-    from scripts.swarm.store import RedisStore
-
-    assert controller._lead(RedisStore(_redis()), {}, _no_wait) is None
-
-
-@pytest.mark.feature("controller-standby-replica")
 def test_a_named_replica_stands_by_until_the_leader_releases(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from scripts.swarm import commands, controller
+    from scripts.swarm import controller
     from scripts.swarm.store import RedisStore
 
-    monkeypatch.setattr(commands, "hive_id", lambda: HIVE)
     store = RedisStore(_redis())
     leader = replica.ReplicaLock(store.redis, HIVE, "pod-a")
     assert leader.take() is True
@@ -373,9 +420,9 @@ def test_a_named_replica_stands_by_until_the_leader_releases(
 
     stop = threading.Event()
     monkeypatch.setattr(controller, "STOPPING", stop)
-    lock = controller._lead(store, {replica.REPLICA_ENV: "pod-b"}, wait)
+    lock = replica.ReplicaLock(store.redis, HIVE, "pod-b")
+    controller._lead(store, {}, lock, wait)
     try:
-        assert lock is not None
         assert (lock.owner, lock.holder(), waits) == ("pod-b", "pod-b", [replica.POLL_S])
         assert capsys.readouterr().out == (
             "controller: replica pod-b stands by while pod-a leads\ncontroller: replica pod-b leads the passes\n"
@@ -389,15 +436,15 @@ def test_a_named_replica_stands_by_until_the_leader_releases(
 def test_a_named_replica_with_no_leader_leads_without_standing_by(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from scripts.swarm import commands, controller
+    from scripts.swarm import controller
     from scripts.swarm.store import RedisStore
 
-    monkeypatch.setattr(commands, "hive_id", lambda: HIVE)
     stop = threading.Event()
     monkeypatch.setattr(controller, "STOPPING", stop)
     try:
-        lock = controller._lead(RedisStore(_redis()), {replica.REPLICA_ENV: "pod-a"}, _no_wait)
-        assert lock is not None and lock.holder() == "pod-a"
+        lock = replica.ReplicaLock(_redis(), HIVE, "pod-a")
+        controller._lead(RedisStore(lock.redis), {}, lock, _no_wait)
+        assert lock.holder() == "pod-a"
         assert capsys.readouterr().out == "controller: replica pod-a leads the passes\n"
     finally:
         stop.set()
