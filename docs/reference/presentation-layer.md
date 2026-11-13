@@ -179,8 +179,9 @@ previous tree. A value keeps its previous fragment when:
 A list or map whose parts all come back as the previous fragments, in the same
 order and number, returns the previous fragment itself, so an unchanged
 subtree costs one identity check per part. A value `orjson` cannot write, such
-as an integer outside 64 bits, takes its signature from the strict encoder. Stamp records were already reused
-by identity ([pull request 8441](https://github.com/the-cloud-clockwork/agentihooks/pull/8441)).
+as an integer outside 64 bits, takes its signature from the strict encoder.
+Stamp records were already reused by identity
+([pull request 8441](https://github.com/the-cloud-clockwork/agentihooks/pull/8441)).
 
 Identity reuse is safe because a stored fragment value is never changed in
 place: a write applies its operations to a separate writer copy of thawed
@@ -206,7 +207,7 @@ between 0.040 and 0.049 s before the change and between 0.017 and 0.021 s
 after it, and the full export stayed byte equal to one built by a fresh
 reader. Before the change, the hosted write p95 over the live hour from 00:55
 to 01:55 UTC on release 2.17.466 was 1.334 s, against the 0.82 s write p95
-baseline of the earlier hosted ledger load measurement. The hour after the
+baseline. The hour after the
 change is measured with the command in
 [Measuring operations writes](#measuring-operations-writes).
 
