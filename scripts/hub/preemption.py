@@ -1,4 +1,4 @@
-"""Operator priority preemption for every swarm, run by the hub on the events engine."""
+"""Operator priority preemption for swarms on the events engine, which the legacy tick skips."""
 
 import sys
 import traceback

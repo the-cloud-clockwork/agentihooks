@@ -76,15 +76,19 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 
 ## Event driven engine
 
-Every swarm runs the `events` engine: the hub offers ready tasks on the NATS JetStream bus and hives pull them,
-a workstation task on the root hive.
+Each swarm runs one of two engines, chosen by its `engine` setting:
+
+| Engine | Who starts lane agents |
+|---|---|
+| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
+| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
 
 ```bash
-agentihooks swarm <slug> set engine=events   # records the checkout's Git origin
+agentihooks swarm <slug> set engine=events
+agentihooks swarm <slug> set engine=legacy   # switch back
 ```
 
-`events` is the only accepted value. A stored `legacy` value, or none, reads as `events`; any other value is
-refused.
+Swarms created before the setting existed read as `legacy`. Any other value is refused.
 
 ### The life of a task
 
