@@ -49,9 +49,13 @@ def resolved(node: ast.AST, aliases: dict[str, str]) -> str:
 
 def attribute_target(args: list[ast.expr], aliases: dict[str, str]) -> str:
     """Return the dotted target of an owner and attribute name pair, or an empty string."""
-    match args:
-        case [owner_node, ast.Constant(value=str() as attribute), *_] if owner := resolved(owner_node, aliases):
-            return f"{owner}.{attribute}"
+    if (
+        len(args) > 1
+        and isinstance(args[1], ast.Constant)
+        and isinstance(attribute := args[1].value, str)
+        and (owner := resolved(args[0], aliases))
+    ):
+        return f"{owner}.{attribute}"
     return ""
 
 
