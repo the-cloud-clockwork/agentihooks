@@ -335,10 +335,11 @@ def test_default_hub_readiness_uses_the_shared_source_and_stops_after_lease_loss
     provider.slugs.return_value = ["rig", "other"]
     provider.snapshot.return_value = Mock()
     factory = Mock(return_value=provider)
-    publish = Mock()
+    publish = Mock(return_value=[])
     monkeypatch.setattr("scripts.hub.readiness.BusConfig.from_environ", lambda: BusConfig(backend="nats"))
     monkeypatch.setattr(readiness, "Source", factory)
     monkeypatch.setattr(readiness, "publish", publish)
+    monkeypatch.setattr(readiness, "offers", Mock(return_value=[]))
     with backend("memory", None) as bus:
         reactor = Readiness(bus, clock=lambda: 73)
         reactor.poll(Mock(side_effect=[True, False]))
