@@ -592,8 +592,6 @@ def _failed_panes(tick: Any, get: Get) -> Any:
 
 
 def _orphans_step(tick: Any, get: Get) -> Any:
-    if get("config").engine == tick.EVENTS_ENGINE:
-        return []
     return tick.skip_refused(_orphans, get("slug"), get("store"), get("ledger"), get("rows"))
 
 
