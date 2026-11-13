@@ -39,9 +39,10 @@ class ReplicaLock:
 
     def take(self) -> bool:
         """Take or renew the lock; answer False while another replica holds it."""
+        asked_at = self.clock()
         taken = bool(self.redis.eval(TAKE, 1, self.key, self.owner, self.lock_ms))
         if taken:
-            self.taken_at = self.clock()
+            self.taken_at = asked_at
         return taken
 
     def fresh(self, margin_s: float) -> bool:

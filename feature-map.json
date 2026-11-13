@@ -28,6 +28,7 @@
         "tests/swarm/test_controller_replica.py::test_the_beat_reports_a_lost_lock_once_and_ends",
         "tests/swarm/test_controller_replica.py::test_the_beat_rides_out_a_renewal_error_only_while_the_lock_cannot_have_expired",
         "tests/swarm/test_controller_replica.py::test_a_lock_is_fresh_until_its_last_take_nears_expiry",
+        "tests/swarm/test_controller_replica.py::test_a_take_counts_from_before_its_round_trip",
         "tests/swarm/test_controller_replica.py::test_a_replica_lock_exists_only_when_the_replica_is_named",
         "tests/swarm/test_controller_replica.py::test_the_keeper_calls_its_action_until_stopped",
         "tests/swarm/test_controller_replica.py::test_a_standby_answers_health_itself",

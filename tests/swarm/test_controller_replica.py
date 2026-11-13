@@ -163,6 +163,14 @@ def test_a_lock_is_fresh_until_its_last_take_nears_expiry() -> None:
 
 
 @pytest.mark.feature("controller-standby-replica")
+def test_a_take_counts_from_before_its_round_trip() -> None:
+    times = iter([100.0, 107.0])
+    lock = replica.ReplicaLock(_redis(), HIVE, "pod-a", clock=lambda: next(times))
+    assert lock.take() is True
+    assert lock.taken_at == 100.0
+
+
+@pytest.mark.feature("controller-standby-replica")
 def test_a_replica_lock_exists_only_when_the_replica_is_named() -> None:
     redis = _redis()
     assert replica.configured({}, redis, HIVE) is None
@@ -213,6 +221,13 @@ class _Leader(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         self._page(502)
+
+    def do_DELETE(self) -> None:
+        self.send_response(500)
+        self.send_header("Content-Length", "100")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(b'{"err')
 
     def _page(self, status: int) -> None:
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -269,7 +284,7 @@ def test_a_standby_forwards_every_other_request_to_the_leader(leader: str) -> No
 
 
 @pytest.mark.feature("controller-standby-replica")
-@pytest.mark.parametrize("method", ["PUT", "PATCH"])
+@pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
 def test_a_standby_refuses_a_leader_reply_that_is_not_json(leader: str, method: str) -> None:
     from scripts.swarm.store import RedisStore
     from scripts.swarm_v2 import standby as standby_api

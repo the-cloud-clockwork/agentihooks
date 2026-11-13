@@ -59,7 +59,7 @@ def forward(address: str, method: str, path: str, authorization: str, body: obje
     except urllib.error.HTTPError as refused:
         try:
             return refused.code, json.loads(refused.read())
-        except ValueError:
+        except (OSError, ValueError, http.client.HTTPException):
             return 503, _refusal(UNANSWERED)
     except (OSError, ValueError, http.client.HTTPException):
         return 503, _refusal(UNANSWERED)
