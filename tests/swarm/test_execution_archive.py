@@ -333,6 +333,28 @@ def test_set_launch_writes_the_decision_onto_the_live_head_and_its_projection(st
 
 
 @pytest.mark.feature("events-launch-decision-record")
+def test_set_launch_never_shows_an_agent_dropped_during_the_write(store, monkeypatch):
+    from scripts.swarm import execution
+
+    current = started(store, "eng-1@fixture")
+    project = store.project_agent
+    held = []
+
+    def dropped_first(slug, *args, **kwargs):
+        held.append(execution.WRITES["fixture"]._is_owned())
+        store.redis.hdel(store.key(slug, "agents"), current.name)
+        return project(slug, *args, **kwargs)
+
+    monkeypatch.setattr(store, "project_agent", dropped_first)
+
+    assert store.execution_registry.set_launch("fixture", current.execution_id, DECISION) is True
+
+    assert held == [True]
+    assert store.execution("fixture", current.execution_id).harness == "codex"
+    assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
+
+
+@pytest.mark.feature("events-launch-decision-record")
 @pytest.mark.parametrize("which", ["replaced", "dropped", "unknown", "earlier", "unlisted"])
 def test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head(store, which):
     first, _, _, other = history(store)

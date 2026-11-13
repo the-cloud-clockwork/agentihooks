@@ -314,7 +314,7 @@ class ExecutionRegistry:
                 doc["executions"][execution_id] = asdict(updated)
                 return updated, current
 
-            shown = self._fenced(slug, change, history=True)
+            shown = self._fenced(slug, change)
             if shown is None:
                 return False
             self.store.project_agent(slug, *shown, listed_only=True)
