@@ -1,0 +1,26 @@
+{
+  "detector": "idle with claim",
+  "cases": [
+    {
+      "name": "engineer idle three ticks on its claim with no named wait",
+      "label": "finding",
+      "source": "an agent that went quiet at its prompt without declaring a wait",
+      "history": {
+        "tasks": [{"id": "t70", "state": "claimed", "claimed_by": "engineer@32a0c1-0850", "pr_url": ""}],
+        "agents": [{"name": "engineer@32a0c1-0850", "lane": "eng", "task": "t70", "idle_ticks": 3}],
+        "talk": {}
+      }
+    },
+    {
+      "name": "engineer idle on its pull request while it waits on checks",
+      "label": "none",
+      "source": "a declared wait on checks holds the idle count",
+      "history": {
+        "tasks": [{"id": "t71", "state": "pr", "claimed_by": "engineer@32a0c1-0851", "pr_url": "https://example.test/pull/71"}],
+        "agents": [{"name": "engineer@32a0c1-0851", "lane": "eng", "task": "t71", "idle_ticks": 5}],
+        "waiting": ["t71"],
+        "talk": {}
+      }
+    }
+  ]
+}

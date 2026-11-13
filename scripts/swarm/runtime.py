@@ -243,6 +243,14 @@ def _predecessor(task):
     return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
 
 
+def _decided(placed: Placed, route: list[str], picked: model_pick.ModelPick, profile: str) -> Placed:
+    """Carry the launch decision onto a detached placement so its agent record shows it before the pane starts."""
+    if not placed.launch_job:
+        return placed
+    account = route[1] if route[:1] == ["--route"] else placed.account
+    return replace(placed, account=account, model=picked.model or "", effort=picked.effort or "", profile=profile)
+
+
 def _command(action, agent, text="", nonce=""):
     from scripts.hive.orders import CommandOrder
 
@@ -336,7 +344,15 @@ class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
     pass_memo: dict | None = None
 
-    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
+    def __init__(
+        self,
+        home: Path = SWARM_HOME,
+        run: Callable[..., Any] = subprocess.run,
+        choose: Callable[[str, dict[str, str]], tuple[str, str]] | None = None,
+        herdr: Callable[..., Any] = herdr_call,
+        defer_master_canary: bool = False,
+        accounts: list[capacity.Account] | None = None,
+    ) -> None:
         self.home, self.run, self.herdr = home, run, herdr
         self.defer_master_canary = defer_master_canary
         self.choose = choose or agent_choice.choose
@@ -347,6 +363,8 @@ class HerdrRuntime:
         self.hive = None
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
+        if accounts is not None:
+            self._quota_accounts = accounts
         self._host_spent = capacity.no_spawns
         self._reserving = threading.Lock()
 
@@ -872,7 +890,7 @@ class HerdrRuntime:
             )
         placed = placed if placed.launch_job else codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
-        return replace(
+        placed = replace(
             placed,
             model_source=picked.source,
             model_confidence=picked.confidence,
@@ -894,6 +912,7 @@ class HerdrRuntime:
             if front and agent == "claude" and not task.get("route_kind")
             else "",
         )
+        return _decided(placed, route, picked, profile)
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""

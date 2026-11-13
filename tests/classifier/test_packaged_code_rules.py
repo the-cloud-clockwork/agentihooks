@@ -85,7 +85,7 @@ def pieces(*rulings, sized=True):
     return {
         "pieces": [{"slot": i, "ruling": ruling} for i, ruling in enumerate(rulings)],
         "covers": [],
-        "sized": [{}] if sized else [],
+        "sized": [{"repo": "the task's own repository", "suffix": ""}] if sized else [],
     }
 
 
@@ -103,6 +103,13 @@ def pieces(*rulings, sized=True):
 def test_trace_plan_fails_a_mostly_cut_or_oversized_plan(first, second, size, ruling, expected):
     answers = {"piece_0": noul(first), "piece_1": noul(second), "size": size}
     assert verdicts(trace_plan, "trace-plan", answers, pieces(ruling, False)) == {"verdict": expected}
+
+
+def test_trace_plan_fails_when_any_repository_slice_is_oversized():
+    params = {**pieces(False, False), "sized": [{"repo": "a", "suffix": ""}, {"repo": "b", "suffix": "_1"}]}
+    answers = {"piece_0": noul(0.9), "piece_1": noul(0.9), "size": score(1, 0.9)}
+    assert verdicts(trace_plan, "trace-plan", answers | {"size_1": score(1, 0.9)}, params) == {"verdict": "pass"}
+    assert verdicts(trace_plan, "trace-plan", answers | {"size_1": score(2, 0.9)}, params) == {"verdict": "fail"}
 
 
 def test_trace_plan_passes_a_grown_plan_without_a_size_answer():

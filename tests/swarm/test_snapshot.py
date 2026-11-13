@@ -1,10 +1,14 @@
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TextIO, cast
+from unittest.mock import patch
 
 import pytest
 
+from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, name_state, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -188,6 +192,79 @@ def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisSt
     assert store.culture.key("sw") in keys
 
 
+@pytest.mark.feature("swarm-snapshot-atomic-read")
+def test_a_delivery_closing_during_export_never_pairs_an_old_item_with_a_newer_journal() -> None:
+    state, inbox, item_id, _ = close_mid_export(
+        lambda inbox, item_id, eng: (
+            lambda words: inbox.key("item", item_id) in words[1:] and words[0] not in ("TYPE", "EXISTS")
+        )
+    )
+    item_key, history_key = inbox.key("item", item_id), inbox.key("history", item_id)
+    keys, (before, after) = state["keys"], state["seen"]
+    assert before[item_key] != after[item_key]
+    pair = (keys[item_key]["value"], keys[history_key]["value"])
+    assert pair in ((before[item_key], before[history_key]), (after[item_key], after[history_key]))
+
+
+@pytest.mark.feature("swarm-snapshot-atomic-read")
+def test_a_delivery_closing_during_export_never_leaves_its_address_waiting_without_pending_mail() -> None:
+    state, inbox, _, eng = close_mid_export(
+        lambda inbox, item_id, eng: lambda words: words[:3] == ["SISMEMBER", inbox.key("waiting"), eng]
+    )
+    waiting = eng in state["members"].get(inbox.key("waiting"), [])
+    assert waiting == (inbox.key("pending", eng) in state["keys"])
+
+
+@pytest.mark.feature("swarm-snapshot-atomic-read")
+def test_export_carries_each_shared_inbox_membership_of_the_swarm_and_none_of_another(store: RedisStore) -> None:
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", eng, "index me")
+    for shared in ("waiting", "indexed", "open-indexed"):
+        store.redis.sadd(inbox.key(shared), eng, "someone@elsewhere")
+    store.redis.sadd(inbox.key("wake-outbox"), item.id, "foreign-item")
+    members = store.export("sw")["members"]
+    for shared in ("waiting", "indexed", "open-indexed"):
+        assert eng in members[inbox.key(shared)]
+        assert "someone@elsewhere" not in members[inbox.key(shared)]
+    assert item.id in members[inbox.key("wake-outbox")]
+    assert "foreign-item" not in members[inbox.key("wake-outbox")]
+
+
+def close_mid_export(
+    trigger: Callable[[InboxStore, str, str], Callable[[list[str]], bool]],
+) -> tuple[dict[str, Any], InboxStore, str, str]:
+    """Export swarm sw while a delivery to its engineer closes right after the first command the trigger matches; the
+    export also carries what the item key and its history held before and after the close under seen."""
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    other = fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    armed: list[Callable[[list[str]], bool]] = []
+
+    class Closing(fakeredis.FakeRedis):
+        def execute_command(self, *args: object, **options: object) -> object:
+            result = super().execute_command(*args, **options)
+            if armed and armed[0]([str(arg) for arg in args]):
+                armed.clear()
+                inbox.close(item.id, eng, "done", "answered while the snapshot read")
+            return result
+
+    store = RedisStore(Closing(server=server, decode_responses=True))
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    inbox = InboxStore(other)
+    item = inbox.send("operator", eng, "close me while the snapshot reads")
+    read = [inbox.key("item", item.id), inbox.key("history", item.id)]
+    before = dict(zip(read, (other.hgetall(read[0]), other.lrange(read[1], 0, -1))))
+    armed.append(trigger(inbox, item.id, eng))
+    state = store.export("sw")
+    after = dict(zip(read, (other.hgetall(read[0]), other.lrange(read[1], 0, -1))))
+    return {**state, "seen": (before, after)}, inbox, item.id, eng
+
+
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
     seed(store, "sw")
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
@@ -247,6 +324,104 @@ def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
     assert [i.id for i in inbox.pending_items("master@sw")] == pending
     assert item.id in {i.id for i in inbox.pending()}
     assert [h["state"] for h in inbox.history(item.id)] == ["pending"]
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore(store: RedisStore) -> None:
+    item = seed(store, "sw")
+    dispatcher = Dispatcher(InboxStore(store.redis))
+    dispatcher.own("master@sw", "bridge-1")
+    deliveries = dispatcher.reserve("master@sw", "bridge-1")
+    assert item.id in {delivery.item for delivery in deliveries}
+    for delivery in deliveries:
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = Dispatcher(InboxStore(store.redis))
+    restored.own("master@sw", "bridge-1")
+    assert restored.reserve("master@sw", "bridge-1") == []
+    recovered = restored.receipts.recover("master@sw", "bridge-1")
+    assert sorted((d.id, d.state) for d in recovered) == sorted((d.id, "unknown") for d in deliveries)
+    for delivery in deliveries:
+        assert restored.receipts.accept(delivery.id, "bridge-1", delivery.digest).committed
+    assert restored.reserve("master@sw", "bridge-1") == []
+    states = [h["state"] for h in InboxStore(store.redis).history(item.id)]
+    assert states.count("delivered") == 1
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_ref_shown_before_redis_is_lost_is_not_delivered_again_after_restore(store: RedisStore) -> None:
+    seed(store, "sw")
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "a comment on the parser", ref="sw:1:c1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("master@sw", "bridge-1")
+    for delivery in dispatcher.reserve("master@sw", "bridge-1"):
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+        dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = InboxStore(store.redis)
+    again = restored.send("operator", "master@sw", "the same comment relayed again", ref="sw:1:c1")
+    redelivery = Dispatcher(restored)
+    redelivery.own("master@sw", "bridge-1")
+    assert redelivery.reserve("master@sw", "bridge-1") == []
+    assert restored.get(again.id).state == "done"
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore(store: RedisStore) -> None:
+    seed(store, "sw")
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "a comment on the parser", ref="sw:1:c1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("master@sw", "bridge-1")
+    for delivery in dispatcher.reserve("master@sw", "bridge-1"):
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = InboxStore(store.redis)
+    again = restored.send("operator", "master@sw", "the same comment relayed again", ref="sw:1:c1")
+    redelivery = Dispatcher(restored)
+    redelivery.own("master@sw", "bridge-1")
+    assert redelivery.reserve("master@sw", "bridge-1") == []
+    assert restored.get(again.id).state == "pending"
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: RedisStore) -> None:
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    store.names.alias("sw-eng-old", eng)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "sw-eng-old", "carry on from the parser", ref="sw:2:a1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("sw-eng-old", "bridge-1")
+    [delivery] = dispatcher.reserve("sw-eng-old", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    journal = {
+        inbox.key("deliveries", eng),
+        inbox.key("delivery", delivery.id),
+        inbox.key("reservation", item.id),
+        inbox.key("ref-reservation", eng, "sw:2:a1"),
+    }
+    alias_keys, _ = inbox.keys_at(["sw-eng-old"])
+    assert not journal & set(alias_keys)
+    assert journal <= set(inbox.keys_at([eng])[0])
+    with patch.object(InboxStore, "keys_at", autospec=True, side_effect=InboxStore.keys_at) as listed:
+        exported = store.export("sw")
+    assert {"sw-eng-old", eng} <= set(listed.call_args.args[1])
+    assert journal <= set(exported["keys"])
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = Dispatcher(InboxStore(store.redis))
+    restored.own("sw-eng-old", "bridge-1")
+    assert restored.reserve("sw-eng-old", "bridge-1") == []
+    assert [(d.id, d.state) for d in restored.receipts.recover("sw-eng-old", "bridge-1")] == [(delivery.id, "unknown")]
 
 
 def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
@@ -421,6 +596,28 @@ def test_only_the_ten_newest_automatic_snapshots_are_kept(store):
     assert snapshot.path("sw").exists()
 
 
+@pytest.mark.feature("swarm-auto-snapshot-size-budget")
+def test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest(store, monkeypatch):
+    monkeypatch.setattr(snapshot, "KEEP_BYTES", 1_000_000, raising=False)
+    _running(store, snapshot_minutes=1)
+    snapshot.auto_dir("sw").mkdir(parents=True)
+    for n in range(1, 6):
+        (snapshot.auto_dir("sw") / f"auto-{n * MINUTE}.json").write_text(json.dumps({"taken_at": n}).ljust(400_000))
+    snapshot.auto(store, "sw", 10 * MINUTE, {}, run=_no_git)
+    kept = snapshot.automatic("sw")
+    assert [p.name for p in kept] == [f"auto-{n * MINUTE}.json" for n in (4, 5, 10)]
+    assert sum(p.stat().st_size for p in kept) <= 1_000_000
+
+
+@pytest.mark.feature("swarm-auto-snapshot-size-budget")
+def test_the_newest_automatic_snapshot_is_kept_even_past_the_size_budget(tmp_path):
+    files = [tmp_path / f"auto-{n}.json" for n in (1, 2)]
+    for file in files:
+        with file.open("wb") as planted:
+            planted.truncate(3 << 30)
+    assert snapshot.stale(files) == files[:1]
+
+
 @pytest.mark.parametrize("slug", ["", ".", "..", "sw/..", "/abs"])
 def test_automatic_pruning_refuses_a_name_that_is_not_one_swarm_folder(store, slug):
     _running(store, slug=slug, snapshot_minutes=1)
@@ -494,3 +691,92 @@ def test_status_shows_when_the_last_automatic_snapshot_was_taken(env, capsys):
 
 def test_the_ledger_source_names_the_show_command_for_its_slug():
     assert snapshot.ledger_source("sw") == "agentihooks ledger --slug sw show"
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_a_snapshot_is_written_one_entry_at_a_time_never_as_one_whole_string(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _running(store)
+    for n in range(20):
+        store.redis.set(store.key("sw", f"bulk-{n}"), "x" * 50_000)
+    real, longest = json.dumps, [0]
+
+    def measured(value: object, *args: object, **kwargs: object) -> str:
+        text = real(value, *args, **kwargs)
+        longest[0] = max(longest[0], len(text))
+        return text
+
+    monkeypatch.setattr(json, "dumps", measured)
+    taken = snapshot.take(store, "sw", 99, run=_no_git, environ={})
+    monkeypatch.setattr(json, "dumps", real)
+    written = taken.read_text()
+    assert json.loads(written)["state"]["keys"][store.key("sw", "bulk-3")]["value"] == "x" * 50_000
+    assert longest[0] < len(written) / 10
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_pruning_reads_each_kept_snapshot_refs_without_parsing_the_snapshot(store: RedisStore) -> None:
+    _running(store, snapshot_minutes=1)
+    taken = snapshot.auto(store, "sw", 0, {}, run=_no_git)
+    assert taken is not None
+    assert json.loads(taken.with_name(taken.name + ".refs").read_text()) == []
+    taken.write_text("{")
+    assert snapshot.referenced("sw") == set()
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it(store: RedisStore) -> None:
+    _running(store, snapshot_minutes=1)
+    for n in range(12):
+        snapshot.auto(store, "sw", n * MINUTE, {}, run=_no_git)
+    kept = sorted(p.name for p in snapshot.auto_dir("sw").glob("*.refs"))
+    assert kept == sorted(f"auto-{n * MINUTE}.json.refs" for n in range(2, 12))
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_a_take_that_dies_before_its_snapshot_lands_leaves_no_refs_naming_the_old_snapshot(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _running(store)
+    target = snapshot.take(store, "sw", 1, run=_no_git, environ={})
+    held = {"sources": {"a": {"inventory": {"x": {"sha256": "kept-by-old"}}}}}
+    target.write_text(json.dumps(held))
+    real = Path.replace
+
+    def dies(self: Path, other: Path) -> Path:
+        if self.suffix == ".partial":
+            raise OSError("killed")
+        return real(self, other)
+
+    monkeypatch.setattr(Path, "replace", dies)
+    with pytest.raises(OSError):
+        snapshot.take(store, "sw", 2, run=_no_git, environ={})
+    assert snapshot.referenced("sw") == {"kept-by-old"}
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_each_entry_down_to_the_split_depth_is_written_as_its_own_string() -> None:
+    chunks: list[str] = []
+
+    class Out:
+        def write(self, text: str) -> int:
+            chunks.append(text)
+            return len(text)
+
+    value = {"keys": {"a": {"type": "hash", "value": {"f": "1"}}, "b": [1]}, "names": None}
+    snapshot._write(cast("TextIO", Out()), value, 2)
+    assert chunks == [
+        "{",
+        '"keys": ',
+        "{",
+        '"a": ',
+        '{"type": "hash", "value": {"f": "1"}}',
+        ', "b": ',
+        "[1]",
+        "}",
+        ', "names": ',
+        "null",
+        "}",
+    ]
+    assert json.loads("".join(chunks)) == value

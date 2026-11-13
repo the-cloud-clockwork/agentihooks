@@ -60,6 +60,7 @@ def relaunch(run: "_Pass", agent: AgentRecord, saved: dict, error: "SpawnError")
         request.write_text(json.dumps({**json.loads(request.read_text()), "job": job}))
         entry = {"task": saved["task"], "primed": retried, "placed": asdict(replace(placed, launch_job=job))}
         run.store.redis.hset(run.store.key(run.slug, launch_job.KEY), agent.name, json.dumps(entry))
+        run.store.put_agent(run.slug, launch_job.decided(agent, placed))
         launch_job.spawn(job)
     except Exception as exc:
         return "", exc if isinstance(exc, SpawnError) else SpawnError(str(exc))

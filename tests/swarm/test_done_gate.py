@@ -160,7 +160,7 @@ def test_the_tick_reopens_a_task_an_agent_marked_done_before_its_pull_request_me
     actions, ledger, _ = recheck(store, document, state)
     word = state.lower()
     assert actions == [f"task t1 reopened, its pull request is {word}"]
-    assert ledger.updates == [("t1", {"state": "open", "claimed_by": ""})]
+    assert ledger.updates == [("t1", {"state": "open", "claimed_by": "", "pr_url": URL})]
     assert ledger.comments == [
         (
             "t1",

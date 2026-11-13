@@ -217,9 +217,10 @@ ROWS = pass_domains("rows")
 def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], now_ms: int) -> list[str]:
     from scripts.hub.reconciler import legacy_agents
 
-    judged = launch_check.judged(store, slug)
-    agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], list[str]()
-    facts, live_names = runtime.bindings(agents), runtime.live_names()
+    judged, listed = launch_check.judged(store, slug), legacy_agents(store, slug)
+    agents, actions = [a for a in listed if a.name not in judged], list[str]()
+    bound = [a for a in listed if a.name not in judged or live_binding.managed(a)]
+    facts, live_names = runtime.bindings(bound), runtime.live_names()
     holders = held_elsewhere.holders(store)
     for agent in agents:
         if (

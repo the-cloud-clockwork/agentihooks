@@ -1,8 +1,10 @@
 import json
 import multiprocessing
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -1022,23 +1024,37 @@ def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
 
 
 @pytest.fixture
-def shared_units(tmp_path, monkeypatch):
+def shared_units(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, Path, Path, str]:
     from scripts.targets._common import _install_module
 
     install = _install_module()
+    assert install is not None
     installed = tmp_path / "installed-agentihooks"
     monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", installed)
     monkeypatch.setattr(install, "install_root", lambda: installed)
+    tool = tmp_path / "tool" / "bin"
+    tool.mkdir(parents=True)
+    (tool / "agentihooks").write_text("#!/bin/sh\n")
+    link = tmp_path / "local" / "bin" / "agentihooks"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tool / "agentihooks")
+    monkeypatch.setattr(install, "_cli_link", lambda: link)
+    monkeypatch.setattr(sys, "executable", str(tool / "python"))
     shared = tmp_path / "systemd" / "user"
     monkeypatch.setattr(timer, "UNIT_DIR", shared)
-    return install, installed, shared
+    return install, installed, shared, str(link)
 
 
-def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, tmp_path, monkeypatch, capsys):
-    install, installed, shared = shared_units
+def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(
+    shared_units: tuple[ModuleType, Path, Path, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install, installed, shared, binary = shared_units
     calls = []
     run = lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
-    assert timer.ensure("/installed/bin/agentihooks", run=run)
+    assert timer.ensure(binary, run=run)
     before = {path.name: path.read_text() for path in shared.iterdir()}
     calls.clear()
 
@@ -1048,7 +1064,7 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
     assert timer.ensure("/scratch/bin/agentihooks", shared, run=run) is False
 
     assert {path.name: path.read_text() for path in shared.iterdir()} == before
-    assert 'ExecStart="/installed/bin/agentihooks" swarm waker' in before["agentihooks-inbox-waker.service"]
+    assert f'ExecStart="{binary}" swarm waker' in before["agentihooks-inbox-waker.service"]
     assert calls == []
     refusal = (
         f"this run comes from {scratch}, not the installed agentihooks at {installed}, "
@@ -1064,15 +1080,13 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
     )
 
 
-def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_units):
-    _, _, shared = shared_units
+def test_timer_from_the_installed_agentihooks_writes_the_shared_units(
+    shared_units: tuple[ModuleType, Path, Path, str],
+) -> None:
+    _, _, shared, binary = shared_units
     calls = []
-    assert timer.ensure(
-        "/installed/bin/agentihooks", run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
-    )
-    assert (
-        'ExecStart="/installed/bin/agentihooks" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
-    )
+    assert timer.ensure(binary, run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0))
+    assert f'ExecStart="{binary}" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
     assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
@@ -1877,8 +1891,46 @@ def test_the_worktree_branch_is_read_and_checked_on_origin():
     ]
 
 
+@pytest.mark.feature("successor-upstream-branch")
+def test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks() -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    answers = {
+        "branch": (0, "engineer-a1b2c3-0002\n"),
+        "rev-parse": (0, "origin/engineer-a1b2c3-0001\n"),
+        "engineer-a1b2c3-0002": (2, ""),
+        "engineer-a1b2c3-0001": (0, "abc\trefs/heads/engineer-a1b2c3-0001\n"),
+    }
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs))
+        code, out = answers[argv[-1] if argv[1] == "ls-remote" else argv[1]]
+        return subprocess.CompletedProcess(argv, code, out, "")
+
+    assert cli.worktree_branch(None, run=run) == "engineer-a1b2c3-0001"
+    assert calls == [
+        (["git", "branch", "--show-current"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0002"], GIT_OPTS),
+        (["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
+    ]
+
+
+@pytest.mark.feature("successor-upstream-branch")
+@pytest.mark.parametrize("base", ["dev", "main", "master", "v1"])
+def test_an_unpushed_checkout_tracking_a_base_branch_is_refused(base: str) -> None:
+    calls, fake = git_answers(
+        {"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": (0, f"origin/{base}\n"), "ls-remote": (2, "")}
+    )
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(None, run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin engineer-a1b2c3-0002"
+    )
+    assert [argv[-1] for argv, _ in calls if argv[1] == "ls-remote"] == ["engineer-a1b2c3-0002"]
+
+
 def test_a_branch_missing_on_origin_is_refused():
-    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (2, "")})
+    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "rev-parse": (128, ""), "ls-remote": (2, "")})
     with pytest.raises(SwarmError) as refused:
         cli.worktree_branch(None, run=fake)
     assert str(refused.value) == (
@@ -1981,7 +2033,7 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
     ports, provider, reference = _pull_port("fork-owner/bundle", seen)
 
     head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
-    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h")
     assert seen == ["https://github.com/o/r/pull/3"]
     [call] = provider.calls
     assert (call.operation, call.args) == ("change", (reference,))
@@ -1991,17 +2043,19 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
 def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
     ports, _, _ = _pull_port("")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "")
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h")
 
 
 @pytest.mark.parametrize(
     "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), *PULL_READ_ERRORS]
 )
-def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
+def test_an_unreadable_pull_request_is_refused(error: Exception) -> None:
     def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
         raise error
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("", "")
+    with pytest.raises(SwarmError) as refused:
+        cli.pull_branch("https://github.com/o/r/pull/3", ports)
+    assert str(refused.value) == f"GitHub does not confirm pull request https://github.com/o/r/pull/3: {error}"
 
 
 def test_the_pull_branch_reads_through_the_stack_source_control_port() -> None:

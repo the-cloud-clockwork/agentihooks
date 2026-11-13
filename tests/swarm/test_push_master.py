@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -225,7 +226,9 @@ class Built(Exception):
         (APP_SERVER_TRANSPORT, "claude", {"harness": "claude"}),
     ],
 )
-def test_the_spawn_hands_the_prompt_the_transport_its_launch_chooses(tmp_path, monkeypatch, setting, harness, expected):
+def test_the_spawn_hands_the_prompt_the_transport_its_launch_chooses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, harness: str, expected: dict[str, str]
+) -> None:
     from types import SimpleNamespace
 
     from scripts.swarm.runtime import HerdrRuntime
@@ -240,7 +243,7 @@ def test_the_spawn_hands_the_prompt_the_transport_its_launch_chooses(tmp_path, m
         for agent in ("CLAUDE", "CODEX"):
             monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
     monkeypatch.setattr(prompt, "build", build)
-    runtime = HerdrRuntime(home=tmp_path, run=None, choose=lambda *_: (harness, "open"))
+    runtime = HerdrRuntime(home=tmp_path, choose=lambda *_: (harness, "open"))
     config = SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
