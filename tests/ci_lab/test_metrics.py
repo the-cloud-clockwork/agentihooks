@@ -341,8 +341,11 @@ def test_served_routes_reach_a_scraper_over_http() -> None:
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
         with urllib.request.urlopen(f"{base}/metrics", timeout=5) as reply:
-            assert reply.headers["Content-Type"] == "text/plain; version=0.0.4; charset=utf-8"
-            assert 'ci_lab_units_running{class="queue"} 1.0' in reply.read().decode()
+            text = reply.read().decode()
+            headers = dict(reply.headers.items())
+            assert headers["Content-Type"] == "text/plain; version=0.0.4; charset=utf-8"
+            assert headers["Content-Length"] == str(len(text.encode()))
+            assert 'ci_lab_units_running{class="queue"} 1.0' in text
         with urllib.request.urlopen(f"{base}/capacity", timeout=5) as reply:
             assert json.loads(reply.read())["utilisation"] == 0.25
         with pytest.raises(urllib.error.HTTPError) as refused:

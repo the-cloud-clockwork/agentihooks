@@ -294,7 +294,7 @@ def respond(snapshot: Callable[[], Load], registry: Registry, method: str, targe
         return 405, JSON, b'{"error": "method not allowed"}'
     load = snapshot()
     if path == "/capacity":
-        return 200, JSON, json.dumps(document(load), allow_nan=False).encode()
+        return 200, JSON, json.dumps(document(load)).encode()
     observe_load(registry, load)
     return 200, EXPOSITION, registry.render().encode()
 
