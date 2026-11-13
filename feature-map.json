@@ -148,7 +148,8 @@
       "tests": [
         "tests/swarm/test_host_budget.py::test_read_host_counts_reserved_managed_executions",
         "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room",
-        "tests/context/test_account_sessions.py::test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher"
+        "tests/context/test_account_sessions.py::test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher",
+        "tests/context/test_account_sessions.py::test_reserved_executions_count_none_while_the_store_is_down"
       ]
     },
     {
