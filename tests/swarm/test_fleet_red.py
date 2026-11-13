@@ -584,15 +584,35 @@ def test_holds_save_the_listing_of_every_repository_with_a_pull_request_task_not
         "review": task("review", state="pr", pr_url="https://github.com/o/q/pull/2"),
         "gone": task("gone", state="done", pr_url="https://github.com/x/y/pull/3"),
     }
+    passes = []
+    for _ in range(3):
+        found, _, saves = fleet_red.holds("sw", store, rows, NOW_MS)
+        passes.append((found, [save.key for save in saves], list(reads)))
+        for save in saves:
+            fleet_red.saver(store)(save)
 
-    found, _, saves = fleet_red.holds("sw", store, rows, NOW_MS)
-
-    assert found == []
-    assert reads == ["o/r", "o/q"]
-    assert [save.key for save in saves] == [
-        store.key("sw", "fleet-red-pulls:o/r"),
-        store.key("sw", "fleet-red-pulls:o/q"),
+    assert passes == [
+        ([], [store.key("sw", "fleet-red-pulls:o/r")], ["o/r"]),
+        ([], [store.key("sw", "fleet-red-pulls:o/q")], ["o/r", "o/q"]),
+        ([], [], ["o/r", "o/q"]),
     ]
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_a_pass_that_lists_a_waiting_repository_live_warms_no_other_one(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or SAVED)
+    rows = {
+        "red": task("red", pr_url=MINE),
+        "review": task("review", state="pr", pr_url="https://github.com/o/q/pull/2"),
+    }
+
+    _, _, saves = fleet_red.holds("sw", store, rows, NOW_MS)
+
+    assert reads == ["o/r"]
+    assert [save.key for save in saves] == [store.key("sw", "fleet-red-pulls:o/r")]
 
 
 def test_the_engine_saves_the_listing_the_notice_step_returns(
