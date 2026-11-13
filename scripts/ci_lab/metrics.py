@@ -1,12 +1,16 @@
 """Prometheus exposition for GET /metrics and the lab_units and lab_grades ClickHouse rows."""
 
 import hashlib
-from collections.abc import Iterable, Mapping
+import json
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import inf, isfinite, isnan
 from typing import Protocol
+from urllib.parse import urlsplit
 
-from scripts.ci_lab.capacity import Load, predicted_wait
+from scripts.ci_lab import contract
+from scripts.ci_lab.capacity import Load, document, predicted_wait
 from scripts.ci_lab.delivery import CLASSES
 from scripts.swarm import metrics_outbox
 
@@ -23,10 +27,15 @@ __all__ = [
     "observe_load",
     "observe_records",
     "record",
+    "respond",
+    "serve",
     "unit_row",
 ]
 
 LEDGER = "ci-lab"
+JSON = "application/json"
+EXPOSITION = "text/plain; version=0.0.4; charset=utf-8"
+ROUTES = ("/capacity", "/metrics")
 
 
 @dataclass(frozen=True)
@@ -39,27 +48,42 @@ class Metric:
     help: str
 
 
-CONTRACT = (
-    Metric("ci_lab_units_queued", "gauge", ("class",), "Units pending per class."),
-    Metric("ci_lab_units_running", "gauge", ("class",), "Units leased and running per class."),
-    Metric("ci_lab_slots_total", "gauge", (), "Slots offered by ready workers."),
-    Metric("ci_lab_slots_busy", "gauge", (), "Slots running a unit."),
-    Metric("ci_lab_slots_wanted", "gauge", (), "Slots the queue asks the autoscaler for."),
-    Metric("ci_lab_queue_wait_seconds", "gauge", ("class",), "Predicted queue wait per class."),
-    Metric("ci_lab_unit_duration_seconds", "gauge", ("kind",), "Last unit duration per kind."),
-    Metric("ci_lab_cache_hits_total", "counter", ("cache",), "Cache hits per cache."),
-    Metric("ci_lab_cache_misses_total", "counter", ("cache",), "Cache misses per cache."),
-    Metric("ci_lab_mirror_age_seconds", "gauge", (), "Age of the git mirror."),
-    Metric("ci_lab_core_seconds_total", "counter", ("class",), "Core seconds spent per class."),
-    Metric("ci_lab_heads_graded_total", "counter", ("class", "conclusion"), "Heads graded per class and conclusion."),
-    Metric("ci_lab_budget_fraction", "gauge", (), "Fraction of the daily core budget left."),
-    Metric("ci_lab_class_shed", "gauge", ("class",), "One when a class is shed."),
-    Metric("ci_lab_units_redelivered_total", "counter", (), "Units requeued after an expired lease."),
-    Metric("ci_lab_units_lost_total", "counter", (), "Units lost after a second expired lease."),
-    Metric("ci_lab_units_overdue", "gauge", (), "Leased units past their estimate."),
-    Metric("ci_lab_workers_ready", "gauge", (), "Workers holding a live heartbeat."),
-    Metric("ci_lab_github_rate_remaining", "gauge", (), "GitHub API calls left in the window."),
-    Metric("ci_lab_verdict_mismatch_total", "counter", ("gate",), "Shadow verdicts that differ from Actions."),
+HELP = {
+    contract.UNITS_QUEUED: "Units pending per class.",
+    contract.UNITS_RUNNING: "Units leased and running per class.",
+    contract.SLOTS_TOTAL: "Slots offered by ready workers.",
+    contract.SLOTS_BUSY: "Slots running a unit.",
+    contract.SLOTS_WANTED: "Slots the queue asks the autoscaler for.",
+    contract.QUEUE_WAIT_SECONDS: "Predicted queue wait per class.",
+    contract.UNIT_DURATION_SECONDS: "Last unit duration per kind.",
+    contract.CACHE_HITS_TOTAL: "Cache hits per cache.",
+    contract.CACHE_MISSES_TOTAL: "Cache misses per cache.",
+    contract.MIRROR_AGE_SECONDS: "Age of the git mirror.",
+    contract.CORE_SECONDS_TOTAL: "Core seconds spent per class.",
+    contract.HEADS_GRADED_TOTAL: "Heads graded per class and conclusion.",
+    contract.BUDGET_FRACTION: "Fraction of the daily core budget left.",
+    contract.CLASS_SHED: "One when a class is shed.",
+    contract.UNITS_REDELIVERED_TOTAL: "Units requeued after an expired lease.",
+    contract.UNITS_LOST_TOTAL: "Units lost after a second expired lease.",
+    contract.UNITS_OVERDUE: "Leased units past their estimate.",
+    contract.WORKERS_READY: "Workers holding a live heartbeat.",
+    contract.GITHUB_RATE_REMAINING: "GitHub API calls left in the window.",
+    contract.VERDICT_MISMATCH_TOTAL: "Shadow verdicts that differ from Actions.",
+}
+COUNTERS = frozenset(
+    {
+        contract.CACHE_HITS_TOTAL,
+        contract.CACHE_MISSES_TOTAL,
+        contract.CORE_SECONDS_TOTAL,
+        contract.HEADS_GRADED_TOTAL,
+        contract.UNITS_REDELIVERED_TOTAL,
+        contract.UNITS_LOST_TOTAL,
+        contract.VERDICT_MISMATCH_TOTAL,
+    }
+)
+CONTRACT = tuple(
+    Metric(name, "counter" if name in COUNTERS else "gauge", labels, HELP[name])
+    for name, labels in contract.METRICS.items()
 )
 BY_NAME = {metric.name: metric for metric in CONTRACT}
 
@@ -259,3 +283,32 @@ def observe_records(registry: Registry, units: Iterable[UnitRecord], grades: Ite
         registry.inc(cache, 1.0, {"cache": "verdict"})
     for grade in grades:
         registry.inc("ci_lab_heads_graded_total", 1.0, {"class": grade.priority, "conclusion": grade.conclusion})
+
+
+def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
+    """Answer GET /capacity with the capacity document and GET /metrics with the exposition."""
+    path = urlsplit(target).path
+    if path not in ROUTES:
+        return 404, JSON, b'{"error": "not found"}'
+    if method != "GET":
+        return 405, JSON, b'{"error": "method not allowed"}'
+    load = snapshot()
+    if path == "/capacity":
+        return 200, JSON, json.dumps(document(load), allow_nan=False).encode()
+    observe_load(registry, load)
+    return 200, EXPOSITION, registry.render().encode()
+
+
+def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
+    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
+
+    def answer(request: BaseHTTPRequestHandler) -> None:
+        status, content_type, data = respond(snapshot, registry, request.command, request.path)
+        request.send_response(status)
+        request.send_header("Content-Type", content_type)
+        request.send_header("Content-Length", str(len(data)))
+        request.end_headers()
+        request.wfile.write(data)
+
+    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
+    return ThreadingHTTPServer((host, port), handler)

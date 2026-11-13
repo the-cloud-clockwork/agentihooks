@@ -1,11 +1,15 @@
 import hashlib
+import json
 import re
+import threading
+import urllib.error
+import urllib.request
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from scripts.ci_lab import metrics
+from scripts.ci_lab import capacity, contract, metrics
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.delivery import CLASSES
 from scripts.swarm import metrics_outbox
@@ -280,3 +284,70 @@ def test_record_ships_through_the_real_outbox(tmp_path: Path) -> None:
         "INSERT INTO swarm.lab_grades FORMAT JSONEachRow",
     }
     assert b'"class": "pull_request"' in inserts["INSERT INTO swarm.lab_units FORMAT JSONEachRow"]
+
+
+def test_the_contract_follows_the_service_contract_module() -> None:
+    assert {metric.name: metric.labels for metric in metrics.CONTRACT} == dict(contract.METRICS)
+    assert CONTRACT_NAMES == tuple(contract.METRICS)
+
+
+LOAD = Load({"pull_request": (60.0, 30.0)}, {"queue": 1}, slots_total=4, slots_busy=1, budget_fraction=0.5)
+
+
+def test_capacity_route_answers_the_capacity_document() -> None:
+    status, content_type, body = metrics.respond(lambda: LOAD, metrics.Registry(), "GET", "/capacity?x=1")
+    assert (status, content_type) == (200, "application/json")
+    assert json.loads(body) == capacity.document(LOAD)
+    assert json.loads(body)["classes"]["pull_request"]["predicted_wait_s"] == 30.0
+
+
+def test_metrics_route_observes_the_load_and_renders_every_family() -> None:
+    registry = metrics.Registry()
+    status, content_type, body = metrics.respond(lambda: LOAD, registry, "GET", "/metrics")
+    text = body.decode()
+    assert (status, content_type) == (200, "text/plain; version=0.0.4; charset=utf-8")
+    assert text == registry.render()
+    assert 'ci_lab_queue_wait_seconds{class="pull_request"} 30.0' in text
+    assert "\nci_lab_slots_busy 1.0\n" in text
+    for name in CONTRACT_NAMES:
+        assert f"# TYPE {name} " in text
+
+
+@pytest.mark.parametrize(
+    ("method", "target", "status", "body"),
+    [
+        ("GET", "/lease", 404, {"error": "not found"}),
+        ("POST", "/capacity", 405, {"error": "method not allowed"}),
+        ("POST", "/metrics", 405, {"error": "method not allowed"}),
+    ],
+)
+def test_other_routes_and_methods_are_refused(method: str, target: str, status: int, body: dict[str, str]) -> None:
+    calls: list[int] = []
+
+    def snapshot() -> Load:
+        calls.append(1)
+        return LOAD
+
+    answered = metrics.respond(snapshot, metrics.Registry(), method, target)
+    assert answered[:2] == (status, "application/json")
+    assert json.loads(answered[2]) == body
+    assert calls == []
+
+
+def test_served_routes_reach_a_scraper_over_http() -> None:
+    server = metrics.serve("127.0.0.1", 0, lambda: LOAD, metrics.Registry())
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(f"{base}/metrics", timeout=5) as reply:
+            assert reply.headers["Content-Type"] == "text/plain; version=0.0.4; charset=utf-8"
+            assert 'ci_lab_units_running{class="queue"} 1.0' in reply.read().decode()
+        with urllib.request.urlopen(f"{base}/capacity", timeout=5) as reply:
+            assert json.loads(reply.read())["utilisation"] == 0.25
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(f"{base}/missing", timeout=5)
+        assert refused.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
