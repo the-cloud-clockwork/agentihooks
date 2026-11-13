@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/verdicts.py:scripts.swarm.health.verdicts.x\u01c1VerdictStore\u01c1false_positives:9b3b3b2bc605086de0da84176fc389b80784c5e90135c5849725312272ec5a58": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so the mutant changes only the static annotation and no runtime output."
+  }
+}

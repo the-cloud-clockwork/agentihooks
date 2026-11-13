@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/verdicts.py:scripts.swarm.health.verdicts.x\u01c1VerdictStore\u01c1false_positives:61566f7e76189e102e5bdfa7af75505de32cb33811c90805d24a1e8d4f17eef8": {
+    "reader": "standards_reader",
+    "reason": "maxsplit only limits splits after the first separator, so element 0 is always the text before the first slash and the detector key is unchanged."
+  }
+}

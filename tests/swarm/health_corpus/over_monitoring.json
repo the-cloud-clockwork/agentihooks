@@ -1,0 +1,23 @@
+{
+  "detector": "over monitoring",
+  "cases": [
+    {
+      "name": "engineer that polled thirty times since its last action",
+      "label": "finding",
+      "source": "watch calls outnumbering actions",
+      "history": {
+        "activity": {"engineer@32a0c1-0870": {"watch": 30, "act": 2, "since": 25}},
+        "talk": {}
+      }
+    },
+    {
+      "name": "master watching the same amount inside its wider budget",
+      "label": "none",
+      "source": "the master watches the whole swarm and has its own limits",
+      "history": {
+        "activity": {"master@32a0c1-0001": {"watch": 30, "act": 2, "since": 25}},
+        "talk": {}
+      }
+    }
+  ]
+}

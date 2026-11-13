@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/verdicts.py:scripts.swarm.health.verdicts.x\u01c1VerdictStore\u01c1false_positives:a1f1a35bbaf6438116f36fc6f9017a9e0fd903792a4d2d798cfa1bbb5c01d9e2": {
+    "reader": "standards_reader",
+    "reason": "With no split limit, element 0 of str.split is still the text before the first slash, so the detector key is the same for every finding id."
+  }
+}
