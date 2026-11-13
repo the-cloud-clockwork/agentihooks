@@ -1,7 +1,7 @@
 """Capacity document served at GET /capacity, computed from a load snapshot."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from math import fsum
 
 from scripts.ci_lab.delivery import CLASSES
@@ -18,7 +18,7 @@ class Load:
     slots_total: int
     slots_busy: int
     budget_fraction: float = 1.0
-    shed: tuple[str, ...] = field(default=())
+    shed: tuple[str, ...] = ()
 
     @property
     def slots_free(self) -> int:

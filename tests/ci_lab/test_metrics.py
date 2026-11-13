@@ -41,7 +41,7 @@ COUNTERS = {
     "ci_lab_verdict_mismatch_total",
 }
 VALUE = r'"(?:[^"\\]|\\.)*"'
-SAMPLE = re.compile(rf"^([a-z_]+)(\{{[a-z_]+={VALUE}(,[a-z_]+={VALUE})*\}})? (\+Inf|-?[0-9.e+-]+)$")
+SAMPLE = re.compile(rf"^([a-z_]+)(\{{[a-z_]+={VALUE}(,[a-z_]+={VALUE})*\}})? ([+-]Inf|-?[0-9]+\.[0-9]+(e[+-][0-9]+)?)$")
 
 
 def test_the_contract_holds_exactly_the_architecture_names() -> None:
@@ -65,14 +65,24 @@ def test_every_sample_line_is_valid_exposition() -> None:
     metrics.observe_load(registry, load, {"hotfix": None, "queue": 12.5})
     registry.inc("ci_lab_heads_graded_total", 1, {"class": "pull_request", "conclusion": "success"})
     registry.inc("ci_lab_verdict_mismatch_total", 2, {"gate": 'tests "unit"\\x'})
+    registry.inc("ci_lab_verdict_mismatch_total", 1, {"gate": "a\nb"})
+    registry.set("ci_lab_mirror_age_seconds", float("-inf"))
     text = registry.render()
     assert text.endswith("\n")
+    typed: set[str] = set()
     for line in text.splitlines():
-        if not line.startswith("#"):
-            assert SAMPLE.match(line), line
+        if line.startswith("# TYPE "):
+            typed.add(line.split()[2])
+        elif not line.startswith("#"):
+            match = SAMPLE.match(line)
+            assert match, line
+            assert match.group(1) in typed, line
+            float(match.group(4))
     assert 'ci_lab_queue_wait_seconds{class="hotfix"} +Inf' in text
     assert 'ci_lab_queue_wait_seconds{class="queue"} 12.5' in text
     assert 'ci_lab_verdict_mismatch_total{gate="tests \\"unit\\"\\\\x"} 2.0' in text
+    assert 'ci_lab_verdict_mismatch_total{gate="a\\nb"} 1.0' in text
+    assert "\nci_lab_mirror_age_seconds -Inf\n" in text
 
 
 def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
@@ -125,9 +135,15 @@ def test_wrong_type_or_labels_are_refused(call: str, name: str, labels: dict[str
         getattr(registry, call)(name, 1.0, labels)
 
 
-def test_a_negative_counter_increment_is_refused() -> None:
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])
+def test_a_negative_or_non_finite_counter_increment_is_refused(value: float) -> None:
     with pytest.raises(ValueError, match="non negative"):
-        metrics.Registry().inc("ci_lab_units_lost_total", -1)
+        metrics.Registry().inc("ci_lab_units_lost_total", value)
+
+
+def test_a_nan_gauge_is_refused() -> None:
+    with pytest.raises(ValueError, match="ci_lab_workers_ready takes only a gauge value that is a number"):
+        metrics.Registry().set("ci_lab_workers_ready", float("nan"))
 
 
 def test_lab_tables_are_declared_for_the_outbox() -> None:
@@ -173,19 +189,26 @@ def test_unit_and_grade_rows_pass_the_outbox_schema() -> None:
     assert row["class"] == "pull_request"
     assert row["cached"] == 1
     assert row["seconds"] == 12.0
+    assert row["wait_s"] == 3.0
     assert row["ledger"] == metrics.LEDGER
     graded = metrics.grade_row(grade())
     metrics.GRADES.check(graded)
     assert graded["class"] == "queue"
     assert graded["units"] == 7
     assert graded["cached_units"] == 4
+    assert graded["seconds"] == 310.0
 
 
-def test_unit_rows_are_keyed_by_repo_head_and_unit() -> None:
+def test_rows_are_keyed_by_repo_head_and_unit_or_class() -> None:
     first = metrics.unit_row(unit())["event_id"]
     assert metrics.unit_row(unit())["event_id"] == first
     assert metrics.unit_row(unit(head="d" * 40))["event_id"] != first
     assert metrics.unit_row(unit(key="k2"))["event_id"] != first
+    assert metrics.unit_row(replace(unit(), repo="org/other"))["event_id"] != first
+    graded = metrics.grade_row(grade())["event_id"]
+    assert metrics.grade_row(grade())["event_id"] == graded
+    assert metrics.grade_row(replace(grade(), priority="promotion"))["event_id"] != graded
+    assert metrics.grade_row(replace(grade(), repo="org/other"))["event_id"] != graded
 
 
 class Spool:

@@ -3,6 +3,7 @@
 import hashlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from math import isfinite, isnan
 from typing import Protocol
 
 from scripts.ci_lab.capacity import Load
@@ -26,7 +27,6 @@ __all__ = [
 ]
 
 LEDGER = "ci-lab"
-CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 
 @dataclass(frozen=True)
@@ -112,7 +112,7 @@ def _escape(value: str) -> str:
 
 
 def _sample(name: str, labels: tuple[tuple[str, str], ...], value: float) -> str:
-    number = "+Inf" if value == float("inf") else repr(value)
+    number = {float("inf"): "+Inf", float("-inf"): "-Inf"}.get(value, repr(value))
     if not labels:
         return f"{name} {number}"
     pairs = ",".join(f'{label}="{_escape(text)}"' for label, text in labels)
@@ -128,14 +128,14 @@ class Registry:
     def set(self, name: str, value: float, labels: Mapping[str, str] | None = None) -> None:
         """Set a gauge sample."""
         metric = BY_NAME[name]
-        if metric.kind != "gauge":
-            raise ValueError(f"{name} is a {metric.kind}, not a gauge")
+        if metric.kind != "gauge" or isnan(value):
+            raise ValueError(f"{name} takes only a gauge value that is a number")
         self.values[name][_labels(metric, labels or {})] = float(value)
 
     def inc(self, name: str, value: float = 1.0, labels: Mapping[str, str] | None = None) -> None:
         """Add a non negative amount to a counter sample."""
         metric = BY_NAME[name]
-        if metric.kind != "counter" or value < 0:
+        if metric.kind != "counter" or not isfinite(value) or value < 0:
             raise ValueError(f"{name} takes only non negative counter increments")
         key = _labels(metric, labels or {})
         self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
