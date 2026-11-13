@@ -90,7 +90,7 @@ class Admission:
         from scripts.hive import registry
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
-        member, hub = str(record.get("version", "")), updater.installed_version()
+        member, hub = str(record.get("version")), updater.installed_version()
         reported, floor = release_key(member), release_key(hub)
         return f"release={member} below {hub}" if reported and floor and reported < floor else ""
 
