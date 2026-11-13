@@ -1,6 +1,6 @@
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm_ledger import ledger_kinds
@@ -34,8 +34,8 @@ class Scope:
 @dataclass(frozen=True)
 class Answer:
     rows: list[dict[str, Any]]
-    frozen_ids: list[str] = field(default_factory=list)
-    sources: list[int] = field(default_factory=list)
+    frozen_ids: list[str]
+    sources: list[int]
 
 
 def ancestry(task: dict[str, Any], graph: dict[str, Any]) -> list[str]:
