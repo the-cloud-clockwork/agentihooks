@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.861 · 2026-11-13
+
+### 2026-11-13 · 98e27b946d1b · #11086 · @agenticore-app
+
+**Pin packaging in the swarm image lock so the hub admission imports**
+
+This change adds the packaging==26.3 entry, with matching hashes, to docker/swarm/requirements.lock so the swarm image actually ships the dependency that scripts.hub.admission needs; previously that image installed only from the lock with --no-deps, so adding packaging to pyproject in #11075 didn't reach it, and compose-task-smoke and compose-recovery-drill crashed with ModuleNotFoundError. It also adds a regression test that walks real imports from the CLI, ledger server, and hub modules to confirm every third-party import is covered by the swarm lock, catching this class of gap automatically going forward.
+
+### 2026-11-13 · a0d5021f7114 · #11081 · @agenticore-app
+
+**Skip the SCM git scan in ledger load installs**
+
+This change sets `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS` to `0.dev${{ github.run_number }}` on both ledger-load install steps (load and compare), so setuptools_scm no longer runs a git status scan while building the editable install. That scan was timing out after 40 seconds in CI, failing the ledger-load workflow at the Install dependencies step. Since no ledger-load step actually reads the installed version, pretending the version is safe and matches the approach already used elsewhere (writer lock, feature suite). A new test asserts the env var is present on both install steps, and a dispatched run confirms the install now completes without invoking git.
+
+### 2026-11-13 · df34cfaaa700 · #11075 · @agenticore-app
+
+**Hub refuses events admission from a hive on an older release**
+
+This change fixes a bug where an outdated hive could grab an events offer, fail to launch three times, and never reopen it, stalling the queue for fifteen minutes. Now, before any claim, execution, seat, or ledger write happens, the hub compares the hive's reported release version against its own using proper version ranking, and refuses admission outright if the hive is behind. Unknown or unparsable versions set no floor, and refusals leave any existing claim to normal lease recovery, so stale hives can no longer silently swallow work they can't complete.
+
 ## v2.17.860 · 2026-11-13
 
 ### 2026-11-13 · d27434f98bc8 · #11077 · @agenticore-app
