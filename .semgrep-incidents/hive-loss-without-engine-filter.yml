@@ -5,17 +5,16 @@ rules:
     message: >-
       A hub poll judges hive presence for a swarm that may not be on the events engine. Only spokes beat presence
       and they poll only events swarms, so a silent hive of a legacy swarm reads as lost and its running executions
-      are exited. Guard presence.lost with membership in the events swarms or skip swarms whose engine is not
-      EVENTS_ENGINE.
+      are exited. Guard presence.lost with the hub's events judgement, membership in the events swarms, or a skip of
+      swarms whose engine is not EVENTS_ENGINE.
     patterns:
       - pattern-inside: |
           def poll(...):
               ...
       - pattern: presence.lost(...)
+      - pattern-not-inside: $HUB._judged(...) and ...
       - pattern-not-inside: $SWARM in events and ...
       - pattern-not-inside: ... and $SWARM in events
-      - pattern-not-inside: $SWARM in $SELF._events(...) and ...
-      - pattern-not-inside: ... and $SWARM in $SELF._events(...)
       - pattern-not-inside: |
           if <... EVENTS_ENGINE ...>:
               continue

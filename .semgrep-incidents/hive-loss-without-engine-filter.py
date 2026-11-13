@@ -1,63 +1,52 @@
-class Unfiltered:
-    def poll(self, now):
-        for swarm, hive in self.rows():
-            # ruleid: hive-loss-without-engine-filter
-            if presence.lost(self.bus.for_swarm(swarm), hive, now):
-                self.exit(swarm, hive)
+from typing import Any
 
 
-class EventsReadButUnused:
-    def poll(self, now):
-        events = self._events()
-        for swarm, hive in self.rows():
-            # ruleid: hive-loss-without-engine-filter
-            lost = now - self.watching >= presence.TTL_MS and presence.lost(self.bus.for_swarm(swarm), hive, now)
-
-    def _events(self):
-        return set(event_slugs(self.store))
+def poll(hub: Any, now: int) -> None:
+    for swarm, hive in hub.rows():
+        # ruleid: hive-loss-without-engine-filter
+        if presence.lost(hub.bus.for_swarm(swarm), hive, now):
+            hub.exit(swarm, hive)
 
 
-class GuardedByEventsMembership:
-    def poll(self, now):
-        events = self._events()
-        for swarm, hive in self.rows():
-            lost = (
-                swarm in events
-                and now - self.watching >= presence.TTL_MS
-                # ok: hive-loss-without-engine-filter
-                and presence.lost(self.bus.for_swarm(swarm), hive, now)
-            )
+def poll(hub: Any, now: int) -> None:
+    hub.observe(now)
+    for swarm, hive in hub.rows():
+        # ruleid: hive-loss-without-engine-filter
+        lost = now - hub.watching >= presence.TTL_MS and presence.lost(hub.bus.for_swarm(swarm), hive, now)
+        hub.settle(swarm, hive, lost)
 
 
-class SkipsOtherEngines:
-    def poll(self, now):
-        for swarm, hive in self.rows():
-            if self.store.config(swarm).engine != EVENTS_ENGINE:
-                continue
-            # ok: hive-loss-without-engine-filter
-            if presence.lost(self.bus.for_swarm(swarm), hive, now):
-                self.exit(swarm, hive)
+def poll(hub: Any, now: int) -> None:
+    for swarm, hive in hub.rows():
+        # ruleid: hive-loss-without-engine-filter
+        if hive in hub.hives and presence.lost(hub.bus.for_swarm(swarm), hive, now):
+            hub.exit(swarm, hive)
 
 
-def ending(bus, hive, now):
+def poll(hub: Any, now: int) -> None:
+    for swarm, hive in hub.rows():
+        # ok: hive-loss-without-engine-filter
+        lost = hub._judged(swarm, now) and presence.lost(hub.bus.for_swarm(swarm), hive, now)
+        hub.settle(swarm, hive, lost)
+
+
+def poll(hub: Any, now: int) -> None:
+    events = set(event_slugs(hub.store))
+    for swarm, hive in hub.rows():
+        # ok: hive-loss-without-engine-filter
+        if swarm in events and presence.lost(hub.bus.for_swarm(swarm), hive, now):
+            hub.exit(swarm, hive)
+
+
+def poll(hub: Any, now: int) -> None:
+    for swarm, hive in hub.rows():
+        if hub.store.config(swarm).engine != EVENTS_ENGINE:
+            continue
+        # ok: hive-loss-without-engine-filter
+        if presence.lost(hub.bus.for_swarm(swarm), hive, now):
+            hub.exit(swarm, hive)
+
+
+def ending(bus: Any, hive: str, now: int) -> bool:
     # ok: hive-loss-without-engine-filter
     return presence.lost(bus, hive, now)
-
-
-class ChecksEventsAfterPresence:
-    def poll(self, now):
-        for swarm, hive in self.rows():
-            lost = (
-                now - self.watching >= presence.TTL_MS
-                # ok: hive-loss-without-engine-filter
-                and presence.lost(self.bus.for_swarm(swarm), hive, now)
-                and swarm in self._events(now)
-            )
-
-
-class GuardedByUnrelatedMembership:
-    def poll(self, now):
-        for swarm, hive in self.rows():
-            # ruleid: hive-loss-without-engine-filter
-            if hive in self.hives and presence.lost(self.bus.for_swarm(swarm), hive, now):
-                self.exit(swarm, hive)

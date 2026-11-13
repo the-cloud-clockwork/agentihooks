@@ -173,7 +173,7 @@ def test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive(rig):
 
 
 @pytest.mark.feature("hive-loss-events-engine-only")
-def test_a_hub_built_without_a_store_connects_only_once_a_hive_reads_as_lost(rig, monkeypatch):
+def test_a_hub_built_without_a_store_connects_once_it_watches_a_start(rig, monkeypatch):
     from scripts.hive import presence
     from scripts.hub import hive_loss
 
@@ -185,14 +185,90 @@ def test_a_hub_built_without_a_store_connects_only_once_a_hive_reads_as_lost(rig
     connect.assert_not_called()
     assert rig.first.spoke.poll() == "started"
     rig.hub.run_once()
-    while rig.clock() < T0 + presence.TTL_MS - 5_000:
+    while rig.clock() < T0 + presence.TTL_MS:
         rig.clock.return_value = rig.clock() + 5_000
         loss.poll()
-    connect.assert_not_called()
-    rig.clock.return_value = T0 + presence.TTL_MS
-    loss.poll()
     connect.assert_called_once_with()
     assert [call.args[1].key for call in loss._emit.call_args_list] == ["execution-a"]
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_swarm_switched_back_to_events_waits_a_full_presence_ttl_before_judging_its_hives(rig):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
+    advance(rig, T0 + 4 * presence.TTL_MS)
+    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "events")
+    rig.loss._emit = Mock()
+    observed = rig.clock() + 5_000
+    advance(rig, observed + presence.TTL_MS - 1)
+    rig.loss._emit.assert_not_called()
+    advance(rig, observed + presence.TTL_MS)
+    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["execution-a"]
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_swarm_switched_back_to_events_keeps_executions_whose_hive_beats_again(rig):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
+    advance(rig, T0 + 4 * presence.TTL_MS)
+    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "events")
+    rig.loss._emit = Mock()
+    advance(rig, rig.clock() + 4 * presence.TTL_MS, beating=["hive-a"])
+    rig.loss._emit.assert_not_called()
+    assert claim_state(rig) == "started"
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_swarm_missing_from_the_store_index_is_never_judged(rig):
+    from scripts.hive import presence
+    from scripts.swarm.store import PREFIX
+
+    rig.store.redis.srem(f"{PREFIX}:index", "rig")
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.loss._emit = Mock()
+    advance(rig, T0 + 4 * presence.TTL_MS)
+    rig.loss._emit.assert_not_called()
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_failed_store_read_keeps_the_last_events_swarms_and_says_so(rig, monkeypatch, capsys):
+    import redis
+
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    monkeypatch.setattr(hive_loss, "event_slugs", Mock(side_effect=redis.ConnectionError("down")))
+    rig.loss._emit = Mock()
+    advance(rig, T0 + presence.TTL_MS)
+    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["execution-a"]
+    failure = "hub: hive loss kept its last events swarms; the store read failed (down)"
+    assert capsys.readouterr().err.splitlines() == [failure] * 9 + [
+        "hub: hive hive-a of swarm rig lost; exited execution execution-a of task task"
+    ]
+
+
+@pytest.mark.feature("hive-loss-events-engine-only")
+def test_a_failed_first_store_read_judges_no_swarm(rig, monkeypatch):
+    import redis
+
+    from scripts.hive import presence
+    from scripts.hub import hive_loss
+
+    monkeypatch.setattr(hive_loss, "event_slugs", Mock(side_effect=redis.ConnectionError("down")))
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.loss._emit = Mock()
+    advance(rig, T0 + 4 * presence.TTL_MS)
+    rig.loss._emit.assert_not_called()
 
 
 def test_a_beating_hive_keeps_its_running_task(rig):

@@ -23,10 +23,10 @@ GAP_MS = presence.BEAT_SECONDS * 1000
 
 
 class HiveLoss:
-    def __init__(self, bus: Bus, clock: lease.Clock = lease.wall_ms, store: RedisStore | None = None):
+    def __init__(self, bus: Bus, clock: lease.Clock = lease.wall_ms, store: RedisStore | None = None) -> None:
         self._bus = bus
         self._store = store
-        self._read: tuple[int | None, set[str]] = (None, set())
+        self._entered: dict[str, int] | None = None
         self._state = bus.state(BUCKET)
         self._clock = clock
         self._emit = execution_events.emit
@@ -58,15 +58,12 @@ class HiveLoss:
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
             by_hive[(raw["swarm"], raw["data"]["hive"])].append((key, Envelope.from_dict(raw)))
+        self._observe(now, entry is not None)
         done, losses = [], []
         for (swarm, hive), starts in by_hive.items():
             if not guard():
                 break
-            lost = (
-                now - self._watching >= presence.TTL_MS
-                and presence.lost(self._bus.for_swarm(swarm), hive, now)
-                and swarm in self._events(now)
-            )
+            lost = self._judged(swarm, now) and presence.lost(self._bus.for_swarm(swarm), hive, now)
             if lost or prune:
                 settled, ended = self._settle(starts, lost, now)
                 done += settled
@@ -87,11 +84,24 @@ class HiveLoss:
             for line in losses:
                 print(line, file=sys.stderr)
 
-    def _events(self, now: int) -> set[str]:
-        if self._read[0] != now:
+    def _observe(self, now: int, watching: bool) -> None:
+        """Record since when each swarm has been on the events engine, keeping the last record when the store fails."""
+        if not watching:
+            return
+        try:
             self._store = self._store or swarm_store.connect()
-            self._read = (now, set(event_slugs(self._store)))
-        return self._read[1]
+            events = event_slugs(self._store)
+        except (swarm_store.SwarmError, *swarm_store.store_errors()) as exc:
+            print(f"hub: hive loss kept its last events swarms; the store read failed ({exc})", file=sys.stderr)
+            return
+        start = self._watching if self._entered is None else now
+        seen = self._entered or {}
+        self._entered = {swarm: seen.get(swarm, start) for swarm in events}
+
+    def _judged(self, swarm: str, now: int) -> bool:
+        """A swarm is judged once this hub has watched it on the events engine for a full presence TTL."""
+        since = (self._entered or {}).get(swarm)
+        return since is not None and now - max(self._watching, since) >= presence.TTL_MS
 
     def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[str]]:
         done, ended = [], []
