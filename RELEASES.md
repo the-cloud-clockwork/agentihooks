@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.853 · 2026-11-13
+
+### 2026-11-13 · 371b65b5cb50 · #11009 · @agenticore-app
+
+**Document stored fragment reuse by identity on ledger writes and refreshes**
+
+This change adds documentation to docs/reference/presentation-layer.md explaining how the ledger reuses stored fragments by identity during writes and refreshes, covering the fragment tree, the three ordered reuse checks and their cost, why identity-based reuse is safe, the write/cross-pod-refresh/rebuild paths, and the measured refresh CPU improvement from the earlier fix (#8569), plus a troubleshooting entry and index update. It matters because it records verified, source-checked behavior so operators can diagnose refresh CPU regressions and understand the performance guarantees without re-reading the implementation.
+
 ## v2.17.852 · 2026-11-13
 
 ### 2026-11-13 · d4fe5d5f72c8 · #11040 · @nestorcolt
