@@ -162,6 +162,24 @@ def test_a_lock_held_on_another_hive_or_an_unnamed_replica_never_stands_by(store
     assert controller_probes.standing_by({}, store, lambda: "hive-fixture") is False
 
 
+def test_live_skips_the_lease_check_on_a_standby_replica(store: RedisStore, capsys: pytest.CaptureFixture[str]) -> None:
+    replica_held(store, "hive-fixture", "pod-leader")
+    environ = {**ENV, REPLICA_ENV: "pod-standby"}
+
+    assert controller_probes.live(environ, store, Fetch(), "hive-fixture") == 0
+    assert capsys.readouterr().out == "controller: live\n"
+
+
+def test_live_still_requires_the_lease_on_the_replica_holding_the_lock(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    replica_held(store, "hive-fixture", "pod-leader")
+    environ = {**ENV, REPLICA_ENV: "pod-leader"}
+
+    assert controller_probes.live(environ, store, Fetch(), "hive-fixture") == 1
+    assert capsys.readouterr().out == "controller: no live controller lease for ['fixture']\n"
+
+
 def test_ready_passes_on_the_deep_report_while_the_api_and_redis_answer(store, capsys):
     fetch = Fetch()
 

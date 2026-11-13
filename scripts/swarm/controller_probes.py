@@ -28,7 +28,10 @@ def live(
     fetch: Callable = urllib.request.urlopen,
     owner: str | None = None,
 ) -> int:
-    held = ticked(store.slugs(), environ.get(HOST_SWARMS_ENV, ""))
+    from scripts.swarm import commands
+
+    standby = standing_by(environ, store, lambda: owner or commands.hive_id())
+    held = [] if standby else ticked(store.slugs(), environ.get(HOST_SWARMS_ENV, ""))
     stale = [slug for slug in held if not lease.current(store, slug)]
     if stale:
         print(f"controller: no live controller lease for {stale}")
