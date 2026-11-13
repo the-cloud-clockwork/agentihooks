@@ -1079,7 +1079,8 @@ def test_a_spoke_settles_its_own_launch_after_nats_drops_mid_launch_and_takes_ne
         rig.runtime.spawn.side_effect = spawn
         assert dropped.poll(500) == "retry"
         rig.runtime.spawn.side_effect = None
-        before.close()
+        with contextlib.suppress(Exception):
+            before.close()
         after = start()
         key = spoke.claim_key(rig.event)
         stranded = after.state("spoke-work").get(key)
