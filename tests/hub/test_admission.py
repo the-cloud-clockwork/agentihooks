@@ -502,3 +502,18 @@ def test_the_hub_admits_a_launch_for_a_hive_on_the_hub_release_or_an_unreported_
     assert admitted is not None
     assert admitted["hive"] == "hive-a"
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+def test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import updater
+
+    monkeypatch.setattr(updater, "installed_version", lambda: "2.17.843")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
