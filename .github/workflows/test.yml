@@ -2612,7 +2612,7 @@ jobs:
         id: check-shard-coverage
         continue-on-error: true
         shell: bash
-        run: |
+        run: &dep-manifest-check-shard-coverage |
           shopt -s nullglob
           python -m tests.coverage_check .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
           python -c 'import json, pathlib; [json.loads(line) for path in pathlib.Path(".coverage-shards").rglob("*.jsonl") for line in path.read_text().splitlines() if line.strip()]'
@@ -2635,6 +2635,11 @@ jobs:
         if: steps.redownload-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *dep-manifest-download-shard-coverage
+
+      - name: Check the shard coverage downloaded again
+        if: steps.check-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: *dep-manifest-check-shard-coverage
 
       - name: Build the test dependency manifest
         env:

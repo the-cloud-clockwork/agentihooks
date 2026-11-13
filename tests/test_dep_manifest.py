@@ -351,6 +351,12 @@ def test_a_torn_shard_download_is_caught_and_downloaded_again_before_the_build(t
     assert check["continue-on-error"] is True
     assert again["if"] == f"steps.{check['id']}.outcome == 'failure'"
     assert again["with"] == _step("dep-manifest", "Download shard coverage")["with"]
+    final = _step("dep-manifest", "Check the shard coverage downloaded again")
+    assert names.index("Download torn shard coverage again, attempt 2") < names.index(final["name"])
+    assert names.index(final["name"]) < names.index("Build the test dependency manifest")
+    assert final["if"] == again["if"]
+    assert final["run"] == check["run"]
+    assert "continue-on-error" not in final
     shard = tmp_path / ".coverage-shards" / "coverage-3.12-7"
     (shard / "dep-inputs").mkdir(parents=True)
     data = CoverageData(str(shard / ".coverage"))
