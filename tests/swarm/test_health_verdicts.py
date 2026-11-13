@@ -136,6 +136,31 @@ def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):
     assert shown(store, [watching(41)], T0 + 2 * HOUR + 1) == []
 
 
+@pytest.mark.feature("swarm-health-false-positives")
+def test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings(
+    board: tuple[Writes, verdicts.VerdictStore],
+) -> None:
+    _, store = board
+    stale = Finding("stale claim", "t9", "no progress", ("quiet",), "30 minutes", 40)
+    other = Finding("over monitoring", "sw-eng-2", "more watch calls", ("x",), "y", 30)
+    nested = Finding("proof loop", "tasks/t9/pr", "reruns past the cap", ("3 reruns",), "2 reruns", 3)
+    unjudged = Finding("idle with claim", "t1", "idle on its claim", ("3 ticks",), "3 ticks", 3)
+    idle = Finding("idle with claim", "t2", "idle on its claim", ("4 ticks",), "3 ticks", 4)
+    store.visible([watching(33), stale, other, nested, unjudged, idle], T0, HOUR)
+    assert store.false_positives() == {}
+    store.judge("over-monitoring/sw-master-1", "false-positive", "ledger re-arms", "sw-master-1", T0)
+    store.judge("over-monitoring/sw-eng-2", "false-positive", "watch re-armed once", "sw-master-1", T0)
+    store.judge("idle-with-claim/t2", "established", "", "sw-master-1", T0)
+    store.judge("stale-claim/t9", "false-positive", "waiting on checks", "sw-master-1", T0)
+    store.judge("proof-loop/tasks/t9/pr", "false-positive", "one rerun was a lost runner", "sw-master-1", T0)
+    assert store.false_positives() == {
+        "idle-with-claim": {"false_positive": 0, "judged": 1},
+        "over-monitoring": {"false_positive": 2, "judged": 2},
+        "proof-loop": {"false_positive": 1, "judged": 1},
+        "stale-claim": {"false_positive": 1, "judged": 1},
+    }
+
+
 def test_an_identical_finding_writes_nothing(board):
     client, store = board
     store.visible([watching(33)], T0, HOUR)

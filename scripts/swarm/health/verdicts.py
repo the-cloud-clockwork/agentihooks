@@ -2,6 +2,7 @@
 
 import json
 from math import inf
+from typing import cast
 from uuid import uuid4
 
 from scripts.swarm.store import SwarmError
@@ -103,3 +104,16 @@ class VerdictStore:
         if since >= until or until > now_ms:
             raise SwarmError("verdict log needs --since before --until and --until no later than now")
         return [json.loads(raw)[1] for raw in self.redis.zrangebyscore(self.event_key, since, f"({until}")]
+
+    def false_positives(self) -> dict[str, dict[str, int]]:
+        """Per detector, the findings whose current verdict is false-positive out of all judged findings."""
+        counts: dict[str, dict[str, int]] = {}
+        stored = cast(dict[str, str], self.redis.hgetall(self.key))  # pyright: ignore[reportUnknownMemberType]
+        for finding_id, raw in sorted(stored.items()):
+            verdict = json.loads(raw).get("verdict")
+            if not verdict:
+                continue
+            row = counts.setdefault(finding_id.split("/", 1)[0], {"false_positive": 0, "judged": 0})
+            row["judged"] += 1
+            row["false_positive"] += verdict["value"] == "false-positive"
+        return counts
