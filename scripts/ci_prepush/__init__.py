@@ -16,6 +16,7 @@ WORKERS = "2"
 LINTED = ("hooks/", "scripts/", "tests/")
 ALLOWLIST = "tests/SIZE_ALLOWLIST.json"
 GRADER = "scripts/size_limits.py"
+TYPE_GRADER = "scripts/type_gate.py"
 
 
 def _git(root: Path, *args: str) -> str:
@@ -53,18 +54,59 @@ def tests_for(root: Path, names: list[str]) -> list[str]:
     return sorted(selected, key=lambda name: (Path(name).parent.as_posix(), name))
 
 
+def _snapshot(root: Path, revision: str, folder: Path) -> Path:
+    """Check out every file of a revision into folder through a private index and return it."""
+    index = {**os.environ, "GIT_INDEX_FILE": f"{folder}.index"}
+    for command in (["read-tree", revision], ["checkout-index", "--all", f"--prefix={folder}/"]):
+        subprocess.run(["git", "-C", str(root), *command], check=True, env=index)
+    return folder
+
+
 def _comment_step(root: Path, revision: str, grade: Path) -> list[tuple[str, list[str]]]:
     protected = _git(root, "ls-tree", revision, "scripts/no_comments.py")
     if not protected and not (root / "scripts/no_comments.py").is_file():
         return []
-    snapshot = grade / "comments-base"
-    index = {**os.environ, "GIT_INDEX_FILE": str(grade / "comments-base.index")}
-    for command in (["read-tree", revision], ["checkout-index", "--all", f"--prefix={snapshot}/"]):
-        subprocess.run(["git", "-C", str(root), *command], check=True, env=index)
+    snapshot = _snapshot(root, revision, grade / "comments-base")
     grader = snapshot / "scripts/no_comments.py"
     if not grader.is_file():
         grader = root / "scripts/no_comments.py"
     return [("Python comments", [sys.executable, "-I", str(grader), "--base", str(snapshot), "--head", str(root)])]
+
+
+def _type_step(root: Path, base: str, revision: str, grade: Path) -> list[tuple[str, list[str]]]:
+    """Return the strict type gate step in the CI matched environment, graded as CI grades it.
+
+    The baseline comes from the merge base and the grader from the base tip, falling back to the head's own gate
+    when the base tip has none.
+    """
+    if _git(root, "ls-tree", base, TYPE_GRADER):
+        grader = grade / "type_gate.py"
+        grader.write_bytes(
+            subprocess.run(["git", "-C", str(root), "show", f"{base}:{TYPE_GRADER}"], capture_output=True).stdout
+        )
+    elif (root / TYPE_GRADER).is_file():
+        grader = root / TYPE_GRADER
+    else:
+        return []
+    snapshot = _snapshot(root, revision, grade / "types-base")
+    return [
+        (
+            "strict types",
+            [
+                sys.executable,
+                "-m",
+                "scripts.type_env",
+                "--grader",
+                str(grader),
+                "--root",
+                str(root),
+                "--base",
+                str(snapshot),
+                "--head",
+                str(root),
+            ],
+        )
+    ]
 
 
 def _snapshot_sources(root: Path, merge_base: str, grade: Path) -> None:
@@ -92,6 +134,7 @@ def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
         ("size limits", [python, "-I", str(grade / GRADER), "--base", str(grade), "--head", str(root)]),
     ]
     steps.extend(_comment_step(root, merge_base, grade))
+    steps.extend(_type_step(root, base, merge_base, grade))
     from hooks.context.local_test_guard import local_tests_allowed
 
     if local_tests_allowed() and (tests := tests_for(root, changed(root, base))):
