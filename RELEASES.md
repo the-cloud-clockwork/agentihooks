@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.841 · 2026-11-13
+
+### 2026-11-13 · cbe9e4d00461 · #10972 · @agenticore-app
+
+**Write a detached agent's harness and account onto its record at spawn**
+
+This change fixes a blind spot in swarm status where a freshly spawned detached agent showed an empty harness and a dashed account while already working, making it impossible to tell which runtime it was using until well after launch. Now `HerdrRuntime.spawn` records the decided harness, routed account, model, effort and profile onto the agent record at the moment the launch job is queued, so `swarm status` reflects reality immediately; the launch result still overwrites these fields once collection completes, keeping them accurate end to end.
+
+### 2026-11-13 · 06945e408047 · #10996 · @agenticore-app
+
+**Bound the swarm history list in Redis**
+
+This change fixes unbounded growth of the swarm history list in Redis, which was accumulating indefinitely with every retired agent and ballooning snapshot sizes across the swarm. Now, when an agent is retired, the history list is trimmed to only the newest rows worth keeping, applied consistently on both the watched transaction path and the compare and delete fallback path. This keeps Redis memory and snapshot sizes in check long term, directly addressing the ledger bloat observed in production where a single swarm's history list had grown to over 14,000 rows and 49.6 MB.
+
 ## v2.17.834 · 2026-11-12
 
 ### 2026-11-12 · 6383b192940c · #10894 · @agenticore-app
