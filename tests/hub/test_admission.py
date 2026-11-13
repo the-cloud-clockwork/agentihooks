@@ -415,3 +415,58 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     assert rig.ledger.writes == []
     assert rig.rows["t1"]["state"] == "open"
     assert capsys.readouterr().err.splitlines() == [f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused"]
+
+
+def _released(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, hub: str) -> None:
+    from scripts import updater
+    from scripts.hive import registry
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    monkeypatch.setattr(updater, "installed_version", lambda: hub)
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000, "version": member})
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+@pytest.mark.parametrize(
+    "member, hub",
+    [("2.17.825", "2.17.843"), ("2.9.0", "2.17.0"), ("2.17.825.dev4+g1a2b", "2.17.826")],
+)
+def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], member: str, hub: str
+) -> None:
+    _released(rig, monkeypatch, member, hub)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events release floor swarm={SLUG} task=t1 hive=hive-a release={member} below {hub}: refused"
+    ]
+
+
+@pytest.mark.feature("hub-admission-release-floor")
+@pytest.mark.parametrize(
+    "member, hub",
+    [
+        ("2.17.843", "2.17.843"),
+        ("2.17.844", "2.17.843"),
+        ("2.18.0", "2.17.843"),
+        ("", "2.17.843"),
+        ("unknown", "2.17.843"),
+        ("2.17.825", "unknown"),
+    ],
+)
+def test_the_hub_admits_a_launch_for_a_hive_on_the_hub_release_or_an_unreported_one(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], member: str, hub: str
+) -> None:
+    _released(rig, monkeypatch, member, hub)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
