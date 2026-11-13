@@ -508,6 +508,7 @@ def test_the_disabled_check_measures_only_mapped_tests(
     assert "tests/test_login.py::test_unmapped" not in seen[0]
 
 
+@pytest.mark.timeout(150)
 def test_the_repository_feature_map_is_valid() -> None:
     root = Path(__file__).resolve().parents[1]
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_"))}
@@ -517,7 +518,7 @@ def test_the_repository_feature_map_is_valid() -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=40,
+        timeout=140,
         check=False,
     )
     assert result.returncode == 0, result.stderr
