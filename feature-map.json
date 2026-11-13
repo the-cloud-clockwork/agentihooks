@@ -1137,6 +1137,23 @@
       ]
     },
     {
+      "id": "hub-owned-claim-lease-renewal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-lease",
+      "behaviour": "Every tick reap pass renews the claim lease of each swarm agent the hub owns, the agents whose execution start is on the bus and that the legacy list leaves out, so an agent admitted through an events offer keeps its claim past the first ten minute lease; a claim another agent holds or one already lapsed is never touched, and the memory bus backend owns no agent.",
+      "seam": "scripts.hub.owned_leases.renew, called by the tick reap step",
+      "tests": [
+        "tests/hub/test_owned_leases.py::test_the_agent_the_legacy_list_leaves_out_gets_a_full_claim_lease",
+        "tests/hub/test_owned_leases.py::test_a_claim_another_agent_holds_is_left_alone",
+        "tests/hub/test_owned_leases.py::test_a_lapsed_claim_is_never_taken_back",
+        "tests/hub/test_owned_leases.py::test_the_memory_backend_owns_no_agent_and_reads_nothing",
+        "tests/tick/steps/test_reap.py::test_reap_renews_the_claim_lease_of_a_hub_owned_agent"
+      ],
+      "rules": [
+        "reap-renews-hub-owned-leases"
+      ]
+    },
+    {
       "id": "swarm-tick-agents-reap",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h10",
