@@ -284,11 +284,14 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path: P
         started.append(argv)
         return 0
 
+    naps: list[float] = []
+
     def bare(pane: str) -> bool:
+        assert naps or not started
         return not started
 
-    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None) == "started"
-    second = launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=lambda s: None)
+    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=naps.append) == "started"
+    second = launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=naps.append)
     assert second == "not-pending"
     assert len(started) == 1 and "the body" in paths.opening(tmp_path, "eng-1").read_text()
     loaded = registry.load(tmp_path)
@@ -296,22 +299,25 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path: P
     assert seat is not None and seat.state == registry.READY
 
 
-def test_a_relaunch_that_raises_leaves_the_seat_pending(tmp_path):
+def test_a_relaunch_that_raises_leaves_the_seat_pending(tmp_path: Path) -> None:
     _swarm(tmp_path, eng_state=registry.PENDING)
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         raise OSError("init-agent is missing")
 
     with pytest.raises(OSError):
-        launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=start)
+        launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=start, wait_s=0.0, sleep=lambda s: None)
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert seat is not None and seat.state == registry.PENDING
 
 
-def test_a_failed_relaunch_or_a_pane_that_never_frees_leaves_the_seat_pending(tmp_path):
+def test_a_failed_relaunch_or_a_pane_that_never_frees_leaves_the_seat_pending(tmp_path: Path) -> None:
     _swarm(tmp_path, eng_state=registry.PENDING)
-    assert launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=lambda a, e: 2) == "failed-2"
+    failed = launch.relaunch(
+        tmp_path, "eng-1", {}, bare=lambda pane: True, start=lambda a, e: 2, wait_s=0.0, sleep=lambda s: None
+    )
+    assert failed == "failed-2"
     outcome = launch.relaunch(
         tmp_path, "eng-1", {}, bare=lambda pane: False, start=lambda a, e: 0, wait_s=0.0, sleep=lambda s: None
     )
@@ -336,7 +342,7 @@ def test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending(tmp_path:
         states.append(seat.state if seat else "gone")
         return True
 
-    outcome = launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None)
+    outcome = launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=lambda s: None)
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert outcome == "exited" and seat is not None and seat.state == registry.PENDING
@@ -353,13 +359,14 @@ def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while
         loaded = registry.load(tmp_path)
         seat = loaded.seat("eng-1") if loaded else None
         assert seat is not None and seat.state == registry.LAUNCHING
+        assert naps or not started
         return not started
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append("eng-1")
         return 0
 
-    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=naps.append) == "started"
+    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=naps.append) == "started"
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert seat is not None and seat.state == registry.READY and sum(naps) == launch.SETTLE_S == 20.0
