@@ -148,7 +148,7 @@ def test_debounce_defaults_are_the_public_quiet_window_and_clock() -> None:
     assert debounce.clock is monotonic
 
 
-def test_carried_credit_skips_only_empty_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_carried_credit_skips_only_empty_rounds() -> None:
     from math import ceil
 
     calls: list[float] = []
@@ -158,11 +158,11 @@ def test_carried_credit_skips_only_empty_rounds(monkeypatch: pytest.MonkeyPatch)
         assert len(calls) <= 12
         return ceil(value)
 
-    monkeypatch.setattr(policy, "ceil", bounded_ceil)
     first = work("first", head="first", estimate=3)
     later = work("later", head="later", estimate=4)
     neighbour = work("neighbour", branch="other", estimate=5)
-    assert policy.order([first, later, neighbour]) == [first, neighbour, later]
+    with patch.object(policy, "ceil", bounded_ceil):
+        assert policy.order([first, later, neighbour]) == [first, neighbour, later]
 
 
 def test_nonunit_quantum_preserves_estimated_costs() -> None:
