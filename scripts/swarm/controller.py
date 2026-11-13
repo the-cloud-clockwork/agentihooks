@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from time import monotonic, time
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, NoReturn, cast
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -726,8 +726,8 @@ def _keep_credential(environ: Mapping[str, str], store: RedisStore) -> threading
     credential = environ.get(CREDENTIAL_ENV, "")
     if "." not in credential:
         return None
-    keep_service: Callable[[Any, str], None] = cast(Any, auth).keep_service
-    return replica.keep(partial(keep_service, cast(Any, store).redis, credential), STOPPING, replica.KEEP_S)
+    keeping = partial(auth.keep_service, store.redis, credential)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
+    return replica.keep(keeping, STOPPING, replica.KEEP_S)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _passes(
@@ -817,7 +817,7 @@ def main(argv: list[str]) -> int:
     previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
         _keep_credential(os.environ, store)
-        lock = replica.configured(os.environ, lambda: cast(Any, store).redis, commands.hive_id)
+        lock = replica.configured(os.environ, store, commands.hive_id)
         if lock is not None:
             _lead(store, os.environ, lock)
         proof_swarm.run(os.environ, store)

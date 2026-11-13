@@ -72,7 +72,7 @@ class ReplicaLock:
             try:
                 kept = self.take()
             except Exception as exc:
-                print(f"controller: renewing the replica lock failed: {exc}", file=sys.stderr, flush=True)
+                print(f"controller: renewing the replica lock failed: {exc}", file=sys.stderr)
                 kept = self.fresh(beat_s)
             if not kept:
                 lost()
@@ -88,7 +88,7 @@ def keep(action: Callable[[], None], stop: threading.Event, every_s: float = KEE
         try:
             action()
         except Exception as exc:
-            print(f"controller: keeping the controller credential failed: {exc}", file=sys.stderr, flush=True)
+            print(f"controller: keeping the controller credential failed: {exc}", file=sys.stderr)
         return True
 
     return _repeat(run, stop, every_s, KEEP_THREAD)
@@ -104,7 +104,7 @@ def _repeat(action: Callable[[], bool], stop: threading.Event, every_s: float, n
     return thread
 
 
-def configured(environ: Mapping[str, str], redis: Callable[[], Any], hive: Callable[[], str]) -> ReplicaLock | None:
+def configured(environ: Mapping[str, str], store: Any, hive: Callable[[], str]) -> ReplicaLock | None:
     """Build the replica lock of a controller whose Deployment names its replica, else None without reaching Redis."""
-    owner = environ.get(REPLICA_ENV, "")
-    return ReplicaLock(redis(), hive(), owner) if owner else None
+    owner = environ.get(REPLICA_ENV)
+    return ReplicaLock(store.redis, hive(), owner) if owner else None

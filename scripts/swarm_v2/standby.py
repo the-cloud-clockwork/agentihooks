@@ -4,9 +4,8 @@ import http.client
 import json
 import re
 import urllib.error
-import urllib.parse
 import urllib.request
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.api import health, readiness
@@ -25,7 +24,7 @@ NO_ENDPOINT = "no such endpoint on the published port"
 
 def publish_leader(store: RedisStore, slug: str, address: str, ttl_ms: int | None = None) -> None:
     """Record the control API address of the replica that leads ``slug``, for its standbys to forward to."""
-    cast(Any, store).redis.set(store.key(slug, LEADER_KEY), address, px=ttl_ms)
+    store.redis.set(store.key(slug, LEADER_KEY), address, px=ttl_ms)  # pyright: ignore[reportUnknownMemberType]
 
 
 class Standby:
@@ -34,19 +33,20 @@ class Standby:
 
     def __init__(self, store: RedisStore, slug: str, only: re.Pattern[str] | None = None) -> None:
         self.store, self.slug, self.only = store, slug, only
-        self.readiness = readiness.Probe(cast(Any, store).redis)
+        self.redis: Any = store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        self.readiness = readiness.Probe(self.redis)  # pyright: ignore[reportUnknownMemberType]
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict[str, Any]]:
         if self.only is not None and not self.only.fullmatch(path):
-            return 404, cast(dict[str, Any], cast(Any, GrantRefused(NOT_SERVED, NO_ENDPOINT)).detail())
+            return 404, _refused(NOT_SERVED, NO_ENDPOINT)
         if (method, path) == ("GET", health.LIVE_PATH):
             return 200, {"probe": health.SHALLOW, "status": STANDBY}
         if (method, path) == ("GET", health.READY_PATH):
             available = self.readiness.check()
             return (200 if available else 503), {"redis": health.OK if available else health.UNAVAILABLE}
-        address = cast(str | None, cast(Any, self.store).redis.get(self.store.key(self.slug, LEADER_KEY)))
+        address: str | None = self.redis.get(self.store.key(self.slug, LEADER_KEY))
         if not address:
-            return 503, _refusal(NO_LEADER)
+            return 503, _refused(UNAVAILABLE, NO_LEADER)
         return forward(address, method, path, authorization, body)
 
 
@@ -54,8 +54,7 @@ def forward(address: str, method: str, path: str, authorization: str, body: obje
     """Send one control API request to the leader at ``address`` and return its status and JSON reply."""
     data = None if body is None else json.dumps(body).encode()
     headers = {"Authorization": authorization, "Content-Type": "application/json"}
-    url = urllib.parse.urlunsplit((SCHEME, address, path, "", ""))
-    request = urllib.request.Request(url, data=data, method=method, headers=headers)
+    request = urllib.request.Request(f"{SCHEME}://{address}{path}", data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=FORWARD_S) as response:
             return response.status, json.loads(response.read())
@@ -63,10 +62,10 @@ def forward(address: str, method: str, path: str, authorization: str, body: obje
         try:
             return refused.code, json.loads(refused.read())
         except (OSError, ValueError, http.client.HTTPException):
-            return 503, _refusal(UNANSWERED)
+            return 503, _refused(UNAVAILABLE, UNANSWERED)
     except (OSError, ValueError, http.client.HTTPException):
-        return 503, _refusal(UNANSWERED)
+        return 503, _refused(UNAVAILABLE, UNANSWERED)
 
 
-def _refusal(message: str) -> dict[str, Any]:
-    return cast(dict[str, Any], cast(Any, GrantRefused(UNAVAILABLE, message)).detail())
+def _refused(error_class: str, message: str) -> dict[str, Any]:
+    return GrantRefused(error_class, message).detail()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
