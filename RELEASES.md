@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.857 · 2026-11-13
+
+### 2026-11-13 · 928bacf42a44 · #11047 · @agenticore-app
+
+**Add CI lab capacity document, contract metrics and ClickHouse rows**
+
+This change adds the CI lab capacity document and metrics plumbing: `scripts.ci_lab.capacity` computes load, predicted wait, and utilisation to back the `GET /capacity` endpoint, while `scripts.ci_lab.metrics` builds a contract-driven registry (HELP/TYPE rendering, observe helpers) serving both `/capacity` and `/metrics`, plus `UNITS` and `GRADES` ClickHouse outbox tables for recording rows. It lays the groundwork for the scheduler to expose live load and task metrics once wired in, enabling the planned Prometheus query proof.
+
 ## v2.17.856 · 2026-11-13
 
 ### 2026-11-13 · 752f49ee78e3 · #11064 · @nestorcolt
