@@ -1584,6 +1584,14 @@ def test_a_member_of_a_removed_hive_is_dropped_and_its_task_reopened(
         ledger.update_task.assert_not_called()
 
 
+@pytest.mark.feature("removed-hive-member-reaped")
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_an_agent_that_names_no_hive_never_reads_as_vanished(remote: SimpleNamespace) -> None:
+    agent = replace(remote.agent, hive="")
+
+    assert remote.runtime.hive.vanished(agent, LAUNCHED + remote.reports.STARTUP_MS) is False
+
+
 @pytest.mark.parametrize(
     ("ended", "pod_started_after", "listed", "gone"),
     [
