@@ -179,7 +179,11 @@ def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, A
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     rows: Any = view.rows
     return [
-        offer(task, view, now_ms) for task in rows.values() if task.get("lane") and claimable(task, task["lane"], view)
+        offer(task, view, now_ms)
+        for task in rows.values()
+        if task.get("lane")
+        and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
+        and claimable(task, task["lane"], view)
     ]
 
 

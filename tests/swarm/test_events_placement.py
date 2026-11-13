@@ -52,9 +52,11 @@ def test_an_offer_carries_its_hive_pin_and_needs_and_nothing_for_an_unpinned_tas
     }
 
 
-def test_a_workstation_offer_keeps_an_explicit_hive_pin() -> None:
-    [event] = readiness.offers(snapshot(doc([task("desk", workstation=True, hive="hive-b")])), NOW)
-    assert event.data == {"lane": "eng", "generation": 0, "hive": "hive-b"}
+def test_a_workstation_task_pinned_off_the_root_hive_is_never_offered() -> None:
+    pinned = [task("desk", workstation=True, hive="hive-b"), task("root", workstation=True, hive=ROOT)]
+    assert [event.data for event in readiness.offers(snapshot(doc(pinned)), NOW)] == [
+        {"lane": "eng", "generation": 0, "hive": ROOT}
+    ]
 
 
 @pytest.mark.parametrize(
