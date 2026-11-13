@@ -5808,6 +5808,19 @@
         "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
       ]
+    },
+    {
+      "id": "swarm-engine-events-only",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1620-rest",
+      "behaviour": "Events is the only swarm engine: a new config defaults to events, a stored legacy or missing value reads as events, and setting engine to legacy is refused.",
+      "seam": "SwarmConfig and SwarmStore.config through the swarm set command",
+      "tests": [
+        "tests/swarm/test_events_only_engine.py::test_a_new_swarm_config_runs_on_the_events_engine",
+        "tests/swarm/test_events_only_engine.py::test_a_stored_legacy_or_missing_engine_reads_as_events",
+        "tests/swarm/test_events_only_engine.py::test_a_legacy_engine_is_refused_without_changing_config",
+        "tests/swarm/test_events_only_engine.py::test_set_usage_names_only_the_events_engine"
+      ]
     }
   ],
   "unmapped_rules": [
