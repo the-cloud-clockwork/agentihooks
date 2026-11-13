@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lab_capacity.py:scripts.swarm.lab_capacity.x_read:2d889d52aba3c2802f6ce286ca3cfd4b239bcd5776c42a4511e0dbccb23bf55a": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged at runtime for any typ, so replacing cast(dict[str, Any], doc) with cast(None, doc) yields identical return values on every input. The survivor exists only at the type-annotation level, and the strict type gate requires the cast to stay."
+  }
+}

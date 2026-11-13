@@ -16,6 +16,7 @@ from scripts.swarm.ledger_client import LedgerOffline
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
+from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, Left, pass_domains
 
 reports: Any = import_module("scripts.hive.reports")
@@ -507,3 +508,28 @@ STEPS = (
 list(map(registry.register, STEPS))
 
 tick: Any = import_module("scripts.swarm.tick")
+
+
+def _lab_capacity(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Read the CI lab capacity of the swarm's configured lab into its lab block and ship its rows to the metrics
+    outbox; a swarm without a lab address reads nothing."""
+    lab_capacity: Any = import_module("scripts.swarm.lab_capacity")
+    metrics: Any = import_module("scripts.swarm.metrics")
+    slug, store, now_ms = get("slug"), get("store"), get("now_ms")
+    found = lab_capacity.capture(store, slug, store.config(slug).lab_url, now_ms)
+    return metrics.record(lab_capacity.TABLE, found, now_ms) if found else []
+
+
+registry.register(
+    CallStep(
+        "lab capacity",
+        "observe",
+        _lab_capacity,
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"metrics"}),
+        feature="lab-capacity-reader",
+    )
+)
