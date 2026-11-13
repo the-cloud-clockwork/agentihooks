@@ -2,10 +2,12 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
+import re
 import sys
 from types import SimpleNamespace
 from typing import Any
 
+from scripts import updater
 from scripts.hive import account_slots
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window, successor_fill
@@ -16,6 +18,13 @@ ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
+RELEASE = re.compile(r"\d+(?:\.\d+)*")
+
+
+def release_key(text: str) -> tuple[int, ...]:
+    """The dotted integer release a version string starts with; empty for an unreported or unparsable one."""
+    found = RELEASE.match(text)
+    return tuple(int(part) for part in found.group().split(".")) if found else ()
 
 
 class LateAdmission(RuntimeError):
@@ -50,6 +59,12 @@ class Admission:
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             return None
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
+        if older := self._outdated(request["hive"]):
+            print(
+                f"hub: events release floor swarm={slug} task={task_id} hive={request['hive']} {older}: refused",
+                file=sys.stderr,
+            )
+            return None
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
             return None
@@ -69,6 +84,15 @@ class Admission:
             return admitted
         self.reopen(slug, request)
         raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
+
+    def _outdated(self, hive: str) -> str:
+        """The member release below the hub release it is refused for; empty when either release is unreported."""
+        from scripts.hive import registry
+
+        record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        member, hub = str(record.get("version", "")), updater.installed_version()
+        reported, floor = release_key(member), release_key(hub)
+        return f"release={member} below {hub}" if reported and floor and reported < floor else ""
 
     def _placeable(self, row: dict[str, Any], hive: str) -> bool:
         """A draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is

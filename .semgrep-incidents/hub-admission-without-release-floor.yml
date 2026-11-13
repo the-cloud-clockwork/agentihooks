@@ -1,0 +1,22 @@
+rules:
+  - id: hub-admission-without-release-floor
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub admission admits a hive spoke take without checking the hive's reported release against the hub release. On
+      13 November a workstation hive on an older release, without the spoke reopen call, took the only events offer,
+      failed three launches, never reopened and left a lost claim, so nothing launched for fifteen minutes. Refuse the
+      take through self._outdated before any claim.
+    patterns:
+      - pattern-inside: |
+          class Admission:
+              ...
+      - pattern: |
+          def admit(self, ...):
+              ...
+      - pattern-not: |
+          def admit(self, ...):
+              ...
+              if <... self._outdated(...) ...>:
+                  ...
+              ...
