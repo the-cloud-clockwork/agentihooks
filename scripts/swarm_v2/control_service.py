@@ -12,7 +12,7 @@ from scripts.swarm import lease, ledger_host, metrics_fleet
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_link, storage
-from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
+from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, standby, telemetry
 from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.recovery import RecoveryAPI
@@ -44,6 +44,7 @@ TLS_KEY_ENV = "AGENTIHOOKS_CONTROL_TLS_KEY"
 PUBLIC_URL_ENV = "AGENTIHOOKS_CONTROL_PUBLIC_URL"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
+POD_IP_ENV = "AGENTIHOOKS_POD_IP"
 HOST = "0.0.0.0"
 MAX_PORT = 65535
 THREAD = "swarm-v2-api"
@@ -144,6 +145,7 @@ class ControlService:
         self.secure: ThreadingHTTPServer | None = None
         self.published: tuple[str, int, ssl.SSLContext] | None = None
         self.control_url = ""
+        self.address = ""
         self.runtime = None
         self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
@@ -215,6 +217,8 @@ class ControlService:
                 )
         if self.published is not None and self.secure is None:
             self.serve_published(*self.published)
+        if self.server is not None and self.address:
+            standby.publish_leader(store, slug, f"http://{self.address}:{self.server.server_port}", lease.ttl_ms())
         if self.server is not None and self.api_url and slug in store.slugs():
             config = store.config(slug)
             if config.api_url != self.api_url or config.control_url != self.control_url:
@@ -297,6 +301,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     )
     service.controller.terminals = anton_client(environ, slug, workers)
     service.listen = (HOST, int(port))
+    service.address = environ.get(POD_IP_ENV, "")
     service.published, service.control_url = published(environ)
     if workers is not None:
         service.controller.jump = jump.routes(environ, workers.policy["namespace"])
@@ -322,3 +327,25 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
             flush=True,
         )
     return service
+
+
+def stand_by(environ: Mapping[str, str], store: RedisStore) -> list[ThreadingHTTPServer]:
+    """Serve the standby control API on the API and published ports while another replica leads."""
+    port, slug = environ.get(PORT_ENV), environ.get(SWARM_ENV)
+    if not port or not slug:
+        return []
+    api = standby.Standby(store, slug)
+    servers = [serve(api, HOST, int(port))]
+    secure, _ = published(environ)
+    if secure is not None:
+        servers.append(serve_tls(api, *secure))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, name=f"{THREAD}-standby", daemon=True).start()
+    return servers
+
+
+def close(servers: Iterable[ThreadingHTTPServer]) -> None:
+    """Stop the standby servers so the leading control service can take their ports."""
+    for server in servers:
+        server.shutdown()
+        server.server_close()

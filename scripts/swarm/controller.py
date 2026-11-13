@@ -5,20 +5,20 @@ import signal
 import sys
 import threading
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from time import monotonic, time
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
 from scripts.gates import intent
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
+from scripts.swarm import holder_pod, lease, local_slots, redis_grace, replica, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable, connect, store_errors
@@ -611,6 +611,8 @@ def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
 STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 RUNNING = threading.Event()
 DRAINING = threading.Event()
+STOPPING = threading.Event()
+LOST_EXIT = 75
 
 
 def _halt() -> NoReturn:
@@ -680,6 +682,46 @@ def _journal_pass(number: int, outcome: str) -> None:
     """Write the one structured line that marks the end of a controller pass and names its outcome."""
     sys.stdout.write(json.dumps({"event": "controller_pass_end", "pass": number, "outcome": outcome}) + "\n")
     sys.stdout.flush()
+
+
+def _lead(
+    store: RedisStore, environ: Mapping[str, str], wait: Callable[[float], None] = scheduled_wait
+) -> replica.ReplicaLock | None:
+    """Stand by behind the replica leading this hive's passes, then take the lead and keep it renewed."""
+    from scripts.swarm import commands
+    from scripts.swarm_v2 import control_service
+
+    lock = replica.configured(environ, cast(Any, store).redis, commands.hive_id())
+    if lock is None:
+        return None
+    servers = control_service.stand_by(environ, store)
+    try:
+        if not lock.take():
+            print(f"controller: replica {lock.owner} stands by while {lock.holder()} leads", flush=True)
+            lock.lead(wait)
+    finally:
+        control_service.close(servers)
+    print(f"controller: replica {lock.owner} leads the passes", flush=True)
+    lock.beat(_lost, STOPPING)
+    return lock
+
+
+def _lost(end: Callable[[int], None] = os._exit) -> None:
+    """End the process at once when another replica took the lead, so two replicas never run passes together."""
+    os.write(2, b"controller: another replica took the lead; exiting\n")
+    end(LOST_EXIT)
+
+
+def _keep_credential(environ: Mapping[str, str], store: RedisStore) -> threading.Thread | None:
+    """Keep a replica's own controller credential alive for as long as the controller runs."""
+    from scripts.hive import auth
+    from scripts.swarm_v2.control_service import CREDENTIAL_ENV
+
+    credential = environ.get(CREDENTIAL_ENV, "")
+    if "." not in credential:
+        return None
+    keep_service: Callable[[Any, str], None] = cast(Any, auth).keep_service
+    return replica.keep(partial(keep_service, cast(Any, store).redis, credential), STOPPING, replica.KEEP_S)
 
 
 def _passes(
@@ -761,11 +803,14 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     outage = redis_grace.Outage.from_environ()
     store = _reached(outage)
-    service = None
+    service, lock = None, None
     bus = open_controller_bus(os.environ)
     DRAINING.clear()
+    STOPPING.clear()
     previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
+        _keep_credential(os.environ, store)
+        lock = _lead(store, os.environ)
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
         return _passes(store, service, proof_swarm, args.once, outage)
@@ -773,8 +818,11 @@ def main(argv: list[str]) -> int:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
     finally:
+        STOPPING.set()
         if service is not None:
             service.stop()
+        if lock is not None:
+            lock.release()
         if bus is not None:
             bus.close()
         for number, handler in previous.items():

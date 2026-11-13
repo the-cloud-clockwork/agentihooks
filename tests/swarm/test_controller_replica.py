@@ -205,11 +205,11 @@ def test_a_standby_answers_health_itself(
     monkeypatch: pytest.MonkeyPatch, available: bool, ready: tuple[int, dict[str, str]]
 ) -> None:
     from scripts.swarm.store import RedisStore
-    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2 import standby as standby_api
     from scripts.swarm_v2.api import readiness
 
     monkeypatch.setattr(readiness, "available", lambda client: available)
-    standby = control_service.Standby(RedisStore(_redis()), "rig")
+    standby = standby_api.Standby(RedisStore(_redis()), "rig")
     assert standby.route("GET", "/v2/health/live", "None", None) == (200, {"probe": "shallow", "status": "standby"})
     assert standby.route("GET", "/v2/health/ready", "None", None) == ready
 
@@ -217,11 +217,11 @@ def test_a_standby_answers_health_itself(
 @pytest.mark.feature("controller-standby-replica")
 def test_a_standby_forwards_every_other_request_to_the_leader(leader: str) -> None:
     from scripts.swarm.store import RedisStore
-    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2 import standby as standby_api
 
     store = RedisStore(_redis())
-    control_service.publish_leader(store, "rig", leader)
-    standby = control_service.Standby(store, "rig")
+    standby_api.publish_leader(store, "rig", leader)
+    standby = standby_api.Standby(store, "rig")
     assert standby.route("POST", "/v2/executions", "Bearer grant", {"seat": "eng-1"}) == (
         201,
         {"path": "/v2/executions", "authorization": "Bearer grant", "body": {"seat": "eng-1"}},
@@ -232,9 +232,9 @@ def test_a_standby_forwards_every_other_request_to_the_leader(leader: str) -> No
 @pytest.mark.feature("controller-standby-replica")
 def test_a_standby_refuses_while_no_replica_leads() -> None:
     from scripts.swarm.store import RedisStore
-    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2 import standby as standby_api
 
-    standby = control_service.Standby(RedisStore(_redis()), "rig")
+    standby = standby_api.Standby(RedisStore(_redis()), "rig")
     assert standby.route("POST", "/v2/executions", "Bearer grant", {}) == (
         503,
         {
@@ -249,11 +249,11 @@ def test_a_standby_refuses_while_no_replica_leads() -> None:
 @pytest.mark.feature("controller-standby-replica")
 def test_a_standby_refuses_when_the_leader_is_unreachable() -> None:
     from scripts.swarm.store import RedisStore
-    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2 import standby as standby_api
 
     store = RedisStore(_redis())
-    control_service.publish_leader(store, "rig", "http://127.0.0.1:9")
-    standby = control_service.Standby(store, "rig")
+    standby_api.publish_leader(store, "rig", "http://127.0.0.1:9")
+    standby = standby_api.Standby(store, "rig")
     assert standby.route("POST", "/v2/executions", "Bearer grant", {}) == (
         503,
         {
@@ -263,3 +263,178 @@ def test_a_standby_refuses_when_the_leader_is_unreachable() -> None:
             "message": "the leading controller replica did not answer",
         },
     )
+
+
+def _get(url: str) -> tuple[int, dict]:
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=5) as response:
+        return response.status, json.loads(response.read())
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_standby_serves_its_api_and_published_ports_until_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ssl
+
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2.api import readiness
+
+    monkeypatch.setattr(readiness, "available", lambda client: True)
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    monkeypatch.setattr(control_service, "published", lambda environ: (("127.0.0.1", 0, context), "https://x"))
+    store = RedisStore(_redis())
+    servers = control_service.stand_by({control_service.PORT_ENV: "0", control_service.SWARM_ENV: "rig"}, store)
+    assert [type(server).__name__ for server in servers] == ["ThreadingHTTPServer", "TLSServer"]
+    port = servers[0].server_port
+    assert _get(f"http://127.0.0.1:{port}/v2/health/live") == (200, {"probe": "shallow", "status": "standby"})
+    control_service.close(servers)
+    with pytest.raises(OSError):
+        _get(f"http://127.0.0.1:{port}/v2/health/live")
+
+
+@pytest.mark.feature("controller-standby-replica")
+@pytest.mark.parametrize(
+    "environ", [{}, {"AGENTIHOOKS_CONTROL_API_PORT": "8780"}, {"AGENTIHOOKS_CONTROL_SWARM": "rig"}]
+)
+def test_a_standby_without_an_api_serves_nothing(environ: dict[str, str]) -> None:
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import control_service
+
+    assert control_service.stand_by(environ, RedisStore(_redis())) == []
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_the_leading_control_service_publishes_its_pod_address(tmp_path: Any) -> None:
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2 import standby as standby_api
+
+    key_path = tmp_path / "launch.key"
+    key_path.write_bytes(b"k" * 32)
+    environ = {control_service.KEY_ID_ENV: "launch-1", control_service.KEY_FILE_ENV: str(key_path)}
+    store = RedisStore(_redis())
+    store.create(SwarmConfig("rig", "agentihooks", 2, 0))
+    service = control_service.ControlService(store, "rig", control_service.launch_key(environ), lambda: True)
+    service.listen, service.address = ("127.0.0.1", 0), "10.0.0.7"
+    try:
+        assert service.start() is True
+        port = service.server.server_port
+        assert store.redis.get(store.key("rig", standby_api.LEADER_KEY)) == f"http://10.0.0.7:{port}"
+        assert store.redis.pttl(store.key("rig", standby_api.LEADER_KEY)) > 0
+    finally:
+        service.stop()
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_control_service_without_a_pod_address_publishes_none(tmp_path: Any) -> None:
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2 import standby as standby_api
+
+    key_path = tmp_path / "launch.key"
+    key_path.write_bytes(b"k" * 32)
+    environ = {control_service.KEY_ID_ENV: "launch-1", control_service.KEY_FILE_ENV: str(key_path)}
+    store = RedisStore(_redis())
+    store.create(SwarmConfig("rig", "agentihooks", 2, 0))
+    service = control_service.ControlService(store, "rig", control_service.launch_key(environ), lambda: True)
+    service.listen = ("127.0.0.1", 0)
+    try:
+        assert service.start() is True
+        assert store.redis.get(store.key("rig", standby_api.LEADER_KEY)) is None
+    finally:
+        service.stop()
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_controller_without_a_named_replica_leads_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import controller
+    from scripts.swarm.store import RedisStore
+
+    assert controller._lead(RedisStore(_redis()), {}, _no_wait) is None
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_named_replica_stands_by_until_the_leader_releases(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import commands, controller
+    from scripts.swarm.store import RedisStore
+
+    monkeypatch.setattr(commands, "hive_id", lambda: HIVE)
+    store = RedisStore(_redis())
+    leader = replica.ReplicaLock(store.redis, HIVE, "pod-a")
+    assert leader.take() is True
+    waits: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        assert leader.release() is True
+
+    stop = threading.Event()
+    monkeypatch.setattr(controller, "STOPPING", stop)
+    lock = controller._lead(store, {replica.REPLICA_ENV: "pod-b"}, wait)
+    try:
+        assert lock is not None
+        assert (lock.owner, lock.holder(), waits) == ("pod-b", "pod-b", [replica.POLL_S])
+        assert capsys.readouterr().out == (
+            "controller: replica pod-b stands by while pod-a leads\ncontroller: replica pod-b leads the passes\n"
+        )
+        assert any(thread.name == replica.BEAT_THREAD for thread in threading.enumerate())
+    finally:
+        stop.set()
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_named_replica_with_no_leader_leads_without_standing_by(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import commands, controller
+    from scripts.swarm.store import RedisStore
+
+    monkeypatch.setattr(commands, "hive_id", lambda: HIVE)
+    stop = threading.Event()
+    monkeypatch.setattr(controller, "STOPPING", stop)
+    try:
+        lock = controller._lead(RedisStore(_redis()), {replica.REPLICA_ENV: "pod-a"}, _no_wait)
+        assert lock is not None and lock.holder() == "pod-a"
+        assert capsys.readouterr().out == "controller: replica pod-a leads the passes\n"
+    finally:
+        stop.set()
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_replica_that_lost_the_lead_exits_at_once(capfd: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm import controller
+
+    ends: list[int] = []
+    controller._lost(ends.append)
+    assert ends == [controller.LOST_EXIT] == [75]
+    assert capfd.readouterr().err == "controller: another replica took the lead; exiting\n"
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_a_replica_keeps_its_own_controller_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import auth
+    from scripts.swarm import controller
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(_redis())
+    kept: list[tuple[Any, str]] = []
+    stop = threading.Event()
+    monkeypatch.setattr(controller, "STOPPING", stop)
+    monkeypatch.setattr(replica, "KEEP_S", 0.01)
+    monkeypatch.setattr(auth, "keep_service", lambda redis, credential: kept.append((redis, credential)) or stop.set())
+    thread = controller._keep_credential({"AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller-pod-a.secret"}, store)
+    assert thread is not None
+    thread.join(timeout=5)
+    assert kept == [(store.redis, "controller-pod-a.secret")]
+
+
+@pytest.mark.feature("controller-standby-replica")
+@pytest.mark.parametrize("environ", [{}, {"AGENTIHOOKS_CONTROLLER_CREDENTIAL": "sharedsecret"}])
+def test_a_shared_controller_credential_needs_no_keeping(environ: dict[str, str]) -> None:
+    from scripts.swarm import controller
+    from scripts.swarm.store import RedisStore
+
+    assert controller._keep_credential(environ, RedisStore(_redis())) is None
