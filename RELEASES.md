@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.863 · 2026-11-13
+
+### 2026-11-13 · 70f0bc23f481 · #11079 · @agenticore-app
+
+**Record each ledger export read's shape and caller, and each operations write's kinds**
+
+Request records now capture the shape of each ledger export read (bare, full, since, refused, plus parts/scoped/events) alongside a bounded caller token from request_caller, and each operations write records its distinct op kinds, letting request_metrics split both routes by these labels. This matters because write p95 is far over target and some export and operations posts are unusually slow, but without shape, caller or operation kind recorded there was no way to trace that cost back to the periodic job or endpoint causing it. Write counts and p95 stay unchanged since writes are still classed by method.
+
 ## v2.17.862 · 2026-11-13
 
 ### 2026-11-13 · 15203fd4d20a · #11084 · @agenticore-app
