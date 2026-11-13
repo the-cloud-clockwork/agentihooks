@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -196,6 +197,54 @@ def test_plan_skips_tests_when_the_change_touches_none(repo, tmp_path):
         "ruff format",
         "size limits",
     ]
+
+
+def _type_command(repo: Path, grader: Path, snapshot: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "scripts.type_env",
+        "--grader",
+        str(grader),
+        "--root",
+        str(repo),
+        "--base",
+        str(snapshot),
+        "--head",
+        str(repo),
+    ]
+
+
+def test_plan_grades_types_with_the_base_tip_gate_against_the_merge_base(repo: Path, tmp_path: Path) -> None:
+    _commit(repo, {"scripts/type_gate.py": "GATE = 1\n"}, "gate")
+    _git(repo, "branch", "-f", "base")
+    _git(repo, "checkout", "-q", "-b", "work")
+    _commit(repo, {"scripts/type_gate.py": "GATE = 2\n", "scripts/beta.py": "B = 2\n"}, "change")
+    _git(repo, "checkout", "-q", "base")
+    _commit(repo, {"scripts/type_gate.py": "GATE = 3\n", "scripts/alpha.py": "A = 3\n"}, "base moves")
+    _git(repo, "checkout", "-q", "work")
+    grade = tmp_path / "grade"
+    grade.mkdir()
+
+    steps = dict(ci_prepush.plan(repo, "base", grade))
+
+    snapshot = grade / "types-base"
+    grader = grade / "type_gate.py"
+    assert steps["strict types"] == _type_command(repo, grader, snapshot)
+    assert grader.read_text() == "GATE = 3\n"
+    assert (snapshot / "scripts/type_gate.py").read_text() == "GATE = 1\n"
+    assert (snapshot / "scripts/alpha.py").read_text() == "A = 1\n"
+    assert (snapshot / "scripts/beta.py").read_text() == "B = 1\n"
+
+
+def test_plan_grades_types_with_the_head_gate_when_the_base_has_none(repo: Path, tmp_path: Path) -> None:
+    _commit(repo, {"scripts/type_gate.py": "GATE = 2\n"}, "introduce the gate")
+    grade = tmp_path / "grade"
+    grade.mkdir()
+
+    steps = dict(ci_prepush.plan(repo, "base", grade))
+
+    assert steps["strict types"] == _type_command(repo, repo / "scripts/type_gate.py", grade / "types-base")
 
 
 def test_run_stamps_head_when_every_step_passes(repo, monkeypatch, capsys):
