@@ -2,6 +2,50 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.856 · 2026-11-13
+
+### 2026-11-13 · 752f49ee78e3 · #11064 · @nestorcolt
+
+**Pass the launch signing key in the controller rollout chart check**
+
+This change fixes a failing helm-kind check by supplying the `controller.api.signingKey.keyId` and `secretName` values that the controller template now requires when rendering API test cases; without them, rendering the chart for any case with the API enabled failed outright, breaking kind-based CI on dev. The fix mirrors the same signing key values already used by kind-smoke's own API install, and was verified locally with `helm template` across replica counts, so the rollout chart check now renders successfully and CI can pass again.
+
+### 2026-11-13 · 7d1002bc8fde · #11043 · @agenticore-app
+
+**Refuse a monkeypatch of a target an autouse fixture mocks**
+
+This adds a new CI lint, `scripts/ci_double_patch.py`, that scans every test file for cases where an autouse fixture mocks a target via `mock.patch`/`patch.object` while another fixture monkeypatches the same target, since the monkeypatch teardown can silently reinstall the mock after the fixture exits. It fixed the one real offender in `tests/context/conftest.py`, where three `prod_lockdown` getters were mocked by an autouse fixture but monkeypatched elsewhere; those now consistently use monkeypatch. The lint runs as a new protected grader step, with fixtures proving it catches real and clean cases.
+
+### 2026-11-13 · e54a1dcafb4d · #11053 · @agenticore-app
+
+**Count a timed out or failed reuse artifact download as no record**
+
+This change fixes a flaky CI failure where test selection crashed if downloading a reuse artifact from a prior run timed out or errored. Previously `scripts.ci_test_plan.find_record` let a `CalledProcessError` or `TimeoutExpired` from the GitHub artifact zip download propagate, failing the select job outright (as seen in run 43380505546). Now `_usable` treats either failure as the run simply being unavailable, so the search continues to older runs or falls back to no reusable record, letting selection proceed normally instead of aborting the whole workflow.
+
+### 2026-11-13 · 0970e06a4348 · #11033 · @agenticore-app
+
+**Controller runs a standby replica and rolls out with no tick downtime**
+
+This change lets the controller run multiple replicas so image rollouts no longer stall tick processing. A Redis-backed replica lock elects one leader to run passes and the control service, while standbys handle health checks and forward other API calls to the leader. The chart now supports a configurable replica count with RollingUpdate and a PodDisruptionBudget above one replica, and a new holder-scoped credential keeps the leader's session alive during handoff. This release still ships as a single replica; a follow-up change bumps replicas to two once this is deployed, enabling zero-downtime rollouts going forward.
+
+### 2026-11-13 · 525494d016eb · #11046 · @agenticore-app
+
+**Add CI lab queue state, leases and the lease API**
+
+This change introduces the backend for the CI lab job queue: a Redis-backed queue tracking pending, leased, and completed jobs per head, a leasing module that hands out jobs to workers with expiry-based reaping and token-guarded completion, and an HTTP API exposing lease, heartbeat, complete, and upload-url endpoints. It ensures no job is ever claimed by two workers, expired leases are retried once before being marked lost, and all mutating requests require a valid live lease token, making concurrent CI worker scheduling safe and auditable.
+
+### 2026-11-13 · d310f799a706 · #11050 · @agenticore-app
+
+**Add the CI lab service contract: entry points, environment, ports, metric names**
+
+This change establishes the formal service contract for the CI lab's scheduler and worker: it defines the environment variables each expects, fixes their network ports (8800, 9108), and names the twenty Architecture metrics as importable constants so platform tests can reference them reliably. It adds CLI entry points with offline self-tests, and crucially makes the worker refuse to start if any GITHUB_APP_* credential variable is present in its environment, enforcing the design rule that the worker holds no credentials. Documentation now tracks this contract and is tested against it.
+
+### 2026-11-13 · 7d9f3e5f6201 · #11051 · @nestorcolt
+
+**Release the hub admission when an events launch fails**
+
+This fix closes a gap where an admitted hub task stayed permanently claimed if the hive's launch failed afterward: the hive would reset its own claim and nak, but the hub never withdrew the admission, so no other hive could pick up the task and the agent sat idle for about eight minutes until the controller retired it. Now any launch failure or admit-request failure explicitly reopens the task through the hub, and admissions that resolve after the hive's own request timeout are automatically released and refused as late, preventing the stuck-claim scenario that lost eight engineers on November 13.
+
 ## v2.17.855 · 2026-11-13
 
 ### 2026-11-13 · 094549c13daa · #11034 · @agenticore-app
