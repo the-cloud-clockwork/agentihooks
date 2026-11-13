@@ -298,6 +298,28 @@ class ExecutionRegistry:
         if shown is not None:
             self.store.project_agent(slug, *shown, listed_only=True)
 
+    def set_launch(self, slug: str, execution_id: str, decision: dict[str, str]) -> bool:
+        """Writes a hive's launch decision onto its execution inside the fence; False when the execution no longer
+        heads its seat or its agent left the live list, so a dropped agent never reappears."""
+        with _writes(slug):
+            listed = self.store.listed(slug)
+
+            def change(doc: dict[str, Any]) -> Any:
+                raw = doc["executions"].get(execution_id)
+                heads = {head.execution_id for head in occupants_of(doc).values()}
+                if not raw or execution_id not in heads or _record(raw).name not in listed:
+                    return None
+                current = _record(raw)
+                updated = replace(current, **decision)
+                doc["executions"][execution_id] = asdict(updated)
+                return updated, current
+
+            shown = self._fenced(slug, change, history=True)
+            if shown is None:
+                return False
+            self.store.project_agent(slug, *shown, listed_only=True)
+            return True
+
     def reconcile(self, slug: str, runtime: Runtime, now_ms: int) -> list[str]:
         self.archive(slug)
         recorded = {agent.name for agent in self.agents(slug)}

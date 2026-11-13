@@ -3,7 +3,6 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
 import sys
-from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -249,8 +248,7 @@ class Admission:
             return False
         launch = request["launch"]
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
-        self.store.put_agent(slug, replace(occupant, **decision))
-        return True
+        return self.store.execution_registry.set_launch(slug, occupant.execution_id, decision)
 
 
 OPERATIONS = ("admit", "reopen", "failed", "launched")

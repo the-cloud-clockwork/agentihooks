@@ -610,15 +610,18 @@
       "id": "events-launch-decision-record",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-record-launch-fields",
-      "behaviour": "A hive lane spoke that spawned an events admitted agent reports its launch decision to the hub after it publishes execution started and acknowledges the offer, a failing or slow report is logged and never holds back or fails the started event, and the hub writes the harness, profile, account, model and effort onto that agent's record, which swarm status reads; a hive without the admission or a seat another agent now occupies changes no record.",
-      "seam": "Admission.launched for a hive spoke request and LaneTasks.launched from Spoke._apply after the started event",
+      "behaviour": "A hive lane spoke that spawned an events admitted agent stores its launch decision on the started claim and reports it to the hub after it publishes execution started and acknowledges the offer, and again whenever it republishes that started claim; a failing or slow report is logged and never holds back or fails the started event. The hub writes the harness, profile, account, model and effort onto that agent's execution inside the fence, which swarm status reads; a hive without the admission, a seat another agent now occupies, or an agent already dropped changes no record.",
+      "seam": "Admission.launched through ExecutionRegistry.set_launch for a hive spoke request, and LaneTasks.launched from Spoke._report_launch after the started event",
       "tests": [
         "tests/hub/test_admission.py::test_the_hive_launch_decision_reaches_the_record_swarm_status_reads",
         "tests/hub/test_admission.py::test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record",
         "tests/hub/test_admission.py::test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record",
         "tests/hub/test_admission.py::test_the_hub_answers_a_launched_request_over_the_slot_subject",
         "tests/hive/test_lanes.py::test_a_launch_is_reported_to_the_hub_with_its_harness_profile_and_account",
-        "tests/hive/test_spoke.py::test_a_failing_launch_report_never_holds_back_the_started_event"
+        "tests/hive/test_spoke.py::test_a_failing_launch_report_never_holds_back_the_started_event",
+        "tests/hive/test_spoke.py::test_a_redelivered_started_offer_reports_its_stored_launch_decision_again",
+        "tests/hive/test_spoke.py::test_a_started_claim_stored_without_a_launch_decision_reports_nothing",
+        "tests/hub/test_admission.py::test_a_launch_decision_after_the_agent_was_dropped_never_brings_it_back"
       ]
     },
     {

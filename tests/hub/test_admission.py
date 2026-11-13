@@ -164,6 +164,16 @@ def test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record(rig):
 
 
 @pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_decision_after_the_agent_was_dropped_never_brings_it_back(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.drop_agent(SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == []
+
+
+@pytest.mark.feature("events-launch-decision-record")
 def test_the_hub_answers_a_launched_request_over_the_slot_subject(rig):
     bus = open_bus(BusConfig(scoped=True))
     slots.serve(bus, admitter=rig.admitter)  # pyright: ignore[reportArgumentType]
