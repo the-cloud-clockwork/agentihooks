@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.862 · 2026-11-13
+
+### 2026-11-13 · 15203fd4d20a · #11084 · @agenticore-app
+
+**Renew the claim lease of hub owned agents in the reap pass**
+
+This change fixes a bug where hub-admitted agents lost their task claim after ten minutes because the tick reap pass only renewed claims for legacy agents, ignoring hub-owned ones. A new `scripts.hub.owned_leases.renew` routine now extends the claim lease for every swarm agent the legacy list skips, acting only on claims still naming that agent, and is called on every reap pass. This stops hub-admitted agents from being wrongly stopped mid-execution while the ledger still names them as claimant, including across engine switches. Regression tests, a feature map entry, and a Semgrep rule guard against recurrence.
+
 ## v2.17.861 · 2026-11-13
 
 ### 2026-11-13 · 98e27b946d1b · #11086 · @agenticore-app
