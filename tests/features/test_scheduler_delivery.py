@@ -48,14 +48,17 @@ def test_scheduler_delivers_once_under_the_machine_lock_and_records_completion(
     def forbidden(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
         pytest.fail(f"a second tick started while the machine lock was held: {argv}")
 
-    def launch(argv: list[str], *, env: dict[str, str], pass_fds: tuple[int, ...]) -> subprocess.Popen[bytes]:
+    def launch(
+        argv: list[str], *, env: dict[str, str], pass_fds: tuple[int, ...], start_new_session: bool
+    ) -> subprocess.Popen[bytes]:
         assert argv[-2:] == ["swarm", "tick"]
+        assert start_new_session is True
         assert "FEATURE_PARENT_ONLY" not in env
         assert "AGENTIHOOKS_SWARM_REDIS_URL" not in env
         calls.append(argv)
         assert scheduled_tick.main(forbidden) == 0
         assert scheduler.read(scheduled_tick.DELIVERED) == ""
-        return subprocess.Popen(argv, env=env, pass_fds=pass_fds)
+        return subprocess.Popen(argv, env=env, pass_fds=pass_fds, start_new_session=start_new_session)
 
     before = time.time()
     assert scheduled_tick.main(launch) == 0

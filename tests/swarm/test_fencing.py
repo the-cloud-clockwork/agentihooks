@@ -177,6 +177,7 @@ def test_a_first_write_imports_the_legacy_redis_lease_once(store, clock):
 
 
 def test_a_first_read_imports_legacy_task_claims_journals_and_fences(store):
+    store.redis.set(store.key("sw", "control-epoch"), 1)
     store.redis.set(store.key("sw", "task-authority", "t1"), json.dumps({"holder": "eng-a"}))
     rows = [json.dumps({"event": event}) for event in "abc"]
     store.redis.rpush(store.key("sw", "claim-journal", "t1"), *rows)

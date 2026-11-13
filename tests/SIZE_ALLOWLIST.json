@@ -40,13 +40,12 @@
  },
  "hooks/hook_manager.py::on_post_tool_use": {
   "C901": 55,
-  "PLR0912": 55,
-  "function-lines": 302
+  "PLR0912": 55
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
   "C901": 77,
   "PLR0912": 82,
-  "function-lines": 507
+  "function-lines": 483
  },
  "hooks/hook_manager.py::on_session_end": {
   "C901": 19,
@@ -146,7 +145,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6795
+  "file-lines": 6769
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -216,8 +215,8 @@
   "function-lines": 654
  },
  "scripts/install.py::uninstall_global": {
-  "C901": 35,
-  "PLR0912": 43
+  "C901": 34,
+  "PLR0912": 41
  },
  "scripts/mcp_daemon.py::status": {
   "C901": 15,
@@ -234,9 +233,6 @@
  "scripts/status_checker.py::format_cli": {
   "C901": 22,
   "PLR0912": 26
- },
- "scripts/swarm/tick.py::_spawn": {
-  "PLR0913": 8
  },
  "scripts/swarm_ledger/ledger_core.py::apply_op": {
   "C901": 18,
@@ -277,6 +273,9 @@
  "scripts/targets/copilot_target.py::CopilotAdapter.teardown": {
   "C901": 25,
   "PLR0912": 27
+ },
+ "scripts/tick/steps/place.py::_spawn": {
+  "PLR0913": 8
  },
  "tests/swarm/test_drain_watch.py::_drain_swarm": {
   "PLR0913": 9

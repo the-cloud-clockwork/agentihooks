@@ -157,6 +157,8 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
 def main(
     argv: list[str] | None = None, environ: dict[str, str] | None = None, deps: supervisor.Deps | None = None
 ) -> int:
+    from scripts.inbox.codex import REFUSED_EXIT
+
     arguments = list(sys.argv[1:] if argv is None else argv)
     split = arguments.index("--") if "--" in arguments else len(arguments)
     args = _parser().parse_args(arguments[:split])
@@ -173,6 +175,8 @@ def main(
     try:
         started = supervisor.launch(store, spec, deps or supervisor.Deps())
     except (supervisor.LaunchFailure, SwarmError, BindingError) as exc:
+        if isinstance(exc, supervisor.LaunchFailure) and exc.error_class == "account_refused":
+            close_refused(spec.agent.account, REFUSED_EXIT)
         print(f"agentihooks codex-session: launch refused: {exc}", file=sys.stderr)
         if spec.environ.get(binding.REPORT):
             binding.refuse(Path(spec.environ[binding.REPORT]), f"codex-session launch refused: {exc}")
@@ -199,6 +203,9 @@ def main(
                 pass
         else:
             print(PUMP_EXITED.format(pump.returncode), file=sys.stderr)
+            if pump.returncode == REFUSED_EXIT and spec.environ.get(binding.REPORT):
+                binding.refuse(Path(spec.environ[binding.REPORT]), "Codex provider refused the routed account")
+            close_refused(spec.agent.account, pump.returncode)
             return pump.returncode or 3
     finally:
         if pump is not None:
@@ -210,3 +217,13 @@ def main(
 
 def _exit_on_signal(signum: int, frame: object) -> None:
     raise SystemExit(128 + signum)
+
+
+def close_refused(account: str, pump_code: int) -> None:
+    """Record the routed account as expired when its pump ended on a provider account refusal."""
+    from scripts import codex_usage
+    from scripts.codex_quota import CodexQuota
+    from scripts.inbox.codex import REFUSED_EXIT
+
+    if pump_code == REFUSED_EXIT:
+        codex_usage.store(account, CodexQuota(time.time(), "?", expired=True))

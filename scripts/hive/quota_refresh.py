@@ -28,6 +28,7 @@ def stale_codex(environ: Mapping[str, str], now: float) -> list[codex_router.Cod
         account
         for account in pool
         if (reading := readings.get(account.name)) is None
+        or codex_router.recheck_expired(account, reading, environ, now)
         or quota_freshness.stale(reading.observed_at, (reading.five_hour.resets_at, reading.seven_day.resets_at), now)
     ]
 

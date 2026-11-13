@@ -1,11 +1,15 @@
 import argparse
 import ast
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import Any, cast
 
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 CLOCKS = {"time", "time_ns", "monotonic", "monotonic_ns", "perf_counter", "perf_counter_ns"}
 BOUNDS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)
+FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+ModuleIndex = tuple[list[ast.ImportFrom], dict[str, FunctionNode], dict[str, str], dict[str, FunctionNode]]
+ModuleCache = dict[Path, tuple[list[ast.ImportFrom], dict[str, FunctionNode], dict[str, str]]]
 
 
 def qualified(node: ast.AST) -> str:
@@ -26,7 +30,7 @@ def statements(node: ast.AST) -> Iterator[ast.AST]:
 
 
 def aliases_for(tree: ast.Module, nodes: list[ast.AST]) -> dict[str, str]:
-    aliases = {}
+    aliases: dict[str, str] = {}
     for node in nodes:
         if isinstance(node, ast.Import):
             aliases.update((name.asname or name.name, name.name) for name in node.names)
@@ -38,8 +42,8 @@ def aliases_for(tree: ast.Module, nodes: list[ast.AST]) -> dict[str, str]:
     return aliases
 
 
-def bindings_for(function: ast.AST) -> dict:
-    bindings = {}
+def bindings_for(function: ast.AST) -> dict[str, list[ast.expr]]:
+    bindings: dict[str, list[ast.expr]] = {}
     for node in ast.walk(function):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -50,7 +54,7 @@ def bindings_for(function: ast.AST) -> dict:
                     for index, item in enumerate(target.elts):
                         if isinstance(item, ast.Name):
                             bindings.setdefault(item.id, []).append(
-                                ast.Subscript(value=node.value, slice=ast.Constant(index))
+                                ast.Subscript(value=cast("ast.expr", node.value), slice=ast.Constant(index))
                             )
         if (
             isinstance(node, ast.Call)
@@ -67,25 +71,32 @@ def bindings_for(function: ast.AST) -> dict:
 
 
 class Timing:
-    def __init__(self, functions: dict, helpers: dict, aliases: dict) -> None:
+    def __init__(
+        self,
+        functions: dict[str, FunctionNode],
+        helpers: dict[str, tuple[FunctionNode, dict[str, str]]],
+        aliases: dict[str, str],
+    ) -> None:
         self.functions = dict(functions)
         self.functions.update((name, node) for name, (node, _) in helpers.items())
         self.aliases = aliases
-        self.helper_aliases = {node: aliases for node, aliases in helpers.values()}
-        self.bindings = {}
+        self.helper_aliases: dict[ast.AST, dict[str, str]] = {node: aliases for node, aliases in helpers.values()}
+        self.bindings: dict[ast.AST, dict[str, list[ast.expr]]] = {}
 
-    def bindings_for(self, function: ast.AST) -> dict:
+    def bindings_for(self, function: ast.AST) -> dict[str, list[ast.expr]]:
         if function not in self.bindings:
             self.bindings[function] = bindings_for(function)
         return self.bindings[function]
 
-    def arguments(self, call: ast.Call, helper: ast.AST, caller: ast.AST, seen: frozenset) -> frozenset:
+    def arguments(
+        self, call: ast.Call, helper: FunctionNode, caller: ast.AST, seen: frozenset[tuple[Any, ...]]
+    ) -> frozenset[tuple[Any, ...]]:
         positional = [*helper.args.posonlyargs, *helper.args.args]
         arguments = {parameter.arg: value for parameter, value in zip(positional, call.args)}
         arguments.update((keyword.arg, keyword.value) for keyword in call.keywords if keyword.arg)
         return frozenset((helper, name, self.value(value, caller, seen)) for name, value in arguments.items())
 
-    def value(self, node: ast.AST, function: ast.AST, seen: frozenset = frozenset()) -> int:
+    def value(self, node: ast.AST, function: ast.AST, seen: frozenset[tuple[Any, ...]] = frozenset()) -> int:
         key = (node, function)
         if key in seen:
             return 0
@@ -129,7 +140,7 @@ class Timing:
                 seen = seen | self.arguments(node, helper, function, seen)
                 return max(
                     (
-                        self.value(item.value, helper, seen)
+                        self.value(cast("ast.AST", item.value), helper, seen)
                         for item in statements(helper)
                         if isinstance(item, ast.Return)
                     ),
@@ -140,7 +151,7 @@ class Timing:
             return self.indexed(node.value, node.slice.value, function, seen)
         return max((self.value(child, function, seen) for child in ast.iter_child_nodes(node)), default=0)
 
-    def indexed(self, node: ast.AST, index: object, function: ast.AST, seen: frozenset) -> int:
+    def indexed(self, node: ast.AST, index: object, function: ast.AST, seen: frozenset[tuple[Any, ...]]) -> int:
         key = (node, function, index)
         if key in seen:
             return 0
@@ -154,7 +165,7 @@ class Timing:
             seen = seen | self.arguments(node, helper, function, seen)
             return max(
                 (
-                    self.indexed(item.value, index, helper, seen)
+                    self.indexed(cast("ast.AST", item.value), index, helper, seen)
                     for item in statements(helper)
                     if isinstance(item, ast.Return)
                 ),
@@ -189,13 +200,13 @@ class Timing:
         ]
 
 
-def marked(nodes: list[ast.AST]) -> bool:
+def marked(nodes: Iterable[ast.AST]) -> bool:
     return any(
         qualified(node.func if isinstance(node, ast.Call) else node).endswith("mark.wall_clock") for node in nodes
     )
 
 
-def indexed(tree: ast.Module) -> tuple:
+def indexed(tree: ast.Module) -> ModuleIndex:
     nodes = list(ast.walk(tree))
     imports = [node for node in nodes if isinstance(node, ast.ImportFrom) and str(node.module).startswith("tests.")]
     functions = {item.name: item for item in tree.body if isinstance(item, FUNCTIONS)}
@@ -203,16 +214,20 @@ def indexed(tree: ast.Module) -> tuple:
     return imports, functions, aliases_for(tree, nodes), every
 
 
-def helper_module(path: Path, modules: dict) -> tuple:
+def helper_module(
+    path: Path, modules: ModuleCache
+) -> tuple[list[ast.ImportFrom], dict[str, FunctionNode], dict[str, str]]:
     if path not in modules:
         modules[path] = indexed(ast.parse(path.read_text(), filename=str(path)))[:3]
     return modules[path]
 
 
-def imported_helpers(imports: list, root: Path, modules: dict, seen: frozenset = frozenset()) -> dict:
-    helpers = {}
+def imported_helpers(
+    imports: list[ast.ImportFrom], root: Path, modules: ModuleCache, seen: frozenset[Path] = frozenset()
+) -> dict[str, tuple[FunctionNode, dict[str, str]]]:
+    helpers: dict[str, tuple[FunctionNode, dict[str, str]]] = {}
     for node in imports:
-        path = root / (node.module.replace(".", "/") + ".py")
+        path = root / (cast("str", node.module).replace(".", "/") + ".py")
         if path in seen or not path.is_file():
             continue
         nested, functions, aliases = helper_module(path, modules)
@@ -223,11 +238,13 @@ def imported_helpers(imports: list, root: Path, modules: dict, seen: frozenset =
     return helpers
 
 
-def discover(tree: ast.Module, root: Path, modules: dict) -> list[tuple[str, int, bool]]:
+def discover(tree: ast.Module, root: Path, modules: ModuleCache) -> list[tuple[str, int, bool]]:
     imports, _, aliases, every = indexed(tree)
     timing = Timing(every, imported_helpers(imports, root, modules), aliases)
 
-    def walk(scope, prefix="", inherited=False):
+    def walk(
+        scope: ast.Module | ast.ClassDef | FunctionNode, prefix: str = "", inherited: bool = False
+    ) -> Iterator[tuple[str, int, bool]]:
         assignments = [node for node in scope.body if isinstance(node, ast.Assign)]
         inherited = inherited or marked(
             [
@@ -252,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path("."))
     args = parser.parse_args(argv)
     files = sorted((args.root / "tests").rglob("*.py"))
-    problems, count, modules = [], 0, {}
+    problems, count, modules = cast("list[str]", []), 0, cast("ModuleCache", {})
     if not files:
         problems.append("No Python test files found")
     for path in files:

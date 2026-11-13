@@ -1,6 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import (
@@ -21,7 +22,7 @@ from scripts.tick.ports.source_control import (
 )
 
 if TYPE_CHECKING:
-    from scripts.swarm.store import SwarmConfig
+    from scripts.swarm.store import AgentRecord, SwarmConfig
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,78 @@ class Ledger(Protocol):
 
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object: ...
 
+    def update_task(
+        self,
+        task_id: str,
+        fields: Mapping[str, object],
+        *,
+        if_state: Sequence[str] = (),
+        if_match: Mapping[str, object] | None = None,
+        deadline: Deadline,
+    ) -> dict[str, Any]: ...
+
+    def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]: ...
+
+    def watchdog_copy(self, *, deadline: Deadline) -> dict[str, Any]: ...
+
+    def notify(self, text: str, *, deadline: Deadline) -> None: ...
+
+    def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None: ...
+
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None: ...
+
+
+STORE_READS = frozenset(
+    {
+        "agents",
+        "claim_generation",
+        "claims",
+        "config",
+        "earlier_lives",
+        "execution",
+        "execution_occupants",
+        "failed_harness",
+        "handoff",
+        "handoff_envelope",
+        "handoff_seat",
+        "launches",
+        "slugs",
+        "culture.get",
+        "execution_registry.agents",
+        "execution_registry.get",
+        "execution_registry.occupants",
+        "execution_registry.records",
+        "memory.learned",
+        "memory.recaps",
+        "seats.key",
+        "seats.occupant",
+        "seats.seat_of",
+        *(
+            f"redis.{command}"
+            for command in (
+                "exists",
+                "get",
+                "hexists",
+                "hget",
+                "hgetall",
+                "hmget",
+                "llen",
+                "lrange",
+                "mget",
+                "pttl",
+                "scard",
+                "sismember",
+                "smembers",
+                "ttl",
+                "xlen",
+                "zcount",
+                "zrange",
+                "zscore",
+            )
+        ),
+    }
+)
+
 
 @runtime_checkable
 class Coordination(Protocol):
@@ -48,11 +121,25 @@ class Coordination(Protocol):
 
     def lock(self, name: str, *, deadline: Deadline) -> object: ...
 
+    def tick_lock(self, held: object, ttl_ms: int, caller: str, *, deadline: Deadline) -> str | None: ...
+
+    def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None: ...
+
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object: ...
 
     def capacity(self, *, deadline: Deadline) -> object: ...
 
     def mark(self, name: str, value: object, *, deadline: Deadline) -> object: ...
+
+    def marked(self, name: str, *, deadline: Deadline) -> str | None: ...
+
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any: ...
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any: ...
 
 
 @runtime_checkable
@@ -97,6 +184,8 @@ class SourceControl(Protocol):
 
     def download(self, path: str, *, deadline: Deadline) -> bytes: ...
 
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any: ...
+
 
 @runtime_checkable
 class Runtime(Protocol):
@@ -108,10 +197,58 @@ class Runtime(Protocol):
 
     def panes(self, *, deadline: Deadline) -> object: ...
 
+    def live_names(self, *, deadline: Deadline) -> set[str]: ...
+
+    def observe(self, agent: "AgentRecord", *, deadline: Deadline) -> Any: ...
+
+    def retire(self, agent: "AgentRecord", *, homes: Sequence[Path] = (), deadline: Deadline) -> bool: ...
+
+    def name_pane(self, agent: "AgentRecord", *, deadline: Deadline) -> None: ...
+
+    def refusal(self, agent: "AgentRecord", *, deadline: Deadline) -> str: ...
+
+    def resume(self, config: "SwarmConfig", agent: "AgentRecord", text: str, *, deadline: Deadline) -> Any: ...
+
+    def dismiss(self, agent: "AgentRecord", *, deadline: Deadline) -> bool: ...
+
+    def place(
+        self, config: "SwarmConfig", lane: str, name: str, task: Mapping[str, Any], *, deadline: Deadline
+    ) -> Any: ...
+
+    def has_capacity(self, config: "SwarmConfig", *, deadline: Deadline) -> bool: ...
+
+    def launch_room(self, config: "SwarmConfig", *, deadline: Deadline) -> int | None: ...
+
+    def reported(self, agent: "AgentRecord", *, deadline: Deadline) -> bool: ...
+
+    def placement_refusal(self, lane: str, task: Mapping[str, Any], *, deadline: Deadline) -> str: ...
+
+    def placement(self, *, deadline: Deadline) -> object: ...
+
+    def begin_placement(self, *, deadline: Deadline) -> None: ...
+
+    def end_placement(self, *, deadline: Deadline) -> None: ...
+
+    def reap_name(self, name: str, *, deadline: Deadline) -> bool: ...
+
+    def admits(self, *, deadline: Deadline) -> bool: ...
+
+    def admit(self, slug: str, tasks: Sequence[Mapping[str, Any]], now_ms: int, *, deadline: Deadline) -> Any: ...
+
+    def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None: ...
+
+    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str: ...
+
+    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool: ...
+
+    def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any: ...
+
 
 @runtime_checkable
 class Processes(Protocol):
     def scan(self, *, deadline: Deadline) -> object: ...
+
+    def rescan(self, *, deadline: Deadline) -> object: ...
 
 
 @runtime_checkable
@@ -122,6 +259,8 @@ class Inbox(Protocol):
 
     def close(self, item_id: str, outcome: str, detail: str, *, deadline: Deadline) -> object: ...
 
+    def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object: ...
+
 
 @runtime_checkable
 class Llm(Protocol):
@@ -131,6 +270,8 @@ class Llm(Protocol):
 @runtime_checkable
 class Metrics(Protocol):
     def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object: ...
+
+    def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object: ...
 
 
 @runtime_checkable

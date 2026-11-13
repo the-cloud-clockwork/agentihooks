@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -17,10 +17,12 @@ from urllib.parse import quote, urlencode
 import orjson
 
 from .. import ledger_link
+from ..repository import live_rows
 from ..repository.entry import thawed
 from ..repository.rows import children, encode
 from . import resources, schemas
 
+Transport = Callable[[str, str, dict[str, Any] | None], dict[str, Any]]
 RETRIES = 5
 BACKOFF = 0.25
 KEPT = None
@@ -80,12 +82,15 @@ def located(state: object, path: list) -> object:
 
 
 class ResourceClient:
-    def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
+    def __init__(self, base: str, credentials: dict, timeout: float = 10, transport: Transport | None = None) -> None:
         self.base = base
         self.credentials = credentials
         self.timeout = timeout
+        self.transport = transport
 
     def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self.transport is not None:
+            return self.transport(slug, path, payload)
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
@@ -154,10 +159,14 @@ class ResourceClient:
         kept[key] = (reply["generation"], state)
         return thawed(state)
 
-    def changes(self, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
+    def changes(
+        self, slug: str, since: int, parts: tuple[str, ...], scope: live_rows.Scope | None = None
+    ) -> dict[str, Any]:
         """The export of the named parts as the changes since generation since, or in full when the server no
         longer holds every change after it."""
-        return self.request(slug, "export", {"since": since, "parts": list(parts)})
+        scope = live_rows.Scope() if scope is None else scope
+        payload = {"since": since, "parts": list(parts), "closed": scope.closed, "frozen": scope.frozen}
+        return self.request(slug, "export", payload)
 
     def stored_export(self, slug: str) -> dict:
         """The full export, read as the changes since the one the last command on this host stored for it."""

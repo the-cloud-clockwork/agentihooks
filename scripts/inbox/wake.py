@@ -7,13 +7,14 @@ count survives restarts.
 
 import uuid
 from dataclasses import dataclass, replace
+from typing import Any
 
 from scripts.hive import reports
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import CLOSED, Item, redelivery_ms
+from scripts.inbox.store import CLOSED, InboxStore, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
@@ -33,6 +34,8 @@ WAKE_TEXT = (
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
 PASSED, FROZEN = "passed_master", "frozen"
 ALERTED = "alerted"
+HELD = "held it until it can be closed"
+SHUT = "closed it"
 
 
 def window_ms(environ):
@@ -143,7 +146,9 @@ class _Clock:
     quiet: int
 
 
-def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
+def _wake_world(
+    inbox: InboxStore, slug: str, agents: list[Any], herdr: Any, ledger: Any, clock: _Clock, items: list[Item]
+) -> list[str]:
     now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
@@ -184,7 +189,8 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         elif step in (TO_MASTER, TO_OPERATOR):
             notice = item.sender == ledger_alerts.SENDER
             if not notice and not _alert(inbox, slug, ledger, item):
-                actions.append(f"the ledger page refused message {item.id}, closed it")
+                outcome = SHUT if inbox.get(item.id).state in CLOSED else HELD
+                actions.append(f"the ledger page refused message {item.id}, {outcome}")
                 continue
             shown = "its alert is already on the ledger page" if notice else "shown to the operator on the ledger page"
             inbox.note(item.id, TO_OPERATOR, BY, shown, now_ms)

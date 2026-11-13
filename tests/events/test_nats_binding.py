@@ -15,7 +15,7 @@ def test_bus_provisions_only_when_requested(monkeypatch, provision):
         create_key_value=AsyncMock(),
         key_value=AsyncMock(),
     )
-    client = SimpleNamespace(jetstream=Mock(return_value=js), close=AsyncMock())
+    client = SimpleNamespace(jetstream=Mock(return_value=js), close=AsyncMock(), options={})
     connect = AsyncMock(return_value=client)
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     bus = nats.NatsBus(BusConfig(provision=provision), "nats://localhost:4222")

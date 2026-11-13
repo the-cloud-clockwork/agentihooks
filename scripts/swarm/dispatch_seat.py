@@ -13,12 +13,14 @@ import json
 from dataclasses import replace
 from typing import Any
 
-from scripts.inbox.store import InboxError, InboxStore
+from scripts.inbox import store as inbox_store
+from scripts.inbox.store import InboxError
 from scripts.swarm import (
     bottleneck,
     capacity,
     dev_red,
     elapsed,
+    hash_pages,
     launch_check,
     lifetime,
     priority_sweep,
@@ -26,7 +28,7 @@ from scripts.swarm import (
     stage_cover,
     templates,
 )
-from scripts.swarm.store import DISPATCH, FULL
+from scripts.swarm.store import DISPATCH, FULL, AgentRecord, RedisStore
 
 LANE = DISPATCH
 SEAT = "dispatcher"
@@ -121,8 +123,9 @@ def _forget_quota_lanes(store, slug: str, write: bool) -> None:
 
 
 def red_dev(store, slug: str, doc: dict) -> list[dict]:
-    held = store.redis.hgetall(dev_red.key(slug))
-    blocked = sorted(t["id"] for t in doc.get("tasks", []) if t["id"] in held and t.get("state") == "blocked")
+    candidates = [t["id"] for t in doc.get("tasks", []) if t.get("state") == "blocked"]
+    held = hash_pages.picked(store.redis, dev_red.key(slug), candidates)
+    blocked = sorted(task_id for task_id in candidates if task_id in held)
     if not blocked:
         return []
     run_id = max(int(held[task_id]) for task_id in blocked)
@@ -133,8 +136,8 @@ def line(trigger: dict) -> str:
     return LINES[trigger.get("kind", "priority")].format(**trigger)
 
 
-def inbox_work(store, slug: str) -> list[dict]:
-    inbox = InboxStore(store.redis)
+def inbox_work(store: RedisStore, slug: str) -> list[dict]:
+    inbox = inbox_store.InboxStore(store.redis)
     items = {item.id: item for address in _addresses(store, slug) for item in inbox.open_mail(address)}
     return [
         {"id": f"inbox:{item.id}", "kind": "inbox", "item": item.id}
@@ -173,9 +176,9 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
         return [_end(slug, store, seat) for seat in seats]
     gone = [seat for seat in seats if left(seat, doc)]
     if gone:
-        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {
-            trigger["id"] for trigger in found if trigger.get("kind") != "inbox"
-        }:
+        if seen := set(
+            hash_pages.picked(store.redis, store.key(slug, SENT), [t["id"] for t in found if t.get("kind") != "inbox"])
+        ):
             store.redis.sadd(store.key(slug, LEFT), *seen)
         return [_end(slug, store, seat, DEPARTED) for seat in gone]
     if seats:
@@ -203,8 +206,8 @@ class _NoTriggers(Exception):
     pass
 
 
-def _launch_triggers(store, slug, found):
-    inbox = InboxStore(store.redis)
+def _launch_triggers(store: RedisStore, slug: str, found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    inbox = inbox_store.InboxStore(store.redis)
     owners = set(_addresses(store, slug))
     live = []
     for trigger in found:
@@ -249,24 +252,25 @@ def _spawn(slug, config, store, runtime, found, now_ms):
     return [f"spawned dispatcher {record.name} for {_count(found)}"]
 
 
-def _move_mail_home(store, record):
+def _move_mail_home(store: RedisStore, record: AgentRecord) -> None:
     """Runs just after launch, because the runtime picks the host inside spawn."""
     from scripts.inbox import exits
 
-    inbox = InboxStore(store.redis)
+    inbox = inbox_store.InboxStore(store.redis)
     home = inbox.home_store(record.seat)
     for world in inbox.worlds():
         if world.world != home.world:
             exits._move_world_mail(world, [(record, home)])
 
 
-def _wake(slug, store, seat, found):
-    sent = set(store.redis.hkeys(store.key(slug, SENT)))
-    new = [trigger for trigger in found if trigger["id"] not in sent and trigger.get("kind") != "inbox"]
+def _wake(slug: str, store: RedisStore, seat: AgentRecord, found: list[dict[str, Any]]) -> list[str]:
+    candidates = [trigger for trigger in found if trigger.get("kind") != "inbox"]
+    sent = hash_pages.picked(store.redis, store.key(slug, SENT), [trigger["id"] for trigger in candidates])
+    new = [trigger for trigger in candidates if trigger["id"] not in sent]
     if not new:
         return []
     lines = "\n".join(line(trigger) for trigger in new)
-    InboxStore(store.redis).send(SENDER, seat.seat, WAKE.format(slug=slug, lines=lines))
+    inbox_store.InboxStore(store.redis).send(SENDER, seat.seat, WAKE.format(slug=slug, lines=lines))
     _sent(store, slug, new)
     return [f"woke {seat.name} with {_count(new, 'new ')}"]
 

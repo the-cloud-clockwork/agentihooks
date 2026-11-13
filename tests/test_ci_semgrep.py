@@ -44,7 +44,7 @@ def test_scan_keeps_the_reusable_workflow_steps():
     assert [step.get("name") for step in steps[2:]] == [
         "Install Semgrep",
         "Own rules hold on their fixtures and the code",
-        "Source control exceptions only shrink",
+        "Rule exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
     ]
@@ -75,11 +75,15 @@ def test_scan_runs_the_registry_packs_and_the_outage_rules():
     }
 
 
-def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
+def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step() -> None:
     assert ".semgrep-incidents" in _jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()
     assert any(_ROOT.glob(".semgrep-incidents/*.yml"))
     runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
-    assert "semgrep --metrics off --test .semgrep-incidents" in runs
+    fixture_run = next(run for run in runs if run and "cp -r .semgrep-incidents" in run)
+    assert 'copy="$(mktemp -d -p "$RUNNER_TEMP")"' in fixture_run
+    assert 'cp -r .semgrep-incidents "$copy/rules"' in fixture_run
+    assert ': > "$copy/.semgrepignore"' in fixture_run
+    assert '(cd "$copy" && semgrep --metrics off --test --config rules rules)' in fixture_run
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
@@ -92,10 +96,10 @@ def test_feature_fixture_command_runs_recursively():
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
 
 
-def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
-    steps = _jobs()["feature-tests"]["steps"]
-    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
-    assert any(step.get("run") == 'python -m pip install semgrep==1.177.0 "pyyaml>=6.0"' for step in steps)
+def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
+    steps = [step for job in _jobs().values() for step in job.get("steps", [])]
+    assert not any("scripts.feature_map" in step.get("run", "") for step in steps)
+    assert any(step.get("run") == "python -m pip install semgrep==1.177.0" for step in steps)
 
 
 def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
@@ -109,7 +113,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
         {"pattern": '["gh", ...]'},
         {"pattern": "scripts.tick.adapters.github.command(...)"},
     ]
-    assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "/scripts/tick/**", "*.test.py"]
     allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
     assert rule["paths"]["exclude"] == allowed
     assert "/scripts/tick/adapters/github.py" in allowed
@@ -126,14 +130,36 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert "/scripts/swarm/cli.py" not in allowed
     assert "/scripts/swarm/ci_speed.py" not in allowed
     assert "/scripts/swarm/mutation_wait.py" not in allowed
+    assert "/scripts/swarm/ledger_events.py" not in allowed
+    assert allowed == ["/scripts/swarm/github_reads.py", "/scripts/tick/adapters/github.py"]
 
 
+@pytest.mark.feature("tick-unbounded-read-rule")
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
     steps = _jobs()["scan"]["steps"]
-    step = next(step for step in steps if step.get("name") == "Source control exceptions only shrink")
+    step = next(step for step in steps if step.get("name") == "Rule exceptions only shrink")
     assert step["env"]["BASE"] == "${{ inputs.base }}"
-    assert 'git show "$BASE:.semgrep/source-control-allowlist.json"' in step["run"]
+    assert "for list in .semgrep/*-allowlist.json; do" in step["run"]
+    assert 'git show "$BASE:$list"' in step["run"]
     assert "current <= previous" in step["run"]
+    lists = sorted(path.name for path in (_ROOT / ".semgrep").glob("*-allowlist.json"))
+    assert lists == ["source-control-allowlist.json", "tick-unbounded-read-allowlist.json"]
+
+
+@pytest.mark.feature("tick-unbounded-read-rule")
+def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_task() -> None:
+    rule = yaml.safe_load((_ROOT / ".semgrep/tick-unbounded-read.yml").read_text())["rules"][0]
+    assert rule["id"] == "tick-unbounded-store-read"
+    assert rule["languages"] == ["python"]
+    assert rule["severity"] == "ERROR"
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "/scripts/tick/**", "*.test.py"]
+    allowed = json.loads((_ROOT / ".semgrep/tick-unbounded-read-allowlist.json").read_text())
+    assert rule["paths"]["exclude"] == sorted(allowed)
+    assert all(path.endswith(".py") and "*" not in path for path in allowed)
+    assert all(isinstance(task, str) and task.startswith("t-") for task in allowed.values())
+    fixture = (_ROOT / ".semgrep/tick-unbounded-read.test.py").read_text()
+    assert fixture.count("# ruleid: tick-unbounded-store-read") == 12
+    assert fixture.count("# ok: tick-unbounded-store-read") == 10
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():
@@ -161,6 +187,12 @@ def test_charts_run_the_chart_timer_guard():
     steps = _jobs()["charts"]["steps"]
     assert steps[-1]["run"] == "python tests/ci_charts/chart_timers.py"
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
+
+
+def test_charts_render_every_pod_template_at_two_chart_versions():
+    runs = [step.get("run") for step in _jobs()["charts"]["steps"]]
+    assert "python tests/ci_charts/chart_pod_templates.py" in runs
+    assert (_ROOT / "tests/ci_charts/chart_pod_templates.py").is_file()
 
 
 def test_charts_grade_the_guard_rules_against_the_base_floors():

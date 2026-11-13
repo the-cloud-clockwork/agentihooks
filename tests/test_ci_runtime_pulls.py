@@ -364,6 +364,71 @@ exit 17
         assert any(call.startswith("manifest inspect ") for call in calls)
 
 
+@pytest.mark.parametrize(
+    "image,reuse,architecture,expected",
+    [
+        ("mirror.gcr.io/library/python:3.12-slim-bookworm", "true", "amd64", 0),
+        ("public.ecr.aws/docker/library/redis:7", "true", "amd64", 0),
+        ("public.ecr.aws/docker/library/nats:2.15.1-alpine", "true", "arm64", 17),
+        ("public.ecr.aws/docker/library/redis:7", "", "amd64", 17),
+    ],
+)
+def test_reuse_local_skips_the_registry_only_for_a_verified_local_image(
+    tmp_path: Path, image: str, reuse: str, architecture: str, expected: int
+) -> None:
+    """A loaded amd64 image skips every registry call; anything else still pulls."""
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == image && "$2" == inspect ]]; then
+  printf '%s\\n' "$LOCAL_ARCH"
+  exit 0
+fi
+exit 17
+""",
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "PULL_REUSE_LOCAL": reuse,
+            "PULL_RETRY_SECONDS": "0",
+            "LOCAL_ARCH": architecture,
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == expected, result.stderr
+    calls = log.read_text().splitlines()
+    if expected == 0:
+        assert len(calls) == 1
+        assert " image inspect " in f" {calls[0]} "
+        assert calls[0].endswith(image)
+    else:
+        assert any(call.startswith("manifest inspect ") for call in calls)
+
+
+def test_swarm_smoke_loads_saved_runtime_images_before_any_pull_reuses_them() -> None:
+    """The smoke job loads the cached images first and lets every pre build pull reuse them."""
+    steps = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    names = [step.get("name") for step in steps]
+    load = names.index("Load the saved runtime images")
+    assert names.index("Restore the runtime images saved on dev") < load
+    for name in ("Pull the Python base with bounded retries", "Build the swarm image"):
+        assert load < names.index(name)
+        assert steps[names.index(name)]["env"]["PULL_REUSE_LOCAL"] == "true"
+    save = steps[names.index("Save the runtime images for later runs")]
+    assert save["with"]["key"] == steps[names.index("Restore the runtime images saved on dev")]["with"]["key"]
+
+
 @pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "build"])
 def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
     log = tmp_path / "docker.log"

@@ -1,0 +1,15 @@
+rules:
+  - id: master-fallback-run-without-timeout
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The master fallback calls subprocess.run without a timeout. On 6 November at 19:42 UTC an unbounded fallback
+      pass hung the loop and no master was started while the swarm had none. Pass timeout= on every subprocess.run
+      in the master fallback.
+    paths:
+      include:
+        - /scripts/swarm/master_fallback.py
+        - master-fallback-run-without-timeout.py
+    patterns:
+      - pattern: subprocess.run(...)
+      - pattern-not: subprocess.run(..., timeout=$TIMEOUT, ...)

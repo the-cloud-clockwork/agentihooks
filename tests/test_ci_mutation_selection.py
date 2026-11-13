@@ -534,6 +534,58 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert mutation_counts("scripts/sample.py", source, {9, 14}) == (0, ["cached"])
 
 
+def test_mutant_counting_resolves_positions_on_its_one_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    import libcst
+    from libcst import metadata
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import changed_mutations, mutation_counts
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = "def doubled(value):\n    return value * 2\n\n\ndef tripled(value):\n    return value * 3\n"
+    expected = len(changed_mutations("scripts/sample.py", source, {2, 6})[1])
+    parses, wrappers = [], []
+    parse = libcst.parse_module
+    init = metadata.MetadataWrapper.__init__
+    monkeypatch.setattr(libcst, "parse_module", lambda text, *args: parses.append(text) or parse(text, *args))
+    monkeypatch.setattr(
+        metadata.MetadataWrapper,
+        "__init__",
+        lambda wrapper, *args, **kwargs: wrappers.append(wrapper) or init(wrapper, *args, **kwargs),
+    )
+    assert mutation_counts("scripts/sample.py", source, {2, 6}) == (expected, [])
+    assert expected > 0
+    assert parses == [source]
+    assert len(wrappers) == 1
+
+
+def test_mutant_creation_wraps_its_parse_and_visits_again_only_for_a_refused_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import libcst
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import created_mutations
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    parsed: list[libcst.Module] = []
+    parse = libcst.parse_module
+    monkeypatch.setattr(libcst, "parse_module", lambda text, *args: parsed.append(parse(text, *args)) or parsed[-1])
+    plain = "def doubled(value):\n    return value * 2\n"
+    wrapper, graded, possible = created_mutations("scripts/sample.py", plain)
+    assert wrapper.module is parsed[0]
+    assert graded
+    assert possible is graded
+    refusing = "@opaque\nclass Cached:\n    def cached(value):\n        return value - 1\n"
+    _, graded, possible = created_mutations("scripts/sample.py", refusing)
+    assert graded == []
+    assert possible
+
+
 def test_changed_module_constants_and_dataclass_fields_beside_a_decorated_class_select_without_error(monkeypatch):
     from mutmut.configuration import Config
 
@@ -1223,12 +1275,6 @@ WALL_CLOCK_SPLITS = {
     ],
     "tests/hive/test_cli.py": [
         ("test_a_stalled_tls_client_is_dropped_after_the_request_timeout", "test_a_stalled_tls_client_is_dropped")
-    ],
-    "tests/swarm/test_cli.py": [
-        (
-            "test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs",
-            "test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs",
-        )
     ],
     "tests/gates/test_push_stop_executor.py": [
         (

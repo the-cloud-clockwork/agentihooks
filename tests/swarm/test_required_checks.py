@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import ready
-from scripts.swarm.ledger_events import GATE, pull_request, view, views
+from scripts.swarm.ledger_events import GATE, pull_request
+from tests.swarm.graph_port import view, views
 from tests.swarm.test_ready import HEAD, URL, merging  # noqa: F401
 
 SUITE = {

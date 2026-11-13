@@ -112,6 +112,16 @@ def test_an_email_named_account_is_discovered_routed_and_shown():
     assert " 2/" in row and "80%" in row
 
 
+def test_a_dashed_controller_key_routes_to_the_hive_underscore_slot() -> None:
+    environ = {"AH_CC_TOKEN_nestorcoltathotmail_com": "tok-a", "AH_CC_TOKEN_other": "tok-b"}
+
+    decision = balancer.forced(environ, "nestorcoltathotmail-com")
+
+    assert decision.credential is not None
+    assert decision.credential.env_name == "AH_CC_TOKEN_nestorcoltathotmail_com"
+    assert decision.credential.account == "nestorcoltathotmail_com"
+
+
 def test_probe_passes_only_selected_oauth_token(monkeypatch):
     observed = {}
 
@@ -787,6 +797,28 @@ def test_a_reset_window_counts_as_full_and_a_rejected_account_takes_no_session()
     assert balancer.account_cap(balancer._error_result("x", "failed"), NOW) is None
 
 
+def test_the_primary_login_is_capped_to_zero_at_its_reserve(monkeypatch):
+    from scripts import master_claude_login as login
+
+    monkeypatch.setenv(login.ORDER_ENV, "main")
+    above = balancer.ProbeResult(
+        "main", "allowed", "NORMAL", 90.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(90.0)
+    )
+    at = balancer.ProbeResult("main", "allowed", "NORMAL", 2.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(98.0))
+    assert balancer.account_cap(above, 1000) == 6
+    assert balancer.account_cap(at, 1000) == 0
+
+
+def test_a_non_primary_login_at_the_same_usage_is_unaffected(monkeypatch):
+    from scripts import master_claude_login as login
+
+    monkeypatch.setenv(login.ORDER_ENV, "main")
+    other = balancer.ProbeResult(
+        "other", "allowed", "NORMAL", 20.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(80.0)
+    )
+    assert balancer.account_cap(other, 1000) == 6
+
+
 def test_a_ceiling_scales_the_cap_with_the_tighter_window():
     full = balancer.ProbeResult("a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0))
     assert balancer.account_cap(full, 1000) == 6
@@ -1115,3 +1147,400 @@ def test_the_master_overflow_ranks_by_the_fable_week_when_asked(monkeypatch, tmp
     assert (
         balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000).account == "A"
     )
+
+
+@pytest.mark.parametrize("stored", [{"version": 2, "modes": {"normal": {}}}, [1]])
+def test_a_cache_of_another_version_or_shape_reads_as_empty(tmp_path: Path, stored: object) -> None:
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps(stored))
+
+    assert balancer._read_cache(cache) == {"version": 1, "modes": {}}
+
+
+def test_cached_observations_skip_entries_missing_a_result_or_a_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+    beta = balancer.Credential("AH_CC_TOKEN_BETA", "secret-b")
+    balancer.collect_results([alpha, beta], cache_file=cache, environ={}, now=1000)
+    data = json.loads(cache.read_text())
+    first, second = data["modes"]["normal"]["accounts"].values()
+    first["result"] = None
+    del second["observed_at"]
+    cache.write_text(json.dumps(data))
+
+    assert balancer.cached_observations(cache_file=cache) == []
+
+
+def test_requested_model_falls_back_to_empty_when_the_settings_dict_has_no_model(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"other": "value"}))
+
+    assert balancer.requested_model([], settings) == ""
+
+
+def test_requested_model_falls_back_to_empty_when_the_settings_file_is_not_a_dict(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps([1, 2, 3]))
+
+    assert balancer.requested_model([], settings) == ""
+
+
+def _model_usage_stream(model: str, model_usage: dict[str, dict[str, int]]) -> str:
+    events = [
+        {"type": "system", "subtype": "init", "model": model},
+        {
+            "type": "result",
+            "usage": {"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            "modelUsage": model_usage,
+        },
+    ]
+    return "\n".join(json.dumps(event) for event in events)
+
+
+def test_a_single_model_usage_entry_sets_context_capacity_when_the_model_name_differs() -> None:
+    output = _model_usage_stream("claude-haiku-4-5-20251001", {"other-model-name": {"contextWindow": 123456}})
+
+    result = balancer.parse_probe("ALPHA", output, 100)
+
+    assert result.context_capacity == 123456
+
+
+def test_context_capacity_uses_the_requested_models_own_usage_entry() -> None:
+    output = _model_usage_stream(
+        "claude-haiku-4-5-20251001",
+        {
+            "claude-haiku-4-5-20251001": {"contextWindow": 200000},
+            "claude-sonnet-4-5-20251001": {"contextWindow": 1000000},
+        },
+    )
+
+    result = balancer.parse_probe("ALPHA", output, 100)
+
+    assert result.context_capacity == 200000
+
+
+def test_an_unknown_probe_state_raises_the_fixed_rate_limit_error_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def unreachable(*args: object, **kwargs: object) -> None:
+        raise claude_usage.Unreachable
+
+    monkeypatch.setattr(claude_usage, "probe", unreachable)
+    monkeypatch.setattr(balancer.subprocess, "run", run)
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+
+    result = balancer.probe_credential(credential, "haiku", 10, {})
+
+    assert result.state == "UNKNOWN"
+    assert result.error == "rate-limit windows unavailable"
+
+
+def test_cache_freshness_honours_the_mode_fable_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def probe(credentials: list[balancer.Credential], *args: object, **kwargs: object) -> list[balancer.ProbeResult]:
+        calls.append([credential.account for credential in credentials])
+        return [balancer.parse_probe(item.account, _stream(0.10, 0.10, 0.10), 100) for item in credentials]
+
+    monkeypatch.setattr(balancer, "probe_credentials", probe)
+    cache = tmp_path / "cache.json"
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+    stale_fable = balancer.ProbeResult(
+        "ALPHA",
+        "allowed",
+        "NORMAL",
+        80.0,
+        balancer.QuotaWindow(used=10.0, resets_at=90000),
+        balancer.QuotaWindow(used=10.0, resets_at=90000),
+        balancer.QuotaWindow(used=10.0, resets_at=500),
+    )
+    cache.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "modes": {
+                    "fable": {
+                        "accounts": {
+                            "AH_CC_TOKEN_ALPHA": {
+                                "observed_at": 1000,
+                                "result": balancer._result_data(stale_fable),
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    results, source = balancer.collect_results([credential], include_fable=True, cache_file=cache, environ={}, now=1030)
+
+    assert source == "live"
+    assert calls == [["ALPHA"]]
+    assert results[0].account == "ALPHA"
+
+
+def test_entry_is_fresh_treats_the_cache_ttl_boundary_as_stale() -> None:
+    entry = {
+        "observed_at": 940,
+        "result": balancer._result_data(balancer.parse_probe("ALPHA", _stream(0.10, 0.10), 100)),
+    }
+
+    assert balancer._entry_is_fresh(entry, 1000, False) is False
+
+
+class _FreshLookingMapping:
+    def __init__(self, data: dict[str, object]) -> None:
+        self._data = data
+
+    def get(self, key: str) -> object:
+        return self._data.get(key)
+
+    def __getitem__(self, key: str) -> object:
+        return self._data[key]
+
+
+def test_entry_is_fresh_rejects_a_non_dict_entry_even_when_it_looks_fresh() -> None:
+    result = balancer.parse_probe("ALPHA", _stream(0.10, 0.10), 100)
+    entry = _FreshLookingMapping({"observed_at": 999, "result": balancer._result_data(result)})
+
+    assert balancer._entry_is_fresh(entry, 1000, False) is False
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_takes_the_open_account_with_most_room_when_swarm_agents_fill_every_seat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env = _three(monkeypatch)
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_launch_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("BEST", "master overflow")
+    assert decision.credential == balancer.Credential("AH_CC_TOKEN_BEST", "b")
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize("marker", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_SLOT_HIVE"])
+def test_a_swarm_or_hive_launch_keeps_the_session_cap_when_every_seat_is_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, marker: str
+) -> None:
+    env = {**_three(monkeypatch), marker: "x"}
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_takes_a_free_seat_the_normal_way(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    env = _three(monkeypatch)
+    decision = balancer.select_launch_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 6, "MID": 6}, now=1000
+    )
+    assert (decision.account, decision.source) == ("LOW", "cached")
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_fill_every_seat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import install
+    from scripts.routing import reservation
+
+    for name, value in _three(monkeypatch).items():
+        monkeypatch.setenv(name, value)
+    for name in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SLOT_HIVE", "AGENTIHOOKS_SLOT_EXECUTION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/opt/claude")
+    monkeypatch.setattr(balancer, "route_requires_fable", lambda *args: False)
+    monkeypatch.setattr(reservation, "for_worker", lambda harness, environ: None)
+    monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"BEST": 6, "MID": 6, "LOW": 6})
+    launched: dict[str, str] = {}
+
+    def execvpe(binary: str, argv: list[str], env: dict[str, str]) -> None:
+        launched.update(binary=binary, token=env["CLAUDE_CODE_OAUTH_TOKEN"])
+        raise RuntimeError("exec reached")
+
+    monkeypatch.setattr(install.os, "execvpe", execvpe)
+    with pytest.raises(RuntimeError, match="^exec reached$"):
+        install.cmd_claude([])
+    assert launched == {"binary": "/opt/claude", "token": "b"}
+    assert capsys.readouterr().out == (
+        "[agenti] account=BEST routing_left=80% 5h_left=90% 7d_left=80% source=master overflow\n"
+    )
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_skips_an_account_under_five_percent_of_its_five_hour_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tired = balancer.parse_probe("TIRED", _stream(0.97, 0.05), 100)
+    mid = balancer.parse_probe("MID", _stream(0.30, 0.40), 100)
+    low = balancer.parse_probe("LOW", _stream(0.50, 0.70), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([tired, mid, low], "cached"))
+    env = {"AH_CC_TOKEN_TIRED": "t", "AH_CC_TOKEN_MID": "m", "AH_CC_TOKEN_LOW": "l"}
+    full = {"TIRED": 0, "MID": 6, "LOW": 4}
+    decision = balancer.select_launch_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("MID", "master overflow")
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize("now", [1000, None])
+def test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, now: float | None
+) -> None:
+    monkeypatch.setattr(balancer.time, "time", lambda: 1000.0)
+    tired = balancer.parse_probe("TIRED", _stream(0.97, 0.05), 100)
+    spent = balancer.parse_probe("SPENT", _stream(0.10, 0.99), 100)
+    skipped = balancer.parse_probe("SKIPPED", _stream(0.10, 0.10), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([tired, spent, skipped], "cached"))
+    env = {"AH_CC_TOKEN_TIRED": "t", "AH_CC_TOKEN_SPENT": "s", "AH_CC_TOKEN_SKIPPED": "k"}
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential(
+            env, cache_file=tmp_path / "c.json", sessions={}, exclude=["SKIPPED"], now=now
+        )
+    assert str(raised.value) == (
+        "no Claude account is open: TIRED: 3% of its five hour window left, under the 5% floor; "
+        "SPENT: 1% of its week left, under the 5% floor; SKIPPED: excluded from this launch"
+    )
+    assert [result.account for result in raised.value.results] == ["TIRED", "SPENT", "SKIPPED"]
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize(
+    ("marker", "selector"),
+    [
+        ("", "select_master_credential"),
+        ("AGENTIHOOKS_SWARM", "select_credential"),
+        ("AGENTIHOOKS_SLOT_HIVE", "select_credential"),
+    ],
+)
+def test_the_launch_selector_forwards_every_option_to_the_selector_it_picks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, marker: str, selector: str
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    for name in ("select_master_credential", "select_credential"):
+        monkeypatch.setattr(balancer, name, lambda environ, _name=name, **kwargs: calls.append((_name, kwargs)))
+    env = {marker: "x"} if marker else {}
+    balancer.select_launch_credential(env)
+    balancer.select_launch_credential(
+        env,
+        include_fable=True,
+        claude_bin="/opt/claude",
+        sessions={"A": 1},
+        exclude=["B"],
+        cache_file=tmp_path / "c.json",
+        now=5.0,
+    )
+    defaults = {
+        "include_fable": False,
+        "claude_bin": "claude",
+        "sessions": None,
+        "exclude": (),
+        "cache_file": None,
+        "now": None,
+    }
+    given = {
+        "include_fable": True,
+        "claude_bin": "/opt/claude",
+        "sessions": {"A": 1},
+        "exclude": ["B"],
+        "cache_file": tmp_path / "c.json",
+        "now": 5.0,
+    }
+    assert calls == [(selector, defaults), (selector, given)]
+
+
+def _window_result(
+    account: str,
+    five: float | None,
+    week: float | None,
+    *,
+    status: str = "allowed",
+    fable: float | None = None,
+    week_resets: int = 91000,
+    five_resets: int = 4600,
+) -> balancer.ProbeResult:
+    return balancer.ProbeResult(
+        account,
+        status,
+        "NORMAL",
+        None,
+        balancer.QuotaWindow(five, five_resets),
+        balancer.QuotaWindow(week, week_resets),
+        balancer.QuotaWindow(fable, 91000),
+    )
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize(
+    ("result", "include_fable", "reason"),
+    [
+        (_window_result("SKIPPED", 10, 10), False, "excluded from this launch"),
+        (_window_result("A", 10, 10, status="rejected"), False, "the provider revoked or rejects this token"),
+        (_window_result("A", 10, 10, status="revoked"), False, "the provider revoked or rejects this token"),
+        (_window_result("A", 10, None), False, "no fresh quota reading"),
+        (_window_result("A", 10, 10), True, "no fresh quota reading"),
+        (_window_result("A", 10, 10, fable=97), True, "3% of its week left, under the 5% floor"),
+        (_window_result("A", 10, 96), False, "4% of its week left, under the 5% floor"),
+        (_window_result("A", 10, 95), False, "open"),
+        (_window_result("A", 10, 99, week_resets=500), False, "open"),
+        (_window_result("A", 96, 10), False, "4% of its five hour window left, under the 5% floor"),
+        (_window_result("A", 95, 10), False, "open"),
+        (_window_result("A", None, 10), False, "open"),
+        (_window_result("A", 99, 10, five_resets=500), False, "open"),
+        (_window_result("PRIMARY", 10, 85), False, "the primary login keeps its week reserve"),
+    ],
+)
+def test_the_launch_refusal_names_the_rule_that_closes_the_account(
+    monkeypatch: pytest.MonkeyPatch, result: balancer.ProbeResult, include_fable: bool, reason: str
+) -> None:
+    from scripts.routing import reservation
+
+    seen: list[tuple[str, float, bool]] = []
+
+    def primary_reserved(slug: str, week: float, environ: object) -> bool:
+        seen.append((slug, week, environ is balancer.os.environ))
+        return slug == "PRIMARY"
+
+    monkeypatch.setattr(reservation, "primary_reserved", primary_reserved)
+    assert balancer._launch_refusal(result, 1000, include_fable, {"SKIPPED"}) == reason
+    if result.account == "PRIMARY":
+        assert seen == [("PRIMARY", 15.0, True)]
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_keeps_a_refusal_that_read_no_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    refusal = balancer.RoutingError("no non-empty AH_CC_TOKEN_* variables found")
+
+    def refuse(environ: object, **kwargs: object) -> None:
+        raise refusal
+
+    monkeypatch.setattr(balancer, "select_master_credential", refuse)
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential({})
+    assert raised.value is refusal
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_names_the_fable_week_when_it_closes_the_only_account(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fable = balancer.parse_probe("FABLE", _stream(0.10, 0.10, 0.97), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([fable], "cached"))
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential(
+            {"AH_CC_TOKEN_FABLE": "f"}, include_fable=True, cache_file=tmp_path / "c.json", sessions={}, now=1000
+        )
+    assert str(raised.value) == "no Claude account is open: FABLE: 3% of its week left, under the 5% floor"

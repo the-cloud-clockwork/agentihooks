@@ -3,12 +3,17 @@
 import sys
 import urllib.error
 import uuid
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.repository import live_rows
 
 LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
 SERVICE_AUTHORS = ("swarm", None)
@@ -26,6 +31,10 @@ class LedgerUnreachable(SwarmError):
     pass
 
 
+class LedgerOffline(LedgerUnreachable):
+    """A fresh read refused while the pass runs from its last good view; the step that needs it is skipped."""
+
+
 UNREACHABLE = (
     "ledger server not answering",
     "server refused: 5",
@@ -33,6 +42,65 @@ UNREACHABLE = (
     "ledger talk queued while the server was down",
     "the local inbox outbox is full",
 )
+
+
+OFFLINE: ContextVar[bool] = ContextVar("tick_ledger_offline", default=False)
+SLOW: ContextVar[bool] = ContextVar("tick_ledger_slow", default=False)
+OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
+SNAPSHOT_TIMEOUT_S = 3.0
+EXPORT_TIMEOUT_S = 30.0
+CLEAR_BATCH = 200
+
+
+def offline() -> bool:
+    """Whether the pass runs from its last good view, set at its start or by any step that saw the server stop."""
+    from scripts.tick import view
+
+    return OFFLINE.get() or view.offline()
+
+
+def slow() -> bool:
+    """Whether the read that left the pass on its last good view only timed out, so its writes are still sent first."""
+    from scripts.tick import view
+
+    return SLOW.get() or view.slow()
+
+
+def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``ops``, refused as the server would refuse them when a task write's guard fails against the held view."""
+    from scripts.tick import view
+
+    held = view.current()
+    for op in ops:
+        found = held.read("tasks", op["item"].removeprefix("tasks/")) if held and op["op"] == "task_update" else None
+        row = cast(dict[str, Any], found) if isinstance(found, dict) else None
+        if row is not None and _moved(row, op):
+            raise LedgerRefused(f"ledger {slug} refused: {op['item']} moved since the last good view")
+    return ops
+
+
+def _moved(row: dict[str, Any], op: dict[str, Any]) -> bool:
+    """Whether held task ``row`` fails the state or field guard of write ``op``, judged as the server judges it."""
+    _ledger()
+    from scripts.swarm_ledger import ledger_tasks
+
+    return bool(ledger_tasks._guarded(row, op))  # pyright: ignore[reportPrivateUsage]
+
+
+def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:
+    """The answer of ``ops`` queued in the outbox, carrying the held view with their task fields applied."""
+    from scripts.tick import view
+
+    return {**view.queued(ops), **answer}
+
+
+def _offline_write(ledger: Any, slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+    """``ops`` queued in the outbox while the pass runs from its last good view, refused as the server would refuse
+    them against that view, and unreachable when the outbox cannot take them."""
+    try:
+        return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
+    except SystemExit as exc:
+        raise LedgerUnreachable(f"ledger {slug}: {exc}") from exc
 
 
 def _accepted(slug, state):
@@ -48,6 +116,16 @@ def _ledger():
     return ledger
 
 
+@dataclass(frozen=True)
+class FreezeWords:
+    """The words and focus queue place a freeze write carries."""
+
+    reason: str = ""
+    quote: str = ""
+    position: str = ""
+    only: bool = False
+
+
 class LedgerClient:
     def __init__(self, service: bool = False, read_timeout: float | None = None) -> None:
         self.service = service
@@ -60,23 +138,45 @@ class LedgerClient:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
+        held_offline = offline()
+        if held_offline and not ops:
+            raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
+            if held_offline and ops and not slow():
+                return _offline_write(ledger, slug, ops, service)
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
+            from scripts.tick import view
+
+            view.stopped(exc.__context__)
             refused = str(exc).startswith("server refused: 4")
             unreachable = str(exc).startswith(UNREACHABLE)
+            if unreachable and held_offline and ops:
+                return _offline_write(ledger, slug, ops, service)
             error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
             raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise LedgerRefused(f"ledger {slug} refused: {detail}")
+        if ops:
+            from scripts.tick import view
+
+            view.wrote()
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
+        if offline():
+            raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
-        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
+        try:
+            return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
+        except OSError as exc:
+            from scripts.tick import view
+
+            view.stopped(exc)
+            raise
 
     def state(self, slug):
         return self._call(slug)
@@ -111,6 +211,14 @@ class LedgerClient:
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
         return self.item(slug, f"tasks/{task_id}")
+
+    def watchdog_copy(self, slug: str) -> dict[str, Any]:
+        """The newest watchdog document copy stored on the ledger, empty when none is stored."""
+        copy: dict[str, Any] = self._resource(slug, "watchdog")
+        return copy
+
+    def store_watchdog_copy(self, slug: str, text: str, by: str) -> None:
+        self._call(slug, [_op("watchdog_copy", by, text=text)])
 
     def item(self, slug, path):
         """One item by its list path, or None when the ledger holds no such item."""
@@ -246,12 +354,15 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
-    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
-        fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
+    def freeze(
+        self, slug: str, verb: str, target: str, by: str | None = None, words: FreezeWords | None = None
+    ) -> None:
+        given = {key: value for key, value in asdict(words or FreezeWords()).items() if value}
         if verb == "unfreeze":
-            op = _op("freeze_clear", by, **fields)
+            given = {key: value for key, value in given.items() if key in ("reason", "quote")}
+            op = _op("freeze_clear", by, target=target, **given)
         else:
-            op = _op("freeze_set", by, verb=verb, **fields)
+            op = _op("freeze_set", by, verb=verb, target=target, **given)
         if by is None:
             op.pop("by")
         self._call(slug, [op])
@@ -259,8 +370,9 @@ class LedgerClient:
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
 
-    def ungroup_tasks(self, slug, lead):
-        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
+    def ungroup_tasks(self, slug: str, lead: str, if_match: dict[str, list[str]] | None = None) -> None:
+        guard = {} if if_match is None else {"if_match": if_match}
+        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}", **guard)])
 
     def rank_task(self, slug, task_id, rank, by, if_owned=False):
         guard = {"if_owned": True} if if_owned else {}
@@ -268,6 +380,14 @@ class LedgerClient:
 
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
+
+    def clear_priorities(self, slug: str, cleared: list[tuple[str, str]]) -> None:
+        """Clear each ``(priority id, reason)`` of ``cleared`` as the swarm, ``CLEAR_BATCH`` clears per ledger write."""
+        ops: list[dict[str, Any]] = [
+            _op("priority_clear", "swarm", target=priority_id, reason=reason) for priority_id, reason in cleared
+        ]
+        for start in range(0, len(ops), CLEAR_BATCH):
+            self._call(slug, ops[start : start + CLEAR_BATCH])
 
     def comment_item(self, slug, item, text):
         self._write(slug, _op("add", "swarm", thread=f"{item}/comments", text=text))
@@ -309,19 +429,17 @@ class LedgerClient:
 
     def _lifecycle(self, slug: str, payload: dict[str, Any]) -> Any:
         from scripts.swarm import lease
-        from scripts.swarm_ledger.api.client import ResourceClient
 
         if (epoch := lease.epoch_for(slug)) is not None:
             payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
         try:
-            client = ResourceClient(ledger.base(slug), ledger.credentials(slug, self.service))
-            return client.request(slug, "lifecycle/actions", payload)["data"]
+            return ledger.client(slug, self.service).request(slug, "lifecycle/actions", payload)["data"]
         except urllib.error.HTTPError as exc:
             error = LedgerRefused if 400 <= exc.code < 500 else SwarmError
             raise error(f"ledger {slug}: server refused: {exc.code} {ledger.refusal_text(exc)}") from exc
         except OSError as exc:
-            raise SwarmError(f"ledger {slug}: {exc}") from exc
+            raise LedgerUnreachable(f"ledger {slug}: {exc}") from exc
 
     def bin_closed(self, slug, closed_at):
         from scripts.swarm_ledger import ledger_link
@@ -345,6 +463,23 @@ class LedgerClient:
         import ledger_bin
 
         return slug in ledger_bin.entries()
+
+
+def pass_state(ledger: Any, slug: str, scope: "live_rows.Scope | None" = None) -> dict[str, Any]:
+    """The tasks of ledger ``slug`` the tick reads, with its metadata and phases: the tick pass's held view patched
+    with one delta read while the pass holds a view of that ledger, else the ledger's own whole read. ``scope``
+    names which closed or frozen tasks a reader needs; any scope but the tick's filters the whole read."""
+    from scripts.swarm_ledger.repository import live_rows
+    from scripts.tick import view
+
+    held = view.document(slug) if scope is None else None
+    if held is not None:
+        return held
+    doc = ledger.state(slug)
+    if scope is None or scope == view.TICK_SCOPE:
+        return doc
+    answer = live_rows.answer(doc, scope)
+    return {**doc, "tasks": answer.rows, live_rows.FROZEN_IDS: answer.frozen_ids}
 
 
 def _op(kind, by, **fields):

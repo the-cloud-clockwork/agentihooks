@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -8,6 +8,10 @@ from .envelope import Envelope
 
 class StateConflict(Exception):
     pass
+
+
+class PayloadTooLarge(ValueError):
+    """The bus refused a message larger than its server limit; sending it again can never succeed."""
 
 
 @dataclass(frozen=True)
@@ -47,10 +51,17 @@ class WorkQueue(Protocol):
 
     def take(self, timeout_ms: int) -> Delivery | None: ...
 
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        """Removes every offer still on the queue, taken but unsettled or not, that ``stale`` names and returns how
+        many it removed."""
+        ...
+
 
 @runtime_checkable
 class StateStore(Protocol):
     def get(self, key: str) -> StateEntry | None: ...
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]: ...
 
     def create(self, key: str, value: bytes) -> int: ...
 

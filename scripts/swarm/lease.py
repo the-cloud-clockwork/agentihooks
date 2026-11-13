@@ -38,6 +38,10 @@ def beat_s() -> float:
     return tick_ms() / 1000
 
 
+class LeaseUnavailable(SwarmError):
+    """The hosted controller lease could not be reached or failed on the server; the lease itself was not refused."""
+
+
 @dataclass(frozen=True)
 class Lease:
     owner: str
@@ -49,10 +53,12 @@ def now_ms(store: RedisStore) -> int:
     return document.now_ms()
 
 
-def _address(slug):
+def _address(slug: str) -> str:
+    """The ledger route the lease goes through; none once the shared swarm database is configured."""
     from scripts.swarm_ledger.ledger_route import url
+    from scripts.swarm_ledger.repository import postgres
 
-    return url(slug)
+    return "" if postgres.url(os.environ) else url(slug)
 
 
 def _remote(slug, action, fields=None):
@@ -70,11 +76,12 @@ def _remote(slug, action, fields=None):
         )["data"]
     except urllib.error.HTTPError as exc:
         replay, error = failure(exc)
-        raise SwarmError(
+        refused = SwarmError if replay.code < 500 else LeaseUnavailable
+        raise refused(
             f"hosted controller lease refused: {replay.code} {error.get('code', '')} {error.get('message', '')}"
         ) from None
     except OSError as exc:
-        raise SwarmError(f"hosted controller lease is unavailable: {exc}") from exc
+        raise LeaseUnavailable(f"hosted controller lease is unavailable: {exc}") from exc
 
 
 def _recorded(doc: dict) -> Lease | None:
@@ -211,6 +218,8 @@ def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> No
             return
         try:
             renew(store, slug, held)
+        except LeaseUnavailable:
+            continue
         except SwarmError:
             return
         except document.unavailable():

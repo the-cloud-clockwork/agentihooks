@@ -6,12 +6,13 @@ import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from hashlib import sha256
-from typing import Any, TypeVar
+from random import uniform
+from typing import Any, TypeVar, cast
 
 from scripts.events import state
 from scripts.events.bus import StateConflict
 from scripts.events.redis_state import RedisStateStore
-from scripts.tick.adapters.records_redis import LAYOUT, META, RedisRecords
+from scripts.tick.adapters.records_redis import LAYOUT, META, RedisRecords, fence_key
 from scripts.tick.ports.records import (
     BLIND,
     FencedBatch,
@@ -68,6 +69,8 @@ RECORDS_SLUG = "records_slug"
 ARCHIVE = "archive"
 ARCHIVE_REF = "archive_ref"
 BY_NAME = "by-name"
+ARCHIVED_NAMES = "archived-names"
+INDEXED = ""
 MOVED = "moved_to"
 SECTIONS = tuple(name for name, value in EMPTY.items() if isinstance(value, dict))
 LOADED = (META, *(name for name in SECTIONS if name != ARCHIVE), BY_NAME)
@@ -101,6 +104,9 @@ def _task(key: str) -> str:
 
 
 def _scan(store: Any, slug: str, part: str) -> Any:
+    """Walks the keyspace for slug's legacy part keys only when the swarm kept a legacy controller epoch."""
+    if not store.redis.exists(store.key(slug, LEGACY_COUNTERS["epoch"])):
+        return iter(())
     return store.redis.scan_iter(match=store.key(slug, part, "*"))
 
 
@@ -163,8 +169,7 @@ def _port(store: Any) -> RedisRecords:
 def _migrated(store: Any, slug: str) -> RedisRecords | None:
     if state.backend() != "redis":
         return None
-    port = _port(store)
-    return port if port.layout(slug) == RECORDS else None
+    return _port(store) if RedisRecords(store.redis).layout(slug) == RECORDS else None
 
 
 def _assemble(slug: str, loaded: dict[str, dict[str, Record]]) -> dict[str, Any]:
@@ -213,7 +218,7 @@ def _section_changes(
 
 
 def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]) -> list[RecordWrite]:
-    """Every record a change wrote, each expecting the revision it was read at, plus the derived name index."""
+    """Every record a change wrote, each expecting the revision it was read at, plus the derived name indexes."""
     writes: list[RecordWrite] = []
     for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF, RECORDS_SLUG}):
         if name in SECTIONS:
@@ -223,7 +228,12 @@ def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, di
         elif name not in before or before[name] != after[name]:
             writes.append(RecordWrite("put", META, name, _expected(loaded, META, name), after[name]))
     heads = (_heads(before.get("executions", {})), _heads(after.get("executions", {})))
-    return writes + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+    archived = (_heads(before.get(ARCHIVE, {})), _heads(after.get(ARCHIVE, {})))
+    return (
+        writes
+        + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+        + _section_changes(ARCHIVED_NAMES, archived[0], archived[1], loaded)
+    )
 
 
 class Reads(dict[str, Any]):
@@ -343,10 +353,15 @@ def _lease_fence(fence: Any) -> LeaseFence | None:
     return LeaseFence(fence.owner, fence.epoch, now_ms())
 
 
+def _retry(attempt: int) -> None:
+    if attempt + 1 < ATTEMPTS:
+        time.sleep(uniform(0.001, 0.032))
+
+
 def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, Any]], T], fence: Any) -> T:
     from scripts.swarm.store import SwarmError
 
-    for _ in range(ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         loaded = port.sections(slug, LOADED)
         assembled = _assemble(slug, loaded)
         before = copy.deepcopy(assembled)
@@ -368,6 +383,7 @@ def _write_records(port: RedisRecords, slug: str, change: Callable[[dict[str, An
         try:
             port.fenced_batch(slug, FencedBatch(tuple(writes), _lease_fence(fence)))
         except RevisionConflict:
+            _retry(attempt)
             continue
         except StaleLease as exc:
             raise SwarmError(STALE) from exc
@@ -481,12 +497,14 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def read_executions(store: Any, slug: str) -> dict[str, Any]:
-    states = _states(store)
-    if isinstance(states, RedisStateStore):
-        entry = states.get_projection(slug)
-        if entry is not None:
-            return json.loads(entry.value)
-    return read(store, slug)["executions"]
+    rows = records(store, slug).sections(slug, ("executions",))["executions"]
+    return {key: row.value for key, row in rows.items()}
+
+
+def read_claims(store: Any, slug: str) -> dict[str, Any]:
+    """Return the swarm's task claims, read from the claims section alone through the records port."""
+    rows = records(store, slug).sections(slug, ("claims",))["claims"]
+    return {key: row.value for key, row in rows.items()}
 
 
 LEASE_CACHE = "lease-cache"
@@ -509,8 +527,10 @@ def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
     states = _states(store)
     if not isinstance(states, RedisStateStore):
         return None
-    raw = store.redis.get(_lease_cache_key(store, slug))
-    revision = store.redis.get(states.revision_key)
+    layout, lease = store.redis.hmget(fence_key(slug, META), LAYOUT, "lease")
+    if layout is not None and json.loads(layout)["v"] == RECORDS:
+        return {"lease": None if lease is None else json.loads(lease)["v"]}
+    raw, revision = store.redis.mget(_lease_cache_key(store, slug), states.revision_key)
     if raw is None or revision is None:
         return None
     cached = json.loads(raw)
@@ -523,7 +543,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
     from scripts.swarm.store import SwarmError
 
     states = _states(store)
-    for _ in range(ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         entry = _entry(states, store, slug)
         doc = _decode(entry.value)
         if MOVED in doc:
@@ -538,6 +558,7 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
         try:
             written = states.update(slug, _encode(doc), entry.revision)
         except StateConflict:
+            _retry(attempt)
             continue
         _cache_lease(store, states, slug, doc, written)
         return result
@@ -545,8 +566,11 @@ def write(store: Any, slug: str, change: Callable[[dict], T], fence: Any = None)
 
 
 def authority_held(store: Any, slug: str, task: str) -> bool:
-    doc = read(store, slug)
-    return task in doc["claims"] or task in doc["journals"]
+    port = RedisRecords(store.redis)
+    found = (port if port.layout(slug) == RECORDS else WholeDocumentRecords(store)).sections(
+        slug, ("claims", "journals")
+    )
+    return task in found["claims"] or task in found["journals"]
 
 
 def count(store: Any, slug: str, part: str) -> int:
@@ -646,8 +670,17 @@ class WholeDocumentRecords:
         return DOCUMENT
 
     def sections(self, slug: str, names: Sequence[str]) -> dict[str, dict[str, Record]]:
-        entry = _entry(_states(self.store), self.store, slug)
-        doc = _decode(entry.value)
+        states = _states(self.store)
+        entry = (
+            states.get_projection(slug)
+            if isinstance(states, RedisStateStore) and set(names) <= {"executions", BY_NAME}
+            else None
+        )
+        if entry is None:
+            entry = _entry(states, self.store, slug)
+            doc = _decode(entry.value)
+        else:
+            doc = {"executions": json.loads(entry.value)}
         if ARCHIVE in names:
             hydrate_archive(self.store, doc)
         return {name: {key: Record(entry.revision, value) for key, value in _view(doc, name).items()} for name in names}
@@ -681,6 +714,26 @@ def records(store: Any, slug: str) -> Records:
     return _migrated(store, slug) or WholeDocumentRecords(store)
 
 
+def _index_archive(port: RedisRecords, slug: str) -> set[str]:
+    rows = port.sections(slug, (ARCHIVE,))[ARCHIVE]
+    heads = _heads({key: row.value for key, row in rows.items()})
+    writes = [RecordWrite("put", ARCHIVED_NAMES, name, BLIND, key) for name, key in heads.items()]
+    port.fenced_batch(slug, FencedBatch((*writes, RecordWrite("put", ARCHIVED_NAMES, INDEXED, BLIND))))
+    return set(heads)
+
+
+def archived_name(store: Any, slug: str, name: str) -> bool:
+    """Whether an archived execution carries the name: one index read once migrated, built once from the archive."""
+    port = _migrated(store, slug)
+    if port is None:
+        rows = WholeDocumentRecords(store).sections(slug, (ARCHIVE,))[ARCHIVE]
+        return any(cast(dict[str, Any], row.value)["name"] == name for row in rows.values())
+    found, indexed = port.redis.hmget(port.key(slug, ARCHIVED_NAMES), name, INDEXED)
+    if found is not None:
+        return True
+    return indexed is None and name in _index_archive(port, slug)
+
+
 def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) -> int:
     """Moves the fencing document onto per record keys once every live reader and writer has both layouts.
 
@@ -704,6 +757,7 @@ def migrate_records(store: Any, slug: str, *, writers_upgraded: bool = False) ->
         doc = _decode(entry.value)
         hydrate_archive(store, doc)
         writes = _changes(EMPTY, doc, empty)
+        writes.append(RecordWrite("put", ARCHIVED_NAMES, INDEXED, 0))
         writes.append(RecordWrite("put", META, LAYOUT, 0, RECORDS))
         moved = _encode({**json.loads(entry.value), MOVED: RECORDS})
         return (lambda staged: states.queue_write(staged, slug, moved, current)), FencedBatch(tuple(writes))

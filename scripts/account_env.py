@@ -32,7 +32,11 @@ class Accounts(NamedTuple):
     from_email: Callable[[str], str] | None
 
 
-CLAUDE = Accounts(TOKEN_PREFIX, "claude.env", lambda environ: openbao_kv.CLAUDE_CREDS, None)
+def _claude_path(environ: Mapping[str, str]) -> str:
+    return openbao_kv.CLAUDE_CREDS
+
+
+CLAUDE = Accounts(TOKEN_PREFIX, "claude.env", _claude_path, None)
 CODEX = Accounts(CODEX_TOKEN_PREFIX, "codex.env", openbao_kv.codex_creds, codex_token_env)
 
 
@@ -71,7 +75,7 @@ def fallback_path(environ: Mapping[str, str], name: str) -> Path:
 
 
 def parse(text: str, prefix: str) -> dict[str, str]:
-    tokens = {}
+    tokens: dict[str, str] = {}
     for line in text.splitlines():
         name, sep, raw = line.strip().removeprefix("export ").partition("=")
         try:

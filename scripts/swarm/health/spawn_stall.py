@@ -11,23 +11,24 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.ledger_client import LedgerGone
+from scripts.swarm.ledger_client import LedgerGone, pass_state
 from scripts.swarm.store import RedisStore
 
 STALL_MS = 600_000
+KEY = "spawn-stall"
 REF = "spawn-stall:"
 LOCAL_CAP = "local cap"
 LOCAL_REFUSAL = "spawn-stall-local"
 
 
 def read(store, slug: str) -> dict:
-    raw = store.redis.get(store.key(slug, "spawn-stall"))
+    raw = store.redis.get(store.key(slug, KEY))
     return json.loads(raw) if raw else {}
 
 
 def save(store, slug: str, state: dict) -> None:
     timing.keep()
-    store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
+    store.redis.set(store.key(slug, KEY), json.dumps(state))
 
 
 def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, since: int | None = None) -> bool:
@@ -37,7 +38,7 @@ def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, s
     if config.state != "running":
         return False
     try:
-        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
+        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     except LedgerGone:
         return False
     ready = placeable(store, slug, ready, at if since is None else since)
@@ -201,3 +202,8 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         deliver(store, slug, ledger, clock())
         if found := findings(store, slug):
             blockers.record(store, slug, found[0].kind, found[0].summary, clock())
+        from scripts.swarm.health import panic_call
+
+        for line in panic_call.step(store, slug, clock()):
+            event = json.dumps({"event": "swarm_panic_call", "slug": slug, "action": line})
+            timing.emit(sys.stdout, event)  # pyright: ignore[reportUnknownMemberType]

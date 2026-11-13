@@ -1,0 +1,25 @@
+{
+  "detector": "stale claim",
+  "cases": [
+    {
+      "name": "claim with no ledger change for forty five minutes",
+      "label": "finding",
+      "source": "a holder that stopped saying what it does",
+      "history": {
+        "tasks": [{"id": "t80", "state": "claimed", "claimed_by": "engineer@32a0c1-0860", "pr_url": ""}],
+        "agents": [{"name": "engineer@32a0c1-0860", "lane": "eng", "task": "t80", "idle_ticks": 0, "quiet_minutes": 45}],
+        "talk": {}
+      }
+    },
+    {
+      "name": "claim that moved ten minutes ago",
+      "label": "none",
+      "source": "a holder that keeps its ledger line current",
+      "history": {
+        "tasks": [{"id": "t81", "state": "claimed", "claimed_by": "engineer@32a0c1-0861", "pr_url": ""}],
+        "agents": [{"name": "engineer@32a0c1-0861", "lane": "eng", "task": "t81", "idle_ticks": 0, "quiet_minutes": 10}],
+        "talk": {}
+      }
+    }
+  ]
+}

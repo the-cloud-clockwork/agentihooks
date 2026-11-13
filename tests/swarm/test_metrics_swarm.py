@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import URLError
 
@@ -423,7 +424,7 @@ def test_a_task_done_again_keeps_one_sample_spanning_to_its_final_merge(tmp_path
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 0, 0))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     final = "https://github.com/org/repo/pull/2"
@@ -459,7 +460,7 @@ def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypat
     store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
     state = doc([event("task claimed", NOW)])
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
@@ -473,6 +474,39 @@ def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypat
         store.drop_agent(SLUG, "worker", NOW + 5_000)
         metrics_swarm.record_pass(box, SLUG, NOW + 6_000, store, state, [], {})
         assert sorted(row["kind"] for row in box.recent("agent_events", NOW + 6_000)) == ["claim", "retire", "spawn"]
+    finally:
+        box.close()
+
+
+@pytest.mark.feature("metrics-gate-rows-span-the-window")
+def test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    from scripts.gates import log as gate_log
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.gate_log, "swarm_home", lambda: tmp_path)
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    who = SimpleNamespace(name="worker", task="t")
+    stale = NOW - metrics_outbox.DAY_MS - 1
+    gate_log.append(SLUG, gate_log.Row.of("scope", "deny", who, reason="stale", now_ms=stale))
+    gate_log.append(SLUG, gate_log.Row.of("scope", "deny", who, reason="outside scope", now_ms=NOW - 3_000))
+    gate_log.append(SLUG, gate_log.Row.of("reruns", "count", who, reason="CI reruns 1 of 2", now_ms=NOW - 2_000))
+    for index in range(600):
+        gate_log.append(SLUG, gate_log.Row.of("talk", "observe", who, reason="x" * 100, now_ms=NOW - 1_000 + index))
+    assert gate_log.gate_log_path(SLUG).stat().st_size > gate_log.TAIL_BYTES
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        denies = [row for row in box.recent("agent_events", NOW) if row["kind"] == "gate_deny"]
+        assert [(row["ts_ms"], row["reason"]) for row in denies] == [(NOW - 3_000, "outside scope")]
+        reruns = [row for row in box.recent("delivery_events", NOW) if row["kind"] == "rerun"]
+        assert [(row["ts_ms"], row["reason"]) for row in reruns] == [(NOW - 2_000, "CI reruns 1 of 2")]
     finally:
         box.close()
 
@@ -559,7 +593,7 @@ def test_the_host_sample_names_who_holds_its_spawns(tmp_path, monkeypatch, hold,
     ready["eng"] = [{"id": task} for task in ready_ids]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
@@ -592,7 +626,7 @@ def test_a_quota_hold_names_the_lane_pin_that_limits_it(tmp_path, monkeypatch, a
     ready["eng"] = [{"id": task} for task in ready_ids]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
@@ -626,7 +660,7 @@ def test_a_hold_on_a_lane_waiting_for_hive_room_is_a_host_hold(tmp_path, monkeyp
     ready["eng"] = [{"id": "a"}, {"id": "b"}]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
@@ -665,7 +699,7 @@ def test_a_host_spawn_hold_keeps_its_own_reason_without_pin_notes(tmp_path, monk
     ready["eng"] = [{"id": "a"}, {"id": "b"}]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
@@ -700,7 +734,7 @@ def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_p
         return SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)
 
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
@@ -851,7 +885,7 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
     store.put_agent(SLUG, record)
     store.record_launch(SLUG, record, "failed", "boom")
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     pulls = {TASK["pr_url"]: SimpleNamespace(state="OPEN", merged_at=None, queued=True, head="h1")}
@@ -864,8 +898,16 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
         box.close()
 
 
-def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch):
-    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+@pytest.mark.feature("workstation-agent-count-by-headed-hive")
+def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(monkeypatch):
+    import fakeredis
+
+    from scripts.hive import registry
+
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "agentihooks-swarm")
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    registry.update(redis, "root", ["ui=yes"])
+    registry.update(redis, "hive-a", ["max-agents=4"])
     agents = [
         {"runtime_backend": "local", "runtime_target": {"host_id": "root"}},
         {"runtime_backend": "local", "runtime_target": {}},
@@ -874,8 +916,11 @@ def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch
         {"runtime_backend": "local", "runtime_target": {"host_id": "hive-a"}},
         {"runtime_backend": "kubernetes", "runtime_target": {"host_id": "root"}},
     ]
-    counts = metrics_swarm.placement_counts(agents)
+    counts = metrics_swarm.placement_counts(redis, agents)
     assert counts == {"workstation_agents": 4, "hive_agents": 2}
+    headless = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    assert metrics_swarm.placement_counts(headless, agents) == {"workstation_agents": 3, "hive_agents": 3}
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 6), counts)
     assert [host[key] for key in ("workstation_agents", "hive_agents")] == [4, 2]
     assert [metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 4), {})[key] for key in counts] == [0, 0]
@@ -909,7 +954,7 @@ def test_record_pass_ships_each_swarm_review_round_once(tmp_path, monkeypatch):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 0, 0))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))

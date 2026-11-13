@@ -101,6 +101,42 @@ def test_plain_falls_back_when_nothing_is_left():
     assert notice_text.plain("") == notice_text.FALLBACK
 
 
+JOB = "https://github.com/o/r/actions/runs/19234567890/job/54123456789"
+PULL = "https://github.com/o/r/pull/1961"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"Tests run over budget; job {JOB} at quota_handoff", f"Tests run over budget, job {JOB} at quota handoff"),
+        (f"{JOB} ran (slow)", f"{JOB} ran slow"),
+        (f"see {PULL} and {JOB}", f"see {PULL} and {JOB}"),
+        (f"merged {PULL}", f"merged {PULL}"),
+        (f"merged {PULL},", f"merged {PULL}"),
+        (f"see {PULL}(a)(b);c", f"see {PULL}%28a%29%28b%29%3Bc"),
+    ],
+)
+def test_plain_never_splits_a_web_link(text, expected):
+    shown = notice_text.plain(text)
+    assert shown == expected
+    assert ledger_comments.problems(shown, "comment") == []
+
+
+@pytest.mark.parametrize(
+    ("write", "kind"),
+    [
+        (lambda c, text: c.followup("sw", text), "item"),
+        (lambda c, text: c.comment("sw", "t1", text, by="swarm"), "comment"),
+    ],
+)
+def test_a_swarm_followup_reaches_the_ledger_with_its_link_intact(monkeypatch, write, kind):
+    sent = _capture(monkeypatch)
+    write(LedgerClient(), f"Tests run over budget on dev, gate job {JOB}")
+    (op,) = sent[0]
+    assert JOB in op["text"].split()
+    assert ledger_comments.problems(op["text"], kind) == []
+
+
 def _capture(monkeypatch, refuse=False):
     sent = []
 
@@ -212,6 +248,7 @@ class _Runtime:
 
 def test_capacity_saves_its_decision_and_drops_a_refused_notice(monkeypatch):
     monkeypatch.setattr("scripts.swarm.tick._claimable", lambda *a: [])
+    monkeypatch.setattr("scripts.swarm.tick.claim_view", lambda *a: None)
     store = _Store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     actions = capacity.apply("sw", config, store, _RefusingLedger(), _Runtime(), 1000)

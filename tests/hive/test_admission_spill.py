@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -140,17 +141,21 @@ def _load(launched, hive_id, **fields):
     store.redis.set(key, json.dumps({**json.loads(store.redis.get(key)), **fields}))
 
 
-def test_the_first_ranked_hive_takes_a_launch_under_cpu_load_below_the_memory_line(setup, capsys):  # noqa: F811
+def test_a_spill_past_a_cpu_saturated_first_ranked_hive_records_its_cpu_refusal(
+    setup: SimpleNamespace,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     write_hive(setup, prefer={"eng": 1})
     write_hive(setup, id="spare")
-    _load(setup, "remote", cpus=1, load5=2.0)
+    _load(setup, "remote", cpus=16, load5=28.7)
     request = request_for(setup)
     request.task[ACK_LATER] = True
     assert setup.launcher.spawn(request).status is Status.PENDING
     order = setup.launcher.orders_for(request.task["id"])
-    assert order.hive == "remote"
-    assert "placement_spill" not in setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
-    assert "hive_placement_spill" not in capsys.readouterr().err
+    assert order.hive == "spare"
+    refused = "cpu: five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+    decision = setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
+    assert decision["placement_spill"] == {"preferred": "remote", "refusal": refused}
 
 
 @pytest.mark.parametrize("in_pass", [False, True])
@@ -242,14 +247,14 @@ def test_a_launch_past_an_unhosted_first_ranked_hive_records_why(setup, fields, 
 def test_a_reservation_refused_on_the_first_ranked_hive_names_its_memory_line(setup):  # noqa: F811
     write_hive(setup, prefer={"eng": 1})
     write_hive(setup, id="spare")
-    _load(setup, "remote", cpus=1, load5=2.0, available_mb=20_000 + admission.AGENT_MB)
+    _load(setup, "remote", available_mb=20_000 + admission.AGENT_MB)
     request = request_for(setup)
     selected = setup.launcher.select(setup.config, "eng", request.task)
     assert (selected.hive, selected.first) == ("remote", True)
     assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
     assert setup.launcher.reserve_room(request, selected) == (
-        "no hive for eng has room: remote ram: 20700 of 100000 MB available, 80 percent used, "
-        "700 MB per agent with 1 pending launches, fits 0 more under the 80 percent line"
+        "no hive for eng has room: remote ram: 20850 of 100000 MB available, 80 percent used, "
+        "850 MB per agent with 1 pending launches, fits 0 more under the 80 percent line"
     )
 
 
@@ -312,7 +317,7 @@ def test_the_hive_listing_counts_pending_launches_against_the_first_room(setup):
     listed = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
     assert (listed[placement.FIRST_ROOM], listed[placement.FIRST_REFUSAL]) == (
         0,
-        "ram: 20700 of 100000 MB available, 80 percent used, 700 MB per agent with 1 pending launches, "
+        "ram: 20850 of 100000 MB available, 80 percent used, 850 MB per agent with 1 pending launches, "
         "fits 0 more under the 80 percent line",
     )
 

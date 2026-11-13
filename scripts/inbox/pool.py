@@ -1,11 +1,13 @@
 """The master inbox pool of a swarm with two or more live masters: items for the front door seat wait here in arrival
 order, and each is claimed by exactly one live master, in round robin seat order. Operator items never enter it."""
 
+from typing import Any, cast
+
 from scripts.inbox import intent
 from scripts.inbox.seats import is_seat, master_of
 from scripts.inbox.store import POOL_HOLDER, POOL_SKIP
 from scripts.swarm.keyspace import ROOT
-from scripts.swarm.store import MASTER, RedisStore
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
 
 PREFIX = f"{ROOT}:inbox:pool"
@@ -13,6 +15,7 @@ POOLS = f"{PREFIX}s"
 OPERATOR = "operator"
 CLAIMER = "inbox"
 CLAIM_ATTEMPTS = 3
+STARTING = "starting"
 DROPPED = object()
 
 
@@ -27,10 +30,15 @@ def number(address: str) -> int:
     return 1 if seat == MASTER else int(seat.removeprefix(f"{MASTER}-"))
 
 
+def unlaunched(agent: AgentRecord) -> bool:
+    """A master record still starting with no pane and no launch time: its launch never placed a session."""
+    return agent.state == STARTING and not agent.pane_id and not agent.launched_at
+
+
 def live_masters(redis, slug: str, agents: list | None = None) -> list[str]:
-    agents = RedisStore(redis).agents(slug) if agents is None else agents
-    waiting = {agent.name for agent in agents if agent.input_prompt}
-    return [seat for seat, name in masters.held(redis, slug, agents).items() if is_seat(seat) and name not in waiting]
+    records: list[AgentRecord] = RedisStore(redis).agents(slug) if agents is None else agents
+    absent = {agent.name for agent in records if agent.input_prompt or unlaunched(agent)}
+    return [seat for seat, name in masters.held(redis, slug, records).items() if is_seat(seat) and name not in absent]
 
 
 def turn(live: list[str], last: str, skip: str | None) -> str:
@@ -58,6 +66,35 @@ class MasterPool:
         if any(self.inbox.home(seat) != self.inbox.world for seat in live):
             return []
         return live if len(live) > 1 or (live and address not in live) else []
+
+    def rerouted(self, requested: str, address: str) -> tuple[str, str]:
+        """An item for an empty backend master seat is sent to the front door seat instead, so the pool hands it to a
+        live master; every other address is kept."""
+        if not (is_seat(address) and address.startswith(f"{MASTER}-")):
+            return requested, address
+        door = master_of(address)
+        if not self.empty(slug_of(door), address):
+            return requested, address
+        return door, door
+
+    def empty(self, slug: str, address: str) -> bool:
+        """No master is in the seat: the seat was retired, its registry occupant has finished, retired, been asked to
+        retire, left it or never launched, or it has none and no live master record names the seat."""
+        redis = cast(Any, self.redis)
+        seats = cast(Any, self.inbox).seats
+        if address in masters.MasterSeats(redis).retired(slug):
+            return True
+        from scripts.swarm import master_retire
+
+        store = RedisStore(redis)
+        agents: list[AgentRecord] = cast(Any, store).agents(slug)
+        gone = {agent.name for agent in agents if agent.state in masters.GONE or unlaunched(agent)}
+        occupant: str = seats.occupant(address).occupant
+        if occupant:
+            asked = bool(master_retire.reason(store, slug, occupant))
+            return occupant in gone or seats.left(occupant, address) or asked
+        named = [a.name for a in agents if a.lane == MASTER and a.seat == address and a.name not in gone]
+        return all(master_retire.reason(store, slug, name) for name in named)
 
     def stage_add(self, pipe, item) -> None:
         """pipe is in MULTI; the score is the item's place in its front door's arrival order."""

@@ -12,6 +12,7 @@ import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
@@ -21,6 +22,9 @@ from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 NO_DAEMON = "--no-daemon"
 REQUIRED_HOOKS = ("sessionStart", "userPromptSubmit", "preToolUse", "postToolUse", "stop")
@@ -50,6 +54,7 @@ STARTUP_FILES = (
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
+TRANSPORT_EXITED = "codex transport exited"
 OPENING_ATTEMPTS = 2
 OPENING_WATCH_S = 30.0
 TURN_COMPLETED = "turn/completed"
@@ -257,8 +262,12 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
 
 
 def shown_name(launch: Launch, agent: AgentRecord) -> str:
-    title = masters.title(launch.slug, agent.seat)
-    return title if agent.lane == MASTER else agent.name
+    return thread_title(launch.slug, agent)
+
+
+def thread_title(slug: str, agent: AgentRecord) -> str:
+    """The name a managed Codex thread shows: the master title for the master lane, else the agent name."""
+    return masters.title(slug, agent.seat) if agent.lane == MASTER else agent.name
 
 
 def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:
@@ -267,7 +276,9 @@ def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> N
         protocol.set_thread_name(connection, thread_id, name)
 
 
-def opening_end(connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable) -> dict:
+def opening_end(
+    connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable
+) -> dict[str, Any]:
     """The opening turn as it completed; empty once the model answers or the watch ends first."""
     for _ in range(MAX_POLLS):
         while events:
@@ -283,11 +294,17 @@ def opening_end(connection: protocol.Connection, events: list[dict], deadline: f
 
 
 def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, deps: Deps) -> str:
+    from scripts.inbox.codex import account_refusal
+
     for _ in range(OPENING_ATTEMPTS):
         events: list[dict] = []
         connection.listener = events.append
         turn_id = protocol.start_turn(connection, thread_id, launch.opening)
         turn = opening_end(connection, events, deps.clock() + OPENING_WATCH_S, deps.clock)
+        if reason := account_refusal(turn):
+            if launch.environ.get(binding.REPORT):
+                binding.refuse(Path(launch.environ[binding.REPORT]), reason)
+            raise LaunchFailure("account_refused", reason)
         error = str((turn.get("error") or {}).get("message"))
         if CAPACITY not in error:
             return turn_id
@@ -327,7 +344,15 @@ def _record(launch: Launch, agent: AgentRecord, path: Path) -> TransportRecord:
     )
 
 
-def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tuple[TransportRecord, AgentRecord]:
+def _connect_bound(
+    store: RedisStore,
+    bindings: BindingStore,
+    launch: Launch,
+    agent: AgentRecord,
+    record: TransportRecord,
+    process: subprocess.Popen,
+    deps: Deps,
+) -> tuple[TransportRecord, AgentRecord]:
     path = Path(record.endpoint_ref.removeprefix(UNIX))
     connection, info = wait_ready(path, process, record, launch, deps)
     try:
@@ -519,7 +544,20 @@ def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> Trans
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)
     bindings.put(slug, record)
     bindings.release(slug, record)
+    end_join_report(store, started.agent, now_ms)
     directory = execution_directory(record)
     if directory is not None:
         remove_home(directory)
     return record
+
+
+def end_join_report(store: RedisStore, agent: AgentRecord, now_ms: int) -> None:
+    """End the agent's hive join report so no heartbeat grades its home after removal."""
+    from scripts.hive import join_report
+
+    redis = cast("Redis", store.redis)
+    report: dict[str, Any] = join_report.read(redis, agent)
+    if report:
+        join_report.end(
+            redis, join_report.host(agent), agent.execution_id, report["session_id"], TRANSPORT_EXITED, "ended", now_ms
+        )

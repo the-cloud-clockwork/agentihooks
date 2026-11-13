@@ -23,9 +23,10 @@ questions:
   - name: size
     type: score
     each: sized
-    key: size
+    key: "size{item[suffix]}"
     instructions: >-
-      How much source work is the plan? Judge only pieces with nonempty areas; test only pieces and the shared
+      How much source work is the plan's slice in {item[repo]}? Judge only that repository's pieces with nonempty
+      areas; a piece without a repo field belongs to the task's own repository. Test only pieces and the shared
       mutation clearance file are supporting proof, not additional scope.
     levels:
       - trivial

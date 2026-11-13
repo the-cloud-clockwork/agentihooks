@@ -418,6 +418,7 @@ def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):
     ledger, runtime, messenger = object(), object(), object()
     calls = []
     monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: calls.append((args, kwargs)) or ["done"])
+    monkeypatch.setattr(controller, "tickable", lambda reader, slug: reader is ledger)
     assert controller.run_once(store, ledger, runtime, messenger) == {"sw": ["done"]}
     assert calls == [((store, "sw", ledger, runtime, messenger), {"scheduled": True})]
 
@@ -492,4 +493,19 @@ def test_publish_hands_the_tick_view_to_the_status_report(store, monkeypatch):
 
     command_runner.publish(store, "sw", {"tasks": []}, view)
     command_runner.publish(store, "sw", {"tasks": []})
-    assert seen == [(store, "sw", {"tasks": []}, None, view), (store, "sw", {"tasks": []}, None, None)]
+    command_runner.publish(store, "sw", {"tasks": []}, view, [{"kind": "found"}])
+    assert seen == [
+        (store, "sw", {"tasks": []}, None, view, None),
+        (store, "sw", {"tasks": []}, None, None, None),
+        (store, "sw", {"tasks": []}, None, view, [{"kind": "found"}]),
+    ]
+
+
+def test_the_tick_status_publish_hands_the_found_health_findings_to_publish(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[object, ...]] = []
+    monkeypatch.setattr(command_runner, "publish", lambda *args: seen.append(args))
+    found = [{"kind": "stale"}]
+    cli._publish_tick_status(store, "sw", {"tasks": []}, "view", None, found)
+    assert seen == [(store, "sw", {"tasks": []}, "view", found)]

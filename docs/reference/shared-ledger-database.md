@@ -194,7 +194,7 @@ Each allowed write then lists those locks, with the client address of each refus
 `writer` alert per refused writer on the ledger it is writing, targeted at the master:
 
 ```
-The ledger writer at 10.0.0.5 was refused: ledger writer version 0 is below version 1, the oldest the shared database allows; update its code and restart it
+The ledger writer at 192.0.2.5 was refused: ledger writer version 0 is below version 1, the oldest the shared database allows; update its code and restart it
 ```
 
 A session with no client address, such as one on a local socket, shows as `an unseen client`.
@@ -361,3 +361,19 @@ gh run view <run id> --log | grep -E 'passed|failed|FAIL|PASS'
 - [Deployment modes](deployment-modes.md): which processes share the ledger database
 - [Docker Compose quick start](../getting-started/compose-quick-start.md): setting `AGENTIHOOKS_SWARM_DATABASE_URL`
 - [Presentation layer architecture](presentation-layer.md): the `LedgerRepository` interface behind both stores
+
+### Connection capacity and recovery
+
+Each process keeps at most `AGENTIHOOKS_LEDGER_POOL_SHARE` of PostgreSQL
+`max_connections` open for its ledger pool (default `0.1`). The share must be
+strictly between zero and one. The pool also leaves the superuser reserved
+connections and one additional connection available. Allocate shares across
+all controller and server processes so their sum preserves capacity for other
+clients. At least one connection is required per process.
+
+The cap includes checked out and idle connections. An exhausted checkout waits
+up to five seconds for a return, then raises an ordinary database error. Idle
+connections are checked with a query and rolled back before reuse; a dead
+connection is closed and replaced. A connection lost during a write, including
+failed rollback, is recorded by the ledger probe as a failed request so the tick
+pass continues.

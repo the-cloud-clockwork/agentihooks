@@ -48,10 +48,6 @@ def tick_each(store, finished=None):
     return work
 
 
-def no_stop():
-    return None
-
-
 def test_a_service_stop_during_a_tick_releases_its_lock_and_exits_143(env, monkeypatch, capsys):  # noqa: F811
     store, _, _ = env
     woke = []
@@ -63,7 +59,7 @@ def test_a_service_stop_during_a_tick_releases_its_lock_and_exits_143(env, monke
     seen = blocked_tick(store, monkeypatch, step)
     before = signal.getsignal(signal.SIGTERM)
     with pytest.raises(SystemExit) as stopped:
-        tick_stop.run(["sw"], tick_each(store), no_stop, 0)
+        tick_stop.run(["sw"], tick_each(store), 0)
     assert woke == [True]
     assert stopped.value.code == 143
     assert seen[0] is not None
@@ -93,7 +89,7 @@ def test_a_stop_releases_a_lock_whose_step_has_not_returned(env, monkeypatch, ca
     began = time.monotonic()
     try:
         with pytest.raises(SystemExit):
-            tick_stop.run(["sw"], tick_each(store, finished), no_stop, 0)
+            tick_stop.run(["sw"], tick_each(store, finished), 0)
         assert time.monotonic() - began < 10
         assert tick_stop.STOP.is_set()
     finally:
@@ -108,12 +104,10 @@ def test_a_stop_releases_a_lock_whose_step_has_not_returned(env, monkeypatch, ca
 def test_the_tick_stops_itself_at_its_deadline_and_releases_its_lock(env, monkeypatch, capsys):  # noqa: F811
     store, _, _ = env
     seen = blocked_tick(store, monkeypatch, lambda: tick_stop.STOP.wait(10))
-    settled = threading.Event()
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
-    assert tick_stop.run(["sw"], tick_each(store), settled.set, 0) is True
+    assert tick_stop.run(["sw"], tick_each(store), 0) is True
     assert seen[0] is not None
     assert lock_of(store) is None
-    assert settled.is_set()
     assert not tick_stop.STOP.is_set()
     assert "the swarm tick stopped at its 0.2 second deadline; released 0 held tick locks" in capsys.readouterr().err
 
@@ -128,7 +122,7 @@ def test_the_deadline_counts_from_the_tick_start(monkeypatch):
         assert tick_stop.STOP.wait(60)
 
     began = time.monotonic()
-    assert tick_stop.run(["a"], work, no_stop, 30) is True
+    assert tick_stop.run(["a"], work, 30) is True
     assert time.monotonic() - began < 10
     assert ran == ["a"]
 
@@ -150,7 +144,7 @@ def test_a_stop_releases_the_locks_of_every_swarm_still_ticking(monkeypatch, cap
     monkeypatch.setattr(tick_stop.os, "_exit", hard_exit)
     try:
         with pytest.raises(SystemExit):
-            tick_stop.run(["a", "b"], work, no_stop, 0)
+            tick_stop.run(["a", "b"], work, 0)
     finally:
         free.set()
     assert sorted(released) == ["a", "b"]
@@ -166,7 +160,7 @@ def test_every_swarm_starts_its_tick_before_the_stop(monkeypatch):
         tick_stop.STOP.wait(10)
 
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 1)
-    assert tick_stop.run([f"s{n}" for n in range(64)], work, no_stop, 0) is True
+    assert tick_stop.run([f"s{n}" for n in range(64)], work, 0) is True
     assert early == [True] * 64
 
 
@@ -179,7 +173,7 @@ def test_the_tick_stops_once_its_deadline_is_reached(monkeypatch):
 
     monkeypatch.setattr(tick_stop, "time", types.SimpleNamespace(monotonic=lambda: next(clock, 200.0)))
     monkeypatch.setattr(tick_stop, "wait", timed_wait)
-    assert tick_stop.run(["a"], lambda slug: tick_stop.STOP.wait(10), no_stop, tick_stop.DEADLINE_S) is True
+    assert tick_stop.run(["a"], lambda slug: tick_stop.STOP.wait(10), tick_stop.DEADLINE_S) is True
     assert waits == [tick_stop.GRACE_S]
 
 
@@ -191,7 +185,7 @@ def test_a_stop_reports_a_swarm_tick_that_failed(monkeypatch, capsys):
         tick_stop.check()
 
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
-    assert tick_stop.run(["a", "b"], work, no_stop, 0) is True
+    assert tick_stop.run(["a", "b"], work, 0) is True
     err = capsys.readouterr().err
     assert "a swarm tick failed while the tick stopped: RuntimeError: broken" in err
     assert "Stopped" not in err
@@ -199,7 +193,7 @@ def test_a_stop_reports_a_swarm_tick_that_failed(monkeypatch, capsys):
 
 def test_a_tick_that_finishes_in_time_returns_without_a_stop():
     ran, before = [], signal.getsignal(signal.SIGTERM)
-    assert tick_stop.run(["a", "b"], ran.append, no_stop, 0) is False
+    assert tick_stop.run(["a", "b"], ran.append, 0) is False
     assert sorted(ran) == ["a", "b"]
     assert signal.getsignal(signal.SIGTERM) is before
 
@@ -209,7 +203,7 @@ def test_a_failed_swarm_tick_still_raises():
         raise RuntimeError(slug)
 
     with pytest.raises(RuntimeError, match="^a$"):
-        tick_stop.run(["a"], work, no_stop, 0)
+        tick_stop.run(["a"], work, 0)
 
 
 def test_release_all_releases_each_held_tick_lock_once():

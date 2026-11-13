@@ -1,0 +1,6 @@
+{
+  "scripts/hive/reports.py:scripts.hive.reports.xǁReportsǁvanished:35b58cd0c05a9e99acaffbc5146718a0dfd67b08ede9eae424dcb687f5c5410c": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the string type argument of typing.cast for the member names; cast returns its value argument unchanged at runtime, so names is identical."
+  }
+}

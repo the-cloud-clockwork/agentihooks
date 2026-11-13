@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
+from scripts.tick import pool
 from scripts.tick.adapters import github as _github
 
 CALLER = ContextVar("github_caller", default="swarm.rest")
@@ -94,7 +95,7 @@ def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
         return found
 
 
-def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
+def snapshot(endpoint: str, now: float, fetch: Callable[[], dict], ttl: float = RUN_TTL_S) -> dict:
     entry = home() / f"{_key(f'snapshot {endpoint}')}.json"
     try:
         entry.parent.mkdir(parents=True, exist_ok=True)
@@ -108,7 +109,7 @@ def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
             return fetch()
         try:
             cached = json.loads(entry.read_text())
-            if now - cached["at"] < RUN_TTL_S:
+            if now - cached["at"] < ttl:
                 return cached["snapshot"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -211,6 +212,14 @@ def _not_modified(output: str | bytes | None) -> bool:
     return bool(re.match(pattern, output))
 
 
+def location(repo: str) -> dict[str, Any]:
+    """The run options that point a gh read at repo: a checkout path as its working directory, an owner and name
+    through GH_REPO with no working directory."""
+    if Path(repo).is_absolute():
+        return {"cwd": repo}
+    return {"env": {**os.environ, "GH_REPO": repo}}
+
+
 def rest(
     caller: str, args: list[str], run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run, **options: Any
 ) -> subprocess.CompletedProcess[Any]:
@@ -218,13 +227,14 @@ def rest(
 
     path = gh_audit.endpoint(_github.command(args)) if args[0] == "api" else None
     if path is None:
-        return run(_github.command(args), **options)
+        with pool.limit("github"):
+            return run(_github.command(args), **options)
     endpoint = next(word for word in args[1:] if word.split("?")[0].removeprefix("/") == path)
     paginate = "--paginate" in args
     include = "--include" in args or "-i" in args
     command = _github.command(args if include or not paginate else [*args, "--include"])
     try:
-        with gh_audit.uncharged():
+        with gh_audit.uncharged(), pool.limit("github"):
             result = run(command, **options)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         if not _not_modified(exc.stdout):

@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import yaml
@@ -45,15 +46,53 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
         assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
 
 
-def _graded_needs(promote, analysis="A1"):
+@pytest.mark.feature("tick-scale-gate-wiring")
+def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    scale = jobs["tick-scale"]
+    assert {"uses": "./.github/actions/tick-scale"} in scale["steps"]
+    assert "tick-scale" not in jobs["gate-required"]["needs"]
+    assert enabled(scale["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(scale["if"], event, {})
+    for consumer in ("promotion-ready", "promote"):
+        assert "tick-scale" in jobs[consumer]["needs"]
+        for result in ("failure", "skipped", "cancelled"):
+            needs = _graded_needs(jobs[consumer])
+            needs["tick-scale"].result = result
+            assert not enabled(jobs[consumer]["if"], "push", needs)
+    action = yaml.safe_load((ROOT / ".github/actions/tick-scale/action.yml").read_text())
+    steps = action["runs"]["steps"]
+    assert any(str(step.get("run", "")).startswith("python -m tests.tick_scale.gate") for step in steps)
+    plant = next(step for step in steps if step.get("run") == "git apply tests/tick_scale/whole_hash.patch")
+    assert plant["if"] == "inputs.plant == 'true'"
+    proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    assert proofs[True] == {"push": {"branches": ["diffcheck/tick-scale-*"]}, "workflow_dispatch": None}
+    called = proofs["jobs"]["tick-scale"]["steps"][-1]
+    assert called["uses"] == "./.github/actions/tick-scale"
+    assert called["with"]["plant"] == "${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}"
+
+
+def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, SimpleNamespace]:
     return {
-        name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis)) for name in promote["needs"]
+        name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis, promote="false"))
+        for name in promote["needs"]
     }
 
 
 @pytest.mark.parametrize("result", ["failure", "cancelled"])
 @pytest.mark.parametrize(
-    "job", ["gate-required", "refresh-durations", "coverage-baseline", "flake-budget", "sonar", "hierarchy-cpu"]
+    "job",
+    [
+        "gate-required",
+        "refresh-durations",
+        "coverage-baseline",
+        "flake-budget",
+        "sonar",
+        "hierarchy-cpu",
+        "tick-scale",
+        "tick-pattern-tree",
+    ],
 )
 def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(job, result):
     promote = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["promote"]
@@ -63,12 +102,68 @@ def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(j
     assert not enabled(promote["if"], "push", needs)
 
 
+@pytest.mark.feature("launch-hotfix-promotion")
+@pytest.mark.parametrize("job", ["gate-required", "coverage-baseline", "flake-budget", "sonar", "promotion-ready"])
+def test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode(job: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    promote = jobs["promote"]
+    needs = _graded_needs(promote)
+    needs[job].result = "failure"
+    assert not enabled(promote["if"], "push", needs)
+    needs["launch-hotfix"].outputs.promote = "true"
+    assert enabled(promote["if"], "push", needs)
+    assert not enabled(promote["if"], "pull_request", needs)
+    assert "with" not in promote
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+def test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    grade = jobs["launch-hotfix"]
+    assert grade["name"] == "Launch hotfix grade"
+    assert set(grade["needs"]) == {"select", "split", "unit", "unit-lost", "unit-rerun", "shard-check", "test-count"}
+    assert enabled(grade["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(grade["if"], event, {})
+    assert "launch-hotfix" not in jobs["gate-required"]["needs"]
+    assert grade["permissions"] == {"contents": "read"}
+    token = next(step for step in grade["steps"] if step.get("id") == "app-token")["with"]
+    assert {key: token[key] for key in token if key.startswith("permission-")} == {
+        "permission-contents": "read",
+        "permission-pull-requests": "read",
+    }
+    step, confirm = grade["steps"][-2:]
+    assert step["id"] == "grade"
+    assert step["run"].startswith("python -m scripts.ci_launch_hotfix ")
+    assert step["env"] == {"NEEDS": "${{ toJSON(needs) }}", "GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
+    assert confirm["name"] == "Confirm the launch hotfix route"
+    assert confirm["if"] == "steps.grade.outputs.promote == 'true'"
+    script = (ROOT / ".github/scripts/promote.cjs").read_text()
+    assert "const HOTFIX_STEP = 'Confirm the launch hotfix route';" in script
+    assert "const HOTFIX_GRADE = 'Launch hotfix grade';" in script
+
+
 @pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
 def test_promotion_requires_a_successful_hierarchy_proof(result):
     promote = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["promote"]
     needs = _graded_needs(promote)
     needs["hierarchy-cpu"].result = result
     assert enabled(promote["if"], "push", needs) == (result == "success")
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_clean_whole_tree_tick_pattern(result: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    tree = jobs["tick-pattern-tree"]
+    assert any(step.get("run") == "python -m scripts.tick_pattern --tree" for step in tree["steps"])
+    assert enabled(tree["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(tree["if"], event, {})
+    assert "tick-pattern-tree" not in jobs["gate-required"]["needs"]
+    for consumer in ("promotion-ready", "promote"):
+        needs = _graded_needs(jobs[consumer])
+        needs["tick-pattern-tree"].result = result
+        assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
 
 
 def test_a_revision_sonar_graded_promotes_from_its_own_analysis():

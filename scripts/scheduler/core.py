@@ -27,11 +27,14 @@ ABANDONED = ("ready", "fired", "cancelled", "stopped", "stale")
 T = TypeVar("T")
 
 
-def _abandoned(entry: dict[str, Any], now: float) -> bool:
+def abandoned(entry: dict[str, Any], now: float) -> bool:
     """A process timer no waiter holds: finished or never started, and due ABANDONED_S or more before now."""
     due = entry.get("due")
     return (
-        entry["owner"] == PROCESS_OWNER and entry["state"] in ABANDONED and due is not None and now - due >= ABANDONED_S
+        entry.get("owner") == PROCESS_OWNER
+        and entry.get("state") in ABANDONED
+        and due is not None
+        and now - due >= ABANDONED_S
     )
 
 
@@ -239,28 +242,28 @@ class Scheduler:
         if delay is not None and delay < 0:
             raise ValueError("delay must not be negative")
         due = at if at is not None else now + delay
-        return self._new(Schedule("timer", owner, payload, due, delay))
+        return self._new(Schedule("timer", owner, payload, due, delay), now)
 
     def stopwatch(self, *, owner: str, payload: str, limit: float, now: float | None = None) -> Entry:
         now = time.time() if now is None else now
         if limit < 0:
             raise ValueError("limit must not be negative")
-        return self._new(Schedule("stopwatch", owner, payload, now + limit, limit))
+        return self._new(Schedule("stopwatch", owner, payload, now + limit, limit), now)
 
     def interval(self, *, owner: str, payload: str, every: float, now: float | None = None) -> Entry:
         now = time.time() if now is None else now
         if every <= 0:
             raise ValueError("an interval must be positive")
-        return self._new(Schedule("interval", owner, payload, now + every, every))
+        return self._new(Schedule("interval", owner, payload, now + every, every), now)
 
     def cron(
         self, *, owner: str, payload: str, expression: str, timezone: str = "UTC", now: float | None = None
     ) -> Entry:
         now = time.time() if now is None else now
         due = next_due(expression, timezone, now)
-        return self._new(Schedule("cron", owner, payload, due, None, expression, timezone))
+        return self._new(Schedule("cron", owner, payload, due, None, expression, timezone), now)
 
-    def _new(self, schedule: Schedule) -> Entry:
+    def _new(self, schedule: Schedule, now: float) -> Entry:
         if not schedule.owner or not schedule.payload.strip():
             raise ValueError("a schedule needs an owner and payload")
         entry_id = uuid.uuid4().hex
@@ -272,7 +275,13 @@ class Scheduler:
             "signal": "limit_reached" if schedule.kind == "stopwatch" else "timeout",
             "slots": [],
         }
-        self.change(lambda document: document["entries"].__setitem__(entry_id, entry))
+
+        def insert(document: dict[str, Any]) -> None:
+            for old_id in [key for key, row in document["entries"].items() if abandoned(row, now)]:
+                document["entries"].pop(old_id)
+            document["entries"][entry_id] = entry
+
+        self.change(insert)
         return Entry(self, entry_id)
 
     @staticmethod
@@ -354,7 +363,7 @@ class Scheduler:
             for entry_id in document["retired"]:
                 document["entries"].pop(entry_id, None)
             document["retired"] = {}
-            for entry_id in [key for key, entry in document["entries"].items() if _abandoned(entry, now)]:
+            for entry_id in [key for key, entry in document["entries"].items() if abandoned(entry, now)]:
                 document["entries"].pop(entry_id)
 
         self.change(reap, lease=lease)
@@ -365,7 +374,7 @@ class Scheduler:
         if document["retired"]:
             return True
         return any(
-            entry["state"] == "pending" or (entry["state"] == "active" and entry["due"] <= now)
+            entry["state"] == "pending" or (entry["state"] == "active" and entry["due"] <= now) or abandoned(entry, now)
             for entry in document["entries"].values()
         )
 
@@ -381,3 +390,10 @@ class Scheduler:
                     self._deliver(entry_id, now, lease)
             self._reap(lease, now)
             return fired
+
+    def collect_runs(self) -> int:
+        """Collect the finished hive runs among the run orders this scheduler sent; return how many it collected."""
+        from scripts.hive import run_collect
+        from scripts.scheduler.slots import swarm_store
+
+        return len(run_collect.poll(swarm_store(self.state).redis, self.key(run_collect.SENT)))

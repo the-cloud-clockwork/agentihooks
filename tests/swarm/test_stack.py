@@ -2,6 +2,7 @@ import dataclasses
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,7 @@ from scripts.swarm_ledger import ledger_comments, task_dependencies
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -86,6 +88,9 @@ class ShellPort(FakeSourceControl):
         path = f"repos/{reference.repository}/issues/{reference.number}/comments"
         self._run(["gh", "api", path, "-f", f"body={body}"])
         return Comment(reference, path)
+
+
+Parked = tuple[Any, ...]
 
 
 def _slug_checked(ledger, name):
@@ -298,7 +303,7 @@ def test_a_task_parked_on_a_branchless_ops_dependency_waits_then_goes_to_the_nex
     text = doc.read_text()
     assert park(doc) == 0
     assert store.handoff("sw", "t1") == text
-    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
     assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
     assert not task_dependencies.ready(ledger.rows["t1"], ledger.rows)
     assert claim_hold.waits(ledger.rows["t1"], ledger.rows) == "it waits on task a"
@@ -689,28 +694,32 @@ def test_park_stacks_on_the_deepest_of_several_dependency_branches(parked, monke
 OTHER = "https://github.com/o/bundle"
 
 
-def test_park_fetches_a_dependency_branch_from_its_other_repository(parked, capsys):
+@pytest.mark.feature("swarm-park-foreign-dependency-no-fetch")
+@pytest.mark.parametrize("other", [OTHER, "git@github.com:O/bundle.git", "/srv/docs.git"])
+def test_park_records_a_dependency_in_another_repository_without_fetching_its_branch(
+    parked: Parked, capsys: pytest.CaptureFixture[str], other: str
+) -> None:
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = OTHER
+    ledger.rows["a"]["branch_repo"] = other
+    shell.fail = (("git", "fetch", "--"),)
     assert park(doc) == 0
-    fields = {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": [OTHER]}
+    fields = {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": [other]}
     assert ("t1", fields, AGENT) in ledger.updates
-    assert ledger.rows["t1"]["parked_repos"] == [OTHER]
-    body = f"Parked on branch `eng-t1` until a (`eng-a` in {OTHER}) merges. Stacked base `{BASE}`. {NOTE}"
+    assert ledger.rows["t1"]["parked_repos"] == [other]
+    body = f"Parked on branch `eng-t1` until a (`eng-a` in {other}) merges. Stacked base `{BASE}`. {NOTE}"
     assert shell.calls == [
         ["git", "ls-remote", "--heads", "origin", "eng-t1"],
         ["git", "rev-parse", "HEAD"],
         ["git", "status", "--porcelain"],
         *LOCATE,
         ["git", "remote", "get-url", "origin"],
-        ["git", "fetch", "--", OTHER, "eng-a"],
         ["git", "fetch", "origin", "dev"],
         ["git", "merge-base", "HEAD", "origin/dev"],
         ["git", "rev-list", "--count", BASE],
         ["gh", "api", COMMENTS, "-f", f"body={body}"],
         REMOVE,
     ]
-    assert json.loads(capsys.readouterr().out)["parked_repos"] == [OTHER]
+    assert json.loads(capsys.readouterr().out)["parked_repos"] == [other]
 
 
 @pytest.mark.parametrize(
@@ -729,7 +738,7 @@ def test_park_fetches_a_dependency_in_the_same_repository_from_origin(parked, re
     assert "a (`eng-a`) merges" in comment[-1]
 
 
-def test_park_names_each_other_repository_once_in_dependency_order(parked):
+def test_park_names_each_other_repository_once_in_dependency_order(parked: Parked) -> None:
     _, ledger, _, shell, doc = parked
     ledger.rows["b"].update({"state": "claimed", "branch_repo": "git@github.com:O/bundle.git"})
     ledger.rows["c"] = {"id": "c", "title": "Docs", "state": "pr", "branch": "eng-c", "branch_repo": "/srv/docs.git"}
@@ -740,11 +749,7 @@ def test_park_names_each_other_repository_once_in_dependency_order(parked):
     assert ledger.rows["t1"]["parked_on"] == ["a", "b", "c", "d"]
     assert ledger.rows["t1"]["parked_repos"] == [OTHER, "/srv/docs.git"]
     assert shell.calls.count(["git", "remote", "get-url", "origin"]) == 1
-    assert [c[3:] for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == [
-        [OTHER, "eng-a"],
-        ["git@github.com:O/bundle.git", "eng-b"],
-        ["/srv/docs.git", "eng-c"],
-    ]
+    assert [c for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == []
 
 
 def test_park_reads_no_origin_url_when_no_dependency_records_a_repository(parked):
@@ -771,28 +776,21 @@ def _antoncore_dependency(parked, monkeypatch, origin):
     monkeypatch.setattr(stack, "shell", answer)
 
 
-def test_park_fetches_an_antoncore_dependency_through_the_antoncore_checkout(parked, monkeypatch):
-    _, ledger, _, shell, doc = parked
-    _antoncore_dependency(parked, monkeypatch, "git@github.com:O/antoncore.git")
-    assert park(doc) == 0
-    assert ["git", "-C", CHECKOUT, "fetch", "origin", "eng-a"] in shell.calls
-    assert [c for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == []
-    assert ledger.rows["t1"]["parked_repos"] == [ANTONCORE]
-
-
-@pytest.mark.parametrize("origin", ["git@github.com:o/bundle.git", ""])
-def test_park_fetches_by_url_when_the_recorded_checkout_has_no_matching_origin(parked, monkeypatch, origin):
+@pytest.mark.feature("swarm-park-foreign-dependency-no-fetch")
+@pytest.mark.parametrize(
+    "origin", ["git@github.com:O/antoncore.git", "https://github.com/o/antoncore", "git@github.com:o/bundle.git", ""]
+)
+def test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
     _, ledger, _, shell, doc = parked
     _antoncore_dependency(parked, monkeypatch, origin)
+    shell.fail = (("git", "-C", CHECKOUT), ("git", "fetch", "--"))
     assert park(doc) == 0
-    assert ["git", "fetch", "--", ANTONCORE, "eng-a"] in shell.calls
-    assert [c for c in shell.calls if c[:2] == ["git", "-C"]] == []
-
-
-def test_park_refuses_when_the_antoncore_checkout_cannot_fetch(parked, monkeypatch, capsys):
-    _antoncore_dependency(parked, monkeypatch, "https://github.com/o/antoncore.git")
-    parked[3].fail = (("git", "-C", CHECKOUT),)
-    _refused(parked, capsys, f"cannot fetch eng-a in {CHECKOUT}: boom")
+    assert [c for c in shell.calls if c[:2] == ["git", "-C"] or c[:3] == ["git", "fetch", "--"]] == []
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.rows["t1"]["stacked_base"] == BASE
+    assert ledger.rows["t1"]["parked_repos"] == [ANTONCORE]
 
 
 UNVERIFIED = "Host key verification failed.\nfatal: Could not read from remote repository."
@@ -811,66 +809,45 @@ def _ssh_refused(shell, refused, inner=None, stderr=UNVERIFIED):
 
 
 @pytest.mark.parametrize("stderr", [UNVERIFIED, KEY_REFUSED])
-def test_park_fetches_an_ssh_dependency_over_https_when_the_host_key_cannot_be_verified(parked, monkeypatch, stderr):
+def test_park_fetches_a_same_repository_dependency_over_https_when_origin_is_unverified(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, stderr: str
+) -> None:
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
-    refused = [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]]
-    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, refused, stderr=stderr))
-    assert park(doc) == 0
-    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/bundle.git", "eng-a"] in shell.calls
-    assert ledger.rows["t1"]["parked_on"] == ["a"]
-
-
-def test_park_fetches_a_same_repository_dependency_over_https_when_origin_is_unverified(parked, monkeypatch):
-    _, ledger, _, shell, doc = parked
-    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]], stderr=stderr))
     assert park(doc) == 0
     refspec = "+refs/heads/eng-a:refs/remotes/origin/eng-a"
     assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", refspec] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
 
 
-def test_park_fetches_through_an_unverified_checkout_origin_over_https(parked, monkeypatch):
-    _, ledger, _, shell, doc = parked
-    _antoncore_dependency(parked, monkeypatch, "git@github.com:O/antoncore.git")
-    refused = [["git", "-C", CHECKOUT, "fetch", "origin", "eng-a"]]
-    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, refused, stack.shell))
-    assert park(doc) == 0
-    refspec = "+refs/heads/eng-a:refs/remotes/origin/eng-a"
-    assert [
-        *PROMPTLESS,
-        "git",
-        "-C",
-        CHECKOUT,
-        "fetch",
-        "--",
-        "https://github.com/O/antoncore.git",
-        refspec,
-    ] in shell.calls
+ORIGIN_RETRY = [
+    *PROMPTLESS,
+    "git",
+    "fetch",
+    "--",
+    "https://github.com/O/r.git",
+    "+refs/heads/eng-a:refs/remotes/origin/eng-a",
+]
 
 
-def test_park_refuses_naming_both_errors_when_the_https_retry_fails(parked, monkeypatch, capsys):
+def test_park_refuses_naming_both_errors_when_the_https_retry_fails(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = "ssh://git@github.com:22/O/bundle"
-    https = [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/bundle", "eng-a"]
-    monkeypatch.setattr(
-        stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", "ssh://git@github.com:22/O/bundle", "eng-a"]])
-    )
-    shell.fail = (tuple(https[:3]),)
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
+    shell.fail = (tuple(ORIGIN_RETRY[:3]),)
     assert park(doc) == 1
-    says = (
-        "swarm: cannot fetch eng-a from ssh://git@github.com:22/O/bundle: "
-        f"{UNVERIFIED}; over https://github.com/O/bundle: boom\n"
-    )
+    says = f"swarm: cannot fetch eng-a: {UNVERIFIED}; over https://github.com/O/r.git: boom\n"
     assert capsys.readouterr().err == says
-    assert https in shell.calls
+    assert ORIGIN_RETRY in shell.calls
     assert "parked_on" not in ledger.rows["t1"]
 
 
-def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(parked, monkeypatch, capsys):
+def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
-    inner = _ssh_refused(shell, [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]])
+    inner = _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]])
 
     def answer(argv):
         if argv[:2] == PROMPTLESS:
@@ -880,8 +857,8 @@ def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(parked, monkey
     monkeypatch.setattr(stack, "shell", answer)
     assert park(doc) == 1
     says = (
-        f"swarm: cannot fetch eng-a from git@github.com:O/bundle.git: {UNVERIFIED}; "
-        "over https://github.com/O/bundle.git: env GIT_TERMINAL_PROMPT=0 could not run: timed out\n"
+        f"swarm: cannot fetch eng-a: {UNVERIFIED}; "
+        "over https://github.com/O/r.git: env GIT_TERMINAL_PROMPT=0 could not run: timed out\n"
     )
     assert capsys.readouterr().err == says
     assert "parked_on" not in ledger.rows["t1"]
@@ -902,21 +879,24 @@ def test_park_names_the_ssh_error_when_the_origin_url_cannot_be_read(parked, mon
     assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
 
 
-def test_park_refuses_an_unverified_fetch_from_an_address_with_no_https_form(parked, monkeypatch, capsys):
+def test_park_refuses_an_unverified_fetch_from_an_origin_with_no_https_form(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = OTHER
-    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", OTHER, "eng-a"]]))
+    shell.origin = "https://github.com/o/r"
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
     assert park(doc) == 1
-    assert capsys.readouterr().err == f"swarm: cannot fetch eng-a from {OTHER}: {UNVERIFIED}\n"
+    assert capsys.readouterr().err == f"swarm: cannot fetch eng-a: {UNVERIFIED}\n"
     assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
 
 
-def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(parked, capsys):
+def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(
+    parked: Parked, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
-    shell.fail = (("git", "fetch", "--"),)
-    _refused(parked, capsys, "cannot fetch eng-a from git@github.com:O/bundle.git: boom")
-    assert [c[3] for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == ["git@github.com:O/bundle.git"]
+    shell.fail = (("git", "fetch", "origin"),)
+    _refused(parked, capsys, "cannot fetch eng-a: boom")
+    assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
 
 
 @pytest.mark.parametrize(
@@ -998,12 +978,14 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
     ("failing", "says"),
     [
         (("git", "remote", "get-url"), "cannot read the origin url"),
-        (("git", "fetch", "--"), f"cannot fetch eng-a from {OTHER}"),
         (("git", "fetch", "origin"), "cannot fetch dev"),
         (("git", "merge-base", "HEAD"), "the task shares no history with dev"),
+        (("git", "rev-list", "--count"), f"cannot count {BASE}"),
     ],
 )
-def test_park_on_another_repository_refuses_when_a_command_fails(parked, capsys, failing, says):
+def test_park_on_another_repository_refuses_when_a_command_fails(
+    parked: Parked, capsys: pytest.CaptureFixture[str], failing: tuple[str, ...], says: str
+) -> None:
     parked[1].rows["a"]["branch_repo"] = OTHER
     parked[3].fail = (failing,)
     _refused(parked, capsys, f"{says}: boom")
@@ -1078,7 +1060,7 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
     }
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
     assert store.claimant("sw", "t1") == AGENT
-    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
     assert [a.name for a in store.agents("sw") if a.name == AGENT] == []
     assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
     assert store.handoff("sw", "t1") == text
@@ -1101,7 +1083,7 @@ def test_a_refused_park_leaves_no_restart_mark(parked, capsys):
 def test_the_life_launched_after_a_park_is_recorded_as_after_the_park(parked):
     store, ledger, rt, _, doc = parked
     assert park(doc) == 0
-    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
     ledger.rows["a"]["state"] = "done"
     ledger.update_task = type(ledger).update_task.__get__(ledger)
     tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
@@ -1311,7 +1293,9 @@ def _task_repo(tmp_path, monkeypatch):
     return repo, _git(repo, "rev-parse", "dev")
 
 
-def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(tmp_path, monkeypatch):
+def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     other = tmp_path / "other"
     _git(tmp_path, "init", "-b", "eng-a", str(other))
     _git(other, "-c", "user.email=t@example.invalid", "-c", "user.name=T", "commit", "--allow-empty", "-m", "Other")
@@ -1319,7 +1303,8 @@ def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(tmp_pa
     dep = {"id": "a", "branch": "eng-a", "branch_repo": str(other)}
     assert stack._foreign([dep]) == [dep]
     assert stack._stacked_base([dep], [dep]) == fork
-    assert _git(repo, "cat-file", "-t", _git(other, "rev-parse", "eng-a")) == "commit"
+    missing = ["git", "-C", str(repo), "cat-file", "-e", _git(other, "rev-parse", "eng-a")]
+    assert subprocess.run(missing, capture_output=True, check=False).returncode != 0
 
 
 def test_restack_of_a_task_parked_on_another_repository_rebases_onto_dev(parked, tmp_path, monkeypatch, capsys):

@@ -6,7 +6,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
 
@@ -19,6 +19,8 @@ READY_TIMEOUT_S = 120.0
 POLL_S = 0.5
 ATTEMPTS = 3
 EARLY_EXIT_S = 5.0
+WATCH_S = 5.0
+STOP_S = 5.0
 ENDED = "the execution's app-server {}; there is no thread to attach"
 NOT_READY = "the execution has no connected thread after {:g} seconds"
 NO_ATTACH = "{} runs no app-server a native terminal can attach to"
@@ -32,6 +34,16 @@ Open = Callable[[str, list[str]], "Placement"]
 
 class AttachError(RuntimeError):
     pass
+
+
+class ViewerProcess(Protocol):
+    def poll(self) -> int | None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
 
 
 def viewer_argv(codex_bin: str, record: TransportRecord) -> list[str]:
@@ -85,6 +97,38 @@ def attach(
             return code
         sleep(POLL_S)
     return code
+
+
+def server_ended(read: Read) -> bool:
+    """True once the execution lost its seat or its app-server is gone; an unreadable store keeps the viewer."""
+    from scripts.swarm.live_binding import server_alive
+
+    try:
+        record = read()
+    except Exception:
+        return False
+    return record is None or server_alive(record) is False
+
+
+def watched(
+    command: list[str],
+    read: Read,
+    popen: Callable[[list[str]], ViewerProcess] = subprocess.Popen,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Run the viewer until it closes, or end it once its app-server is gone: Codex keeps a dead reconnect open."""
+    viewer = popen(command)
+    while viewer.poll() is None:
+        if server_ended(read):
+            viewer.terminate()
+            try:
+                viewer.wait(timeout=STOP_S)
+            except subprocess.TimeoutExpired:
+                viewer.kill()
+                viewer.wait()
+            break
+        sleep(WATCH_S)
+    return viewer.wait()
 
 
 def recorded(slug: str, name: str) -> Read:
@@ -188,9 +232,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str], read: Read | None = None, run: Run | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        current = read or recorded(args.slug, args.agent)
         return attach(
-            read or recorded(args.slug, args.agent),
-            run or (lambda command: subprocess.run(command).returncode),
+            current,
+            run or (lambda command: watched(command, current, subprocess.Popen, time.sleep)),
             args.codex_bin,
             args.timeout,
         )

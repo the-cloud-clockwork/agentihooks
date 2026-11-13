@@ -1,5 +1,7 @@
+import json
 import subprocess
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -240,6 +242,15 @@ def test_a_master_remote_or_live_launch_closes_its_pane_on_retirement(store, age
     assert runtime.closed == [agent.pane_id] and failed_panes.held(store, "sw") == {}
 
 
+@pytest.mark.feature("hive-launch-pane-off-controller-hold")
+def test_a_hive_hosted_launch_keeps_its_pane_off_the_controller_hold(store, monkeypatch):
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    runtime = PaneRuntime()
+    agent = AgentRecord("engineer@a1b2c3-0004", "eng", "t1", pane_id="w5M:p1", runtime_target={"host_id": "root"})
+    assert tick_module._retire_launch("sw", store, runtime, agent, FAILED_AT) is True
+    assert runtime.closed == ["w5M:p1"] and failed_panes.held(store, "sw") == {}
+
+
 def test_a_failed_retirement_holds_no_pane(store):
     runtime = PaneRuntime()
     agent = AgentRecord("engineer@a1b2c3-0003", "eng", "t1", pane_id="w1:p3")
@@ -445,3 +456,36 @@ def test_closing_a_pane_that_herdr_refuses_raises(tmp_path):
 def test_lines_drop_trailing_blanks_and_keep_the_last_ones():
     assert failed_panes.lines("a\nb  \n\nc\n\n\n", 2) == ["", "c"]
     assert failed_panes.lines("", 20) == []
+
+
+class HistoryReads:
+    """Wrap a Redis client and record each range read of a key."""
+
+    def __init__(self, redis: Any) -> None:
+        self.redis: Any = redis
+        self.ranged: list[str] = []
+
+    def lrange(self, key: str, start: int, end: int) -> list[str]:
+        self.ranged.append(key)
+        return self.redis.lrange(key, start, end)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.redis, name)
+
+
+@pytest.mark.feature("failed-panes-report-hash-only")
+def test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list(store: RedisStore) -> None:
+    store.redis.hset(store.key("sw", "launches"), "e-1", json.dumps({"agent": "e-1", "task": "t1", "state": "started"}))
+    failed = {"agent": "e-2", "task": "t2", "state": "failed", "error": "gone", "pane_id": "w1:p9"}
+    store.redis.hset(store.key("sw", "launches"), "e-2", json.dumps(failed))
+    store.note_launch_pane("sw", "e-2", ["$ codex", "account not found"])
+    validated = {"validation": {"state": "validated"}}
+    old = {"name": "e-0", "task": "t0", "started_at": 5, "profile_decision": validated}
+    store.redis.rpush(store.key("sw", "history"), json.dumps(old))
+    reads = HistoryReads(store.redis)
+    store.redis = reads
+
+    rows = failed_panes.report(store, "sw")
+
+    assert rows == [{**failed, "pane_lines": ["$ codex", "account not found"]}]
+    assert reads.ranged == []

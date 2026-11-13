@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/herdr/hive_lifecycle.py:scripts.swarm_v2.herdr.hive_lifecycle.x_reconcile:3df4a8cc661527d69c01a7ef9752292a035ebac0ac77beddf8b194c30e705d76": {
+    "reader": "standards_reader",
+    "reason": "Passes None instead of False as the dry run argument of the hive machine forget. Forget reads dry run only in a truthiness check, and both values are falsy, so the same removal branch runs and returns the same lines; no output changes."
+  }
+}

@@ -17,7 +17,7 @@ gh workflow run proofs.yml \
   -f base=origin/dev
 ```
 
-For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+For a stacked branch, set `base` to its dependency branch. Open the draft pull request at the first push; never wait for Mutation preflight before opening it. A branch push with no open pull request still runs the preflight. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
 ## Required gate proof
 
@@ -336,9 +336,121 @@ test merely to meet a time target.
 | A changed function has no recorded unit | Keep candidate files whole for that source path |
 | Manifest has no commit, a shared test helper or conftest changed, dependency inputs or the unit test workflow changed, or a Python module outside the measured roots changed | Disable narrowing; retain candidate files |
 | Inserted or deleted source cannot map directly | Include tests reaching the affected recorded functions; added or removed modules use their recorded units |
-| Import-time source changes or replaced lines outside a function | Include tests reaching recorded units in that module |
+| Import-time source changes or replaced lines outside a function that change the module shape | Include tests reaching recorded units in that module. Edits that leave the shape unchanged keep line selection; see [Class body edits outside a function](#class-body-edits-outside-a-function) |
 | Changed data file was opened by a recorded test | Retain that test as a covering candidate |
 | Narrowing would leave a source path with no tests | Keep its original candidate list |
+
+#### Class body edits outside a function
+
+An edit to a plain class attribute, such as a dataclass field or a constant in
+a class body, no longer selects every test that touched the file. Selection for
+that file comes from the tests that executed the changed function lines and the
+functions enclosing inserted or deleted lines, as for any other edit inside a
+function.
+
+The planner compares the module's shape before and after each change between
+the manifest commit and the head. The shape is the list of top level
+statements, where a class is reduced to its name, bases, keywords and
+decorators, its methods by name and decorators, its nested classes reduced the
+same way as a top level class, and its attributes whose value is a dict
+literal. A top level function is reduced to its name and decorators, so its
+signature and body are not part of the shape. Every other top level statement,
+such as an assignment or an import, is compared in full. Plain class attributes
+and method bodies are not part of the shape.
+No module wide fallback is added when the shape is unchanged, or when every
+top level change is additive: new imports, new undecorated functions, new
+assignments to unused names, or new entries appended to an existing top level
+list, tuple, set or dict literal, where a dict gains new constant keys and no
+new entry contains a call. That last exemption covers
+only a top level assignment; the same append to a dict literal inside a class
+body changes the shape.
+
+| Change outside any function | Module shape | Selection for that file |
+|---|---|---|
+| A class attribute value changes, `X = 1` to `X = 2`, annotated or not | Unchanged | Tests that executed the changed lines |
+| A class attribute is added or removed, such as a new dataclass field | Unchanged | Tests that executed the changed lines |
+| A class attribute whose value is a dict literal changes, such as a dispatch table | Changed | Every test reaching a recorded unit of the module |
+| A top level assignment changes, `SETTING = 1` to `SETTING = 2` | Changed | Every test reaching a recorded unit of the module |
+| A new entry is appended to a top level literal, `HANDLERS = {"a": f}` to `HANDLERS = {"a": f, "b": g}` | Changed, exempt as additive | Tests that executed the changed lines, plus tests that executed a line reading that table, plus any test that executed a line of that file and whose own test file names the table. A dict subscript lookup outside a `try` block is not counted as a read, because only a test passing the new key reaches the new entry |
+| A class base, keyword or decorator changes | Changed | Every test reaching a recorded unit of the module |
+| A decorator on a function or method is added, removed or changed | Changed | Every test reaching a recorded unit of the module |
+| A method or nested class is added, removed or renamed | Changed | Every test reaching a recorded unit of the module |
+| The new source does not parse while the old one does | Changed | Every test reaching a recorded unit of the module |
+
+A replaced line still maps to its recorded line, so a test whose recorded
+lines include the changed class body line is selected. An inserted or deleted
+line inside a function still adds the tests reaching that function, and a
+replaced function header line still adds that function's tests. The table rows
+that mean "changed" are the cases where a top level rebinding, a new dispatch
+entry or a changed decorator can alter behavior in code no changed line
+belongs to.
+
+For example, a pull request adds one field to a configuration dataclass and
+changes one line in the method that reads it. The names below illustrate the
+shape of the measured change; they are not the store's source:
+
+```diff
+ @dataclass
+ class Config:
+     slug: str
++    mode: str = "legacy"
+
+ class Store:
+     def config(self, slug: str) -> Config:
+-        raw = self._read(slug)
++        raw = self._read(slug) or {}
+         return Config(**raw)
+```
+
+The shape of the module is the same before and after, so the selection for
+that file holds the tests whose recorded lines include the changed `config`
+line, plus helper callers and any whole files the other fallbacks keep. Before
+this rule, the added field selected every test reaching any unit of the
+module.
+
+##### Configuration
+
+There is no switch or threshold. The rule runs inside the existing planner
+command whenever a usable line manifest is found, and does not apply when the
+manifest is missing or narrowing is disabled by the drift rows above.
+
+##### Inspect the class body selection
+
+Download the selection as in [Inspect the selection](#inspect-the-selection)
+and count the entries for the changed file. A count near the number of tests
+reaching any unit of the module means the module wide fallback fired:
+
+```bash
+jq -r --arg path scripts/swarm/store.py '.[$path] | length' \
+  EVIDENCE_DIR/selection/.mutation-selection.json
+```
+
+##### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| A class field edit still selects thousands of tests | Look for another change in the same file since the manifest commit: a top level assignment, a decorator, a new or removed method, or a dict literal class attribute changes the shape and restores the module wide fallback |
+| A test that reads the new attribute is absent | The attribute line itself runs at import time, so only tests whose recorded lines include the changed line or a changed function line are selected. Change or cover a function line that reads the attribute, or rely on the test's file being kept by another fallback |
+| A survivor appears in code that reads the attribute | The mutant's line was not executed by a selected test. Add a test that executes that function line; the next dev record carries it |
+
+##### Delivery evidence
+
+[Pull request 7170](https://github.com/the-cloud-clockwork/agentihooks/pull/7170)
+delivered this rule for issue 7165. The measurement used one `SwarmConfig`
+field and one `RedisStore.config` line on a proof branch, read through the
+Proofs mutation workflow:
+
+| Run | Selection for `scripts/swarm/store.py` | Shards |
+|---|---|---|
+| [Before, Proofs 40193087658](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40193087658) | 7216 tests | About 976 s of the 1080 s budget; seven of ten shards ran out the budget on the original repair |
+| [After, Proofs 40310822438](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40310822438) | 583 tests | Nine shards, each completed in 640 to 1040 s |
+| [Planted fault, Proofs 40219199912](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40219199912) | 566 tests | A fault planted in the engine default of the reader; all 64 mutants killed and the report green |
+
+The regression cases are
+`test_statistics_select_only_contexts_executing_the_edited_branch`, with the
+`constant`, `dropped`, `rebound` and `decorator` modes, and
+`test_only_top_level_statement_edits_change_the_module_keys` in
+`tests/test_ci_mutation_planned_selection.py`.
 
 Escape-only tests do not supply recorded mutant coverage: their child process
 uses a light bootstrap that does not record trampoline hits. They cannot
@@ -601,7 +713,7 @@ turn an empty or failed collection into a passing run.
 
 ### Inspect a branch run
 
-Push the branch before opening its pull request, then inspect its preflight:
+A branch push with no open pull request runs its preflight; inspect it:
 
 ```bash
 gh run list --workflow mutation-preflight.yml --branch <branch> --limit 5
@@ -773,9 +885,10 @@ workers a batch runner starts, which is three under the batch runner's CPU
 limit of three. Before this change it assumed four, so its estimates were
 optimistic by a third and a shard could run past its budget.
 
-Most planning steps run on the light runner, whose own CPU limit is two, so
-they cannot read the batch quota from their cgroup. The one exception is the
-**Refine mutation shards from measured statistics** step inside the `stats`
+Most planning steps run on the light or standard runner, whose own CPU
+limits are two and five, so they cannot read the batch quota from their
+cgroup. The one exception is the **Refine mutation shards from measured
+statistics** step inside the `stats`
 job, which runs only when a single job covers the whole plan and runs on the
 batch runner itself; it reads the variable like the others. Each planning step
 passes the batch runner's quota in `MUTATION_SHARD_CPU_QUOTA`, and
@@ -794,6 +907,18 @@ shards and the Proofs `tests` proof use to choose their pytest workers.
 
 The rule is `max(1, min(4, int(quota)))`, with four as the CPU count, so the
 variable can lower the planned workers but never raise them above four.
+
+### Shards past the batch runner pool
+
+The batch pool holds twelve runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, twenty four shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the twelfth queue on the pool and start as the first wave finishes, so a change whose work exceeds twelve shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
+
+Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the twenty four shards in two waves of twelve runners and asks for at least the change's worker seconds divided by what those twenty four shards hold, and never fewer than two, pull requests.
+
+| Measured worker seconds at three workers | Shards | Result |
+|---|---|---|
+| up to 32400 | up to 12 | one wave |
+| 32401 to 64800 | 13 to 24 | two waves, every mutant graded |
+| over 64800, or one unit over 2700 | 24 | refused at plan time |
 
 ### What the worker count sizes
 
@@ -1447,7 +1572,7 @@ These are implementation defaults, with no environment variable or workflow disp
 | `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
 | `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
 | Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
-| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
+| Shard target and limit | 240 seconds, 10 shards wanted; up to 24 shards when the budget needs them ([Shards past the batch runner pool](#shards-past-the-batch-runner-pool)) | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
 
 For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
 
@@ -1519,6 +1644,20 @@ There is no setting for the ratio, and no log line prints it. Compare `Measured 
 | One group's mutants are priced differently from another's | Each statistics group the plan loads has its own ratio |
 
 [Pull request 4786](https://github.com/the-cloud-clockwork/agentihooks/pull/4786) delivered the adjustment. Replaying the planner on the same statistics artifacts, the account scan head of [run 39207424222](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39207424222) fell from 48.2 to 16.2 estimated minutes per mutant and from 100 to 60 units on ten shards; five other recent pull request runs fell between two and four times, and two of them needed fewer shards (10 to 6, and 5 to 3). Predicted over actual shard wall stayed between 1.6 and 4.9 across all six runs, so the estimate still exceeds observed work. On the account scan head every one of the 1881 traced tests executes the changed one statement function, so line level narrowing could not have cut its test set.
+
+### Early stage and shards sized after it
+
+A preflight plan with split mutants runs two stages. In the early stage (`probe`), each split mutant runs only its head tests once. The shards then skip the head and run only what the early stage left. Each stage is sized for its own work, so neither stage is sized for the worst case of the other.
+
+| Stage | Job count | Work priced |
+|---|---|---|
+| `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 12 (the batch runner pool) or the number of split mutants | One head run per split mutant |
+| `replan` | One job on the light pool, after every `probe` job succeeds | Merges the early results into the plan, replans the shards and uploads `mutation-plan-probed` |
+| `mutation-shard` | `shards` in the probed plan, sized for the lowest planned stage wall. A stage costs one job setup of 180 seconds plus its slowest shard's work per worker for each wave of 12 batch runners. The planner takes the fewest shards whose stage plans within six minutes (360 seconds, or the shard budget less the longest early job when that is smaller); when no count does, it takes the count with the lowest planned stage wall whose slowest shard fits the remaining budget, so a large remainder runs one wave of longer shards before two waves of short ones. A shard is graded against the remaining budget | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
+
+On the e2 proof, [run 41605474823](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41605474823) sized both stages at 49 jobs from 130220 estimated worker seconds. Its early stage killed 451 of 493 split mutants. The 356 surviving units then took 16849 observed worker seconds; their head plus slice estimate was 69876.
+
+The `replan` log prints `Early mutation kills: K of N split mutants` and `Probed mutation worker seconds: S; probed shards: C`. When the remaining budget cannot hold the slowest shard, `replan` fails with **Mutation plan over budget** and the shards do not start. A plan without split mutants skips `probe` and `replan`, and the shards use the `refine` plan as before. The pull request Tests workflow runs the same two stages as `mutation-probe` and `mutation-replan`, after `mutation-refine` and before `mutation-shard`. `mutation-replan` uploads `mutation-plan-probed`, the shards download it over the measured plan, and the `mutation` job counts shards from it first. A refine plan without split mutants, or a head whose planner predates `probe_shards`, skips both stages. The longest chain of Tests stage budgets to Gate Required runs through the mutation stages and already took the whole fifteen minutes, so the two new stages take their budget from the shard stage: `mutation-probe` 120 seconds, `mutation-replan` 30 seconds and `mutation-shard` 210 seconds, which together keep the former 360. The shards no longer rerun each split mutant's head, so they need less of it.
 
 ### Combined grading
 
@@ -1793,7 +1932,7 @@ A Standards reader clears an exact survivor with one JSON file under `mutation-c
 }
 ```
 
-Write an independently reviewed ruling with `scripts.ci_mutation.clearances.write_clearance(root, key, ruling)`; `clearance_path(root, key)` returns its deterministic filename. Run `python -m scripts.ci_mutation.clearances` from the repository root to migrate legacy rulings without changing their reader or reason. The migration leaves an empty legacy object for compatible older readers. Trace plans and the build scope gate accept both clearance locations as supporting proof.
+Write an independently reviewed ruling with `scripts.ci_mutation.clearances.write_clearance(root, key, ruling)`; `clearance_path(root, key)` returns its deterministic filename. To record a Standards reader ruling for survivors in a downloaded `report.json`, run `python -m scripts.ci_mutation.clearances write <report.json> <mutant names> --reader "<reader>" --reason "<reason>"` from the repository root (or pass `--root`). It accepts the merged report and a per shard report, keys each named survivor with the report module's clearance key, writes one clearance file per survivor, prints each path, and refuses before writing when a name is not a survivor in the report. The local test guard lets this command through; a direct import of the report module in a shell command is still refused. Run `python -m scripts.ci_mutation.clearances` with no arguments from the repository root to migrate legacy rulings without changing their reader or reason. The migration leaves an empty legacy object for compatible older readers. Trace plans and the build scope gate accept both clearance locations as supporting proof.
 
 ## Clean baseline failures
 

@@ -3,7 +3,9 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from datetime import date, datetime
+from typing import Any
 
 from scripts.agents_quota import page_quota
 from scripts.gates import catalog, lift, modes, progress
@@ -41,11 +43,16 @@ from scripts.swarm import (
 from scripts.swarm.health import (
     activity,
     checks,
+    early_ends,
     merge_stall,
     night_watch,
+    ordering_dependencies,
     prompt_backlog,
+    quiet_hives,
+    restore_wait,
     spawn_stall,
     standing,
+    step_starvation,
     urgent_hold,
     verdicts,
 )
@@ -89,7 +96,9 @@ def verdict_store(store, slug):
     return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
 
 
-def findings(store, slug, config, tasks, events, view=None):
+def findings(
+    store: Any, slug: str, config: Any, tasks: list[dict[str, Any]], events: list[Any], view: Any = None
+) -> list[Any]:
     agents, limits = store.agents(slug), health.limits()
     if view is None:
         pending = checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST)
@@ -139,12 +148,17 @@ def findings(store, slug, config, tasks, events, view=None):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
+        + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
+        + early_ends.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
+        + quiet_hives.findings(store.redis, now_ms())
+        + restore_wait.findings(store, slug, now_ms())
     )
     found = outage.hold_findings(store, slug, found, agents)
     if ledger_probe.holding(store, slug):
@@ -286,7 +300,14 @@ def agent_hive(agent: AgentRecord) -> str:
     return agent.hive or reports.host(agent) or (hive_id() if agent.runtime_backend == "local" else "")
 
 
-def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None, view=None) -> dict:
+def status_report(
+    store: RedisStore,
+    slug: str,
+    state: dict[str, Any],
+    runtime: Runtime | None = None,
+    view: Callable[[str], Any] | None = None,
+    found: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     from scripts.hive import join_report
     from scripts.swarm import capacity, tick_activity
 
@@ -331,7 +352,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),
         "spawns": store.spawns(slug),
-        "findings": findings(store, slug, config, tasks, events, view),
+        "findings": found if found is not None else findings(store, slug, config, tasks, events, view),
         "launch_checks": launch_check.reports(store, slug),
         "failed_launch_panes": failed_panes.report(store, slug),
         "auto_snapshot": auto_snapshot(config),
@@ -340,6 +361,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "handoffs": handoff_rows(handed, agents, recovery_cards.rows(store, slug)),
         "peer": store.peer(slug),
         "plan_shape": shape_report(tasks, config.max_eng),
+        "ordering_dependencies": ordering_dependencies.read(store, slug),
         "compact_limit": compact_limit(config),
         "done_today": done_today(tasks, events, local_midnight_ms()),
         "doctor": doctor_report(store, slug),

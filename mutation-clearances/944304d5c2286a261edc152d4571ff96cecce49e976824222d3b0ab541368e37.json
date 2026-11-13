@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:ccc722c9f963e4b842ba5ee605513f02a05fdebe5e51f781f7ead6b07da63fdd": {
+    "reader": "standards_reader",
+    "reason": "ThreadPoolExecutor.shutdown in the Python 3.12 standard library branches only on the truthiness of wait (if wait: join threads); None and False are both falsy, so the mutant takes the same path and changes no observable output."
+  }
+}

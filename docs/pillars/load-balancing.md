@@ -96,12 +96,20 @@ response header carries the fable window.
    after every account that has one. Remaining ties go by harness, then account
    name.
 
-When no account has a free place the launch fails. `agentihooks balance` and the
+When no account has a free place a swarm or hive slot launch fails. A launch
+outside both, such as the operator's own `agenti`, then takes the open account
+with the most room, the way the master does, so swarm agents filling every cap
+never lock him out of an account that still has quota. It still skips an account
+under 5% of its five hour window or week, and when every account is closed it
+fails naming each account's real refusal. `agentihooks balance` and the
 Quota panel on the ledger page show each account's live sessions against its
 computed cap. A lock held until Claude starts keeps two simultaneous launches
 from both taking the last free place.
 
 `agenti --route <slug>` skips all of this and uses `AH_CC_TOKEN_<slug>`.
+`agenti --route claude-ai` skips it too and runs on a stored claude ai login
+instead of a token; see
+[Standalone sessions on a claude ai login](../reference/account-login.md#standalone-sessions-on-a-claude-ai-login).
 
 ```text
 [agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/6 source=cached
@@ -790,6 +798,8 @@ are resolved by account name. If no Claude account qualifies, it considers Codex
 accounts by the same ranking, provided the lane and required harness permit
 Codex and the profile has no required Claude only plugin. With no eligible
 account, successor placement fails; it does not launch on a draining account.
+Under the deployed controller, hive placement applies the same rule to every
+launch: see [closed and draining accounts get no hive agent](hives.md#closed-and-draining-accounts-get-no-hive-agent).
 
 ### Worked example
 
@@ -990,7 +1000,7 @@ days, so the refresher below keeps it alive.
 
 - The slug follows the `accounts env` rule: lower cased, `@` becomes `at` and
   every other character outside `a-z` and `0-9` becomes `_`, one for one, so an
-  email works (`nestor.colt@gmail.com` becomes `nestor_coltatgmail_com`, `team-a`
+  email works (`operator@example.com` becomes `operatoratexample_com`, `team-a`
   becomes `team_a`) and the login prints a note recommending the email of the
   target account. A result that is empty, starts with `_`, or is `status`,
   `help`, `default` or `api` is refused. Both logins use this rule. An account

@@ -145,7 +145,7 @@ def _week(monkeypatch, **used):
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, used[account] + 0 * now, 0.0))
 
 
-@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 96.0])
+@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 99.0])
 def test_a_login_past_the_master_limit_yields_to_the_next_in_order(monkeypatch, rendered, tmp_path, spent):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
@@ -161,19 +161,21 @@ def test_the_operator_order_holds_while_both_logins_are_under_the_master_limit(m
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=80.0)
-    _week(monkeypatch, oneatexample_com=90.0, twoatexample_com=20.0)
+    _week(monkeypatch, oneatexample_com=70.0, twoatexample_com=20.0)
     monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com")
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
 
 
-def test_the_operator_order_holds_when_every_login_is_past_the_master_limit(monkeypatch, rendered, tmp_path):
+def test_the_primary_past_the_master_limit_and_its_reserve_yields_to_the_next_ordered_login(
+    monkeypatch, rendered, tmp_path
+):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _room(monkeypatch, oneatexample_com=1.0, twoatexample_com=4.0)
     _week(monkeypatch, oneatexample_com=99.0, twoatexample_com=96.0)
     monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com")
-    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
 
 
 def test_a_held_first_login_passes_to_the_next_ordered_login_under_the_master_limit(monkeypatch, rendered, tmp_path):
@@ -182,7 +184,7 @@ def test_a_held_first_login_passes_to_the_next_ordered_login_under_the_master_li
     _stored(2, TWO)
     _stored(3, {"emailAddress": "three@example.com"})
     _room(monkeypatch, oneatexample_com=50.0, twoatexample_com=90.0, threeatexample_com=10.0)
-    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=97.0, threeatexample_com=30.0)
+    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=99.0, threeatexample_com=30.0)
     monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com,threeatexample_com")
     environ = _environ(rendered)
     _held(1, environ["AGENTIHOOKS_AGENT_NAME"])
@@ -340,6 +342,12 @@ def test_room_reads_the_newest_snapshot_and_drops_a_window_that_reset(monkeypatc
     _readings(monkeypatch, cache, (200.0, _limits((30.5, 900), (40.5, 300))))
     assert master_logins.usage("two", 300.0) == (30.5, 0.0, 200.0)
     assert master_logins.left("two", 300.0) == 69.5
+
+
+def test_week_left_uses_the_week_independently_of_the_five_hour_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    _readings(monkeypatch, [(100.0, _probe("two", (95.0, 900), (80.0, 900)))], None)
+    assert master_logins.week_left("two", 300.0) == 20.0
+    assert master_logins.week_left("two", 900.0) == 100.0
 
 
 def test_room_reads_the_cache_when_it_is_newer(monkeypatch):

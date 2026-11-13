@@ -434,3 +434,13 @@ def test_probes_and_classifier_calls_hold_no_slot_while_a_routed_launch_inside_o
     for pid, (argv, child) in enumerate([*internal, (routed["argv"], routed["env"])], start=800):
         _proc(root, pid, "codex", 1, argv, child)
     assert account_sessions.codex_sessions_by_account(root) == {"alpha": 1}
+
+
+def test_a_date_only_timestamp_needs_its_z_suffix_replaced_to_parse() -> None:
+    limits = _windows(10.0, 20.0, NOW + 60, NOW + 6000)
+    event = json.dumps(
+        {"timestamp": "2026-01-01Z", "type": "event_msg", "payload": {"type": "token_count", "rate_limits": limits}}
+    )
+    quota = codex_quota.parse_event(event)
+    assert quota is not None
+    assert quota.five_hour == QuotaWindow(used=10.0, resets_at=NOW + 60)

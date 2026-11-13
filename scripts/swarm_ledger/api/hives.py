@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Any
 
 from redis import RedisError
 
@@ -24,7 +25,7 @@ PATCH = {
         "ephemeral": FLAG,
         "excluded": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "prefer": {"type": "object", "additionalProperties": {"type": "integer"}},
-        "max_agents": {"type": "integer"},
+        "max_agents": {"oneOf": [{"type": "integer"}, {"const": "auto"}]},
     },
 }
 MISSING = "resource_missing"
@@ -53,15 +54,37 @@ def masters(store: object) -> dict[str, dict]:
     return found
 
 
-def view(store: object, now_ms: int) -> list[dict]:
+def shown(hive: dict[str, Any], now_ms: int) -> bool:
+    """A hive row is listed until a day without a heartbeat, and an ephemeral hive only until it goes quiet."""
+    if hive.get("ephemeral") == "yes" and registry.quiet(hive, now_ms):
+        return False
+    return now_ms - hive["heartbeat_at"] <= GONE_MS
+
+
+def beaten(sessions: dict[str, Any]) -> int:
+    """The worker sessions a hive reported at its latest heartbeat, without its interactive master sessions."""
+    interactive, workers = 0, 0
+    for slot, count in sessions.items():
+        if slot.startswith("interactive:"):
+            interactive += count
+        elif slot != "_executions":
+            workers += count
+    return max(0, workers - interactive)
+
+
+def view(store: Any, now_ms: int) -> list[dict[str, Any]]:
     loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
-    hives = [hive for hive in loaded_hives(store) if now_ms - hive["heartbeat_at"] <= GONE_MS]
+    hives = [hive for hive in loaded_hives(store) if shown(hive, now_ms)]
     for hive in hives:
-        sessions = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+        hive["live"] = registry.live(hive, now_ms)
+        sessions: dict[str, Any] = (
+            json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}") if hive["live"] else {}
+        )
         if hive["name"] == hive["id"]:
             hive["name"] = (ports.hive().auth.member(store.redis, hive["id"]) or {}).get("name") or hive["id"]
-        hive["live"] = registry.live(hive, now_ms)
+        hive["agents_at"] = hive["heartbeat_at"]
+        hive["agents"] = beaten(sessions)
         hive["master"] = leads.get(hive["id"])
         hive["slots"] = [
             {**slot, "agents": sessions.get(f"{slot['harness']}:{slot['account']}", 0)} for slot in hive["slots"]

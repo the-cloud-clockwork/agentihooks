@@ -1,11 +1,11 @@
 """Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
-for fifteen minutes, three five minute load windows, until its agent joins; a joined agent's load shows in the five
-minute load one window after launch, so its reservation ends there."""
+for fifteen minutes until the controller collects the hive's answer to its launch, live, failed or ambiguous; the CPU
+used and pod load readings carry a launched agent's own load from the next heartbeat on, while the five minute load a
+hive without a CPU used reading falls back to takes up to five minutes to show it."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from scripts.swarm.host_budget import MEMORY_PER_AGENT_MB
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -13,14 +13,13 @@ if TYPE_CHECKING:
 
 CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING = "cpu", "ram", "quota", "placement", "node cap", "missing telemetry"
 MAX_AGENTS, DISK = "max agents", "disk"
+HIVE_ADMISSION = "hive admission"
 REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
 AGENT_CPU = 0.5
-AGENT_MB = MEMORY_PER_AGENT_MB
+AGENT_MB = 850
 PENDING_MS = 900_000
-LOAD_WINDOW_MS = 300_000
-JOINED = "#joined"
 NO_READING = "no fresh headroom reading"
 # cpus/load5 shipped with the first headroom reading; a hive daemon still on an older image before total_mb
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
@@ -36,7 +35,6 @@ local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', millis)
 if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, redis.call('ZCARD', KEYS[1])} end
-redis.call('ZREM', KEYS[1], ARGV[1] .. ARGV[4])
 local held = redis.call('ZCARD', KEYS[1])
 if held >= tonumber(ARGV[2]) then return {0, held} end
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[3]), ARGV[1])
@@ -50,19 +48,14 @@ local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
 """
 
-_JOIN = """
-local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
-if not score then return 0 end
-redis.call('ZREM', KEYS[1], ARGV[1])
-redis.call('ZADD', KEYS[1], tonumber(score) - tonumber(ARGV[2]), ARGV[1] .. ARGV[3])
-return 1
-"""
-
 _RECORD = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[2]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
+"""
+_ADMITTED = """
+redis.call('HINCRBY', KEYS[2], 'admitted', 1)
 """
 
 
@@ -73,16 +66,10 @@ class Room:
     detail: str
 
 
-def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
     cpus, load5 = measured["cpus"], measured["load5"]
     held = _held(pending)
-    limits = [
-        (
-            _cpu_room(cpus, load5, pending),
-            CPU,
-            f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
-        )
-    ]
+    limits = [_host_cpu(cpus, load5, measured.get("used_cpus"), pending)]
     if all(field in measured for field in RAM_FIELDS):
         available, total = measured["available_mb"], measured["total_mb"]
         limits.append(
@@ -93,6 +80,23 @@ def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
             )
         )
     return limits
+
+
+def _host_cpu(cpus: float, load5: float, used: float | None, pending: int) -> tuple[int, str, str]:
+    """The node CPU line: CPU used when the hive reads it, the five minute load only as a fallback and a guard that
+    binds while used CPU is at or above the swarm share."""
+    held = _held(pending)
+    loaded = f"five minute load {load5:.2f} on {cpus} CPUs"
+    if used is None:
+        return (
+            _cpu_room(cpus, load5, pending),
+            CPU,
+            f"{loaded}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
+        )
+    shown = f"{used:.2f} of {cpus} CPUs used, {loaded}"
+    if 100 * load5 > HOST_PERCENT * cpus and 100 * used >= SWARM_PERCENT * cpus:
+        return 0, CPU, f"{shown} with CPU used at or above the {SWARM_PERCENT} percent swarm share, fits {{}} more"
+    return _cpu_room(cpus, used, pending), CPU, f"{shown}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}"
 
 
 def _held(pending: int) -> str:
@@ -174,7 +178,9 @@ def room(
     free, floor = measured.get("disk_free_gb"), measured.get("disk_floor_gb")
     if free is not None and floor is not None and free < floor:
         return Room(0, DISK, f"{free} GB free on the agent home, below the {floor} GB worktree floor")
-    limits = _first(measured, pending) if first else _host(measured, pending) + _pod(measured, pending)
+    limits = _host(measured, pending) + _pod(measured, pending)
+    if first:
+        limits = _first(measured, pending) + [limit for limit in limits if limit[1] == CPU]
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents, max_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
@@ -198,24 +204,24 @@ def key(machine: str) -> str:
 
 
 def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int = PENDING_MS) -> tuple[bool, int]:
-    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms, JOINED)
+    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms)
     return bool(admitted), int(held)
 
 
-def record(redis: "Redis", machine: str, member: str) -> None:
-    redis.eval(_RECORD, 1, key(machine), member, PENDING_MS)
+def record(redis: "Redis", machine: str, member: str, totals: str = "") -> None:
+    """Hold a pending workstation launch; with a totals hash, count it admitted in the same call."""
+    if totals:
+        redis.eval(_RECORD + _ADMITTED, 2, key(machine), totals, member, PENDING_MS)
+    else:
+        redis.eval(_RECORD, 1, key(machine), member, PENDING_MS)
 
 
 def pending(redis: "Redis", machine: str) -> int:
     return int(redis.eval(_PENDING, 1, key(machine)))
 
 
-def joined(redis: "Redis", machine: str, member: str) -> None:
-    redis.eval(_JOIN, 1, key(machine), member, PENDING_MS - LOAD_WINDOW_MS, JOINED)
-
-
 def release(redis: "Redis", machine: str, member: str) -> None:
-    redis.zrem(key(machine), member, member + JOINED)
+    redis.zrem(key(machine), member)
 
 
 def category(reason: str) -> str:
@@ -239,3 +245,25 @@ def counts(waits: dict) -> dict:
 def status_lines(waits: dict) -> list[str]:
     shown = "  ".join(f"{reason} {count}" for reason, count in counts(waits).items())
     return [f"admission refusals  {shown}"] if shown else []
+
+
+def hive_lines(hives: list[dict[str, Any]]) -> list[str]:
+    """One line per hive naming its admission room and the limit that binds it."""
+    return [f"hive {hive['id']}  admission room {hive['room']}  {hive['limit']}" for hive in hives]
+
+
+def binding(hives: list[dict[str, Any]], others: dict[str, int | None]) -> str:
+    """The limit that binds spawning: the smallest of the summed hive admission room and the other known rooms, hive
+    admission first on a tie; at zero hive room it names each hive's refusing limit."""
+    room = sum(hive["room"] for hive in hives)
+    limits = {HIVE_ADMISSION: room, **{name: count for name, count in others.items() if count is not None}}
+    name = min(limits, key=limits.__getitem__)
+    line = f"binding limit {name}, room {limits[name]}"
+    if name != HIVE_ADMISSION or room:
+        return line
+    return line + ": " + "; ".join(f"hive {hive['id']} {hive['refusal']}" for hive in hives)
+
+
+def view_lines(hives: list[dict[str, Any]], others: dict[str, int | None]) -> list[str]:
+    """The hive admission lines and the binding limit line, none when no hive is live."""
+    return [*hive_lines(hives), binding(hives, others)] if hives else []

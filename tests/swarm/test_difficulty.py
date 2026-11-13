@@ -1,10 +1,13 @@
+from types import SimpleNamespace
+
 import pytest
 
 from hooks.classifier import Answer, ClassifierRequestError, ClassifierUnavailable, DecisionResult
 from scripts.swarm import difficulty
-from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from scripts.tick.step import Write
+from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 DOC = {"phases": [{"id": "p1", "title": "Sizing", "description": "Every task carries a size"}]}
@@ -192,7 +195,7 @@ def test_a_task_without_territory_has_no_rule():
 
 
 def test_pass_over_a_doc_without_tasks_sizes_nothing():
-    assert difficulty.size_pass("sw", FakeLedger([]), {}) == []
+    assert list(difficulty.sizes({})) == []
 
 
 def test_confidence_at_the_floor_is_kept(asked):
@@ -240,29 +243,14 @@ def test_pass_sizes_only_open_unsized_tasks_up_to_the_bound(asked):
         {**TASK, "id": "c", "state": "done"},
     ]
     ledger = FakeLedger(tasks + [{**TASK, "id": f"d{i}"} for i in range(5)])
-    actions = difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")})
+    found = task_steps.size_writes(SimpleNamespace(difficulty=difficulty), {**DOC, "tasks": ledger.tasks("sw")})
+    actions = [item for item in found if not isinstance(item, Write)]
     assert actions == ["sized task a L by rule"] + [f"sized task d{i} S by classifier" for i in range(4)]
-    assert ledger.rows["b"]["difficulty_source"] == "operator"
-    assert ledger.rows["c"].get("difficulty") is None
-    assert ledger.rows["d4"].get("difficulty") is None
-    assert difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")}) == ["sized task d4 S by classifier"]
-
-
-def test_pass_goes_on_past_a_refused_task(asked):
-    asked("S", 0.9)
-
-    class Refusing(FakeLedger):
-        def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
-            if task_id == "a":
-                raise LedgerRefused("refused")
-            return super().update_task(slug, task_id, fields, by, if_state, if_match)
-
-    ledger = Refusing([{**TASK, "id": "a"}, {**TASK, "id": "b"}])
-    assert difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")}) == [
-        "skipped sizing task a: the ledger refused its write",
-        "sized task b S by classifier",
-    ]
-    assert ledger.rows["b"]["difficulty"] == "S"
+    apply = task_steps.task_writer("sw", ledger, ledger.rows.get)
+    for item in found:
+        if isinstance(item, Write):
+            apply(item)
+    assert [task_id for task_id, _ in difficulty.sizes({**DOC, "tasks": ledger.tasks("sw")})] == ["d4"]
 
 
 def test_pass_asks_the_classifier_for_every_task_of_its_bound_at_once(monkeypatch):
@@ -277,19 +265,20 @@ def test_pass_asks_the_classifier_for_every_task_of_its_bound_at_once(monkeypatc
         return answered("S" if int(state["task"][1:]) % 2 else "L", 0.9)
 
     monkeypatch.setattr(difficulty, "decide", decide)
-    ledger = FakeLedger([{**TASK, "id": f"t{i}"} for i in range(41)])
-    actions = difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")})
+    tasks = [{**TASK, "id": f"t{i}"} for i in range(41)]
+    found = difficulty.sizes({**DOC, "tasks": tasks})
+    actions = [difficulty.sized_action(task_id, fields) for task_id, fields in found]
     assert actions == [f"sized task t{i} {'S' if i % 2 else 'L'} by classifier" for i in range(40)]
     assert sorted(asked) == sorted((f"t{i}", "Sizing: Every task carries a size") for i in range(40))
-    assert ledger.rows["t40"].get("difficulty") is None
 
 
-def test_pass_writes_the_tasks_before_one_that_fails_and_raises(asked):
+def test_pass_yields_the_tasks_before_one_that_fails_and_raises(asked):
     asked("S", 0.9)
-    ledger = FakeLedger([{**TASK, "id": "a"}, {**TASK, "id": "b", "territory": None}, {**TASK, "id": "c"}])
+    tasks = [{**TASK, "id": "a"}, {**TASK, "id": "b", "territory": None}, {**TASK, "id": "c"}]
+    found = difficulty.sizes({**DOC, "tasks": tasks})
+    assert next(found)[0] == "a"
     with pytest.raises(TypeError):
-        difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")})
-    assert (ledger.rows["a"]["difficulty"], ledger.rows["b"].get("difficulty")) == ("S", None)
+        next(found)
 
 
 @pytest.fixture

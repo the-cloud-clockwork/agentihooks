@@ -113,7 +113,8 @@ The operator opens `https://swarm.example.com/<slug>` in a browser, signs in thr
 | Symptom | Cause | Check |
 |---|---|---|
 | The browser gets `403 forbidden` after the Access login | `SWARM_ACCESS_TEAM` or `SWARM_ACCESS_AUD` is unset or wrong, or the server cannot reach `https://<team domain>/cdn-cgi/access/certs` | Compare the audience tag with the Access application; fetch the certs URL from inside the pod |
-| Any client gets `403 forbidden` with `Host not allowed` | The address the client used is not an allowed host | Add the host to `SWARM_ALLOWED_HOSTS` |
+| Any client gets `403 forbidden` with `Host not allowed` | The address the client used is not an allowed host | Add the host to `SWARM_ALLOWED_HOSTS`; on the `agentihooks-swarm` chart, add it to `ledger.allowedHosts` |
+| Hive agents get `403 forbidden` on every ledger read and write after `ledger.publicUrl` moved to a public route, while browser and workstation clients still work | Hives reach the ledger at an internal address that the chart no longer allows | List that address, with its port, in `ledger.allowedHosts`; see [Host names the ledger answers](../getting-started/kubernetes-quick-start.md#host-names-the-ledger-answers) |
 | An agent gets `403 forbidden` | Token derived for another slug or name, the server has no `SWARM_SECRET`, or the secret was rotated | Re-derive the token from the current secret with the exact slug and `X-Ledger-Agent` value |
 | An agent that worked locally is refused once `SWARM_URL` is set | A page-derived token; remote clients never use it | Set `AGENTIHOOKS_LEDGER_AGENT_TOKEN` or `SWARM_SECRET` |
 | A machine client gets Cloudflare error 1010 | Python's default user agent | Send `User-Agent: agentihooks-swarm`; the agentihooks clients already do |
@@ -126,7 +127,7 @@ A workstation swarm, its agents and the ledger hooks reach a hosted ledger by en
 
 | Variable | Meaning |
 |---|---|
-| `SWARM_URL` | Address of the hosted ledger, such as `https://swarm.homeofanton.com`. Set, it makes every ledger client remote, as any non-local `AGENTIHOOKS_DEPLOYMENT` already does: the CLI, the swarm tick and the session hook never start or restart a local ledger server. In a session bound to a swarm (`AGENTIHOOKS_SWARM`), it makes only that swarm's ledger remote; a call for another slug is remote only when `LEDGER_URL` or the deployment mode says so, and then still goes to `SWARM_URL`, even when `LEDGER_URL` is set, because `SWARM_URL` wins the address. `LEDGER_URL` remains the fallback; set with no `AGENTIHOOKS_DEPLOYMENT`, it also makes the client remote, and only `AGENTIHOOKS_DEPLOYMENT=local` keeps it local. |
+| `SWARM_URL` | Address of the hosted ledger, such as `https://swarm.example.com`. Set, it makes every ledger client remote, as any non-local `AGENTIHOOKS_DEPLOYMENT` already does: the CLI, the swarm tick and the session hook never start or restart a local ledger server. In a session bound to a swarm (`AGENTIHOOKS_SWARM`), it makes only that swarm's ledger remote; a call for another slug is remote only when `LEDGER_URL` or the deployment mode says so, and then still goes to `SWARM_URL`, even when `LEDGER_URL` is set, because `SWARM_URL` wins the address. `LEDGER_URL` remains the fallback; set with no `AGENTIHOOKS_DEPLOYMENT`, it also makes the client remote, and only `AGENTIHOOKS_DEPLOYMENT=local` keeps it local. |
 | `AGENTIHOOKS_LEDGER_AGENT_TOKEN` | The agent's own token, sent with its pinned name. |
 | `SWARM_SECRET` | When the client holds it and no agent token is set, the client derives the token for its own name. The swarm tick derives each spawned agent's token; neither the secret nor the tick's own agent token reaches a spawned agent. |
 | `SWARM_ACCESS_CLIENT_ID`, `SWARM_ACCESS_CLIENT_SECRET` | Cloudflare service token for machines off the tailnet; `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` are read when these are unset. Both parts set, every API request, upload, event stream, proof ledger call and health probe carries `CF-Access-Client-Id`, `CF-Access-Client-Secret` and `User-Agent: agentihooks-swarm`, because Cloudflare refuses Python's default user agent with error 1010. |
@@ -203,7 +204,8 @@ agentihooks ledger --slug my-ledger --as engineer@abc123-0001 alert list
 
 - `SWARM_URL` names one hosted ledger per process. In a session bound to one swarm, a remote call for another swarm's ledger still goes to `SWARM_URL`, even when `LEDGER_URL` is set.
 - The service token headers are sent only when both parts are set. One part alone sends neither, so the request reaches Access without a service token.
-- The client trusts the system roots for `https`, plus `LEDGER_CA_FILE`, or only `LEDGER_CA_PEM` when that is set.
+- The client trusts the system roots for `https`, plus `LEDGER_CA_FILE`, or only `LEDGER_CA_PEM` when that is set. A hive installs `LEDGER_CA_FILE` from its hive endpoint on `hive add` and `hive refresh`; see
+  [Ledger CA on a hive](../pillars/hives.md#ledger-ca-on-a-hive).
 
 ### Client troubleshooting
 
@@ -252,6 +254,8 @@ The server lands a relay only when every check passes. A failed check refuses th
 The quote is searched in the entries of the relaying agent's own names and of every master and planner of its swarm
 that has recorded words. A Doctor master also searches the masters of the swarm it watches. Engineer and CI sessions
 never count, and neither do words from another swarm's sessions. A relay matches words of any age.
+`agentihooks doctor <slug> start` and `stop` run the same check for the watched master's `--quote` and accept only
+words recorded in the last thirty minutes; see [Master orders for its Doctor](../pillars/swarm.md#master-orders-for-its-doctor).
 
 The server reads its own store first, then the mirrored entries in Redis, newest first. A quote the hooks never
 recorded is refused on both. The stored entry carries `by: operator`, `relayed_by` (the master),

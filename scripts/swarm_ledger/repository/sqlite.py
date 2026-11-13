@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, media_files, outbox, refresh, writer_copy
+from . import artifact_files, heap, hierarchy, live_rows, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -592,7 +592,13 @@ class SQLiteLedgerRepository:
         return entry.views[view]
 
     def export_since(
-        self, slug: str, since: int, view: Callable[..., Any], changes: Callable[..., Any], parts: tuple[str, ...] = ()
+        self,
+        slug: str,
+        since: int,
+        view: Callable[..., Any],
+        changes: Callable[..., Any],
+        parts: tuple[str, ...] = (),
+        scope: live_rows.Scope | None = None,
     ) -> tuple[int, str | bytes]:
         """(generation, text) of the stored ledger: changes(state, paths, parts) when the database recorded every
         row change after generation since, else view(fragments, parts) of the stored ledger, built once per part
@@ -606,16 +612,26 @@ class SQLiteLedgerRepository:
                 if 0 < since <= entry.generation
                 else None
             )
-        text = None if paths is None else changes(entry.state, paths, parts)
+        scoped = () if scope is None else (self._answer(entry, scope),)
+        text = None if paths is None else changes(entry.state, paths, parts, *scoped)
         if text is not None:
             return entry.generation, text
-        key = (view, parts)
+        key = (view, parts, scope)
         if key not in entry.views:
             with VIEW_BUILD:
                 if key not in entry.views:
-                    entry.views[key] = view(entry.fragments, parts)
+                    entry.views[key] = view(entry.fragments, parts, *scoped)
                     heap.release()
         return entry.generation, entry.views[key]
+
+    def _answer(self, entry: Entry, scope: live_rows.Scope) -> live_rows.Answer:
+        views: dict[Any, Any] = entry.views  # pyright: ignore[reportUnknownMemberType]
+        key = (live_rows.answer, scope)
+        if key not in views:
+            with VIEW_BUILD:
+                if key not in views:
+                    views[key] = live_rows.answer(entry.state, scope)  # pyright: ignore[reportUnknownArgumentType]
+        return views[key]
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
@@ -690,14 +706,18 @@ class SQLiteLedgerRepository:
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
         paths = write_rows(connection, slug, before, after)
-        hierarchy.sync(connection, slug, state)
+        with request_metrics.step("hierarchy_sync"):
+            hierarchy.sync(connection, slug, state)
         kept = len(state["_meta"].get("events", []))
-        append_events(connection, slug, events, kept)
-        if not events and "events" in state["_meta"]:
-            trim_events(connection, slug, kept)
-        outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
+        with request_metrics.step("event_append"):
+            append_events(connection, slug, events, kept)
+            if not events and "events" in state["_meta"]:
+                trim_events(connection, slug, kept)
+        with request_metrics.step("outbox_write"):
+            outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
-        refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
+        with request_metrics.step("refresh_record"):
+            refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
         connection.execute(
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),

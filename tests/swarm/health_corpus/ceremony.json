@@ -1,0 +1,157 @@
+{
+  "detector": "ceremony",
+  "cases": [
+    {
+      "name": "fresh engineer whose required comments were counted as talk",
+      "label": "none",
+      "source": "ninth of October, engineer 0824, issue 2194, ruled false positive",
+      "history": {
+        "tasks": [{"id": "t40", "state": "claimed", "claimed_by": "engineer@32a0c1-0824", "pr_url": ""}],
+        "events": [
+          {"kind": "task claimed", "target": "tasks/t40", "by": "swarm", "at": 1000},
+          {"kind": "joined", "target": "", "by": "engineer@32a0c1-0824", "at": 2000},
+          {"kind": "task started", "target": "tasks/t40", "by": "swarm", "at": 2100},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 3000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 4000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 5000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 6000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 7000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 8000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 9000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 10000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 11000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0824", "at": 12000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 13000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 14000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 15000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 16000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 17000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 18000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 19000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 20000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 21000},
+          {"kind": "comment added", "target": "tasks/t40", "by": "engineer@32a0c1-0824", "at": 22000}
+        ],
+        "agents": [{"name": "engineer@32a0c1-0824", "lane": "eng", "task": "t40", "idle_ticks": 0}],
+        "talk": {"engineer@32a0c1-0824": 0}
+      }
+    },
+    {
+      "name": "Codex engineer whose pushes were never recorded on the ledger",
+      "label": "none",
+      "source": "ninth of October, engineer 0827, issue 2194, ruled false positive",
+      "history": {
+        "tasks": [{"id": "t41", "state": "claimed", "claimed_by": "engineer@32a0c1-0827", "pr_url": ""}],
+        "events": [
+          {"kind": "task claimed", "target": "tasks/t41", "by": "swarm", "at": 1000},
+          {"kind": "joined", "target": "", "by": "engineer@32a0c1-0827", "at": 2000},
+          {"kind": "task started", "target": "tasks/t41", "by": "swarm", "at": 2100},
+          {"kind": "issue recorded", "target": "tasks/t41", "by": "engineer@32a0c1-0827", "at": 3000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 4000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 5000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 6000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 7000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 8000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 9000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 10000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 11000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 12000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 13000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 14000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 15000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 16000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 17000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 18000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 19000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 20000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 21000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 22000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "engineer@32a0c1-0827", "at": 23000}
+        ],
+        "agents": [{"name": "engineer@32a0c1-0827", "lane": "eng", "harness": "codex", "task": "t41", "idle_ticks": 0}],
+        "talk": {"engineer@32a0c1-0827": 0}
+      }
+    },
+    {
+      "name": "engineer whose pull request checks are green",
+      "label": "none",
+      "source": "an engineer delivering a green pull request is exempt from the transition ratio",
+      "history": {
+        "tasks": [{"id": "t44", "state": "pr", "claimed_by": "engineer@32a0c1-0832", "pr_url": "https://example.test/pull/44"}],
+        "events": [
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 1000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 2000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 3000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 4000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 5000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 6000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 7000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 8000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 9000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 10000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 11000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 12000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 13000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 14000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 15000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 16000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 17000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 18000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 19000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 20000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 21000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 22000}
+        ],
+        "agents": [{"name": "engineer@32a0c1-0832", "lane": "eng", "task": "t44", "idle_ticks": 0}],
+        "green": ["t44"]
+      }
+    },
+    {
+      "name": "engineer that kept talking past the budget after its outcome",
+      "label": "finding",
+      "source": "the talk gate budget between outcomes",
+      "history": {
+        "tasks": [{"id": "t42", "state": "pr", "claimed_by": "engineer@32a0c1-0830", "pr_url": "https://example.test/pull/42"}],
+        "events": [
+          {"kind": "task pr", "target": "tasks/t42", "by": "engineer@32a0c1-0830", "at": 1000}
+        ],
+        "agents": [{"name": "engineer@32a0c1-0830", "lane": "eng", "task": "t42", "idle_ticks": 0}],
+        "talk": {"engineer@32a0c1-0830": 14}
+      }
+    },
+    {
+      "name": "master whose transitions far outrun the merged tasks",
+      "label": "finding",
+      "source": "a master writing many ledger transitions while no task merged",
+      "history": {
+        "tasks": [{"id": "t43", "state": "open", "pr_url": ""}],
+        "events": [
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 1000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 2000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 3000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 4000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 5000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 6000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 7000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 8000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 9000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 10000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 11000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 12000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 13000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 14000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 15000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 16000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 17000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 18000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 19000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 20000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 21000},
+          {"kind": "comment edited", "target": "phases/p4", "by": "master@32a0c1-0001", "at": 22000}
+        ],
+        "agents": [{"name": "master@32a0c1-0001", "lane": "master", "task": "master", "idle_ticks": 0}],
+        "talk": {}
+      }
+    }
+  ]
+}

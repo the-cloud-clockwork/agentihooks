@@ -366,6 +366,49 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
+@pytest.mark.feature("started-lives-task-rows-only")
+def test_counting_a_first_life_decodes_only_rows_that_name_the_task(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import store as store_module
+
+    validated = {"validation": {"state": "validated"}}
+    store.record_launch("smoke", AgentRecord("mine", "eng", "t1", started_at=1), "started")
+    store.record_launch("smoke", AgentRecord("near", "eng", "t10", started_at=2), "started")
+    for index, task in enumerate(["t1", "t10", "t2", "t2"]):
+        row = {"name": f"old-{index}", "task": task, "started_at": index, "profile_decision": validated}
+        store.redis.rpush(store.key("smoke", "history"), json.dumps(row))
+    decoded, original = [], json.loads
+
+    def loads(raw: str) -> object:
+        decoded.append(raw)
+        return original(raw)
+
+    monkeypatch.setattr(store_module.json, "loads", loads)
+
+    assert store.claims("smoke", "t1") == 2
+    assert store.count_claim("smoke", "t1") == 3
+    stored = [
+        *store.redis.hvals(store.key("smoke", "launches")),
+        *store.redis.lrange(store.key("smoke", "history"), 0, -1),
+    ]
+    named = sorted(raw for raw in stored if '"t1"' in raw)
+    assert sorted(raw for raw in decoded if raw in stored) == sorted(named * 2)
+    assert [row["agent"] for row in store.launches("smoke")] == ["mine", "near", "old-0", "old-1", "old-2", "old-3"]
+
+
+@pytest.mark.feature("started-lives-task-rows-only")
+def test_a_launch_row_reused_by_another_task_still_shadows_the_name_history(store: RedisStore) -> None:
+    validated = {"validation": {"state": "validated"}}
+    store.record_launch("smoke", AgentRecord("reused", "eng", "t2", started_at=5), "started")
+    row = {"name": "reused", "task": "t1", "started_at": 1, "profile_decision": validated}
+    store.redis.rpush(store.key("smoke", "history"), json.dumps(row))
+
+    assert (store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (0, 1)
+    assert store.launches("smoke", "t1") == []
+    assert [(row["agent"], row["task"]) for row in store.launches("smoke")] == [("reused", "t2")]
+
+
 def test_the_store_offers_no_unconditional_claim_refund(store):
     assert not hasattr(store, "refund_claim")
 
@@ -751,6 +794,13 @@ def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
     assert store.config("smoke").api_url == "https://swarm.example.test:8443"
     store.redis.hdel(store.key("smoke", "config"), "api_url")
     assert store.config("smoke").api_url == ""
+
+
+def test_the_controller_address_round_trips_and_an_old_config_reads_it_empty(store):
+    store.create(config(control_url="https://swarm-internal.example.test:8780"))
+    assert store.config("smoke").control_url == "https://swarm-internal.example.test:8780"
+    store.redis.hdel(store.key("smoke", "config"), "control_url")
+    assert store.config("smoke").control_url == ""
 
 
 @pytest.mark.parametrize(

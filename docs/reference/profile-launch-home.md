@@ -104,7 +104,7 @@ A swarm spawn that fails this way reopens its task and writes the same reason
 to the swarm timer journal. Count canary timeouts for one UTC day with:
 
 ```bash
-TZ=UTC journalctl --user -u 'agentihooks-swarm*' \
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
   --since "2026-10-23 00:00" --until "2026-10-23 23:59:59" --no-pager -o cat \
   | grep -c "canary did not validate before timeout"
 ```
@@ -123,6 +123,116 @@ deadline, a canary reported at 150 seconds passing, `--launch-until`, the
 `tests/test_launch_deadline.py` pins the shared launch deadline and its message.
 `tests/hive/test_orders.py` pins queued orders whose launches run to their
 deadline all acknowledging live inside the order lifetime.
+
+## Deferred master canary
+
+A Claude swarm master launched by the tick returns to the tick before its new
+session has routed or run its canary, and a later tick pass confirms the
+canary. A master recycle therefore no longer holds every other swarm action
+(spawns, merges, nudges, alerts) for the minutes a new session takes to start,
+log in and validate.
+
+On 25 October, before this change, the tick master step ran 318 seconds in one
+pass and 344 seconds in another, almost all of it inside the herdr runtime
+launch, which returned within seconds of the new master recording its canary.
+The stale tick watcher had to restart the scheduler.
+
+### Which launches defer
+
+| Launch | Defers the canary |
+|---|---|
+| A Claude master launched by the host tick, the acknowledgement pass or the deployed controller tick | Yes: the runtime adds `--defer-canary` to `init-agent` |
+| A Codex master | No: it waits for its canary as before |
+| Engineer, CI and every other lane | No: the launch path is unchanged |
+| A master launched outside the tick | No |
+| A hand run `agentihooks init-agent` | Only with `--defer-canary` and `--profile` |
+
+`--defer-canary` without `--profile` writes no launch report, so the launch
+waits as usual.
+
+### What a deferred launch does
+
+1. `init-agent` writes the pending launch report as in
+   [Launch sequence](#launch-sequence), opens the pane and waits for the
+   launcher to start.
+2. Once the launcher has started, the process forks. The parent prints the
+   launch report and exits 0, ending with:
+
+   ```text
+   status=started
+   launcher_at=<epoch milliseconds>
+   route_status=pending
+   profile_validation=pending
+   profile_report=<path of the pending launch report>
+   ```
+
+3. The detached child, with its output sent to `/dev/null`, does the rest of a
+   normal launch: it waits on the route, names the pane, answers the channel
+   warning and waits for the canary. A route or canary failure is written into
+   the launch report as `failed` with its reason, the only way the child
+   reaches the tick.
+4. The runtime accepts `route_status=pending` only together with
+   `profile_validation=pending` and a `profile_report`. A pending validation
+   with no report fails the launch with `pending profile validation names no
+   request`. The agent is stored with a pending validation naming the report,
+   profile, harness, account and the launch's timeout as its deadline.
+
+A master on the master Claude login keeps the full login budget for the
+child's waits: its `init-agent` call gets a 450 second route timeout and a 660
+second launch timeout instead of the 300 second default, covering the five
+minute browser login, the start and the canary.
+
+### How a later pass confirms it
+
+The `launch checks` tick step reads the launch report of each agent whose
+validation is pending:
+
+| Report | Outcome |
+|---|---|
+| `validated`, with the launch's profile, harness and account | The agent record takes the validation, the account and the validation time as its harness start, then the launch check judges the agent as for any launch |
+| `pending` | The launch check holds its verdict until the deadline below |
+| `failed` | Failed launch check on `canary`: `expected validated; observed <reason>` |
+| Validated on another account | Failed launch check on `canary`: `observed live process account differs from requested route` |
+
+A pending canary is judged once the time since the session started passes the
+larger of the harness's canary deadline (120 seconds for Claude) and the
+deadline the launch recorded: 660 seconds for a master on the master login,
+300 seconds otherwise. A canary still pending then is a failed launch check,
+`expected validated; observed pending`. A failed check takes the normal failed
+launch path and appears in `agentihooks swarm <slug> status` as a launch check
+finding, `<master name> failed the launch check on canary`.
+
+### Tick thread switch interval
+
+Every swarm on a host ticks in its own thread of one tick process. At Python's
+default switch interval of 5 milliseconds, a swarm doing CPU heavy work kept
+the other threads, the master launch among them, waiting on their Redis and
+process round trips. That is why the master recycle on 25 October still took
+344 seconds after the deferral merged. The host tick sets the interval to 0.5
+milliseconds (`TICK_SWITCH_INTERVAL_S` in `scripts/swarm/cli.py`) before any
+swarm ticks. The value is fixed; no setting changes it.
+
+### Checking a recycle
+
+`tick-report` lists the `tick master` step with its median and p95 wall time
+over recent passes; see [Tick report](tick-report.md):
+
+```bash
+agentihooks swarm <slug> tick-report --passes 60
+```
+
+After a master recycle, the `tick master` row stays in seconds, and a later
+pass reports `<master name> passed its launch check in <n> seconds` once the new
+master's canary validates.
+
+### Tests
+
+| Test file | Pins |
+|---|---|
+| `tests/test_canary_wait.py` | `--defer-canary` prints the pending request without waiting, its help text, a launch without a profile request still waiting, and `confirm` reading pending, failed, validated and another account |
+| `tests/swarm/test_master_affinity.py` | A tick master launch returning before a slow canary and before its route, engineer launches and masters outside the tick still waiting, and the scheduled tick building a deferring runtime |
+| `tests/swarm/test_launch_check.py` | A later pass confirming, holding or failing a pending canary, and its deadline |
+| `tests/swarm/test_tick_switch_interval.py` | The host tick setting the switch interval before any swarm ticks |
 
 ## What the home check requires
 

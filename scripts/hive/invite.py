@@ -1,5 +1,7 @@
 """agentihooks hive invite: mint a hive member and write its credential into the OpenBao record a hive mounts."""
 
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -15,6 +17,7 @@ CA_PEM = "ca_pem"
 HIVE_URL = "AGENTIHOOKS_HIVE_URL"
 REDIS_URL = "AGENTIHOOKS_HIVE_REDIS_URL"
 HIVE_ID = "AGENTIHOOKS_HIVE_ID"
+SIGNER_URL = "url"
 
 
 @dataclass(frozen=True)
@@ -29,13 +32,21 @@ class Request:
     bus_url: str | None = None
     signer_path: str | None = None
     swarms: tuple[str, ...] = ()
+    sync: str | None = None
+    minted: Callable[[str], None] | None = None
 
 
 def default_path(label: str) -> str:
     return f"k8s/agentihooks-hive-{label}"
 
 
-def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redis_url: str) -> str:
+def invite(
+    redis: "Redis",
+    bao: openbao_kv.OpenBao,
+    request: Request,
+    local_redis_url: str,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> str:
     current = _read(bao, request.path)
     like = _read(bao, request.like) if request.like else {}
     if request.like and not like:
@@ -49,13 +60,16 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
         CA_PEM: like.get(CA_PEM) or request.ledger_ca,
     }
     entries = {key: value for key, value in entries.items() if value}
+    signer = _read(bao, request.signer_path) if request.signer_path else {}
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
+    if request.minted is not None:
+        request.minted(f"{grant['id']}")
     member_settings = {"AGENTIHOOKS_SWARM_URL": entries.get(SWARM_URL)}
-    bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
+    bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL") or signer.get(SIGNER_URL)
     if bus_url:
         member_settings.update(AGENTIHOOKS_BUS="nats", AGENTIHOOKS_BUS_URL=bus_url)
     try:
-        scoped = bool(request.signer_path) and member_swarms.listing(bao, request.signer_path)
+        scoped = member_swarms.FIELD in signer
         if scoped:
             member_settings["AGENTIHOOKS_BUS_SCOPED"] = "1"
         entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(
@@ -71,6 +85,8 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
             raise auth.HiveError(f"{exc}; the new member {grant['id']} was not revoked ({revoked})") from None
         raise auth.HiveError(str(exc)) from None
     done = f"invited hive member {grant['id']} as {request.label}; {openbao_kv.summary(request.path, entries, total)}"
+    if scoped:
+        done = "; ".join([done, *member_swarms.sync(request.sync, run)])
     previous = _env(current.get(CREDENTIAL)).get(HIVE_ID)
     if previous and previous != grant["id"]:
         try:

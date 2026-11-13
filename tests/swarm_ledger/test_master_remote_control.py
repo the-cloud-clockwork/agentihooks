@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from tests.swarm_ledger.ledger_page import page_source
 
 STUBS = """
@@ -27,6 +29,7 @@ def _run(script):
     return json.loads(subprocess.check_output(["node", "-e", js], text=True))
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_only_a_master_with_a_recorded_decision_gets_the_remote_control_cell():
     cells = _run("""
 const on = {state: 'on', detail: 'master 1 · sw'};
@@ -40,9 +43,9 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => agentRow(r, false)[5])))
     assert cells == [
         {
             "tag": "span",
-            "attrs": {"data-tip": "Remote Control: on (master 1 · sw)"},
+            "attrs": {"data-tip": "Remote Control: on (master 1 · sw), phone access available"},
             "kids": [
-                {"label": "remote control on", "tone": "on"},
+                {"label": "phone access available", "tone": "on"},
                 {"tag": "span", "attrs": {"class": "sw-sub", "text": "master 1 · sw"}, "kids": []},
                 "transport",
             ],
@@ -52,16 +55,29 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => agentRow(r, false)[5])))
     ]
 
 
-def test_an_off_master_without_transport_shows_the_reason_alone():
+@pytest.mark.feature("remote-control-phone-access-wording")
+def test_an_off_master_without_transport_shows_phone_access_unavailable_with_the_reason():
     cell = _run("""
 const raw = {agents: [{name: 'm', lane: 'master', remote_control: {state: 'off', detail: 'fallback auth'}}]};
 console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
 """)
     assert cell == {
         "tag": "span",
-        "attrs": {"data-tip": "Remote Control: off (fallback auth)"},
+        "attrs": {"data-tip": "Remote Control: off (fallback auth), phone access unavailable"},
         "kids": [
-            {"label": "remote control off", "tone": "off"},
+            {"label": "phone access unavailable", "tone": "off"},
             {"tag": "span", "attrs": {"class": "sw-sub", "text": "fallback auth"}, "kids": []},
         ],
     }
+
+
+@pytest.mark.feature("remote-control-phone-access-wording")
+def test_a_master_on_the_token_fallback_card_says_phone_access_unavailable():
+    cell = _run("""
+const off = {state: 'off', detail: 'subscription token fallback'};
+const raw = {agents: [{name: 'm', lane: 'master', remote_control: off}]};
+console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
+""")
+    assert cell["attrs"] == {"data-tip": "Remote Control: off (subscription token fallback), phone access unavailable"}
+    assert cell["kids"][0] == {"label": "phone access unavailable", "tone": "off"}
+    assert cell["kids"][1]["attrs"]["text"] == "subscription token fallback"

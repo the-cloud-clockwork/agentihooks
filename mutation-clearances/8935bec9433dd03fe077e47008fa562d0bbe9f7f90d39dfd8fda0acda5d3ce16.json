@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/ledger.py:scripts.tick.adapters.ledger.x\u01c1ClientLedger\u01c1update_task:1343bd5624e08f684131298471ec46a10d257e184b0fe0af82455a98619c1edb": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its second argument unchanged and does not inspect or enforce its first argument. Replacing list[dict[str, Any]] with None leaves the exact tasks value and every subsequent lookup unchanged."
+  }
+}

@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -184,6 +185,28 @@ def test_controller_keeps_only_the_workstation_login_master_off_hive_placement(s
     assert fenced.runtime.router.placed_backend("master", {"id": "master-2"}) == "hive"
     assert fenced.runtime.router.placed_backend("master", {"id": "master-3"}) == "hive"
     assert fenced.runtime.router.placed_backend("master", {"id": "master-4"}) == "local"
+
+
+@pytest.mark.feature("pod-controller-master-on-hive")
+def test_a_controller_in_a_pod_places_the_login_front_door_on_a_hive(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.swarm import controller
+    from scripts.swarm_v2 import masters
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    monkeypatch.setattr(master_claude_login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    monkeypatch.setenv(controller.POD_NAME, "agentihooks-swarm-controller-0")
+    assert controller.POD_NAME == "AGENTIHOOKS_POD_NAME"
+    masters.MasterSeats(setup.store.redis).set_count(setup.config.slug, 2)
+    task = master(setup)
+    assert controller._master_seats(setup.store, setup.config.slug) == frozenset({"master", "master-2"})
+    fenced = controller.FencedRuntime(
+        setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
+    )
+    assert fenced.runtime.router.placed_backend("master", task) == "hive"
+    monkeypatch.setenv(controller.POD_NAME, "")
+    assert controller._master_seats(setup.store, setup.config.slug) == frozenset({"master-2"})
 
 
 @pytest.mark.parametrize("route", ["interactive", "subscription", "api"])
@@ -408,6 +431,39 @@ def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkey
     result = balancer.revoked_result("work_login", 100)
     monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait("no live hive takes master")
+
+
+@pytest.mark.feature("hive-master-closed-account")
+@pytest.mark.parametrize(("state", "expected"), [("CLOSED", "fallback"), ("OPEN", "remote")])
+def test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed(
+    setup: Any, state: str, expected: str
+) -> None:
+    from scripts.swarm.capacity import Account
+
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, id="fallback", master_login={}, excluded=[], ui="yes", prefer={"master": 9})
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account("claude", "login", state, 0, 80, 3, 6 if state == "OPEN" else 0),
+    ]
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert selected.hive == expected
+    assert selected.account.name == ("account" if state == "CLOSED" else "login")
+
+
+@pytest.mark.feature("hive-master-closed-account")
+@pytest.mark.parametrize(("harness", "chosen"), [("claude", "account"), ("codex", "native")])
+def test_a_master_skips_a_native_login_whose_claude_account_is_closed(setup: Any, harness: str, chosen: str) -> None:
+    from scripts.swarm.capacity import Account
+
+    task = master(setup)
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account(harness, "native", "CLOSED", 0, 80, 3, 0),
+    ]
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
+    assert setup.launcher.select(setup.config, "master", task).account.name == chosen
 
 
 @pytest.mark.parametrize("login", [{}, {"claude": ""}])
@@ -706,3 +762,45 @@ def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check
     secondary = replace(admitted, seat="master-2@fixture")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, secondary, task)
     assert ack.failure == "unavailable: spawned"
+
+
+@pytest.mark.feature("hive-master-refused-account-retry")
+def test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_slot(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from scripts.hive import launch
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "id": "master-2", "seat": "master-2@fixture", "controller_epoch": setup.held.epoch}
+    write_hive(
+        setup,
+        excluded=[],
+        ui="yes",
+        interactive={"claude": "native"},
+        slots=[{"harness": "claude", "account": "account", "kind": "subscription", "cap": 6}],
+    )
+    assert setup.launcher.slots.reserve("claude:native", "lead", 1, 300000)
+    reselect = setup.launcher._reselect
+    tries: list[frozenset[str]] = []
+
+    def bounded(request: SpawnRequest, accounts: frozenset[str]) -> Any:
+        tries.append(accounts)
+        if len(tries) > 2:
+            pytest.fail(f"the retry chose a refused account again: {tries}")
+        return reselect(request, accounts)
+
+    monkeypatch.setattr(setup.launcher, "_reselect", bounded)
+    monkeypatch.setattr(setup.launcher, "answer", lambda request, order: "pending")
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    assert setup.launcher.spawn(request) == "pending"
+    assert tries == [frozenset({"claude:native"})]
+    order = setup.launcher.orders_for("master-2")
+    assert (order.slot, order.route_kind) == ("account", "subscription")
+    records = sorted(setup.store.execution_registry.records("fixture"), key=lambda record: record.generation)
+    assert [(record.account, record.state) for record in records] == [("native", "ended"), ("account", "launching")]
+    ending = setup.store.redis.hget(setup.store.key("fixture", launch.ENDINGS), records[0].execution_id)
+    assert json.loads(ending)["reason"] == (
+        "account reservation is full: account=claude:native sessions=1 cap=1 five_left=None week_left=None"
+    )

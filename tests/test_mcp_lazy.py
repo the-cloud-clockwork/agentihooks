@@ -77,18 +77,20 @@ def initialize(request):
     )["result"]
 
 
-def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
+def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     with server(monkeypatch) as (request, process):
         result = initialize(request)
         assert result["protocolVersion"] == "2025-03-26"
         listing = request("tools/list", request_id=2)["result"]["tools"]
         assert request("ping", request_id=3)["result"] == {}
-        for method, key in (
-            ("resources/list", "resources"),
-            ("resources/templates/list", "resourceTemplates"),
-            ("prompts/list", "prompts"),
-        ):
-            assert request(method, request_id=method)["result"] == {key: []}
+        served = {
+            key: request(method, request_id=method)["result"][key]
+            for method, key in (
+                ("resources/list", "resources"),
+                ("resources/templates/list", "resourceTemplates"),
+                ("prompts/list", "prompts"),
+            )
+        }
     stderr = process.stderr_output
     modules = json.loads(next(line[8:] for line in stderr.splitlines() if line.startswith("IMPORTS=")))
     assert "hooks.hook_manager" not in modules
@@ -101,12 +103,25 @@ def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
             "hooks.mcp.enforcement",
             "hooks.mcp.conditions",
             "hooks.mcp.scheduler",
+            "hooks.mcp.culture",
         )
     )
     from hooks.mcp import build_server
 
-    expected = asyncio.run(build_server().list_tools())
+    built = build_server()
+    expected = asyncio.run(built.list_tools())
     assert listing == [tool.model_dump(by_alias=True, exclude_none=True) for tool in expected]
+    for key, listed in (
+        ("resources", built.list_resources),
+        ("resourceTemplates", built.list_resource_templates),
+        ("prompts", built.list_prompts),
+    ):
+        assert served[key] == [item.model_dump(by_alias=True, exclude_none=True) for item in asyncio.run(listed())]
+    assert {template["uriTemplate"] for template in served["resourceTemplates"]} == {
+        "swarm://{slug}/culture",
+        "swarm://{slug}/seats/{seat}",
+    }
+    assert [prompt["name"] for prompt in served["prompts"]] == ["swarm_culture"]
 
 
 def test_all_thirteen_tools_keep_their_results_after_lazy_start(monkeypatch):
@@ -246,7 +261,7 @@ def test_discovery_handshake_matches_protocol_library(monkeypatch, capsys, reque
             "serverInfo": {"name": expected.server_name, "version": expected.server_version},
         },
     }
-    assert len(replies[1]["result"]["tools"]) == 26
+    assert len(replies[1]["result"]["tools"]) == 35
 
 
 @pytest.mark.parametrize(

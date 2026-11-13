@@ -9,10 +9,11 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from scripts import agent_choice, front_door_route, master_claude_login
 from scripts.handoff import envelope
@@ -102,6 +103,23 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
+def _required(want: str, task: dict[str, Any]) -> str:
+    required: str = task.get("requires_harness", "")
+    if required and want and want != required:
+        raise SpawnError(f"lane harness {want} cannot run a task that requires {required}", "unsupported")
+    return want or required
+
+
+def _off_requirement(saved: dict[str, Any], task: dict[str, Any], admitted: bool) -> bool:
+    required: str | None = task.get("requires_harness")
+    off = bool(required and saved and saved.get("harness") != required)
+    if off and admitted:
+        raise SpawnError(
+            f"admitted {saved['harness']} launch cannot run a task that requires {required}", "unsupported"
+        )
+    return off
+
+
 def _prefer(profile, avoid):
     order = profile_choice.preferred(profile)
     if not avoid:
@@ -138,13 +156,16 @@ def _lane_default(lane, agent, chosen, config=None):
     return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
 
 
-def herdr_call(args):
+def herdr_call(args: list[str]) -> dict[str, Any]:
+    """Run one herdr command, holding a host herdr slot so at most six run at once."""
     from scripts.herdr_host import _cli, binary
+    from scripts.tick import pool
 
-    if args[:2] == ["pane", "read"]:
-        done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
-        return {"text": done.stdout}
-    return _cli(args, dict(os.environ))
+    with pool.limit("herdr"):
+        if args[:2] == ["pane", "read"]:
+            done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
+            return {"text": done.stdout}
+        return _cli(args, dict(os.environ))
 
 
 def herdr_target(name):
@@ -220,6 +241,14 @@ def _pinned(worn, revision):
 def _predecessor(task):
     conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
     return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
+
+
+def _decided(placed: Placed, route: list[str], picked: model_pick.ModelPick, profile: str) -> Placed:
+    """Carry the launch decision onto a detached placement so its agent record shows it before the pane starts."""
+    if not placed.launch_job:
+        return placed
+    account = route[1] if route[:1] == ["--route"] else placed.account
+    return replace(placed, account=account, model=picked.model or "", effort=picked.effort or "", profile=profile)
 
 
 def _command(action, agent, text="", nonce=""):
@@ -315,7 +344,15 @@ class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
     pass_memo: dict | None = None
 
-    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
+    def __init__(
+        self,
+        home: Path = SWARM_HOME,
+        run: Callable[..., Any] = subprocess.run,
+        choose: Callable[[str, dict[str, str]], tuple[str, str]] | None = None,
+        herdr: Callable[..., Any] = herdr_call,
+        defer_master_canary: bool = False,
+        accounts: list[capacity.Account] | None = None,
+    ) -> None:
         self.home, self.run, self.herdr = home, run, herdr
         self.defer_master_canary = defer_master_canary
         self.choose = choose or agent_choice.choose
@@ -326,6 +363,8 @@ class HerdrRuntime:
         self.hive = None
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
+        if accounts is not None:
+            self._quota_accounts = accounts
         self._host_spent = capacity.no_spawns
         self._reserving = threading.Lock()
 
@@ -381,7 +420,7 @@ class HerdrRuntime:
         now: float,
         demand: dict | None = None,
         requirements: dict | None = None,
-        refresh: bool = True,
+        refresh: bool = False,
     ) -> dict:
         from scripts.swarm import capacity
 
@@ -454,7 +493,9 @@ class HerdrRuntime:
                     or profile_choice.DEFAULT_PROFILES[lane]
                 )
                 requested = _set(chosen.get("agent"))
-                if requested:
+                if task.get("requires_harness"):
+                    options.append((task["requires_harness"],))
+                elif requested:
                     options.append((requested,))
                 elif plugins.claude_only(profile):
                     options.append(("claude",))
@@ -528,7 +569,10 @@ class HerdrRuntime:
             return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
         raise SpawnError(self._quota_refusal(agent, None if fixed else agent_choice.AGENTS), "unavailable")
 
-    def _rotation(self, requested, environ, prefer=()):
+    def _rotation(self, requested: str, environ: dict[str, str], prefer: Sequence[str] = ()) -> tuple[str, str]:
+        """(agent, reason) from the pass quota rows, read through ``quota_accounts`` when the pass has none yet."""
+        if not requested and not hasattr(self, "_quota_accounts") and self.quota_accounts is not None:
+            self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
         if requested or not hasattr(self, "_quota_accounts"):
             return self.choose(requested, environ)
         from scripts.swarm.capacity import offered, pick
@@ -591,12 +635,19 @@ class HerdrRuntime:
             raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         return agent, reason
 
-    def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
+    def _profile_decision(
+        self,
+        config: SwarmConfig,
+        lane: str,
+        task: dict,
+        saved: dict,
+        relaunch: dict,
+        environ: dict,
+        hosted: Collection[str] = (),
+    ) -> profile_choice.ProfileDecision:
         decision = profile_choice.kept(task, saved, relaunch)
         if decision is None:
-            decision = timing.call(
-                profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
-            )
+            decision = timing.call(profile_choice.choose, config, lane, task, environ, hosted)
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or self._bundle_revision())
@@ -705,14 +756,15 @@ class HerdrRuntime:
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: Any, lane: str, name: str, task: Any) -> Placed:
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
-        decision = self._profile_decision(config, lane, chosen, task, saved, relaunch, environ)
+        decision = self._profile_decision(config, lane, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
+        want = _required(want, task)
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
@@ -737,7 +789,7 @@ class HerdrRuntime:
             and not quota_transfer
             and not admitted
             and (saved["harness"] != want if want else saved["harness"] == avoid)
-        ):
+        ) or _off_requirement(saved, task, admitted):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
             agent, reason = want or requested or saved.get("harness") or "claude", "interactive login"
@@ -838,7 +890,7 @@ class HerdrRuntime:
             )
         placed = placed if placed.launch_job else codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
-        return replace(
+        placed = replace(
             placed,
             model_source=picked.source,
             model_confidence=picked.confidence,
@@ -850,13 +902,17 @@ class HerdrRuntime:
             choice=agent_choice.choice_kind(reason),
             overlays=list(decision.overlays),
             route_kind=placed_kind,
-            remote_control=remote_control.decision(lane, agent, placed_kind, config.slug, login) if front else {},
+            remote_control=remote_control.landed(
+                remote_control.decision(lane, agent, placed_kind, config.slug, login) if front else {},
+                placed.placement,
+            ),
             desired_route_kind=None
             if lane != MASTER
             else "interactive"
             if front and agent == "claude" and not task.get("route_kind")
             else "",
         )
+        return _decided(placed, route, picked, profile)
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
@@ -924,7 +980,7 @@ class HerdrRuntime:
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
             route_kind=kind,
-            remote_control=rc,
+            remote_control=remote_control.landed(rc, placed.placement),
             desired_route_kind=agent.desired_route_kind,
         )
 
@@ -1220,17 +1276,38 @@ class HerdrRuntime:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent, homes=()):
+    def retire(self, agent: AgentRecord, homes: Sequence[Path] = ()) -> bool:
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
-        then close the pane; the agent's name alone never selects a process."""
+        then close the pane; the agent's name alone never selects a process. An agent whose record names no host
+        and that only another hive lists is reaped by that hive."""
         if host := self.remote(agent):
+            from typing import cast
+
+            from scripts.hive.reports import LOST_MS, Reports
+
+            now_ms = int(time.time() * 1000)
+            hive = cast(Reports | None, self.hive)
+            if hive is not None and (hive.gone(agent) or hive.lost(agent, now_ms, LOST_MS)):
+                cast(dict[str, object], self.refusals).pop(agent.name, None)
+                return True
             return self._order(host, _command("retire", agent), agent.name)
         if live_binding.managed(agent):
             return self._retire_managed(agent)
+        if self._listed_elsewhere(agent.name):
+            return self.reap_name(agent.name)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         if not pid and (launch := launches.find(agent.name, self.home)) is not None:
             return self.retire_process(agent, launch.pid, homes, launch.start_time)
         return self.retire_process(agent, pid, homes)
+
+    def _listed_elsewhere(self, name: str) -> bool:
+        """True when no local session holds the name and another hive's report lists it."""
+        from scripts.swarm.commands import hive_id
+        from scripts.terminate_agent import sessions
+
+        if self.hive is None or any(s.name == name for s in sessions()):
+            return False
+        return self.hive.holder(name) not in ("", hive_id())
 
     def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
         found = None
@@ -1335,19 +1412,22 @@ class HerdrRuntime:
     def refusal(self, agent):
         return self.refusals.get(agent.name, {"process": 0, "refusal": "unknown"})
 
-    def reap_name(self, name):
+    def reap_name(self, name: str) -> bool:
         from scripts.hive.orders import CommandOrder, Orders
+        from scripts.swarm.commands import hive_id
         from scripts.terminate_agent import sessions
 
         held = [s.process.pid for s in sessions() if s.name == name]
-        host = "" if held or self.hive is None else self.hive.holder(name)
-        if not host:
+        hive = self.hive
+        host = "" if held or hive is None else hive.holder(name)
+        if hive is None or host in ("", hive_id()):
             carrying = [pid for pid in held if _carries(pid, name)]
             return not self.reap(carrying).refusal and len(carrying) == len(held)
-        order = CommandOrder(f"reap:{name}", "reap", name=name)
+        identity = ",".join(hive.executions_of(host, name))
+        order = CommandOrder(f"reap:{name}:{identity}" if identity else f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:
-            Orders(self.hive.redis).forget(host, order.id)
+            Orders(hive.redis).forget(host, order.id)
         return reaped
 
     def pane_tail(self, pane_id, lines):

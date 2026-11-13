@@ -11,7 +11,8 @@ from hooks import config
 from scripts import agents_quota, codex_router, codex_usage
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
-from tests.codex_fakes import NOW, access_token
+from scripts.hive import quota_refresh
+from tests.codex_fakes import NOW, access_token, jwt
 
 WEEK = {"used_percent": 12.0, "limit_window_seconds": 604800, "reset_after_seconds": 9, "reset_at": NOW + 100_000}
 FIVE = {"used_percent": 40.0, "limit_window_seconds": 18000, "reset_at": NOW + 600}
@@ -77,6 +78,29 @@ def test_a_read_sends_the_bearer_the_workspace_and_the_codex_user_agent():
 )
 def test_an_expired_token_reads_as_expired(body):
     assert codex_usage.read("tok", "ws", NOW, _opener(error=_http(401, body))) == CodexQuota(NOW, "?", expired=True)
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"error": {"code": "deactivated_workspace", "message": "Payment Required"}}',
+        b'{"code": "deactivated_workspace"}',
+    ],
+    ids=["nested", "flat"],
+)
+def test_a_deactivated_workspace_reads_as_expired(body):
+    assert codex_usage.read("tok", "ws", NOW, _opener(error=_http(402, body))) == CodexQuota(NOW, "?", expired=True)
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(
+    "code, body",
+    [(402, b'{"code": "token_expired"}'), (401, b'{"code": "deactivated_workspace"}'), (402, b'{"code": "other"}')],
+    ids=["402-expired-code", "401-deactivated-code", "402-other"],
+)
+def test_a_refusal_code_counts_only_with_its_own_status(code, body):
+    assert codex_usage.read("tok", "ws", NOW, _opener(error=_http(code, body))) is None
 
 
 @pytest.mark.parametrize(
@@ -247,3 +271,110 @@ def test_an_expired_account_has_no_seats_and_shows_expired_with_the_login_never_
         ("EXPIRED", None, "token expired: run agentihooks codex login alpha"),
         ("EXPIRED", None, "token expired: run codex login"),
     ]
+
+
+def _replay(
+    monkeypatch: pytest.MonkeyPatch, days_left: float, replies: list[object]
+) -> tuple[codex_router.CodexAccount, dict[str, str]]:
+    def opener(request: object, timeout: float | None = None) -> io.BytesIO:
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return io.BytesIO(json.dumps(reply).encode())
+
+    account = codex_router.CodexAccount("nestorcolt_gmail_personal", "AH_CX_TOKEN_nestorcolt_gmail_personal")
+    monkeypatch.setattr(codex_usage.urllib.request, "urlopen", opener)
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [account])
+    monkeypatch.setattr(codex_router, "_registry", lambda: {})
+    monkeypatch.setattr(codex_router.codex_quota, "latest_codex_quota", lambda *args, **kwargs: None)
+    monkeypatch.setattr(quota_refresh.balancer, "discover_credentials", lambda environ: [])
+    return account, {account.env_name: access_token(days_left)}
+
+
+def _seats(account: codex_router.CodexAccount, environ: dict[str, str], now: float) -> tuple[str, int | None]:
+    reading = codex_router.quotas([account], environ)[account.name]
+    assert reading is not None
+    return reading.state_at(now), codex_router.account_cap(reading, now)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+def test_one_transient_401_token_expired_then_a_healthy_read_reopens_the_account_on_the_next_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expired = _http(401, b'{"error": {"code": "token_expired", "message": "expired"}}')
+    account, environ = _replay(monkeypatch, 7, [expired, PRO])
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    assert quota_refresh.refresh(environ, NOW) is True
+    assert _seats(account, environ, NOW) == ("EXPIRED", 0)
+    later = NOW + quota_refresh.RETRY_SECONDS
+    monkeypatch.setattr(codex_router.time, "time", lambda: later)
+    assert quota_refresh.due(environ, later) is True
+    assert quota_refresh.refresh(environ, later) is True
+    assert _seats(account, environ, later) == ("NORMAL", 6)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+def test_an_expired_reading_for_a_token_past_its_exp_stays_expired_and_is_not_probed_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expired = _http(401, b'{"code": "token_expired"}')
+    account, environ = _replay(monkeypatch, -1, [expired])
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    assert quota_refresh.refresh(environ, NOW) is True
+    later = NOW + quota_refresh.RETRY_SECONDS
+    assert quota_refresh.due(environ, later) is False
+    assert quota_refresh.refresh(environ, later) is False
+    assert _seats(account, environ, later) == ("EXPIRED", 0)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+def test_a_live_token_answered_401_again_is_probed_at_most_once_per_refresh_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replies: list[object] = [_http(401, b'{"code": "token_expired"}') for _ in range(2)]
+    account, environ = _replay(monkeypatch, 7, replies)
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    codex_router.fresh_quotas([account], environ, NOW, _no_exec)
+    early = NOW + codex_router.RECHECK_SECONDS - 1
+    codex_router.fresh_quotas([account], environ, early, _no_exec)
+    assert len(replies) == 1
+    codex_router.fresh_quotas([account], environ, NOW + codex_router.RECHECK_SECONDS, _no_exec)
+    assert replies == []
+    assert _seats(account, environ, NOW + codex_router.RECHECK_SECONDS) == ("EXPIRED", 0)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+def test_an_expired_reading_recorded_without_a_probe_attempt_is_rechecked_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account, environ = _replay(monkeypatch, 7, [PRO])
+    codex_usage.store(account.name, CodexQuota(NOW, "?", expired=True))
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    codex_router.fresh_quotas([account], environ, NOW, _no_exec)
+    assert _seats(account, environ, NOW) == ("NORMAL", 6)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+@pytest.mark.parametrize(
+    "account, token, quota, expected",
+    [
+        ("alpha", access_token(7), CodexQuota(NOW, "?", expired=True), True),
+        ("alpha", access_token(7), None, False),
+        ("alpha", access_token(7), codex_usage.parse(PRO, NOW), False),
+        ("alpha", access_token(0), CodexQuota(NOW, "?", expired=True), False),
+        ("alpha", "sk-x", CodexQuota(NOW, "?", expired=True), False),
+        (
+            "alpha",
+            jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "ws-1"}}),
+            CodexQuota(NOW, "?", expired=True),
+            False,
+        ),
+        ("default", access_token(7), CodexQuota(NOW, "?", expired=True), False),
+    ],
+    ids=["live-token", "no-reading", "healthy", "exp-now", "routing-error", "no-exp", "default-without-file"],
+)
+def test_only_an_expired_reading_of_a_token_whose_exp_is_ahead_is_rechecked(
+    account: str, token: str, quota: CodexQuota | None, expected: bool
+) -> None:
+    found = codex_router.CodexAccount(account, "" if account == "default" else "AH_CX_TOKEN_alpha")
+    assert codex_router.recheck_expired(found, quota, {"AH_CX_TOKEN_alpha": token}, NOW) is expected

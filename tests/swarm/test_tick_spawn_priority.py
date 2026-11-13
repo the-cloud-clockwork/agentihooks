@@ -3,6 +3,7 @@ import pytest
 from scripts.swarm import automated_gc, tick_stop
 from scripts.swarm import tick as tick_module
 from scripts.swarm.tick import tick
+from scripts.tick.steps import agents as agent_steps
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
 
@@ -26,7 +27,7 @@ class OrderingRuntime(FakeRuntime):
 
 def _ordered(store, monkeypatch):
     order = []
-    monkeypatch.setattr(tick_module, "_reap", lambda *a, **k: order.append("reap") or [])
+    monkeypatch.setattr(agent_steps, "_reap", lambda *a, **k: order.append("reap") or [])
     monkeypatch.setattr(tick_module.exits, "sweep", lambda *a, **k: order.append("exits.sweep") or [])
     monkeypatch.setattr(automated_gc, "run", lambda *a, **k: ["collected before the spawn"])
     runtime = OrderingRuntime(order)
@@ -62,7 +63,7 @@ def test_a_pass_stopped_before_its_spawn_leaves_the_next_pass_due(store, monkeyp
     def stopped(*a, **k):
         raise tick_stop.Stopped
 
-    monkeypatch.setattr(tick_module, "_reap", stopped)
+    monkeypatch.setattr(agent_steps, "_reap", stopped)
     with pytest.raises(tick_stop.Stopped):
         tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert store.redis.get(store.key("sw", tick_module.SPAWN_DUE)) == "1000"

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +31,8 @@ def machine(tmp_path, monkeypatch):
     (state / "langfuse.env").write_text(f"LANGFUSE_SECRET_KEY={SENTINEL}\n")
     (state / "hive.env").write_text(f"AGENTIHOOKS_HIVE_ID={SENTINEL}\n")
     bundle = checkout(tmp_path / "bundle", "git@github.com:Owner/Bundle.git")
+    for name in ("frontend", "brain"):
+        (bundle / "profiles" / name).mkdir(parents=True)
     (state / "state.json").write_text(
         json.dumps(
             {
@@ -69,7 +72,7 @@ def test_the_snapshot_names_the_configuration_without_values_or_host_paths(machi
         "accounts": ["AH_CC_TOKEN_one", "AH_CX_TOKEN_two"],
         "settings": ["BRAIN_URL", "LANGFUSE_HOST", "LANGFUSE_SECRET_KEY"],
         "bundle": ["github.com/owner/bundle"],
-        "profiles": ["brain"],
+        "profiles": ["brain", "frontend"],
         "rules": ["durability.md", "worktrees.md"],
         "skills": ["dev-cycle", "handoff"],
         "mcp": ["agentihooks", "serena"],
@@ -78,6 +81,18 @@ def test_the_snapshot_names_the_configuration_without_values_or_host_paths(machi
     }
     assert SENTINEL not in json.dumps(snapshot)
     assert str(home) not in json.dumps(snapshot)
+
+
+def test_snapshot_keeps_linked_profiles_outside_the_bundle(machine: tuple[dict[str, str], Path, Path]) -> None:
+    from scripts.hive import config
+
+    environ, home, state = machine
+    path = state / "state.json"
+    installed = json.loads(path.read_text())
+    installed["linked_profiles"].append({"name": "linked-only"})
+    path.write_text(json.dumps(installed))
+
+    assert config.snapshot(environ, home, state, [])["profiles"] == ["brain", "frontend", "linked-only"]
 
 
 def test_an_uninstalled_machine_reports_empty_sections(tmp_path, monkeypatch):

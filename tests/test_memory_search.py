@@ -220,6 +220,28 @@ def test_a_session_not_retained_is_not_searched(inputs, corpus):
     assert not any(label.startswith("kernel:") for label in sv2_idx04_cases.named(labels, wide))
 
 
+@pytest.mark.feature("memory-search-skips-deleted-session")
+def test_a_deleted_session_is_not_searched_before_the_sweep(inputs: dict, corpus: Corpus) -> None:
+    uid = inputs["sessions"][2]["session_uid"]
+    stored = "SELECT chunk_id FROM search_chunk WHERE access_domain = ? AND session_uid = ?"
+    record = corpus.catalog.session(DOMAIN, uid)
+    assert record is not None
+    corpus.catalog.set_state(DOMAIN, uid, "deleted", record["revision"])
+    deleted = {row[0] for row in corpus.catalog.db.execute(stored, (DOMAIN, uid)).fetchall()}
+    answer = corpus.searcher.search(grant(inputs), query(inputs, limit=search.MAX_LIMIT), embedder(inputs))
+    returned = {result["chunk_id"] for result in answer["results"]} | {
+        item["chunk_id"]
+        for result in answer["results"]
+        for side in ("before", "after")
+        for item in result["context"][side]
+    }
+    assert deleted
+    assert answer["mode"] == "hybrid"
+    assert answer["results"]
+    assert returned.isdisjoint(deleted)
+    assert all(result["session_uid"] != uid for result in answer["results"])
+
+
 def test_a_session_with_no_event_in_the_allowed_projects_is_not_searched(inputs, corpus):
     call = {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "ChunkIndex.build"}}
     item = {

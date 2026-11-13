@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/plugins.py:scripts.profiles.plugins.x_claude_only:abe67f37ce209179c73890cdd1979d04a3811234e349d4047cb4841f00fa1b52": {
+    "reader": "standards_reader",
+    "reason": "In `x_claude_only`, the mutation changes only the static type argument of `typing.cast` on cast target `_install_module()`, from \"ModuleType\" to \"XXModuleTypeXX\"; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

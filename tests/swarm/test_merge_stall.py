@@ -1,6 +1,7 @@
 import json
 import subprocess
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -307,12 +308,12 @@ def test_every_github_request_renews_the_tick_before_waiting(monkeypatch):
 
 
 @pytest.mark.parametrize("length", [0, None])
-def test_an_empty_or_absent_dev_queue_returns_no_entries(rig, length):
+def test_an_empty_or_absent_dev_queue_returns_no_entries_and_the_last_dev_merge(rig, length):
     from scripts.swarm.health import merge_stall
 
     store, config, state = rig
     state["queue"] = length
-    assert merge_stall.queue(config.repo, REPO) == (0, 0)
+    assert merge_stall.queue(config.repo, REPO) == (0, AT - HOUR)
 
 
 @pytest.mark.parametrize("length,age", [(0, HOUR), (None, HOUR), (3, HOUR - 1), (3, 0)])
@@ -322,7 +323,7 @@ def test_observation_of_a_queue_without_a_stall_skips_workflow_requests(rig, len
     store, config, state = rig
     state.update(queue=length, merged=AT - age)
     expected_length = 0 if length is None else length
-    expected_merged = AT - age if length else 0
+    expected_merged = AT - age
     assert merge_stall.observe(config.repo, AT) == {
         "repo": REPO,
         "queue": expected_length,
@@ -492,3 +493,78 @@ def test_merge_observation_records_github_read_wall_time(rig, capsys):
     finished = [row for row in events if row.get("phase") == "finished"]
     assert len(finished) == 6
     assert all(row["step"] == "scripts.swarm.health.merge_stall.github_read" and row["wall_s"] >= 0 for row in finished)
+
+
+def test_a_host_without_gh_skips_the_merge_read_and_fails_no_step(
+    rig: tuple[Any, Any, dict[str, Any]], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.health import merge_stall
+
+    store, _, _ = rig
+
+    def missing(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    current = {"pass_id": "p", "failed_steps": []}
+    swarm, run = timing.SWARM.set("proof"), timing.PASS.set(current)
+    try:
+        assert merge_stall.findings(store, "proof", "/repo", AT) == []
+    finally:
+        timing.PASS.reset(run)
+        timing.SWARM.reset(swarm)
+    assert current["failed_steps"] == []
+    state = json.loads(store.redis.get(store.key("proof", "merge-stall")))
+    assert state == {"error": merge_stall.NO_GH, "tried": AT}
+    finished = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert [row["outcome"] for row in finished if row.get("phase") == "finished"] == ["success"]
+
+
+def test_a_missing_checkout_still_fails_the_merge_read_step(
+    rig: tuple[Any, Any, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.health import merge_stall
+
+    store, _, _ = rig
+
+    def missing(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(2, "No such file or directory", kwargs["cwd"])
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    monkeypatch.delenv("AGENTIHOOKS_POD_NAME", raising=False)
+    current = {"pass_id": "p", "failed_steps": []}
+    swarm, run = timing.SWARM.set("proof"), timing.PASS.set(current)
+    try:
+        assert merge_stall.findings(store, "proof", "/repo", AT) == []
+    finally:
+        timing.PASS.reset(run)
+        timing.SWARM.reset(swarm)
+    assert current["failed_steps"] == ["scripts.swarm.health.merge_stall.github_read"]
+    assert json.loads(store.redis.get(store.key("proof", "merge-stall")))["error"] != merge_stall.NO_GH
+
+
+def test_a_pod_without_the_checkout_skips_the_merge_read_and_fails_no_step(
+    rig: tuple[Any, Any, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.health import merge_stall
+
+    store, _, _ = rig
+
+    def missing(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(2, "No such file or directory", kwargs["cwd"])
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    monkeypatch.setenv("AGENTIHOOKS_POD_NAME", "agentihooks-swarm-controller-0")
+    current = {"pass_id": "p", "failed_steps": []}
+    swarm, run = timing.SWARM.set("proof"), timing.PASS.set(current)
+    try:
+        assert merge_stall.findings(store, "proof", "/repo", AT) == []
+    finally:
+        timing.PASS.reset(run)
+        timing.SWARM.reset(swarm)
+    assert current["failed_steps"] == []
+    state = json.loads(store.redis.get(store.key("proof", "merge-stall")))
+    assert state == {"error": merge_stall.NO_CHECKOUT, "tried": AT}

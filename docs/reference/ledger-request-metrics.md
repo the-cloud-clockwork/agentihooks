@@ -94,9 +94,18 @@ and shortened to three decimals.
 | `records[].wall_seconds` | Elapsed time for the whole request |
 | `records[].cpu_seconds` | CPU time of the request thread |
 | `records[].lock_wait_seconds` | Time spent waiting to acquire ledger locks and to begin a database transaction |
+| `records[].hierarchy_sync_seconds` | Time the write spent syncing the ledger hierarchy rows |
+| `records[].outbox_write_seconds` | Time the write spent writing its outbox events |
+| `records[].refresh_record_seconds` | Time the write spent recording the changed paths readers refresh from |
+| `records[].event_append_seconds` | Time the write spent appending and trimming ledger events |
 
 Wall time minus CPU time minus lock wait is the remainder: input and output,
 waiting for other threads, and anything else the request did off CPU.
+
+The four substep times are wall time spans inside the write transaction. They
+overlap CPU time and database waits, so they are not subtracted from the
+remainder; they name which part of the write the time went to. A request that
+writes no ledger reports them as zero.
 
 ### Summary view
 
@@ -107,6 +116,7 @@ The summary covers every request in the window, writes and reads.
 | `writes.count` | Writes in the window |
 | `writes.p95_wall_seconds` | 95th percentile write wall time, or `null` with no writes |
 | `writes.cpu_seconds`, `writes.lock_wait_seconds` | Totals across those writes |
+| `writes.hierarchy_sync_seconds`, `writes.outbox_write_seconds`, `writes.refresh_record_seconds`, `writes.event_append_seconds` | Substep totals across those writes |
 | `writes.other_wall_seconds` | Total remainder, wall minus CPU minus lock wait, per write and never below zero |
 | `slow_days` | Per UTC day, the writes that took 5 seconds or more |
 | `routes` | Per method and route, the request count and total CPU seconds, busiest CPU first |

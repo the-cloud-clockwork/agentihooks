@@ -277,11 +277,12 @@ def test_a_replacement_master_starts_its_own_idle_window(setup):
 @pytest.mark.parametrize("state", ["stopped", "stopping"])
 def test_the_tick_does_not_wake_a_master_while_shutting_down(setup, state, monkeypatch):
     from scripts.swarm import tick as tick_module
+    from scripts.tick.steps import agents as agent_steps
 
     store, master, runtime, _, sent = setup
     ledger = FakeLedger([{"id": "t", "state": "blocked"}])
     store.update("sw", state=state)
-    monkeypatch.setattr(tick_module, "_reap", lambda *args: [])
+    monkeypatch.setattr(agent_steps, "_reap", lambda *args: [])
     monkeypatch.setattr(tick_module.lifetime, "retire_idle_master", lambda *args: [])
     monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
     runtime.retire = lambda *args, **kwargs: False

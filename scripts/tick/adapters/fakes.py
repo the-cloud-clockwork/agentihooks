@@ -1,8 +1,10 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts.inbox.store import InboxError, close_reason
+from scripts.swarm.store import AgentRecord
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
 from scripts.tick.ports.source_control import (
@@ -72,6 +74,32 @@ class FakeLedger:
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object:
         return _record(self, "mutate", (operations,), deadline)
 
+    def update_task(
+        self,
+        task_id: str,
+        fields: Mapping[str, object],
+        *,
+        if_state: Sequence[str] = (),
+        if_match: Mapping[str, object] | None = None,
+        deadline: Deadline,
+    ) -> dict[str, Any]:
+        return _record(self, "update_task", (task_id, fields, if_state, if_match), deadline)
+
+    def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
+        return _record(self, "task", (task_id,), deadline)
+
+    def watchdog_copy(self, *, deadline: Deadline) -> dict[str, Any]:
+        return _record(self, "watchdog_copy", (), deadline)
+
+    def notify(self, text: str, *, deadline: Deadline) -> None:
+        _record(self, "notify", (text,), deadline)
+
+    def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
+        _record(self, "question", (text, by, op_id), deadline)
+
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None:
+        _record(self, "comment", (task_id, text, by), deadline)
+
 
 @dataclass
 class FakeCoordination:
@@ -86,6 +114,12 @@ class FakeCoordination:
 
     def lock(self, name: str, *, deadline: Deadline) -> object:
         return _record(self, "lock", (name,), deadline)
+
+    def tick_lock(self, held: object, ttl_ms: int, caller: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "tick_lock", (held, ttl_ms, caller), deadline)
+
+    def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None:
+        _record(self, "release_tick_lock", (token, caller), deadline)
 
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object:
         return _record(self, "configure", (settings,), deadline)
@@ -103,6 +137,23 @@ class FakeCoordination:
             ),
             deadline,
         )
+
+    def marked(self, name: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "marked", (name,), deadline)
+
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Record a store read and answer the ``store:<operation>`` answer."""
+        _record(self, "store_read", (operation, tuple(args), dict(kwargs)), deadline)
+        return self.answers.get(f"store:{operation}")
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Record a store write and answer the ``store:<operation>`` answer."""
+        _record(self, "store_write", (operation, tuple(args), dict(kwargs)), deadline)
+        return self.answers.get(f"store:{operation}")
 
 
 @dataclass
@@ -180,6 +231,9 @@ class FakeSourceControl:
     def download(self, path: str, *, deadline: Deadline) -> bytes:
         return _record(self, "download", (path,), deadline)
 
+    def graph(self, document: str, variables: Mapping[str, str], *, deadline: Deadline) -> Any:
+        return _record(self, "graph", (document, variables), deadline)
+
 
 @dataclass
 class FakeRuntime:
@@ -198,6 +252,72 @@ class FakeRuntime:
     def panes(self, *, deadline: Deadline) -> object:
         return _record(self, "panes", (), deadline)
 
+    def live_names(self, *, deadline: Deadline) -> set[str]:
+        return _record(self, "live_names", (), deadline)
+
+    def observe(self, agent: AgentRecord, *, deadline: Deadline) -> Any:
+        return _record(self, "observe", (agent,), deadline)
+
+    def retire(self, agent: AgentRecord, *, homes: Sequence[Path] = (), deadline: Deadline) -> bool:
+        return _record(self, "retire", (agent, homes), deadline)
+
+    def name_pane(self, agent: AgentRecord, *, deadline: Deadline) -> None:
+        _record(self, "name_pane", (agent,), deadline)
+
+    def refusal(self, agent: AgentRecord, *, deadline: Deadline) -> str:
+        return _record(self, "refusal", (agent,), deadline)
+
+    def resume(self, config: "SwarmConfig", agent: AgentRecord, text: str, *, deadline: Deadline) -> Any:
+        return _record(self, "resume", (config, agent, text), deadline)
+
+    def dismiss(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
+        return _record(self, "dismiss", (agent,), deadline)
+
+    def place(self, config: "SwarmConfig", lane: str, name: str, task: Mapping[str, Any], *, deadline: Deadline) -> Any:
+        return _record(self, "place", (config, lane, name, task), deadline)
+
+    def has_capacity(self, config: "SwarmConfig", *, deadline: Deadline) -> bool:
+        return _record(self, "has_capacity", (config,), deadline)
+
+    def launch_room(self, config: "SwarmConfig", *, deadline: Deadline) -> int | None:
+        return _record(self, "launch_room", (config,), deadline)
+
+    def reported(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
+        return _record(self, "reported", (agent,), deadline)
+
+    def placement_refusal(self, lane: str, task: Mapping[str, Any], *, deadline: Deadline) -> str:
+        return _record(self, "placement_refusal", (lane, task), deadline)
+
+    def placement(self, *, deadline: Deadline) -> object:
+        return _record(self, "placement", (), deadline)
+
+    def begin_placement(self, *, deadline: Deadline) -> None:
+        _record(self, "begin_placement", (), deadline)
+
+    def end_placement(self, *, deadline: Deadline) -> None:
+        _record(self, "end_placement", (), deadline)
+
+    def reap_name(self, name: str, *, deadline: Deadline) -> bool:
+        return _record(self, "reap_name", (name,), deadline)
+
+    def admits(self, *, deadline: Deadline) -> bool:
+        return _record(self, "admits", (), deadline)
+
+    def admit(self, slug: str, tasks: Sequence[Mapping[str, Any]], now_ms: int, *, deadline: Deadline) -> Any:
+        return _record(self, "admit", (slug, tasks, now_ms), deadline)
+
+    def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None:
+        _record(self, "release_admission", (slug, task_id, reservation), deadline)
+
+    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str:
+        return _record(self, "held_admission", (slug, task_id), deadline)
+
+    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
+        return _record(self, "activate_admission", (slug, task_id, reservation), deadline)
+
+    def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any:
+        return _record(self, "fence", (held, deployment), deadline)
+
 
 @dataclass
 class FakeProcesses:
@@ -206,6 +326,9 @@ class FakeProcesses:
 
     def scan(self, *, deadline: Deadline) -> object:
         return _record(self, "scan", (), deadline)
+
+    def rescan(self, *, deadline: Deadline) -> object:
+        return _record(self, "rescan", (), deadline)
 
 
 @dataclass
@@ -235,6 +358,9 @@ class FakeInbox:
             raise InboxError("done needs an outcome naming where the work went")
         return _record(self, "close", (item_id, outcome, detail), deadline)
 
+    def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object:
+        return _record(self, "settle_exit", (name, seat, exit_text), deadline)
+
 
 @dataclass
 class FakeLlm:
@@ -252,6 +378,9 @@ class FakeMetrics:
 
     def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object:
         return _record(self, "emit", (measurements,), deadline)
+
+    def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object:
+        return _record(self, "log", (slug, tuple(rows)), deadline)
 
 
 @dataclass

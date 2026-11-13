@@ -1,0 +1,6 @@
+{
+  "scripts/ci_semgrep_floors.py:scripts.ci_semgrep_floors.x_fixture_errors:09d127078d87fe46e7d537cab767b36849b74189ca7c0856a0baef5d4b50a8d3": {
+    "reader": "standards_reader",
+    "reason": "When tested is empty, every rule hits continue before reported or mismatched is read."
+  }
+}

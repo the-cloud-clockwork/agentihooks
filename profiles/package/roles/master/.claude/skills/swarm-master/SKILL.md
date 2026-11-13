@@ -50,6 +50,22 @@ goes to a lane as a task.
 - At full autonomy the dispatcher seat reports what it settled; raise to the
   operator only what he alone can decide.
 
+## Focus and freeze
+
+Every open task is focused, free or frozen. Focused tasks form an ordered
+queue and run first; free tasks run only once no focused task is left undone;
+frozen tasks never run. Urgent rank orders work inside its state and never
+passes the focus queue.
+
+- "Focus only this plan": `agentihooks swarm <slug> focus plans/<id> --only
+  --quote "<his words>"` drops every other focus.
+- "Focus this task too": `focus tasks/<id> --bottom` appends it; `--top` puts
+  it first.
+- A focus unfreezes its target and everything under it. The work a focused
+  task waits on joins the focus, so the queue can empty.
+- "Unfreeze": `unfreeze <target>` frees the task; it never focuses it, so it
+  runs after the focus queue empties.
+
 ## Join
 
 - `agentihooks ledger --slug <slug> --as <name> join --role orchestrator`, once.
@@ -126,6 +142,9 @@ takes the claude ai login and Remote Control.
 
 - A code task names its seams and its done condition:
   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
+- A tick task spec names the step, its group, lane (`tick` or `slow`), effects
+  (the `Tools` ports it writes through) and feature map id, so the engineer can
+  run the tick-step scaffold from the spec alone.
 - Work beyond code carries what must be true, how it is checked and who judges:
   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng --phase <phase> --kind troubleshoot --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
 - The proof each kind closes with: code and ci a merged pull request; ops a

@@ -140,7 +140,8 @@ RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20 prefer=",
+    "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= prefer=",
+    "hive set --reason the chart sets the agent cap worker-member max-agents=auto",
     "hive run",
 ]
 
@@ -151,8 +152,44 @@ def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monke
     assert result.returncode == 0, result.stderr
     assert (
         "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
-        "max-agents=20 prefer=eng:1,ci:1,plan:1"
+        "prefer=eng:1,ci:1,plan:1"
     ) in commands.splitlines()
+
+
+@pytest.mark.feature("hive-chart-capabilities")
+def test_the_charted_capabilities_are_registered_on_every_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIVE_CAPABILITIES", "anton,gpu")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "prefer= capabilities=anton,gpu"
+    ) in commands.splitlines()
+
+
+@pytest.mark.feature("hive-chart-capabilities")
+def test_an_empty_charted_capability_list_clears_the_stored_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIVE_CAPABILITIES", "")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "prefer= capabilities="
+    ) in commands.splitlines()
+
+
+@pytest.mark.feature("hive-chart-capabilities")
+def test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("HIVE_CAPABILITIES", raising=False)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not any("capabilities=" in line for line in commands.splitlines())
 
 
 def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
@@ -161,8 +198,17 @@ def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeyp
     assert result.returncode == 0, result.stderr
     assert (
         "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
-        "max-agents=20 prefer= name=swarm-hive-002"
+        "prefer= name=swarm-hive-002"
     ) in commands.splitlines()
+
+
+def test_the_charted_agent_cap_replaces_the_stored_cap_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_MAX_AGENTS", "12")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    lines = commands.splitlines()
+    assert "hive set --reason the chart sets the agent cap worker-member max-agents=12" in lines
+    assert not any(line.startswith("hive set --keep") and "max-agents" in line for line in lines)
 
 
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
@@ -536,7 +582,9 @@ def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots
     assert "hosted ledger CA" not in placed
     assert placed.endswith(pem.strip() + "\n")
     assert placed.startswith(Path(ssl.get_default_verify_paths().cafile).read_text())
-    assert ledger_link.transport({"AGENTIHOOKS_HOME": str(home)})["context"].cert_store_stats()["x509_ca"] > 1
+    context = ledger_link.transport({"AGENTIHOOKS_HOME": str(home)}).get("context")
+    assert context is not None
+    assert context.cert_store_stats()["x509_ca"] > 1
 
 
 def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path, monkeypatch):

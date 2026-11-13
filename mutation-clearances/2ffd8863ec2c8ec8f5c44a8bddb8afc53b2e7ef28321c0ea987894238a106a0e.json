@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/manifestos.py:scripts.profiles.manifestos.x_main:9fc9ddcc6076550c44f4396918ced0ba4b219ff2169bbc3e4e59df482098d4d0": {
+    "reader": "standards_reader",
+    "reason": "In `x_main`, the mutation changes only the static type argument of `typing.cast` on cast target `profile_chain.bundle_path`, from Callable[[dict[str, Any]], \"Path | None\"] to Callable[[dict[str, Any]], \"PATH | NONE\"]; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

@@ -1,10 +1,14 @@
 import itertools
+import os
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -13,11 +17,13 @@ from .entry import Entry
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
+SCRATCH_SHARED = "AGENTIHOOKS_SCRATCH_SHARED_DATABASE"
 WRITER_LOCK = 0x4C454447
 LEDGER_LOCK = 0x4C454453
 LEDGER_WRITE = f"SELECT pg_advisory_xact_lock_shared({WRITER_LOCK})"
 LEDGER_ONLY = f"SELECT pg_advisory_xact_lock({LEDGER_LOCK}, hashtext(?))"
 KEPT = 8
+LIVENESS = "SELECT 1 AS alive"
 STREAM_ROWS = 2000
 STREAMS = itertools.count()
 LOCK_WAIT = 10
@@ -110,7 +116,15 @@ def refusal(version: int, required: int) -> str:
 
 
 def url(env: Mapping[str, str]) -> str | None:
-    return env.get(URL) or None
+    address = env.get(URL) or None
+    if address and scratch(env) and env.get(SCRATCH_SHARED) != "1":
+        return None
+    return address
+
+
+def scratch(env: Mapping[str, str]) -> bool:
+    folder = env.get("LEDGER_DIR")
+    return bool(folder) and Path(folder).expanduser().resolve().is_relative_to((Path.home() / "scratchpad").resolve())
 
 
 def translate(sql: str, named: bool = False) -> str:
@@ -168,30 +182,100 @@ def mapped() -> Iterator[None]:
 
 
 class Pool:
-    """Idle connections to one database, at most KEPT of them, each rolled back before it is kept."""
+    """Live connections to one database, bounded by this process's share of server capacity."""
 
-    def __init__(self, address: str):
-        self.address, self.idle, self.lock = address, [], threading.Lock()
+    def __init__(self, address: str) -> None:
+        self.address = address
+        self.idle: list[Any] = []
+        self.lock = threading.Condition()
+        self.opened = 0
+        self.cap: int | None = None
 
-    def take(self) -> object:
+    def _open(self) -> Any:
+        with mapped():
+            raw = errors().connect(self.address, **SESSION)
+            try:
+                if self.cap is None:
+                    share = float(os.environ.get("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.1"))
+                    if not 0 < share < 1:
+                        raise sqlite3.OperationalError("ledger pool share must be between zero and one")
+                    with raw.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT current_setting('max_connections')::int, "
+                            "current_setting('superuser_reserved_connections')::int",
+                            (),
+                        )
+                        maximum, reserved = cursor.fetchone()
+                    raw.rollback()
+                    self.cap = max(1, min(int(maximum * share), maximum - reserved - 1))
+            except BaseException:
+                raw.close()
+                raise
+        return raw
+
+    def _alive(self, raw: Any) -> bool:
+        if raw.closed:
+            return False
+        try:
+            with raw.cursor() as cursor:
+                cursor.execute(LIVENESS, ())
+            raw.rollback()
+        except errors().Error:
+            return False
+        return True
+
+    def _release(self) -> None:
         with self.lock:
+            self.opened -= 1
+            self.lock.notify()
+
+    def _reserve(self, deadline: float) -> Any:
+        """An idle connection, or None once a slot is reserved for a new one."""
+        with self.lock:
+            while not self.idle and self.opened >= (self.cap or 1):
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise sqlite3.OperationalError("ledger database pool capacity exhausted")
+                self.lock.wait(timeout=left)
             if self.idle:
                 return self.idle.pop()
-        with mapped():
-            return errors().connect(self.address, **SESSION)
+            self.opened += 1
+            return None
 
-    def give(self, raw) -> None:
-        psycopg2 = errors()
+    def _new(self) -> Any:
+        measuring = self.cap is None
+        try:
+            raw = self._open()
+        except BaseException:
+            self._release()
+            raise
+        if measuring:
+            with self.lock:
+                self.lock.notify_all()
+        return raw
+
+    def take(self) -> Any:
+        """A live connection: an idle one that answers, else a new one in a slot reserved under the lock."""
+        deadline = time.monotonic() + 5
+        raw = self._reserve(deadline)
+        while raw is not None and not self._alive(raw):
+            raw.close()
+            self._release()
+            raw = self._reserve(deadline)
+        return raw if raw is not None else self._new()
+
+    def give(self, raw: Any) -> None:
         try:
             raw.rollback()
-        except psycopg2.Error:
+        except errors().Error:
             raw.close()
-            return
         with self.lock:
             if not raw.closed and len(self.idle) < KEPT:
                 self.idle.append(raw)
-                return
-        raw.close()
+            else:
+                raw.close()
+                self.opened -= 1
+            self.lock.notify()
 
 
 POOLS = {}

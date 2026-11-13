@@ -3,7 +3,7 @@ import { $, age, clock, h, newId, span } from "./dom.js";
 import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
-import { appliedCaps, clearNoteError, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
+import { appliedCaps, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
 import { firstPage, moreButton } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { tips } from "./state.js";
@@ -14,6 +14,7 @@ import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 import { renderHandoffs, renderRecovery } from "./recovery.js";
 import { renderContext } from "./context.js";
+import { holdNote, releaseNote } from "./status_note.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -26,9 +27,8 @@ export let overlayDraft = {};
 
 export function receiveSwarm(sw) {
   if (!sw) return swarmLost("no swarm for this ledger");
-  if (swarmReadError && !pending) $("swarm-note").textContent = "";
+  if (swarmReadError) releaseNote();
   swarmReadError = false;
-  clearNoteError();
   const resend = reconcile(sw);
   settleCaps(sw);
   renderSwarm(sw);
@@ -40,8 +40,7 @@ export function swarmLost(reason) {
   swarmReadError = true;
   renderSwarm(swarm);
   renderControls();
-  $("swarm-note").className = "sw-note bad";
-  $("swarm-note").textContent = `Could not read swarm status: ${reason}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
+  holdNote(`Could not read swarm status: ${reason}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`);
 }
 
 export function doctorOn(sw) {
@@ -157,7 +156,7 @@ function agentRows(sw, now) {
 }
 
 function agentRow(a, remote) {
-  return agentCellTips(withId(cells(((id) => a.hive ? h("span", {}, id, h("span", { class: "sw-sub", title: `hive ${a.hive}`, text: a.hive })) : id)(a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account })) : idCell(a.name)), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+  return agentCellTips(withId(cells(((id) => a.hive ? h("span", {}, id, h("span", { class: "sw-sub", title: `hive ${a.hive}`, text: a.hive })) : id)(a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account })) : idCell(a.name)), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? ((on) => h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail}), phone access ${on ? "available" : "unavailable"}` }, label(`phone access ${on ? "available" : "unavailable"}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])))(a.remoteControl.state === "on") : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     h("span", {}, a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state), joinCell(a.hiveJoin)),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`));
 }

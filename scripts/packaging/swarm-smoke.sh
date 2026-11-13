@@ -7,14 +7,20 @@ COMPOSE_PROJECT_NAME="$(python3 -c 'import uuid; print("swarm-proof-" + uuid.uui
 export SWARM_REDIS_PASSWORD
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
 trap 'docker compose down --volumes' EXIT
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/nats:2.15.1-alpine
+require_image() {
+  bash scripts/packaging/pull-runtime-image.sh "$1" && return
+  status=$?
+  printf 'Swarm startup blocked: required image %s could not be pulled\n' "$1" >&2
+  exit "$status"
+}
+require_image mirror.gcr.io/library/redis:7
+require_image mirror.gcr.io/library/nats:2.15.1-alpine
 build=(--build)
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
   build=(--no-build)
 else
-  bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+  require_image ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
 fi
 docker compose up --pull never "${build[@]}" --wait --wait-timeout 120
 python3 - <<'PY'

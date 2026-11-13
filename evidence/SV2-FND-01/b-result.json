@@ -21,7 +21,7 @@
       "outcome": "passed"
     },
     {
-      "test": "tests/test_swarm_v2_baseline.py::test_failing_or_empty_command_is_unverified[import sys; sys.stderr.write('bad http://10.0.0.1/x '); sys.exit(3)-exit 3: bad <redacted-url>]",
+      "test": "tests/test_swarm_v2_baseline.py::test_failing_or_empty_command_is_unverified[import sys; sys.stderr.write('bad http://192.0.2.1/x '); sys.exit(3)-exit 3: bad <redacted-url>]",
       "outcome": "passed"
     },
     {
@@ -153,11 +153,11 @@
       "outcome": "passed"
     },
     {
-      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_addresses_and_bearers[connect to http://10.0.0.5:8080/health failed-connect to <redacted-url> failed]",
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_addresses_and_bearers[connect to http://192.0.2.5:8080/health failed-connect to <redacted-url> failed]",
       "outcome": "passed"
     },
     {
-      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_addresses_and_bearers[host 192.168.1.20 refused-host <redacted-ip> refused]",
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_addresses_and_bearers[host 192.0.2.20 refused-host <redacted-ip> refused]",
       "outcome": "passed"
     },
     {
@@ -185,7 +185,7 @@
       "outcome": "passed"
     },
     {
-      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[loop ::1 and fe80::1-loop <redacted-ip> and <redacted-ip>]",
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[loop ::1 and <redacted-link-local>-loop <redacted-ip> and <redacted-ip>]",
       "outcome": "passed"
     },
     {
@@ -197,7 +197,7 @@
       "outcome": "passed"
     },
     {
-      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[dial tcp anton.internal:6443 refused-dial tcp <redacted-host> refused]",
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[dial tcp cluster.example.internal:6443 refused-dial tcp <redacted-host> refused]",
       "outcome": "passed"
     },
     {

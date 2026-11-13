@@ -3,6 +3,7 @@
 import json
 import re
 from collections.abc import Callable
+from typing import Any
 
 from scripts.inbox.seats import SeatRegistry, seat_address
 from scripts.swarm.naming import seat_label
@@ -193,9 +194,11 @@ def hive_targets(saved: str | None, current: list[str]) -> dict[str, str]:
     return {f"{HIVES}/{hive}": owner for hive, owner in hives.items() if owner in current}
 
 
-def check_hive_owner(slug: str, count: int, hive_id: str, owner: str) -> None:
+def check_hive_owner(slug: str, count: int, hive_id: str, owner: str, retired: list[str]) -> None:
     if owner not in seats(slug, count):
         raise MasterError(f"{owner} is not a master seat of {slug}, so it cannot own hive {hive_id}")
+    if owner in retired:
+        raise MasterError(f"{owner} is retired, so it cannot own hive {hive_id}")
 
 
 def hive_pairs(slug: str, pairs: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
@@ -221,16 +224,42 @@ class MasterSeats:
         return f"{PREFIX}:{slug}:masters"
 
     def set_count(self, slug: str, count: int) -> None:
-        self.redis.hset(self.key(slug), "count", _checked(count))
-        self.keep_retired(slug, 1, count)
+        self._save_retired(slug, 1, _checked(count), {"count": count})
 
     def keep_retired(self, slug: str, above: int, upto: int) -> None:
         """A retired seat numbered at or below above is to be refilled, and one past upto is no longer counted."""
-        held = [address for address in self.retired(slug) if above < _number(slug, address) <= upto]
-        if held:
-            self.redis.hset(self.key(slug), RETIRED, json.dumps(held))
-        else:
-            self.redis.hdel(self.key(slug), RETIRED)
+        self._save_retired(slug, above, upto, {})
+
+    def _save_retired(self, slug: str, above: int, upto: int, fields: dict[str, int]) -> None:
+        """The fields and the kept retired seats land in one watched write, so a seat retired meanwhile is reread."""
+
+        def write(pipe: Any, key: str) -> None:
+            held = [a for a in json.loads(pipe.hget(key, RETIRED) or "[]") if above < _number(slug, a) <= upto]
+            pipe.multi()
+            if fields:
+                pipe.hset(key, mapping=fields)
+            if held:
+                pipe.hset(key, RETIRED, json.dumps(held))
+            else:
+                pipe.hdel(key, RETIRED)
+
+        self._transact(slug, write, "the retired seats were not saved")
+
+    def _transact(self, slug: str, write: Callable[[Any, str], None], lost: str) -> None:
+        """Run write under a watch on the seats key, retrying when another writer changed it first."""
+        from redis.exceptions import WatchError
+
+        key = self.key(slug)
+        for _ in range(SAVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    write(pipe, key)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise MasterError(f"master seats of {slug} kept changing; {lost}")
 
     def retire(self, slug: str, address: str, at: int) -> None:
         """Every phase the seat owns moves to the front door in the same write; at outlives a later refill."""
@@ -272,15 +301,23 @@ class MasterSeats:
         return int(self.redis.hget(self.key(slug), "count") or DEFAULT_COUNT)
 
     def own_hive(self, slug: str, hive_id: str, owner: str) -> None:
-        check_hive_owner(slug, self.count(slug), hive_id, owner)
-        hives = json.loads(self.redis.hget(self.key(slug), HIVES) or "{}")
-        self.redis.hset(self.key(slug), HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
+        """The owner is checked against the counted and retired seats in the same watched write that stores it."""
+
+        def write(pipe: Any, key: str) -> None:
+            count = int(pipe.hget(key, "count") or DEFAULT_COUNT)
+            check_hive_owner(slug, count, hive_id, owner, json.loads(pipe.hget(key, RETIRED) or "[]"))
+            hives = json.loads(pipe.hget(key, HIVES) or "{}")
+            pipe.multi()
+            pipe.hset(key, HIVES, json.dumps({**hives, hive_id: owner}, sort_keys=True))
+
+        self._transact(slug, write, f"hive {hive_id} was not given to {owner}")
 
     def check_hives(self, slug: str, counts: list[int], hives: list[tuple[str, str]]) -> None:
         """Checked against the count a command leaves, before that command writes anything."""
         final = counts[-1] if counts else self.count(slug)
+        retired = self.retired(slug)
         for hive, owner in hives:
-            check_hive_owner(slug, final, hive, owner)
+            check_hive_owner(slug, final, hive, owner, retired)
 
     def hive_owners(self, slug: str) -> dict[str, str]:
         return hive_targets(self.redis.hget(self.key(slug), HIVES), seats(slug, self.count(slug)))

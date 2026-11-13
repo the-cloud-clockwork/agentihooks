@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -69,9 +70,8 @@ def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
     from scripts.swarm.capacity import Account
 
     setup.herdr._quota_accounts.append(Account("codex", "codex-account", "room", 0, None, 80, 6))
-    write_hive(
-        setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
-    )
+    slots = [*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
+    write_hive(setup, slots=slots)
     task = {"id": "task", "hive": "remote"}
     config = setup.config
     if pin == "lane":
@@ -82,7 +82,7 @@ def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
         setup.herdr._quota_tasks = {"task": "codex"}
     selected = setup.launcher.select(config, "eng", task)
     assert (selected.account.harness, selected.account.name, selected.hive) == ("codex", "codex-account", "remote")
-    write_hive(setup, max_agents=0)
+    write_hive(setup, slots=slots, max_agents=0)
     unavailable = setup.launcher.select(config, "eng", task)
     assert isinstance(unavailable, Wait)
     assert "room" in unavailable.reason
@@ -147,6 +147,42 @@ def test_auto_lane_falls_back_to_claude_when_the_planned_codex_account_is_full(s
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
 
     assert (selected.account.harness, selected.account.name, selected.hive) == ("claude", "account", "remote")
+
+
+@pytest.mark.feature("task-requires-harness")
+@pytest.mark.parametrize("pin", ["saved", "planned"])
+def test_a_hive_launches_a_task_requiring_claude_only_on_claude(setup, pin):
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts.append(Account("codex", "codex-account", "room", 0, None, 80, 6))
+    write_hive(
+        setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
+    )
+    task: dict[str, Any] = {"id": "task", "requires_harness": "claude"}
+    if pin == "saved":
+        task["launch_assignment"] = {"harness": "codex", "account": "codex-account"}
+    else:
+        setup.herdr._quota_tasks = {"task": "codex"}
+
+    selected = setup.launcher.select(setup.config, "eng", task)
+
+    assert (selected.account.harness, selected.account.name) == ("claude", "account")
+
+
+@pytest.mark.feature("task-requires-harness")
+def test_a_hive_waits_on_a_lane_pinned_to_codex_for_a_task_requiring_claude(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.hive.placement import Wait
+
+    observed = []
+    monkeypatch.setattr(launch.placement_waits, "observe", lambda *args: observed.append(args[2:5]))
+    config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
+
+    selected = setup.launcher.select(config, "eng", {"id": "task", "requires_harness": "claude"})
+
+    assert isinstance(selected, Wait)
+    assert (selected.reason, selected.role) == ("lane harness codex cannot run a task that requires claude", "eng")
+    assert observed == [("eng", "task", "lane harness codex cannot run a task that requires claude")]
 
 
 @pytest.mark.parametrize(

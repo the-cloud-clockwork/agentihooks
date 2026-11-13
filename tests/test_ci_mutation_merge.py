@@ -129,6 +129,58 @@ def test_main_fails_and_names_a_green_shard_report_without_its_measurement(tmp_p
     assert merge.short_shards({0: {"shard": {"expected": 1, "graded": 1}}}) == []
 
 
+def test_main_reads_tests_shard_reports_by_their_artifact_prefix(tmp_path, capsys):
+    shards = tmp_path / "shards"
+    for shard in (0, 1):
+        path = shards / f"mutation-report-{shard}" / "report.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "files": [_file("scripts/a.py", {"killed": 1})],
+                    "not_mutated": [],
+                    "failed": False,
+                    "shard": {"expected": 1, "graded": 1},
+                }
+            )
+        )
+    _write(
+        shards,
+        0,
+        {
+            "files": [_file("scripts/a.py", {"killed": 5})],
+            "not_mutated": [],
+            "failed": True,
+            "shard": {"expected": 1, "graded": 1},
+        },
+    )
+    out = tmp_path / "gate"
+    argv = [str(shards), "--prefix", "mutation-report-", "--shards", "2", "--output", str(out)]
+    assert merge.main(argv) == 0
+    report = json.loads((out / "report.json").read_text())
+    assert report == {
+        "shards": [{"expected": 1, "graded": 1}, {"expected": 1, "graded": 1}],
+        "files": [_file("scripts/a.py", {"killed": 2})],
+        "not_mutated": [],
+        "failed": False,
+    }
+    assert "Merged 2 of 2 mutation shard reports" in capsys.readouterr().out
+
+
+def test_main_grades_a_split_unit_that_survived_every_tests_shard(tmp_path):
+    shards = tmp_path / "shards"
+    row = {"name": "scripts.a.x_f__mutmut_1", "status": "survived", "lines": [1], "diff": "d", "fingerprint": "f"}
+    for shard in (0, 1):
+        path = shards / f"mutation-report-{shard}" / "report.json"
+        path.parent.mkdir(parents=True)
+        unit = {"path": "scripts/a.py", "lines": [1], "rows": [{**row, "identity": "i"}]}
+        path.write_text(json.dumps({"files": [], "units": [unit], "not_mutated": [], "failed": False}))
+    out = tmp_path / "gate"
+    argv = [str(shards), "--prefix", "mutation-report-", "--shards", "2", "--output", str(out)]
+    assert merge.main(argv) == 1
+    assert json.loads((out / "report.json").read_text())["failed"] is True
+
+
 def test_main_fails_and_names_the_missing_shard_when_a_report_is_absent(tmp_path, capsys):
     shards = tmp_path / "shards"
     _write(shards, 1, {"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False})

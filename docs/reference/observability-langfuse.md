@@ -6,6 +6,12 @@ nav_order: 8
 
 # Observability with OpenTelemetry and Langfuse
 
+Addresses and host names on this page are documentation placeholders:
+`192.0.2.200` stands for the internal ingress, `192.0.2.130` for the host
+that runs the data plane containers and `example.com` for the deployment's
+domain. Where this page names a built in default, the code carries the
+deployment's real ingress address and domain; the page shows their placeholders.
+
 AgentiHooks sends telemetry along five paths. Only the agent trace exporter
 writes to Langfuse; the others speak OTLP to an OpenTelemetry collector.
 
@@ -139,8 +145,8 @@ sets the key pair from these files over any inherited one (see
 |---|---|---|
 | `AGENTIHOOKS_LANGFUSE_ENABLED` | off | The switch. `OTEL_LANGFUSE_ENABLED` is read too, but Claude Code hides it from hooks. |
 | `OTEL_LANGFUSE_PUBLIC_KEY`, `OTEL_LANGFUSE_SECRET_KEY` | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Project key pair. The project the keys belong to is the project traces land in. Both must be set or nothing is exported. |
-| `OTEL_LANGFUSE_ENDPOINT` | `http://10.10.30.200/api/public/otel` | OTLP base URL. The exporter posts to `<endpoint>/v1/traces`. |
-| `OTEL_LANGFUSE_HOST_HEADER` | `langfuse.homeofanton.com` when the endpoint is the default, else none | `Host` header for an ingress that routes by name. |
+| `OTEL_LANGFUSE_ENDPOINT` | `http://192.0.2.200/api/public/otel` | OTLP base URL. The exporter posts to `<endpoint>/v1/traces`. |
+| `OTEL_LANGFUSE_HOST_HEADER` | `langfuse.example.com` when the endpoint is the default, else none | `Host` header for an ingress that routes by name. |
 | `AGENTIHOOKS_LANGFUSE_FIELD_MAX_CHARS` | `32000` | Cap per exported text field. |
 
 On the Anton workbench the keys in the env files belong to the Langfuse project
@@ -199,7 +205,7 @@ either key is empty.
 3. **API.** Ask Langfuse for the session's trace:
 
    ```bash
-   curl -s -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" -o trace.json "https://langfuse.homeofanton.com/api/public/traces?sessionId=<session id>"
+   curl -s -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" -o trace.json "https://langfuse.example.com/api/public/traces?sessionId=<session id>"
    jq '.data[] | {name, tags}' trace.json
    ```
 
@@ -297,13 +303,13 @@ they open the watched swarm's project.
    another project accepted it:
 
    ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" "https://langfuse.homeofanton.com/api/public/traces/$TRACE"
+   curl -s -o /dev/null -w '%{http_code}\n' -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" "https://langfuse.example.com/api/public/traces/$TRACE"
    ```
 
 3. Check which project each key pair opens. The shell's pair:
 
    ```bash
-   curl -s -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" https://langfuse.homeofanton.com/api/public/projects | jq -r '.data[].name'
+   curl -s -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" https://langfuse.example.com/api/public/projects | jq -r '.data[].name'
    ```
 
    The pair the app-server launch pins, from the env files:
@@ -315,7 +321,7 @@ they open the watched swarm's project.
    from scripts.profile_telemetry import agentihooks_langfuse_keys
    keys = agentihooks_langfuse_keys()
    auth = (keys["OTEL_LANGFUSE_PUBLIC_KEY"], keys["OTEL_LANGFUSE_SECRET_KEY"])
-   print([p["name"] for p in httpx.get("https://langfuse.homeofanton.com/api/public/projects", auth=auth, timeout=20).json()["data"]])
+   print([p["name"] for p in httpx.get("https://langfuse.example.com/api/public/projects", auth=auth, timeout=20).json()["data"]])
    EOF
    ```
 
@@ -345,8 +351,8 @@ they open the watched swarm's project.
 The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings
 in `scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads
 the same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
-and `LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). Reads for that
-exact default origin connect to the internal ingress `10.10.30.200` instead of
+and `LANGFUSE_HOST` (default `https://langfuse.example.com`). Reads for that
+exact default origin connect to the internal ingress `192.0.2.200` instead of
 the public tunnel, sending the hostname as `Host` and TLS server name so the
 certificate is still verified against it; a tunnel outage no longer fails a
 read, while a 5xx or a timeout on the internal path still raises `trace reader
@@ -380,8 +386,8 @@ slashes. The default needs no route setting:
 
 | Reader host | Connection |
 |---|---|
-| Unset, empty, or `https://langfuse.homeofanton.com` (also with a trailing slash) | HTTPS to `10.10.30.200:443`, with `langfuse.homeofanton.com` as HTTP `Host` and TLS server name |
-| Another hostname, scheme or explicit port, such as `https://langfuse.example.com` or `https://langfuse.homeofanton.com:8443` | Directly to the configured URL |
+| Unset, empty, or `https://langfuse.example.com` (also with a trailing slash) | HTTPS to `192.0.2.200:443`, with `langfuse.example.com` as HTTP `Host` and TLS server name |
+| Another hostname, scheme or explicit port, such as `https://langfuse.example.org` or `https://langfuse.example.com:8443` | Directly to the configured URL |
 
 TLS verification stays enabled. Keep the hostname in `LANGFUSE_HOST`: setting
 it to the ingress IP selects a direct request and loses the hostname used for
@@ -395,7 +401,7 @@ already supplied, then run:
 
 ```bash
 cd ~/dev/tcc-ecosystem/agentihooks
-LANGFUSE_HOST=https://langfuse.homeofanton.com \
+LANGFUSE_HOST=https://langfuse.example.com \
   LANGFUSE_PUBLIC_KEY="$SWARM_LANGFUSE_PUBLIC_KEY" \
   LANGFUSE_SECRET_KEY="$SWARM_LANGFUSE_SECRET_KEY" \
   ~/dev/tcc-ecosystem/.venv/bin/python -m scripts.doctor.traces_read rig-grade-swarm
@@ -422,10 +428,10 @@ Run this read-only probe from the host that runs the Doctor. It needs no
 project keys and keeps the same hostname and certificate verification:
 
 ```bash
-curl --noproxy '*' --resolve langfuse.homeofanton.com:443:10.10.30.200 \
+curl --noproxy '*' --resolve langfuse.example.com:443:192.0.2.200 \
   --connect-timeout 5 --max-time 10 --silent --show-error \
   --output /dev/null --write-out 'status=%{http_code} tls=%{ssl_verify_result}\n' \
-  https://langfuse.homeofanton.com/api/public/health
+  https://langfuse.example.com/api/public/health
 ```
 
 `status=200 tls=0` confirms a healthy response and a verified certificate from
@@ -435,8 +441,8 @@ or that trace queries finish within their budget.
 | Symptom | Check |
 |---|---|
 | Public URL returns a tunnel 502, internal health probe succeeds | Default-origin Doctor reads bypass the tunnel. Compare the finding's request URL and time with the internal path before attributing it to the tunnel. |
-| Internal connection times out or refuses the connection | The Doctor host must reach `10.10.30.200:443`; check that path and the ingress. There is no fallback to the public tunnel. |
-| Certificate verification fails | Check the certificate served for `langfuse.homeofanton.com`; keep verification enabled and the hostname configured. |
+| Internal connection times out or refuses the connection | The Doctor host must reach `192.0.2.200:443`; check that path and the ingress. There is no fallback to the public tunnel. |
+| Certificate verification fails | Check the certificate served for `langfuse.example.com`; keep verification enabled and the hostname configured. |
 | Langfuse returns 5xx through the internal path, or trace requests time out | These remain read failures and can raise `trace reader unavailable`; inspect the [failure lines](#read-budget) and backend health. |
 | Health succeeds but measurement refuses the project | Follow [Finding where a trace went](#finding-where-a-trace-went); health alone does not validate project identity. |
 
@@ -634,8 +640,8 @@ finding is absent.
 ### Langfuse and the swarm Redis time out together
 
 Langfuse keeps its queue and cache in a Redis outside the cluster: the
-`dataplane_redis` container on the Anton Unraid host, `10.10.30.130:6379`. The
-public tunnel to `langfuse.homeofanton.com` is the `cloudflared` container on
+`dataplane_redis` container on the Anton Unraid host, `192.0.2.130:6379`. The
+public tunnel to `langfuse.example.com` is the `cloudflared` container on
 the same host, and the k3s VMs `k8s-master`, `k8s-worker-1` and `k8s-worker-2`
 are libvirt guests there too. When that host runs out of memory every one of
 these stalls at once, so Langfuse, the edge and anything scheduled on those VMs
@@ -655,7 +661,7 @@ fail in the same minutes even though the pods themselves never restart.
 #### Checking for a host stall
 
 Confirm which Redis Langfuse holds connections to. `/proc/net/tcp` prints the
-remote address in little endian hex; `821E0A0A:18EB` is `10.10.30.130:6379` and
+remote address in little endian hex; `820200C0:18EB` is `192.0.2.130:6379` and
 state `01` is established:
 
 ```bash
@@ -663,18 +669,18 @@ KUBECONFIG=~/.kube/config-k3s kubectl -n anton-prod exec langfuse-0 -- \
   cat /proc/net/tcp | awk '$3 ~ /:18EB$/ {print $3, $4}' | sort | uniq -c
 ```
 
-Observed on 23 October: `6 821E0A0A:18EB 01`, six established connections to
+Observed on 23 October: `6 820200C0:18EB 01`, six established connections to
 the Anton host.
 
 Count the swarm tick's Redis timeouts in the window:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "2026-10-20 11:00" --until "2026-10-20 11:40" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "2026-10-20 11:00" --until "2026-10-20 11:40" \
   | grep -c "alias lookup failed"
 ```
 
 Then read the host itself, read only, over SSH
-(`ssh -i ~/.ssh/anton_id_ed25519 root@10.10.30.130`):
+(`ssh -i ~/.ssh/anton_id_ed25519 root@192.0.2.130`):
 
 ```bash
 free -m
@@ -697,7 +703,7 @@ host history.
 #### Cause found on 20 October
 
 Swarm task t575 followed an outage from 11:20 to 11:27 UTC on 20 October:
-`langfuse.homeofanton.com` answered 530 at 11:24 and 200 again at 11:26:48,
+`langfuse.example.com` answered 530 at 11:24 and 200 again at 11:26:48,
 `langfuse-0` logged 62 Redis timeouts in the hour to 11:24, and the swarm tick
 logged 97 `alias lookup failed ... Timeout reading from socket` lines between
 11:20 and 11:30 against the swarm Redis, then on `k8s-worker-2`. Read on the host
@@ -913,7 +919,7 @@ read.
 
 ```bash
 D=rig-grade-swarm-doctor
-journalctl --user -t agentihooks-swarm --since "-6h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-6h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep '"step": "doctor.trace"' \
   | sed 's/^[^{]*//' \
@@ -1099,9 +1105,9 @@ with an `enabled_tools` allowlist of those advertised names (and optionally
   "mcpServers": {
     "langfuse": {
       "type": "http",
-      "url": "http://10.10.30.200/mcp/",
+      "url": "http://192.0.2.200/mcp/",
       "headers": {
-        "Host": "llm.homeofanton.com",
+        "Host": "llm.example.com",
         "Authorization": "Bearer ${MCP_KEY_GATEWAY}",
         "x-mcp-servers": "langfuse_tools"
       },
@@ -1155,7 +1161,7 @@ headers:
 | Header | Value |
 |---|---|
 | `Authorization` | `Bearer $MCP_KEY_GATEWAY` |
-| `Host` | `llm.homeofanton.com` |
+| `Host` | `llm.example.com` |
 | `x-mcp-servers` | `langfuse_tools` |
 
 It calls `langfuse_tools-swarm_error_latency_summary` with the swarm slug, the
@@ -1167,9 +1173,9 @@ every ten minutes per swarm, and the whole read is bounded at 30 seconds.
 The public gateway name sits behind Cloudflare Access and refuses the gateway
 key, so the reader connects to the gateway's LAN ingress address instead and
 routes by the `Host` header. The ingress serves TLS for the gateway name with a
-valid `*.homeofanton.com` certificate. The reader's HTTP client takes the TLS
+valid `*.example.com` certificate. The reader's HTTP client takes the TLS
 server name from the `Host` header, so a request to
-`https://10.10.30.200/...` sends `llm.homeofanton.com` as SNI and verifies the
+`https://192.0.2.200/...` sends `llm.example.com` as SNI and verifies the
 certificate against that name while it connects to the address. The bearer
 credential therefore travels encrypted on the home network.
 
@@ -1179,8 +1185,8 @@ every configured value in git is `https`:
 
 | Reader | Where the endpoint is set | Value |
 |---|---|---|
-| Deployed swarm controller | antoncore `k8s/values-overlays/agentihooks-swarm/values.yaml`, `controller.env` | `https://10.10.30.200/toolset/swarm-controller/mcp` |
-| Local sampler (timer ticks on a workstation) | agentihooks-bundle `profiles/anton-base` env for Claude, Codex and Copilot | `https://10.10.30.200/mcp/` |
+| Deployed swarm controller | antoncore `k8s/values-overlays/agentihooks-swarm/values.yaml`, `controller.env` | `https://192.0.2.200/toolset/swarm-controller/mcp` |
+| Local sampler (timer ticks on a workstation) | agentihooks-bundle `profiles/anton-base` env for Claude, Codex and Copilot | `https://192.0.2.200/mcp/` |
 
 The bundle and antoncore each have a test that pins the configured scheme to
 `https`. The agentihooks Helm chart ships `controller.env.LANGFUSE_MCP_URL`
@@ -1203,7 +1209,7 @@ fail silently.
 # antoncore k8s/values-overlays/agentihooks-swarm/values.yaml
 controller:
   env:
-    LANGFUSE_MCP_URL: https://10.10.30.200/toolset/swarm-controller/mcp
+    LANGFUSE_MCP_URL: https://192.0.2.200/toolset/swarm-controller/mcp
   secretEnv:
     - name: MCP_KEY_GATEWAY
       secretName: swarm-controller-gateway
@@ -1214,7 +1220,7 @@ controller:
 The bundle sets the local value in `profiles/anton-base/.claude/settings.overrides.json`:
 
 ```json
-{ "env": { "LANGFUSE_MCP_URL": "https://10.10.30.200/mcp/" } }
+{ "env": { "LANGFUSE_MCP_URL": "https://192.0.2.200/mcp/" } }
 ```
 
 and the same value in the Codex (`config.overrides.toml`) and Copilot
@@ -1249,20 +1255,20 @@ key and changes no finding; the next attempt waits out the ten minute interval.
 1. The ingress presents a certificate valid for the gateway name:
 
    ```bash
-   openssl s_client -connect 10.10.30.200:443 -servername llm.homeofanton.com \
+   openssl s_client -connect 192.0.2.200:443 -servername llm.example.com \
      -verify_return_error </dev/null 2>&1 | grep -E "subject=|Verify return code"
    ```
 
    Observed on 2026-10-19 from a home network workstation:
-   `subject=CN = *.homeofanton.com`, issuer Let's Encrypt, and
+   `subject=CN = *.example.com`, issuer Let's Encrypt, and
    `Verify return code: 0 (ok)`.
 2. The gateway answers over that route. Without a key it refuses with 401, which
    proves the TLS session and routing work:
 
    ```bash
    curl -s -o /dev/null -w "%{http_code} %{ssl_verify_result}\n" \
-     --connect-to llm.homeofanton.com:443:10.10.30.200:443 \
-     https://llm.homeofanton.com/toolset/swarm-controller/mcp
+     --connect-to llm.example.com:443:192.0.2.200:443 \
+     https://llm.example.com/toolset/swarm-controller/mcp
    ```
 
    Observed on 2026-10-19 from the same workstation: `401 0`, a refusal for
@@ -1277,6 +1283,6 @@ key and changes no finding; the next attempt waits out the ten minute interval.
 | `Langfuse sampling is off` in the tick output | `LANGFUSE_MCP_URL` is unset where the tick runs | Set it in the overlay or bundle profile, then redeploy or rerun `agentihooks init` |
 | No `Langfuse summary read` line and no findings | The read failed; `error` in the `langfuse-summary` key names the exception type | Run the two checks above: a failed first check points at the ingress or its certificate, a failed second at routing; with both passing, check `MCP_KEY_GATEWAY` is set for the reader |
 | No tick line, `error` is `KeyError` | `MCP_KEY_GATEWAY` is unset; on the controller the `swarm-controller-gateway` Secret is optional, so a missing Secret starts the Pod without the key | Create the Secret with key `key`; the next pass after the ten minute interval reads |
-| Certificate verification fails | The ingress certificate does not cover the TLS server name `llm.homeofanton.com` (not observed; the first check above shows it) | Run the first check; keep `Host: llm.homeofanton.com`, since the reader takes the TLS server name from it |
+| Certificate verification fails | The ingress certificate does not cover the TLS server name `llm.example.com` (not observed; the first check above shows it) | Run the first check; keep `Host: llm.example.com`, since the reader takes the TLS server name from it |
 | The gateway refuses the key | The endpoint names the public gateway address behind Cloudflare Access | Use the LAN ingress address with `https` |
 | Grafana bottleneck findings never appear | The Grafana read failed, or `LANGFUSE_MCP_URL` or `MCP_KEY_GATEWAY` is unset; that read prints nothing and stores no error | Run the two checks above and confirm both variables are set where the tick runs |

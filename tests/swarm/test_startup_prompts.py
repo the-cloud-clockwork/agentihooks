@@ -208,7 +208,7 @@ def test_master_prompt_observation_preserves_previous_retirement_actions():
 
     from scripts.swarm.pane import PaneObservation
     from scripts.swarm.store import RedisStore
-    from scripts.swarm.tick import _reap
+    from scripts.tick.steps.agents import _reap
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -469,6 +469,22 @@ def test_a_parked_task_with_no_branch_or_base_starts_fresh_from_dev_with_the_par
 def test_stacked_steps_apply_only_to_code_work():
     lines = _steps({"kind": "research", "stack_base": [{"task": "t1", "branch": "eng-one"}]})
     assert "park <doc>" not in "\n".join(lines)
+
+
+@pytest.mark.feature("swarm-park-resume-branch")
+@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
+def test_a_resumed_parked_task_of_every_kind_names_its_recorded_branch(kind: str) -> None:
+    lines = _steps({"kind": kind, "branch": "eng-parked", "parked_on": ["t1"]})
+    text = "\n".join(lines)
+    origin = f"{CUT} --from origin/eng-parked"
+    assert (
+        "Your task was parked on branch eng-parked until its dependency finished: continue its work from that "
+        f"branch with {origin}."
+    ) in lines
+    cuts = [line for line in lines if line[:2] in ("2.", "3.", "4.") and CUT in line]
+    assert all(origin in line for line in cuts)
+    assert len(cuts) == (0 if kind == "research" else 1)
+    assert text.count(CUT) == text.count(origin)
 
 
 SERENA_LINE = (

@@ -57,19 +57,21 @@ import re
 import signal
 import subprocess
 import sys
-import threading
 import time
-from collections.abc import Callable, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+import urllib.error
+from collections.abc import Callable, Iterable, MutableMapping
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
-from contextvars import copy_context
-from dataclasses import asdict, replace
+from contextvars import Token, copy_context
+from dataclasses import asdict, dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
+from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
@@ -88,6 +90,7 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
+    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -103,6 +106,8 @@ from scripts.swarm import (
     doc_report,
     done_gate,
     failed_panes,
+    git_https,
+    hive_release,
     idle,
     launch_check,
     ledger_events,
@@ -120,6 +125,7 @@ from scripts.swarm import (
     prerequisite_wait,
     priming_trace,
     prompt,
+    pull_head,
     queue_exit,
     queue_priority,
     queue_record,
@@ -132,6 +138,7 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
+    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -145,9 +152,11 @@ from scripts.swarm import (
 from scripts.swarm import ledger_client as ledger_client
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
-from scripts.swarm.health import activity
+from scripts.swarm.health import activity, report
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
+from scripts.swarm.pull_head import PULL_SECONDS as PULL_SECONDS
+from scripts.swarm.pull_head import PullHead, pull_branch
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     agent_hive,
@@ -188,12 +197,27 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
+from scripts.tick import engine, hook_reads, pool
+from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
+from scripts.tick.adapters.coordination import StoreCoordination
+from scripts.tick.adapters.github import GitHubSourceControl
+from scripts.tick.adapters.host import local_host
+from scripts.tick.adapters.inbox import StoreInbox
+from scripts.tick.adapters.ledger import ClientLedger, PassLedger, resource_client
+from scripts.tick.adapters.llm import ApiLlm
+from scripts.tick.adapters.metrics import SpoolMetrics
+from scripts.tick.adapters.processes import PassProcesses
+from scripts.tick.adapters.runtime import RouterRuntime
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports.contracts import SourceControl
-from scripts.tick.ports.source_control import ChangeRef
-from scripts.tick.steps import Left, PassBox
+from scripts.tick.ports.tools import PASS_TOOLS, Tools
+from scripts.tick.sites import TICK_HOOK_KEYS, TICK_SHUT_KEYS, TICK_SITES, TickSites, run_sites
+from scripts.tick.step import Domain
+from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
+from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
+from scripts.tick.steps import report as report_steps
+from scripts.tick.steps import tasks as task_steps
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -223,6 +247,32 @@ TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
 ON_OFF = {"on": True, "off": False}
 PLACEMENT_NODES = "placement-nodes"
+WRAPPER_PREFIX = (
+    "wrapper probes",
+    "wrapper health",
+    "wrapper commands",
+    "wrapper phases",
+    "wrapper refresh",
+    "wrapper intent",
+    "wrapper reboot",
+)
+PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
+NONE: frozenset[Domain] = frozenset()
+WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    "wrapper probes": (NONE, NONE),
+    "wrapper commands": (pass_domains("stop"), NONE),
+    "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
+    "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
+    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper metrics": (NONE, hook_domains("count")),
+}
+PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
+PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
+HEALTH_SITES = ("wrapper health", "wrapper commands")
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
+ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
+LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -238,12 +288,10 @@ CONFIG_KEYS = {
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
-TICK_SECONDS = 60
-# The scheduled tick holder stops a pass at scheduled_tick.TIMEOUT_S; leave an extra tick room to finish.
-EXTRA_TICKS_UNTIL = 420
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|([\w-]+\.)+(com|org|net|io|dev)/", re.IGNORECASE)
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
@@ -260,34 +308,36 @@ def now_ms():
 
 
 def _publish_tick_status(
-    store: Any, slug: str, doc: Any, view: Any = None, failure: BaseException | None = None
+    store: Any,
+    slug: str,
+    doc: Any,
+    view: Any = None,
+    failure: BaseException | None = None,
+    found: list[dict[str, Any]] | None = None,
 ) -> None:
+    """Publish the tick status, reusing ``found`` health findings, and raise a publish error only for a passing tick."""
     from scripts.swarm import command_runner
 
     try:
-        timing.call(command_runner.publish, store, slug, doc, view)
+        timing.call(command_runner.publish, store, slug, doc, view, found)
     except Exception:
         if failure is None:
             raise
 
 
-def _phase_steps(inbox, store, slug, doc, ledger):
+def _phase_steps(inbox: Any, store: Any, slug: str, doc: dict[str, Any], ledger: Any) -> list[Any]:
     actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
     if actions:
-        doc = timing.call(ledger.state, slug)
-    ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
-    actions += ticked
-    if ticked:
-        actions += skip_refused(
-            phase_planning.planning_pass,
-            inbox,
-            store,
-            slug,
-            timing.call(ledger.state, slug),
-            ledger,
-            store.config(slug),
-        )
-    return actions
+        doc = timing.call(ledger_client.pass_state, ledger, slug)
+    return actions + task_steps.phase_writes(skip_refused(phases.phase_changes, doc))
+
+
+def _planning_after_phase(inbox: Any, store: Any, slug: str, ledger: Any, box: dict[str, Any]) -> list[str]:
+    if task_steps.PHASE_CHANGED not in box:
+        return []
+    del box[task_steps.PHASE_CHANGED]
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
+    return skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
 
 
 def _bin_stop(store, slug, ledger, runtime):
@@ -298,35 +348,314 @@ def _bin_stop(store, slug, ledger, runtime):
     ]
 
 
-def _stopped_tick(store, slug, ledger, runtime, held):
+def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
+    """Hold the pass's ledger view until beating closes, started with one delta read under a short timeout when the
+    client reads it, read again under the export budget when that read timed out without a fresh stored view; a
+    slow or stopped server leaves the pass on the last good view this host stored, writing to
+    the outbox and refusing fresh reads, and an address the credential may not travel to leaves it unheld for its
+    ledger health probe."""
+    beating.enter_context(ledger_view.holding())
+    if not ledger_view.reads(ledger):
+        return
+    beating.callback(ledger_client.OFFLINE.set, False)
+    beating.callback(ledger_client.SLOW.set, False)
+    try:
+        ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
+    except ledger_link.Cleartext as exc:
+        print(f"ledger {slug} view not held: {exc}", file=sys.stderr)
+    except OSError as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
+            raise
+        _read_long_or_hold_stored(slug, ledger, exc)
+
+
+def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> None:
+    """Read the view of ledger ``slug`` again under the export budget when the short read timed out and this host
+    stores no view fresh enough to run from, else hold the stored view."""
+    if ledger_view.timed_out(exc) and not ledger_view.fresh(slug):
+        try:
+            ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
+            return
+        except OSError as again:
+            if isinstance(again, urllib.error.HTTPError) and again.code < 500:
+                raise
+            exc = again
+    _hold_stored(slug, exc)
+
+
+def _hold_stored(slug: str, exc: OSError) -> None:
+    """Hold the last good view of ledger ``slug`` for the pass and run it offline, or leave the pass to its ledger
+    health probe when this host stores none; a read that only timed out leaves its writes sent to the server first."""
+    if ledger_view.hold_stored(slug) is None:
+        print(f"ledger {slug} not answering ({exc}) and no view is stored to run from", file=sys.stderr)
+        return
+    print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
+    ledger_client.OFFLINE.set(True)
+    ledger_client.SLOW.set(ledger_view.timed_out(exc))
+
+
+def _stopped_tick(store: RedisStore, slug: str, ledger: Any, held: Any) -> tuple[list[str], dict[str, Any]]:
     from scripts.swarm import command_runner, controller
 
-    runtime = controller.FencedRuntime(
-        store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
-    )
+    fenced = _fenced(held, controller.deployment_for(store.config(slug), os.environ))
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
-        return controls + _bin_stop(store, slug, ledger, runtime), {}
-    doc = timing.call(ledger.state, slug)
+        return controls + _bin_stop(store, slug, ledger, fenced), {}
+    doc = timing.call(ledger_client.pass_state, ledger, slug)
     store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-    return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
+    return controls + timing.call(tick, slug, store, ledger, fenced, now_ms()), doc
 
 
-def _intent_pass(inbox, store, slug, doc, ledger, config):
-    view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, config: Any) -> tuple[Future, list[str]]:
+    """Start the pass view off the step and judge intent from one batched read of every watched pull request,
+    returning the pending view and the check's actions."""
+    building = ThreadPoolExecutor(max_workers=1)
+    view = building.submit(copy_context().run, timing.call, ledger_events.tick_view, inbox, store, slug, doc)
+    building.shutdown(wait=False)
+    mode = intent.mode_of(config)
+    urls = intent.watched_urls(slug, doc, mode)
+    pulls = intent.Pulls(lambda batch: timing.call(ledger_events.pull_texts, batch), urls)
     check = intent.Check(
         slug,
-        intent.mode_of(config),
+        mode,
         now_ms(),
         ledger,
         ledger_events.Mail(inbox, store, slug),
         intent.pr_view,
         intent.judged,
-        head=lambda url: getattr(view(url), "head", None),
+        head=pulls.head,
         named=intent.named_view,
-        text=intent.pr_text,
+        text=pulls.text,
+        merged=pulls.merged,
+        draft=pulls.draft,
+        limit=intent.JUDGED_PER_PASS,
+        judging=intent.TICK_JUDGING,
     )
     return view, skip_refused(check.run, doc)
+
+
+def _unstopped(owner: Any, hook: Callable[[], bool]) -> Callable[[], bool]:
+    """Return ``hook`` answering false without running once the ledger health probe stopped the pass of ``owner``."""
+    return lambda: "stop" not in owner.box and hook()
+
+
+@dataclass
+class _Wrapper:
+    """The wrapper's sites of a pass graph: the checks the hand written wrapper ran between its groups, and the
+    actions it returned in their order."""
+
+    held: Any
+    beating: ExitStack
+    state: dict[str, Any]
+    box: PassBox
+    ticks: TickSites
+    watching: ExitStack = dataclass_field(default_factory=ExitStack, init=False)
+    seen: dict[str, Any] = dataclass_field(default_factory=dict[str, Any], init=False)
+    ended: list[str] | None = dataclass_field(default=None, init=False)
+    checked: list[str] = dataclass_field(default_factory=list[str], init=False)
+    judging: PassBox = dataclass_field(init=False)
+    groups: dict[str, str] = dataclass_field(init=False)
+
+    @property
+    def store(self) -> RedisStore:
+        """Return the swarm store of the pass state."""
+        return self.state["store"]
+
+    @property
+    def slug(self) -> str:
+        """Return the swarm of the pass state."""
+        return self.state["slug"]
+
+    @property
+    def ledger(self) -> Any:
+        """Return the ledger client of the pass state."""
+        return self.state["ledger"]
+
+    def __post_init__(self) -> None:
+        """Hand the intent check its own box, sharing the pass's left steps, and end the tick's scan with the watch."""
+        self.judging = PassBox(left=self.box.left)
+        self.state["judging"] = self.judging
+        self.groups = {step.name: step.group for step in step_registry.steps()}
+        self.watching.callback(self.ticks.close)
+
+    def hooks(self) -> dict[str, Callable[[], bool]]:
+        """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
+        sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
+        later site's step may spawn before its hook runs. Each check reads and writes the keys
+        ``WRAPPER_HOOK_KEYS`` declares for its site; the checks that reach the ledger answer false without running
+        once the ledger health probe stopped the pass, because the sites they open are shut then."""
+        found = {
+            "wrapper probes": self._fence,
+            "wrapper commands": self._watch,
+            "wrapper phases": self._read,
+            "wrapper intent": self._judge,
+            "wrapper relay": self._judged,
+            "wrapper view": self._reread,
+            "wrapper metrics": self._count,
+        }
+        guarded = hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
+        return {site: _unstopped(self, hook) if site in LEDGER_HOOKS else hook for site, hook in guarded.items()}
+
+    def shut(self, step: Any) -> bool:
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
+        needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
+        open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
+        stopped = not open_past_stop and "stop" in self.box
+        ended = self.ended is not None and step.group not in ENDS_AFTER
+        return stopped or ended or self.ticks.shut(step)
+
+    def actions(self, records: Iterable[Any]) -> list[str]:
+        """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
+        found = tuple(records)
+        return self._acted(found, HEALTH_SITES) + self._counted(found) + self._acted(found, ("wrapper metrics",))
+
+    def _acted(self, records: Iterable[Any], sites: tuple[str, ...]) -> list[str]:
+        """Return the actions of the records of steps at ``sites``, in record order."""
+        return actions_of(record for record in records if self.groups.get(record.name) in sites)
+
+    def _counted(self, records: tuple[Any, ...]) -> list[str]:
+        """Return the actions metrics counts: phases and reboot, the tick unless it left a value, intent and events."""
+        tick = [] if self.ticks.left else self._acted(records, TICK_SITES)
+        early = self._acted(records, ("wrapper phases", "wrapper reboot"))
+        return early + tick + self.checked + self._acted(records, ("wrapper events",))
+
+    def _fence(self) -> bool:
+        """Fence the runtime the rest of the pass uses."""
+        from scripts.swarm import controller
+
+        deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
+        self.state["runtime"] = _fenced(self.held, deployment)
+        return True
+
+    def _watch(self) -> bool:
+        """Watch the rest of the pass for spawn stalls, until the graph returns."""
+        from scripts.swarm.health import spawn_stall
+
+        watched = spawn_stall.watch(self.store, self.slug, self.ledger, now_ms, self.state["runtime"])
+        self.watching.enter_context(watched)
+        return True
+
+    def _read(self) -> bool:
+        """End the pass when the ledger is binned or gone, else read its pass state and clear the halt marks."""
+        store, slug, ledger = self.store, self.slug, self.ledger
+        if timing.call(ledger.binned, slug):
+            self.ended = _bin_stop(store, slug, ledger, self.state["runtime"])
+            return False
+        try:
+            self.box["doc"] = timing.call(ledger_client.pass_state, ledger, slug)
+        except LedgerGone as exc:
+            first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
+            self.ended = (
+                [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
+            )
+            return False
+        store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
+        return True
+
+    def _judge(self) -> bool:
+        """Read the pass state and config the intent check judges against."""
+        self.judging["doc"] = timing.call(ledger_client.pass_state, self.ledger, self.slug)
+        self.judging["config"] = self.store.config(self.slug)
+        return True
+
+    def _judged(self) -> bool:
+        """End the tick's scan, raise what the intent check held and keep its view and checked actions when it stored
+        them; an intent check that overran its budget stored nothing and leaves the pass going."""
+        self.ticks.close()
+        host_steps.raise_held(self.judging)
+        if "judged" in self.judging:
+            view, self.checked = self.judging["judged"]
+            self.box["view"] = host_steps.pass_view(self.slug, view)
+        return True
+
+    def _reread(self) -> bool:
+        """List the agents when the lane dropped the page relay, then read the pass state, config and task rows again
+        for the view, events and metrics sites."""
+        if "agents" not in self.box:
+            self.box["agents"] = host_steps.listed(self.store, self.slug)
+        doc = timing.call(ledger_client.pass_state, self.ledger, self.slug)
+        self.box.update(doc=doc, config=self.store.config(self.slug), rows={t["id"]: t for t in doc["tasks"]})
+        return True
+
+    def _count(self) -> bool:
+        """Hand metrics the number of actions the pass counted so far."""
+        self.box["count"] = len(self._counted(tuple(self.seen.values())))
+        return True
+
+
+class _PassSpool:
+    """The local metrics spool of one tick pass, opened on its first append."""
+
+    def __init__(self) -> None:
+        """Start with the spool closed."""
+        self._box: Any = None
+
+    def append_many(self, batches: list[tuple[Any, list[dict[str, object]]]], checkpoint: Callable[..., None]) -> None:
+        """Open the spool on first use and append every batch in one transaction."""
+        from scripts.swarm import metrics_outbox
+
+        spool: Any = metrics_outbox
+        sink = spool.settings(os.environ)
+        if sink is None:
+            return
+        if self._box is None:
+            self._box = spool.Outbox(spool.spool_path(), sink)
+        self._box.append_many(batches, checkpoint)
+
+
+def _fencing(store: RedisStore, slug: str) -> Callable[[object, str, Any], Any]:
+    """Return the fence the runtime port of swarm ``slug`` puts its pass runtime behind: the lease held, in a
+    deployment."""
+
+    def fence(held: object, deployment: str, runtime: Any) -> Any:
+        from scripts.swarm import controller
+
+        return controller.FencedRuntime(store, slug, held, runtime, deployment)
+
+    return fence
+
+
+def _fenced(held: object, deployment: str) -> Any:
+    """Fence the pass runtime to the lease ``held`` through the runtime port of the pass tools and return it."""
+    tools: Any = PASS_TOOLS.get()
+    return tools.runtime.fence(held, deployment, deadline=Deadline.after(TICK_LOCK_MS / 1000))
+
+
+def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
+    """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
+    from scripts.swarm import dispatcher
+
+    swarm: Any = store
+    settings: Any = classifier_settings.load()
+
+    def agent(name: str) -> Any:
+        return next((record for record in swarm.agents(slug) if record.name == name), None)
+
+    return Tools(
+        ledger=ClientLedger(slug, resource_client(slug, service=True)) if ledger is None else PassLedger(slug, ledger),
+        coordination=StoreCoordination(store, slug, owner),
+        source_control=GitHubSourceControl("", Path.cwd(), "dev"),
+        runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime, fencing=_fencing(store, slug)),
+        processes=PassProcesses(),
+        inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
+        llm=ApiLlm(settings.models[0], settings.url),
+        metrics=SpoolMetrics(_PassSpool(), {dispatcher.TABLE.name: dispatcher.TABLE}),
+        host=local_host(store, slug, os.environ),
+    )
+
+
+def _end_hold(store: RedisStore, slug: str, token: str, keeping: Token[Any], revoke: Callable[[], None]) -> None:
+    """Revoke the pass's step hook, release its tick lock, then drop the hook and stop hold even when the release
+    raises."""
+    from scripts.swarm import controller
+
+    revoke()
+    try:
+        controller.release_tick_lock(store, slug, token, "pass")
+    finally:
+        timing.BEFORE_STEP.reset(keeping)
+        tick_stop.drop(token)
 
 
 @timing.instrument_tick
@@ -352,107 +681,78 @@ def run_tick(
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
-    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
+    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS, "pass")
     if token is None:
         return ["another tick is running"]
-    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token))
+    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token, "pass stop"))
 
-    def before_step():
-        tick_stop.check()
-        tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
-
-    keeping = timing.BEFORE_STEP.set(before_step)
-    doc, view, beating = {}, None, ExitStack()
+    renewal = tick_activity.Renewal(
+        store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass step"), now_ms
+    )
+    keeping = timing.BEFORE_STEP.set(renewal)
+    doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
+    wrapper: _Wrapper | None = None
+    failed: BaseException | None = None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
+        beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
+        beating.enter_context(
+            pool.running(
+                mode=store.config(slug).tick_mode,
+                heartbeat=lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass heartbeat"),
+            )
+        )
         timing.keep()
+        budgets.resolve(store, slug)
         run_group("before")
         if store.config(slug).state == "stopped":
-            actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
+            _hold_view(beating, slug, ledger)
+            actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
-        box: dict[str, Any] = PassBox()
-        passing = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
-        run_group("wrapper probes", **passing)
-        host_steps.raise_held(box)
-        if "stop" in box:
-            return box["stop"]
-        if ledger_view.reads(ledger):
-            ledger_view.start(slug, ledger.service)
-        runtime = controller.FencedRuntime(
-            store,
-            slug,
-            held,
-            runtime or routed(herdr=HerdrRuntime()),
-            controller.deployment_for(store.config(slug), os.environ),
-        )
-        from scripts.swarm.health import spawn_stall
-
-        passing |= {"ledger": ledger, "runtime": runtime}
-        probed = run_group("wrapper health", **passing)
-        host_steps.raise_held(box)
-        with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
-            controls = run_group("wrapper commands", **passing)
+        state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
+        state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
+        ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
+        wrapper = _Wrapper(held, beating, state, box, ticks)
+        _hold_view(beating, slug, ledger)
+        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
+        try:
+            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
+        finally:
+            wrapper.watching.close()
+        doc, view = box.get("doc", doc), host_steps.settled_view(box.get("view"))
+        try:
             host_steps.raise_held(box)
-            if timing.call(ledger.binned, slug):
-                return _bin_stop(store, slug, ledger, runtime)
-            inbox = InboxStore(store.redis)
-            try:
-                doc = timing.call(ledger.state, slug)
-            except LedgerGone as exc:
-                first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
-                return (
-                    [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
-                )
-            store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-            actions = run_group("wrapper phases", **passing, inbox=inbox, doc=doc)
-            host_steps.raise_held(box)
-            run_group("wrapper refresh", **passing, scheduled=scheduled)
-            host_steps.raise_held(box)
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
-            judging: dict[str, Any] = PassBox()
-            with ThreadPoolExecutor(max_workers=1) as worker:
-                judging_state = passing | {"box": judging, "inbox": inbox, "doc": doc, "config": config}
-                judged = worker.submit(copy_context().run, run_group, "wrapper intent", **judging_state)
-                try:
-                    actions += run_group("wrapper reboot", **passing)
-                    host_steps.raise_held(box)
-                finally:
-                    judged.result()
-                    host_steps.raise_held(judging)
-                    view, checked = judging["judged"]
-            actions += checked
-            run_group("wrapper relay", **passing, inbox=inbox)
-            host_steps.raise_held(box)
-            agents = box["agents"]
-            doc, config = timing.call(ledger.state, slug), store.config(slug)
-            run_group("wrapper view", **passing, inbox=inbox, doc=doc, view=view)
-            host_steps.raise_held(box)
-            view = box.get("view", view)
-            rows = {t["id"]: t for t in doc["tasks"]}
-            passing |= {"inbox": inbox, "doc": doc, "config": config, "view": view, "rows": rows, "agents": agents}
-            actions += run_group("wrapper events", **passing)
-            host_steps.raise_held(box)
-            actions += run_group("wrapper metrics", **passing, count=len(actions))
-            host_steps.raise_held(box)
-            doc = timing.call(ledger.state, slug)
-            run_group("after", **(passing | {"doc": doc}))
-            host_steps.raise_held(box)
-            started = box["started"]
-            return probed + controls + actions + (["started automatic snapshot"] if started else [])
-    except Left:
-        return []
+        finally:
+            host_steps.raise_held(wrapper.judging)
+        if "stop" in box or wrapper.ended is not None:
+            return box.get("stop") or wrapper.ended or []
+        doc = timing.call(ledger_client.pass_state, ledger, slug)
+        ended = report_steps.FULL
+        return wrapper.actions(records)
+    except Left as missing:
+        ended = report_steps.EARLY
+        return report_steps.early_end(store, slug, missing, box.left)
+    except (Exception, ledger_link.Cleartext) as exc:
+        failed = exc
+        return host_steps.held_failure(exc, box, getattr(wrapper, "judging", {}))
     finally:
         try:
             published: dict[str, Any] = PassBox()
-            run_group(
-                "wrapper status", store=store, slug=slug, doc=doc, view=view, box=published, failure=sys.exception()
-            )
-            host_steps.raise_held(published)
+            closing: dict[str, Any] = {
+                "store": store,
+                "slug": slug,
+                "doc": doc,
+                "view": view,
+                "box": published,
+                "ended": ended,
+            }
+            run_group(report_steps.CLOSING_GROUP, **closing, failure=sys.exception() or failed)
+            host_steps.end_held(published)
         finally:
-            beating.close()
-            timing.BEFORE_STEP.reset(keeping)
-            tick_stop.drop(token)
-            controller.release_tick_lock(store, slug, token)
+            try:
+                beating.close()
+            finally:
+                _end_hold(store, slug, token, keeping, renewal.revoke)
 
 
 def cmd_list(store, args):
@@ -472,33 +772,6 @@ def _tick_one(store, slug):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
         timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
-
-
-class _Firsts:
-    def __init__(self, count):
-        self.left, self.lock, self.settled = count, threading.Lock(), threading.Event()
-
-    def done(self):
-        with self.lock:
-            self.left -= 1
-            if not self.left:
-                self.settled.set()
-
-
-def _tick_while_others_run(store: RedisStore, slug: str, firsts: _Firsts, until: float) -> None:
-    """An extra pass starts only when this swarm's longest pass so far still ends by the extra pass cutoff."""
-    started = time.monotonic()
-    try:
-        _tick_one(store, slug)
-    finally:
-        firsts.done()
-    longest = time.monotonic() - started
-    while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
-        started = time.monotonic()
-        if started + longest > until or tick_stop.STOP.is_set():
-            return
-        _tick_one(store, slug)
-        longest = max(longest, time.monotonic() - started)
 
 
 def _reconcile_services():
@@ -533,7 +806,7 @@ def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     ):
         return []
     ledger = ledger or LedgerClient()
-    doc = ledger.state(slug)
+    doc = ledger_client.pass_state(ledger, slug)
     inbox = InboxStore(store.redis)
     view = ledger_events.tick_view(inbox, store, slug, doc)
     lease.require(store, slug, held)
@@ -552,17 +825,18 @@ def cmd_waits(store, args):
     except (OSError, subprocess.SubprocessError) as exc:
         timing.emit(sys.stderr, f"the scheduled swarm tick guard failed: {type(exc).__name__}: {exc}")
 
-    def check(slug):
+    def check(job: tuple[str, Callable[[RedisStore, str], list[str]]]) -> None:
+        slug, passing = job
         try:
-            for action in run_waits(store, slug):
+            for action in passing(store, slug):
                 timing.emit(sys.stdout, f"{slug}: {action}")
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    slugs = store.slugs()
-    if slugs:
-        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(check, slugs))
+    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    if jobs:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            list(pool.map(check, jobs))
 
 
 def _tickable(slug):
@@ -598,6 +872,16 @@ def cmd_tick(store, args):
         print("another swarm tick is running on this machine", file=sys.stderr)
 
 
+def cmd_swarm_tick(store: RedisStore, args: argparse.Namespace) -> None:
+    """Tick one swarm on this workstation, refused for a swarm the Anton controller serves."""
+    from scripts.swarm import scheduled_tick
+
+    if scheduled_tick.served(store.config(args.slug)):
+        raise SwarmError(scheduled_tick.SERVED.format(slug=args.slug))
+    for action in run_tick(store, args.slug):
+        print(action)
+
+
 def _tick_host(store, started):
     from scripts import operator_env
     from scripts.swarm_ledger import authority_context
@@ -616,13 +900,7 @@ def _tick_host(store, started):
 
         documentation_session.schedule_retry()
         if slugs:
-            firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
-            if tick_stop.run(
-                slugs,
-                lambda slug: _tick_while_others_run(store, slug, firsts, until),
-                firsts.settled.set,
-                time.monotonic() - started,
-            ):
+            if tick_stop.run(slugs, lambda slug: _tick_one(store, slug), time.monotonic() - started):
                 return
         from scripts import herdr_gc
 
@@ -656,7 +934,12 @@ def cmd_waker(store, args):
 def cmd_prober(store, args):
     from scripts.swarm import command_runner, quota_refresh
 
-    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+    quota_refresh.run(
+        store,
+        lambda slug, row: command_runner.execute(store, slug, row),
+        quota_refresh.WAIT_S,
+        lambda: quota_refresh.probe(dict(os.environ), time.time()),
+    )
 
 
 def cmd_spoke(store, args):
@@ -690,8 +973,10 @@ def cmd_tick_watch(store, args):
         repair = tick_watch.Repair(scheduled_tick.restart, respawn)
     else:
 
-        def repair(slug, now):
-            return place_master(slug, store, runtime, now)
+        def repair(slug: str, now: int) -> list[str]:
+            return tick_watch.bounded(
+                lambda: place_master(slug, store, runtime, now), tick_watch.REPAIR_S, "the master placement"
+            )
 
     tick_watch.run(store, now_ms, repair)
 
@@ -699,6 +984,8 @@ def cmd_tick_watch(store, args):
 def cmd_create(store, args):
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
+    if WEB_REPO.match(args.repo):
+        raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
@@ -938,12 +1225,13 @@ def cmd_agent_up(store, args):
     print(json.dumps(asdict(launched)))
 
 
-def cmd_exit(store, args):
+def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
+    released = agent is not None and agent.lane != MASTER and agent.state == "finished"
+    if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
-    else:
+    elif not released:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
@@ -1276,7 +1564,24 @@ def probe_command(store, args):
         print(found.line())
 
 
-def cmd_status(store, args):
+def hive_admission(store: Any, slug: str) -> dict[str, Any]:
+    """Each live hive's admission room and limit, and the binding limit against quota seats and host room."""
+    from scripts.hive import admission
+    from scripts.hive.launch import live_hives
+    from scripts.swarm import capacity
+
+    hives = live_hives(store)
+    record: dict[str, Any] = capacity.read(store, slug)
+    host: dict[str, Any] = record.get("host") or {}
+    environ = dict(os.environ)
+    observed = capacity.accounts(environ, time.time(), refresh=False)
+    seats = capacity.quota_seats(observed, capacity.warned_accounts(observed, environ))
+    others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
+    rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+    return {"hives": rows, "lines": admission.view_lines(hives, others)}
+
+
+def cmd_status(store: Any, args: Any) -> None:
     if args.json:
         store.config(args.slug)
         print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
@@ -1309,6 +1614,7 @@ def cmd_status(store, args):
     from scripts.hive import admission, placement_waits
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
+    held += hive_admission(store, config.slug)["lines"]
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -1340,19 +1646,14 @@ def cmd_status(store, args):
         for field, values in launch["misses"].items():
             mode = "report only" if field in launch_check.REPORT_ONLY else "enforced"
             print(f"  {field}  {mode}  expected {values['expected']}; observed {values['actual']}")
-    for f in found:
-        print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
-        for entry in f["evidence"]:
-            print(f"  - {entry}")
-        print(f"  threshold {f['threshold']}")
-        print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
+    sys.stdout.write(report.text(found, verdict_store(store, args.slug).false_positives()))
     for row in gate_log.decisions(args.slug):
         print(
             f"gate  {modes.label(row['kind'])}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"
         )
 
 
-def cmd_freeze(store, args):
+def cmd_freeze(store: RedisStore, args: argparse.Namespace) -> None:
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
     full = store.config(args.slug).autonomy == FULL
@@ -1360,8 +1661,11 @@ def cmd_freeze(store, args):
         raise SwarmError(
             "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
         )
-    LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
-    print(json.dumps({args.command: args.target, "by": writer}))
+    given: dict[str, Any] = vars(args)
+    queue = {key: given[key] for key in ("position", "only") if given.get(key)}
+    words = FreezeWords(reason=args.reason or "", quote=args.quote or "", **queue)
+    LedgerClient().freeze(args.slug, args.command, args.target, by=by, words=words)
+    print(json.dumps({args.command: args.target, "by": writer, **queue}))
 
 
 def cmd_cover(store, args):
@@ -1391,19 +1695,42 @@ def autoscale_lines(config, decision):
     return lines
 
 
-def cmd_autoscale(store, args):
-    from scripts.swarm import capacity
+def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
+    from scripts.hive import admission, launch
+    from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
     if args.fixture:
         inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
-    _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
+    _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs, capacity.tick_host(inputs))
+    known = args.slug in store.slugs()
+    slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
+    host: dict[str, Any] = (decision or {})["host"]
+    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    admitted: list[str] = []
+    if hives:
+        seats = capacity.inputs_seats(inputs)
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
     if args.json:
-        print(json.dumps({"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision}, indent=2))
+        rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+        shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
+        print(
+            json.dumps(
+                {
+                    "scaling": config.scaling,
+                    "applied": config.scaling == AUTO_SCALING,
+                    **(decision or {}),
+                    **slots,
+                    **shown,
+                },
+                indent=2,
+            )
+        )
         return
-    print("\n".join(autoscale_lines(config, decision)))
+    local = [f"local slots {slots['local_slots']}, host room guard applies"] if known else []
+    print("\n".join([*autoscale_lines(config, decision), *local, *admitted]))
 
 
 def cmd_names(store, args):
@@ -1649,45 +1976,29 @@ def cmd_review(store, args):
 
 def _git(run, *args):
     try:
-        return run(["git", *args], capture_output=True, text=True, timeout=20)
+        return git_https.run(["git", *args], runner=run, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
         raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
 
 
-def worktree_branch(recorded, run=subprocess.run):
+def worktree_branch(recorded: str | None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> str:
     current = _git(run, "branch", "--show-current")
     branch = current.stdout.strip() if current.returncode == 0 else ""
     if not branch:
         raise SwarmError("swarm branch runs in a worktree on a branch; this checkout is on none")
-    target = branch
-    if recorded and recorded != branch:
-        target = f"HEAD:{recorded}"
-        if _tracks(run, recorded):
-            branch = recorded
-    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
+    target = f"HEAD:{recorded}" if recorded and recorded != branch else branch
+    branch = recorded if recorded and recorded != branch and _upstream(run) == recorded else branch
+    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode == 0:
+        return branch
+    upstream = "" if recorded or (found := _upstream(run)) in ("dev", "main", "master", "v1") else found
+    if not upstream or _git(run, "ls-remote", "--exit-code", "--heads", "origin", upstream).returncode != 0:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
-    return branch
+    return upstream
 
 
-def _tracks(run, recorded):
+def _upstream(run: Callable[..., subprocess.CompletedProcess[str]]) -> str:
     done = _git(run, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
-    return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
-
-
-PULL_SECONDS = 20
-
-
-def pull_branch(
-    url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control
-) -> tuple[str, str]:
-    """Read a pull request's head branch and the url of the repository holding it, both empty when unreadable."""
-    try:
-        provider, reference = ports(url)
-        change = provider.change(reference, deadline=Deadline.after(PULL_SECONDS))
-    except stack.PORT_ERRORS:
-        return "", ""
-    host = url.split("/pull/")[0].rsplit("/", 2)[0]
-    return change.head_branch, f"{host}/{change.head_repository}" if change.head_repository else ""
+    return done.stdout.strip().partition("/")[2] if not done.returncode and done.stdout.startswith("origin/") else ""
 
 
 def origin_repo(run=subprocess.run):
@@ -1747,16 +2058,18 @@ def cmd_branch(store, args):
     print(json.dumps({"task": agent.task, **fields, **carried}))
 
 
-def cmd_pr(store, args):
+def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
     ledger = LedgerClient()
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
-    head, repo = pull_branch(args.url)
+    head, repo, number, sha = PullHead(*pull_branch(args.url))
+    pull_head.refuse_other_branch(row, args, PullHead(head, repo))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
-    fields = {"state": "pr", "awaiting": awaiting, **branch} | ({} if keeps_main else {"pr_url": args.url})
+    confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
+    fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})
     fields.update(_split_binding(row, args.url, args.half))
     scoped = _pull_scope(row, args)
     row.update(scoped)
@@ -1840,7 +2153,7 @@ def _require_target(store: object, args: argparse.Namespace, task_id: str) -> No
     done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
 
 
-def cmd_merge(store, args):
+def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -1849,6 +2162,9 @@ def cmd_merge(store, args):
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
+        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
+        hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
@@ -1860,7 +2176,7 @@ def cmd_merge(store, args):
                 admit=lambda head: (
                     (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
                 ),
-                journal=queue_record.Journal(args.url),
+                journal=queue_record.Journal(args.url, context=stalled),
                 attempts=merge_queue.ATTEMPTS,
             )
         else:
@@ -1902,7 +2218,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
-    fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
+    fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
@@ -1946,16 +2262,15 @@ def _pull_reader(url, pull):
 
 
 def _feature_gate(
-    store: RedisStore, slug: str, agent: AgentRecord, task: dict, pull: ledger_events.PullRequest | None
+    store: RedisStore, slug: str, agent: AgentRecord, task: dict[str, Any], pull: ledger_events.PullRequest | None
 ) -> None:
     """Refuse swarm done when the feature gate enforces and the task names no mapped, tested feature."""
     if modes.configured(feature_gate.GATE, store.config(slug).gates) == "off":
         return
     head = pull.head if pull is not None else ""
+    wanted = task["proof"].get("feature", "")
     refused = feature_gate.refusal(
-        task,
-        task["proof"].get("feature", ""),
-        lambda: [feature_gate.read_map(ref) for ref in feature_gate.refs(head)],
+        task, wanted, lambda: [feature_gate.read_feature(ref, wanted) for ref in feature_gate.refs(head)]
     )
     who = Who(name=agent.name, swarm=slug, task=agent.task)
     if refused and feature_gate.GATE.allows(store, who, "done", refused, now_ms()):
@@ -2090,7 +2405,7 @@ def cmd_wait(store, args):
         rows = waits.named_tasks(
             held["kind"], held["target"], agent.task, lambda task_id: LedgerClient().task(args.slug, task_id)
         )
-        get = InboxStore(store.redis).get
+        get = InboxStore(store.redis).locate
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
         prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient(), now_ms(), args.final)
@@ -2153,14 +2468,19 @@ def cmd_handoff(store, args):
     )
 
 
-def _hand_off(store, slug, agent, text, reason, ledger):
+def _hand_off(
+    store: RedisStore, slug: str, agent: AgentRecord, text: str, reason: str, ledger: Any
+) -> tuple[dict, dict]:
     recap = "\n\n".join(
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
-    envelope = handoff_envelope.build(store, slug, agent, reason, _own_rows(ledger, slug, agent.task), now_ms())
+    rows = _own_rows(ledger, slug, agent.task)
+    envelope = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
+    if hive_release.release(ledger, slug, (rows or [{}])[0], agent.name):
+        store.release(slug, agent.task, agent.name)
     transfer = transfers.record(store, slug, agent, reason, text, now_ms())
     store.put_agent(slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
@@ -2397,7 +2717,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import tick_report
+    from scripts.swarm import night_watch_drill, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2412,8 +2732,8 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename"):
-        sub.add_parser(plain)
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "night-watch-drill"):
+        sub.add_parser(plain).set_defaults(handler={"night-watch-drill": night_watch_drill.command}.get(plain))
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
     close = sub.add_parser("close")
@@ -2434,6 +2754,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("probe").set_defaults(handler=probe_command)
+    sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")
     report.add_argument("--passes", type=tick_report.pass_count, default=100)
     report.set_defaults(handler=tick_report.command)
@@ -2443,6 +2764,11 @@ def build_parser() -> argparse.ArgumentParser:
         frozen.add_argument("target")
         frozen.add_argument("--reason", default="")
         frozen.add_argument("--quote", default="")
+        if verb == "focus":
+            frozen.add_argument("--only", action="store_true")
+            place = frozen.add_mutually_exclusive_group()
+            place.add_argument("--top", dest="position", action="store_const", const="top")
+            place.add_argument("--bottom", dest="position", action="store_const", const="bottom")
     scale = sub.add_parser("autoscale")
     scale.add_argument("--fixture", default="")
     scale.add_argument("--json", action="store_true")

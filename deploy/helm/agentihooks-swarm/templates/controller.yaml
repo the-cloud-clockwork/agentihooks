@@ -1,5 +1,7 @@
 {{- if not .Values.hiveOnly }}
 {{- $api := .Values.controller.api }}
+{{- $tls := $api.tls | default dict }}
+{{- $published := and $api.enabled $tls.secretName }}
 {{- $workers := .Values.controller.workers }}
 {{- $ca := .Values.controller.terminalCa | default dict }}
 {{- $jump := .Values.controller.jump | default dict }}
@@ -99,6 +101,9 @@ data:
 {{- if has $api.swarm (.Values.controller.hostSwarms | default list) }}
 {{- fail "controller.api.swarm must not be in controller.hostSwarms: the control API holds the tick lease of the swarm it serves" }}
 {{- end }}
+{{- if and $published (not (hasPrefix "https://" (toString $tls.publicUrl))) }}
+{{- fail "controller.api.tls.publicUrl must be the https address callers outside the cluster use" }}
+{{- end }}
 {{- if not (and $api.signingKey.keyId $api.signingKey.secretName) }}
 {{- fail "controller.api.signingKey needs keyId and secretName: workers verify launch grants with that key" }}
 {{- end }}
@@ -117,6 +122,11 @@ spec:
     - name: api
       port: {{ $api.port }}
       targetPort: api
+    {{- if $published }}
+    - name: api-tls
+      port: {{ $tls.port }}
+      targetPort: api-tls
+    {{- end }}
 ---
 {{- end }}
 apiVersion: apps/v1
@@ -140,7 +150,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "swarm.labels" . | nindent 8 }}
+        {{- include "swarm.podLabels" . | nindent 8 }}
         app.kubernetes.io/component: controller
       {{- if and $workers.apiUrl $workers.podPolicy }}
       annotations:
@@ -152,7 +162,7 @@ spec:
       {{- end }}
       automountServiceAccountToken: {{ not (empty $workers.apiUrl) }}
       {{- include "swarm.podSecurityContext" . | nindent 6 }}
-      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 30 }}
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 300 }}
       {{- with .Values.controller.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -247,20 +257,37 @@ spec:
           ports:
             - name: api
               containerPort: {{ $api.port }}
+            {{- if $published }}
+            - name: api-tls
+              containerPort: {{ $tls.port }}
+            {{- end }}
           startupProbe:
-            exec:
-              command: [agentihooks, controller, live]
+            httpGet:
+              path: /v2/health/live
+              port: api
+              httpHeaders:
+                - name: Host
+                  value: "127.0.0.1:{{ $api.port }}"
             {{- toYaml .Values.controller.startupProbe | nindent 12 }}
           readinessProbe:
-            exec:
-              command: [agentihooks, controller, ready]
+            httpGet:
+              path: /v2/health/ready
+              port: api
+              httpHeaders:
+                - name: Host
+                  value: "127.0.0.1:{{ $api.port }}"
             {{- toYaml .Values.controller.readinessProbe | nindent 12 }}
           {{- end }}
           livenessProbe:
+            {{- if $api.enabled }}
+            httpGet:
+              path: /v2/health/live
+              port: api
+              httpHeaders:
+                - name: Host
+                  value: "127.0.0.1:{{ $api.port }}"
+            {{- else }}
             exec:
-              {{- if $api.enabled }}
-              command: [agentihooks, controller, live]
-              {{- else }}
               command:
                 - python
                 - -c
@@ -270,7 +297,7 @@ spec:
                   held = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""));
                   stale = [slug for slug in held if not lease.current(store, slug)];
                   assert not stale, f"no live controller lease for {stale}"
-              {{- end }}
+            {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
@@ -305,6 +332,16 @@ spec:
             {{- if $api.enabled }}
             - name: AGENTIHOOKS_CONTROL_API_PORT
               value: {{ $api.port | quote }}
+            {{- if $published }}
+            - name: AGENTIHOOKS_CONTROL_TLS_PORT
+              value: {{ $tls.port | quote }}
+            - name: AGENTIHOOKS_CONTROL_PUBLIC_URL
+              value: {{ $tls.publicUrl | quote }}
+            - name: AGENTIHOOKS_CONTROL_TLS_CERT
+              value: /run/secrets/control-tls/tls.crt
+            - name: AGENTIHOOKS_CONTROL_TLS_KEY
+              value: /run/secrets/control-tls/tls.key
+            {{- end }}
             - name: AGENTIHOOKS_CONTROL_SWARM
               value: {{ $api.swarm | quote }}
             - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID
@@ -357,6 +394,11 @@ spec:
               mountPath: /run/secrets/launch-signing
               readOnly: true
             {{- end }}
+            {{- if $published }}
+            - name: control-tls
+              mountPath: /run/secrets/control-tls
+              readOnly: true
+            {{- end }}
             {{- if $workers.apiUrl }}
             - name: pod-policy
               mountPath: /etc/agentihooks/pod-policy
@@ -385,6 +427,17 @@ spec:
           secret:
             secretName: {{ $api.signingKey.secretName }}
             defaultMode: 0400
+        {{- end }}
+        {{- if $published }}
+        - name: control-tls
+          secret:
+            secretName: {{ $tls.secretName }}
+            defaultMode: 0400
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
         {{- end }}
         {{- if $workers.apiUrl }}
         - name: pod-policy

@@ -1,8 +1,8 @@
 """Swarm snapshot and restore: documents in the swarm's state folder carrying its Redis state, ledger and worktrees.
 
 Stop and the snapshot command write snapshot.json; while the swarm runs, a job the tick starts writes one automatic
-snapshot per interval into the snapshots folder and keeps the newest ten. Restore takes the newest of them all unless
-pointed at one.
+snapshot per interval into the snapshots folder and keeps the newest ten that fit one gibibyte. Restore takes the newest
+of them all unless pointed at one.
 
 A restore reopens each agent in its own conversation where it can and leaves the swarm paused. Every other agent is
 marked finished, so the next tick retires it, reopens its task and primes the successor with seat memory and handoffs.
@@ -15,14 +15,16 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any, TextIO, cast
 
 from scripts.profiles import binding
 from scripts.swarm import naming, resume
-from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.checkpoints import git_capture, native
 
 VERSION = 1
 KEEP = 10
+KEEP_BYTES = 1 << 30
 MINUTES = 30
 SOURCE_SWITCH = "AGENTIHOOKS_SWARM_SOURCE_CAPTURE"
 SOURCE_REF = "AGENTIHOOKS_SWARM_SOURCE_REF"
@@ -69,15 +71,30 @@ def due(store, slug, now_ms, environ):
     return config.state == "running" and minutes > 0 and (last is None or now_ms - last >= minutes * 60_000)
 
 
-def auto(store, slug, now_ms, environ, run=subprocess.run):
+def auto(
+    store: RedisStore, slug: str, now_ms: int, environ: Mapping[str, str], run: Callable[..., Any] = subprocess.run
+) -> Path | None:
     """Take an automatic snapshot when the running swarm's interval has passed; returns its file or None."""
     if not due(store, slug, now_ms, environ):
         return None
     taken = take(store, slug, now_ms, run, auto_dir(slug) / f"auto-{now_ms}.json", environ)
-    for old in automatic(slug)[:-KEEP]:
+    for old in stale(automatic(slug)):
         old.unlink(missing_ok=True)
+        refs_path(old).unlink(missing_ok=True)
     prune_sources(slug)
     return taken
+
+
+def stale(files: list[Path]) -> list[Path]:
+    """The automatic snapshots to delete, oldest first: all but the newest KEEP whose sizes fit KEEP_BYTES summed from
+    the newest; the newest is always kept."""
+    total, kept = 0, 0
+    for file in reversed(files):
+        total += file.stat().st_size
+        if kept == KEEP or (kept and total > KEEP_BYTES):
+            break
+        kept += 1
+    return files[: len(files) - kept]
 
 
 def newest(slug):
@@ -211,15 +228,24 @@ def natives(
     return captured
 
 
-def referenced(slug):
-    """Every source object a kept snapshot still names."""
-    held = set()
+def referenced(slug: str) -> set[str]:
+    """Every source object a kept snapshot still names, from its refs file, else from the snapshot itself."""
+    held: set[str] = set()
     for file in (path(slug), *automatic(slug)):
-        if file.exists():
-            doc = json.loads(file.read_bytes())
-            for fields in (*doc.get("sources", {}).values(), *doc.get("natives", {}).values()):
-                held.update(ref["sha256"] for ref in fields.get("inventory", {}).values())
+        if not file.exists():
+            continue
+        refs = refs_path(file)
+        held.update(json.loads(refs.read_bytes()) if refs.exists() else _held(json.loads(file.read_bytes())))
     return held
+
+
+def refs_path(file: Path) -> Path:
+    return file.with_name(f"{file.name}.refs")
+
+
+def _held(doc: dict[str, Any]) -> set[str]:
+    fields = (*doc.get("sources", {}).values(), *doc.get("natives", {}).values())
+    return {ref["sha256"] for field in fields for ref in field.get("inventory", {}).values()}
 
 
 def prune_sources(slug):
@@ -229,16 +255,22 @@ def prune_sources(slug):
             file.unlink()
 
 
-def take(store, slug, now_ms, run=subprocess.run, target=None, environ=None):
-    config, state, agents = store.config(slug), store.export(slug), store.agents(slug)
+def take(
+    store: RedisStore,
+    slug: str,
+    now_ms: int,
+    run: Callable[..., Any] = subprocess.run,
+    target: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Write the snapshot one entry at a time, loading the Redis export and the ledger one after the other."""
+    config, agents = store.config(slug), store.agents(slug)
     environ = os.environ if environ is None else environ
     found = worktrees(config.repo, [a.name for a in agents], run)
-    doc = {
+    head = {
         "version": VERSION,
         "slug": slug,
         "taken_at": now_ms,
-        "state": state,
-        "ledger": stored_ledger(slug),
         "worktrees": found,
         "sources": sources(slug, found, environ),
         "natives": natives(slug, agents, config.repo, found, environ, run),
@@ -246,10 +278,33 @@ def take(store, slug, now_ms, run=subprocess.run, target=None, environ=None):
     target = target or path(slug)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".partial")
-    partial.write_text(json.dumps(doc), encoding="utf-8")
+    with partial.open("w", encoding="utf-8") as out:
+        out.write(json.dumps(head)[:-1])
+        out.write(', "state": ')
+        _write(out, store.export(slug), 2)
+        out.write(', "ledger": ')
+        _write(out, stored_ledger(slug), 1)
+        out.write("}")
     partial.chmod(0o600)
+    refs, refs_partial = refs_path(target), refs_path(partial)
+    refs_partial.write_text(json.dumps(sorted(_held(head))), encoding="utf-8")
+    refs_partial.chmod(0o600)
+    refs.unlink(missing_ok=True)
     partial.replace(target)
+    refs_partial.replace(refs)
     return target
+
+
+def _write(out: TextIO, value: object, depth: int) -> None:
+    """Serialize value into out, splitting mappings into one string per entry down to depth levels."""
+    if depth == 0 or not isinstance(value, dict):
+        out.write(json.dumps(value))
+        return
+    out.write("{")
+    for n, (key, item) in enumerate(cast("dict[str, object]", value).items()):
+        out.write(f"{', ' if n else ''}{json.dumps(key)}: ")
+        _write(out, item, depth - 1)
+    out.write("}")
 
 
 def restore(store, slug, live, source=None, runtime=None, has_quota=resume.account_quota, now_ms=None):

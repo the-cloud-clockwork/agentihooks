@@ -495,6 +495,11 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-btn.sw-mode[aria-pressed="true"], .sw-btn.sw-mode:hover:not(:disabled) { color: var(--accent-2); }
 .sw-note { margin: 0; padding: 0 var(--space-row) var(--space-tight); font-size: var(--fs-meta); color: var(--muted); }
 .sw-note:empty { display: none; }
+.sw-fail { display: flex; align-items: baseline; gap: var(--space-tight); }
+.sw-fail-text { min-width: 0; }
+.sw-btn.sw-dismiss { min-height: 0; padding: 0 6px; color: var(--muted); font-size: var(--fs-item); line-height: 1; }
+.sw-btn.sw-dismiss::before { content: "×"; }
+.sw-btn.sw-dismiss:hover, .sw-btn.sw-dismiss:focus-visible { color: var(--accent); }
 .sw-alert { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-tight) var(--space-row); font-size: var(--fs-meta); }
 .sw-alert[hidden] { display: none; }
 .sw-alert-count { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--destructive); }

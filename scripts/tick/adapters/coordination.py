@@ -2,11 +2,13 @@
 locks, launch capacity and swarm marks, each call admitted only while its deadline holds."""
 
 import uuid
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm import lease as leases
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import STORE_READS, UndeclaredEffect
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore, SwarmConfig
@@ -47,6 +49,21 @@ class StoreCoordination:
         taken = bool(self._redis().set(self._key("lock", name), token, nx=True, px=held_ms))
         return token if taken else None
 
+    def tick_lock(self, held: object, ttl_ms: int, caller: str, *, deadline: Deadline) -> str | None:
+        """Take the controller tick lock under the held lease for ``ttl_ms``; its token, or None while another
+        live pass holds it."""
+        from scripts.swarm import controller
+
+        deadline.live()
+        return controller.take_tick_lock(self.store, self.slug, cast(leases.Lease, held), ttl_ms, caller)
+
+    def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None:
+        """Release the controller tick lock when ``token`` still holds it."""
+        from scripts.swarm import controller
+
+        deadline.live()
+        controller.release_tick_lock(self.store, self.slug, token, caller)
+
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> "SwarmConfig":
         """Store the settings that differ from the swarm's current config."""
         deadline.live()
@@ -74,3 +91,33 @@ class StoreCoordination:
         if value is None:
             return bool(self._redis().delete(key))
         return bool(self._redis().set(key, str(value)))
+
+    def marked(self, name: str, *, deadline: Deadline) -> str | None:
+        """Return the value of the swarm mark name, or None when it is unset."""
+        deadline.live()
+        value: str | None = self._redis().get(self._key(name))
+        return value
+
+    def _operation(self, operation: str) -> Callable[..., Any]:
+        target: Any = self.store
+        for part in operation.split("."):
+            if part.startswith("_"):
+                raise AttributeError(part)
+            target = getattr(target, part)
+        return target
+
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Answer the named swarm store read, a dotted path such as ``redis.hget``, while the deadline holds."""
+        deadline.live()
+        if operation not in STORE_READS:
+            raise UndeclaredEffect(f"{operation} is a store write")
+        return self._operation(operation)(*args, **kwargs)
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Apply the named swarm store write, a dotted path such as ``seats.occupy``, while the deadline holds."""
+        deadline.live()
+        return self._operation(operation)(*args, **kwargs)

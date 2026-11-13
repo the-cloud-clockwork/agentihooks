@@ -59,6 +59,10 @@ def test_p95_counts_all_write_methods_and_excludes_reads(capture):
         "lock_wait_seconds": 10.0,
         "client_wait_seconds": 0.0,
         "postgres_wait_seconds": 0.0,
+        "hierarchy_sync_seconds": 0.0,
+        "outbox_write_seconds": 0.0,
+        "refresh_record_seconds": 0.0,
+        "event_append_seconds": 0.0,
         "other_wall_seconds": 790.0,
     }
     assert result["slow_days"] == [{"day": "2026-10-13", "count": 36}]
@@ -213,6 +217,10 @@ def test_parallel_handlers_keep_request_clocks_and_lock_wait_separate(capture, m
         "lock_wait_seconds": 28.0,
         "client_wait_seconds": 0.0,
         "postgres_wait_seconds": 0.0,
+        "hierarchy_sync_seconds": 0.0,
+        "outbox_write_seconds": 0.0,
+        "refresh_record_seconds": 0.0,
+        "event_append_seconds": 0.0,
         "other_wall_seconds": 36.0,
     }
     assert result["routes"] == [

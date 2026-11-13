@@ -1,11 +1,13 @@
+import io
 import json
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from hooks.targets.normalizer import normalize_payload
-from scripts.gates import Call, Gate, Who, entry
+from scripts.gates import Call, Gate, Who, entry, lift
 from scripts.gates.one_push import (
     OnePush,
     actions,
@@ -410,15 +412,74 @@ def test_a_required_workflow_that_never_started_lets_the_push_pass(tree, tmp_pat
 @pytest.mark.parametrize(
     "raw",
     [
-        {**NEVER_STARTED, "mergeable": "CONFLICTING", "checkSuites": TESTS_RUNNING},
-        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE", "checkSuites": TESTS_RUNNING},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
         {**NEVER_STARTED, "mergeable": "MERGEABLE", "statusCheckRollup": LINT_EXPECTED},
+        {**NEVER_STARTED, "mergeable": "UNKNOWN", "checkSuites": TESTS_RUNNING},
     ],
 )
 def test_a_real_running_check_or_a_pending_placeholder_on_a_mergeable_head_still_holds_the_push(tree, tmp_path, raw):
     decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
     assert not decision.allowed
     assert decision.reason == push_refusal("demo", URL)
+
+
+TESTS_RUN = {"databaseId": 9, "event": "pull_request", "workflow": {"id": 3, "resourcePath": "/o/r/test.yml"}}
+PASSED_GATE_STATUS = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+
+
+def running_tests(lint):
+    return {
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "gated": False,
+        "gate_workflows": [],
+        "statusCheckRollup": [
+            PASSED_GATE_STATUS,
+            {"name": "lint", "conclusion": lint, "isRequired": False, "checkSuite": {"workflowRun": TESTS_RUN}},
+            {
+                "name": "mutation-shard (0)",
+                "conclusion": None,
+                "isRequired": False,
+                "checkSuite": {"workflowRun": TESTS_RUN},
+            },
+        ],
+        "checkSuites": [{"status": "IN_PROGRESS", "conclusion": None, "workflowRun": TESTS_RUN}],
+    }
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+@pytest.mark.parametrize("lint", ["FAILURE", "TIMED_OUT"])
+def test_a_failed_job_in_a_running_suite_lets_the_push_pass_though_the_required_status_passed(tree, tmp_path, lint):
+    found = pull_request(running_tests(lint))
+    assert (found.red, found.running, found.head_red) == (False, True, True)
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+@pytest.mark.parametrize(("state_", "head_red"), [("FAILURE", True), ("ERROR", True), ("PENDING", False)])
+def test_a_failed_status_context_on_the_head_lets_the_push_pass(tree, tmp_path, state_, head_red):
+    raw = running_tests("SUCCESS")
+    raw["statusCheckRollup"] = [*raw["statusCheckRollup"], {"context": "ci/x", "state": state_, "isRequired": False}]
+    found = pull_request(raw)
+    assert (found.red, found.running, found.head_red) == (False, True, head_red)
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed is head_red
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+@pytest.mark.parametrize("lint", ["SUCCESS", "CANCELLED", None])
+def test_a_running_suite_with_no_failed_job_still_holds_the_push(tree, tmp_path, lint):
+    found = pull_request(running_tests(lint))
+    assert found.head_red is False
+    decision = gate(found).decide(bash("git push", tree), ME, state(tmp_path))
+    assert decision.reason == push_refusal("demo", URL)
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+def test_a_conflicting_head_lets_the_push_pass_while_its_suite_runs(tree, tmp_path):
+    found = pull_request({**running_tests("SUCCESS"), "mergeable": "CONFLICTING"})
+    assert (found.red, found.running, found.head_red) == (False, True, False)
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
 
 
 def test_a_reader_counts_when_either_its_name_or_its_type_names_it(tree, tmp_path):
@@ -647,3 +708,43 @@ def test_redirections_and_their_targets_are_never_read_as_remote_or_refspec() ->
     assert positionals(words) == ["origin", "task"]
     assert positionals(["origin", "2>"]) == ["origin"]
     assert positionals(["origin", "2>/dev/null", "task"]) == ["origin", "task"]
+
+
+def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull_request(
+    tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_shared(home: Path | None) -> None:
+        return None
+
+    def head(url: str) -> str:
+        return "a1"
+
+    monkeypatch.setattr(lift, "_shared", no_shared)
+    monkeypatch.setattr("scripts.gates.intent.pr_head", head)
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": ME.name, "AGENTIHOOKS_SWARM_TASK": "t1"}
+
+    def launch(reader: str) -> int:
+        payload = {"tool_name": "Agent", "tool_input": {"name": reader, "prompt": "review"}}
+        with patch("sys.stderr", io.StringIO()), patch.dict(entry.GATES, {"subagents": SubagentBudget(launches=1)}):
+            return entry.main(["subagents"], io.StringIO(json.dumps(payload)), env, tmp_path)
+
+    assert launch("standards-reader") == 0
+    assert launch("spec-reader") == 2
+    lift.lift_agent(ME, "subagents", tmp_path, pull={"url": URL, "head": "a1"})
+    assert launch("spec-reader") == 0
+    assert gate().decide(bash("gh pr ready", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_spent_budget_never_reads_the_head_lift_for_a_launch_that_names_no_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+
+    def head_lifted(slug: str, task: str, gate: str, home: Path | None = None) -> bool:
+        asked.append(task)
+        return True
+
+    monkeypatch.setattr(lift, "head_lifted", head_lifted)
+    budget = SubagentBudget(launches=0)
+    decision = budget.decide(Call(tool="Agent", tool_input={"name": "helper"}), ME, state(tmp_path))
+    assert (decision.allowed, asked) == (False, [])

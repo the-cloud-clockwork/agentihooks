@@ -21,6 +21,7 @@ SCOPED_STATE_BUCKETS = (
     "hive-presence",
     "hive-executions",
     "execution-starts",
+    "inbox",
 )
 
 

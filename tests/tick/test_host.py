@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
+from scripts.hive import sweep
 from scripts.inbox import relay
 from scripts.swarm import (
     command_runner,
@@ -21,7 +22,7 @@ from scripts.swarm import (
     refresh_job,
     timing,
 )
-from scripts.swarm.health import prompt_backlog, urgent_hold
+from scripts.swarm.health import ordering_dependencies, prompt_backlog, urgent_hold
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -44,7 +45,6 @@ class _Slots:
 
 
 STORE = SimpleNamespace(redis="redis")
-TICK = object()
 
 
 def _pass(box: dict[str, Any] | None = None, **extra: object) -> dict[str, Any]:
@@ -78,11 +78,9 @@ def _cli(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespace
         skip_refused=skip_refused,
         _intent_pass=intent_pass,
         _phase_steps=phase_steps,
+        _planning_after_phase=lambda *args: calls.append(("after", *args)) or ["planned again"],
         relay=relay,
         refresh_job=refresh_job,
-        tick=TICK,
-        routed=lambda herdr: ("routed", herdr),
-        HerdrRuntime=lambda: "herdr",
     )
 
 
@@ -109,31 +107,34 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert [(step.name, step.group, step.order) for step in host.STEPS] == [
-        ("inbox relay", "wrapper probes", 10),
-        ("launch slots", "wrapper probes", 20),
-        ("outage probes", "wrapper probes", 30),
-        ("hive ledger", "wrapper probes", 40),
-        ("ledger health", "wrapper probes", 50),
-        ("host pressure", "wrapper health", 10),
-        ("ledger watchdog", "wrapper health", 20),
-        ("ledger probe", "wrapper health", 30),
-        ("prompt backlog", "wrapper health", 40),
-        ("command runner", "wrapper commands", 10),
-        ("urgent hold", "wrapper phases", 10),
-        ("planning and phase pass", "wrapper phases", 20),
-        ("refresh job", "wrapper refresh", 10),
-        ("intent check", "wrapper intent", 10),
-        ("reboot pass", "wrapper reboot", 10),
-        ("tick call", "wrapper reboot", 20),
-        ("outbox migration", "wrapper relay", 10),
-        ("page relay", "wrapper relay", 20),
-        ("tick view", "wrapper view", 10),
+    assert [(step.name, step.group) for step in host.STEPS] == [
+        ("inbox relay", "wrapper probes"),
+        ("launch slots", "wrapper probes"),
+        ("outage probes", "wrapper probes"),
+        ("hive ledger", "wrapper probes"),
+        ("ledger health", "wrapper probes"),
+        ("host pressure", "wrapper health"),
+        ("ledger watchdog", "wrapper health"),
+        ("ledger probe", "wrapper health"),
+        ("prompt backlog", "wrapper health"),
+        ("command runner", "wrapper commands"),
+        ("urgent hold", "wrapper phases"),
+        ("dependency audit", "wrapper phases"),
+        ("planning and phase pass", "wrapper phases"),
+        ("planning after phase", "wrapper phases"),
+        ("refresh job", "wrapper refresh"),
+        ("intent check", "wrapper intent"),
+        ("reboot pass", "wrapper reboot"),
+        ("outbox migration", "wrapper relay"),
+        ("page relay", "wrapper relay"),
+        ("tick view", "wrapper view"),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        slow = {"hive ledger", "host pressure", "ledger watchdog", "ledger probe", "prompt backlog"}
+        lane = engine.SLOW if step.name in slow else CallStep.lane
+        assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,12 +150,13 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
 
 def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3"]
+    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3", "ran 5"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
         ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
         ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
+        ("call", sweep.sweep, STORE, 7),
     ]
 
 
@@ -212,25 +214,26 @@ def test_a_ledger_that_is_no_client_skips_the_health_probe(monkeypatch: pytest.M
     assert box == {}
 
 
-def test_the_phase_steps_observe_the_urgent_hold_then_run_the_planning_and_phase_passes(
+def test_the_phase_steps_observe_the_urgent_hold_and_dependency_audit_then_run_the_planning_and_phase_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[Any, ...]] = []
-    state = _pass(inbox="inbox", doc="doc")
-    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked"]
+    box: dict[str, Any] = {}
+    state = _pass(box, inbox="inbox", doc="doc")
+    assert _run("wrapper phases", calls, state, monkeypatch) == ["phase ticked", "planned again"]
     assert calls == [
         ("call", urgent_hold.observe, STORE, "sw", "doc", 7),
+        ("call", ordering_dependencies.observe, STORE, "sw", "doc"),
         ("phases", "inbox", STORE, "sw", "doc", "ledger"),
+        ("after", "inbox", STORE, "sw", "ledger", box),
     ]
 
 
-def test_the_tick_call_runs_after_the_reboot_pass_with_the_pass_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
-    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", "runtime", 7)
-    calls.clear()
-    _run("wrapper reboot", calls, _pass(runtime=None), monkeypatch)
-    assert calls[1] == ("call", TICK, "sw", STORE, "ledger", ("routed", "herdr"), 7)
+def test_no_host_step_wraps_the_tick_and_the_reboot_site_holds_only_the_reboot_pass() -> None:
+    registered = [step for wave in registry.waves() for step in wave]
+    assert "tick call" not in {step.name for step in registered}
+    assert "tick call" not in budgets.FLOORS
+    assert [step.name for step in engine.group_steps("wrapper reboot")] == ["reboot pass"]
 
 
 class _Agent:
@@ -278,19 +281,38 @@ def test_the_refresh_job_starts_only_on_a_scheduled_tick(monkeypatch: pytest.Mon
     assert calls == [("call", refresh_job.start, STORE, "sw")]
 
 
-def test_the_intent_check_keeps_its_judgement_in_the_box(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_intent_check_keeps_its_judgement_in_its_judging_box(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
-    state = _pass(box, inbox="inbox", doc="doc", config="config")
+    judging: dict[str, Any] = {"doc": "judged doc", "config": "judged config"}
+    state = _pass(box, inbox="inbox", doc="doc", config="config", judging=judging)
     assert _run("wrapper intent", calls, state, monkeypatch) == []
-    assert calls == [("intent", "inbox", STORE, "sw", "doc", "ledger", "config")]
-    assert box == {"judged": ("view", "checked")}
+    assert calls == [("intent", "inbox", STORE, "sw", "judged doc", "ledger", "judged config")]
+    assert judging == {"doc": "judged doc", "config": "judged config", "judged": ("view", "checked")}
+    assert box == {}
+
+
+def test_the_intent_check_holds_what_it_raises_in_its_judging_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    box: dict[str, Any] = {}
+    judging: dict[str, Any] = {}
+
+    def boom(cli: Any, get: Any) -> None:
+        calls.append(("boom", cli))
+        raise RuntimeError("judge down")
+
+    monkeypatch.setattr(host, "import_module", lambda name: "cli")
+    assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
+    assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
+    assert calls == [("boom", "cli")]
+    assert box == {}
+    assert isinstance(judging["raised"], RuntimeError)
 
 
 def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
-    assert calls[0] == ("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)
+    assert _run("wrapper reboot", calls, _pass(), monkeypatch) == ["ran 1"]
+    assert calls == [("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)]
 
 
 def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -334,3 +356,70 @@ def test_a_held_call_after_a_held_exception_does_not_run(monkeypatch: pytest.Mon
 
 def test_an_empty_box_raises_nothing() -> None:
     assert host.raise_held({}) is None
+
+
+def test_a_viewed_step_without_a_view_skips_and_says_so(capsys: pytest.CaptureFixture[str]) -> None:
+    ran: list[object] = []
+    step = host.viewed("stall watch", lambda cli, get: ran.append(cli) or ["ran"])
+    line = "skipped stall watch: no step stored the tick view this pass"
+    assert step("cli", {"view": None}.get) == [line]
+    assert ran == []
+    assert capsys.readouterr().err == f"{line}\n"
+
+
+def test_a_viewed_step_with_a_view_runs_its_call(capsys: pytest.CaptureFixture[str]) -> None:
+    step = host.viewed("stall watch", lambda cli, get: [cli, get("view")])
+    assert step("cli", {"view": "lookup"}.get) == ["cli", "lookup"]
+    assert capsys.readouterr().err == ""
+
+
+def test_a_failed_pass_logs_the_error_and_records_the_pass_as_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    record: dict[str, Any] = {"outcome": "success"}
+    token = timing.PASS.set(record)
+    try:
+        assert host.failed_pass(RuntimeError("boom")) == ["pass failed: a step raised RuntimeError: boom"]
+    finally:
+        timing.PASS.reset(token)
+    assert record == {"outcome": "error", "error": "RuntimeError: boom"}
+    assert capsys.readouterr().err.endswith("RuntimeError: boom\n")
+
+
+def test_a_failed_pass_outside_a_pass_record_still_returns_its_line() -> None:
+    assert host.failed_pass(ValueError("x")) == ["pass failed: a step raised ValueError: x"]
+
+
+def test_a_held_failure_ends_the_pass_and_an_unheld_one_raises_again() -> None:
+    held, other = RuntimeError("held"), RuntimeError("other")
+    assert host.held_failure(held, {}, {"raised": held}) == ["pass failed: a step raised RuntimeError: held"]
+    with pytest.raises(RuntimeError) as raised:
+        host.held_failure(other, {"raised": held})
+    assert raised.value is other
+
+
+def test_a_held_redis_error_raises_again_for_the_outage_guard() -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    dropped = RedisConnectionError("dropped")
+    with pytest.raises(RedisConnectionError) as raised:
+        host.held_failure(dropped, {"raised": dropped})
+    assert raised.value is dropped
+    with pytest.raises(RedisConnectionError):
+        host.end_held({"raised": dropped})
+
+
+def test_end_held_returns_nothing_raises_a_stop_and_fails_an_error() -> None:
+    assert host.end_held({}) == []
+    with pytest.raises(SystemExit):
+        host.end_held({"raised": SystemExit(2)})
+    assert host.end_held({"raised": KeyError("k")}) == ["pass failed: a step raised KeyError: 'k'"]
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_cleartext_refusal_fails_the_pass_held_or_not_and_in_the_closing_group() -> None:
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    refused = Cleartext("a ledger credential off loopback travels only over https")
+    line = ["pass failed: a step raised Cleartext: a ledger credential off loopback travels only over https"]
+    assert host.held_failure(refused) == line
+    assert host.held_failure(refused, {"raised": refused}) == line
+    assert host.end_held({"raised": refused}) == line

@@ -1,0 +1,1 @@
+Record each registered tick step under its registered name, such as `spawn`, in `tick:steps`, in the pass `failed_steps` list and in the tick report, instead of the shared `scripts.tick.steps.CallStep.run` name, so a pass can be attributed step by step.

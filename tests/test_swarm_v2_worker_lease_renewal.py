@@ -121,6 +121,46 @@ def test_the_first_tick_renews_at_once_and_then_on_the_fixed_interval(tmp_path):
     assert lease.lost is None
 
 
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+def test_an_acknowledged_archive_rides_an_immediate_heartbeat_and_every_later_one(tmp_path):
+    clock = Clock()
+    controller = Controller(clock)
+    lease = renewer(tmp_path, clock, controller)
+
+    lease.tick()
+    clock.advance(1.0)
+    assert lease.acknowledge(10) is True
+    assert lease.acknowledge(10) is True
+    assert lease.acknowledge(4) is True
+    clock.advance(lease_renewal.INTERVAL_SECONDS)
+    lease.tick()
+
+    sent = [call[3]["archive_watermark"] for call in heartbeats(controller)]
+    assert sent == [0, 10, 10]
+    validator = contracts.load()
+    assert all(contracts.check(validator, "heartbeat", call[3]) is None for call in heartbeats(controller))
+    assert lease.lost is None
+
+
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+def test_an_archive_acknowledgement_the_controller_missed_is_resent_after_the_retry_pause(tmp_path):
+    clock = Clock()
+    controller = Controller(clock, (503, {}))
+    lease = renewer(tmp_path, clock, controller)
+
+    assert lease.acknowledge(1) is False
+    clock.advance(lease_renewal.RETRY_SECONDS)
+
+    assert lease.acknowledge(1) is True
+    assert [call[3]["archive_watermark"] for call in heartbeats(controller)] == [1, 1]
+    assert lease.lost is None
+
+
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+def test_an_unleased_worker_has_no_archive_acknowledgement_to_wait_on():
+    assert lease_renewal.Unleased().acknowledge(10) is True
+
+
 def test_a_worker_keeps_its_lease_past_five_minutes(tmp_path):
     clock = Clock()
     controller = Controller(clock)

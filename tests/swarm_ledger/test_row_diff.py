@@ -67,6 +67,14 @@ def nothing(s):
     pass
 
 
+def insert_first(s: dict) -> None:
+    s["tasks"].insert(0, {"id": "t0", "title": "z", "comments": [{"id": "c0", "text": "w"}]})
+
+
+def drop_middle(s: dict) -> None:
+    del s["tasks"][1]
+
+
 EDITS = [
     field,
     append_comment,
@@ -80,6 +88,8 @@ EDITS = [
     add_top,
     rename_key,
     nothing,
+    insert_first,
+    drop_middle,
 ]
 
 
@@ -139,3 +149,57 @@ def test_a_container_of_another_type_replaces_every_row(old, new):
 def test_an_empty_list_turned_empty_object_replaces_its_own_row():
     old, new = {"x": []}, {"x": {}}
     assert diff(old, new) == ({'["x"]': flatten(old)['["x"]']}, {'["x"]': flatten(new)['["x"]']})
+
+
+def freeze(row_id: str, verb: str) -> dict:
+    return {"id": row_id, "verb": verb, "target": f"tasks/{row_id}", "by": "m", "at": 1, "reason": ""}
+
+
+def frozen(count: int, focuses: list[str]) -> dict:
+    return {
+        "title": "t",
+        "freezes": [freeze(f"f{n}", "freeze") for n in range(count)] + [freeze(f, "focus") for f in focuses],
+    }
+
+
+def row_path(row_id: str) -> str:
+    return f'["freezes",["id","{row_id}",0]]'
+
+
+@pytest.mark.feature("ledger-row-diff-keyed-lists")
+def test_a_top_focus_insert_into_a_large_freeze_list_writes_only_the_new_row_and_the_moved_focus() -> None:
+    old = frozen(1000, ["c0"])
+    new = copy.deepcopy(old)
+    new["freezes"].insert(1000, freeze("c1", "focus"))
+    before, after = diff(old, new)
+    added = set(flatten(new)) - set(flatten(old))
+    assert len(added) == 7
+    assert set(changes(before, after)) == added | {row_path("c0")}
+
+
+@pytest.mark.feature("ledger-row-diff-keyed-lists")
+def test_an_only_focus_filter_deletes_only_the_dropped_focus_rows() -> None:
+    old = frozen(1000, ["c0", "c1", "c2"])
+    new = copy.deepcopy(old)
+    del new["freezes"][1002]
+    del new["freezes"][1000]
+    before, after = diff(old, new)
+    gone = set(flatten(old)) - set(flatten(new))
+    assert len(gone) == 14
+    changed = changes(before, after)
+    assert set(changed) == gone | {row_path("c1")}
+    assert all(changed[path] is None for path in gone)
+    assert changed[row_path("c1")] == flatten(new)[row_path("c1")]
+
+
+@pytest.mark.feature("ledger-row-diff-keyed-lists")
+def test_a_freeze_clear_in_the_middle_rewrites_no_field_row_of_a_kept_freeze() -> None:
+    old = frozen(50, [])
+    new = copy.deepcopy(old)
+    del new["freezes"][10]
+    before, after = diff(old, new)
+    changed = changes(before, after)
+    gone = set(flatten(old)) - set(flatten(new))
+    moved = {row_path(f"f{n}") for n in range(11, 50)}
+    assert set(changed) == gone | moved
+    assert {path: changed[path] for path in moved} == {path: flatten(new)[path] for path in moved}

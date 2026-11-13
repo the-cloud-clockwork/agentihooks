@@ -1,0 +1,46 @@
+{
+  "detector": "proof loop",
+  "cases": [
+    {
+      "name": "task restarted four times on the same head",
+      "label": "finding",
+      "source": "reruns with nothing new pushed between lives",
+      "history": {
+        "tasks": [{"id": "t60", "state": "claimed", "pr_url": ""}],
+        "events": [
+          {"kind": "task started", "target": "tasks/t60", "by": "swarm", "at": 1000, "head": "a1"},
+          {"kind": "task started", "target": "tasks/t60", "by": "swarm", "at": 2000, "head": "a1"},
+          {"kind": "task started", "target": "tasks/t60", "by": "swarm", "at": 3000, "head": "a1"},
+          {"kind": "task started", "target": "tasks/t60", "by": "swarm", "at": 4000, "head": "a1"}
+        ],
+        "talk": {}
+      }
+    },
+    {
+      "name": "task passed on through handoffs with a new head each life",
+      "label": "none",
+      "source": "successors that each pushed before the next start",
+      "history": {
+        "tasks": [{"id": "t61", "state": "claimed", "pr_url": ""}],
+        "events": [
+          {"kind": "task started", "target": "tasks/t61", "by": "swarm", "at": 1000, "head": "b1"},
+          {"kind": "task started", "target": "tasks/t61", "by": "swarm", "at": 2000, "head": "b2"},
+          {"kind": "task started", "target": "tasks/t61", "by": "swarm", "at": 3000, "head": "b3"},
+          {"kind": "task started", "target": "tasks/t61", "by": "swarm", "at": 4000, "head": "b4"}
+        ],
+        "talk": {}
+      }
+    },
+    {
+      "name": "task in its fourth review round",
+      "label": "finding",
+      "source": "review rounds past the cap of three",
+      "history": {
+        "tasks": [{"id": "t62", "state": "pr", "pr_url": "https://example.test/pull/62"}],
+        "events": [],
+        "review_rounds": {"t62": {"standards": 4}},
+        "talk": {}
+      }
+    }
+  ]
+}

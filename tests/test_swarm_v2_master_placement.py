@@ -38,7 +38,7 @@ def world(tmp_path, monkeypatch):
         runtime = service.runtime
         runtime.herdr_runtime = local
         runtime.router.runtimes[LOCAL] = LocalHerdrRuntime(local)
-        runtime.launch.func.__self__.planned = lambda task: None
+        runtime.launch.func.__self__.planned = lambda task, harness: None
         return service, runtime
 
     yield store, pods, local, start

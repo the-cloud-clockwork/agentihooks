@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import type_gate
+from scripts import feature_map, type_gate
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
@@ -69,16 +69,10 @@ def test_a_new_ill_typed_function_is_red(tmp_path: Path, capsys: pytest.CaptureF
     ) in out
 
 
-def test_a_fixed_error_with_a_stale_baseline_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_fixed_error_with_a_stale_baseline_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = _tree(tmp_path / "base", {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 1})
     head = _tree(tmp_path / "head", {"hooks/planted.py": WELL_TYPED}, {"hooks/planted.py": 1})
-    code, out = _grade(base, head, capsys)
-    assert code == 1
-    assert out == (
-        "0 type errors in 0 files, 1 allowed, 1 errors\n"
-        f"::error::{type_gate.BASELINE} records 1 type errors in hooks/planted.py, the head has 0; "
-        "run python -m scripts.type_gate --write\n"
-    )
+    assert _grade(base, head, capsys) == (0, "0 type errors in 0 files, 1 allowed, 0 errors\n")
 
 
 def test_a_regenerated_baseline_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -180,12 +174,15 @@ def test_grade_reports_growth_and_drift_per_file() -> None:
 
 
 def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
-    drift = (
-        f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
-    )
     assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, set()) == []
-    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, {"a.py"}) == [drift]
-    assert type_gate.grade({"a.py": 3}, {"a.py": 1}, {"a.py": 2}, set()) == [drift]
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}, {"a.py"}) == []
+    assert type_gate.grade({"a.py": 3}, {"a.py": 1}, {"a.py": 2}, set()) == []
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 3}, set()) == [
+        f"{type_gate.BASELINE} records 3 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
+    ]
+    assert type_gate.grade({}, {}, {"a.py": 1}, set()) == [
+        f"{type_gate.BASELINE} records 1 type errors in a.py, the head has 0; run python -m scripts.type_gate --write"
+    ]
     assert type_gate.grade({"a.py": 1}, {"a.py": 1}, {}, set()) == [
         f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
     ]
@@ -482,7 +479,7 @@ def test_a_checker_failure_names_its_output(
     assert _grade(base, head, capsys) == (1, "::error::basedpyright exited 2: boom\n")
     assert calls[-1] == {
         "cwd": head,
-        "env": {**os.environ, "NODE_OPTIONS": "--max-old-space-size=6656"},
+        "env": {**os.environ, "NODE_OPTIONS": "--max-old-space-size=5120"},
         "capture_output": True,
         "text": True,
     }
@@ -562,3 +559,142 @@ def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
     monkeypatch.chdir(tmp_path)
     args = type_gate.build_parser().parse_args(["--base", "b"])
     assert (args.base, args.head) == (Path("b"), Path.cwd())
+
+
+@pytest.mark.feature("independent-ci-records")
+def test_type_records_load_and_refresh_without_rewriting_the_shared_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _tree(tmp_path, {"hooks/a.py": WELL_TYPED}, {})
+    records = root / "tests/type-baseline"
+    (records / "hooks").mkdir(parents=True)
+    (records / "hooks/a.py.json").write_text("2\n")
+    (records / "hooks/untouched.py.json").write_text("1\n")
+    assert type_gate.load(root) == {"hooks/a.py": 2, "hooks/untouched.py": 1}
+    monkeypatch.setattr(type_gate, "measure", lambda _: {"hooks/a.py": 1, "hooks/untouched.py": 1})
+    type_gate.write(root)
+    assert (root / type_gate.BASELINE).read_text() == "{}"
+    assert (records / "hooks/a.py.json").read_text() == "1\n"
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/untouched.py": 1}
+
+
+def test_type_record_duplicate_and_invalid_counts_are_refused(tmp_path: Path) -> None:
+    root = _tree(tmp_path, {}, {"hooks/a.py": 1})
+    record = root / "tests/type-baseline/hooks/a.py.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("1")
+    with pytest.raises(ValueError, match="duplicate"):
+        type_gate.load(root)
+    (root / type_gate.BASELINE).write_text("{}")
+    for invalid in ("-1", "true", '"one"', "{}"):
+        record.write_text(invalid)
+        with pytest.raises(ValueError, match="count"):
+            type_gate.load(root)
+
+
+def test_type_refresh_preserves_disjoint_legacy_and_fragment_owners(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _tree(tmp_path, {}, {"hooks/a.py": 2})
+    record = root / "tests/type-baseline/hooks/b.py.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("2\n")
+    monkeypatch.setattr(type_gate, "measure", lambda _: {"hooks/a.py": 1, "hooks/b.py": 1})
+    type_gate.write(root)
+    assert json.loads((root / type_gate.BASELINE).read_text()) == {"hooks/a.py": 1}
+    assert not (record.parent / "a.py.json").exists()
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/b.py": 1}
+    monkeypatch.setattr(type_gate, "measure", lambda _: {})
+    type_gate.write(root)
+    assert type_gate.load(root) == {}
+
+
+def test_type_refresh_writes_exact_records_and_drops_stale_and_duplicate_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _tree(tmp_path, {}, {"hooks/a.py": 2, "hooks/gone.py": 1})
+    records = root / "tests/type-baseline"
+    (records / "hooks").mkdir(parents=True)
+    (records / "hooks/a.py.json").write_text("2\n")
+    (records / "hooks/b.py.json").write_text("5\n")
+    (records / "hooks/old.py.json").write_text("4\n")
+    os.utime(records / "hooks/b.py.json", ns=(1_000_000_000, 1_000_000_000))
+    measured = {"hooks/a.py": 1, "hooks/b.py": 5, "pkg/deep/c.py": 3}
+    monkeypatch.setattr(type_gate, "measure", lambda _: measured)
+    type_gate.write(root)
+    assert (root / type_gate.BASELINE).read_text() == '{\n  "hooks/a.py": 1\n}\n'
+    assert sorted(path.relative_to(records).as_posix() for path in records.rglob("*.json")) == [
+        "hooks/b.py.json",
+        "pkg/deep/c.py.json",
+    ]
+    assert (records / "hooks/b.py.json").read_text() == "5\n"
+    assert (records / "hooks/b.py.json").stat().st_mtime_ns == 1_000_000_000
+    assert (records / "pkg/deep/c.py.json").read_text() == "3\n"
+    measured["hooks/b.py"] = 4
+    type_gate.write(root)
+    assert (records / "hooks/b.py.json").read_text() == "4\n"
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/b.py": 4, "pkg/deep/c.py": 3}
+
+
+def test_type_records_accept_a_zero_count_and_refuse_a_non_python_source(tmp_path: Path) -> None:
+    root = _tree(tmp_path, {}, {})
+    records = root / "tests/type-baseline/hooks"
+    records.mkdir(parents=True)
+    (records / "a.py.json").write_text("0\n")
+    assert type_gate.load(root) == {"hooks/a.py": 0}
+    (records / "a.txt.json").write_text("1\n")
+    with pytest.raises(ValueError, match="invalid type count"):
+        type_gate.load(root)
+
+
+@pytest.mark.parametrize("order", [("left", "right"), ("right", "left")])
+@pytest.mark.feature("independent-ci-records")
+def test_independent_source_branches_merge_their_records_in_either_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
+) -> None:
+    root = _tree(tmp_path, {"hooks/a.py": "COUNT = 2\n", "hooks/b.py": "COUNT = 2\n"}, {})
+    records = root / "tests/type-baseline/hooks"
+    records.mkdir(parents=True)
+    for source in ("a", "b"):
+        (records / f"{source}.py.json").write_text("2\n")
+    map_path = root / "feature-map.json"
+    map_path.write_text(json.dumps({"features": [], "fragments": True}))
+    for source in ("a", "b"):
+        path = feature_map.entry_path(map_path, source)
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({"id": source, "behaviour": "before"}))
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=True).stdout
+
+    def measured(tree: Path) -> dict[str, int]:
+        return {
+            f"hooks/{source}.py": int((tree / f"hooks/{source}.py").read_text().split()[-1]) for source in ("a", "b")
+        }
+
+    monkeypatch.setattr(type_gate, "measure", measured)
+    git("init", "-b", "base")
+    git("config", "user.name", "CI record proof")
+    git("config", "user.email", "ci-record-proof@example.invalid")
+    git("add", ".")
+    git("commit", "-m", "base")
+    base = git("rev-parse", "HEAD").strip()
+    for branch, source in (("left", "a"), ("right", "b")):
+        git("checkout", "-b", branch, base)
+        (root / f"hooks/{source}.py").write_text("COUNT = 1\n")
+        type_gate.write(root)
+        feature_map.entry_path(map_path, source).write_text(json.dumps({"id": source, "behaviour": "after"}))
+        assert map_path.read_text() == json.dumps({"features": [], "fragments": True})
+        assert (root / type_gate.BASELINE).read_text() == "{}"
+        git("add", ".")
+        git("commit", "-m", branch)
+    git("checkout", order[0])
+    output = git("merge", "--no-edit", order[1])
+    assert "CONFLICT" not in output
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/b.py": 1}
+    assert type_gate.grade({"hooks/a.py": 2, "hooks/b.py": 2}, measured(root), type_gate.load(root)) == []
+    assert {entry["id"]: entry["behaviour"] for entry in feature_map.load(map_path)["features"]} == {
+        "a": "after",
+        "b": "after",
+    }
+    print(f"independent record merge {order[0]} then {order[1]}: clean, both type and feature changes retained")

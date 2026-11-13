@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -32,7 +33,7 @@ def exchange(headers: Mapping[str, str], slug: str) -> dict:
     The issuer keeps verifying today's credentials whatever AGENTIHOOKS_AUTH_LEGACY says: that switch governs the
     services that verify signed tokens, and this exchange is how a legacy holder obtains one.
     """
-    principal = authority.credential_caller(headers, "", slug)
+    principal = authority.credential_caller(headers, authority.page_credential(slug), slug)
     if principal is None and authority.controller_credential(headers.get("X-Controller-Credential")):
         principal = ""
     if principal is None:
@@ -105,5 +106,6 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args(argv)
+    print(ports.hive().auth.backfill_holders(ports.swarm().store.redis_client()), file=sys.stderr)
     server((args.host, args.port)).serve_forever()
     return 0

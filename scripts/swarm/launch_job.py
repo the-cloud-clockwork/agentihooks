@@ -4,9 +4,10 @@ import sys
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
-from scripts.swarm import successor_retry
-from scripts.swarm.store import SwarmConfig
+from scripts.swarm import hash_pages, successor_retry
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 
 KEY = "launch-jobs"
@@ -94,11 +95,24 @@ def read(job: dict, now_ms: int) -> Placed | None:
     return Placed(**outcome["placed"])
 
 
-def pending(store, slug: str, launch, placed: Placed) -> None:
+def decided(record: AgentRecord, placed: Placed) -> AgentRecord:
+    """The agent record carrying the harness, account, model, effort and profile its launch decided."""
+    return replace(
+        record,
+        harness=placed.harness,
+        account=placed.account,
+        model=placed.model,
+        effort=placed.effort,
+        profile=placed.profile,
+    )
+
+
+def pending(store: Any, slug: str, launch: Any, placed: Placed) -> None:
     entry = {"task": launch.task, "placed": asdict(placed)}
     if launch.task.get("handoff"):
         entry["primed"] = launch.primed
     store.redis.hset(store.key(slug, KEY), launch.record.name, json.dumps(entry))
+    store.put_agent(slug, decided(launch.record, placed))
     store.record_launch(slug, launch.record, STATE)
 
 
@@ -148,7 +162,7 @@ def collect(run) -> tuple[list[str], set[str]]:
 
     key, actions, waiting = run.store.key(run.slug, KEY), [], set()
     agents = {agent.name: agent for agent in run.store.agents(run.slug)}
-    for name, raw in run.store.redis.hgetall(key).items():
+    for name, raw in sorted(hash_pages.fields(run.store.redis, key).items()):
         saved = json.loads(raw)
         agent = agents.get(name)
         if agent is None:

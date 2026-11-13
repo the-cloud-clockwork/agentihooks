@@ -53,10 +53,8 @@ def _nodes(statements: list[ast.AST]) -> list[ast.AST]:
 
 
 def _disables(nodes: list[ast.AST], skippers: set[str]) -> bool:
-    return any(
-        _named(node) in DISABLING | skippers or (isinstance(node, ast.Constant) and node.value in DISABLING)
-        for node in nodes
-    )
+    names = DISABLING | skippers
+    return any(_named(node) in names or (isinstance(node, ast.Constant) and node.value in DISABLING) for node in nodes)
 
 
 def _checks(nodes: list[ast.AST], helpers: frozenset[str]) -> list[ast.AST]:
@@ -187,8 +185,16 @@ def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
             for alias in node.names
             if alias.name in DISABLING
         }
-        for _ in functions:
-            skippers |= {function.name for key, function, _ in functions if _disables(bodies[key], skippers)}
+        names = {node.name for node in ast.walk(module) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for _ in names:
+            grown: set[str] = {
+                function.name
+                for key, function, _ in functions
+                if function.name not in skippers and _disables(bodies[key], skippers)
+            }
+            if not grown:
+                break
+            skippers |= grown
         for key, function, context in functions:
             test = function.name.startswith("test")
             checks = _checks(bodies[key], helpers)

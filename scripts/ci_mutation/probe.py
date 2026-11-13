@@ -7,8 +7,10 @@ import os
 import shutil
 import subprocess
 import time
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from scripts.ci_mutation.mutant_shards import function_name, holds
 from scripts.ci_mutation.stats import SharedStats
@@ -16,19 +18,20 @@ from scripts.ci_mutation.stats import SharedStats
 SHARD_PLAN = "shard-plan.json"
 
 
-def plan_fingerprint(plan: dict) -> str:
+def plan_fingerprint(plan: dict[str, Any]) -> str:
     content = {key: value for key, value in plan.items() if key != "probe"}
     return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
 
-def probe_plan(plan: dict, shard: tuple[int, int]) -> dict:
-    if shard[1] != plan["shards"] or not 0 <= shard[0] < shard[1]:
+def probe_plan(plan: dict[str, Any], shard: tuple[int, int]) -> dict[str, Any]:
+    if shard[1] != plan.get("probe_shards", plan["shards"]) or not 0 <= shard[0] < shard[1]:
         raise ValueError("early mutation shard does not match the measured plan")
     names = sorted(name for name in plan["assignments"] if function_name(name) in plan["splits"])
     assignments = {name: [] for name in plan["assignments"]}
     assignments.update({name: index % shard[1] for index, name in enumerate(names)})
     return {
         **{key: value for key, value in plan.items() if key != "probe"},
+        "shards": shard[1],
         "assignments": assignments,
         "probe_mode": True,
     }
@@ -55,10 +58,6 @@ def read_probe_results(path: Path) -> tuple[dict[str, str], float]:
     return probe_results(json.loads(path.read_text())) if path.is_file() else ({}, 0)
 
 
-def probe_elapsed(stats: SharedStats | None) -> float:
-    return read_probe_results(stats.folder / "plan.json")[1] if stats and stats.part is None else 0
-
-
 def mark_probe_results(work: Path, results: dict) -> dict:
     early, _ = read_probe_results(work / SHARD_PLAN)
     for values in results.values() if early else ():
@@ -69,8 +68,15 @@ def mark_probe_results(work: Path, results: dict) -> dict:
 
 
 def reuse_kills(run_tests: Callable[..., int], early: dict[str, str]) -> Callable[..., int]:
-    def run_cached(self, *, mutant_name, tests):
+    def run_cached(self: object, *, mutant_name: str | None, tests: list[str]) -> int:
         if mutant_name is not None and early.get(mutant_name) == "killed":
+            return 1
+        if (
+            mutant_name is None
+            and not tests
+            and os.environ.get("MUTANT_UNDER_TEST") == "fail"
+            and "killed" in early.values()
+        ):
             return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
@@ -83,8 +89,21 @@ def worker_failure(work: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"early mutation failed: {reason}\n{detail}")
 
 
-def merge_probes(plan: dict, records: list[dict]) -> dict:
-    total = plan["shards"]
+def refusals(owned: set[str], rows: dict[str, str], seconds: float, budget: float) -> str:
+    """Name every reason an early shard's grading is refused, or return an empty string when it is complete."""
+    statuses = Counter(status for status in rows.values() if status not in {"killed", "survived"})
+    parts = [", ".join(f"{count} {status}" for status, count in sorted(statuses.items()))] if statuses else []
+    if owned - set(rows):
+        parts.append(f"{len(owned - set(rows))} without a result")
+    if set(rows) - owned:
+        parts.append(f"{len(set(rows) - owned)} not assigned to this shard")
+    if seconds > budget:
+        parts.append(f"ran {seconds:.1f} s, over its {budget:.1f} s budget")
+    return "; ".join(parts)
+
+
+def merge_probes(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
+    total = plan.get("probe_shards", plan["shards"])
     if len(records) != total or {record["index"] for record in records} != set(range(total)):
         raise ValueError("early mutation results are missing or duplicated")
     results = {}
@@ -119,7 +138,7 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
     plan = json.loads((stats.folder / "plan.json").read_text())
     early = probe_plan(plan, shard)
     owned = {name for name, assignment in early["assignments"].items() if holds(assignment, shard[0])}
-    rows = {}
+    rows: dict[str, str] = {}
     if owned:
         output = root / ".mutation-probe" / str(shard[0])
         output.mkdir(parents=True, exist_ok=True)
@@ -144,8 +163,12 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
                 raise worker_failure(work, reason)
             rows.update({row["name"]: row["status"] for values in results.values() for row in values})
     seconds = time.monotonic() - started
-    if set(rows) != owned or set(rows.values()) - {"killed", "survived"} or seconds > budget:
-        raise ValueError("early mutation did not completely grade its assigned mutants within budget")
+    refused = refusals(owned, rows, seconds, budget)
+    if refused:
+        for name, status in sorted(rows.items()):
+            if status not in {"killed", "survived"}:
+                print(f"::error::{name} {status}")
+        raise ValueError(f"early mutation did not grade its assigned mutants: {refused}")
     return {"plan": plan_fingerprint(plan), "index": shard[0], "total": shard[1], "seconds": seconds, "results": rows}
 
 

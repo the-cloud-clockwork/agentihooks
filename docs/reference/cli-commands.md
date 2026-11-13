@@ -367,6 +367,21 @@ agentihooks recall eval golden.json                                           # 
 
 ---
 
+## `agentihooks knowledge`
+
+Ask one ledger what it is and how it is evolving. The ledger is chunked by structure (ledger, phase, task, question, follow up, note, proof, comment), each chunk keeps its parent, and only new or changed chunks are embedded into a per ledger index under the agentihooks home. The default embedder counts hashed words, so matching is lexical. An `ask` refreshes the index first when its last refresh is two minutes old or more, so an added task is searchable within minutes.
+
+```bash
+agentihooks knowledge ask "merge queue priority" --limit 5   # summary, recent changes, hits with their parent chain
+agentihooks knowledge refresh                                # embed what changed now
+```
+
+`--ledger` defaults to `AGENTIHOOKS_SWARM`. Each hit carries its parents, nearest first, so a task hit names its phase and a comment hit names its task and phase.
+
+`AGENTIHOOKS_KNOWLEDGE_EMBEDDER` chooses the embedder: `hash` (default) or `semantic`, which matches by meaning, so a question worded differently from a task still finds it. `semantic` calls an OpenAI-compatible embeddings endpoint named by `AGENTIHOOKS_KNOWLEDGE_EMBED_URL` (HTTPS, or HTTP on loopback), `AGENTIHOOKS_KNOWLEDGE_EMBED_MODEL`, `AGENTIHOOKS_KNOWLEDGE_EMBED_DIMENSION` and `AGENTIHOOKS_KNOWLEDGE_EMBED_TOKEN`, sending at most 32 texts per request and ranking by cosine. A provider outage exits 1 with the reason. Each embedder and model keeps its own index file, so switching rebuilds rather than mixing vectors.
+
+---
+
 ## `agentihooks claude` / `agenti`
 
 Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
@@ -378,7 +393,13 @@ agenti                          # fewest live sessions among accounts below thei
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
 agenti --route api              # force the api side; fails when no api endpoint is configured
+agenti --route claude-ai        # a stored claude ai login; only a front door master falls back to a token
 ```
+
+`--route claude-ai` picks a stored claude ai login by
+`AGENTIHOOKS_MASTER_LOGIN_ORDER` and prints
+`[agenti] account=<name> route=claude-ai slot=<n>`; see
+[Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login).
 
 The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
 `account=api kind=api` for the api side. The api weight decides which side a
@@ -431,6 +452,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
 | `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default the rest of the launch deadline); see [Canary deadline](profile-launch-home.md#canary-deadline) |
 | `--launch-until` | Epoch milliseconds by which the launch must return; bounds the launch deadline. A hive passes its launch order's expiry less an acknowledgement margin |
+| `--defer-canary` | With `--profile`: return once the launcher starts, printing `route_status=pending`, `profile_validation=pending` and `profile_report=<path>`; a detached child finishes the route and canary waits and writes any failure into that report. The swarm tick passes it for Claude masters; see [Deferred master canary](profile-launch-home.md#deferred-master-canary) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
@@ -494,6 +516,61 @@ checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.
 
 ---
 
+## `agentihooks headless run`
+
+Run one full rendered profile unattended on Claude Code or codex-cli and print
+one JSON object with `status`, `output`, `session`, `exit_code`, `transcript`
+and `run_dir`. Exits 0 only when `status` is `ok`.
+
+```bash
+agentihooks headless run engineer --input 'Reply with JSON whose answer is the word pong.'
+agentihooks headless run engineer --input prompt.md --schema schema.json --harness codex --tier low --timeout 600 --out runs/codex
+```
+
+| Flag | Meaning |
+|---|---|
+| `PROFILE` | Profile to run |
+| `--input TEXT\|FILE` | Prompt text, or a file holding it (required) |
+| `--schema FILE` | JSON schema file the output must match |
+| `--harness auto\|claude\|codex` | Harness (default `auto`: `AGENTIHOOKS_TARGET`, else `claude`) |
+| `--out DIR` | Run folder (default `<AGENTIHOOKS_HOME>/headless/<UTC stamp>-<8 hex>`) |
+| `--tier high\|low`, `--effort` | Model tier (default `high`) and effort (default `medium`) |
+| `--timeout SECONDS` | Kill the run after this many seconds (default `1800`) |
+
+Statuses, run folder, tiers, worker mode and troubleshooting:
+[Headless profile runs](headless-run.md).
+
+---
+
+## `agentihooks workflow`
+
+List, check and run workflows: YAML files of stages, each stage one or more
+headless profile runs. `run`, `status` and `resume` print one JSON object, the
+saved run state or `{"error": ...}`; `run` and `resume` exit 0 only when the
+run ends `passed`.
+
+```bash
+agentihooks workflow list
+agentihooks workflow validate ./review.yaml
+agentihooks workflow run simple-workflow --case case.txt --run-id cleanup-dry-run --harness codex
+agentihooks workflow status cleanup-dry-run
+agentihooks workflow resume cleanup-dry-run
+```
+
+| Command | Meaning |
+|---|---|
+| `list` | Every loaded workflow with its layer and file |
+| `show NAME` | One workflow with its defaults filled in |
+| `validate FILE\|NAME` | Check a workflow file or a loaded name |
+| `run NAME --case FILE [--run-id ID] [--harness auto\|claude\|codex]` | Start a run in `<AGENTIHOOKS_HOME>/workflows/runs/<ID>` (default id: 32 hex characters) |
+| `status RUN` | Print the saved state; launches nothing |
+| `resume RUN` | Continue from the saved stage with the saved definition and harness |
+
+File format, layers, run folder, state fields, limitations and troubleshooting:
+[Workflow runs](workflows.md).
+
+---
+
 ## `agentihooks terminate-agent`
 
 List live Claude Code and Codex sessions, end one by exact name, session UUID or
@@ -518,6 +595,55 @@ agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 | `--term-timeout` | Seconds to wait after SIGTERM, and again after SIGKILL (default 3) |
 | `--keep-pane` | Leave the agent's herdr pane open after it exits |
 | `--json` | Print the resolution report as one JSON object |
+
+### Which processes the list shows
+
+`--list`, and every selector match outside `--stand-down`, reads two sources:
+the session registry and the local process table. `--stand-down` matches only
+Codex records, through the stand-down resolver. A process counts as an agent
+when the basename of its command name or of one of its first two arguments is
+`claude` (or the argument ends in `claude-code/cli.js`), or is `codex` or starts
+with `codex-`.
+
+| Source | Shown when | `STATUS` |
+|---|---|---|
+| Registry record | Its status is `alive` or `handed_off`, its recorded PID is a live agent process, and it was recorded in this process namespace or carries no namespace stamp | The record's status |
+| Process table only | An agent process that no shown record names, including one behind a record with any other status, such as `suspect`, or behind a record from another namespace | `unregistered` |
+
+Left out of both:
+
+- Zombie (`Z`) and dying (`X`) processes.
+- Records stamped with another process namespace, such as a session inside a
+  container on the same host: this process table cannot judge their PID. When
+  the local namespace cannot be read, every stamped record counts as foreign.
+- An unregistered `claude` process with `-p` or `--print` anywhere in its
+  arguments. Print mode runs one prompt and exits; it holds no interactive
+  session to end. A print mode process that does have a registry record still
+  lists under that record.
+
+```text
+$ agentihooks terminate-agent --list --type claude
+TYPE    NAME          SESSION_ID  PID   PGID  STATUS        CWD
+claude  eng@abc-0042  3f2c...     4121  4121  alive         /home/me/dev/worktrees/repo/eng-abc-0042
+claude  kept          -           4380  4380  unregistered  -
+```
+
+Two columns can show something other than the raw record:
+
+- A Codex record whose working folder is a Codex memory thread shows the
+  `SESSION_ID` and `CWD` of its process's main conversation, when the same PID
+  has another `alive`, `handed_off` or `superseded` record outside a memory
+  thread. Without one, the memory thread's own values stay.
+- An unregistered process whose parent is also an agent process has an empty
+  `NAME`, printed `-`, unless its command line carries `--name`. The `--name`
+  value shows as given. Two cases show the process's
+  `AGENTIHOOKS_AGENT_NAME` instead: the `--name` value equals that name with
+  `@` written as `-`, or the variable is set and the `--name` value is a master
+  pane title such as `master 2 · rig`.
+
+The real output separates columns with tabs. A `claude -p "hello"` running
+beside the two listed sessions adds no row. Rows sort by type, name,
+session id and PID.
 
 ### Terminate a process
 
@@ -682,7 +808,7 @@ A path is actionable only when it is **unused** and **removing it loses nothing*
 - An action is `due` only after two sweeps at least 1 h apart in the same boot, except removal of a clean pushed worktree whose owner left, which is due on first sight. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
 - `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree, except in a scratch repository, where the snapshot stays on a local `wip/` branch and the worktree is removed.
 - Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
-- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -t agentihooks-swarm`).
+- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`). The tick judges only panes a swarm opened; `gc` judges every recorded pane. Decision order, idle clock and log lines: [Idle swarm pane sweep](../pillars/swarm.md#idle-swarm-pane-sweep).
 - Codex execution homes (`$XDG_RUNTIME_DIR/cx` and `~/.agentihooks/cx`): a home no live process owns, by working folder, argument, open file or an answering server socket, and unchanged for ten minutes is listed under `codex_homes` in the JSON report and removed by `--enforce` on first sight, after its rollouts are appended to the canonical Codex home. Removals are logged to `~/.agentihooks/gc-codex-homes.jsonl`. See [Reclaim orphan execution homes](codex-managed-terminal.md#reclaim-orphan-execution-homes).
 - Launch run folder (`$XDG_RUNTIME_DIR/agentihooks-claude-terminal`): launch scripts, route reports, prompts, start markers and profile reports older than a day are removed, and closing markers whose launcher has exited.
 

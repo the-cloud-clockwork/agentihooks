@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_problems:cf35a34d0d4220a023b17abbafb8b6f27c6822add0d2286b8edab05eac5a94d5": {
+    "reader": "standards_reader",
+    "reason": "In `x_problems`, the mutation changes only the static type argument of `typing.cast` on cast target `_manifest(folder)`, from \"tuple[dict[str, Any], str | None]\" to \"tuple[dict[str, any], str | none]\"; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

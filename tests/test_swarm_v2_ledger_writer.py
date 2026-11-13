@@ -3,6 +3,7 @@ import os
 import socket
 import sqlite3
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -103,6 +104,39 @@ def test_a_released_lease_lets_the_next_writer_in(tmp_path, lease):
     lease.release()
     lease.release()
     assert lease.held is False
+    successor = ledger_writer.WriterLease(tmp_path).acquire(OTHER)
+    try:
+        assert successor.held is True
+        assert ledger_writer.holder(tmp_path) == OTHER
+    finally:
+        successor.release()
+    assert ledger_writer.conflicts_total(tmp_path) == 0
+
+
+@pytest.mark.feature("ledger-writer-lease-failed-record-releases")
+@pytest.mark.parametrize("step", ["pwrite", "ftruncate", "fsync"])
+def test_a_failed_holder_record_write_releases_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    real = getattr(ledger_writer.os, step)
+    closed = []
+    real_close = ledger_writer.os.close
+
+    def fail_once(*args: object) -> object:
+        monkeypatch.setattr(ledger_writer.os, step, real)
+        raise OSError(28, "no space left")
+
+    def spy_close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(ledger_writer.os, step, fail_once)
+    monkeypatch.setattr(ledger_writer.os, "close", spy_close)
+    failed = ledger_writer.WriterLease(tmp_path)
+    with pytest.raises(OSError, match="no space left"):
+        failed.acquire(CLAIMANT)
+    assert failed.held is False
+    assert len(closed) == 1
     successor = ledger_writer.WriterLease(tmp_path).acquire(OTHER)
     try:
         assert successor.held is True
@@ -364,6 +398,7 @@ def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard:
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.legacy, "adopt", Mock())
     return tmp_path
 

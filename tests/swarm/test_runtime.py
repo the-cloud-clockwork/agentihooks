@@ -927,10 +927,11 @@ def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeyp
 
     observed = []
 
-    def choose(slug, lane, chosen, task, environ, overlays):
-        assert slug == "sw"
+    def choose(config, lane, task, environ, hosted):
+        assert config.slug == "sw"
         assert lane == "eng"
-        assert overlays == {}
+        assert getattr(config, "overlays", {}) == {}
+        assert hosted == ()
         assert task == {"id": "t1", "title": "x"}
         observed.append("profile")
         return profile_choice.ProfileDecision("engineer", "task", "engineering work")
@@ -1310,14 +1311,14 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     runtime = HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, scaling="manual")
     runtime.quota_capacity(config, [], 5.0, {"eng": 1})
-    assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
+    assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": False, "demand": {"eng": 1}}
     runtime.quota_capacity(config, [], 5.0, {"eng": 0})
-    assert seen["refresh"] is True
-    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=False)
     assert seen["refresh"] is False
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=True)
+    assert seen["refresh"] is True
 
 
-def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
+def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path: Path) -> None:
     from scripts import agent_choice
     from scripts.swarm import capacity
 
@@ -1326,18 +1327,26 @@ def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
         home=tmp_path, choose=lambda requested, environ: calls.append(requested) or ("codex", "requested")
     )
     assert runtime._rotation("", {}) == ("codex", "requested")
-    runtime._quota_accounts = [
-        capacity.Account("claude", "a", "OPEN", 2, 90, 90, 6),
-        capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 6),
-    ]
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        choose=runtime.choose,
+        accounts=[
+            capacity.Account("claude", "a", "OPEN", 2, 90, 90, 6),
+            capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 6),
+        ],
+    )
     assert runtime._rotation("", {}) == ("codex", "rotation")
     assert runtime._rotation("claude", {}) == ("codex", "requested")
-    runtime._quota_accounts = [capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)]
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        choose=runtime.choose,
+        accounts=[capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)],
+    )
     assert runtime._rotation("", {}) == ("codex", agent_choice.ALL_FULL)
     assert calls == ["", "claude"]
 
 
-def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path):
+def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path: Path) -> None:
     from scripts.swarm import capacity
 
     seen = {}
@@ -1355,12 +1364,14 @@ def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path):
         "model_source": "handoff",
     }
     runtime = HerdrRuntime(
-        home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "requested")
+        home=tmp_path,
+        run=run,
+        choose=lambda requested, environ: (requested or "claude", "requested"),
+        accounts=[
+            capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 6),
+            capacity.Account("claude", "old", "OPEN", 3, 90, 90, 6),
+        ],
     )
-    runtime._quota_accounts = [
-        capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 6),
-        capacity.Account("claude", "old", "OPEN", 3, 90, 90, 6),
-    ]
     config = SimpleNamespace(
         slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
     )
@@ -1372,7 +1383,9 @@ def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path):
 
 @pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
 @pytest.mark.parametrize("reason,expected", [("quota", "fresh"), ("recycle", "old")])
-def test_handoff_account_selection_preserves_run_options(tmp_path, harness, model, reason, expected):
+def test_handoff_account_selection_preserves_run_options(
+    tmp_path: Path, harness: str, model: str, reason: str, expected: str
+) -> None:
     from scripts.swarm import capacity
 
     seen = {}
@@ -1390,11 +1403,15 @@ def test_handoff_account_selection_preserves_run_options(tmp_path, harness, mode
         "overlays": ["brain"],
         "profile_decision": {"bundle_revision": "a" * 40},
     }
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested, "requested"))
-    runtime._quota_accounts = [
-        capacity.Account(harness, "old", "OPEN", 0, 30, 90, 2),
-        capacity.Account(harness, "fresh", "OPEN", 1, 90, 90, 6),
-    ]
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        run=run,
+        choose=lambda requested, environ: (requested, "requested"),
+        accounts=[
+            capacity.Account(harness, "old", "OPEN", 0, 30, 90, 2),
+            capacity.Account(harness, "fresh", "OPEN", 1, 90, 90, 6),
+        ],
+    )
     config = SimpleNamespace(
         slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
     )
@@ -1422,17 +1439,18 @@ def test_handoff_account_selection_preserves_run_options(tmp_path, harness, mode
 
 
 @pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
-def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harness, model):
+def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path: Path, harness: str, model: str) -> None:
     from scripts.swarm import capacity
     from scripts.swarm.tick import SpawnError
 
     saved = {"profile": "engineer", "harness": harness, "model": model, "effort": "high", "account": "old"}
+    accounts = [capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2)]
     runtime = HerdrRuntime(
         home=tmp_path,
         run=lambda *args, **kwargs: pytest.fail("must not launch on the depleted account"),
         choose=lambda requested, environ: (requested, "requested"),
+        accounts=accounts,
     )
-    runtime._quota_accounts = [capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2)]
     config = SimpleNamespace(
         slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
     )
@@ -1449,4 +1467,4 @@ def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harne
     assert error.value.status == "unavailable"
     assert task["handoff"] == "saved handoff"
     assert task["handoff_envelope"]["launch"] == saved
-    assert runtime._quota_accounts[0].sessions == 0
+    assert accounts[0].sessions == 0

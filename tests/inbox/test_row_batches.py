@@ -127,3 +127,91 @@ def test_a_batch_is_read_again_on_a_new_connection_after_a_real_server_close():
         assert len(server.connections) == 2
     finally:
         server.close()
+
+
+def seeded_history(store: InboxStore, address: str, count: int) -> list[str]:
+    """Store count items at address straight into Redis, oldest first, and return their ids."""
+    from scripts.inbox.store import Item, _fields
+
+    ids = [f"message-{index:05}" for index in range(count)]
+    with store.redis.pipeline() as pipe:
+        for index, item_id in enumerate(ids):
+            item = Item(item_id, "alice", address, item_id, "done", index, index, sequence=index)
+            pipe.hset(store.key("item", item_id), mapping=_fields(item))
+            pipe.zadd(store.key("address", address), {item_id: index})
+        pipe.execute()
+    return ids
+
+
+def young_connections(store: InboxStore, monkeypatch: pytest.MonkeyPatch, first: int) -> list[tuple[int, bool]]:
+    """Make store's Redis behave like the swarm Redis load balancer path: a new connection resets any pipeline above
+    first commands, and each pipeline it answers doubles what it may carry next; a reset starts a new connection."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    real = store.redis.pipeline
+    allowance = [first]
+    sent: list[tuple[int, bool]] = []
+
+    def pipeline(*args: object, **kwargs: object) -> object:
+        pipe = real(*args, **kwargs)
+        execute = pipe.execute
+
+        def answered(*rest: object, **options: object) -> object:
+            size = len(pipe.command_stack)
+            if size > allowance[0]:
+                sent.append((size, False))
+                allowance[0] = first
+                raise RedisConnectionError("Error while reading from swarm-internal:6379 : (104, 'Connection reset')")
+            sent.append((size, True))
+            allowance[0] *= 2
+            return execute(*rest, **options)
+
+        pipe.execute = answered
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    return sent
+
+
+@pytest.mark.feature("inbox-young-connection-ramp")
+def test_a_large_history_lists_whole_when_a_new_connection_resets_large_first_pipelines(
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = seeded_history(store, "master@crew", 2001)
+    sent = young_connections(store, monkeypatch, first=50)
+    assert [item.id for item in store.inbox("master@crew")] == ids
+    assert sent[0] == (500, False)
+    assert sent[1] == (50, True)
+
+
+@pytest.mark.feature("inbox-young-connection-ramp")
+def test_the_open_index_rebuilds_whole_when_a_new_connection_resets_large_first_pipelines(
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded_history(store, "master@crew", 1201)
+    young_connections(store, monkeypatch, first=50)
+    assert store.open_items("master@crew") == []
+    assert store.redis.get(store.key("open-size", "master@crew")) == "1201"
+
+
+@pytest.mark.feature("inbox-young-connection-ramp")
+@pytest.mark.parametrize(
+    "count, sizes",
+    [
+        (0, []),
+        (1, [1]),
+        (50, [50]),
+        (51, [50, 1]),
+        (500, [50, 100, 200, 150]),
+        (1351, [50, 100, 200, 400, 500, 101]),
+    ],
+)
+def test_a_retried_batch_is_read_in_chunks_that_start_small_and_double_up_to_the_batch(
+    count: int, sizes: list[int]
+) -> None:
+    from scripts.inbox.store import ramped
+
+    ids = [str(index) for index in range(count)]
+    chunks = ramped(ids)
+    assert [len(chunk) for chunk in chunks] == sizes
+    assert [item_id for chunk in chunks for item_id in chunk] == ids

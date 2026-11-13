@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import time
 
 import pytest
@@ -199,6 +200,22 @@ def test_snapshots_keep_distinct_resources_and_retry_partial_results(monkeypatch
     assert github_reads.snapshot("first", 1_001, fetch) == {"pull": "first"}
     assert github_reads.snapshot("partial", 1_000, fetch) == {"pull": None}
     assert github_reads.snapshot("partial", 1_001, fetch) == {"pull": "recovered"}
+
+
+@pytest.mark.feature("tick-view-pull-batch-cache-ttl")
+def test_snapshot_serves_a_caller_given_ttl_past_the_default_run_ttl(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return {"pull": "steady"}
+
+    assert github_reads.snapshot("ttl-case", 1_000, fetch, ttl=180) == {"pull": "steady"}
+    assert github_reads.snapshot("ttl-case", 1_000 + github_reads.RUN_TTL_S + 1, fetch, ttl=180) == {"pull": "steady"}
+    assert len(calls) == 1
+    assert github_reads.snapshot("ttl-case", 1_000 + 181, fetch, ttl=180) == {"pull": "steady"}
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("kind", ["job_log", "snapshot"])
@@ -521,3 +538,13 @@ def test_rest_strips_slurped_page_headers_into_one_json_array(monkeypatch, tmp_p
 
     result = github_reads.rest("jobs", ["api", "repos/o/r/actions/runs/1/jobs", "--paginate", "--slurp"], run)
     assert json.loads(result.stdout) == [{"jobs": [1]}, {"jobs": [2]}]
+
+
+def test_location_runs_a_checkout_path_in_place_and_a_repository_name_through_gh_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_LOCATION_PROBE", "kept")
+    assert github_reads.location("/home/someone/agentihooks") == {"cwd": "/home/someone/agentihooks"}
+    named = github_reads.location("o/r")
+    assert named == {"env": {**os.environ, "GH_REPO": "o/r"}}
+    assert named["env"]["AGENTIHOOKS_LOCATION_PROBE"] == "kept"

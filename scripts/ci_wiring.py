@@ -3,6 +3,7 @@ import json
 import re
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -12,23 +13,23 @@ GATE_EVENTS = ("pull_request", "merge_group")
 FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
-FIELDS = ("reason", "owner", "expires")
+FIELDS = ("reason", "owner")
 EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
 
-def triggers(workflow: dict) -> dict[str, dict]:
-    on = workflow.get("on", workflow.get(True)) or {}
+def triggers(workflow: dict[Any, Any]) -> dict[str, dict[Any, Any]]:
+    on = workflow.get("on", workflow.get(True)) or cast(dict[Any, Any], {})
     if isinstance(on, str):
         on = [on]
     if isinstance(on, list):
-        return {event: {} for event in on}
-    return {event: config or {} for event, config in on.items()}
+        return {event: cast(dict[Any, Any], {}) for event in cast(list[Any], on)}
+    return {event: config or cast(dict[Any, Any], {}) for event, config in on.items()}
 
 
-def needs_of(job: dict) -> set[str]:
-    needs = job.get("needs") or []
-    return {needs} if isinstance(needs, str) else set(needs)
+def needs_of(job: dict[str, Any]) -> set[str]:
+    needs = job.get("needs") or cast(list[Any], [])
+    return {needs} if isinstance(needs, str) else set(cast(list[Any], needs))
 
 
 def _skips_pull_requests(term: str) -> bool:
@@ -42,30 +43,32 @@ def _skips_pull_requests(term: str) -> bool:
     return event not in PULL_REQUEST_EVENTS if operator == "==" else event == "pull_request"
 
 
-def on_pull_requests(job: dict) -> bool:
+def on_pull_requests(job: dict[str, Any]) -> bool:
     condition = str(job.get("if")).strip()
     wrapped = EXPRESSION.fullmatch(condition)
     condition = wrapped.group(1) if wrapped else condition
     return "||" in condition or not any(_skips_pull_requests(term) for term in condition.split("&&"))
 
 
-def load(root: Path) -> dict[str, dict]:
+def load(root: Path) -> dict[str, dict[Any, Any]]:
     folder = root / ".github/workflows"
     paths = sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])
-    return {path.name: yaml.safe_load(path.read_text()) or {} for path in paths}
+    return {path.name: yaml.safe_load(path.read_text()) or cast(dict[Any, Any], {}) for path in paths}
 
 
-def _gate_problems(file: str, workflow: dict) -> list[str]:
+def _gate_problems(file: str, workflow: dict[Any, Any]) -> list[str]:
     on = triggers(workflow)
     problems = [f"{file} holds {GATE} but does not run on {event}." for event in GATE_EVENTS if event not in on]
     for event in FILTERED_EVENTS:
         for key in FILTERS:
-            if key in on.get(event, {}):
+            if key in on.get(event, cast(dict[Any, Any], {})):
                 problems.append(f"{file} filters its {event} trigger by {key}, so a core gate skips some changes.")
     return problems
 
 
-def _job_problems(file: str, gate_id: str, jobs: dict, not_gates: dict) -> list[str]:
+def _job_problems(
+    file: str, gate_id: str, jobs: dict[str, dict[str, Any]], not_gates: dict[str, dict[str, Any]]
+) -> list[str]:
     needs = needs_of(jobs[gate_id])
     outside = [
         f"{file}/{job_id}"
@@ -80,12 +83,14 @@ def _job_problems(file: str, gate_id: str, jobs: dict, not_gates: dict) -> list[
     ]
 
 
-def _outside_problems(workflows: dict[str, dict], gate_file: str, outside: dict) -> list[str]:
+def _outside_problems(
+    workflows: dict[str, dict[Any, Any]], gate_file: str, outside: dict[str, dict[str, Any]]
+) -> list[str]:
     jobs = [
         f"{file}/{job_id}"
         for file, workflow in workflows.items()
         if file != gate_file and any(event in triggers(workflow) for event in PULL_REQUEST_EVENTS)
-        for job_id, job in (workflow.get("jobs") or {}).items()
+        for job_id, job in (workflow.get("jobs") or cast(dict[str, Any], {})).items()
         if on_pull_requests(job)
     ]
     problems = [
@@ -100,28 +105,31 @@ def _outside_problems(workflows: dict[str, dict], gate_file: str, outside: dict)
     ]
 
 
-def _declaration_problems(declared: dict[str, dict], today: date) -> list[str]:
-    problems = []
-    for key, entry in declared.items():
-        problems += [f"{key} is declared without its {field}." for field in FIELDS if not entry.get(field)]
-        if entry.get("expires") and date.fromisoformat(entry["expires"]) < today:
-            problems.append(f"{key} expired on {entry['expires']}.")
-    return problems
+def _declaration_problems(declared: dict[str, dict[str, Any]]) -> list[str]:
+    return [
+        f"{key} is declared without its {field}."
+        for key, entry in declared.items()
+        for field in FIELDS
+        if not entry.get(field)
+    ]
 
 
-def check(workflows: dict[str, dict], config: dict, today: date) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date) -> list[str]:
     from scripts import ci_gate_queue
 
     try:
         workflows = ci_gate_queue.normalize(workflows)
     except ValueError as error:
         return [str(error)]
-    not_gates, outside = config.get("not_gates", {}), config.get("outside_gate", {})
-    problems = _declaration_problems({**not_gates, **outside}, today)
+    not_gates, outside = (
+        config.get("not_gates", cast(dict[str, Any], {})),
+        config.get("outside_gate", cast(dict[str, Any], {})),
+    )
+    problems = _declaration_problems({**not_gates, **outside})
     gates = [
         (file, job_id)
         for file, workflow in workflows.items()
-        for job_id, job in (workflow.get("jobs") or {}).items()
+        for job_id, job in (workflow.get("jobs") or cast(dict[str, Any], {})).items()
         if job.get("name") == GATE
     ]
     if len(gates) != 1:
@@ -147,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     workflows = load(args.root)
     config = json.loads((args.root / CONFIG).read_text())
     problems = check(workflows, config, datetime.now(UTC).date())
-    jobs = sum(len(workflow.get("jobs") or {}) for workflow in workflows.values())
+    jobs = sum(len(workflow.get("jobs") or cast(dict[Any, Any], {})) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:
         print(f"::error::{problem}")

@@ -1,5 +1,8 @@
-from scripts.hive import headroom, registry
+from collections import Counter
+
+from scripts.hive import headroom, placement_waits, registry
 from scripts.swarm import ledger_probe, metrics_outbox
+from scripts.swarm.store import RedisStore
 
 PATH = dict.fromkeys(("plan", "phase", "slice", "task"), "")
 PROBES = metrics_outbox.Table(
@@ -39,7 +42,10 @@ RESOURCE_FIELDS = (
 )
 
 
-def admission_rows(store, slug: str, now_ms: int) -> list[dict]:
+def admission_rows(store: RedisStore, slug: str, now_ms: int) -> list[dict]:
+    totals: Counter[str] = Counter()
+    for key in ("pending-admission-total", placement_waits.TOTALS):
+        totals.update({outcome: int(total) for outcome, total in store.redis.hgetall(store.key(slug, key)).items()})
     return [
         {
             "event_id": f"admission:{slug}:{now_ms}:{outcome}",
@@ -47,9 +53,9 @@ def admission_rows(store, slug: str, now_ms: int) -> list[dict]:
             "ts_ms": now_ms,
             **PATH,
             "outcome": outcome,
-            "total": int(total),
+            "total": total,
         }
-        for outcome, total in sorted(store.redis.hgetall(store.key(slug, "pending-admission-total")).items())
+        for outcome, total in sorted(totals.items())
     ]
 
 

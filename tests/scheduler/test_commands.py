@@ -1,8 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
-from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, restore
+from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, WorkflowSlot, restore
 
 pytestmark = pytest.mark.unit
 
@@ -53,7 +55,7 @@ def test_fleet_is_the_target_without_a_name():
 @pytest.mark.parametrize(
     ("target", "name", "message"),
     [
-        ("pane", "x", "target must be one of fleet, swarm, seat, session, not pane"),
+        ("pane", "x", "target must be one of fleet, swarm, seat, session, workflow, not pane"),
         ("fleet", "sw", "the fleet target takes no name"),
         ("swarm", "", "the swarm target needs a name"),
         ("seat", "", "the seat target needs a name"),
@@ -65,6 +67,121 @@ def test_fleet_is_the_target_without_a_name():
 def test_a_target_that_does_not_fit_is_refused(target, name, message):
     with refused(message):
         commands.target_slot(target, name)
+
+
+@pytest.fixture
+def case(tmp_path):
+    path = tmp_path / "case.json"
+    path.write_text("{}")
+    return path
+
+
+@pytest.mark.feature("scheduler-workflow-target-case")
+def test_the_workflow_target_names_its_slot_with_the_case(case, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot("nightly", str(case), str(tmp_path))
+
+
+@pytest.mark.feature("scheduler-workflow-target-case")
+def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
+    monkeypatch.chdir(case.parent)
+    slot = commands.target_slot("workflow", "nightly", "case.json")
+    assert slot == WorkflowSlot("nightly", str(case.resolve()), str(case.parent))
+    assert slot.record() == {
+        "kind": "workflow",
+        "name": "nightly",
+        "case": str(case.resolve()),
+        "project": str(case.parent),
+        "placement": "local",
+        "needs": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("target", "name", "message"),
+    [
+        ("workflow", "", "the workflow target needs a name"),
+        ("fleet", "", "only the workflow target takes a case"),
+        ("swarm", "sw", "only the workflow target takes a case"),
+        ("seat", "master@sw", "only the workflow target takes a case"),
+        ("session", OWNER, "only the workflow target takes a case"),
+    ],
+)
+@pytest.mark.feature("scheduler-workflow-target-case")
+def test_a_case_fits_only_a_named_workflow_target(case, target, name, message):
+    with refused(message):
+        commands.target_slot(target, name, str(case))
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_workflow_target_takes_a_hive_placement_with_its_needs(
+    case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    slot = commands.target_slot("workflow", "nightly", str(case), placement="hive", needs="build, lint,build")
+    assert slot == WorkflowSlot("nightly", str(case), str(tmp_path), "hive", ("build", "lint"))
+    assert slot.record()["placement"] == "hive"
+    assert slot.record()["needs"] == ["build", "lint"]
+    assert restore(slot.record()) == slot
+    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot(
+        "nightly", str(case), str(tmp_path), "local", ()
+    )
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_stored_workflow_slot_without_a_placement_runs_locally(case: Path) -> None:
+    record = {"kind": "workflow", "name": "nightly", "case": str(case), "project": "/repo"}
+    assert restore(record) == WorkflowSlot("nightly", str(case), "/repo", "local", ())
+
+
+@pytest.mark.parametrize(
+    ("target", "name", "placement", "needs", "message"),
+    [
+        ("workflow", "nightly", "cloud", "", "placement must be local or hive, not cloud"),
+        ("workflow", "nightly", "local", "build", "only a hive placement takes needs"),
+        ("workflow", "nightly", "", "build", "only a hive placement takes needs"),
+        ("swarm", "sw", "hive", "", "only the workflow target takes a placement"),
+        ("swarm", "sw", "", "build", "only the workflow target takes a placement"),
+        ("fleet", "", "local", "", "only the workflow target takes a placement"),
+    ],
+)
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_placement_that_does_not_fit_is_refused(
+    case: Path, target: str, name: str, placement: str, needs: str, message: str
+) -> None:
+    with refused(message):
+        commands.target_slot(target, name, str(case) if target == "workflow" else "", placement=placement, needs=needs)
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally(
+    case: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    from scripts.hive import run_placement
+    from scripts.workflows import scheduled
+
+    placed = []
+    monkeypatch.setattr(scheduled, "start", lambda *args: pytest.fail("a hive run started locally"))
+    monkeypatch.setattr(run_placement, "dispatch", lambda run, redis: placed.append((run, redis)))
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    slot = WorkflowSlot("nightly", str(case), "/repo", "hive", ("build",))
+    slot.deliver({"owner": OWNER, "payload": "go"}, "delivery-1", RedisStateStore(redis, "scheduler"))
+    assert placed == [(run_placement.Run("delivery-1", "nightly", case.read_text(), "/repo", OWNER, ("build",)), redis)]
+
+
+@pytest.mark.feature("scheduler-workflow-target-case")
+def test_the_workflow_target_needs_a_case():
+    with refused("the workflow target needs a case"):
+        commands.target_slot("workflow", "nightly")
+
+
+@pytest.mark.feature("scheduler-workflow-target-case")
+def test_a_case_that_is_not_a_file_is_refused(tmp_path):
+    for case in (tmp_path / "missing.json", tmp_path):
+        with refused(f"{case} is not a case file"):
+            commands.target_slot("workflow", "nightly", str(case))
 
 
 @pytest.mark.parametrize(

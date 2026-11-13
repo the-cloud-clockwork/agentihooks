@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/herdr/operator_service.py:scripts.swarm_v2.herdr.operator_service.xǁServiceǁrun_pass:65157d80c036792cc293968a3f774068f44bb997933bb84038ddd9e6dea0c693": {
+    "reader": "standards_reader",
+    "reason": "Changes only when buffered removal log lines reach the operating system, never their content or order within the single threaded process stdout: print flushes only when flush is truthy, and this falsy value behaves like the default False. The status probe captures its own output, nothing else writes to the stream, and interpreter shutdown flushes stdout, so captured output is identical."
+  }
+}

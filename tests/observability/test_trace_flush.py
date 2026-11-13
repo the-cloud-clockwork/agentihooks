@@ -79,8 +79,10 @@ def test_budget_defaults_and_overrides():
             "AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC": "2",
             "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": "0.5",
             "AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS": "4",
+            "AGENTIHOOKS_TRACE_FLUSH_IDLE_SEC": "30",
         }
-    ) == trace_flush.Budget(2.0, 0.5, 4)
+    ) == trace_flush.Budget(2.0, 0.5, 4, 30.0)
+    assert trace_flush.budget({}).idle == 300.0
     bad = {"AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC": "soon", "AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS": "0"}
     assert trace_flush.budget(bad) == trace_flush.Budget(15.0, 5.0, 3)
 
@@ -158,6 +160,64 @@ def test_exporter_flushes_during_an_active_turn_and_once_after_the_owner_exits(h
     ]
     assert {timeout for _, _, timeout in calls} == {5}
     assert not trace_flush.owner_path("session").exists()
+
+
+def _idle_run(clock: Clock, calls: list[tuple[float, str]]) -> str:
+    def send(session: str, path: str, timeout: float, trigger: str) -> bool:
+        calls.append((clock(), trigger))
+        return True
+
+    return trace_flush.supervise(
+        "session",
+        trace_flush.Budget(15, 5, 3, idle=60),
+        send,
+        clock,
+        clock.sleep,
+        lambda owner: True,
+        timer_wait=clock.sleep,
+    )
+
+
+def test_exporter_exits_once_its_live_owner_has_no_new_work_for_the_idle_bound(home: Path, tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, calls = Clock(), []
+    assert _idle_run(clock, calls) == "idle"
+    assert calls == [(0, "request:start")]
+    assert clock.now == 60
+    assert not trace_flush.owner_path("session").exists()
+
+
+def test_new_work_restarts_the_idle_bound(home: Path, tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, calls = Clock(), []
+    clock.hooks += [(50, lambda: _grow(transcript))]
+    assert _idle_run(clock, calls) == "idle"
+    assert calls == [(0, "request:start"), (60, "interval")]
+    assert clock.now == 120
+
+
+def test_a_request_landing_at_the_idle_exit_keeps_the_exporter(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, calls, unlink = Clock(), [], Path.unlink
+
+    def racing_unlink(path: Path, missing_ok: bool = False) -> None:
+        unlink(path, missing_ok=missing_ok)
+        if path == trace_flush.owner_path("session") and clock.now == 60:
+            _request("session", transcript, "prompt")
+            _grow(transcript)
+
+    monkeypatch.setattr(Path, "unlink", racing_unlink)
+    assert _idle_run(clock, calls) == "idle"
+    assert calls == [(0, "request:start"), (60, "request:prompt")]
+    assert clock.now == 120
 
 
 def test_owner_exit_drains_new_records_with_a_final_trigger(home, tmp_path):
@@ -623,19 +683,26 @@ def test_spawn_detaches_the_exporter(monkeypatch):
     monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *a, **k: calls.append((fn, a, k)))
     trace_flush._spawn("s")
     assert calls == [
-        (trace_flush.run, ("s",), {"timeout_sec": 7 * 24 * 3600, "task_name": "trace_flush"}),
+        (trace_flush.run, ("s",), {"timeout_sec": 3600, "task_name": "trace_flush"}),
         (trace_flush.recover, (), {"timeout_sec": 60, "task_name": "trace_recovery"}),
     ]
 
 
-def test_run_clears_the_alarm_lowers_priority_and_logs_the_outcome(monkeypatch, capsys):
+def test_run_keeps_the_job_bound_armed_lowers_priority_and_logs_the_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     calls = []
-    monkeypatch.setattr(trace_flush.signal, "alarm", lambda n: calls.append(("alarm", n)))
     monkeypatch.setattr(trace_flush.os, "nice", lambda n: calls.append(("nice", n)))
-    monkeypatch.setattr(trace_flush, "supervise", lambda s: calls.append(("supervise", s)) or "owner exited")
-    trace_flush.run("s")
-    assert calls == [("alarm", 0), ("nice", 10), ("supervise", "s")]
-    assert capsys.readouterr().err == "trace_flush s: owner exited\n"
+    monkeypatch.setattr(
+        trace_flush, "supervise", lambda s: f"{trace_flush.signal.getitimer(trace_flush.signal.ITIMER_REAL)[0]:.0f}"
+    )
+    trace_flush.signal.alarm(100)
+    try:
+        trace_flush.run("s")
+    finally:
+        trace_flush.signal.alarm(0)
+    assert calls == [("nice", 10)]
+    assert capsys.readouterr().err == "trace_flush s: 100\n"
 
 
 def test_flush_once_reports_pending_work(monkeypatch, home):

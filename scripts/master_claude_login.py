@@ -465,7 +465,7 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
     return {number: copy for number, copy in copies.items() if _private(home(number)) or copy.get("grant")}
 
 
-def _preferred() -> dict[str, int]:
+def preferred() -> dict[str, int]:
     ranks: dict[str, int] = {}
     for name in os.environ.get(ORDER_ENV, "").split(","):
         try:
@@ -488,10 +488,10 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     if not offered:
         raise LoginRefused(NO_LOGIN)
     named = {number: login_account(number, copy) for number, copy in offered.items()}
-    now, held = time.time(), []
+    now, held = time.time(), list[str]()
     order = list(offered)
     if len(offered) > 1:
-        ranks = _preferred()
+        ranks = preferred()
         order.sort(
             key=lambda number: (
                 master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,
@@ -502,6 +502,11 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
             )
         )
     for number in order:
+        found = named[number]
+        week_left = master_logins.week_left(found, now)
+        if reservation.primary_reserved(found, week_left, os.environ):
+            held.append(f"{found or number} reserved at {week_left:.0f}% of the week left")
+            continue
         with _locked(root(number)) as folder:
             try:
                 epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)))[0]
@@ -692,11 +697,20 @@ def _token_lock(environ: Mapping[str, str]):
     return lock
 
 
+def trust_launch_folder(environ: Mapping[str, str], target: Path) -> None:
+    """Record the launch folder as trusted in the Claude config home target, reporting a folder left untrusted."""
+    from scripts.claude_trust import WAIT_NOTICE, ensure_trusted
+
+    trust, why = ensure_trusted(Path.cwd(), {**environ, "CLAUDE_CONFIG_DIR": str(target)})
+    if trust == "untrusted":
+        print(f"[agenti] Claude does not trust {Path.cwd()} ({why}); {WAIT_NOTICE}", file=sys.stderr)
+
+
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
-    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_master_credential
-    from scripts.hive.account_slots import execute
+    from scripts.claude_quota_balancer import API_ACCOUNT, RoutingError, launch_environment, select_master_credential
+    from scripts.hive.account_slots import Unavailable, execute
     from scripts.install import _claude_command, _write_route_report
 
     with _token_lock(environ):
@@ -704,18 +718,22 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
             environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
         )
         target = token_home(environ)
+        trust_launch_folder(environ, target)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
-        chain.notification(target, "token", "routed")
-        _write_route_report(
-            report, status="routed", account=decision.account, placement="fallback", remote_control="off"
-        )
-        print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
-        execute(
-            "claude",
-            decision.account,
-            child_env,
-            lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
-        )
+
+        def invoke(env: dict[str, str]) -> None:
+            chain.notification(target, "token", "routed")
+            _write_route_report(
+                report, status="routed", account=decision.account, placement="fallback", remote_control="off"
+            )
+            print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
+            os.execvpe(binary, _claude_command(binary, _token_args(args)), env)
+
+        try:
+            execute("claude", decision.account, child_env, invoke, master=True)
+        except Unavailable as exc:
+            _write_route_report(report, status="failed", error=str(exc))
+            raise RoutingError(str(exc)) from exc
 
 
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
@@ -730,6 +748,7 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
     if prepared is None:
         return launch_token(binary, args, environ, report)
     target, found = prepared
+    trust_launch_folder(environ, target)
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
     execute(

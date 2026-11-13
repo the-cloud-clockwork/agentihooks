@@ -1,0 +1,1 @@
+`agentihooks swarm <slug> status` raises one information only `early end` health finding when consecutive tick passes end early because no step stored the same pass value, naming the value and the count, once the count reaches `AGENTIHOOKS_HEALTH_EARLY_ENDS` (3). An early end on another value starts the count again and a full pass clears it.

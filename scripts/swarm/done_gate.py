@@ -5,10 +5,15 @@ unless the proof files the fix instead.
 done in the last day and reopens one whose pull request is not merged; a done from the master or operator stands.
 """
 
+from collections.abc import Callable
+from types import MappingProxyType
+from typing import Any
+
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
 
 GATED = ("code", "ci")
+DONE = MappingProxyType({"state": "done", "awaiting": ""})
 WORKERS = ("eng", "ci")
 MERGED = "MERGED"
 MERGE = "merge it, then run swarm done again"
@@ -24,9 +29,11 @@ REOPENED = (
 )
 
 
-def refusal(task, url, github):
+def refusal(task: dict, url: str | None, github: Callable[[str], Any]) -> str:
     """Why `swarm done` must refuse this task, or '' when it may close."""
     kind = ledger_kinds.kind(task)
+    if url and url in (task.get("past_pulls") or []):
+        return f"pull request {url} belongs to this task before it reopened; give the new pull request with --pr <url>"
     if kind not in GATED:
         return _unmerged(url, github, READY) if url and gated(task) else ""
     if task.get("split"):
@@ -86,7 +93,7 @@ def _targets(task):
     return [*_pulls(task), *(url for url, scope in scopes.items() if scope.get("kind") == "prerequisite")]
 
 
-def recheck_pass(store, slug, doc, ledger, now_ms, github):
+def recheck_pass(store: Any, slug: str, doc: dict, ledger: Any, now_ms: int, github: Callable[[str], Any]) -> list[str]:
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     actions = []
     for task_id in _done_by_workers(doc.get("_meta", {}).get("events", []), now_ms):
@@ -96,7 +103,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
         for url in _pulls(task):
             state = _unmerged_state(store, slug, url, github)
             if state:
-                ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
+                ledger.update_task(slug, task_id, {"state": "open", "claimed_by": "", "pr_url": task["pr_url"]})
                 ledger.comment(slug, task_id, REOPENED.format(url=url, state=state), by="swarm")
                 actions.append(f"task {task_id} reopened, its pull request is {state}")
                 break

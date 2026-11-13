@@ -7,7 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts import codex_router, quota_freshness, quota_state, session_bands
 from scripts.claude_quota_balancer import (
@@ -65,8 +65,8 @@ COLUMNS = [
     "AGE",
 ]
 REFRESH_MIN_S = 60
-_page_cache: dict = {}
-_last_refresh: dict = {}
+_page_cache: dict[str, Any] = {}
+_last_refresh: dict[str, float] = {}
 _refresh_lock = threading.Lock()
 
 
@@ -84,7 +84,7 @@ class QuotaRow:
     observed_at: float | None = None
     cap: int | None = None
     kind: str = SUBSCRIPTION
-    weight: int | None = None
+    weight: float | None = None
     master: str = ""
     selected: bool = False
     routing_left: float | None = None
@@ -95,7 +95,7 @@ class QuotaRow:
 
 
 def claude_rows(
-    results: list,
+    results: list[ProbeResult],
     sessions: dict[str, int],
     source: str = CACHED,
     observed: dict[str, float] | None = None,
@@ -108,7 +108,7 @@ def claude_rows(
 
 
 def _claude_row(
-    result, sessions: dict[str, int], source: str, seen: float | None, now: float, include_fable: bool
+    result: ProbeResult, sessions: dict[str, int], source: str, seen: float | None, now: float, include_fable: bool
 ) -> QuotaRow:
     cap = account_cap(result, now, include_fable) if session_bands.fresh(seen, now) else None
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, now)
@@ -162,20 +162,26 @@ def _codex_source(account: "codex_router.CodexAccount", quota: "CodexQuota | Non
 
 
 def codex_rows(
-    accounts: list,
-    quotas: dict,
+    accounts: list["codex_router.CodexAccount"],
+    quotas: "Mapping[str, CodexQuota | None]",
     sessions: dict[str, int],
     now: float,
     environ: Mapping[str, str] | None = None,
     identities: Mapping[str, str] | None = None,
 ) -> list[QuotaRow]:
-    rows = []
+    rows: list[QuotaRow] = []
     for account in accounts:
         quota = quotas.get(account.name)
         known = quota is not None and not quota.expired
-        fresh = known and session_bands.fresh(quota.observed_at, now)
-        measured = known and not codex_router.stale_reset(quota, now, environ)
-        week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if measured else None
+        fresh = known and session_bands.fresh(cast("CodexQuota", quota).observed_at, now)
+        measured = known and not codex_router.stale_reset(cast("CodexQuota", quota), now, environ)
+        week = (
+            session_bands.left(
+                cast("CodexQuota", quota).seven_day.used, cast("CodexQuota", quota).seven_day.resets_at, now
+            )
+            if measured
+            else None
+        )
         cap = codex_router.account_cap(quota, now, environ) if account.signed_in and known else None
         rows.append(
             QuotaRow(
@@ -183,7 +189,9 @@ def codex_rows(
                 account=account.name,
                 state=quota_state.shown(_codex_state(account, quota, now, environ), cap, week),
                 sessions=sessions.get(account.name, 0),
-                five_hour_left=session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
+                five_hour_left=session_bands.left(
+                    cast("CodexQuota", quota).five_hour.used, cast("CodexQuota", quota).five_hour.resets_at, now
+                )
                 if fresh
                 else None,
                 seven_day_left=week,
@@ -200,11 +208,11 @@ def codex_rows(
     return rows
 
 
-def fingerprints(accounts: list, environ: Mapping[str, str]) -> dict[str, str]:
+def fingerprints(accounts: list["codex_router.CodexAccount"], environ: Mapping[str, str]) -> dict[str, str]:
     return {account.name: codex_router.fingerprint(codex_router.identity(account, environ)) for account in accounts}
 
 
-def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
+def without_routing(rows: list[QuotaRow], accounts: list["codex_router.CodexAccount"]) -> list[QuotaRow]:
     """Accounts this environment holds no token for show their quota but take no routing share."""
     names = {account.name for account in accounts}
     return [replace(row, cap=None, routing_left=None) if row.account in names else row for row in rows]
@@ -284,7 +292,13 @@ def with_unrouted(
     return kept + list(found.values())
 
 
-def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
+def next_account(
+    pool: list["codex_router.CodexAccount"],
+    quotas: "Mapping[str, CodexQuota | None]",
+    sessions: dict[str, int],
+    now: float,
+    environ: dict[str, str],
+) -> str:
     """The account open placement would give the next launch, among accounts whose credential is not refused."""
     usable = [account for account in pool if not codex_router.refusal(account, environ)]
     try:
@@ -299,7 +313,8 @@ def mark_next(rows: list[QuotaRow], account: str) -> list[QuotaRow]:
 
 def render(rows: list[QuotaRow], now: int, unlisted: int = 0, fable: bool = False, current: str = NO_CURRENT) -> str:
     columns = [*COLUMNS, *(FABLE_COLUMNS if fable else [])]
-    table, rank = [], 0
+    table: list[list[str]] = []
+    rank = 0
     for row in _ordered(rows):
         rank += row.kind == SUBSCRIPTION
         cells = _cells(str(rank) if row.kind == SUBSCRIPTION else MISSING, row, now, current)
@@ -312,7 +327,7 @@ def render(rows: list[QuotaRow], now: int, unlisted: int = 0, fable: bool = Fals
 
 
 def _ordered(rows: list[QuotaRow]) -> list[QuotaRow]:
-    def key(row: QuotaRow) -> tuple:
+    def key(row: QuotaRow) -> tuple[int, bool, bool, float]:
         harness = HARNESSES.index(row.agent) if row.agent in HARNESSES else len(HARNESSES)
         return harness, row.kind != SUBSCRIPTION, row.routing_left is None, -(row.routing_left or 0)
 
@@ -412,7 +427,7 @@ def _interactive_row(master: "MasterAccount", sessions: dict[str, int]) -> Quota
 
 def _mark(row: QuotaRow, master: "MasterAccount | None") -> QuotaRow:
     declared = master is not None and row.kind != API and row.account == master.slug
-    return replace(row, master=master.marker) if declared else row
+    return replace(row, master=cast("MasterAccount", master).marker) if declared else row
 
 
 def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sessions: dict[str, int]) -> list[QuotaRow]:
@@ -460,7 +475,9 @@ def _codex(now: float, force: bool = False) -> list[QuotaRow]:
     pool = codex_router.CodexAccountSource().pool(environ)
     sessions = codex_sessions_by_account()
     live = codex_router.routed_live(pool, sessions, environ)
-    quotas = codex_router.fresh_quotas(pool, environ, now, force=force)
+    quotas = cast("Callable[..., dict[str, CodexQuota | None]]", codex_router.fresh_quotas)(
+        pool, environ, now, force=force
+    )
     quotas.update(codex_router.quotas(live, environ))
     identities = fingerprints(pool + live, environ)
     rows = without_routing(codex_rows(pool + live, quotas, sessions, now, identities=identities), live)
@@ -494,7 +511,12 @@ def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) ->
 
 
 def current_table(
-    observations: list, probed: list, names: set[str], sessions: dict[str, int], fable: bool, current: str
+    observations: list[tuple[float, ProbeResult]],
+    probed: list[ProbeResult],
+    names: set[str],
+    sessions: dict[str, int],
+    fable: bool,
+    current: str,
 ) -> str:
     now = time.time()
     seen = {result.account: (at, result) for at, result in observations if result.account in names}
@@ -509,7 +531,7 @@ def _unprobed(account: str) -> ProbeResult:
     return ProbeResult(account, "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
 
 
-def _observed(results: list, now: float, fable: bool) -> dict[str, float]:
+def _observed(results: list[ProbeResult], now: float, fable: bool) -> dict[str, float]:
     from scripts.claude_quota_balancer import cached_observations
 
     cached = {result.account: at for at, result in cached_observations(include_fable=fable)}
@@ -532,7 +554,7 @@ def with_reservations(rows: list[QuotaRow], holds: Mapping[str, "Reservation | N
 
 
 def balance_table(
-    results: list,
+    results: list[ProbeResult],
     sessions: dict[str, int],
     now: float,
     fable: bool = False,
@@ -551,14 +573,14 @@ def balance_table(
     return "\n".join([table, *(f"{row.agent} {row.account}: {row.reserved}" for row in rows if row.reserved)])
 
 
-def current_observations(cached: list) -> list:
+def current_observations(cached: list[tuple[float, ProbeResult]]) -> list[tuple[float, ProbeResult]]:
     if not cached:
         return []
     newest = max(at for at, _ in cached)
     return [(at, result) for at, result in cached if newest - at <= RETIRED_AFTER_S]
 
 
-def _page_quota(now: float) -> dict:
+def _page_quota(now: float) -> dict[str, Any]:
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer, codex_router
     from scripts.routing.claude_api import ClaudeApiSource
@@ -586,7 +608,7 @@ def _page_quota(now: float) -> dict:
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
 
 
-def page_quota(now: float | None = None) -> dict:
+def page_quota(now: float | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
     if not _page_cache or now - _page_cache["at"] >= PAGE_TTL_S:
         _page_cache.update(at=now, quota=_page_quota(now))

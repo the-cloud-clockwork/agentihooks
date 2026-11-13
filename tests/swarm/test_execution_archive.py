@@ -43,20 +43,118 @@ def section(store, name):
 def test_archive_moves_only_rows_no_live_reader_returns(store):
     first, second, third, other = history(store)
     registry = store.execution_registry
-    agents, occupants = registry.agents("fixture"), registry.occupants("fixture")
+    agents = registry.agents("fixture")
     records = sorted(registry.records("fixture"), key=lambda a: a.execution_id)
 
-    assert registry.archive("fixture") == 2
+    assert registry.archive("fixture") == 3
 
-    assert set(section(store, "executions")) == {third.execution_id, other.execution_id}
-    assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
+    assert set(section(store, "executions")) == {third.execution_id}
+    assert set(section(store, "archive")) == {first.execution_id, second.execution_id, other.execution_id}
     assert registry.agents("fixture") == agents
-    assert registry.occupants("fixture") == occupants
+    assert registry.occupants("fixture") == {"eng-1@fixture": store.execution("fixture", third.execution_id)}
     assert sorted(registry.records("fixture"), key=lambda a: a.execution_id) == records
     assert store.execution("fixture", first.execution_id).name == first.name
     assert registry.managed("fixture", second.name)
     assert not registry.managed("fixture", "nobody@fixture")
     assert registry.archive("fixture") == 0
+
+
+@pytest.mark.feature("swarm-archive-terminal-head")
+def test_archive_moves_a_terminal_head_with_no_newer_generation(store):
+    agent = started(store, "eng-9@fixture")
+    store.drop_agent("fixture", agent.name)
+    registry = store.execution_registry
+
+    assert registry.archive("fixture") == 1
+
+    assert agent.execution_id not in section(store, "executions")
+    assert agent.execution_id in section(store, "archive")
+    assert store.execution("fixture", agent.execution_id).state == "ended"
+    assert registry.occupants("fixture") == {}
+
+
+@pytest.mark.feature("swarm-archive-stale-generations-of-a-listed-name")
+def test_archive_moves_older_generations_of_a_name_that_stays_listed(store):
+    name = store.next_name("fixture", "eng")
+    agent = AgentRecord(name, "eng", "task", seat="eng-1@fixture")
+    one = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", name)
+    two = store.start_execution("fixture", agent, one.execution_id)
+    store.drop_agent("fixture", name)
+    three = store.start_execution("fixture", agent, two.execution_id)
+    registry = store.execution_registry
+
+    assert registry.archive("fixture") == 2
+
+    assert set(section(store, "executions")) == {three.execution_id}
+    assert set(section(store, "archive")) == {one.execution_id, two.execution_id}
+    assert registry.occupants("fixture") == {"eng-1@fixture": store.execution("fixture", three.execution_id)}
+
+
+@pytest.mark.feature("swarm-archive-keeps-listed-head")
+def test_archive_keeps_a_listed_head_that_is_ended(store):
+    name = store.next_name("fixture", "eng")
+    agent = AgentRecord(name, "eng", "task", seat="eng-9@fixture")
+    older = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", name)
+    head = store.start_execution("fixture", agent, older.execution_id)
+    store.put_agent("fixture", replace(head, state="ended"))
+    registry = store.execution_registry
+
+    assert registry.archive("fixture") == 1
+
+    assert set(section(store, "executions")) == {head.execution_id}
+    assert set(section(store, "archive")) == {older.execution_id}
+    assert registry.occupants("fixture") == {"eng-9@fixture": store.execution("fixture", head.execution_id)}
+
+
+@pytest.mark.feature("swarm-archive-prunes-intents")
+def test_archive_prunes_intents_for_the_rows_it_archives(store):
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        first, second, third, other = history(store)
+        assert first.execution_id in section(store, "intents")
+        assert second.execution_id in section(store, "intents")
+
+    assert store.execution_registry.archive("fixture") == 3
+
+    intents = section(store, "intents")
+    assert first.execution_id not in intents
+    assert second.execution_id not in intents
+    assert third.execution_id in intents
+    assert other.execution_id not in intents
+
+
+@pytest.mark.parametrize("external", [False, True])
+def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
+    from scripts.swarm import lease
+
+    first, second, third, other = history(store)
+    if external:
+        fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        assert store.execution_registry.archive("fixture") == 3
+        store.put_agent("fixture", replace(third, state="working"))
+    port = fencing.records(store, "fixture")
+    assert port.layout("fixture") == fencing.DOCUMENT
+    doc = fencing.read(store, "fixture")
+    executions = fencing.read_executions(store, "fixture")
+    assert set(doc["archive"]) == {first.execution_id, second.execution_id, other.execution_id}
+    assert executions == doc["executions"]
+    assert executions[third.execution_id]["state"] == "working"
+    for execution_id, row in doc["archive"].items():
+        found = port.record("fixture", "archive", execution_id)
+        assert found is not None
+        assert found.value == row
+    for execution_id, row in executions.items():
+        found = port.record("fixture", "executions", execution_id)
+        assert found is not None
+        assert found.value == row
 
 
 def test_managed_reads_the_archive_inside_redis(store, monkeypatch):
@@ -245,14 +343,22 @@ def test_archive_keeps_rows_without_a_seat_or_generation(store):
     assert {"legacy", "nameless"} <= set(section(store, "executions"))
 
 
+@pytest.mark.feature("swarm-archive-prunes-intents")
 def test_reconcile_archives_dead_rows(store):
-    first, second, *_ = history(store)
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        first, second, third, other = history(store)
     runtime = MagicMock()
     runtime.live_names.return_value = set()
 
     ExecutionRegistry(store).reconcile("fixture", runtime, 0)
 
-    assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
+    assert set(section(store, "archive")) == {first.execution_id, second.execution_id, other.execution_id}
+    assert first.execution_id not in section(store, "intents")
+    assert second.execution_id not in section(store, "intents")
 
 
 def test_a_first_read_imports_the_legacy_execution_hashes(store):

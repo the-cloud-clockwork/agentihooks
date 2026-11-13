@@ -1,8 +1,11 @@
 """PreToolUse enforcement for sustained swarm blockers: a category stuck for an hour or more opens the master coding
-window automatically, injects a once-a-minute notice naming each sustained category, and denies any tool call that
-is not part of the fix. Fleet panic mode opens the same window and denies every other session's pushes, reruns,
-dispatches and deploys. Fails open on a store error."""
+window automatically and injects a once-a-minute notice naming each sustained category, putting the master in
+troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
+session's pushes, reruns, dispatches and deploys; a session on the head branch of a registered fix keeps its pushes,
+reruns and dispatches.
+Fails open on a store error."""
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +18,7 @@ if TYPE_CHECKING:
 
 NOTICE = (
     "BLOCKER QUEUE on swarm {slug}: {categories} sustained for an hour or more. Fix this now: the master coding "
-    "window is open; other work stays denied until each category is cleared with "
+    "window is open; troubleshoot and fix before any other work, and clear each category with "
     "agentihooks swarm {slug} blockers clear <category>. Stop everything unnecessary for the fix: "
     "agentihooks swarm {slug} panic on --fix <pr url> pauses agent starts and cancels every CI run but the fix "
     "and the merge queue, printing what it cancelled."
@@ -34,14 +37,7 @@ _FROZEN_COMMANDS = (
     ("helm", "install"),
     ("argocd", "app", "sync"),
 )
-BLOCK = (
-    "BLOCKED: sustained blockers on swarm {slug} ({categories}) hold the master to the fix: reads, read-only shell, "
-    "edits inside a worktree, git, gh, agentihooks swarm {slug} merge|blockers, msg and ledger commands."
-)
-_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
-_WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
-_READ_COMMANDS = frozenset({"cat", "head", "tail", "ls", "wc", "grep", "find", "pwd"})
-_WORKTREES = Path.home() / "dev" / "worktrees"
+_FIX_COMMANDS = _FROZEN_COMMANDS[:3]
 
 
 def _slug(session_id: str) -> str:
@@ -76,43 +72,6 @@ def _describe(found: "dict[str, Blocker]") -> str:
     )
 
 
-def _in_worktree(value: str, cwd: str) -> bool:
-    path = Path(value).expanduser()
-    target = (path if path.is_absolute() else Path(cwd or ".") / path).resolve()
-    return target == _WORKTREES or target.is_relative_to(_WORKTREES)
-
-
-def _allowed_tokens(tokens: list[str], slug: str) -> bool:
-    if not tokens:
-        return False
-    name = Path(tokens[0]).name
-    if name in _READ_COMMANDS or name in ("git", "gh"):
-        return True
-    if name != "agentihooks" or len(tokens) < 2:
-        return False
-    if tokens[1] == "swarm":
-        return len(tokens) >= 4 and tokens[2] == slug and tokens[3] in ("merge", "blockers", "panic")
-    return tokens[1] in ("msg", "ledger")
-
-
-def _allowed_bash(command: str, slug: str) -> bool:
-    from hooks.context.shell_commands import commands
-
-    found = commands(command)
-    return bool(found) and all(_allowed_tokens(tokens, slug) for tokens in found)
-
-
-def _allowed(tool_name: str, tool_input: dict[str, Any], cwd: str, slug: str) -> bool:
-    if tool_name in _READ_TOOLS or tool_name.startswith("mcp__serena__"):
-        return True
-    if tool_name == "Bash":
-        return _allowed_bash(str(tool_input.get("command") or ""), slug)
-    if tool_name in _WRITE_TOOLS:
-        value = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
-        return bool(value) and _in_worktree(value, cwd)
-    return False
-
-
 def _now_ms(store: "RedisStore") -> int:
     seconds, microseconds = getattr(store, "redis").time()
     return seconds * 1000 + microseconds // 1000
@@ -125,7 +84,7 @@ def pretool(
     if not session_id:
         return None, None
     if not master_coding.is_master(session_id):
-        return None, _frozen(tool_name, tool_input)
+        return None, _frozen(tool_name, tool_input, cwd)
     slug = _slug(session_id)
     if not slug:
         return None, None
@@ -144,9 +103,7 @@ def pretool(
         master_coding.open_for_blockers(session_id, now_ms / 1000)
     categories = _describe(found)
     notice = NOTICE.format(slug=slug, categories=categories) if blockers.due_notice(store, slug, now_ms) else None
-    if _allowed(tool_name, tool_input, cwd, slug):
-        return notice, None
-    return notice, BLOCK.format(slug=slug, categories=categories)
+    return notice, None
 
 
 def _panic_state(store: "RedisStore") -> "Panic | None":
@@ -174,16 +131,73 @@ def _freezes(tokens: list[str]) -> bool:
     return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS)
 
 
-def _frozen(tool_name: str, tool_input: dict[str, Any]) -> str | None:
+def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str) -> str | None:
     if tool_name != "Bash":
         return None
-    from hooks.context.shell_commands import commands
+    from hooks.context.shell_commands import located
 
-    if not any(_freezes(tokens) for tokens in commands(str(tool_input.get("command")))):
+    found = [(tokens, folders) for tokens, folders in located(str(tool_input.get("command"))) if _freezes(tokens)]
+    if not found:
         return None
     store = _store()
     current = None if store is None else _panic_state(store)
-    return None if current is None else FROZEN.format(reason=current.reason)
+    if current is None or all(
+        _spares(tokens) and _on_fix_branch(_directory(cwd, folders), current.fixes) for tokens, folders in found
+    ):
+        return None
+    return FROZEN.format(reason=current.reason)
+
+
+def _directory(cwd: str, folders: list[str]) -> str:
+    """Return the directory a command runs in: the session directory changed by each cd before it, or an empty
+    string without a session directory."""
+    if not cwd:
+        return ""
+    here = Path(cwd)
+    for folder in folders:
+        here = here / Path(folder).expanduser()
+    return str(here)
+
+
+def _spares(tokens: list[str]) -> bool:
+    words = [Path(tokens[0]).name, *tokens[1:]]
+    return any(words[: len(prefix)] == list(prefix) for prefix in _FIX_COMMANDS)
+
+
+def _git(cwd: str, *args: str) -> str:
+    """Return one git read's output in the session's directory, or an empty string when it fails."""
+    try:
+        found = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return found.stdout.strip() if found.returncode == 0 else ""
+
+
+def _fix_branch(url: str) -> str:
+    """Return the head branch of one registered fix pull request, or an empty string when it cannot be read."""
+    from scripts.swarm import panic
+    from scripts.swarm.store import SwarmError
+
+    try:
+        return panic.fix_branch(url)
+    except SwarmError:
+        return ""
+
+
+def _on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
+    """Return whether the session works in the repository and on the head branch of a registered fix pull request."""
+    from scripts.swarm.stack import repo_key
+
+    if not (cwd and fixes):
+        return False
+    branch = _git(cwd, "branch", "--show-current")
+    if not branch:
+        return False
+    origin = _git(cwd, "remote", "get-url", "origin")
+    if not origin:
+        return False
+    changes = f"{repo_key(origin)}/pull/"
+    return any(repo_key(url).startswith(changes) and _fix_branch(url) == branch for url in fixes)
 
 
 def checked(payload: Any) -> str | None:

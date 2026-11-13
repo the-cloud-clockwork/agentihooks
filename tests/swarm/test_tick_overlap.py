@@ -2,6 +2,7 @@ from scripts.gates import intent
 from scripts.swarm import cli
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
+from tests.swarm.test_tick_groups import _Marker, _with
 
 
 def test_the_intent_check_runs_while_the_tick_runs(env, monkeypatch):  # noqa: F811
@@ -19,22 +20,20 @@ def test_the_intent_check_runs_while_the_tick_runs(env, monkeypatch):  # noqa: F
             seen.append(ticking.wait(10))
             return ["judged"]
 
-    real = cli.tick
+    real = cli.TickSites._start
 
-    def tick(*args):
+    def start(sites):
         ticking.set()
-        return real(*args)
+        return real(sites)
 
     monkeypatch.setattr(intent, "Check", Waiting)
-    monkeypatch.setattr(cli, "tick", tick)
+    monkeypatch.setattr(cli.TickSites, "_start", start)
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert seen == [True]
     assert "judged" in actions
 
 
 def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monkeypatch):  # noqa: F811
-    import pytest
-
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     judged, ticked = RuntimeError("intent failed"), ValueError("tick failed")
@@ -46,18 +45,18 @@ def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monke
         def run(self, doc):
             raise judged
 
-    def tick(*args):
-        raise ticked
+    def tick(get):
+        get("box")["raised"] = ticked
+        return []
 
     monkeypatch.setattr(intent, "Check", Failing)
-    monkeypatch.setattr(cli, "tick", tick)
-    with pytest.raises(RuntimeError) as caught:
-        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert caught.value is judged
-    assert caught.value.__context__ is ticked
+    _with(monkeypatch, _Marker("failing marker", "agents", tick))
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert actions == [f"pass failed: a step raised RuntimeError: {judged}"]
+    assert judged.__context__ is ticked
 
 
-def test_the_tick_hands_the_intent_check_the_pull_request_text_read(env, monkeypatch):  # noqa: F811
+def test_the_tick_hands_the_intent_check_batched_pull_request_readers_and_a_limit(env, monkeypatch):  # noqa: F811
     from scripts.swarm import ledger_events
 
     store, ledger, rt = env
@@ -73,10 +72,11 @@ def test_the_tick_hands_the_intent_check_the_pull_request_text_read(env, monkeyp
 
     monkeypatch.setattr(intent, "Check", Recorded)
     monkeypatch.setattr(ledger_events, "tick_view", lambda *args: lambda url: object())
+    monkeypatch.setattr(ledger_events, "pull_texts", lambda urls, source=None: {})
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     [(args, kwargs)] = built
     assert isinstance(args[2], int)
-    assert kwargs["text"] is intent.pr_text
+    assert kwargs["limit"] == intent.JUDGED_PER_PASS
     assert kwargs["head"]("https://github.com/o/r/pull/1") is None
 
 

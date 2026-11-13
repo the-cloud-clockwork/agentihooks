@@ -24,7 +24,7 @@ UNFIT_NAK_MS = 5_000
 @dataclass(frozen=True)
 class Snapshot:
     slug: str
-    rows: dict
+    rows: dict[str, Any]
     doc: dict
     graph: dict
     fix: str
@@ -64,7 +64,7 @@ class Source:
         doc = self.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
-        released = release_wait.checker(config.repo)
+        released = release_wait.checker(config)
         applied = apply_wait.checker(config, rows)
         unshared = fleet_red.checker()
         return Snapshot(
@@ -83,7 +83,7 @@ def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
         task.get("state") == "open"
         and not task.get("out_of_scope")
         and not task.get("merged_into")
-        and not claim_hold.hold(task, rows, doc, graph, fix)
+        and not claim_hold.holds(task, rows, doc, graph, fix)  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
@@ -164,6 +164,13 @@ def tick_launches(engine: str, task: Mapping[str, Any]) -> bool:
     return engine != EVENTS_ENGINE or bool(task.get("workstation"))
 
 
+def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ready tasks the tick launches under ``engine``, narrowed to the capacity decision's tasks when it names
+    any."""
+    ready = [task for task in ready if tick_launches(engine, task)]
+    return [task for task in ready if task["id"] in decision["tasks"]] if "tasks" in decision else ready
+
+
 def tick_places(engine: str, rows: Mapping[str, Mapping[str, Any]]) -> bool:
     return engine != EVENTS_ENGINE or any(
         row.get("state") == "open" and tick_launches(engine, row) for row in rows.values()
@@ -180,15 +187,24 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
-    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned."""
+    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
+    withdraws the stale offers there before the fresh ones join them."""
     events = offers(view, now_ms)
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
+    for queue in queues.values():
+        queue.withdraw(lambda event: stale(event, view))
     placed = []
     for event in events:
         if queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
+
+
+def stale(event: Envelope, view: Snapshot) -> bool:
+    """An offer ``withdrawal`` names against the snapshot, or one whose task turned workstation, which hives never
+    take."""
+    return bool(withdrawal(event, view) or view.rows[event.key].get("workstation"))
 
 
 def withdrawal(event: Envelope, view: Snapshot) -> str:

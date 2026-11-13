@@ -136,6 +136,14 @@ controller:
       secretKey: signing-key
     # Peers beside the controller's own Pods, such as worker Pods; networkPolicy.ingressFrom never reaches the API.
     ingressFrom: []
+    # Recovery endpoints over TLS for callers outside the cluster, such as restore decisions from hives and the
+    # workstation; rendered once secretName names a tls.crt and tls.key secret. publicUrl is the https address
+    # those callers dial and ingressFrom admits them.
+    tls:
+      secretName: ""
+      port: 8781
+      publicUrl: ""
+      ingressFrom: []
     # {agent, task} of the swarm task proving a launch: the controller creates that proof swarm, and removes it once cleared.
     proof: {}
   # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker
@@ -166,7 +174,7 @@ controller:
     periodSeconds: 10
     timeoutSeconds: 8
     failureThreshold: 3
-  terminationGracePeriodSeconds: 30
+  terminationGracePeriodSeconds: 300
   env:
     LANGFUSE_MCP_URL: ""
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
@@ -198,7 +206,7 @@ controller:
         ephemeral-storage: 64Mi
   resources:
     requests:
-      cpu: 50m
+      cpu: 250m
       memory: 128Mi
       ephemeral-storage: 64Mi
     limits:
@@ -299,13 +307,15 @@ workers:
     namespace: default
     leaseName: agentihooks-hive-rollout
     drainSeconds: 1200
-    # Optional pod stamp; each new value rolls the hives one at a time. Release hives leave it unset and roll on the chart version.
+    # Optional pod stamp; each new value rolls the hives one at a time.
     release: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
   masterSwarms: []
   # Placement rank per role, role:rank pairs such as eng:1,ci:1; the lowest rank takes a role's agents first while it has room.
   prefer: ""
+  # Capabilities this hive declares at every start, such as anton; a hive placement need names one to steer a run here.
+  capabilities: []
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

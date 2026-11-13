@@ -8,7 +8,7 @@ import pytest
 
 from scripts.gates import entry
 from scripts.gates.base import Call, Gate, Who
-from scripts.gates.build import BuildGate, refusal, task_territory
+from scripts.gates.build import BuildGate, refusal, task_territory, within
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import trace_plan
 from scripts.swarm_ledger import ledger_workspace
@@ -294,6 +294,71 @@ class TestCommit:
         assert staged.decide(tool="Bash", command="git commit -m x", cwd=elsewhere).allowed
 
 
+CHARTS = "- bake the runner chart | antoncore/k8s/charts | the runners need it\n"
+
+
+@pytest.fixture
+def antoncore(world):
+    repo = world.repo.parent / "antoncore"
+    (repo / "k8s" / "charts" / "runners").mkdir(parents=True)
+    (repo / "k8s" / "charts" / "runners" / "smoke.sh").write_text("a\n")
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    world.antoncore = repo
+    return world
+
+
+class TestRepositoryNamedAreas:
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_an_area_naming_the_repository_allows_an_edit_inside_it(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not antoncore.decide(file_path=str(antoncore.antoncore / "k8s/other/smoke.sh")).allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_an_area_naming_another_repository_does_not_match(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        denied = edit(antoncore, "k8s/charts/runners/smoke.sh")
+        assert not denied.allowed
+        assert "outside your traced plan: k8s/charts/runners/smoke.sh. " in denied.reason
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_worktree_of_the_repository_matches_by_the_repository_name(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        tree = antoncore.antoncore.parent / "wt-1"
+        git(antoncore.antoncore, "worktree", "add", "-q", str(tree))
+        assert antoncore.decide(file_path=str(tree / "k8s/charts/runners/smoke.sh")).allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_commit_inside_the_repository_matches_its_named_area(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        (antoncore.antoncore / "k8s/charts/runners/smoke.sh").write_text("b\n")
+        git(antoncore.antoncore, "add", ".")
+        assert antoncore.decide(tool="Bash", command="git commit -m x", cwd=antoncore.antoncore).allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_territory_naming_the_repository_widens_it(self, antoncore):
+        antoncore.plan()
+        antoncore.territory("antoncore/k8s/charts/")
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_plain_area_still_matches_inside_the_repository(self, antoncore):
+        antoncore.plan("- the chart | k8s/charts | the runners need it\n", kept=(True,))
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_within_strips_only_the_edited_repository_name(self):
+        assert within("k8s/charts/x", ["antoncore/k8s/charts"], "antoncore")
+        assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "other")
+        assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "")
+        assert within("antoncore/k8s/charts/x", ["antoncore/k8s/charts"], "")
+
+
 class TestTerritory:
     def test_a_missing_ledger_or_task_reads_as_no_territory(self, tmp_path):
         assert task_territory(tmp_path, SLUG, TASK) == []
@@ -395,7 +460,8 @@ class TestMore:
         ledgers.mkdir()
         legacy_page.store(ledgers, SLUG, {"tasks": [{"id": TASK, "territory": ["power"]}]})
         call = Call(tool="Edit", tool_input={"file_path": str(world.repo / "power/x.py")}, cwd=str(world.repo))
-        decision = BuildGate(environ={}).decide(call, Who(name=ME, swarm=SLUG, task=TASK), None)
+        state = Verdicts(SLUG, "build", Path.home() / "gates")
+        decision = BuildGate(environ={}).decide(call, Who(name=ME, swarm=SLUG, task=TASK), state)
         assert decision.allowed
 
     def test_the_work_folder_and_scratchpad_are_exempt_inside_a_git_tree(self, world):

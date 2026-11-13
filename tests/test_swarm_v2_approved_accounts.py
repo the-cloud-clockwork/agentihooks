@@ -218,7 +218,7 @@ def test_the_fleet_rows_are_one_claude_row_per_approved_key_with_its_fleet_held_
     ]
 
 
-def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_windows():
+def test_an_observed_key_offers_its_quota_band_past_the_launch_cap_with_its_windows():
     store, route = _route({"akey"})
     _observe(store, "akey", five_used=93.0, week_used=40.0)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
@@ -226,7 +226,7 @@ def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_win
         "claude", "akey", "OPEN", 0, 7.0, 60.0, 2, NOW_MS // 1000 + 48 * HOUR, five_resets_at=NOW_MS // 1000 + HOUR
     )
     _observe(store, "akey", five_used=10.0)
-    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == 4
+    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == session_bands.TOP_BAND
 
 
 def test_an_exhausted_key_is_a_closed_row():
@@ -234,6 +234,256 @@ def test_an_exhausted_key_is_a_closed_row():
     _observe(store, "akey", status="rejected")
     [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
     assert (row.state, row.cap) == ("CLOSED", 0)
+
+
+def _hive_reading(
+    store: RedisStore,
+    slot: str,
+    five_used: object = 10.0,
+    hive: str = "hive-a",
+    observed_ms: int = NOW_MS,
+    heartbeat_ms: int = NOW_MS,
+    others: tuple[str, ...] = (),
+) -> None:
+    import json
+
+    from scripts.hive import registry
+
+    registry.update(store.redis, hive, ["max-agents=8"])
+    registry.beat(
+        store.redis,
+        hive,
+        {
+            "heartbeat_at": heartbeat_ms,
+            "slots": [{"harness": "claude", "account": slot, "kind": "subscription", "cap": 6}],
+        },
+    )
+    reading = {
+        "five_hour": {"used": five_used, "resets_at": NOW_MS // 1000 + HOUR},
+        "seven_day": {"used": 40.0, "resets_at": NOW_MS // 1000 + 48 * HOUR},
+        "observed_at": observed_ms / 1000,
+    }
+    other = {**reading, "five_hour": {"used": 99.0, "resets_at": NOW_MS // 1000 + HOUR}}
+    readings = {**{name: other for name in others}, f"claude:{slot}": reading}
+    store.redis.set(f"{registry.key(hive)}:quota", json.dumps(readings))
+
+
+def test_a_secret_key_reads_the_quota_a_live_hive_published_under_its_token_slug() -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=93.0)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert row == capacity.Account(
+        "claude",
+        "nestor-coltatgmail-com",
+        "OPEN",
+        0,
+        7.0,
+        60.0,
+        2,
+        NOW_MS // 1000 + 48 * HOUR,
+        five_resets_at=NOW_MS // 1000 + HOUR,
+    )
+
+
+def test_a_hive_reading_for_another_account_leaves_the_key_unread() -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "thecloudclockworkatgmail_com")
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.five_left, row.week_left) == (None, None)
+
+
+@pytest.mark.parametrize("five_used", [-20.0, "high"])
+def test_a_malformed_hive_reading_leaves_the_key_unread(five_used: object) -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=five_used)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.five_left, row.week_left) == (None, None)
+
+
+def test_a_hive_reading_with_no_five_hour_window_opens_the_key_by_its_week() -> None:
+    store, route = _route({"nestor-coltatgmail-com"})
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=None)
+    [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 60.0, session_bands.TOP_BAND)
+
+
+def _hive_observed(five_used: float, observed_ms: int = NOW_MS) -> quota.Observation:
+    return quota.Observation(
+        "nestor-coltatgmail-com",
+        "claude",
+        "",
+        0,
+        observed_ms,
+        "allowed",
+        five_used,
+        40.0,
+        NOW_MS // 1000 + HOUR,
+        NOW_MS // 1000 + 48 * HOUR,
+    )
+
+
+def _hive_lookup(store: RedisStore) -> quota.Observation | None:
+    return quota.hive_observation(store.redis, "nestor-coltatgmail-com", "claude", NOW_MS)
+
+
+def test_the_hive_observation_carries_the_hive_windows_under_the_secret_key_with_no_grant() -> None:
+    store, _ = _route(set())
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=30.0, others=("claude:thecloudclockworkatgmail_com",))
+    assert _hive_lookup(store) == _hive_observed(30.0)
+    assert quota.hive_observation(store.redis, "nestor-coltatgmail-com", "codex", NOW_MS) is None
+
+
+def test_a_dead_hive_reading_is_skipped_for_a_live_one() -> None:
+    store, _ = _route(set())
+    _hive_reading(
+        store, "nestor_coltatgmail_com", five_used=70.0, hive="hive-a", heartbeat_ms=NOW_MS - 10 * HOUR * 1000
+    )
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, hive="hive-b", observed_ms=NOW_MS - 1000)
+    assert _hive_lookup(store) == _hive_observed(20.0, NOW_MS - 1000)
+
+
+def test_an_unreadable_hive_report_is_skipped_for_the_next_hive() -> None:
+    from scripts.hive import registry
+
+    store, _ = _route(set())
+    _hive_reading(store, "nestor_coltatgmail_com", hive="hive-a")
+    store.redis.set(f"{registry.key('hive-a')}:quota", "not json")
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, hive="hive-b")
+    assert _hive_lookup(store) == _hive_observed(20.0)
+
+
+@pytest.mark.parametrize("newer", ["hive-a", "hive-b"])
+def test_the_newest_live_hive_reading_wins(newer: str) -> None:
+    store, _ = _route(set())
+    for hive in ("hive-a", "hive-b"):
+        observed = NOW_MS if hive == newer else NOW_MS - 1000
+        _hive_reading(
+            store, "nestor_coltatgmail_com", five_used=20.0 if hive == newer else 70.0, hive=hive, observed_ms=observed
+        )
+    assert _hive_lookup(store) == _hive_observed(20.0)
+
+
+def test_a_published_observation_holds_against_a_hive_reading_no_newer_than_it() -> None:
+    store, route = _route(set())
+    _observe(store, "nestor-coltatgmail-com", five_used=50.0)
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0)
+    assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 50.0
+    _hive_reading(store, "nestor_coltatgmail_com", five_used=20.0, observed_ms=NOW_MS + 1000)
+    assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 20.0
+
+
+CLOSED_KEY, OPEN_KEY = "nestorcolt-smatgmail-com", "thecloudclockworkatgmail-com"
+
+
+def _spent_week(store: RedisStore, week_used: float) -> None:
+    """The live shape of a spent account: a hive slot reading with a week and no five hour window."""
+    import json
+
+    from scripts.hive import registry
+
+    _hive_reading(store, "nestorcolt_smatgmail_com", five_used=None)
+    key = f"{registry.key('hive-a')}:quota"
+    readings = json.loads(store.redis.get(key))
+    readings["claude:nestorcolt_smatgmail_com"]["seven_day"]["used"] = week_used
+    store.redis.set(key, json.dumps(readings))
+
+
+def test_a_closed_account_a_hive_advertises_gets_no_placement() -> None:
+    from scripts.hive import launch
+
+    store, route = _route({CLOSED_KEY, OPEN_KEY})
+    _spent_week(store, 97.0)
+    rows = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account(
+            "claude",
+            CLOSED_KEY,
+            "CLOSED",
+            0,
+            None,
+            3.0,
+            0,
+            NOW_MS // 1000 + 48 * HOUR,
+            five_resets_at=NOW_MS // 1000 + HOUR,
+        ),
+        capacity.Account("claude", OPEN_KEY, "OPEN", 0, None, None, 1),
+    ]
+    assert [row.name for row in launch._open_rows(rows)] == [OPEN_KEY]
+    assert route.choose(1, planned=CLOSED_KEY) == OPEN_KEY
+
+
+def test_a_hive_reading_with_room_in_its_week_takes_the_week_band() -> None:
+    store, route = _route({CLOSED_KEY})
+    _spent_week(store, 89.0)
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.five_left, row.week_left) == ("OPEN", session_bands.TOP_BAND, None, 11.0)
+
+
+def test_a_claude_account_with_no_five_hour_reading_is_not_held_to_one_session() -> None:
+    store, route = _route({CLOSED_KEY}, {CLOSED_KEY: 1})
+    _spent_week(store, 49.0)
+    [row] = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 51.0, session_bands.TOP_BAND)
+    assert capacity.free_seats(row) == session_bands.TOP_BAND - 1
+
+
+def test_the_launch_cap_still_bounds_the_kubernetes_worker_route() -> None:
+    store, route = _route({CLOSED_KEY}, {CLOSED_KEY: 1})
+    _spent_week(store, 49.0)
+    assert route.choose(1) is None
+
+
+DRAINING = {
+    "claude five hour at five": ("claude", 5.0, 50.0, True),
+    "claude five hour above five": ("claude", 5.1, 50.0, False),
+    "claude week at ten": ("claude", None, 10.0, True),
+    "claude week above ten": ("claude", None, 10.1, False),
+    "codex five hour spent": ("codex", 1.0, 50.0, False),
+    "codex week at ten": ("codex", None, 10.0, True),
+    "nothing read": ("claude", None, None, False),
+}
+
+
+@pytest.mark.parametrize(("harness", "five", "week", "expected"), DRAINING.values(), ids=DRAINING.keys())
+def test_a_swarm_account_drains_at_ten_percent_of_its_week_or_five_of_its_five_hours(
+    harness: str, five: float | None, week: float | None, expected: bool
+) -> None:
+    assert approved.draining(harness, five, week) is expected
+
+
+def test_a_draining_fleet_reading_takes_no_hive_agent() -> None:
+    store, route = _route({"akey", "bkey"})
+    _observe(store, "akey", week_used=92.0)
+    [row, _] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
+    assert route.choose(6, planned="akey") == "bkey"
+
+
+def test_a_claude_fleet_reading_at_five_percent_of_its_five_hours_takes_no_hive_agent() -> None:
+    store, route = _route({"akey"})
+    _observe(store, "akey", five_used=95.0)
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.five_left) == ("CLOSED", 0, 5.0)
+
+
+def test_a_codex_fleet_reading_with_a_spent_five_hours_keeps_its_week_band() -> None:
+    store, observations = _quota()
+    route = approved.AccountRoute(lambda: frozenset({"ckey"}), observations, dict, "codex")
+    observation = quota.Observation(
+        "ckey",
+        "codex",
+        "exe-" + "0" * 32,
+        1,
+        NOW_MS,
+        "allowed",
+        99.0,
+        10.0,
+        NOW_MS // 1000 + HOUR,
+        NOW_MS // 1000 + HOUR,
+    )
+    store.redis.hset(quota.latest_key("codex"), "ckey", quota.encode(observation))
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.harness, row.state, row.cap) == ("codex", "OPEN", 6)
 
 
 def _sizing(runtime):
@@ -310,6 +560,158 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     herdr = HerdrRuntime()
     assert herdr.quota_accounts is None
     decision = _sizing(herdr)
-    assert asked == [(NOW_MS / 1000, True)]
+    assert asked == [(NOW_MS / 1000, False)]
     assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
+
+
+def _harness_routes(
+    claude_keys: set[str], codex_keys: set[str], held: dict[str, int] | None = None
+) -> approved.HarnessRoutes:
+    _, observations = _quota()
+    return approved.HarnessRoutes(
+        {
+            harness: approved.AccountRoute(
+                lambda keys=keys: frozenset(keys), observations, lambda: dict(held or {}), harness
+            )
+            for harness, keys in (("claude", claude_keys), ("codex", codex_keys))
+        }
+    )
+
+
+def test_the_fleet_rows_carry_every_approved_claude_and_codex_account_with_free_seats() -> None:
+    routes = _harness_routes({"akey"}, {"alpha-personal", "beta-business"}, {"beta-business": 1})
+    rows = approved.FleetAccounts(routes, 6)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account("claude", "akey", "OPEN", 0, None, None, 6),
+        capacity.Account("codex", "alpha-personal", "OPEN", 0, None, None, 6),
+        capacity.Account("codex", "beta-business", "OPEN", 1, None, None, 6),
+    ]
+    assert [capacity.free_seats(row) for row in rows] == [6, 6, 5]
+
+
+def test_a_launch_account_comes_from_the_route_of_its_harness() -> None:
+    routes = _harness_routes({"akey"}, {"alpha-personal"})
+    assert routes.choose(2, None, None, "codex") == "alpha-personal"
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "akey", None, "codex") == "alpha-personal"
+    assert routes.choose(2, None, None, "other") is None
+
+
+def test_harness_routes_pass_the_clock_the_planned_account_and_the_quota_predecessor_to_their_route() -> None:
+    store, observations = _quota()
+    claude = approved.AccountRoute(lambda: frozenset({"akey", "bkey"}), observations, lambda: {"bkey": 1}, "claude")
+    routes = approved.HarnessRoutes({"claude": claude})
+    _observe(store, "akey")
+
+    assert routes.rows(4, NOW_MS / 1000) == claude.rows(4, NOW_MS / 1000)
+    assert routes.rows(4, NOW_MS / 1000)[0].week_resets_at == NOW_MS // 1000 + 48 * HOUR
+    assert routes.banded_rows(4, NOW_MS / 1000) == claude.banded_rows(4, NOW_MS / 1000)
+    assert [row.name for row in routes.banded_rows(4, NOW_MS / 1000)] == ["akey", "bkey"]
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "bkey", None, "claude") == "bkey"
+    assert routes.choose(2, None, ("claude", "akey"), "claude") == claude.choose(2, None, ("claude", "akey"))
+    assert routes.choose(2, None, ("claude", "akey"), "claude") != "akey"
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+@pytest.mark.parametrize("masters", [1, 2, 3])
+@pytest.mark.parametrize("at_ceiling", [False, True])
+def test_fleet_worker_rows_match_the_quota_hooks_reserved_ceiling(
+    monkeypatch: pytest.MonkeyPatch, masters: int, at_ceiling: bool
+) -> None:
+    from hooks.context import quota_policy
+    from scripts.routing import reservation
+
+    store, route = _route({"reserved-key", "other-key"})
+    held = reservation.Reservation("claude", "reserved-key", masters)
+    limit = quota_policy._own_ceiling(held, "reserved-key", False)
+    assert limit is not None
+    used = limit if at_ceiling else limit - 1
+    _observe(store, "reserved-key", week_used=used)
+    _observe(store, "other-key", week_used=used)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    rows = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    own = next(row for row in rows if row.name == "reserved-key")
+    other = next(row for row in rows if row.name == "other-key")
+    assert (own.cap == 0) is at_ceiling
+    assert own.reserved == (held.reason if at_ceiling else "")
+    assert (other.cap or 0) > 0
+    assert (capacity.unreserved(rows)[1].cap or 0) > 0
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+@pytest.mark.parametrize("lane", ["dispatch", "eng", "ci", "plan"])
+def test_fleet_worker_choice_falls_through_reserved_claude_to_codex_or_names_its_refusal(
+    monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
+    from scripts.routing import reservation
+    from scripts.swarm.runtime import SpawnError
+
+    store, route = _route({"reserved-key"})
+    _observe(store, "reserved-key", week_used=70)
+    codex = approved.AccountRoute(lambda: {"codex-key"}, route.quota, lambda: {}, "codex")
+    by_harness = {"claude": route, "codex": codex}
+    routes = approved.HarnessRoutes(by_harness)
+    held = reservation.Reservation("claude", "reserved-key", 1)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    runtime = HerdrRuntime()
+    runtime.quota_accounts = approved.FleetAccounts(routes, 2)
+    assert runtime._rotation("", {})[0] == "codex"
+    assert runtime._quota_choice("claude", "rotation", False, lane)[0] == "codex"
+    assert runtime._quota_account("codex", None, None, lane).name == "codex-key"
+    by_harness.pop("codex")
+    runtime._quota_accounts = runtime.quota_accounts({}, NOW_MS / 1000, refresh=False)
+    with pytest.raises(SpawnError, match="reserved-key"):
+        runtime._quota_choice("claude", "rotation", False, lane)
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+def test_fleet_launch_picker_cannot_restore_a_reserved_account_as_a_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.routing import reservation
+
+    store, route = _route({"reserved-key"})
+    _observe(store, "reserved-key", week_used=70)
+    held = reservation.Reservation("claude", "reserved-key", 1)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    assert route.choose(2, planned="reserved-key") is None
+    route.keys = lambda: {"reserved-key", "other-key"}
+    _observe(store, "other-key")
+    assert route.choose(2, planned="reserved-key") == "other-key"
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+def test_fleet_launch_picker_keeps_the_reserved_account_for_the_master_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.routing import reservation
+
+    store, route = _route({"reserved-key"})
+    _observe(store, "reserved-key", week_used=70)
+    held = reservation.Reservation("claude", "reserved-key", 1)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    routes = approved.HarnessRoutes({"claude": route})
+    assert routes.choose(2, None, None, "claude", "master") == "reserved-key"
+    assert routes.choose(2, None, None, "claude", "dispatch") is None

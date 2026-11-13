@@ -1,0 +1,6 @@
+{
+  "scripts/codex_quota.py:scripts.codex_quota.x_parse_event:3c1864d551e106ea2a9039d3a072fde1cc37c36a567dfe15e7febf78e09332f4": {
+    "reader": "standards_reader",
+    "reason": "The timestamp default feeds fromisoformat, which raises ValueError for empty, XXXX and None alike on CPython 3.12, so the except returns None either way."
+  }
+}

@@ -93,6 +93,41 @@ def test_budgeted_step_record_reads_late_past_its_budget_and_not_failed(ended: f
     assert json.loads(passes[0][1]["record"])["failed_steps"] == []
 
 
+@pytest.mark.feature("swarm-tick-cost-report")
+def test_budgeted_step_record_carries_its_lane_only_when_given() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with timing.tick("sw", store):
+        timing.within(1.0, sorted, [1], lane="critical")
+        timing.within(1.0, sorted, [1])
+    rows = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    assert rows[0]["lane"] == "critical"
+    assert "lane" not in rows[1]
+
+
+@pytest.mark.feature("swarm-tick-cost-report")
+def test_budgeted_step_records_and_fails_under_the_name_it_is_given() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    def fail() -> None:
+        raise ValueError("broken")
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        timing.within(1.0, sorted, [1], name="spawn")
+        with pytest.raises(ValueError):
+            timing.within(1.0, fail, name="reap")
+    rows = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    assert [row["step"] for row in rows] == ["spawn", "reap"]
+    passes = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:passes"))]
+    assert passes[0]["failed_steps"] == ["reap"]
+
+
 def test_budgeted_step_that_raises_is_an_error_not_late() -> None:
     import fakeredis
 
@@ -230,3 +265,122 @@ def test_record_storage_failure_is_reported_without_masking_the_tick(capsys: pyt
         capsys.readouterr().err
         == json.dumps({"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:passes"}) + "\n"
     )
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_a_pass_error_is_read_back_from_the_store_after_a_controller_restart() -> None:
+    import fakeredis
+
+    from scripts.swarm import tick_report
+    from scripts.swarm.store import RedisStore
+
+    server = fakeredis.FakeServer()
+    store = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
+
+    @timing.instrument_tick
+    def run_tick(actual: RedisStore, slug: str) -> list[str]:
+        raise RuntimeError("ledger refused the pass")
+
+    with pytest.raises(RuntimeError):
+        run_tick(store, "sw")
+    record = json.loads(store.redis.xrange(store.key("sw", "tick:passes"))[0][1]["record"])
+    restarted = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
+    assert tick_report.read(restarted, "sw", 10)["pass_errors"] == [
+        {"pass_id": record["pass_id"], "end_ms": record["end_ms"], "error": "RuntimeError: ledger refused the pass"}
+    ]
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_a_pass_ended_by_a_held_step_failure_keeps_its_pass_error_off_the_pass_row() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+    from scripts.tick.steps import host
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = ValueError("ledger answered 503")
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        assert host.end_held({"raised": held}) == ["pass failed: a step raised ValueError: ledger answered 503"]
+    passes = store.redis.xrange(store.key("sw", "tick:passes"))
+    record = json.loads(passes[0][1]["record"])
+    assert record["outcome"] == "error"
+    assert "ledger answered 503" not in passes[0][1]["record"]
+    assert timing.pass_errors(store, "sw") == [
+        {"pass_id": record["pass_id"], "end_ms": record["end_ms"], "error": "ValueError: ledger answered 503"}
+    ]
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_pass_errors_keep_only_the_newest_within_their_bound() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    @timing.instrument_tick
+    def run_tick(actual: RedisStore, slug: str, number: int) -> list[str]:
+        raise ValueError(f"pass {number}")
+
+    for number in range(timing.PASS_ERRORS_KEPT + 2):
+        with pytest.raises(ValueError):
+            run_tick(store, "sw", number)
+    kept = timing.pass_errors(store, "sw")
+    assert len(kept) == timing.PASS_ERRORS_KEPT
+    assert kept[0]["error"] == f"ValueError: pass {timing.PASS_ERRORS_KEPT + 1}"
+    assert kept[-1]["error"] == "ValueError: pass 2"
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+@pytest.mark.parametrize("outcome", ["success", "stopped"])
+def test_a_pass_that_ends_without_an_error_keeps_no_pass_error(outcome: str) -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    @timing.instrument_tick
+    def run_tick(actual: RedisStore, slug: str) -> list[str]:
+        if outcome == "stopped":
+            raise tick_stop.Stopped()
+        return []
+
+    try:
+        run_tick(store, "sw")
+    except tick_stop.Stopped:
+        pass
+    assert timing.pass_errors(store, "sw") == []
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_a_long_pass_error_is_cut_to_its_bound() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    @timing.instrument_tick
+    def run_tick(actual: RedisStore, slug: str) -> list[str]:
+        raise ValueError("x" * (timing.PASS_ERROR_CHARS * 2))
+
+    with pytest.raises(ValueError):
+        run_tick(store, "sw")
+    assert len(timing.pass_errors(store, "sw")[0]["error"]) == timing.PASS_ERROR_CHARS
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_a_refused_pass_error_write_is_journalled(capsys: pytest.CaptureFixture[str]) -> None:
+    from redis.exceptions import RedisError
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise RedisError("down")
+
+    store = SimpleNamespace(key=lambda slug, name: f"{slug}:{name}", redis=SimpleNamespace(lpush=refuse, lrange=refuse))
+    timing.pass_error(store, "sw", {"pass_id": "p", "end_ms": 1, "error": "boom"})
+    assert (
+        capsys.readouterr().err
+        == json.dumps({"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:pass-errors"}) + "\n"
+    )
+    assert timing.pass_errors(store, "sw") == []

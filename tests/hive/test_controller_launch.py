@@ -37,6 +37,7 @@ def setup():
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
+    herdr.quota_accounts = None
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
     launcher.opening = lambda request: f"opening for {request.name}"
@@ -57,6 +58,36 @@ def test_resolves_profile_before_hive_selection(setup):
     assert launch.ROLE_PROFILES["cicd"] == "ci"
 
 
+def test_the_profile_check_sees_the_profiles_its_target_hives_advertise(setup):
+    from scripts.hive import config as hive_config
+    from scripts.hive import launch
+
+    write_hive(setup, id="other")
+    write_hive(setup, id="gone")
+    setup.store.redis.set(hive_config._key("remote"), json.dumps({"profiles": ["brain", "frontend"]}))
+    setup.store.redis.set(hive_config._key("other"), json.dumps({"profiles": ["qa"]}))
+    setup.store.redis.set(hive_config._key("gone"), json.dumps({"profiles": ["smith"]}))
+    hives = [hive for hive in setup.launcher.hives() if hive["id"] in ("remote", "other", "silent")]
+    assert launch.hosted_profiles(setup.store.redis, [*hives, {"id": "silent"}]) == {
+        "remote": frozenset({"brain", "frontend"}),
+        "other": frozenset({"qa"}),
+        "silent": frozenset(),
+    }
+    setup.launcher._select(setup.config, "eng", {"id": "task"}, excluded={"gone"})
+    assert setup.herdr._profile_decision.call_args.args[-1] == frozenset({"brain", "frontend", "qa"})
+
+
+def test_a_profile_only_target_hives_hold_places_only_on_a_hive_advertising_it(setup, monkeypatch):
+    from scripts.hive import launch
+
+    monkeypatch.setattr(launch.profile_choice, "installed", lambda name: name != "frontend")
+    hives = [{"id": "remote"}, {"id": "other"}, {"id": "silent"}]
+    advertised = {"remote": frozenset({"frontend"}), "other": frozenset({"qa"})}
+    assert launch.hosting(hives, "frontend", advertised) == [{"id": "remote"}]
+    assert launch.hosting(hives, "engineer", advertised) == hives
+    assert launch.hosting(hives, "frontend", {"other": frozenset({"qa"})}) == hives
+
+
 def test_selects_an_advertised_claude_slot(setup):
     chosen = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert chosen.hive == "remote"
@@ -71,6 +102,89 @@ def test_codex_assignment_waits_for_its_own_placement_chain(setup):
     config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
     assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait(
         "no Codex account has room after hive sessions: "
+    )
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_placement_before_the_pass_reads_quota_uses_the_runtime_reader(setup):
+    from unittest.mock import Mock, patch
+
+    from scripts.hive import launch
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    setup.herdr.quota_accounts = Mock(return_value=rows)
+    with patch.object(launch.capacity, "accounts", side_effect=AssertionError("the pod cache must not be read")):
+        assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    assert setup.herdr.quota_accounts.call_args.kwargs == {"refresh": False}
+
+
+@pytest.mark.feature("controller-fresh-quota-placement")
+@pytest.mark.parametrize("deployment_reader", [True, False], ids=["deployment", "hive-reports"])
+def test_a_fresh_runtime_places_without_pass_rows_or_pod_quota(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, deployment_reader: bool
+) -> None:
+    import time
+
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import launch
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(launch.capacity.account_sessions, "sessions_by_account", lambda **kwargs: {})
+    monkeypatch.setattr(launch.capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    now = time.time()
+    setup.store.redis.set(f"{launch.registry.key('remote')}:sessions", json.dumps({"claude:account": 0}))
+    setup.store.redis.set(
+        f"{launch.registry.key('remote')}:quota",
+        json.dumps(
+            {
+                "claude:account": {
+                    "five_hour": {"used": 20, "resets_at": now + 3600},
+                    "seven_day": {"used": 10, "resets_at": now + 86400},
+                    "observed_at": now,
+                }
+            }
+        ),
+    )
+    runtime = HerdrRuntime()
+    runtime._profile_decision = setup.herdr._profile_decision
+    reader = Mock(return_value=setup.herdr._quota_accounts)
+    if deployment_reader:
+        runtime.quota_accounts = reader
+    assert not hasattr(runtime, "_quota_accounts")
+    assert balancer.cached_observations() == []
+    launcher = launch.HiveLaunch(setup.store, setup.config.slug, setup.held, runtime)
+    selected = launcher.select(setup.config, "eng", {"id": "task"})
+    assert isinstance(selected, launch.Selection)
+    assert (selected.hive, selected.account.name) == ("remote", "account")
+    if deployment_reader:
+        reader.assert_called_once()
+        assert reader.call_args.kwargs == {"refresh": False}
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_placement_without_a_runtime_reader_reads_the_hive_reports(setup):
+    from unittest.mock import patch
+
+    from scripts.hive import launch
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    del setup.herdr.quota_accounts
+    with patch.object(launch.capacity, "accounts", return_value=rows) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    assert accounts.call_args.kwargs == {"refresh": False, "redis": setup.store.redis}
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_a_placement_wait_names_an_account_with_no_fresh_quota_reading(setup):
+    from scripts.hive.placement import Wait
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts = [Account("claude", "account", "UNKNOWN", 5, None, None)]
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no Claude account has room after hive sessions: account 5 sessions, no fresh quota reading"
     )
 
 
@@ -166,6 +280,30 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
         profile_decision={"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
         execution=outcome.value.execution,
     )
+
+
+def test_placement_carries_the_hive_checkout_path_into_launch(setup: SimpleNamespace) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import placement
+    from scripts.hive.orders import ORIGIN
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Status
+
+    setup.config = replace(setup.config, repo="/home/iamroot/dev/tcc-ecosystem/agentihooks")
+    setup.store.redis.hset(setup.store.key(setup.config.slug, "config"), "repo", setup.config.repo)
+    write_hive(setup, repos=["/home/worker/dev/agentihooks"])
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    assert not isinstance(selected, placement.Wait)
+    assert selected.hive == "remote"
+    assert selected.origin == "/home/worker/dev/agentihooks"
+    setup.launcher.opening = Mock(return_value="opening")
+    assert setup.launcher.spawn(request).status == Status.PENDING
+    assert setup.launcher.opening.call_args.args[0].config.repo == "/home/worker/dev/agentihooks"
+    order = setup.launcher.orders_for(request.task["id"])
+    assert json.loads(setup.store.redis.get(order.prompt_ref))[ORIGIN] == "/home/worker/dev/agentihooks"
 
 
 def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
@@ -473,6 +611,30 @@ def test_a_failed_receipt_other_than_expiry_sends_no_reap(setup):
     assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
+def test_a_stale_launch_finishing_after_its_name_was_reaped_is_reaped_by_its_execution(setup: SimpleNamespace) -> None:
+    from unittest.mock import call
+
+    from scripts.hive.orders import Ack, Consumer
+
+    request = request_for(setup)
+    first = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", first, Ack("failed", {}, "expired"))
+    assert not setup.launcher.wait(first).ok
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    consumer = Consumer(setup.store.redis, "remote", hive)
+    assert consumer.poll_commands() == 1
+    stale = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    assert stale.execution_id != first.execution_id
+    setup.launcher.orders.finish("remote", "0-1", stale, Ack("failed", {}, "expired"))
+    assert not setup.launcher.wait(stale).ok
+    assert consumer.poll_commands() == 1
+    assert hive.herdr.reap_name.call_args_list == [call(request.name), call(request.name)]
+    sent = [f"reap:{request.name}:{order.execution_id}" for order in (first, stale)]
+    receipts = [setup.launcher.orders.command_receipt("remote", order_id) for order_id in sent]
+    assert [setup.store.redis.hexists(receipt, "ack") for receipt in receipts] == [True, True]
+
+
 def test_expired_unknown_order_remains_ambiguous(setup):
     from scripts.swarm_v2.runtime.base import Status
 
@@ -580,7 +742,7 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
     assert [json.loads(fields["order"]) for _, fields in commands] == [
         {
-            "id": f"reap:{request.name}",
+            "id": f"reap:{request.name}:{order.execution_id}",
             "action": "reap",
             "slug": "",
             "name": request.name,
@@ -593,6 +755,30 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     assert replacement.execution_id != order.execution_id
     launched = setup.store.execution_registry.get("fixture", replacement.execution_id)
     assert (launched.name, launched.seat) == (other.name, request.task["seat"])
+
+
+def test_a_later_expired_launch_of_the_same_name_is_reaped_by_its_own_execution(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Consumer
+
+    request = request_for(setup)
+    first = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(first.__dict__))
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(request) == "pending"
+    later = replace(setup.launcher.orders_for("task"), expires_at=0)
+    assert later.execution_id != first.execution_id
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(later.__dict__))
+    assert setup.launcher.spawn(request) == "pending"
+    assert setup.store.execution_registry.get("fixture", later.execution_id).state == "ended"
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [
+        f"reap:{request.name}:{first.execution_id}",
+        f"reap:{request.name}:{later.execution_id}",
+    ]
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    assert Consumer(setup.store.redis, "remote", hive).poll_commands() == 2
+    assert [args for args, _ in hive.herdr.reap_name.call_args_list] == [(request.name,), (request.name,)]
 
 
 def test_unexpired_unacknowledged_order_is_never_retired(setup):
@@ -709,6 +895,48 @@ def test_failed_order_can_retry_with_a_new_generation(setup):
     assert setup.launcher.orders_for("task").generation == order.generation + 1
 
 
+@pytest.mark.parametrize(
+    ("behind", "ack"),
+    [(1, ("failed", "stale_epoch")), (0, ("failed", "stale_epoch")), (1, None), (1, ("live", ""))],
+    ids=["refused-older", "refused-current", "unacknowledged-older", "live-older"],
+)
+def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_the_same_pass(
+    setup: SimpleNamespace, behind: int, ack: tuple[str, str] | None
+) -> None:
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    stale = replace(
+        order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task)),
+        epoch=setup.held.epoch - behind,
+        expires_at=lease.now_ms(setup.store) + 60000,
+    )
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(stale.__dict__))
+    if ack is not None:
+        setup.launcher.orders.finish("remote", "0-0", stale, Ack(ack[0], {"host_id": "remote"}, ack[1]))
+    assert setup.launcher.spawn(request).status == Status.PENDING
+    reissued = setup.launcher.orders_for("task")
+    assert reissued.epoch == setup.held.epoch
+    assert reissued.generation == stale.generation + 1
+    assert reissued.execution_id != stale.execution_id
+    assert setup.store.execution_registry.get("fixture", stale.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), stale.execution_id)) == {
+        "reason": "hive launch failed: stale_epoch",
+        "generation": stale.generation,
+    }
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    reaped = (
+        f"reap:fixture:{stale.execution_id}:{stale.generation}"
+        if ack is not None and ack[0] == "live"
+        else f"reap:{request.name}:{stale.execution_id}"
+    )
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [reaped]
+
+
 def test_an_ended_launch_releases_its_admission_reservation(setup):
     from scripts.hive import admission
     from scripts.hive.orders import Ack
@@ -750,7 +978,7 @@ def write_hive(setup, **changes):
     publish_room(setup.store, hive["id"], hive["max_agents"])
 
 
-NO_RAM = "ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+NO_RAM = "ram: 20000 of 100000 MB available, 850 MB per agent, fits 0 more under the 80 percent line"
 
 
 def publish_room(store, hive_id, room):
@@ -896,7 +1124,8 @@ def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task
     assert setup.launcher.collect(request) == Outcome("spawn", Status.OK, "hive")
 
 
-def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_finished_receipt_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     request, order, _ = live_order(setup)
@@ -904,7 +1133,24 @@ def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
     admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
     setup.store.put_agent("fixture", replace(worker, state="finished"))
     assert setup.launcher.collect(request).ok
-    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{worker.name}{admission.JOINED}"]
+    assert admission.pending(setup.store.redis, order.hive) == 0
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
+
+
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation(
+    setup: SimpleNamespace,
+) -> None:
+    from scripts.hive import admission
+    from scripts.hive.orders import Ack
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    setup.store.redis.hset(setup.launcher.orders.receipt(order), "ack", Ack("failed", {}, "prompt").encode())
+    assert not setup.launcher.collect(request).ok
+    assert admission.pending(setup.store.redis, order.hive) == 0
 
 
 def test_an_ended_worker_receipt_is_still_refused(setup):
@@ -1042,14 +1288,17 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
 
 
-def test_a_live_acknowledgement_marks_its_admission_reservation_joined(setup):
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_live_acknowledgement_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     _, order, ack = live_order(setup)
     name = setup.store.execution_registry.get("fixture", order.execution_id).name
     admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert admission.pending(setup.store.redis, order.hive) == 1
     assert setup.launcher.complete(order, ack).ok
-    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{name}{admission.JOINED}"]
+    assert admission.pending(setup.store.redis, order.hive) == 0
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
 
 
 @pytest.mark.parametrize(
@@ -1274,7 +1523,34 @@ def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_a
     assert slots.counts() == {"claude:account": 1}
 
 
-def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_an_ambiguous_receipt_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
+    from scripts.hive import admission
+    from scripts.hive.orders import Ack
+
+    _, order, _ = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert not setup.launcher.complete(order, Ack("failed", {}, "ambiguous")).ok
+    assert admission.pending(setup.store.redis, order.hive) == 0
+
+
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation(
+    setup: SimpleNamespace,
+) -> None:
+    from scripts.hive import admission
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    with pytest.raises(SwarmError):
+        setup.launcher.complete(replace(order, generation=order.generation + 1), ack)
+    assert admission.pending(setup.store.redis, order.hive) == 0
+
+
+def test_ambiguous_receipt_keeps_the_slot_and_order(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
@@ -1368,9 +1644,7 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     environ = {"fixture": "scope"}
     with patch.object(launch, "os", SimpleNamespace(environ=environ)):
         selected = setup.launcher.select(config, "eng", task)
-    setup.herdr._profile_decision.assert_called_once_with(
-        config, "eng", config.lanes["eng"], task, saved, saved, environ
-    )
+    setup.herdr._profile_decision.assert_called_once_with(config, "eng", task, saved, saved, environ, frozenset())
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
     assert selected.account.harness == ("claude" if harness == "auto" else harness)
@@ -1399,7 +1673,7 @@ def test_handoff_assignment_is_forwarded_to_profile_resolution(setup):
     ):
         assert setup.launcher.select(setup.config, "eng", task).hive == "remote"
     transfer.assert_called_once_with(task)
-    setup.herdr._profile_decision.assert_called_once_with(setup.config, "eng", {}, task, saved, saved, {})
+    setup.herdr._profile_decision.assert_called_once_with(setup.config, "eng", task, saved, saved, {}, frozenset())
 
 
 def test_initial_placement_reads_global_account_reports_without_a_credential_probe(setup):
@@ -1418,7 +1692,7 @@ def test_initial_placement_reads_global_account_reports_without_a_credential_pro
         patch.object(launch.capacity, "accounts", return_value=rows) as accounts,
     ):
         assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
-    accounts.assert_called_once_with(environ, now / 1000, refresh=False)
+    accounts.assert_called_once_with(environ, now / 1000, refresh=False, redis=setup.store.redis)
 
 
 def test_placement_shares_accounts_in_a_pass_and_rereads_in_the_next_pass(setup):
@@ -1620,7 +1894,7 @@ def test_pending_admission_reservations_count_against_hive_room(setup):
         admission.reserve(setup.store.redis, "remote", f"fixture/eng-{index}", 3)
     assert setup.launcher.select(setup.config, "eng", {"id": "next"}) == Wait(
         "no hive for eng has room: remote "
-        "ram: 22100 of 100000 MB available, 700 MB per agent with 3 pending launches, "
+        "ram: 22550 of 100000 MB available, 850 MB per agent with 3 pending launches, "
         "fits 0 more under the 80 percent line"
     )
     assert setup.launcher.hives()[0]["room"] == 0
@@ -2069,6 +2343,19 @@ def test_reported_worker_sessions_fill_the_hive_up_to_its_max_agents(setup):
     )
 
 
+def test_a_hive_set_to_zero_max_agents_takes_no_new_agent(setup):
+    from scripts.hive import registry
+    from scripts.hive.placement import Wait
+
+    publish_room(setup.store, "remote", 10)
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    registry.update(setup.store.redis, "remote", ["max-agents=0"])
+    assert setup.launcher.hives()[0]["room"] == 0
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no hive for eng has room: remote max agents: 0 of 0 agents on the hive, fits 0 more"
+    )
+
+
 def test_max_agents_of_mixed_lanes_refuse_the_next_launch_with_its_reason(setup):
     from scripts.hive import placement_waits
     from scripts.swarm.store import AgentRecord
@@ -2115,7 +2402,7 @@ def test_a_launch_that_loses_the_last_room_to_a_concurrent_reservation_waits_on_
     assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
     assert setup.launcher.reserve_room(request, selected) == (
         "no hive for eng has room: remote "
-        "ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+        "ram: 20850 of 100000 MB available, 850 MB per agent with 1 pending launches, "
         "fits 0 more under the 80 percent line"
     )
     admission.release(setup.store.redis, "remote", "fixture/other")
@@ -2131,7 +2418,7 @@ def test_a_spawn_refused_at_reservation_records_the_wait_and_returns_the_reason(
     monkeypatch.setattr(admission, "reserve", lambda *args, **kwargs: (False, 1))
     refused = (
         "no hive for eng has room: remote "
-        "ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+        "ram: 20850 of 100000 MB available, 850 MB per agent with 1 pending launches, "
         "fits 0 more under the 80 percent line"
     )
     result = setup.launcher.spawn(request_for(setup))
@@ -2351,6 +2638,26 @@ def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
     assert (live.pane_id, live.model, live.effort) == ("pane", "selected-model", "high")
     assert live.profile_decision == {"pid": 12}
     assert result.value.execution == live
+
+
+@pytest.mark.feature("remote-control-token-fallback-reason")
+def test_controller_records_the_remote_control_a_joined_hive_acknowledged(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
+    target = {"host_id": "remote", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    off = {"state": "off", "detail": "subscription token fallback"}
+    metadata = {"pane_id": "pane", "profile_decision": {"pid": 12}, "remote_control": off}
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", target, "", metadata))
+    result = setup.launcher.wait(order)
+    assert result.ok
+    assert setup.store.execution_registry.get("fixture", order.execution_id).remote_control == off
+    assert result.value.remote_control == off
 
 
 def test_an_acknowledgement_without_metadata_keeps_the_admitted_fields(setup):

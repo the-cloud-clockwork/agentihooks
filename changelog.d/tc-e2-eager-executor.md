@@ -1,0 +1,3 @@
+### Added
+
+- A swarm set to `tick-mode=parallel` runs each tick pass on a bounded pool: a step starts as soon as the steps it needs have ended, critical lane steps share a 110 second pass deadline and slow lane steps a 400 second one, and the tick lock heartbeat is written by the critical deadline whatever the slow lane is doing. A lane past its deadline records its unfinished steps late, drops their results and never starts the steps that need them. Reap, remote watch, conversations, pane evidence and quota notices fan out per agent under copied context. At most six herdr and four GitHub calls run at once on a host, and placement is serialized across every swarm on the host by a file lock. Sequential mode, the default, keeps today's order.

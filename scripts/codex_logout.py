@@ -4,6 +4,7 @@ import re
 import shutil
 import sys
 from collections.abc import Callable, Mapping
+from typing import Any, cast
 
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
 from scripts import aicode_tokens, codex_login, openbao_kv, openbao_step, term_colors
@@ -39,7 +40,7 @@ def main(
     args: list[str],
     environ: Mapping[str, str] | None = None,
     console: Console | None = None,
-    opener: Callable | None = None,
+    opener: Callable[..., Any] | None = None,
 ) -> int:
     environ = os.environ if environ is None else environ
     options = _parser().parse_args(args)
@@ -52,7 +53,10 @@ def main(
     tokens = tuple(f"{CODEX_TOKEN_PREFIX}{each}" for each in slugs)
     refresh = tuple(f"{codex_login.REFRESH_PREFIX}{each}" for each in slugs)
     try:
-        bao = openbao_step.target(options.openbao, environ, console or Console(), opener)
+        bao = cast(
+            "Callable[[bool | None, Mapping[str, str], Console, Callable[..., Any] | None], openbao_kv.OpenBao | None]",
+            openbao_step.target,
+        )(options.openbao, environ, console or Console(), opener)
     except StoreRefused as exc:
         _fail(str(exc))
         return 1

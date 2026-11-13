@@ -25,12 +25,13 @@ class _Pattern(NamedTuple):
 
 _NOSECRET_RE = re.compile(r"#\s*nosecret\b", re.IGNORECASE)
 
-# A bare value that is a member access, call or subscript (`settings.x`,
-# `get_secret()`, `Optional[str]`) is code reading a secret, not a literal one.
 _CODE_EXPRESSION_RE = re.compile(r"[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$]|\(|\[)")
 
 
 def _is_literal_secret(match: re.Match) -> bool:
+    """Whether a matched assignment value is a literal; a bare member access, call or subscript is code
+    reading a secret, not a secret.
+    """
     bare = match.group("bare")
     return bare is None or not _CODE_EXPRESSION_RE.match(bare)
 
@@ -65,8 +66,6 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     ),
     _Pattern(
         "generic_secret",
-        # Match KEY = VALUE but skip env var references ($VAR), placeholders (<...> or {...}),
-        # comparisons (==, ===), and quoted values under 8 chars such as Terraform time units
         re.compile(
             r"(?:PASSWORD|(?<!/)PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)(?:\s*(?:=(?!=)|:)\s*"
             r"""(?:["'](?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))|["']\s*:\s*["'][^\s"'$<{]{8,})""",
@@ -128,7 +127,6 @@ def _get_patterns(mode: str) -> list[_Pattern]:
         )
     if mode == "strict":
         return _STANDARD_PATTERNS + _STRICT_PATTERNS
-    # "warn" and "standard" both use the standard set
     return _STANDARD_PATTERNS
 
 
@@ -151,7 +149,6 @@ def scan(text: str, *, mode: str | None = None) -> list[str]:
     if not patterns:
         return []
 
-    # Strip suppressed lines before pattern matching
     filtered = "".join(line for line in text.splitlines(keepends=True) if not _NOSECRET_RE.search(line))
     hits: list[str] = []
     for pattern in patterns:

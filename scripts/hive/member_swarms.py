@@ -1,7 +1,9 @@
 """The member_swarms entry of the hub NATS signer record: hive invite lists each member it mints, hive scope the rest."""
 
-from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
+import subprocess
+import time
+from collections.abc import Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
 from scripts.hive import auth, nats_grant, scope
@@ -10,11 +12,44 @@ if TYPE_CHECKING:
     from redis import Redis
 
 FIELD = "member_swarms"
+SYNC_ENV = "AGENTIHOOKS_NATS_SIGNER_SYNC"
+SYNC_TARGET = "agentihooks-swarm/agentihooks-swarm-nats-signer"
 
 
 def signer_path(environ: Mapping[str, str]) -> str | None:
     path = environ.get(nats_grant.SIGNER_ENV)
     return path if path is not None and path.startswith(nats_grant.HUB_PATH) else None
+
+
+def sync_target(environ: Mapping[str, str]) -> str | None:
+    if signer_path(environ) is None:
+        return None
+    return environ.get(SYNC_ENV, SYNC_TARGET) or None
+
+
+def sync(target: str | None, run: Callable[..., subprocess.CompletedProcess[str]] | None = None) -> list[str]:
+    if target is None:
+        return []
+    namespace, _, name = target.partition("/")
+    command = [
+        "kubectl",
+        "annotate",
+        "externalsecret",
+        name,
+        "--namespace",
+        namespace,
+        f"force-sync={time.time_ns()}",
+        "--overwrite",
+    ]
+    try:
+        result = (run or subprocess.run)(command, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+    else:
+        if result.returncode == 0:
+            return [f"requested a sync of the signer record {target}"]
+        reason = (result.stderr or "").strip() or f"exit {result.returncode}"
+    return [f"could not force the sync of {target} ({reason}), so hive join sees it at the next refresh"]
 
 
 def swarms(redis: "Redis", named: Iterable[str]) -> tuple[str, ...]:
@@ -55,6 +90,25 @@ def assign(
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
     return added
+
+
+def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
+    dropped: list[str] = []
+
+    def change(record: dict[str, Any]) -> dict[str, Any]:
+        dropped.clear()
+        listed: dict[str, Any] = dict(record.get(FIELD) or {})
+        if member not in listed:
+            return {}
+        del listed[member]
+        dropped.append(member)
+        return {FIELD: listed}
+
+    try:
+        openbao_kv.update(bao, path, change)  # pyright: ignore[reportUnknownMemberType]
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+    return member in dropped
 
 
 def backfill(redis: "Redis", bao: openbao_kv.OpenBao, path: str, named: Iterable[str]) -> str:

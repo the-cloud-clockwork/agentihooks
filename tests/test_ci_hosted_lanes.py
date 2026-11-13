@@ -28,6 +28,7 @@ DIRECT = {
     "swarm-node-smoke.yml": ("Swarm worker image smoke", "swarm-node-smoke"),
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
     "writer-lock.yml": ("Writer lock", "writer-lock"),
+    "tick-equivalence.yml": ("Tick equivalence", "tick-equivalence"),
     "feature-suite.yml": ("Feature suite", "feature-suite"),
     "worker-resources.yml": ("Worker resources", "worker-resources"),
     "startup-stages.yml": ("Startup stages", "startup-stages"),
@@ -43,15 +44,17 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "chart-release.yml",
+    "gate-required.yml",
     "changelog.yml",
     "changelog-seed.yml",
-    "tick-equivalence.yml",
+    "tick-scale.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 CALLED = {
     "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
     "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
+    "docs-sanity.yml:scan": "the reusable docs sanity scan runs in its caller's repository and must not hold a lane there",
 }
 if (_WORKFLOWS / "hive-join.yml").is_file():
     CALLED["hive-join.yml"] = "called hive join smoke must not hold the caller lane"

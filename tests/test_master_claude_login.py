@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -705,6 +706,18 @@ def test_prepare_without_a_stored_epoch_takes_epoch_one(ah, rendered, tmp_path, 
     assert json.loads((login.root() / login.OWNER).read_text())["epoch"] == 1
 
 
+def test_prepare_skips_the_primary_login_at_its_reserve(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_logins
+
+    _seed(rendered)
+    monkeypatch.setenv(login.ORDER_ENV, "master@example.com")
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 2.0)
+    with pytest.raises(login.LoginRefused, match="masteratexample_com reserved at 2% of the week left"):
+        login.prepare(_environ(rendered), tmp_path)
+
+
 def test_prepare_refuses_incompatible_settings_before_touching_the_lease_or_home(ah, rendered, tmp_path, monkeypatch):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: pytest.fail("store read before refusal"))
     _settings(tmp_path / ".claude" / "settings.json", {"apiKeyHelper": "/bin/key"})
@@ -762,6 +775,52 @@ def test_launch_turns_a_refusal_into_a_routing_error(ah, rendered, tmp_path, mon
     monkeypatch.chdir(tmp_path)
     with pytest.raises(RoutingError, match="sets apiKeyHelper$"):
         login.launch_claude("/opt/claude", [], _environ(rendered), "")
+
+
+@pytest.mark.feature("master-login-launch-folder-trust")
+def test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    _seed(rendered)
+    login._write(login.root() / login.OWNER, {"epoch": 3, "holders": {"master@a-0": os.getppid()}})
+    scratch = tmp_path / "scratch"
+    (scratch / ".git").mkdir(parents=True)
+    assert "projects" not in json.loads((login.home() / login.CONFIG).read_text())
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.chdir(scratch)
+    executed = []
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, env: executed.append(env))
+    login.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert executed[0]["CLAUDE_CONFIG_DIR"] == str(login.home())
+    projects = json.loads((login.home() / login.CONFIG).read_text())["projects"]
+    assert projects[str(scratch.resolve())] == {"hasTrustDialogAccepted": True}
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("master-login-launch-folder-trust")
+def test_a_master_launch_with_folder_trust_off_reports_the_wait_and_marks_nothing(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.claude_trust import WAIT_NOTICE
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    _seed(rendered)
+    scratch = tmp_path / "scratch"
+    (scratch / ".git").mkdir(parents=True)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.chdir(scratch)
+    executed = []
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, env: executed.append(env))
+    login.launch_claude("/opt/claude", [], _environ(rendered, AGENTIHOOKS_TRUST_LAUNCH_DIR="0"), "")
+    assert len(executed) == 1
+    assert "projects" not in json.loads((login.home() / login.CONFIG).read_text())
+    assert capsys.readouterr().err == (
+        f"[agenti] Claude does not trust {scratch.resolve()} (AGENTIHOOKS_TRUST_LAUNCH_DIR is off); {WAIT_NOTICE}\n"
+    )
 
 
 def test_the_claude_launcher_hands_the_master_login_route_to_this_module(tmp_path, monkeypatch):
@@ -1232,7 +1291,8 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     monkeypatch.setattr(router, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
 
-    def admit(harness, account, environ, launch):
+    def admit(harness: str, account: str, environ: Any, launch: Any, *, master: bool) -> Any:
+        assert master is True
         assert (harness, account) == ("claude", "workeratexample_com")
         return launch(environ)
 
@@ -1504,9 +1564,14 @@ def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, t
     assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
 
 
-def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered, tmp_path, monkeypatch):
+@pytest.mark.feature("hive-master-account-seat")
+def test_the_master_token_route_takes_a_seat_past_full_lane_agents(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer as router
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
     from scripts.hive import account_slots
 
     monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
@@ -1514,15 +1579,25 @@ def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered,
     full = {"workeratexample_com": 6}
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: full)
     env = _environ(rendered)
+    env.update({account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "master"})
     picked = []
 
-    def overflow(environ, **options):
+    def overflow(environ: Any, **options: Any) -> router.RouteDecision:
         picked.append((environ, options))
         credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
         return router.RouteDecision(credential, None, "master overflow", 6, 6)
 
+    bus = factory.open_bus(BusConfig())
+    report_reading = {
+        "slots": [{"harness": "claude", "account": "workeratexample_com", "cap": 6}],
+        "sessions": {},
+    }
+    slots = account_slots.Slots(bus, "one", lambda: report_reading)
+    for number in range(6):
+        assert slots.take(f"lane-{number}", "claude") == "workeratexample_com"
+    monkeypatch.setattr(factory, "open_bus", lambda _: bus)
+    monkeypatch.setattr(account_slots, "_reading", lambda _: report_reading)
     monkeypatch.setattr(router, "select_master_credential", overflow)
-    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
     executed = []
     monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append(environ))
     report = tmp_path / "route"
@@ -1535,3 +1610,132 @@ def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered,
         "remote_control=off",
     ]
     assert executed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
+    assert account_slots.HIVE_ENV not in executed[0]
+    assert account_slots.EXECUTION_ENV not in executed[0]
+
+
+@pytest.mark.feature("master-token-slot-route-report")
+@pytest.mark.parametrize("reason", ["No account slot available", "Account slot admission failed"])
+def test_a_refused_master_token_hive_slot_reports_only_the_refusal(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    from collections.abc import Callable, Mapping
+    from unittest.mock import Mock
+
+    from scripts import claude_quota_balancer as router
+    from scripts import install
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+    decision = router.RouteDecision(credential, None, "master overflow", 6, 6)
+    monkeypatch.setattr(router, "select_master_credential", lambda *args, **kwargs: decision)
+    report = tmp_path / "route"
+    written = Mock(wraps=install._write_route_report)
+    monkeypatch.setattr(install, "_write_route_report", written)
+    executed = Mock()
+    monkeypatch.setattr(login.os, "execvpe", executed)
+
+    def refuse(
+        harness: str,
+        account: str,
+        environ: Mapping[str, str],
+        invoke: Callable[[dict[str, str]], object],
+        *,
+        master: bool = False,
+    ) -> None:
+        assert master is True
+        assert harness == "claude"
+        assert account == decision.account
+        raise account_slots.Unavailable(reason)
+
+    monkeypatch.setattr(account_slots, "execute", refuse)
+    env = _environ(rendered, AGENTIHOOKS_HIVE="hive", AGENTIHOOKS_EXECUTION_ID="execution")
+    with pytest.raises(router.RoutingError, match=reason):
+        login.launch_token("/opt/claude", [], env, str(report))
+
+    assert report.read_text().splitlines() == ["status=failed", f"error={reason}"]
+    assert [call.kwargs["status"] for call in written.call_args_list] == ["failed"]
+    executed.assert_not_called()
+
+
+@pytest.mark.feature("master-token-slot-route-report")
+def test_the_master_token_route_reports_routed_only_inside_the_admitted_callback(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Callable, Mapping
+
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+    decision = router.RouteDecision(credential, None, "master overflow", 6, 6)
+    monkeypatch.setattr(router, "select_master_credential", lambda *args, **kwargs: decision)
+    report = tmp_path / "route"
+    executed = []
+
+    def admit(
+        harness: str,
+        account: str,
+        environ: Mapping[str, str],
+        invoke: Callable[[dict[str, str]], object],
+        *,
+        master: bool = False,
+    ) -> None:
+        assert master is True
+        assert not report.exists()
+        invoke({**environ, "ADMITTED": "yes"})
+
+    def launch(binary: str, argv: list[str], environ: Mapping[str, str]) -> None:
+        assert report.read_text().splitlines() == [
+            "status=routed",
+            "account=workeratexample_com",
+            "placement=fallback",
+            "remote_control=off",
+        ]
+        executed.append(environ["ADMITTED"])
+
+    monkeypatch.setattr(account_slots, "execute", admit)
+    monkeypatch.setattr(login.os, "execvpe", launch)
+    login.launch_token("/opt/claude", [], _environ(rendered), str(report))
+    assert executed == ["yes"]
+
+
+@pytest.mark.feature("master-login-launch-folder-trust")
+def test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from collections.abc import Callable, Mapping
+
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    scratch = tmp_path / "scratch"
+    (scratch / ".git").mkdir(parents=True)
+    monkeypatch.chdir(scratch)
+    credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+    decision = router.RouteDecision(credential, None, "master overflow", 6, 6)
+    monkeypatch.setattr(router, "select_master_credential", lambda *args, **kwargs: decision)
+    homes = []
+
+    def admit(
+        harness: str,
+        account: str,
+        environ: Mapping[str, str],
+        invoke: Callable[[dict[str, str]], object],
+        *,
+        master: bool = False,
+    ) -> None:
+        homes.append(environ["CLAUDE_CONFIG_DIR"])
+
+    monkeypatch.setattr(account_slots, "execute", admit)
+    environ = _environ(rendered)
+    login.launch_token("/opt/claude", [], environ, str(tmp_path / "route"))
+    assert homes == [str(login._token_folder(environ) / "claude")]
+    projects = json.loads((Path(homes[0]) / login.CONFIG).read_text())["projects"]
+    assert projects[str(scratch.resolve())] == {"hasTrustDialogAccepted": True}
+    assert capsys.readouterr().err == ""

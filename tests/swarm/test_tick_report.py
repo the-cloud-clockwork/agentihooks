@@ -1,5 +1,7 @@
+import argparse
 import json
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -33,7 +35,96 @@ def test_report_aggregates_step_costs_and_pass_gaps() -> None:
             {"step": "inspect", "count": 1, "median_s": 4.0, "p95_s": 4.0, "cpu_share": 20.0},
             {"step": "launch", "count": 2, "median_s": 4.0, "p95_s": 6.0, "cpu_share": 80.0},
         ],
+        "lanes": [],
+        "critical_end_p95_s": None,
+        "records": [],
+        "ready_gaps": [],
+        "rows_read_max": None,
     }
+
+
+@pytest.mark.feature("swarm-tick-cost-report")
+def test_report_gives_each_lane_its_share_of_all_step_cpu() -> None:
+    passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 11000, "wall_s": 10.0}]
+    steps = [
+        {**step("a", "spawn", 1.0, 3.0, 1.0), "lane": "critical"},
+        {**step("a", "reap", 1.0, 1.0, 0.0), "lane": "critical"},
+        {**step("a", "sweep", 1.0, 2.0, 1.0), "lane": "slow"},
+        step("a", "legacy", 1.0, 2.0, 0.0),
+        {**step("a", "run_tick", 10.0, 9.0, 0.0), "lane": "critical"},
+    ]
+    assert tick_report.summarize(passes, steps)["lanes"] == [
+        {"lane": "critical", "count": 2, "cpu_share": 50.0},
+        {"lane": "slow", "count": 1, "cpu_share": 30.0},
+    ]
+
+
+def test_tick_report_prints_each_lane_share(capsys: pytest.CaptureFixture[str]) -> None:
+    report = {
+        "pass_count": 1,
+        "pass_p95_s": 1.0,
+        "gap_p95_s": None,
+        "gap_max_s": None,
+        "passes_without_steps": 0,
+        "steps": [],
+        "lanes": [{"lane": "critical", "count": 2, "cpu_share": 41.5}],
+        "critical_end_p95_s": 12.5,
+        "records": [
+            {"step": "spawn", "records": 4, "late_share": 25.0, "abandoned": 1, "held": 2, "skipped": 3, "dropped": 5}
+        ],
+    }
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
+    out = capsys.readouterr().out
+    assert "Lane critical  2 steps  41.50% CPU share" in out
+    assert "Critical lane end p95: 12.500s" in out
+    assert "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\nspawn  4  25.00%  1  2  3  5\n" in out
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_report_names_the_most_task_rows_a_pass_read(capsys: pytest.CaptureFixture[str]) -> None:
+    passes = [
+        {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0, "rows_read": 997},
+        {"pass_id": "b", "start_ms": 3000, "end_ms": 4000, "wall_s": 1.0, "rows_read": 990},
+        {"pass_id": "c", "start_ms": 5000, "end_ms": 6000, "wall_s": 1.0},
+    ]
+    report = tick_report.summarize(passes, [])
+    assert report["rows_read_max"] == 997
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=3))
+    assert "Task rows read per pass, most: 997\n" in capsys.readouterr().out
+
+
+@pytest.mark.feature("swarm-tick-ready-gap")
+def test_report_prints_each_step_ready_to_start_gap(capsys: pytest.CaptureFixture[str]) -> None:
+    passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 20000, "wall_s": 19.0}]
+    counts = {"outcome": "ok", "abandoned": False, "held": False, "skipped": False, "dropped": 0}
+    records = [
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 2.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 4.5},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 2.0, "start_s": 13.7},
+        {**counts, "pass_id": "a", "step": "merge pass", "ready_s": 3.0, "start_s": 3.0},
+        {**counts, "pass_id": "a", "step": "legacy", "start_s": 3.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 5.0, "start_s": 5.0, "skipped": True},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 6.0, "start_s": 6.0, "held": True},
+        {**counts, "pass_id": "other", "step": "waits", "ready_s": 0.0, "start_s": 90.0},
+    ]
+    report = tick_report.summarize(passes, [], records)
+    assert report["ready_gaps"] == [
+        {"step": "merge pass", "count": 1, "median_s": 0.0, "max_s": 0.0},
+        {"step": "waits", "count": 3, "median_s": 3.5, "max_s": pytest.approx(11.7)},
+    ]
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
+    out = capsys.readouterr().out
+    assert (
+        "Step  Ready to start median  Ready to start max\nmerge pass  0.000s  0.000s\nwaits  3.500s  11.700s\n" in out
+    )
+
+
+def test_lane_share_is_zero_when_no_step_cpu_was_spent() -> None:
+    rows = [{**step("a", "spawn", 1.0, 0.0, 0.0), "lane": "critical"}]
+    assert tick_report.lane_shares(rows, 0.0) == [{"lane": "critical", "count": 1, "cpu_share": 0.0}]
 
 
 def step(pass_id: str, name: str, wall: float, own: float, child: float) -> dict[str, Any]:
@@ -65,6 +156,11 @@ def test_empty_report_and_missing_step_history_are_explicit() -> None:
         "passes_without_steps": 0,
         "orphan_steps": 0,
         "steps": [],
+        "lanes": [],
+        "critical_end_p95_s": None,
+        "records": [],
+        "ready_gaps": [],
+        "rows_read_max": None,
     }
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
     assert tick_report.summarize(passes, [])["passes_without_steps"] == 1
@@ -117,9 +213,24 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}
+    row = {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0, "critical_end_s": 1.25}
     store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
     store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps(step("a", "launch", 1, 1, 0))})
+    outcome = {
+        "pass_id": "a",
+        "step": "launch",
+        "lane": "tick",
+        "outcome": "late",
+        "wall_s": 1.0,
+        "budget_s": 0.5,
+        "start_s": 0.25,
+        "abandoned": True,
+        "held": False,
+        "skipped": False,
+        "dropped": 2,
+        "conflicts": 0,
+    }
+    store.redis.xadd(store.key("sw", "tick:records"), {"record": json.dumps(outcome)})
     tick_report.command(store, argparse.Namespace(slug="sw", passes=1))
     assert capsys.readouterr().out == (
         "Tick report: 1 recorded passes\n"
@@ -128,7 +239,13 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "Passes without retained steps: 0\n"
         "Step  Count  Median  P95  CPU share\n"
         "launch  1  1.000s  1.000s  100.00%\n"
+        "Critical lane end p95: 1.250s\n"
+        "Task rows read per pass, most: n/a\n"
+        "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\n"
+        "launch  1  100.00%  1  0  0  2\n"
+        "Step  Ready to start median  Ready to start max\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
+        "Pass errors, newest first: 0\n"
     )
 
 
@@ -164,3 +281,24 @@ def test_report_command_prints_measured_gaps(capsys: pytest.CaptureFixture[str])
         store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
     tick_report.command(store, argparse.Namespace(slug="sw", passes=2))
     assert "Gap p95: 9.000s; largest gap: 9.000s\n" in capsys.readouterr().out
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_tick_report_prints_each_kept_pass_error(capsys: pytest.CaptureFixture[str]) -> None:
+    report = {
+        "pass_count": 0,
+        "pass_p95_s": None,
+        "gap_p95_s": None,
+        "gap_max_s": None,
+        "passes_without_steps": 0,
+        "steps": [],
+        "lanes": [],
+        "critical_end_p95_s": None,
+        "records": [],
+        "pass_errors": [{"pass_id": "abc", "end_ms": 1794377295000, "error": "LedgerUnreachable: refused"}],
+    }
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
+    out = capsys.readouterr().out
+    assert "Pass errors, newest first: 1\n" in out
+    assert "abc  2026-11-11T06:08:15Z  LedgerUnreachable: refused\n" in out

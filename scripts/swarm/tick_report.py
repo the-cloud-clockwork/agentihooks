@@ -1,11 +1,13 @@
 import argparse
 import json
 import math
+import time
 from collections import defaultdict
+from collections.abc import Iterable
 from statistics import median
 from typing import Any
 
-from scripts.swarm.timing import HISTORY_LIMIT
+from scripts.swarm.timing import HISTORY_LIMIT, pass_errors
 
 PAGE_SIZE = 256
 
@@ -14,7 +16,9 @@ def p95(values: list[float]) -> float | None:
     return sorted(values)[math.ceil(len(values) * 0.95) - 1] if values else None
 
 
-def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(
+    passes: list[dict[str, Any]], steps: list[dict[str, Any]], records: Iterable[dict[str, Any]] = ()
+) -> dict[str, Any]:
     ordered = sorted(passes, key=lambda row: row["start_ms"])
     identities = {row["pass_id"] for row in ordered}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -29,6 +33,7 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
             grouped[row["step"]].append(row)
     costs = {name: sum(row["own_cpu_s"] + row["reaped_child_cpu_s"] for row in rows) for name, rows in grouped.items()}
     cpu = sum(costs.values())
+    kept = [row for row in records if row["pass_id"] in identities]
     gaps = [max(0.0, (right["start_ms"] - left["end_ms"]) / 1000) for left, right in zip(ordered, ordered[1:])]
     return {
         "pass_count": len(ordered),
@@ -47,7 +52,60 @@ def summarize(passes: list[dict[str, Any]], steps: list[dict[str, Any]]) -> dict
             }
             for name, rows in sorted(grouped.items())
         ],
+        "lanes": lane_shares([row for rows in grouped.values() for row in rows], cpu),
+        "critical_end_p95_s": p95([row["critical_end_s"] for row in ordered if "critical_end_s" in row]),
+        "records": outcomes(kept),
+        "ready_gaps": ready_gaps(kept),
+        "rows_read_max": max((row["rows_read"] for row in ordered if "rows_read" in row), default=None),
     }
+
+
+def outcomes(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return one row of outcome columns per step name from ``tick:records`` rows, sorted by name."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in records:
+        grouped[row["step"]].append(row)
+    return [
+        {
+            "step": name,
+            "records": len(rows),
+            "late_share": 100 * sum(row["outcome"] == "late" for row in rows) / len(rows),
+            "abandoned": sum(row["abandoned"] for row in rows),
+            "held": sum(row["held"] for row in rows),
+            "skipped": sum(row["skipped"] for row in rows),
+            "dropped": sum(row["dropped"] for row in rows),
+        }
+        for name, rows in sorted(grouped.items())
+    ]
+
+
+def ready_gaps(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return each step's count, median and largest gap from becoming ready to starting its run, read from the
+    ``tick:records`` rows that carry a ready time and whose run started, sorted by name."""
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for row in records:
+        if "ready_s" in row and not row["skipped"] and not row["held"]:
+            grouped[row["step"]].append(row["start_s"] - row["ready_s"])
+    return [
+        {"step": name, "count": len(gaps), "median_s": median(gaps), "max_s": max(gaps)}
+        for name, gaps in sorted(grouped.items())
+    ]
+
+
+def lane_shares(steps: list[dict[str, Any]], cpu: float) -> list[dict[str, Any]]:
+    """Return each recorded lane's step count and its percent of ``cpu``; steps recorded without a lane are left out."""
+    lanes: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in steps:
+        if "lane" in row:
+            lanes[row["lane"]].append(row)
+    return [
+        {
+            "lane": lane,
+            "count": len(rows),
+            "cpu_share": 100 * sum(row["own_cpu_s"] + row["reaped_child_cpu_s"] for row in rows) / cpu if cpu else 0.0,
+        }
+        for lane, rows in sorted(lanes.items())
+    ]
 
 
 def history(store: Any, slug: str, stream: str, limit: int) -> list[dict[str, Any]]:
@@ -66,7 +124,8 @@ def read(store: Any, slug: str, passes: int) -> dict[str, Any]:
     selected = history(store, slug, "tick:passes", passes)
     identities = {row["pass_id"] for row in selected}
     steps = [row for row in history(store, slug, "tick:steps", HISTORY_LIMIT) if row.get("pass_id") in identities]
-    return summarize(selected, steps)
+    report = summarize(selected, steps, history(store, slug, "tick:records", HISTORY_LIMIT))
+    return {**report, "pass_errors": pass_errors(store, slug)}
 
 
 def pass_count(value: str) -> int:
@@ -91,4 +150,22 @@ def command(store: Any, args: argparse.Namespace) -> None:
         print(
             f"{row['step']}  {row['count']}  {seconds(row['median_s'])}  {seconds(row['p95_s'])}  {row['cpu_share']:.2f}%"
         )
+    for row in report["lanes"]:
+        print(f"Lane {row['lane']}  {row['count']} steps  {row['cpu_share']:.2f}% CPU share")
+    print(f"Critical lane end p95: {seconds(report['critical_end_p95_s'])}")
+    print(f"Task rows read per pass, most: {report.get('rows_read_max') or 'n/a'}")
+    print("Step  Records  Late share  Abandoned  Held  Skipped  Dropped")
+    for row in report["records"]:
+        print(
+            f"{row['step']}  {row['records']}  {row['late_share']:.2f}%  {row['abandoned']}  {row['held']}"
+            f"  {row['skipped']}  {row['dropped']}"
+        )
+    print("Step  Ready to start median  Ready to start max")
+    for row in report.get("ready_gaps", []):
+        print(f"{row['step']}  {seconds(row['median_s'])}  {seconds(row['max_s'])}")
     print("CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.")
+    errors = report.get("pass_errors", [])
+    print(f"Pass errors, newest first: {len(errors)}")
+    for row in errors:
+        ended = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(row["end_ms"] / 1000))
+        print(f"{row['pass_id']}  {ended}  {row['error']}")

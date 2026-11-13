@@ -32,3 +32,19 @@ def test_runtime_facts_are_documented():
     text = _text()
     for fact in ("AGENTIHOOKS_SWARM_REDIS_URL", "every minute", "one task", "eng", "ci", "master@<code>-<n>"):
         assert fact in text, fact
+
+
+def test_the_one_push_gate_has_a_setting_row_beside_the_other_gates() -> None:
+    text = _text()
+    rows = [line for line in text.splitlines() if line.startswith("| `agentihooks swarm <id> set one-push-gate=")]
+    assert rows, "no one-push-gate setting row"
+    assert text.index(rows[0]) > text.index("| `agentihooks swarm <id> set talk-gate=")
+    for fact in (
+        "`gh pr create`",
+        "`git push`",
+        "unless a check is red",
+        "`deny` (the default)",
+        "lift <agent> one-push",
+        "lift the one-push gate",
+    ):
+        assert fact in rows[0], fact

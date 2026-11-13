@@ -141,7 +141,10 @@ def test_lane_and_kind_selectors_are_targets():
         ({"verb": "freeze", "target": "lane:night"}, "a freeze target is a plan, phase, slice or task address"),
         ({"verb": "freeze", "target": "kind:chore"}, "a freeze target is a plan, phase, slice or task address"),
         ({"verb": "freeze", "target": "plans/a", "reason": 3}, "reason and quote must be text"),
-        ({"verb": "freeze", "target": "plans/a", "extra": 1}, "freeze_set takes only verb target reason quote"),
+        (
+            {"verb": "freeze", "target": "plans/a", "extra": 1},
+            "freeze_set takes only verb target reason quote position only",
+        ),
         ({"verb": "freeze", "target": "lane:ci:x"}, "a freeze target is a plan, phase, slice or task address"),
         ({"verb": "freeze", "target": "plans/a", "by": "operator"}, "invalid freeze author"),
         ({"verb": "freeze", "target": "plans/a", "by": "1bad"}, "invalid freeze author"),
@@ -170,7 +173,6 @@ def test_a_freeze_on_a_node_the_ledger_lacks_is_rejected():
 def test_unfreezing_a_plan_clears_only_the_records_on_that_plan():
     for target in ("plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p2", "tasks/t2", "lane:ci"):
         freeze(target)
-    freeze("plans/a", verb="focus")
     state, rejected = write("freeze_clear", target="plans/a", reason="hierarchy shipped")
     assert rejected == []
     assert targets(state) == [
@@ -186,7 +188,7 @@ def test_unfreezing_a_plan_clears_only_the_records_on_that_plan():
         "kind": "unfrozen",
         "target": "plans/a",
         "id": state["_meta"]["events"][-1]["id"],
-        "cleared": ["plans/a", "plans/a"],
+        "cleared": ["plans/a"],
         "reason": "hierarchy shipped",
     }
     assert state["_meta"]["events"][-1]["id"].startswith("freeze_clear-")
@@ -301,9 +303,9 @@ def test_short_recorded_quotes_do_not_block_master_freezes_or_become_operator_wo
     state, rejected = write(op, by=MASTER, target="plans/a", quote=quote, **fields)
     assert rejected == []
     if op == "freeze_set":
-        assert targets(state) == [("freeze", "plans/a"), ("focus", "plans/a")]
-        assert state["freezes"][1]["by"] == MASTER
-        assert "quote" not in state["freezes"][1]
+        assert targets(state) == [("focus", "plans/a")]
+        assert state["freezes"][0]["by"] == MASTER
+        assert "quote" not in state["freezes"][0]
     else:
         assert state["freezes"] == []
     assert event_of(state)["by"] == MASTER
@@ -455,3 +457,32 @@ def test_the_api_takes_freeze_ops_against_the_freezes_collection():
     ]
     assert schemas.check_operations({"operation_id": "o1", "ops": ops, "guards": {}}, core, ()) == ops
     assert [schemas.target(op) for op in ops] == ["freezes", "freezes"]
+
+
+def test_the_api_stores_a_focus_posted_with_only_true() -> None:
+    freeze("plans/b", verb="focus")
+    ops = [{"op": "freeze_set", "id": "f3", "verb": "focus", "target": "plans/a", "only": True}]
+    assert schemas.check_operations({"operation_id": "o2", "ops": ops, "guards": {}}, core, ()) == ops
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == []
+    assert targets(state) == [("focus", "plans/a")]
+
+
+@pytest.mark.parametrize("position", ["top", "bottom"])
+def test_the_api_accepts_a_focus_at_the_top_or_bottom(position: str) -> None:
+    ops = [{"op": "freeze_set", "id": "f6", "verb": "focus", "target": "plans/a", "position": position}]
+    assert schemas.check_operations({"operation_id": "o5", "ops": ops, "guards": {}}, core, ()) == ops
+
+
+def test_the_api_refuses_a_focus_position_outside_top_and_bottom() -> None:
+    ops = [{"op": "freeze_set", "id": "f5", "verb": "focus", "target": "plans/a", "position": "middle"}]
+    with pytest.raises(schemas.APIError) as raised:
+        schemas.check_operations({"operation_id": "o4", "ops": ops, "guards": {}}, core, ())
+    assert raised.value.code == "schema_invalid"
+
+
+def test_the_api_refuses_a_non_boolean_only_flag() -> None:
+    ops = [{"op": "freeze_set", "id": "f4", "verb": "focus", "target": "plans/a", "only": "yes"}]
+    with pytest.raises(schemas.APIError) as raised:
+        schemas.check_operations({"operation_id": "o3", "ops": ops, "guards": {}}, core, ())
+    assert raised.value.code == "schema_invalid"

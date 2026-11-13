@@ -48,6 +48,50 @@ def test_run_persists_two_stages_and_selected_harness(setup_run, monkeypatch, ca
     assert all(call.args[2] == root / "sample" for call in launch.call_args_list)
 
 
+def test_run_routes_filtered_stages_through_the_judge(
+    setup_run: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, case, _ = setup_run
+    document = json.loads(json.dumps(DOCUMENT))
+    document["stages"]["check"]["filters"] = ["judge-blind"]
+    definition = schema.parse(yaml.safe_dump(document))
+    monkeypatch.setattr(loader, "resolve", lambda cwd=None: ({"pair": loader.Found("project", case, definition)}, []))
+    profile = Mock(launch=Mock(return_value=StageResult("pass", ["built"])))
+    judge = Mock(launch=Mock(return_value=StageResult("pass", {"verdict": "pass", "notes": []})))
+    profiles = Mock(return_value=profile)
+    judges = Mock(return_value=judge)
+    monkeypatch.setattr(cli, "HeadlessProfile", profiles)
+    monkeypatch.setattr(cli, "Judge", judges)
+
+    assert cli.main(["run", "pair", "--case", str(case), "--run-id", "judged", "--harness", "codex"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+    profiles.assert_called_once_with(harness="codex")
+    judges.assert_called_once_with(harness="codex")
+    assert [call.args[0].id for call in profile.launch.call_args_list] == ["build"]
+    assert [call.args[0].id for call in judge.launch.call_args_list] == ["check"]
+    assert judge.launch.call_args.args[1:] == ({"case": "Build the sample", "build": ["built"]}, root / "judged")
+
+
+def test_run_resolves_workflows_from_the_current_folder(setup_run, monkeypatch, tmp_path, capsys):
+    root, case, launch = setup_run
+    definition = schema.parse(yaml.safe_dump(DOCUMENT))
+    cwds = []
+
+    def resolve(*args):
+        cwds.append(args)
+        return {"pair": loader.Found("project", case, definition)}, []
+
+    monkeypatch.setattr(loader, "resolve", resolve)
+    monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["run", "pair", "--case", str(case), "--run-id", "here"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+    assert cwds == [(tmp_path,)]
+
+
 def test_status_only_reads_saved_run(setup_run, monkeypatch, capsys):
     root, case, _ = setup_run
     definition = schema.parse(yaml.safe_dump(DOCUMENT))
@@ -173,7 +217,7 @@ def test_run_uses_the_exit_check_for_workflow_verdicts(setup_run, monkeypatch, c
     _, case, launch = setup_run
     document = {**DOCUMENT, "workflow": {**DOCUMENT["workflow"], "exit": "all stages accepted"}}
     definition = schema.parse(yaml.safe_dump(document))
-    monkeypatch.setattr(loader, "resolve", lambda: ({"pair": loader.Found("project", case, definition)}, []))
+    monkeypatch.setattr(loader, "resolve", lambda cwd: ({"pair": loader.Found("project", case, definition)}, []))
     judge = Mock(return_value=True)
     monkeypatch.setattr(cli.exit_checks, "check", judge)
     monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
@@ -194,7 +238,7 @@ def test_exhausted_run_returns_failure_with_saved_json(setup_run, monkeypatch, c
         },
     }
     definition = schema.parse(yaml.safe_dump(document))
-    monkeypatch.setattr(loader, "resolve", lambda: ({"pair": loader.Found("project", case, definition)}, []))
+    monkeypatch.setattr(loader, "resolve", lambda cwd: ({"pair": loader.Found("project", case, definition)}, []))
     monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
     assert cli.main(["run", "pair", "--case", str(case)]) == 1
     state = json.loads(capsys.readouterr().out)

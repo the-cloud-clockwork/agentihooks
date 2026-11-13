@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x__intent_pass:765c349405a92b229a9b39cfdb4cd24c5eb9e516689fa399096a66f0ae93c046": {
+    "reader": "standards_reader",
+    "reason": "The executor gets exactly one submit before shutdown and starts one thread for it under any max_workers of at least one, so the view job, its result and the return order are unchanged."
+  }
+}

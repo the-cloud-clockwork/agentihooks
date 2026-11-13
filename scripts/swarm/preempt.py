@@ -5,9 +5,11 @@ the freed seat goes to the waiting task because the spawn order puts urgent work
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
-from scripts.inbox.store import InboxStore
-from scripts.swarm import dispatcher, freeze
+from scripts.inbox import store as inbox_store
+from scripts.swarm import dispatcher, freeze, hash_pages
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -34,9 +36,29 @@ class Seats:
     owner: Callable
     ready: Callable
     placement: Callable
+    view: Callable[..., Any] | None = None
 
     def holds(self, agent) -> bool:
         return not self.ended(agent, self.rows) and self.owner(agent, self.rows.get(agent.task, {}))
+
+    def claim_view(self, slug: str, store: Any, doc: dict[str, Any], dispatched: Callable[..., Any] | None) -> Any:
+        """One claim view for the pass, or None when the seats carry no builder."""
+        view: Callable[..., Any] | None = self.view
+        return view(slug, store, self.rows, doc, dispatched) if view else None
+
+    def claimable(
+        self,
+        slug: str,
+        store: Any,
+        doc: dict[str, Any],
+        lane: str,
+        dispatched: Callable[..., Any] | None,
+        claims: Any,
+    ) -> list[dict[str, Any]]:
+        """The lane's ready tasks, read from the pass's claim view when there is one."""
+        extra: dict[str, Any] = {"claims": claims} if claims is not None else {}
+        ready: Callable[..., list[dict[str, Any]]] = self.ready
+        return ready(slug, store, self.rows, doc, lane, dispatched, **extra)
 
 
 def _places(lane: str, task: dict) -> str:
@@ -53,15 +75,17 @@ def probe(runtime, lane: str, task: dict) -> str:
         return f"profile unresolved: {exc}"
 
 
-def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[str]:
+def run(slug: str, config: Any, store: Any, doc: dict, now_ms: int, seats: Seats) -> list[str]:
     from scripts.swarm import capacity
 
     caps = capacity.caps(capacity.read(store, slug), config)
     dispatched, agents, full = yielding(store, slug, doc, dispatcher.claim_key(config, doc)), store.agents(slug), {}
+    claims = None
     for lane, cap in caps.items():
         holders = [a for a in agents if a.lane == lane and seats.holds(a)]
         if cap and len(holders) >= cap:
-            full[lane] = (seats.ready(slug, store, seats.rows, doc, lane, dispatched), holders)
+            claims = claims if claims is not None else seats.claim_view(slug, store, doc, dispatched)
+            full[lane] = (seats.claimable(slug, store, doc, lane, dispatched, claims), holders)
     return step(slug, store, seats.rows, doc, full, now_ms, seats.placement)
 
 
@@ -88,16 +112,17 @@ def preferred(task: dict, doc: dict, graph: dict) -> bool:
     return any(r["verb"] == "focus" and freeze.covers(r["target"], task, chain) for r in doc.get("freezes") or [])
 
 
-def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int, probe: Callable = _places) -> list[str]:
+def step(
+    slug: str, store: RedisStore, rows: dict, doc: dict, full: dict, now_ms: int, probe: Callable = _places
+) -> list[str]:
     """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders;
     probe(lane, task) returns why placement refuses the task now, empty when it would place."""
     from scripts.hive import placement_waits
 
     graph, redis = hierarchy.project(doc)[0], store.redis
-    seen, asked = redis.smembers(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
-    refused = placement_waits.read(store, slug)
     holding = {a.name for _, holders in full.values() for a in holders}
-    asked = {name: entry for name, entry in asked.items() if name in holding}
+    seen, asked = redis.smembers(store.key(slug, WAITING)), hash_pages.picked(redis, store.key(slug, ASKED), holding)
+    refused = placement_waits.read(store, slug)
     waiting, actions = set(), []
     for lane, (ready, holders) in full.items():
         for task in (t for t in ready if preferred(t, doc, graph)):
@@ -111,7 +136,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int, probe
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
-                actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
+                actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"])
     redis.delete(store.key(slug, WAITING))
     if waiting:
         redis.sadd(store.key(slug, WAITING), *waiting)

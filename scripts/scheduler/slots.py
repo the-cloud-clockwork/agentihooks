@@ -3,12 +3,17 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
+from pathlib import Path
 from types import FunctionType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
     from scripts.swarm.store import RedisStore
+
+LOCAL = "local"
+HIVE = "hive"
+PLACEMENTS = (LOCAL, HIVE)
 
 
 class Slot(Protocol):
@@ -116,12 +121,58 @@ class SwarmSlot:
                 pass
 
 
-KINDS = {"inbox": InboxSlot, "broadcast": BroadcastSlot, "swarm": SwarmSlot, "callable": CallableSlot}
+@dataclass(frozen=True)
+class WorkflowSlot:
+    name: str
+    case: str
+    project: str
+    placement: str = LOCAL
+    needs: tuple[str, ...] = ()
+
+    def record(self) -> dict[str, object]:
+        return {
+            "kind": "workflow",
+            "name": self.name,
+            "case": self.case,
+            "project": self.project,
+            "placement": self.placement,
+            "needs": list(self.needs),
+        }
+
+    def deliver(self, event: dict[str, object], delivery_id: str, state: "StateStore") -> None:
+        if self.placement == HIVE:
+            from scripts.hive import run_collect, run_placement
+            from scripts.scheduler.core import Scheduler
+
+            owner = str(event["owner"])
+            redis = cast("object", swarm_store(state).redis)  # pragma: no mutate
+            run = run_placement.Run(
+                delivery_id, self.name, Path(self.case).read_text(), self.project, owner, self.needs
+            )
+            placed = run_placement.dispatch(run, redis)
+            if isinstance(placed, str):
+                run_collect.remember(redis, Scheduler().key(run_collect.SENT), placed, delivery_id, owner)
+            return
+        from scripts.workflows import scheduled
+
+        scheduled.start(self.name, self.case, self.project, delivery_id, str(event["owner"]))
 
 
-def restore(record: dict) -> Slot:
+KINDS = {
+    "inbox": InboxSlot,
+    "broadcast": BroadcastSlot,
+    "swarm": SwarmSlot,
+    "workflow": WorkflowSlot,
+    "callable": CallableSlot,
+}
+
+
+def restore(record: dict[str, Any]) -> Slot:
     fields = dict(record)
     kind = fields.pop("kind")
+    if kind == "workflow":
+        fields.setdefault("project", "")
+        fields["needs"] = tuple(fields.get("needs", ()))
     return KINDS[kind](**fields)
 
 

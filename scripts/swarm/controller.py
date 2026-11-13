@@ -3,35 +3,46 @@ import json
 import os
 import signal
 import sys
+import threading
 import uuid
 from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from time import monotonic, time
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
+from scripts.gates import intent
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import holder_pod, lease, local_slots, tick_stop
+from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
-from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
+from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerUnreachable
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable, connect, store_errors
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
+from scripts.tick.adapters.processes import PassProcesses
+from scripts.tick.ports.tools import PASS_TOOLS
 
 if TYPE_CHECKING:
     from scripts.hive.admission import Room
+    from scripts.hive.launch import Selection
     from scripts.hive.placement import Wait
+    from scripts.swarm.tick import Placed
     from scripts.swarm_v2.control_service import ControlService
 
 LOCAL, HYBRID, DISTRIBUTED = "local", "hybrid", "distributed"
+POD_NAME = "AGENTIHOOKS_POD_NAME"
 NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
 OVERFLOW = "the local machine takes {lane} work"
+AGENT_CHANGES = frozenset(["retire", "reap_name", "close_space", "close_pane", "resume"])
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
@@ -60,7 +71,20 @@ class FencedRuntime:
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self.runtime, name)
+        found = getattr(self.runtime, name)
+        return partial(self._changing, found) if name in AGENT_CHANGES else found
+
+    def live_names(self) -> set[str]:
+        """The live agent names, listed once per tick pass and again after a fenced runtime changes its agents."""
+        shared = _pass_processes()
+        return self.runtime.live_names() if shared is None else shared.live_names(self.runtime.live_names)
+
+    def _changing(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            if (shared := _pass_processes()) is not None:
+                shared.forget_names()
 
     def _mode_refusal(self) -> str:
         if self.deployment == LOCAL:
@@ -115,7 +139,7 @@ class FencedRuntime:
 
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
             if not isinstance(selected, Wait):
-                return self._workstation_claim(lane, task, claim)
+                return self._workstation_claim(lane, task, claim, selected)
             if lane == "master":
                 return f"{WORKSTATION.format(lane=lane)}: {selected.reason}"
             return self._overflow(lane, task, selected, claim)
@@ -124,12 +148,14 @@ class FencedRuntime:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
-    def _workstation_claim(self, lane: str, task: dict, claim: str) -> str:
-        if self.runtime.router.placed_backend(lane, task) != WORKSTATION_BACKEND:
+    def _workstation_claim(self, lane: str, task: dict[str, Any], claim: str, selected: "Selection") -> str:
+        from scripts.swarm.commands import hive_id
+
+        if self.runtime.router.placed_backend(lane, task) != WORKSTATION_BACKEND or selected.hive != hive_id():
             return ""
         return self._local_refusal(lane, task, claim)
 
-    def _local_refusal(self, lane: str, task: dict, name: str) -> str:
+    def _local_refusal(self, lane: str, task: dict[str, Any], name: str) -> str:
         if lane == "master":
             return ""
         from scripts.hive import admission, placement_waits, registry
@@ -141,7 +167,8 @@ class FencedRuntime:
         if not equipped(task, local):
             return needs_refusal(task, [local] if local else [])
         found, held, maximum = self._workstation_room(machine, task)
-        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
+        cache = self._local_slots_cache
+        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum, cache) if name else held
         if taken >= maximum:
             self._local_full(machine, taken, maximum)
             refused = f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
@@ -152,20 +179,18 @@ class FencedRuntime:
         return ""
 
     def _workstation_room(self, machine: str, task: dict) -> tuple["Room", int, int]:
-        from scripts.hive import admission, headroom, registry
+        from scripts.hive import admission, ceiling, registry
 
         hive = registry.show(self.store.redis, machine)
         cache = self._local_slots_cache
         running = local_slots.running(self.store, self.slug, task["id"], cache)
         held = local_slots.held(self.store, machine, self.slug, task["id"], cache)
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
-        now = lease.now_ms(self.store)
-        found = admission.room(
-            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)),
-            running,
-            pending,
-            hive["max_agents"] if hive is not None else None,
+        reading = (
+            _host_reading(self.store, machine) if cache is None else cache.once(_host_reading, self.store, machine)
         )
+        top = ceiling.ceiling(hive["max_agents"], reading) if hive is not None else None
+        found = admission.room(reading, running, pending, top)
         maximum = local_slots.maximum(self.store, self.slug, running + found.room)
         found = admission.capped(found, running, maximum)
         return found, held, min(maximum, running + found.room)
@@ -217,11 +242,11 @@ class FencedRuntime:
         room = getattr(self.runtime, "launch_room", None)
         return room(config) if room else 1
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         task = _master_task(lane, task)
         try:
-            return self._spawn(config, lane, name, task)
+            return self._changing(self._spawn, config, lane, name, task)
         except BaseException:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
@@ -230,8 +255,9 @@ class FencedRuntime:
             admission.release(self.store.redis, hive_id(), f"{self.slug}/{name}")
             raise
 
-    def _spawn(self, config, lane, name, task):
-        refused = self._refusal(lane, task, name)
+    def _spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
+        with timing.step(f"{__name__}.FencedRuntime._refusal", report=False):
+            refused = self._refusal(lane, task, name)
         workstation = _to_workstation(lane, refused, self._pass_memo())
         from scripts.hive.placement import LOCAL_FULL
 
@@ -241,35 +267,76 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
+        from scripts.hive import placement_waits
+
+        runtime = self.runtime
+        hive = getattr(runtime, "hive_launch", None) is not None
+        counted = workstation or (self.deployment == LOCAL and not hive)
+        totals = self.store.key(self.slug, placement_waits.TOTALS) if counted else ""
         if workstation or self.deployment == LOCAL:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
 
-            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
-        runtime = self.runtime
+            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}", totals)
         if workstation:
             runtime = runtime.herdr_runtime
-        elif not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None:
+        elif not _hive_lane(lane, task, self.kubernetes_proof) and hive:
             runtime = runtime.original_runtime
-        return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        else:
+            task = self._hive_task(config, lane, task)
+        with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
+            try:
+                return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+            except BaseException:
+                if totals:
+                    placement_waits.admitted(self.store, self.slug, -1)
+                raise
 
-    def collect(self, config, lane, name, task):
+    def _hive_task(self, config: SwarmConfig, lane: str, task: dict[str, Any]) -> dict[str, Any]:
+        """A workstation task placed on a workstation hive other than this machine launches there, pinned to it."""
+        from scripts.hive.launch import Selection
+        from scripts.swarm.commands import hive_id
+
+        launch = getattr(self.runtime, "hive_launch", None)
+        if not task.get("workstation") or launch is None:
+            return task
+        selected = launch.select(config, lane, task)
+        if not isinstance(selected, Selection) or selected.hive == hive_id():
+            return task
+        return {**task, "workstation": False, "hive": selected.hive}
+
+    def collect(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm.tick import SpawnError
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        outcome = self.runtime.hive_launch.collect(request)
+        outcome = self._changing(self.runtime.hive_launch.collect, request)
         if not outcome.ok:
             raise SpawnError(outcome.detail, outcome.status)
         return outcome.value
 
-    def expire(self, config, lane, name, task):
+    def expire(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm_v2.runtime.base import SpawnRequest
 
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        return self.runtime.hive_launch.expire(request)
+        return self._changing(self.runtime.hive_launch.expire, request)
+
+
+def _host_reading(store: RedisStore, machine: str) -> dict[str, Any] | None:
+    """The machine's host reading for workstation room, taken against its last saved reading."""
+    from scripts.hive import headroom
+
+    now = lease.now_ms(store)
+    reading: dict[str, Any] | None = headroom.measure(0, now, previous=headroom.read(store.redis, machine, now))
+    return reading
+
+
+def _pass_processes() -> PassProcesses | None:
+    """The running tick pass's process model, which holds its shared live names listing."""
+    processes = getattr(PASS_TOOLS.get(), "processes", None)
+    return processes if isinstance(processes, PassProcesses) else None
 
 
 def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
@@ -279,11 +346,15 @@ def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
 
 
 def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
+    """The master seats placed on hives. The claude ai login front door stays local only where local is the
+    workstation; a controller in a pod has no workstation checkout, so every seat goes to hive placement there."""
     from scripts import master_claude_login
     from scripts.inbox.seats import seat_address
     from scripts.swarm_v2 import masters
 
     seats = (masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
+    if os.environ.get(POD_NAME):
+        return frozenset(seats)
     return frozenset(
         seat for seat in seats if not master_claude_login.enabled(slug, seat_address(slug, seat), "master", "claude")
     )
@@ -331,6 +402,7 @@ def _stat(pid) -> list[str]:
 
 
 CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
+_LIVE: set[str] = set()
 
 
 def _contained() -> bool:
@@ -372,7 +444,12 @@ def _dead(raw: str) -> bool:
         return holder_pod.gone(held.get("pod"), holder_pod.pod(os.environ))
     if not host or "pid" not in held or "start" not in held:
         return False
-    return _gone(held["pid"], held["start"])
+    return _gone(held["pid"], held["start"]) or _forgotten(raw, held)
+
+
+def _forgotten(raw: str, held: Any) -> bool:
+    """Tell whether ``held`` names this very process while no pass in it still holds the token ``raw``."""
+    return held["pid"] == os.getpid() and _stat(os.getpid())[19:20] == [held["start"]] and raw not in _LIVE
 
 
 def _ended_boot(held: dict, host: str) -> bool:
@@ -381,43 +458,59 @@ def _ended_boot(held: dict, host: str) -> bool:
     return bool(machine) and held.get("machine") == machine and bool(boot) and boot != host.partition(":")[0]
 
 
-def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
+def _lock_raw(pipe: Any, key: str) -> str | None:
+    """Read the tick lock value through a watched pipeline."""
+    return pipe.get(key)
+
+
+def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int, caller: str = "unnamed") -> str | None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
     token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **_holder()})
     with store.redis.pipeline() as pipe:
-        try:
-            pipe.watch(key)
-            lease.require(store, slug, held)
-            raw = pipe.get(key)
-            if raw and not _dead(raw):
-                return None
-            pipe.multi()
-            pipe.set(key, token, px=ttl_ms)
-            pipe.execute()
-            return token
-        except WatchError:
+        pipe.watch(key)
+        lease.require(store, slug, held)
+        raw = _lock_raw(pipe, key)
+        if raw and not _dead(raw):
+            _journal_lock(slug, caller, "refused", raw)
             return None
+        pipe.multi()
+        pipe.set(key, token, px=ttl_ms)
+        try:
+            pipe.execute()
+        except WatchError:
+            _journal_lock(slug, caller, "refused", raw)
+            return None
+        _LIVE.add(token)
+        _journal_lock(slug, caller, "replaced a dead holder" if raw else "taken", raw)
+        return token
 
 
-def release_tick_lock(store: RedisStore, slug: str, token: str) -> None:
+def release_tick_lock(store: RedisStore, slug: str, token: str, caller: str = "unnamed") -> None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
+    _LIVE.discard(token)
     with store.redis.pipeline() as pipe:
+        pipe.watch(key)
+        raw = _lock_raw(pipe, key)
+        if raw != token:
+            _journal_lock(slug, caller, "found another holder", raw)
+            return
+        pipe.multi()
+        pipe.delete(key)
         try:
-            pipe.watch(key)
-            if pipe.get(key) != token:
-                return
-            pipe.multi()
-            pipe.delete(key)
             pipe.execute()
         except WatchError:
+            _journal_lock(slug, caller, "found another holder", raw)
             return
+        _journal_lock(slug, caller, "released", raw)
 
 
-def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int) -> None:
+def keep_tick(
+    store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int, caller: str = "unnamed"
+) -> None:
     from redis.exceptions import WatchError
 
     lease.renew(store, slug, held)
@@ -426,8 +519,11 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key)
-                if pipe.get(key) != token:
-                    raise SwarmError("the tick lock is stale")
+                raw = _lock_raw(pipe, key)
+                if raw != token:
+                    raise SwarmError(
+                        f"the tick lock is stale: {caller} expected token {_token_prefix(token)}, {_lock_holder(raw)}"
+                    )
                 pipe.multi()
                 pipe.pexpire(key, ttl_ms)
                 pipe.execute()
@@ -436,16 +532,56 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
                 continue
 
 
-def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
+def _token_prefix(value: str) -> str:
+    decoded: dict[str, Any] = json.loads(value) if value.startswith("{") else {}
+    return str(decoded.get("token", value))[:8]
+
+
+def _lock_holder(raw: str | None) -> str:
+    if raw is None:
+        return "the key is absent"
+    held: dict[str, Any] = json.loads(raw) if raw.startswith("{") else {}
+    fields = " ".join(f"{name} {held.get(name, 'unknown')}" for name in ("epoch", "host", "pid", "start"))
+    return f"held by {fields} token {_token_prefix(raw)}"
+
+
+def _journal_lock(slug: str, caller: str, outcome: str, raw: str | None) -> None:
+    line = {"event": "swarm_tick_lock", "slug": slug, "caller": caller, "outcome": outcome, "holder": _lock_holder(raw)}
+    sys.stderr.write(json.dumps(line) + "\n")
+    sys.stderr.flush()
+
+
+def run_once(
+    store: RedisStore,
+    ledger: Any = None,
+    runtime: Any = None,
+    messenger: Any = None,
+    runtimes: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
     from scripts.swarm.cli import run_tick
     from scripts.swarm.commands import hive_id
 
     runtimes = runtimes or {}
-    host, actions = hive_id(), {}
+    host = hive_id()
+    actions: dict[str, list[str]] = {}
+    reader: Any = ledger or LedgerClient()
     for slug in ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, "")):
+        if not tickable(reader, slug):
+            continue
         store.redis.set(store.key(slug, "controller-host"), host, px=lease.ttl_ms())
         actions[slug] = run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
     return actions
+
+
+def tickable(ledger: Any, slug: str) -> bool:
+    """Answer False for a swarm whose ledger is binned or closed; a gone or cleartext ledger ticks so its pass
+    reports it once, and a ledger that cannot be reached ends the pass as unreachable."""
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except (LedgerGone, ledger_link.Cleartext):
+        return True
+    except OSError as exc:
+        raise LedgerUnreachable(f"ledger {slug}: {exc}") from exc
 
 
 def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
@@ -472,11 +608,142 @@ def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
     return bus
 
 
-def _stopped(*_) -> None:
-    # The pod grace period can end before the tick's finally reaches its release.
+STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+RUNNING = threading.Event()
+DRAINING = threading.Event()
+
+
+def _halt() -> NoReturn:
+    """Stop the tick, release every held tick lock and exit as a terminated process."""
     tick_stop.STOP.set()
     tick_stop.release_all()
     sys.exit(143)
+
+
+def _stopped(signum: int, frame: object) -> None:
+    """Let a running pass finish on the first stop signal; exit at once between passes or on a second signal."""
+    if RUNNING.is_set() and not DRAINING.is_set():
+        DRAINING.set()
+        os.write(2, f"controller: stop signal {signum}, finishing the running pass before exit\n".encode())
+        return
+    _halt()
+
+
+def _cadence_wait(started: float) -> None:
+    """Wait out the rest of one tick from the pass start, so passes start one tick apart."""
+    left = lease.tick_ms() / 1000 - (monotonic() - started)
+    if left > 0:
+        scheduled_wait(left)
+
+
+def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
+    """Run one controller pass: tick every hosted swarm, then the control service and the proof swarms."""
+    for slug, actions in tick_once(store, service).items():
+        for action in actions:
+            print(f"{slug}: {action}", flush=True)
+    if service is not None:
+        service.tick()
+    proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
+
+
+def _finishing(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
+    """Run one pass that a stop signal lets finish, then exit once the pass ends."""
+    RUNNING.set()
+    try:
+        _pass(store, service, proof_swarm)
+    except Exception as exc:
+        if not DRAINING.is_set():
+            raise
+        os.write(2, f"controller: the last pass before exit ended: {exc}\n".encode())
+    finally:
+        RUNNING.clear()
+    if DRAINING.is_set():
+        _halt()
+
+
+def _reached(outage: redis_grace.Outage) -> RedisStore:
+    """Connect at startup, retrying one tick apart while Redis refuses inside the grace window."""
+    while True:
+        try:
+            store = connect()
+        except Unreachable as exc:
+            if not outage.tolerated():
+                raise
+            print(f"controller: {exc}; retrying after one tick inside the Redis grace window", file=sys.stderr)
+            scheduled_wait(lease.tick_ms() / 1000)
+            continue
+        outage.ended()
+        return store
+
+
+def _journal_pass(number: int, outcome: str) -> None:
+    """Write the one structured line that marks the end of a controller pass and names its outcome."""
+    sys.stdout.write(json.dumps({"event": "controller_pass_end", "pass": number, "outcome": outcome}) + "\n")
+    sys.stdout.flush()
+
+
+def _passes(
+    store: RedisStore,
+    service: "ControlService | None",
+    proof_swarm: ModuleType,
+    once: bool,
+    outage: redis_grace.Outage,
+) -> int:
+    """Run passes one tick apart, riding out Redis errors until they outlast the grace window."""
+    if not once:
+        intent.keep_judging()
+    number = 0
+    while True:
+        started = monotonic()
+        number += 1
+        try:
+            _finishing(store, service, proof_swarm)
+        except LedgerUnreachable as exc:
+            print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
+            _journal_pass(number, "ledger_unreachable")
+            if once:
+                return 1
+            scheduled_wait(lease.tick_ms() / 1000)
+            continue
+        except store_errors() as exc:
+            if not outage.tolerated():
+                raise Unreachable(f"Redis is unreachable past the {outage.grace_s:.0f}s grace window ({exc})") from exc
+            print(
+                f"controller: pass ended inside the Redis grace window, next pass after one tick: {exc}",
+                file=sys.stderr,
+            )
+            _journal_pass(number, "redis_grace")
+            if once:
+                return 1
+            scheduled_wait(lease.tick_ms() / 1000)
+            continue
+        outage.ended()
+        redis_grace.cleared(redis_grace.marker(os.environ))
+        _journal_pass(number, "ok")
+        if once:
+            return 0
+        _cadence_wait(started)
+
+
+def _probe(action: str) -> int:
+    """Run one container probe; liveness passes while a Redis outage is inside the grace window."""
+    from scripts.swarm import controller_probes
+
+    path = redis_grace.marker(os.environ)
+    try:
+        status = getattr(controller_probes, action)(os.environ, connect())
+    except (SwarmError, *store_errors()) as exc:
+        if action == "live" and isinstance(exc, (Unreachable, *store_errors())):
+            grace = redis_grace.grace_seconds(os.environ)
+            down = redis_grace.down_for(path, time())
+            if down < grace:
+                print(f"controller: {exc}; live inside the {grace:.0f}s Redis grace window, down {down:.0f}s")
+                return 0
+        print(f"controller: {exc}")
+        return 1
+    if action == "live":
+        redis_grace.cleared(path)
+    return status
 
 
 def main(argv: list[str]) -> int:
@@ -485,37 +752,23 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     if args.action != "run":
-        from scripts.swarm import controller_probes
-
-        try:
-            store = connect()
-        except SwarmError as exc:
-            print(f"controller: {exc}")
-            return 1
-        return getattr(controller_probes, args.action)(os.environ, store)
+        return _probe(args.action)
     from scripts import operator_env
     from scripts.swarm import commands
     from scripts.swarm_v2 import control_service, proof_swarm
 
     operator_env.fill(os.environ)
     operator_env.classifier(os.environ)
-    store = connect()
+    outage = redis_grace.Outage.from_environ()
+    store = _reached(outage)
     service = None
     bus = open_controller_bus(os.environ)
-    previous = signal.signal(signal.SIGTERM, _stopped)
+    DRAINING.clear()
+    previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
-        while True:
-            for slug, actions in tick_once(store, service).items():
-                for action in actions:
-                    print(f"{slug}: {action}", flush=True)
-            if service is not None:
-                service.tick()
-            proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
-            if args.once:
-                return 0
-            scheduled_wait(lease.tick_ms() / 1000)
+        return _passes(store, service, proof_swarm, args.once, outage)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
@@ -524,4 +777,5 @@ def main(argv: list[str]) -> int:
             service.stop()
         if bus is not None:
             bus.close()
-        signal.signal(signal.SIGTERM, previous)
+        for number, handler in previous.items():
+            signal.signal(number, handler)

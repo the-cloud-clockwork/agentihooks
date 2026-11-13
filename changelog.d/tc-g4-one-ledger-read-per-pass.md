@@ -1,0 +1,1 @@
+A tick pass reads its ledger once plus once after each ledger write: the held view serves every whole document read, the capacity step's included, until a write leaves it stale; the phase pass projects each phase's tasks from the pass document instead of reading the ledger hierarchy; and the promotion refresh uses the pass document instead of reading the ledger again.

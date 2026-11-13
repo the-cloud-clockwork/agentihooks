@@ -7,7 +7,7 @@ from typing import NoReturn
 
 import pytest
 
-from scripts.gates import Call, Gate, Who, push_stop
+from scripts.gates import Call, Decision, Gate, Who, push_stop
 from scripts.gates.progress import Progress
 from scripts.gates.push_stop import (
     FLOOR_S,
@@ -78,6 +78,7 @@ def rig(tmp_path):
         root=root,
         now=lambda: NOW,
         clock=lambda: ticks.pop(0) if ticks else time.monotonic(),
+        github=lambda url: None,
     )
 
     def stop(who=WHO, started=None):
@@ -120,7 +121,8 @@ def test_the_template_is_the_operator_text():
 
 
 def test_a_fresh_worktree_with_no_work_stops_freely(rig):
-    assert rig.stop().allowed
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (True, "")
     assert rig.remote_head() == ""
     assert rig.inbox() == []
 
@@ -170,6 +172,31 @@ def test_dirty_work_still_pushes_the_commits_it_holds(rig):
     (rig.tree / "new").write_text("new\n")
     assert rig.stop().reason == TEMPLATE
     assert rig.remote_head() == head
+
+
+def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_ends(monkeypatch, rig, tmp_path):
+    from hooks import config, hook_manager
+
+    for flag in ("CI_MANIFESTO_ENABLED", "BRAIN_ENABLED", "BROADCAST_ENABLED", "BRAIN_WRITER_ENABLED"):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    helper = {"session_id": "main", "agent_id": "reader", "agent_type": "code-reviewer"}
+
+    def stop(session: str) -> Decision:
+        rig.gate.started = time.monotonic()
+        return rig.gate.decide(Call("", session=session), WHO, Verdicts(SLUG, rig.gate.name, tmp_path))
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    (rig.tree / "readme").write_text("reviewed\n")
+    hook_manager.on_subagent_start(helper)
+    assert stop("main").allowed
+    assert rig.remote_head() == head
+    assert rig.inbox() == []
+    assert stop("other").reason == TEMPLATE
+    hook_manager.on_subagent_stop(helper)
+    decision = stop("main")
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
 
 
 def test_a_closed_template_item_is_sent_again(rig):
@@ -444,7 +471,7 @@ def test_the_push_gets_the_time_left_plus_the_reserve_less_the_floor(monkeypatch
 def test_a_retained_branch_deleted_from_origin_is_not_recreated(rig):
     rig.commit("before")
     git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
-    git(rig.seed, "push", str(rig.origin), "--delete", PREDECESSOR)
+    git(rig.origin, "update-ref", "-d", f"refs/heads/{PREDECESSOR}")
     continuing(rig)
     rig.commit()
     assert rig.stop().reason == TEMPLATE
@@ -1093,7 +1120,7 @@ def test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop(rig,
     rig.gate._github = lambda url: seen.append(url) or PullRequest("OPEN", None, 1, False, True, queued=True)
     wait_on(rig, {"kind": "merge", "target": target})
     assert rig.stop().allowed
-    assert seen == [target]
+    assert seen == ["https://github.com/o/r/pull/7", target]
     assert rig.remote_head() == theirs
 
 
@@ -1191,3 +1218,65 @@ def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
     head = rig.commit()
     assert rig.stop().allowed
     assert rig.remote_head() == head
+
+
+RUNNING_URL = "https://github.com/o/r/pull/7"
+
+
+def running_pull(**changes: object) -> object:
+    from scripts.swarm.ledger_events import PullRequest
+
+    fields = {"state": "OPEN", "merged_at": None, "pushed_at": 1, "red": False, "running": True, "started": True}
+    return PullRequest(**{**fields, **changes})
+
+
+def test_running_checks_let_unpushed_work_stop_without_a_push_and_name_the_checks(rig: SimpleNamespace) -> None:
+    rig.ledger.task["pr_url"] = RUNNING_URL
+    rig.commit()
+    seen: list[str] = []
+    rig.gate._github = lambda url: seen.append(url) or running_pull()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (
+        True,
+        f"Checks still run on {RUNNING_URL} and none is red, so the stop hook did not push: a push now cancels them. "
+        f"Wait with agentihooks swarm {SLUG} wait --on checks {RUNNING_URL}, then push once they resolve.",
+    )
+    assert seen == [RUNNING_URL]
+    assert rig.remote_head() == ""
+    assert rig.inbox() == []
+
+
+def test_running_checks_still_demand_a_commit_of_uncommitted_work_without_a_push(rig: SimpleNamespace) -> None:
+    rig.ledger.task["pr_url"] = RUNNING_URL
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: running_pull()
+    assert rig.stop().reason == TEMPLATE
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"running": False},
+        {"red": True},
+        {"state": "MERGED"},
+        {"queued": True},
+        {"started": False},
+        {"head_red": True},
+        {"mergeable": "CONFLICTING"},
+    ],
+)
+def test_resolved_red_closed_queued_or_unstarted_checks_still_demand_the_push(
+    rig: SimpleNamespace, changes: dict[str, object]
+) -> None:
+    refuse_the_push(rig)
+    rig.gate._github = lambda url: running_pull(**changes)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_running_checks_on_a_pull_request_in_another_repo_still_demand_the_push(rig: SimpleNamespace) -> None:
+    refuse_the_push(rig)
+    rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
+    rig.gate._github = lambda url: running_pull()
+    assert rig.stop().reason == TEMPLATE

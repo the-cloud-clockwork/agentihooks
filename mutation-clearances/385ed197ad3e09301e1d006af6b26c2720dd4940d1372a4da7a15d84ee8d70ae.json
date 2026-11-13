@@ -1,0 +1,6 @@
+{
+  "scripts/ci_test_plan.py:scripts.ci_test_plan.x__api:c09ae4154cc07ad948e9f1472217572954d03e7508e3d284d61e88bb11223fba": {
+    "reader": "standards_reader",
+    "reason": "The unreachable AssertionError sits after a loop that always returns or raises first, so its message is never shown."
+  }
+}

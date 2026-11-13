@@ -10,7 +10,7 @@ from typing import Any
 from hooks.classifier import decision_log
 from scripts import agent_choice
 from scripts.gates import log as gate_log
-from scripts.hive import placement_waits
+from scripts.hive import placement, placement_waits, registry
 from scripts.swarm import capacity, host_budget, metrics_outbox
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import SPAWN_HOLD
@@ -332,13 +332,14 @@ def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list)
     return rows
 
 
-def placement_counts(agents: list[dict]) -> dict:
+def placement_counts(redis: Any, agents: list[dict[str, Any]]) -> dict[str, int]:
     from scripts.swarm.commands import hive_id
 
-    here = hive_id()
+    headed = [hive["id"] for hive in registry.hives(redis) if hive.get("ui") == placement.YES]
+    home = {"", *(headed or [hive_id()])}
     remote = sum(
         agent.get("runtime_backend", "local") != "local"
-        or (agent.get("runtime_target") or {}).get("host_id", here) not in ("", here)
+        or (agent.get("runtime_target") or {}).get("host_id", "") not in home
         for agent in agents
     )
     return {"workstation_agents": len(agents) - remote, "hive_agents": remote}
@@ -504,7 +505,7 @@ def record_pass(
     agents = [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)]
     agents += [asdict(agent) for agent in store.agents(slug)]
     handoffs = [json.loads(row) for row in store.redis.hgetall(store.key(slug, "transfers")).values()]
-    gates, reruns = gate_rows(slug, doc, agents, gate_log.recent(slug, limit=None))
+    gates, reruns = gate_rows(slug, doc, agents, gate_log.since(slug, now_ms - metrics_outbox.DAY_MS))
     quota = capacity.read(store, slug)
     hold = store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
     live = [asdict(agent) for agent in store.agents(slug)]
@@ -514,7 +515,7 @@ def record_pass(
     quota["held_by"] = ("host" if room else "quota") if quota["held_spawns"] else ""
     quota["held_harness"] = "" if room else held_harness(store.config(slug).lanes, held)
     quota["reason"] = room or held_pins(store.config(slug).lanes, held, quota.get("reason"))
-    quota.update(placement_counts(live))
+    quota.update(placement_counts(store.redis, live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     rounds = read_review_rounds(slug, box)
     review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows, *rounds.rows]}}

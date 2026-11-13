@@ -1,0 +1,12 @@
+rules:
+  - id: join-github-check-app-default
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive join github check defaults an unset HIVE_GITHUB_AUTH_MODE to app, so a root hive session on a user
+      gh login probes the installation endpoint and fails its launch check. Default to app only for a joined hive
+      member, AGENTIHOOKS_HIVE_ID set, and to the user endpoint otherwise.
+    patterns:
+      - pattern-inside: |
+          $X if <... os.environ.get("HIVE_GITHUB_AUTH_MODE", "app") ...> else $Y
+      - pattern: os.environ.get("HIVE_GITHUB_AUTH_MODE", "app")

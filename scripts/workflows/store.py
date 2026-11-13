@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -37,3 +38,27 @@ def save(folder: Path, state: dict) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temp, folder / STATE_FILE)
+
+
+def files(folder: Path) -> dict[str, str]:
+    """Every regular file in the run folder as base64 bytes, keyed by its path relative to the folder; a symlink is
+    skipped."""
+    return {
+        path.relative_to(folder).as_posix(): base64.b64encode(path.read_bytes()).decode()
+        for path in sorted(folder.rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+def restore(folder: Path, saved: dict[str, str]) -> None:
+    """Write the saved files into the run folder; a path that leaves the folder is refused before any write."""
+    root = folder.resolve()
+    targets: dict[Path, str] = {}
+    for name, encoded in saved.items():
+        target = (root / name).resolve()
+        if Path(name).is_absolute() or not target.is_relative_to(root):
+            raise ValueError(f"run file {name} leaves the run folder")
+        targets[target] = encoded
+    for target, encoded in targets.items():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(base64.b64decode(encoded))

@@ -1,0 +1,10 @@
+rules:
+  - id: fleet-accounts-without-master-reservation
+    languages: [python]
+    severity: ERROR
+    message: Hosted fleet capacity must apply the shared master reservation filter before offering worker rows.
+    patterns:
+      - pattern-inside: |
+          class FleetAccounts:
+              ...
+      - pattern: return $ROUTE.banded_rows(...)

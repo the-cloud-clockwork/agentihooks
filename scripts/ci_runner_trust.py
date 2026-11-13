@@ -2,12 +2,14 @@ import argparse
 import json
 import re
 from pathlib import Path
+from typing import Any, cast
 
 ACTORS = ".github/workflows/trusted-actors.json"
 LOADER = "the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev"
 POOLS = ("anton-oss", "anton-oss-light", "anton-oss-batch")
 # The only org shared workflow known to place its job on the runner named by its runs_on input.
 SHARED = "the-cloud-clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
+HOSTED_SHARED = frozenset({"the-cloud-clockwork/agentihooks/.github/workflows/docs-sanity.yml@main"})
 QUEUE_POOLS = {"anton-oss": "anton-oss-queue"}
 GUARD = (
     "github.event_name != 'pull_request_target' && "
@@ -21,7 +23,7 @@ GUARD = (
 )
 
 
-def loader_contract() -> dict:
+def loader_contract() -> dict[str, Any]:
     command = (
         "python3 -I -c 'import json; from pathlib import Path; "
         'p=json.loads(Path(".github/workflows/trusted-actors.json").read_text()); '
@@ -61,29 +63,34 @@ def loader_contract() -> dict:
 
 def validate_actors(actors: object) -> list[str]:
     if isinstance(actors, dict):
-        if set(actors) != {"actors", "queue_actor"} or not isinstance(actors["actors"], list):
+        if set(cast(dict[str, Any], actors)) != {"actors", "queue_actor"} or not isinstance(
+            cast(dict[str, Any], actors)["actors"], list
+        ):
             raise ValueError("trusted actors policy requires actors and queue_actor")
-        approved = validate_actors(actors["actors"])
-        queue = actors["queue_actor"]
+        approved = validate_actors(cast(dict[str, Any], actors)["actors"])
+        queue = cast(dict[str, Any], actors)["queue_actor"]
         if not isinstance(queue, str) or not re.fullmatch(r"[A-Za-z0-9-]+\[bot\]", queue) or queue in approved:
             raise ValueError("trusted actors queue identity must be a distinct platform bot")
         return approved + [queue]
     if (
         not isinstance(actors, list)
-        or len(actors) != 3
-        or any(not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", actor) for actor in actors)
-        or len(set(actors)) != 3
-        or sum(actor.endswith("[bot]") for actor in actors) != 2
+        or len(cast(list[Any], actors)) != 3
+        or any(
+            not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", actor)
+            for actor in cast(list[Any], actors)
+        )
+        or len(set(cast(list[Any], actors))) != 3
+        or sum(cast(str, actor).endswith("[bot]") for actor in cast(list[Any], actors)) != 2
     ):
         raise ValueError("trusted actors must contain one operator and two distinct app bots")
-    return actors
+    return cast(list[str], actors)
 
 
 def _compact(expression: str) -> str:
     return re.sub(r"'(?:''|[^'])*'|\s+", lambda match: match[0] if match[0].startswith("'") else "", expression)
 
 
-def _guarded(job: dict, jobs: dict) -> bool:
+def _guarded(job: dict[Any, Any], jobs: dict[Any, Any]) -> bool:
     needs = job.get("needs", [])
     needs = [needs] if isinstance(needs, str) else needs
     loader = jobs.get("runner-trust", {})
@@ -118,7 +125,7 @@ def _hosted(runner: object) -> bool:
     )
 
 
-def selector(policy: dict, pool: str, queue: bool = False, *, trusted_reruns: bool = False) -> str:
+def selector(policy: dict[str, Any], pool: str, queue: bool = False, *, trusted_reruns: bool = False) -> str:
     members = json.dumps(policy["actors"], separators=(",", ":"))
     queue_actor = policy["queue_actor"]
     condition = (
@@ -141,7 +148,7 @@ def selectors(policy: object, pool: str) -> set[str]:
     if not isinstance(policy, dict):
         return set()
     return {
-        _compact(selector(policy, pool, queue, trusted_reruns=reruns))
+        _compact(selector(cast(dict[str, Any], policy), pool, queue, trusted_reruns=reruns))
         for queue in (False, pool in QUEUE_POOLS)
         for reruns in (False, True)
     }
@@ -151,18 +158,28 @@ def _selector(runner: object, policy: object) -> bool:
     return isinstance(runner, str) and any(_compact(runner) in selectors(policy, pool) for pool in POOLS)
 
 
-def _trusted_runner(job: dict, actors: object) -> bool:
+def _hosted_shared(uses: str) -> bool:
+    """Match a hosted only shared workflow, owner and repository without case, path and ref exactly."""
+    parts = uses.split("/", 2)
+    if len(parts) != 3:
+        return False
+    return f"{parts[0].lower()}/{parts[1].lower()}/{parts[2]}" in HOSTED_SHARED
+
+
+def _trusted_runner(job: dict[Any, Any], actors: object) -> bool:
     uses = job.get("uses")
+    if isinstance(uses, str) and _hosted_shared(uses):
+        return True
     if uses and uses.lower() != SHARED:
         return False
-    runner = (job.get("with") or {}).get("runs_on") if uses else job.get("runs-on")
+    runner = (job.get("with") or cast(dict[Any, Any], {})).get("runs_on") if uses else job.get("runs-on")
     return _hosted(runner) or _selector(runner, actors)
 
 
-def check(workflows: dict[str, dict], actors: object = None) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], actors: object = None) -> list[str]:
     if actors is not None:
         validate_actors(actors)
-    problems = []
+    problems: list[str] = []
     if "runner-trust.yml" in workflows:
         loader = dict(workflows["runner-trust.yml"])
         loader.pop("name", None)
@@ -204,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     import yaml
 
     workflows = {
-        path.name: yaml.safe_load(path.read_text()) or {}
+        path.name: yaml.safe_load(path.read_text()) or cast(dict[Any, Any], {})
         for path in (args.root / ".github/workflows").iterdir()
         if path.suffix in (".yml", ".yaml")
     }

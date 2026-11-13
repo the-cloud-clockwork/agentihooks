@@ -2,8 +2,10 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+from scripts.routing import aggregate
+from scripts.routing.slots import account_key
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmError
@@ -15,7 +17,7 @@ from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
-from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccounts, SecretKeys
+from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccounts, HarnessRoutes, SecretKeys
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.completion import Completion
@@ -30,6 +32,7 @@ from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
 from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
+from scripts.swarm_v2.kubernetes.unschedulable import Unschedulable
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.operator_auth import OPERATOR
@@ -156,7 +159,8 @@ class Workers:
         return {"memory_mib": profile["limits"]["memory_mib"], "cpu_millis": cpu}
 
     def launch(self, request: SpawnRequest) -> dict:
-        task, shape = request.task, self.requested
+        task: dict[str, Any] = request.task
+        shape = self.requested
         return {
             "task_id": task["id"],
             "swarm_id": request.config.slug,
@@ -164,7 +168,7 @@ class Workers:
             "grant_ref": f"grant-{task['execution_id']}",
             "controller_epoch": task["controller_epoch"],
             "project_id": self.terms.project_ids[0],
-            "harness": HARNESS,
+            "harness": task.get("harness", HARNESS),
             "image_digest": image_tag.resolve(self.policy["image_repository"], self.image_tag),
             "profile": self.profile,
             "memory_mib": shape["memory_mib"],
@@ -224,8 +228,10 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
     )
     api = pod_api(environ, workers.policy["namespace"])
-    keys = SecretKeys(api)
-    route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity), HARNESS)
+    quota, held = QuotaObservations(controller.store, slug, verify), partial(_held, capacity)
+    route = HarnessRoutes(
+        {harness: AccountRoute(SecretKeys(api, harness), quota, held, harness) for harness in ("claude", "codex")}
+    )
     launcher.accounts = route.choose
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
@@ -245,7 +251,8 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     runtime.router.placement = replace(runtime.router.placement, master_seats=seats)
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
     runtime.herdr_runtime.host = WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
-    launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
+    launcher.planned = runtime.herdr_runtime.planned_account
+    launcher.planned_harness = partial(_planned_harness, runtime.herdr_runtime)
     launcher.router = runtime.router
     runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)
     return runtime
@@ -284,7 +291,20 @@ def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> Term
 
 
 def _held(capacity: AccountCapacity) -> dict[str, int]:
-    return fleet_held(capacity.store, capacity.clock())
+    """Per account, the larger of its Kubernetes account reservations and the sessions live hives report, since a
+    worker pod's hive reports the same session its reservation holds."""
+    now = capacity.clock()
+    held: dict[str, int] = {}
+    for account, count in fleet_held(capacity.store, now).items():
+        held[account_key(account)] = held.get(account_key(account), 0) + count
+    for account, count in aggregate.sessions(getattr(capacity.store, "redis"), now / 1000).items():
+        held[account] = max(held.get(account, 0), count)
+    return held
+
+
+def _planned_harness(herdr: HerdrRuntime, task_id: str) -> str | None:
+    """The harness the tick's quota plan placed the task on, read as the hive launcher reads it."""
+    return getattr(herdr, "_quota_tasks", {}).get(task_id)
 
 
 class GrantRelease:
@@ -315,6 +335,7 @@ class RecoveryPass:
         self.replacements: Replacements | None = None
         self.choose: Callable[[], list[str]] | None = None
         self.completion: Completion | None = None
+        self.ending: Unschedulable | None = None
 
     def __call__(self) -> dict[str, str]:
         pods, version = self.api.snapshot(self.selector)
@@ -329,6 +350,8 @@ class RecoveryPass:
         if self.choose is not None:
             for line in self.choose():
                 print(line, flush=True)
+        if self.ending is not None:
+            self.ending(pods)
         if self.replacements is not None:
             self.replacements()
         if self.completion is not None:
@@ -384,7 +407,8 @@ def recovery_pass(
     cleanup = Cleanup(controller.store, slug, api, controller.require, attach, releases["grant"])
     recovering.completion = Completion(controller.store, slug, cleanup)
     if ledger is not None:
-        recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger)
+        recovering.replacements = Replacements(recovery, cast(Any, service.runtime).relaunch, ledger, placed=True)
+        recovering.ending = Unschedulable(controller.store, slug, controller, ledger)
     if environ is not None:
         recovering.choose = partial(proof_swarm.choose_fresh, environ, recovery)
     return recovering

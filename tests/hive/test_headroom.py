@@ -2,11 +2,15 @@ import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from scripts.hive import cli, daemon, headroom, registry
 from scripts.hive.orders import Orders
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 pytestmark = pytest.mark.unit
 
@@ -71,9 +75,12 @@ def test_measure_reads_the_five_minute_load_and_available_memory(proc, monkeypat
     monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
     assert headroom.measure(3, 77_000, proc) == {
         "cpus": 8,
+        "load1": 9.1,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "swap_used_mb": 1000,
+        "swap_total_mb": 2000,
         "disk_free_gb": 9,
         "disk_floor_gb": 50,
         "pending": 3,
@@ -155,9 +162,12 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
     headroom.publish(redis, "box", 5_000, proc)
     assert json.loads(redis.get(f"{registry.key('box')}:headroom")) == {
         "cpus": 4,
+        "load1": 9.1,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "swap_used_mb": 1000,
+        "swap_total_mb": 2000,
         "disk_free_gb": 9,
         "disk_floor_gb": 50,
         "pending": 2,
@@ -255,9 +265,27 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     redis.set(headroom.key("old"), json.dumps({**record, "measured_at": 9_999}))
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tstale\tui=no\tmax-agents=20\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
-        "old\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
+        "box\tstale\tui=no\tworkers=0 of 0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\trelease=unknown\n"
+        "old\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=master\theadroom=missing\trelease=unknown\n"
     )
+
+
+def test_hive_list_shows_workers_against_the_limit_without_masters(
+    redis: "Redis", monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import join_report
+
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 40_000)
+    monkeypatch.setattr(cli, "_local_agents", lambda *_: {"box": ["master 1 · fixture", "engineer@aaaaaa-0002"]})
+    reports = [
+        {"slug": "fixture", "agent": name} for name in ("master@aaaaaa-0001", "master-aaaaaa-0003", "ci@aaaaaa-0004")
+    ]
+    monkeypatch.setattr(join_report, "live", lambda *_: reports)
+    monkeypatch.setattr(join_report, "summary", lambda report: report["agent"])
+    registry.update(redis, "box", ["ui=no", "max-agents=4"])
+    assert cli.main(["list"]) == 0
+    assert "\tworkers=2 of 4 (cap 4)\t" in capsys.readouterr().out.splitlines()[0]
 
 
 POD_LIMITS = {
@@ -289,7 +317,7 @@ def test_hive_list_shows_a_pod_hive_within_its_pod_memory_limit(redis, proc, cgr
     registry.update(redis, "anton-2", ["ui=no"])
     headroom.publish(redis, "anton-2", 5_000, proc)
     assert cli.main(["list"]) == 0
-    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\n" in capsys.readouterr().out
+    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\t" in capsys.readouterr().out
 
 
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):
@@ -297,9 +325,12 @@ def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc
     limit(cgroup, POD_LIMITS)
     assert headroom.measure(0, 5, proc) == {
         "cpus": 8,
+        "load1": 9.1,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "swap_used_mb": 1000,
+        "swap_total_mb": 2000,
         "pod_total_mb": 6300,
         "pod_available_mb": 5400,
         "pod_cpus": 2.5,
@@ -394,3 +425,70 @@ def test_publish_reads_pod_load_against_the_previous_live_reading(redis, proc, c
 
 def test_the_cgroup_folder_defaults_to_the_cgroup_v2_mount():
     assert DEFAULT_CGROUP == Path("/sys/fs/cgroup")
+
+
+STAT = "cpu  600 0 200 1000 100 10 40 50 50 0\ncpu0 600 0 200 1000 100 10 40 50 50 0\n"
+
+
+def _measured(proc: Path, previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Measure headroom against the test proc folder, failing when the reading is missing."""
+    measured = headroom.measure(0, 20_000, proc, previous)
+    assert measured is not None
+    return measured
+
+
+def _published(redis: "Redis", hive: str) -> dict[str, Any]:
+    """The headroom reading published for a hive."""
+    raw = redis.get(headroom.key(hive))
+    assert isinstance(raw, (str, bytes))
+    return json.loads(raw)
+
+
+def test_measure_reads_the_node_cpu_ticks_without_used_cpus_on_a_first_reading(
+    proc: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
+    (proc / "stat").write_text(STAT)
+    measured = _measured(proc)
+    assert measured["cpu_ticks"] == [900, 2000]
+    assert "used_cpus" not in measured
+
+
+@pytest.mark.parametrize(
+    ("previous", "used"),
+    [
+        ({"cpu_ticks": [500, 1000], "measured_at": 5_000}, {"used_cpus": 3.2}),
+        ({"cpu_ticks": [900, 1000], "measured_at": 5_000}, {"used_cpus": 0.0}),
+        ({"cpu_ticks": [0, 1999], "measured_at": 5_000}, {"used_cpus": 7200.0}),
+        ({"measured_at": 5_000}, {}),
+        ({"cpu_ticks": [901, 1000], "measured_at": 5_000}, {}),
+        ({"cpu_ticks": [500, 2000], "measured_at": 5_000}, {}),
+    ],
+)
+def test_measure_reads_used_cpus_from_node_ticks_since_the_previous_reading(
+    proc: Path, monkeypatch: pytest.MonkeyPatch, previous: dict[str, Any], used: dict[str, float]
+) -> None:
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
+    (proc / "stat").write_text(STAT)
+    measured = _measured(proc, previous)
+    assert {field: value for field, value in measured.items() if field == "used_cpus"} == used
+
+
+@pytest.mark.parametrize("stat", ["", "cpu  x 0 0 0\n"])
+def test_measure_keeps_the_load_reading_without_a_readable_cpu_stat(proc: Path, stat: str) -> None:
+    (proc / "stat").write_text(stat)
+    measured = _measured(proc, {"cpu_ticks": [0, 1], "measured_at": 5_000})
+    assert measured["load5"] == 3.456
+    assert "cpu_ticks" not in measured and "used_cpus" not in measured
+
+
+def test_publish_reads_used_cpus_against_the_previous_live_reading(
+    redis: "Redis", proc: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 16)
+    (proc / "stat").write_text(STAT)
+    headroom.publish(redis, "box", 5_000, proc)
+    assert "used_cpus" not in _published(redis, "box")
+    (proc / "stat").write_text("cpu  1100 0 200 1500 100 10 90 0 0 0\n")
+    headroom.publish(redis, "box", 20_000, proc)
+    assert _published(redis, "box")["used_cpus"] == 8.0

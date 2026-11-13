@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/ledger.py:scripts.tick.adapters.ledger.x\u01c1ClientLedger\u01c1task:b3975cb8a37c56fbffef9d2ee19c52c53ee18138f197d2d5e33a778684508b4c": {
+    "reader": "standards-reader",
+    "reason": "urllib.parse.quote always leaves ASCII letters unescaped, including X, regardless of safe. Adding repeated X characters to an empty safe set therefore changes no quoted task identifier or requested resource path."
+  }
+}

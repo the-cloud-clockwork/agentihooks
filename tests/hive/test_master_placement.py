@@ -9,6 +9,7 @@ REPO = "agentihooks"
 def hive(name, **fields):
     record = {
         **registry._default(name, "yes"),
+        "max_agents": 15,
         "repos": [REPO],
         "heartbeat_at": NOW,
         "agents": 0,
@@ -201,4 +202,45 @@ def test_a_master_login_outranks_a_preferred_hive_slot_and_follows_master_prefer
     ]
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
         "b", "second", "master-login", False
+    )
+
+
+@pytest.mark.feature("hive-master-closed-account")
+@pytest.mark.parametrize(
+    ("fields", "front", "kind"),
+    [
+        ({"master_login": {"claude": "closed_key"}}, True, "master-login"),
+        ({"interactive": {"claude": "closed_key"}, "slots": []}, False, "interactive"),
+        ({"slots": [{"harness": "claude", "account": "closed_key", "kind": "subscription"}]}, False, "subscription"),
+    ],
+)
+def test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat(
+    fields: dict[str, object], front: bool, kind: str
+) -> None:
+    hives = [hive("closed", prefer={"master": 0}, **fields), hive("open", prefer={"master": 1})]
+    assert placement.place_master("claude", "", REPO, hives, NOW, front, frozenset({"closed-key"})) == (
+        placement.MasterPlacement("open", "token", "subscription", False)
+    )
+    assert placement.place_master("claude", "", REPO, hives, NOW, front) == (
+        placement.MasterPlacement("closed", "closed_key", kind, False)
+    )
+
+
+@pytest.mark.feature("hive-master-closed-account")
+def test_a_master_waits_when_its_only_login_account_is_closed() -> None:
+    hives = [hive("native", interactive={"claude": "login"}, slots=[])]
+    assert placement.place_master("claude", "login", REPO, hives, NOW, closed=frozenset({"login"})) == (
+        placement.Wait("no hive for master holds the claude login for login")
+    )
+
+
+@pytest.mark.feature("hive-master-closed-account")
+def test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen() -> None:
+    slots = [
+        {"harness": "claude", "account": "closed_key", "kind": "subscription"},
+        {"harness": "claude", "account": "open_key", "kind": "subscription"},
+    ]
+    hives = [hive("only", slots=slots)]
+    assert placement.place_master("claude", "", REPO, hives, NOW, closed=frozenset({"closed-key"})) == (
+        placement.MasterPlacement("only", "open_key", "subscription", False)
     )
