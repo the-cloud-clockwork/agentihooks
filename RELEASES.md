@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.865 · 2026-11-13
+
+### 2026-11-13 · e6f1fb92c592 · #11093 · @agenticore-app
+
+**Close the dropped spoke bus before restarting NATS in the mid launch drop test**
+
+This change fixes a flaky mid launch NATS drop test by explicitly closing the dropped spoke's bus before the server is restarted. Previously, the old client's pending buffer could flush on reconnect, overwriting the stranded claim's status with a stale "started" instead of "launching," causing intermittent mutation stats failures. Closing the bus first prevents this race; nats-py's close call raises a harmless TypeError while writing the pending buffer to the dead transport, which NatsBus.close already suppresses via its finally block.
+
 ## v2.17.864 · 2026-11-13
 
 ### 2026-11-13 · 4f66ffcbe4cd · #11091 · @agenticore-app
