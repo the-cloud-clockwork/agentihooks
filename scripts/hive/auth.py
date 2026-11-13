@@ -68,6 +68,8 @@ NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
+NO_HOLDER = ""
+CONTROLLER_HOLDER = "controller-"
 
 
 class HiveError(Exception):
@@ -340,7 +342,9 @@ def agent_member(redis: object, token: str, slug: str, name: str) -> str | None:
     return member_id if scope == [slug, name] else None
 
 
-def issue_controller(redis) -> str:
+def issue_controller(redis: object, holder: str = NO_HOLDER) -> str:
+    if holder:
+        return issue_service(redis, f"{CONTROLLER_HOLDER}{holder}")
     credential = secrets.token_urlsafe()
     hive_state.amend(_store(redis), "controller", lambda _: _digest(credential))
     return credential

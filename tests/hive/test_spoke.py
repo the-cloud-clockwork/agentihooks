@@ -199,6 +199,7 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     assert real_take(0) is None
 
 
+@pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("failure", ["request", "outcome"])
 def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure):
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -212,7 +213,7 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
         ]
     assert rig.spoke.poll() == "retry"
     assert rig.queue.take(0) is None
-    rig.tasks.reopen.assert_not_called()
+    rig.tasks.reopen.assert_called_once_with(rig.event)
     rig.clock.now = 9
     assert rig.spoke.poll() == "empty"
     rig.clock.now = 10
@@ -220,6 +221,7 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
     assert rig.runtime.spawn.call_count == (1 if failure == "request" else 2)
 
 
+@pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
 def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -230,7 +232,11 @@ def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, stat
     assert rig.spoke.poll() == "retry"
 
     rig.tasks.failed.assert_called_once_with(rig.event, "codex", "launch failed")
-    rig.tasks.reopen.assert_not_called()
+    rig.tasks.reopen.assert_called_once_with(rig.event)
+    assert rig.tasks.method_calls[-2:] == [
+        ("failed", (rig.event, "codex", "launch failed"), {}),
+        ("reopen", (rig.event,), {}),
+    ]
     rig.clock.now = 10
     assert rig.spoke.poll() == "started"
     rig.tasks.failed.assert_called_once()
@@ -324,8 +330,8 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
-    assert observed == ["dead", "reopen", "term"]
-    rig.tasks.reopen.assert_called_once_with(rig.event)
+    assert observed == ["reopen", "reopen", "dead", "reopen", "term"]
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
     letters = rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0)
     assert len(letters) == 1
     letter = letters[0].event
@@ -339,7 +345,7 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     rig.queue.offer(replace(rig.event, id="duplicate-after-dead"))
     assert rig.spoke.poll() == "dead"
     assert rig.runtime.spawn.call_count == 3
-    rig.tasks.reopen.assert_called_once()
+    assert rig.tasks.reopen.call_count == 3
     assert rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0) == []
 
 
@@ -459,7 +465,7 @@ def test_a_restarted_spoke_relaunches_its_own_ambiguous_spawn_under_a_new_claim_
     assert second["revision"] > first["revision"]
     assert claim(rig)["state"] == "started"
     assert all(call.args[0].task["account_slot_hive"] == "hive-a" for call in rig.runtime.spawn.call_args_list)
-    rig.tasks.reopen.assert_not_called()
+    rig.tasks.reopen.assert_called_once_with(rig.event)
 
 
 def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lane(rig):
@@ -686,6 +692,7 @@ def test_ready_recovery_retries_below_the_cap_and_reopens_at_the_cap(rig, attemp
     assert pending.get(rig.spoke._pending_key).value == b"{}"
 
 
+@pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("attempt", [1, 3])
 def test_own_launching_recovery_releases_the_claim_and_takes_new_work(rig, attempt):
     pending = seed_pending(rig, {"state": "launching", "owner": "hive-a", "name": "agent-a"}, attempt)
@@ -693,7 +700,7 @@ def test_own_launching_recovery_releases_the_claim_and_takes_new_work(rig, attem
     if attempt == 1:
         assert rig.spoke.poll() == "held"
         assert claim(rig) == {"state": "ready"}
-        rig.tasks.reopen.assert_not_called()
+        rig.tasks.reopen.assert_called_once_with(rig.event)
     else:
         assert rig.spoke.poll() == "dead"
         assert claim(rig) == {"state": "dead"}
@@ -789,9 +796,10 @@ def test_completed_dead_work_does_not_repeat_recovery_on_a_held_spoke(rig):
     assert rig.spoke.poll() == "empty"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
     rig.spoke.measure = lambda: None
     assert rig.spoke.poll() == "held"
-    rig.tasks.reopen.assert_called_once_with(rig.event)
+    assert rig.tasks.reopen.call_count == 3
 
 
 def test_ambiguous_launch_intent_keeps_owner_and_name_after_the_exception(rig):

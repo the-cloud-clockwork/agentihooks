@@ -5,7 +5,7 @@ import signal
 import sys
 import threading
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -18,7 +18,7 @@ from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
 from scripts.gates import intent
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
+from scripts.swarm import holder_pod, lease, local_slots, redis_grace, replica, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable, connect, store_errors
@@ -611,6 +611,8 @@ def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
 STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 RUNNING = threading.Event()
 DRAINING = threading.Event()
+STOPPING = threading.Event()
+LOST_EXIT = 75
 
 
 def _halt() -> NoReturn:
@@ -646,8 +648,16 @@ def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: Modu
     proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
 
 
-def _finishing(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
-    """Run one pass that a stop signal lets finish, then exit once the pass ends."""
+def _finishing(
+    store: RedisStore,
+    service: "ControlService | None",
+    proof_swarm: ModuleType,
+    lock: replica.ReplicaLock | None = None,
+) -> None:
+    """Run one pass that a stop signal lets finish, then exit once the pass ends; a replica first renews its lock
+    and ends the process when another replica holds it."""
+    if lock is not None and not lock.take():
+        _lost()
     RUNNING.set()
     try:
         _pass(store, service, proof_swarm)
@@ -682,12 +692,51 @@ def _journal_pass(number: int, outcome: str) -> None:
     sys.stdout.flush()
 
 
+def _lead(
+    store: RedisStore,
+    environ: Mapping[str, str],
+    lock: replica.ReplicaLock,
+    wait: Callable[[float], None] = scheduled_wait,
+) -> None:
+    """Stand by behind the replica leading this hive's passes, then take the lead and keep it renewed."""
+    from scripts.swarm_v2 import control_service
+
+    servers = control_service.stand_by(environ, store)
+    try:
+        if not lock.take():
+            print(f"controller: replica {lock.owner} stands by while {lock.holder()} leads", flush=True)
+            lock.lead(wait)
+    finally:
+        control_service.close(servers)
+    print(f"controller: replica {lock.owner} leads the passes", flush=True)
+    lock.beat(_lost, STOPPING)
+
+
+def _lost(end: Callable[[int], None] = os._exit) -> None:
+    """End the process at once when another replica took the lead, so two replicas never run passes together."""
+    os.write(2, b"controller: another replica took the lead; exiting\n")
+    end(LOST_EXIT)
+
+
+def _keep_credential(environ: Mapping[str, str], store: RedisStore) -> threading.Thread | None:
+    """Keep a replica's own controller credential alive for as long as the controller runs."""
+    from scripts.hive import auth
+    from scripts.swarm_v2.control_service import CREDENTIAL_ENV
+
+    credential = environ.get(CREDENTIAL_ENV)
+    if not credential or "." not in credential:
+        return None
+    keeping = partial(auth.keep_service, store.redis, credential)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
+    return replica.keep(keeping, STOPPING, replica.KEEP_S)  # pyright: ignore[reportUnknownArgumentType]
+
+
 def _passes(
     store: RedisStore,
     service: "ControlService | None",
     proof_swarm: ModuleType,
     once: bool,
     outage: redis_grace.Outage,
+    lock: replica.ReplicaLock | None = None,
 ) -> int:
     """Run passes one tick apart, riding out Redis errors until they outlast the grace window."""
     if not once:
@@ -697,7 +746,7 @@ def _passes(
         started = monotonic()
         number += 1
         try:
-            _finishing(store, service, proof_swarm)
+            _finishing(store, service, proof_swarm, lock)
         except LedgerUnreachable as exc:
             print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
             _journal_pass(number, "ledger_unreachable")
@@ -761,20 +810,28 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     outage = redis_grace.Outage.from_environ()
     store = _reached(outage)
-    service = None
+    service, lock = None, None
     bus = open_controller_bus(os.environ)
     DRAINING.clear()
+    STOPPING.clear()
     previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
+        _keep_credential(os.environ, store)
+        lock = replica.configured(os.environ, store, commands.hive_id)
+        if lock is not None:
+            _lead(store, os.environ, lock)
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
-        return _passes(store, service, proof_swarm, args.once, outage)
+        return _passes(store, service, proof_swarm, args.once, outage, lock)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
     finally:
+        STOPPING.set()
         if service is not None:
             service.stop()
+        if lock is not None:
+            lock.release()
         if bus is not None:
             bus.close()
         for number, handler in previous.items():

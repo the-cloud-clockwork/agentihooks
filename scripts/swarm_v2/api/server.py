@@ -3,6 +3,7 @@ import re
 import socket
 import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Protocol
 
 from scripts.swarm_v2.api.artifacts import MAX_REQUEST, ArtifactsAPI
 from scripts.swarm_v2.api.artifacts import PATH as ARTIFACT_PATH
@@ -26,6 +27,10 @@ TASK_PATHS = re.compile(r"/v2/(?:tasks|swarm)(?:/.*)?")
 BROADCAST_PATHS = re.compile(r"/v2/broadcasts(?:/.*)?")
 COMMAND_PATHS = re.compile(r"/v2/executions/[^/]+/commands(?:/.*)?")
 HEALTH_PATHS = re.compile(r"/v2/health/.*")
+
+
+class Router(Protocol):
+    def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict[str, Any]]: ...
 
 
 class Routes:
@@ -58,7 +63,7 @@ class Routes:
 
 
 class ExecutionsHandler(BaseHTTPRequestHandler):
-    api: "ExecutionsAPI | Routes | RecoveryAPI"
+    api: Router
 
     def do_GET(self) -> None:
         self.reply(*self.api.route("GET", self.path, str(self.headers.get(AUTHORIZATION)), None))
@@ -110,11 +115,11 @@ class TLSServer(ThreadingHTTPServer):
             secure.close()
 
 
-def serve(api: ExecutionsAPI | Routes, host: str, port: int) -> ThreadingHTTPServer:
+def serve(api: Router, host: str, port: int) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
 
 
-def serve_tls(api: RecoveryAPI, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
+def serve_tls(api: Router, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
     """Serve the given routes over TLS with the given server context."""
     server = TLSServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
     server.tls = context

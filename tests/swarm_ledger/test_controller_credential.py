@@ -75,6 +75,46 @@ def test_the_hive_controller_command_writes_a_private_credential_the_server_acce
     assert authority.controller(credential)
 
 
+@pytest.mark.feature("controller-standby-replica")
+def test_two_replica_controller_credentials_stay_valid_side_by_side(hive):
+    first = auth.issue_controller(hive, "pod-a")
+    second = auth.issue_controller(hive, "pod-b")
+    assert first.startswith("controller-pod-a.")
+    assert second.startswith("controller-pod-b.")
+    assert auth.controller(hive, first)
+    assert auth.controller(hive, second)
+    assert authority.controller(first)
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_the_hive_controller_command_issues_a_replica_credential_for_a_holder(hive, capsys, tmp_path):
+    with (
+        patch.object(cli, "redis_client", return_value=hive),
+        patch.dict(os.environ, {"AGENTIHOOKS_HOME": str(tmp_path)}),
+    ):
+        leader = auth.issue_controller(hive, "pod-a")
+        assert cli.main(["controller", "--holder", "pod-b"]) == 0
+    path = tmp_path / auth.CONTROLLER_ENV_FILE
+    _, _, credential = path.read_text().strip().partition("=")
+    assert credential.startswith("controller-pod-b.")
+    assert capsys.readouterr().out == f"issued a controller credential; it is in {path}\n"
+    assert auth.controller(hive, credential)
+    assert auth.controller(hive, leader)
+
+
+@pytest.mark.feature("controller-standby-replica")
+def test_the_hive_controller_command_names_no_holder_unless_given_one():
+    import argparse
+
+    parser = cli._parser()
+    assert parser.parse_args(["controller"]).holder == ""
+    assert parser.parse_args(["controller", "--holder", "pod-a"]).holder == "pod-a"
+    commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    holder = next(action for action in commands.choices["controller"]._actions if action.dest == "holder")
+    assert holder.option_strings == ["--holder"]
+    assert holder.help == "controller replica that keeps its own credential beside the others"
+
+
 def test_a_remote_controller_presents_its_credential_for_service_writes_and_reads(controller_env):
     headers = {"X-Controller-Credential": controller_env}
     assert ledger.credentials(SLUG, service=True) == headers
