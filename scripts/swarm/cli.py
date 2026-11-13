@@ -240,9 +240,11 @@ SCALING_KEYS = {
     "swap-full-share": "swap_full_share",
     "swap-floor": "swap_floor_mb",
 }
-ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url"}
+LAB_URL = "lab-url"
+ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url", LAB_URL: "lab_url"}
 TOP_LEVEL = ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch", "spoke")
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
+NO_LAB_ADDRESS = "lab-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
 ON_OFF = {"on": True, "off": False}
@@ -1314,14 +1316,14 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, {what}") from None
 
 
-def api_address(value):
+def api_address(value: str, refusal: str = NO_API_ADDRESS) -> str:
     try:
         parts = urlsplit(value)
         host = parts.hostname
     except ValueError:
-        raise SwarmError(NO_API_ADDRESS) from None
+        raise SwarmError(refusal) from None
     if value and (parts.scheme not in ("http", "https") or not host or "@" in parts.netloc):
-        raise SwarmError(NO_API_ADDRESS)
+        raise SwarmError(refusal)
     return value
 
 
@@ -1338,6 +1340,8 @@ def config_value(key, value):
         if not value.isdigit():
             raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         return int(value)
+    if key == LAB_URL:
+        return api_address(value, NO_LAB_ADDRESS)
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
 
 
