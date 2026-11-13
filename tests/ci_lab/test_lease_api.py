@@ -28,6 +28,7 @@ class Clock:
         return self.now
 
     def sleep(self, ms: int) -> None:
+        assert ms > 0
         self.sleeps.append(ms)
         self.now += ms
 
@@ -182,6 +183,72 @@ def test_upload_url_needs_the_token(lab: leases.Leases, signer: Signer, jobs: qu
 )
 def test_bad_requests(lab: leases.Leases, signer: Signer, method: str, path: str, body: bytes, expected: tuple) -> None:
     assert lease_api.respond(lab, signer, method, path, body) == expected
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"worker": "w", "free_slots": True, "capabilities": [], "wait_ms": 0},
+        {"worker": "w", "free_slots": 1, "capabilities": ["net", 3], "wait_ms": 0},
+        {"worker": "w", "free_slots": 1, "capabilities": "net", "wait_ms": 0},
+        {"worker": 4, "free_slots": 1, "capabilities": [], "wait_ms": 0},
+    ],
+)
+def test_lease_refuses_malformed_fields(lab: leases.Leases, signer: Signer, body: dict[str, Any]) -> None:
+    assert post(lab, signer, "/lease", body) == (400, {"error": "bad request"})
+
+
+def test_upload_url_serves_the_report(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
+    grant = granted(lab, signer, jobs)
+    target = f"/upload-url?job={grant['job']}&token={grant['token']}&name=report"
+
+    assert lease_api.respond(lab, signer, "GET", target, b"") == (
+        200,
+        {"url": f"https://objects.test/{grant['job']}/report?signed"},
+    )
+
+
+@pytest.mark.parametrize("length", ["abc", "-1", str(lease_api.MAX_BODY_BYTES + 1)])
+def test_server_refuses_a_bad_content_length(lab: leases.Leases, signer: Signer, length: str) -> None:
+    import http.client
+
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        connection.putrequest("POST", "/lease")
+        connection.putheader("Content-Length", length)
+        connection.endheaders()
+        response = connection.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read()) == {"error": "bad request"}
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
+
+
+def test_server_reads_a_body_at_the_cap(lab: leases.Leases, signer: Signer) -> None:
+    import http.client
+
+    body = json.dumps({"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
+    body += b" " * (lease_api.MAX_BODY_BYTES - len(body))
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        connection.request("POST", "/lease", body=body)
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"leases": []}
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
 
 
 def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:

@@ -15,6 +15,7 @@ class Clock:
         return self.now
 
     def sleep(self, ms: int) -> None:
+        assert ms > 0
         self.sleeps.append(ms)
         self.now += ms
 
@@ -59,7 +60,7 @@ def unit(key: str) -> Unit:
 
 def test_lease_grants_fitting_jobs_in_order_with_distinct_tokens(jobs: queue.Queue, lab: leases.Leases) -> None:
     needs = {
-        "big": queue.Requirement(slots=3),
+        "big": queue.Requirement(slots=4),
         "web": queue.Requirement(slots=1, capabilities=frozenset({"browser"})),
         "net": queue.Requirement(slots=2, capabilities=frozenset({"net"})),
     }
@@ -201,3 +202,28 @@ def test_concurrent_leases_never_share_a_job(server, jobs: queue.Queue) -> None:
     assert len(set(every)) == 60
     for index, jobs_of in enumerate(granted):
         assert all(found(jobs, job).worker == f"w{index}" for job in jobs_of)
+
+
+def test_lease_skips_a_job_whose_record_vanished(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    jobs.client.delete("agentihooks-ci:queue:job:h1:test:a")
+
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["h1:test:b"]
+
+
+def test_reap_skips_vanished_and_live_leases(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    lab.lease("w1", 2, frozenset(), 0)
+    jobs.client.delete("agentihooks-ci:queue:job:h1:test:a")
+
+    assert lab.reap(1500) == [("h1:test:b", "pending")]
+    assert [grant.job for grant in lab.lease("w2", 1, frozenset(), 0)] == ["h1:test:b"]
+    monkeypatch.setattr(jobs, "expired", lambda now_ms: ["h1:test:b"])
+    assert lab.reap(1499) == []
+    assert found(jobs, "h1:test:b").state == "leased"
+
+
+def test_complete_of_an_unknown_job_is_refused(lab: leases.Leases) -> None:
+    assert lab.complete("h1:test:none", "tok", "passed") is False

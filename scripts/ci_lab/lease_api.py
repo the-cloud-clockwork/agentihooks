@@ -11,6 +11,7 @@ from scripts.ci_lab.leases import Grant, Leases
 __all__ = ["MAX_WAIT_MS", "UploadSigner", "respond", "serve"]
 
 MAX_WAIT_MS = 30_000
+MAX_BODY_BYTES = 65_536
 UPLOADS = frozenset({"report", "log"})
 
 Reply = tuple[int, dict[str, Any]]
@@ -149,8 +150,11 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> Threadi
             self.answer()
 
         def answer(self) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            status, payload = respond(leases, signer, self.command, self.path, self.rfile.read(length))
+            length = self.headers.get("Content-Length") or "0"
+            if length.isdigit() and int(length) <= MAX_BODY_BYTES:
+                status, payload = respond(leases, signer, self.command, self.path, self.rfile.read(int(length)))
+            else:
+                status, payload = 400, {"error": "bad request"}
             data = json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
