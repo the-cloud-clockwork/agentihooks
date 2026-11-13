@@ -1,15 +1,11 @@
-"""The runtime port fences the pass runtime to the held lease, and the ack pass takes its lease and fence through the
-port tools."""
+"""The runtime port fences the pass runtime to the held lease."""
 
-import os
 from typing import Any, cast
 
 import pytest
 
-from scripts.swarm import ack_pass, cli, commands, controller, lease, ledger_client
-from scripts.swarm import tick as engine
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.tick.adapters.fakes import FakeCoordination, FakeRuntime, fake_tools
+from scripts.swarm import cli, controller, lease
+from scripts.tick.adapters.fakes import FakeRuntime, fake_tools
 from scripts.tick.adapters.runtime import RouterRuntime
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import UndeclaredEffect
@@ -101,64 +97,6 @@ def test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm(monkeyp
     assert fencing(cast(Any, "store"), "sw")("held", "hybrid", "raw") == "fenced"
 
     assert made == [("store", "sw", "held", "raw", "hybrid")]
-
-
-@pytest.fixture
-def store(monkeypatch: pytest.MonkeyPatch) -> RedisStore:
-    """Return a swarm store holding swarm ``sw`` with one launch waiting for its acknowledgement."""
-    import fakeredis
-
-    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
-    monkeypatch.delenv("LEDGER_URL", raising=False)
-    monkeypatch.delenv("SWARM_URL", raising=False)
-    made = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    made.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
-    made.record_launch("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", started_at=1_000), "acknowledging")
-    return made
-
-
-@pytest.mark.feature("tick-runtime-port-fence")
-def test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    held = lease.acquire(store, "sw", commands.hive_id())
-    assert held is not None
-    tools = fake_tools()
-    cast(FakeCoordination, tools.coordination).answers["lease"] = held
-    port = cast(FakeRuntime, tools.runtime)
-    port.answers["fence"] = "fenced"
-    built: list[tuple[Any, ...]] = []
-    collected: list[Any] = []
-    monkeypatch.setattr(cli, "_pass_tools", lambda *args: built.append(args) or tools)
-    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: pytest.fail("fenced outside the runtime port"))
-    monkeypatch.setattr(ledger_client, "pass_state", lambda ledger, slug: {"tasks": []})
-    monkeypatch.setattr(engine, "_collect_acks", lambda *args: collected.append(args[4]) or ["collected"])
-
-    monkeypatch.setattr(lease, "ttl_ms", lambda: 30_000_000)
-
-    assert ack_pass.run(store, "sw", ledger="ledger", runtime="runtime") == ["collected"]
-
-    assert built == [(store, "sw", commands.hive_id(), "ledger", "runtime")]
-    leased = cast(FakeCoordination, tools.coordination).calls
-    assert [c.operation for c in leased] == ["lease"]
-    assert 29_990 < leased[0].deadline.remaining <= 30_000
-    assert port.calls[0].deadline is leased[0].deadline
-    deployment = controller.deployment_for(store.config("sw"), os.environ)
-    assert [(c.operation, c.args) for c in port.calls] == [("fence", (held, deployment))]
-    assert collected == ["fenced"]
-
-
-@pytest.mark.feature("tick-runtime-port-fence")
-def test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    tools = fake_tools()
-    monkeypatch.setattr(cli, "_pass_tools", lambda *args: tools)
-    monkeypatch.setattr(engine, "_collect_acks", lambda *args: pytest.fail("collected without a lease"))
-
-    assert ack_pass.run(store, "sw", ledger="ledger", runtime="runtime") == []
-
-    assert cast(FakeRuntime, tools.runtime).calls == []
 
 
 @pytest.mark.feature("tick-runtime-port-fence")

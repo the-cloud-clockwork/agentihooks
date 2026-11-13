@@ -284,21 +284,6 @@ def test_events_tick_does_not_run_placement_even_with_an_open_workstation_task(
     assert ledger.rows["t1"]["state"] == "open"
 
 
-def test_under_events_the_tick_collects_no_acknowledgement_for_a_workstation_launch(store: RedisStore) -> None:  # noqa: F811
-    from scripts.swarm.tick import _collect_acks
-    from tests.swarm.test_tick import HiveAcks
-
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
-    ledger.rows["t2"]["workstation"] = True
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    store.update("sw", engine="events")
-    doc = {"tasks": list(ledger.rows.values())}
-
-    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
-
-    assert runtime.collected == []
-
-
 def test_only_engines_other_than_events_have_the_tick_launch() -> None:
     assert readiness.tick_launches("legacy")
     assert not readiness.tick_launches(EVENTS_ENGINE)

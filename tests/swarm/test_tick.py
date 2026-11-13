@@ -748,16 +748,6 @@ def test_a_refused_hive_acknowledgement_reopens_its_task(store, monkeypatch):
     assert ledger.rows["t1"]["claimed_by"] not in names and ledger.rows["t2"]["claimed_by"] not in names
 
 
-def test_a_refused_acknowledgement_of_a_task_gone_from_the_ledger_names_the_task(store):
-    from scripts.swarm.tick import _collect_acks
-
-    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    runtime.failing.update(runtime.ordered)
-    actions = _collect_acks("sw", store.config("sw"), store, ledger, runtime, {"tasks": []}, 2_000)
-    assert [action.split(":")[0] for action in actions] == ["spawn failed for t1"]
-
-
 def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
     store.update("sw", max_eng=2)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
@@ -822,28 +812,6 @@ def test_a_swarm_error_during_collect_fails_the_launch_instead_of_waiting_foreve
     tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS + STARTUP_GRACE_MS)
     assert [row["state"] for row in store.launches("sw") if row["agent"] == second] == ["started"]
     assert ledger.rows["t1"]["claimed_by"] == second
-
-
-@pytest.mark.parametrize("broken", [False, True])
-def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store, broken):
-    from scripts.swarm.tick import ACK_EXPIRED, LEASE_MS
-
-    ledger, runtime = tasks(("t1", "eng")), HiveAcks()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    first = runtime.ordered[0]
-    if broken:
-        runtime.broken.add(first)
-    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS - 1)
-    assert [row["state"] for row in store.launches("sw")] == ["acknowledging"]
-    assert runtime.expired == []
-    collected = len(runtime.collected)
-    tick("sw", store, ledger, runtime, now_ms=1_000 + LEASE_MS)
-    launches = {row["agent"]: row for row in store.launches("sw")}
-    assert (launches[first]["state"], launches[first]["error"]) == ("failed", ACK_EXPIRED)
-    assert runtime.collected[collected:] == [first]
-    assert runtime.expired == [first]
-    assert first not in {agent.name for agent in store.agents("sw")}
-    assert ledger.rows["t1"]["claimed_by"] != first
 
 
 @pytest.mark.parametrize(

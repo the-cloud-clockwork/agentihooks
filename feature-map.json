@@ -1036,7 +1036,7 @@
         "tests/tick/test_step_isolation.py::test_budgets_come_from_the_p95_with_headroom_in_whole_seconds",
         "tests/tick/test_step_isolation.py::test_an_undeclared_step_is_refused",
         "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
-        "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
+        "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_drained_resume_recover_outages_and_prerequisite_reopen",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
         "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path",
         "tests/tick/test_intervals.py::test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass",
@@ -1287,8 +1287,6 @@
         "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_failing_an_enforced_check_hands_over_to_the_hive_failure",
         "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_late_on_a_report_only_check_settles_its_admission",
         "tests/tick/steps/test_launch_outcomes.py::test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent",
-        "tests/tick/steps/test_launch_outcomes.py::test_an_expired_launch_reads_the_hive_answer",
-        "tests/tick/steps/test_launch_outcomes.py::test_a_launch_finished_before_collection_is_recorded_as_started",
         "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first",
         "tests/tick/steps/test_launch_outcomes.py::test_an_acknowledging_launch_is_read_from_the_launch_record",
         "tests/tick/steps/test_place_waits.py::test_a_room_refused_launch_releases_its_holds_and_waits",
@@ -1500,13 +1498,13 @@
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
-      "behaviour": "Tick steps carry no hand written order: each declares its needs, reads and writes, the registry waves keep reap before the orphan reopen before spawn, preempt after reap and settle last, every group still runs in today's order, and the reap, reopen and spawn, drained to running and settle last scenarios hold through the tick core.",
+      "behaviour": "Tick steps carry no hand written order: each declares its needs, reads and writes, the registry waves keep reap before spawn and settle last, every group still runs in today's order, and the reap and spawn, drained to running and settle last scenarios hold through the tick core.",
       "seam": "scripts.tick.registry.waves and ordered, scripts.tick.engine.group_steps and scripts.swarm.tick.tick with fake Redis, ledger and runtime",
       "tests": [
         "tests/swarm/test_tick_declared_edges.py::test_registry_waves_reproduce_todays_constraints",
         "tests/swarm/test_tick_declared_edges.py::test_every_group_runs_in_todays_order_from_needs_and_registration",
         "tests/swarm/test_tick_declared_edges.py::test_the_steps_on_each_edge_declare_what_they_read_and_write",
-        "tests/swarm/test_tick_declared_edges.py::test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass",
+        "tests/swarm/test_tick_declared_edges.py::test_a_reaped_task_is_reopened_then_spawned_in_one_pass",
         "tests/swarm/test_tick_declared_edges.py::test_a_drained_swarm_with_new_work_runs_again_before_the_spawn_check",
         "tests/swarm/test_tick_declared_edges.py::test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn",
         "tests/swarm/test_tick_declared_edges.py::test_a_pass_that_spawned_work_ends_on_the_spawn_without_draining"
@@ -2717,7 +2715,6 @@
         "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set",
         "tests/swarm/test_launch_bounded_reads.py::test_place_holds_spawns_for_another_swarms_waiting_master",
         "tests/swarm/test_launch_bounded_reads.py::test_launch_check_reads_pending_checks_and_reports_paged",
-        "tests/swarm/test_launch_bounded_reads.py::test_launch_job_collect_drops_a_job_whose_agent_is_gone",
         "tests/swarm/test_launch_bounded_reads.py::test_local_slots_count_and_claim_held_slots_paged",
         "tests/swarm/test_launch_bounded_reads.py::test_preempt_keeps_only_asks_of_live_holders",
         "tests/swarm/test_launch_bounded_reads.py::test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record",
@@ -3686,8 +3683,8 @@
       "id": "swarm-tick-panic-holds-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2402",
-      "behaviour": "While fleet panic is on, the spawn due step spawns no agent and keeps its due mark, and the dispatch seat step runs no dispatcher seat call; once panic clears both spawn again.",
-      "seam": "scripts.tick.steps.observe.step_spawn_due and the dispatch seat step in scripts.tick.steps.masters",
+      "behaviour": "While fleet panic is on, the dispatch seat step runs no dispatcher seat call; once panic clears it dispatches again.",
+      "seam": "the dispatch seat step in scripts.tick.steps.masters",
       "tests": [
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
       ]
@@ -4349,7 +4346,7 @@
       "id": "fleet-red-claim-view-cache-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2440",
-      "behaviour": "The claim view admits an open task with a pull request whenever the fleet red listing of its repository is not yet saved, instead of listing it live, so spawn due never blocks its budget on a GitHub round trip; a saved listing, saved or failed, still judges the task exactly as before.",
+      "behaviour": "The claim view admits an open task with a pull request whenever the fleet red listing of its repository is not yet saved, instead of listing it live, so spawn never blocks its budget on a GitHub round trip; a saved listing, saved or failed, still judges the task exactly as before.",
       "seam": "the claim view's fleet red reader through scripts.swarm.fleet_red.saved_reader",
       "tests": [
         "tests/swarm/test_fleet_red.py::test_the_claim_view_admits_a_task_on_a_cold_cache_without_listing_live"
@@ -4621,8 +4618,6 @@
         "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_refuses_to_fence_past_its_deadline",
         "tests/tick/test_runtime_port_fence.py::test_fencing_is_a_runtime_write_a_step_must_declare",
         "tests/tick/test_runtime_port_fence.py::test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm",
-        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools",
-        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease",
         "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
       ]
     },

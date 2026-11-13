@@ -100,7 +100,7 @@ def test_budgets_come_from_the_p95_with_headroom_in_whole_seconds() -> None:
     assert budgets.budget_s(0.6) == 1.0
     assert budgets.budget_s(0.7) == 2.0
     assert budgets.budget_s(14.511) == 22.0
-    assert budgets.timing_of("preempt") == (18.0, 60.0)
+    assert budgets.timing_of("stall watch") == (18.0, 60.0)
     assert budgets.timing_of("night watch") == (22.0, 120.0)
     assert budgets.timing_of("config load") == (2.0, 60.0)
     assert budgets.timing_of("hive ledger") == (2.0, 120.0)
@@ -121,9 +121,9 @@ def test_every_registered_call_step_declares_its_measured_timing() -> None:
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
-def test_spawn_needs_only_judge_orphans_and_preempt() -> None:
+def test_spawn_needs_only_judge_drained_resume_recover_outages_and_prerequisite_reopen() -> None:
     assert budgets.JUDGE == {"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"}
-    assert budgets.SPAWN_NEEDS == budgets.JUDGE | {"orphans", "preempt"}
+    assert budgets.SPAWN_NEEDS == budgets.JUDGE | {"drained resume", "recover outages", "prerequisite reopen"}
     assert {step.name: step.needs for step in place.STEPS}["spawn"] == budgets.SPAWN_NEEDS
 
 
@@ -187,7 +187,6 @@ CRITICAL_STEPS = frozenset(
         "track outages",
         "verify",
         "reap",
-        "orphans",
         "recover outages",
         "sleeping",
         "drained resume",
@@ -197,9 +196,7 @@ CRITICAL_STEPS = frozenset(
         "dispatcher group",
         "rank pass",
         "bottleneck remedy",
-        "preempt",
         "spawn",
-        "collect acks",
         "master down",
         "tick master",
         "master scale",

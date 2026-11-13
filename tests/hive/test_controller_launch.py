@@ -1041,78 +1041,6 @@ def live_order(setup, route="subscription"):
     return request, order, ack
 
 
-@pytest.mark.parametrize("task_state", ["blocked", "open", "claimed", "pr", "done"])
-@pytest.mark.parametrize("restart", ["reclaimed", ""])
-def test_a_finished_worker_receipt_is_collected_once_without_reviving_it(setup, restart, task_state):
-    from scripts.swarm import controller
-    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
-
-    request, order, ack = live_order(setup)
-    store, slug = setup.store, setup.config.slug
-    worker = store.execution_registry.get(slug, order.execution_id)
-    worker = replace(worker, state="finished")
-    store.put_agent(slug, worker)
-    store.record_launch(slug, worker, ACKNOWLEDGING)
-    store.mark_restart(slug, worker.task, restart)
-    store.redis.hset(store.key(slug, "launch-assignments"), worker.task, "assignment")
-    lives = store.claims(slug, worker.task)
-    task = {"id": worker.task, "lane": "eng", "state": task_state, "claimed_by": worker.name}
-    doc = {"tasks": [task]}
-    ledger = Mock()
-    routed = Mock()
-    routed.hive_launch = setup.launcher
-    routed.spawn.side_effect = AssertionError("collection must not launch another worker")
-    runtime = controller.FencedRuntime(store, slug, setup.held, routed, "compose")
-
-    actions = _collect_acks(slug, setup.config, store, ledger, runtime, doc, 2_000)
-
-    assert actions == [f"{worker.name} finished task before the tick collected its hive acknowledgement"]
-    assert task == {"id": "task", "lane": "eng", "state": task_state, "claimed_by": worker.name}
-    assert store.execution_registry.get(slug, order.execution_id) == replace(
-        worker,
-        runtime_target=ack.target,
-        pane_id=ack.execution["pane_id"],
-        launched_at=ack.execution["launched_at"],
-        launch_timings=ack.execution["launch_timings"],
-    )
-    assert [(row["agent"], row["state"], row["error"], row["after"]) for row in store.launches(slug)] == [
-        (worker.name, "started", "", restart)
-    ]
-    assert store.claims(slug, worker.task) == lives + 1
-    assert store.spawns(slug) == {"claude": 1}
-    assert store.take_restart(slug, worker.task) == ""
-    assert store.redis.hget(store.key(slug, "launch-assignments"), worker.task) is None
-    assert _collect_acks(slug, setup.config, store, ledger, runtime, doc, 3_000) == []
-    assert store.claims(slug, worker.task) == lives + 1
-    assert store.spawns(slug) == {"claude": 1}
-    assert setup.launcher.slots.counts() == {}
-    ledger.task_set.assert_not_called()
-
-
-@pytest.mark.parametrize("task_state", ["blocked", "claimed"])
-def test_a_live_worker_on_a_blocked_task_still_collects_its_runtime(setup, task_state):
-    from scripts.swarm import controller
-    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
-
-    _, order, _ = live_order(setup)
-    store, slug = setup.store, setup.config.slug
-    worker = store.execution_registry.get(slug, order.execution_id)
-    store.record_launch(slug, worker, ACKNOWLEDGING)
-    task = {"id": worker.task, "lane": "eng", "state": task_state, "claimed_by": worker.name}
-    routed = Mock()
-    routed.hive_launch = setup.launcher
-    runtime = controller.FencedRuntime(store, slug, setup.held, routed, "compose")
-
-    actions = _collect_acks(
-        slug, replace(setup.config, autonomy="manual"), store, Mock(), runtime, {"tasks": [task]}, 2_000
-    )
-
-    assert actions == [f"spawned {worker.name} for task"]
-    live = store.execution_registry.get(slug, order.execution_id)
-    assert (live.state, live.pane_id) == ("working", "pane")
-    assert task["state"] == task_state
-
-
 @pytest.mark.parametrize("task_state", ["claimed", "blocked", "open", "pr", "done"])
 def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task_state(setup, task_state):
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1162,40 +1090,6 @@ def test_an_ended_worker_receipt_is_still_refused(setup):
     setup.store.put_agent("fixture", replace(worker, state="ended"))
     request = replace(request, task={**request.task, "state": "open"})
     assert setup.launcher.collect(request) == Outcome("spawn", Status.REFUSED, "hive", detail=GONE)
-
-
-def test_all_successful_finished_blocked_collections_are_counted_in_one_pass(setup):
-    from scripts.swarm.store import AgentRecord
-    from scripts.swarm.tick import ACKNOWLEDGING, _collect_acks
-
-    store, slug = setup.store, setup.config.slug
-    workers = []
-    tasks = []
-    for number in (1, 2):
-        worker = AgentRecord(
-            store.next_name(slug, "eng"),
-            "eng",
-            f"task-{number}",
-            seat=f"eng-{number}@{slug}",
-            state="finished",
-            harness="claude",
-        )
-        store.put_agent(slug, worker)
-        worker = next(agent for agent in store.agents(slug) if agent.name == worker.name)
-        store.record_launch(slug, worker, ACKNOWLEDGING)
-        workers.append(worker)
-        tasks.append({"id": worker.task, "state": "blocked"})
-    runtime = Mock()
-    runtime.collect.return_value = None
-
-    actions = _collect_acks(slug, setup.config, store, Mock(), runtime, {"tasks": tasks}, 2_000)
-
-    assert actions == [
-        f"{worker.name} finished {worker.task} before the tick collected its hive acknowledgement" for worker in workers
-    ]
-    assert runtime.collect.call_count == 2
-    assert store.spawns(slug) == {"claude": 2}
-    assert all(store.claims(slug, worker.task) == 1 for worker in workers)
 
 
 @pytest.mark.parametrize(("receipt", "detail"), [("missing", None), ("failed", "hive launch failed: identity")])

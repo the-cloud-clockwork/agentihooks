@@ -1,4 +1,4 @@
-"""The placement steps run the tick's hand written acks, ranking, preempt and spawn calls at their sites in today's order."""
+"""The placement steps run the tick's hand written acks, ranking and spawn calls at their sites in today's order."""
 
 import runpy
 from contextlib import contextmanager, nullcontext
@@ -74,10 +74,6 @@ def _store(log: list[Any]) -> SimpleNamespace:
 ROWS = {"t1": {"id": "t1", "state": "open"}}
 
 
-def _probe(runtime: Any, *args: Any) -> None:
-    return None
-
-
 def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **extra: Any) -> dict[str, Any]:
     return {
         "slug": "sw",
@@ -105,28 +101,14 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         yield
         log.append(("leave pass", runtime))
 
-    class _Seats:
-        def __init__(self, *args: Any) -> None:
-            self.args = args
-
-        def __eq__(self, other: object) -> bool:
-            return isinstance(other, _Seats) and self.args == other.args
-
     return SimpleNamespace(
         skip_refused=skip_refused,
         PLACING=nullcontext(),
-        EVENTS_ENGINE="events",
         _placement_pass=placement_pass,
         _spawn="spawn",
         SPAWN_BUDGET_S=60,
-        _collect_acks="collect acks",
         _codex_hook_order="codex hook order",
-        _ended="ended",
-        _current_owner="owner",
-        ready_in_order="ready in order",
-        claim_view="claim view",
         readiness=SimpleNamespace(tick_launches=lambda engine_name: log.append(("places", engine_name)) or places),
-        preempt=SimpleNamespace(probe=_probe, Seats=_Seats, run="preempt"),
         bottleneck_remedy=bottleneck_remedy,
         panic=panic,
     )
@@ -154,31 +136,28 @@ def calm(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
     assert (place.ACKS, place.PLACEMENT) == ("placement acks", "placement")
-    assert [step.name for step in engine.group_steps(place.ACKS)] == ["collect acks", "codex hook order"]
+    assert [step.name for step in engine.group_steps(place.ACKS)] == ["codex hook order"]
     assert [step.name for step in engine.group_steps(place.PLACEMENT)] == [
         "rank pass",
         "bottleneck remedy",
-        "preempt",
         "spawn",
     ]
     declared = {
         step.name: (step.needs, step.reads - pass_domains(*BOXED), step.writes - {actions_of(step.name)})
         for step in place.STEPS
     }
-    assert declared["preempt"] == (place.PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS}))
     assert declared["spawn"] == (
         budgets.SPAWN_NEEDS,
         frozenset({AGENTS, TASKS, SWARM}),
         frozenset({AGENTS, TASKS, Domain("pass:rows")}),
     )
     assert declared["rank pass"] == (frozenset({"drained resume"}), frozenset(), frozenset({tasks.RANK}))
-    assert {name: value[1:] for name, value in declared.items() if name not in {"preempt", "spawn", "rank pass"}} == {
+    assert {name: value[1:] for name, value in declared.items() if name not in {"spawn", "rank pass"}} == {
         name: (frozenset(), frozenset())
         for name in (
             "quota notice",
             "lost runner",
             "time left",
-            "collect acks",
             "codex hook order",
             "bottleneck remedy",
         )
@@ -233,78 +212,35 @@ def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: 
     ]
 
 
-def test_collect_acks_then_the_codex_hook_order_while_awake(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    state = _pass(calm)
-    found = _run(place.ACKS, _tick(calm), state, monkeypatch)
-    assert found == ["ran collect acks", "ran codex hook order"]
-    assert calm == [
-        ("collect acks", "sw", state["config"], state["store"], "ledger", "runtime", "doc", 7),
-        ("codex hook order",),
-    ]
-
-
-def test_the_pass_skips_collecting_acks_while_the_wait_pass_holds_the_acks_lock(
-    calm: list[Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calm.append("acks held")
-    found = _run(place.ACKS, _tick(calm), _pass(calm), monkeypatch)
-    assert found == ["ran codex hook order"]
-    assert calm == ["acks held", ("codex hook order",)]
-
-
-def test_a_sleeping_swarm_collects_acks_without_the_codex_hook_order(
-    calm: list[Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    found = _run(place.ACKS, _tick(calm), _pass(calm, sleeping=True), monkeypatch)
-    assert found == ["ran collect acks"]
-    assert [entry[0] for entry in calm] == ["collect acks"]
-
-
-def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_running_pass_ranks_remedies_and_spawns(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
     tick = _tick(calm)
     state = _pass(calm)
     config, store = state["config"], state["store"]
     found = _run(place.PLACEMENT, tick, state, monkeypatch)
-    assert found == ["ran rank_writes", "ran bottleneck remedy", "ran preempt", "ran spawn"]
-    seats = calm[3][-1]
-    assert seats.args[:4] == (ROWS, "ended", "owner", "ready in order")
-    assert seats.args[4].func is _probe
-    assert seats.args[4].args == ("runtime",)
-    assert seats.args[5] == "claim view"
+    assert found == ["ran rank_writes", "ran bottleneck remedy", "ran spawn"]
     assert calm == [
         (tasks.rank_writes, tick, "sw", config, store, "ledger", "doc", 7),
         ("bottleneck remedy", "sw", store, "ledger", "doc", 7),
+        ("places", "tick"),
         "panic read",
-        ("preempt", "sw", config, store, "doc", 7, seats),
-        ("places", "tick", ROWS),
-        "panic read",
-        ("enter pass", calm[7][5]),
-        ("spawn", "sw", config, calm[7][3], calm[7][4], calm[7][5], ROWS, "doc", 7, calm[7][-1]),
-        ("leave pass", calm[7][5]),
+        ("enter pass", calm[5][5]),
+        ("spawn", "sw", config, calm[5][3], calm[5][4], calm[5][5], ROWS, "doc", 7, calm[5][-1]),
+        ("leave pass", calm[5][5]),
     ]
-    assert isinstance(calm[7][-1], Deadline)
-    assert isinstance(calm[7][3], SpawnStoreCalls)
-    assert calm[7][3].deadline is calm[7][4].deadline
-    assert isinstance(calm[7][4], LedgerCalls)
-    assert isinstance(calm[7][5], SpawnRuntimeCalls)
-    assert calm[7][5].deadline is calm[7][4].deadline
-    assert calm[7][4].deadline.expires_at == calm[7][-1].expires_at + tick.SPAWN_BUDGET_S
-    spawned = calm[7][6]
+    assert isinstance(calm[5][-1], Deadline)
+    assert isinstance(calm[5][3], SpawnStoreCalls)
+    assert calm[5][3].deadline is calm[5][4].deadline
+    assert isinstance(calm[5][4], LedgerCalls)
+    assert isinstance(calm[5][5], SpawnRuntimeCalls)
+    assert calm[5][5].deadline is calm[5][4].deadline
+    assert calm[5][4].deadline.expires_at == calm[5][-1].expires_at + tick.SPAWN_BUDGET_S
+    spawned = calm[5][6]
     assert spawned is not ROWS and state["box"]["rows"] == ROWS
     assert isinstance(state["box"]["rows"], MappingProxyType)
     assert state["box"]["rows"]["t1"] is spawned["t1"]
 
 
-@pytest.mark.parametrize(("state", "engine_name"), [("paused", "tick"), ("running", "events")])
-def test_preempt_waits_for_a_running_tick_engine(
-    calm: list[Any], monkeypatch: pytest.MonkeyPatch, state: str, engine_name: str
-) -> None:
-    found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm, state, engine_name), monkeypatch)
-    assert found == ["ran rank_writes", "ran bottleneck remedy"]
-    assert "preempt" not in [entry[0] for entry in calm if isinstance(entry, tuple)]
-
-
-def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_panic_holds_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
     log: list[Any] = []
     monkeypatch.setattr(panic, "state", lambda store: "halted")
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
@@ -316,7 +252,7 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_spawn_waits_until_the_tick_places(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
     tools = fake_tools()
     found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm), monkeypatch, tools)
-    assert found == ["ran rank_writes", "ran bottleneck remedy", "ran preempt"]
+    assert found == ["ran rank_writes", "ran bottleneck remedy"]
     assert _store_writes(tools) == []
 
 

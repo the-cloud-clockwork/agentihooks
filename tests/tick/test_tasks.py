@@ -68,7 +68,7 @@ def _tick(calls: list[tuple[Any, ...]], raises: object = None) -> SimpleNamespac
     )
 
 
-MOVED = ((agents, ("_reap", "_strays", "_orphans", "_conversations", "_session_models")),)
+MOVED = ((agents, ("_reap", "_strays", "_conversations", "_session_models")),)
 
 
 def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:

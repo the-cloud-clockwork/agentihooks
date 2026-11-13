@@ -353,10 +353,8 @@ def test_a_ready_task_no_longer_holds_a_busy_seat_and_is_never_reopened(released
     assert capacity._busy(store.agents("sw"))["eng"] == 1
     assert release(doc) == 0
     assert capacity._busy(store.agents("sw"))["eng"] == 0
-    rows = {t["id"]: t for t in ledger.tasks("sw")}
     store.release("sw", "t1", AGENT)
     store.drop_agent("sw", AGENT)
-    assert agent_steps._orphans("sw", store, ledger, rows) == []
     assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["claimed_by"] == AGENT
 
 

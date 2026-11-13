@@ -139,15 +139,6 @@ def test_launch_check_reads_pending_checks_and_reports_paged(store: RedisStore) 
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")
-def test_launch_job_collect_drops_a_job_whose_agent_is_gone(store: RedisStore) -> None:
-    key = store.key(SLUG, launch_job.KEY)
-    store.redis.hset(key, "engineer@1-9", json.dumps({"task": "t9", "placed": {}}))
-    run = SimpleNamespace(store=store, slug=SLUG)
-    assert launch_job.collect(run) == ([], set())
-    assert not store.redis.exists(key)
-
-
-@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_local_slots_count_and_claim_held_slots_paged(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(local_slots, "live", lambda: set())
     now = local_slots.lease.now_ms(store)

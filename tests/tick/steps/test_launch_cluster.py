@@ -21,9 +21,6 @@ OBSERVED = (
     "_failed_launch",
     "_retire_launch",
     "_acknowledging",
-    "_expire_launch",
-    "_finished_launch",
-    "_collect_acks",
 )
 PLACED = (
     "Started",

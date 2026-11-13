@@ -19,7 +19,6 @@ TODAY = {
         "recover master",
         "ledger state",
         "automated cleanup",
-        "spawn due",
         "exits sweep",
         "master start watch",
         "launch checks",
@@ -28,7 +27,7 @@ TODAY = {
     ],
     "agents": ["reap", "recover outages", "strays", "failed panes"],
     "drained resume": ["sleeping", "drained resume"],
-    "tasks": ["orphans"],
+    "tasks": [],
     "reopen passes": [
         "dev red reopen",
         "prerequisite reopen",
@@ -38,8 +37,8 @@ TODAY = {
     ],
     "placement notices": ["quota notice", "lost runner", "time left"],
     "task passes": ["run window", "verification notices", "size pass", "grouping release", "dispatcher group"],
-    "placement acks": ["collect acks", "codex hook order"],
-    "placement": ["rank pass", "bottleneck remedy", "preempt", "spawn"],
+    "placement acks": ["codex hook order"],
+    "placement": ["rank pass", "bottleneck remedy", "spawn"],
     "close": ["conversations", "session models", "handoff transfers", "settle", "close space"],
     "wrapper events": [
         "ledger event pass",
@@ -61,10 +60,6 @@ TODAY = {
     "closing": ["last tick", "heartbeat", "status publish", "step starvation"],
 }
 EDGES = (
-    ("reap", "orphans"),
-    ("orphans", "spawn"),
-    ("reap", "preempt"),
-    ("preempt", "spawn"),
     ("spawn", "settle"),
     ("stall watch", "overrun pass"),
     ("health findings", "findings pass"),
@@ -109,11 +104,6 @@ def test_the_steps_on_each_edge_declare_what_they_read_and_write() -> None:
         frozenset({AGENTS}) | pass_domains("rows"),
         frozenset({AGENTS, TASKS, actions_of("reap")}),
     )
-    assert declared("orphans") == (
-        frozenset({TASKS}) | pass_domains("config", "rows"),
-        frozenset({TASKS, actions_of("orphans")}),
-    )
-    assert declared("preempt") == (frozenset({AGENTS}) | state, frozenset({AGENTS, actions_of("preempt")}))
     assert declared("spawn") == (
         frozenset({AGENTS, TASKS, SWARM}) | state,
         frozenset({AGENTS, TASKS, actions_of("spawn")}) | pass_domains("rows"),
@@ -125,14 +115,9 @@ def test_the_steps_on_each_edge_declare_what_they_read_and_write() -> None:
 
 
 @pytest.mark.feature("swarm-tick-declared-edges")
-@pytest.mark.parametrize(
-    ("scenario", "reopened"),
-    [("lost", "lost engineer@a1b2c3-0099, task t1 reopened"), ("orphan", "task t1 had no agent, reopened")],
-)
-def test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass(
-    scenario: str, reopened: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    actions = replay(scenario, "tick", monkeypatch, tmp_path)["actions"][0]
+def test_a_reaped_task_is_reopened_then_spawned_in_one_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    reopened = "lost engineer@a1b2c3-0099, task t1 reopened"
+    actions = replay("lost", "tick", monkeypatch, tmp_path)["actions"][0]
     assert actions.index(reopened) < actions.index("spawned engineer@a1b2c3-0001 for t1")
     assert actions[0] == reopened
 

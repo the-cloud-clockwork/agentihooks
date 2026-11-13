@@ -10,7 +10,7 @@ import pytest
 from scripts.swarm import launch_job
 from scripts.swarm.runtime import SPAWN_TIMEOUT_S, HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmConfig
-from scripts.swarm.tick import Placed, SpawnError, tick
+from scripts.swarm.tick import Placed, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
 
@@ -39,45 +39,6 @@ def test_runtime_prepares_a_detached_job_for_a_workstation_claim(tmp_path, monke
     popen.assert_not_called()
 
 
-@pytest.mark.parametrize("late,error", [(False, False), (True, False), (False, True)])
-def test_worker_writes_success_failure_and_late_success_results(tmp_path, monkeypatch, late, error):
-    monkeypatch.setattr(launch_job.time, "time", lambda: 1)
-    config = SwarmConfig("sw", "/repo", 1, 1)
-    job = launch_job.start(
-        tmp_path,
-        config,
-        "eng",
-        "engineer",
-        {"task_id": "t1", "argv": [], "predecessor": None, "controller_epoch": None},
-    )
-    reaped = []
-    monkeypatch.setattr(HerdrRuntime, "reap_name", lambda self, name: reaped.append(name))
-
-    def launch(self, config, lane, **kwargs):
-        assert self.home == tmp_path
-        assert config.slug == "sw" and lane == "eng" and kwargs["name"] == "engineer"
-        assert kwargs["task_id"] == "t1"
-        if error:
-            raise SpawnError("launcher failed", "ambiguous", "w:p1", harness="claude")
-        if late:
-            monkeypatch.setattr(launch_job.time, "time", lambda: 301)
-        return Placed("w:p1", "claude", profile_decision={"validation": {"state": "validated"}})
-
-    monkeypatch.setattr(HerdrRuntime, "_launch", launch)
-    launch_job.run(Path(job["request"]))
-    if late or error:
-        with pytest.raises(SpawnError) as raised:
-            launch_job.read(job, 302000)
-        assert raised.value.status == "ambiguous" and raised.value.pane_id == "w:p1"
-        assert raised.value.harness == "claude"
-        assert str(raised.value) == ("workstation launch job timed out" if late else "launcher failed")
-        assert reaped == (["engineer"] if late else [])
-    else:
-        result = launch_job.read(job, 2000)
-        assert result.pane_id == "w:p1"
-        assert result.profile_decision == {"validation": {"state": "validated"}}
-
-
 def test_worker_limits_the_launcher_to_the_remaining_job_budget(tmp_path, monkeypatch):
     monkeypatch.setattr(launch_job.time, "time", lambda: 1)
     job = launch_job.start(tmp_path, SwarmConfig("sw", "/repo", 1, 1), "eng", "engineer", {"task_id": "t1", "argv": []})
@@ -92,7 +53,6 @@ def test_worker_limits_the_launcher_to_the_remaining_job_budget(tmp_path, monkey
     monkeypatch.setattr(HerdrRuntime, "_launch", launch)
     launch_job.run(Path(job["request"]))
     assert calls == [(["launcher"], {"timeout": 299, "text": True})]
-    assert launch_job.read(job, 2000).pane_id == "w:p1"
 
 
 def test_worker_refuses_to_start_after_its_deadline(tmp_path, monkeypatch):
@@ -103,9 +63,6 @@ def test_worker_refuses_to_start_after_its_deadline(tmp_path, monkeypatch):
     monkeypatch.setattr(HerdrRuntime, "_launch", launch)
     launch_job.run(Path(job["request"]))
     launch.assert_not_called()
-    with pytest.raises(SpawnError) as raised:
-        launch_job.read(job, 301000)
-    assert str(raised.value) == "workstation launch job timed out" and raised.value.status == "ambiguous"
 
 
 def test_worker_records_an_unexpected_error_with_spawn_defaults(tmp_path, monkeypatch):
@@ -121,51 +78,6 @@ def test_worker_records_an_unexpected_error_with_spawn_defaults(tmp_path, monkey
     monkeypatch.setattr(Path, "replace", record)
     launch_job.run(Path(job["request"]))
     assert moves == [("engineer.writing", "engineer.json")]
-    with pytest.raises(SpawnError) as raised:
-        launch_job.read(job, 2000)
-    assert (str(raised.value), raised.value.status, raised.value.pane_id, raised.value.harness) == (
-        "boom",
-        "refused",
-        "",
-        "",
-    )
-
-
-def test_read_waits_until_the_job_timeout_on_a_real_clock(tmp_path):
-    started = 1_793_000_000_000
-    job = {"path": str(tmp_path / "engineer.json"), "started_at": started, "timeout": 300}
-    assert launch_job.read(job, started + 299_999) is None
-    with pytest.raises(SpawnError) as raised:
-        launch_job.read(job, started + 300_000)
-    assert str(raised.value) == "workstation launch job timed out" and raised.value.status == "ambiguous"
-
-
-def test_completed_takes_the_launch_result_and_clears_the_job():
-    picked = Placed(
-        "",
-        "claude",
-        profile_decision={"source": "picker"},
-        route_kind="subscription",
-        launch_job={"path": "x"},
-    )
-    placed = Placed("w:p1", "codex", account="acct", profile_decision={"validation": {"state": "validated"}})
-    result = launch_job.completed(picked, placed)
-    assert (result.pane_id, result.harness, result.account, result.route_kind) == (
-        "w:p1",
-        "codex",
-        "acct",
-        "subscription",
-    )
-    assert result.profile_decision == {"source": "picker", "validation": {"state": "validated"}}
-    assert result.launch_job == {}
-    assert launch_job.completed(picked, replace(placed, account="api")).route_kind == "api"
-
-
-def test_completed_takes_effort_launch_time_and_conversation_from_the_result():
-    picked = Placed("", "claude", effort="low", launched_at=5, conversation_id="old", launch_job={"path": "x"})
-    placed = Placed("w:p1", "claude", effort="high", launched_at=1100, conversation_id="c1")
-    result = launch_job.completed(picked, placed)
-    assert (result.effort, result.launched_at, result.conversation_id) == ("high", 1100, "c1")
 
 
 def test_worker_gives_the_launcher_no_time_once_the_budget_runs_out_mid_launch(tmp_path, monkeypatch):
@@ -343,100 +255,6 @@ def test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks() -> N
     assert (unrouted.account, unrouted.model, unrouted.effort) == ("acct-a", "", "")
     synchronous = Placed("w:p1", "claude", effort="low")
     assert _decided(synchronous, ["--route", "acct-c"], ModelPick("opus", "high"), "eng") is synchronous
-
-
-def _job_entry(store, name, task, state="working", harness="claude"):
-    from scripts.swarm.store import AgentRecord
-
-    agent = AgentRecord(name, "eng", task, state=state)
-    store.put_agent("sw", agent)
-    picked = Placed("", harness, launch_job={"path": f"/jobs/{name}.json", "started_at": 1000, "timeout": 300})
-    store.redis.hset(
-        store.key("sw", launch_job.KEY), name, json.dumps({"task": {"id": task}, "placed": asdict(picked)})
-    )
-    return next(saved for saved in store.agents("sw") if saved.name == agent.name), picked
-
-
-def test_collect_settles_each_job_with_the_tick_paths(store, monkeypatch):
-    from types import SimpleNamespace
-
-    from scripts.swarm import runtime as runtime_module
-    from scripts.swarm import tick as engine
-    from scripts.swarm_v2.runtime import codex
-
-    store.redis.hset(store.key("sw", launch_job.KEY), "ghost", json.dumps({"task": {"id": "t0"}, "placed": {}}))
-    _job_entry(store, "a-wait", "t-wait")
-    finished, finished_picked = _job_entry(store, "a-fin", "t-fin", state="finished")
-    done, done_picked = _job_entry(store, "a-done", "t-done")
-    failing, _ = _job_entry(store, "a-fail", "t-fail", harness="codex")
-    broken, _ = _job_entry(store, "a-boom", "t-boom", harness="codex")
-    result = Placed("w:p1", "claude", account="acct")
-    results = {
-        "a-fin": result,
-        "a-done": result,
-        "a-fail": SpawnError("bad launch", "refused"),
-        "a-boom": result,
-    }
-
-    def read(job, now_ms):
-        name = Path(job["path"]).stem
-        outcome = results.get(name)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    def admit(store_, slug, agent, runtime):
-        if agent.name == "a-boom":
-            raise RuntimeError("boom")
-        return "launched"
-
-    monkeypatch.setattr(launch_job, "read", read)
-    monkeypatch.setattr(store, "refresh", Mock())
-    complete = Mock(side_effect=lambda config, name, placed, terminate: placed)
-    admitted = Mock(side_effect=admit)
-    monkeypatch.setattr(codex, "complete", complete)
-    monkeypatch.setattr(codex, "admit_legacy", admitted)
-    monkeypatch.setattr(engine, "_finished_launch", Mock(return_value="finished"))
-    monkeypatch.setattr(engine, "_started", Mock(return_value=["started"]))
-    monkeypatch.setattr(engine, "_spawn_failed", Mock(return_value=["failed"]))
-    opened = Mock(return_value="w:p9")
-    monkeypatch.setattr(runtime_module, "_opened_pane", opened)
-    run = SimpleNamespace(
-        slug="sw",
-        config=SwarmConfig("sw", "/repo", 1, 1),
-        store=store,
-        ledger=Mock(),
-        runtime=Mock(),
-        rows={"t-done": {"id": "t-done"}},
-        doc={"tasks": []},
-        now_ms=5000,
-    )
-
-    actions, waiting = launch_job.collect(run)
-
-    assert actions == ["failed", "started", "failed", "finished"]
-    assert waiting == {"a-wait"}
-    assert list(store.redis.hgetall(store.key("sw", launch_job.KEY))) == ["a-wait"]
-    store.refresh.assert_called_once_with("sw", "t-wait", "a-wait", engine.LEASE_MS)
-    engine._finished_launch.assert_called_once_with(
-        "sw", store, run.doc, engine.placed_record(finished, launch_job.completed(finished_picked, result))
-    )
-    placed = launch_job.completed(done_picked, result)
-    assert complete.call_args_list[1].args == (run.config, "a-done", placed, run.runtime.reap_name)
-    assert admitted.call_args_list[1].args == (store, "sw", engine.placed_record(done, placed), run.runtime)
-    engine._started.assert_called_once_with(
-        "sw", run.config, store, run.ledger, run.doc, engine.Started(done, {"id": "t-done"}, placed, "launched"), 5000
-    )
-    failures = engine._spawn_failed.call_args_list
-    assert [call.args[:5] for call in failures] == [("sw", store, run.ledger, run.runtime, run.rows)] * 2
-    assert [call.args[6] for call in failures] == [5000, 5000]
-    second, first = (call.args[5] for call in failures)
-    assert (first.record, first.task) == (failing, {"id": "t-fail"})
-    assert (str(first.error), first.error.harness, first.error.pane_id) == ("bad launch", "codex", "w:p9")
-    assert (second.record, second.task) == (broken, {"id": "t-boom"})
-    assert (str(second.error), second.error.status, second.error.harness) == ("boom", "refused", "codex")
-    assert ("a-fail", 1000) in [call.args for call in opened.call_args_list]
-    assert [call.args for call in run.runtime.reap_name.call_args_list] == [("a-boom",), ("a-fail",)]
 
 
 def test_completed_job_records_the_existing_placed_fields(store, tmp_path, monkeypatch):
