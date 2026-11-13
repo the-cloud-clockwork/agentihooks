@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -261,3 +262,57 @@ def test_posttool_dispatch_rechecks_the_agent_hive_report(monkeypatch):
     payload = {"session_id": "session"}
     hook_manager._swarm_after_tool(payload)
     assert events == [("outcome", payload), ("tool", payload), ("ledger", payload)]
+
+
+def _events_agent(monkeypatch: pytest.MonkeyPatch, home: Path, harness: str, profile: str) -> tuple[Any, Any]:
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_checks, join_report
+    from scripts.swarm import store
+
+    client = store.RedisStore(FakeRedis(decode_responses=True))
+    client.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    name = client.next_name("sw", "eng")
+    agent = store.AgentRecord(name, "eng", "task", hive="worker", harness=harness, profile=profile, seat="eng-1@sw")
+    agent = client.start_execution("sw", agent)
+    client.put_agent("sw", agent)
+    for key, value in {
+        "AGENTIHOOKS_HIVE_ID": "worker",
+        "AGENTIHOOKS_SWARM": "sw",
+        "AGENTIHOOKS_AGENT_NAME": name,
+        "AGENTIHOOKS_PROFILE": "engineer",
+        "CLAUDE_CONFIG_DIR": str(home / "claude"),
+        "CODEX_HOME": str(home / "codex"),
+        "HERDR_PANE_ID": "pane",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    monkeypatch.setattr(store, "connect", lambda: client)
+    monkeypatch.setattr(join_checks, "startup", lambda *args: dict.fromkeys(join_report.REQUIRED, True))
+    return client, agent
+
+
+@pytest.mark.feature("hive-join-session-identity")
+def test_events_agent_without_harness_or_profile_joins_with_its_session_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from hooks.context import hive_join
+    from scripts.hive import join_report
+
+    client, agent = _events_agent(monkeypatch, tmp_path, "", "")
+    hive_join.run({"session_id": "session"}, "start")
+    context = join_report.read(client.redis, agent)["context"]
+    assert (context["home"], context["harness"], context["profile"]) == (str(tmp_path / "claude"), "claude", "engineer")
+
+
+@pytest.mark.feature("hive-join-session-identity")
+def test_recorded_harness_and_profile_win_over_the_session_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from hooks.context import hive_join
+    from scripts.hive import join_report
+
+    client, agent = _events_agent(monkeypatch, tmp_path, "codex", "planner")
+    hive_join.run({"session_id": "session"}, "start")
+    context = join_report.read(client.redis, agent)["context"]
+    assert (context["home"], context["harness"], context["profile"]) == (str(tmp_path / "codex"), "codex", "planner")
