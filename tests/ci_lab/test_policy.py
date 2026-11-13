@@ -1,7 +1,25 @@
+from collections.abc import Iterator
+from math import ceil
+from unittest.mock import patch
+
 import pytest
 
 from scripts.ci_lab import policy
 from scripts.ci_lab.delivery import CLASSES
+
+
+@pytest.fixture(autouse=True)
+def bounded_round_calculations() -> Iterator[None]:
+    calls = 0
+
+    def bounded_ceil(value: float) -> int:
+        nonlocal calls
+        calls += 1
+        assert calls <= 1000
+        return ceil(value)
+
+    with patch.object(policy, "ceil", bounded_ceil):
+        yield
 
 
 def work(
