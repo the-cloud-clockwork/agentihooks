@@ -50,13 +50,13 @@ def test_empty_queue_and_large_estimate() -> None:
 
 @pytest.mark.parametrize("estimate", [0, -1, float("inf"), float("nan")])
 def test_invalid_estimates_are_rejected(estimate: float) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^Deficit costs and quantum must be finite and positive$"):
         policy.order([work("bad", estimate=estimate)])
 
 
 @pytest.mark.parametrize("quantum", [0, -1, float("inf"), float("nan")])
 def test_invalid_quantum_is_rejected(quantum: float) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^Deficit costs and quantum must be finite and positive$"):
         policy.order([work("valid")], quantum=quantum)
 
 
@@ -111,7 +111,7 @@ def test_zero_window_and_explicit_zero_time() -> None:
 
 @pytest.mark.parametrize("quiet_window", [-1, float("inf"), float("nan")])
 def test_invalid_quiet_window_is_rejected(quiet_window: float) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^The quiet window must be finite and nonnegative$"):
         policy.Debounce(quiet_window=quiet_window)
 
 
@@ -128,3 +128,26 @@ def test_debounce_defaults_are_the_public_quiet_window_and_clock() -> None:
     debounce = policy.Debounce()
     assert debounce.quiet_window == 30
     assert debounce.clock is monotonic
+
+
+def test_carried_credit_skips_only_empty_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    from math import ceil
+
+    calls: list[float] = []
+
+    def bounded_ceil(value: float) -> int:
+        calls.append(value)
+        assert len(calls) <= 12
+        return ceil(value)
+
+    monkeypatch.setattr(policy, "ceil", bounded_ceil)
+    first = work("first", head="first", estimate=3)
+    later = work("later", head="later", estimate=4)
+    neighbour = work("neighbour", branch="other", estimate=5)
+    assert policy.order([first, later, neighbour]) == [first, neighbour, later]
+
+
+def test_nonunit_quantum_preserves_estimated_costs() -> None:
+    expensive = work("expensive", estimate=3)
+    cheap = [work(str(index), branch="cheap") for index in range(4)]
+    assert policy.order([expensive, *cheap], quantum=2) == [*cheap[:2], expensive, *cheap[2:]]
