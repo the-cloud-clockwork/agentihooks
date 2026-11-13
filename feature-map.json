@@ -534,7 +534,8 @@
         "tests/hive/test_spoke.py::test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry",
         "tests/hive/test_spoke.py::test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness",
         "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work",
-        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused"
+        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused",
+        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept"
       ]
     },
     {

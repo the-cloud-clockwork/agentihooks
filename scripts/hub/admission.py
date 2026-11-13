@@ -42,6 +42,7 @@ class Admission:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
+        started = self.clock()
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
@@ -60,7 +61,14 @@ class Admission:
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
             print(f"hub: events claim cap swarm={slug} task={task_id}: {reason}", file=sys.stderr)
             return None
-        return self._claim(slug, request, view.rows)
+        return self._answered(slug, request, started, self._claim(slug, request, view.rows))
+
+    def _answered(self, slug: str, request: dict[str, Any], started: int, admitted: dict | None) -> dict | None:
+        """The admission the asking hive is still waiting for; one finished past its wait is released and refused."""
+        if admitted is None or self.clock() - started < ANSWER_MS:
+            return admitted
+        self.reopen(slug, request)
+        raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
 
     def _placeable(self, row: dict[str, Any], hive: str) -> bool:
         """A draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is
