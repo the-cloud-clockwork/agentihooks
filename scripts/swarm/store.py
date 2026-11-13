@@ -111,7 +111,7 @@ class SwarmConfig:
     compact_limit: int = 0
     template: str = ""
     lanes: dict = field(default_factory=dict)
-    links: list = field(default_factory=list)
+    links: list[Any] = field(default_factory=list)
     autonomy: str = DELEGATE
     snapshot_minutes: int | None = None
     code: str = ""
