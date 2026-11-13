@@ -35,6 +35,33 @@ def test_reap(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [(call.operation, call.args, call.deadline) for call in runtime.calls] == [("live_names", (), deadline)]
 
 
+@pytest.mark.feature("hub-owned-claim-lease-renewal")
+def test_reap_renews_the_claim_lease_of_a_hub_owned_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+    from dataclasses import asdict
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.events.config import BusConfig
+    from scripts.swarm import tick
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    owned = AgentRecord("ci@a-1", "ci", "promo", execution_id="exe-1", generation=1, hive="hive-one")
+    store.redis.hset(store.key("sw", "executions"), owned.execution_id, json.dumps(asdict(owned)))
+    store.redis.hset(store.key("sw", "agents"), owned.name, json.dumps(asdict(owned)))
+    store.redis.set(store.key("sw", "claim", "promo"), owned.name, px=1_000)
+    monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: [])
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    tools = fake_tools()
+    cast(FakeRuntime, tools.runtime).answers["live_names"] = set()
+    state = {"slug": "sw", "store": store, "rows": {}, "now_ms": 7}
+    step = next(step for step in agents.STEPS if step.name == "reap")
+    step.run(Context(_View(state), Deadline.after(10), tools))
+    assert tick.LEASE_MS - 1_000 < store.redis.pttl(store.key("sw", "claim", "promo")) <= tick.LEASE_MS
+
+
 @pytest.mark.feature("swarm-tick-agents-reap")
 def test_reap_refuses_a_guarded_ownership_write_without_watching_the_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     from dataclasses import replace
