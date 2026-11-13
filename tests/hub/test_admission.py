@@ -298,6 +298,31 @@ def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleName
     assert rig.rows["t1"]["state"] == "claimed"
 
 
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fleet_red, readiness
+
+    now = [7_000]
+
+    def slow(repo: str) -> list[object]:
+        now[0] += 22_000
+        return []
+
+    monkeypatch.setattr(fleet_red, "read", slow)
+    rig.rows["t2"]["pr_url"] = "https://github.com/o/r/pull/1"
+    rig.ledger.metadata = lambda slug: {"_meta": {"rev": 1}}
+    rig.ledger.state = lambda slug: doc(list(rig.rows.values()))
+    source = readiness.Source(rig.store, rig.ledger)
+    admitter = admission.Admission(rig.store, rig.ledger, source, clock=lambda: now[0])
+
+    admitted = admitter.admit(SLUG, ask(task="t2", lane="ci"))
+
+    assert admitted is not None and admitted["task"]["seat"] == "ci-1@sw"
+    assert now == [7_000]
+
+
 def late_clock(offset: int) -> Callable[[], int]:
     readings: list[None] = []
 
