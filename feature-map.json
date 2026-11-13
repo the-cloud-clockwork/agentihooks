@@ -611,12 +611,14 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-engine-config-migration",
       "behaviour": "python -m scripts.swarm.engine_migration moves every stored swarm config to the events engine with a stored repository origin, a Doctor swarm taking only the origin of the swarm it watches, reports a swarm with no origin as skipped and changes nothing on a second run; doctor start creates the Doctor on the events engine with the watched origin.",
-      "seam": "scripts.swarm.engine_migration.migrate and main, scripts.doctor.cli.cmd_start",
+      "seam": "scripts.swarm.engine_migration.migrate, start_on_events and main, scripts.doctor.cli.cmd_start",
       "tests": [
         "tests/swarm/test_engine_migration.py::test_every_stored_legacy_config_moves_to_events_with_an_origin_the_doctor_included",
         "tests/swarm/test_engine_migration.py::test_a_doctor_takes_the_origin_of_its_peer_and_a_watched_swarm_keeps_its_own",
         "tests/swarm/test_engine_migration.py::test_a_swarm_without_any_origin_stays_legacy_and_is_reported",
         "tests/swarm/test_engine_migration.py::test_a_doctor_never_takes_its_own_checkout_origin_when_the_watched_swarm_has_none",
+        "tests/swarm/test_engine_migration.py::test_a_new_doctor_starts_on_events_with_the_watched_origin",
+        "tests/swarm/test_engine_migration.py::test_a_new_doctor_stays_legacy_when_the_watched_swarm_has_no_origin",
         "tests/swarm/test_engine_migration.py::test_main_migrates_the_connected_store_and_prints_each_outcome",
         "tests/doctor/test_doctor_cli.py::test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin",
         "tests/doctor/test_doctor_cli.py::test_start_leaves_the_doctor_legacy_when_the_watched_swarm_has_no_origin"

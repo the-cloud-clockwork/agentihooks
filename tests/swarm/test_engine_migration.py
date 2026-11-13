@@ -98,6 +98,31 @@ def test_a_doctor_never_takes_its_own_checkout_origin_when_the_watched_swarm_has
 
 
 @pytest.mark.feature("engine-config-migration")
+def test_a_new_doctor_starts_on_events_with_the_watched_origin(store: RedisStore) -> None:
+    store.create(replace(SwarmConfig("watch", "/missing", 1, 1), repo_origin="github.com/team/watched"))
+    store.create(SwarmConfig("watch-doctor", "/missing", 1, 0, template="doctor"))
+    store.create(SwarmConfig("other", "/missing", 1, 1))
+
+    engine_migration.start_on_events(store, "watch-doctor", "watch")
+
+    assert configs(store) == {
+        "other": ("legacy", ""),
+        "watch": ("legacy", "github.com/team/watched"),
+        "watch-doctor": ("events", "github.com/team/watched"),
+    }
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_new_doctor_stays_legacy_when_the_watched_swarm_has_no_origin(store: RedisStore, checkout: Path) -> None:
+    store.create(SwarmConfig("watch", "/missing", 1, 1))
+    store.create(SwarmConfig("watch-doctor", str(checkout), 1, 0, template="doctor"))
+
+    engine_migration.start_on_events(store, "watch-doctor", "watch")
+
+    assert configs(store) == {"watch": ("legacy", ""), "watch-doctor": ("legacy", "")}
+
+
+@pytest.mark.feature("engine-config-migration")
 def test_main_migrates_the_connected_store_and_prints_each_outcome(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
