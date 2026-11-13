@@ -1,3 +1,4 @@
+import hashlib
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -216,7 +217,7 @@ def test_unit_and_grade_rows_pass_the_outbox_schema() -> None:
 
 def test_rows_are_keyed_by_repo_head_and_unit_or_class() -> None:
     first = metrics.unit_row(unit())["event_id"]
-    assert metrics.unit_row(unit())["event_id"] == first
+    assert first == hashlib.sha256(f"org/repo\0{'a' * 40}\0k1".encode()).hexdigest()
     assert metrics.unit_row(unit(head="d" * 40))["event_id"] != first
     assert metrics.unit_row(unit(key="k2"))["event_id"] != first
     assert metrics.unit_row(replace(unit(), repo="org/other"))["event_id"] != first
