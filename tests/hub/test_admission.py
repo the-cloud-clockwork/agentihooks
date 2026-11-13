@@ -530,7 +530,7 @@ def test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents(
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": f"{live} of {cap} agents on the hive"}
     assert rig.store.claimant(SLUG, "t1") is None
     assert {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")} == before
     assert rig.ledger.writes == []
@@ -538,6 +538,28 @@ def test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents(
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {live} of {cap} agents on the hive"
     ]
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+@pytest.mark.parametrize("hive, held", [("root", True), ("hive-a", False)])
+def test_only_the_root_hive_counts_workers_that_name_no_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, hive: str, held: bool
+) -> None:
+    from scripts.hive import registry
+    from scripts.swarm import readiness
+    from scripts.swarm.store import AgentRecord
+
+    named = readiness.ROOT if hive == "root" else hive
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, named, {"heartbeat_at": 6_000})
+    registry.update(rig.store.redis, named, ["max-agents=1"])
+    record = AgentRecord(rig.store.next_name(SLUG, "ci"), "ci", "t2", seat=f"ci-1@{SLUG}", started_at=1)
+    rig.store.start_execution(SLUG, record)
+
+    admitted = rig.admitter.admit(SLUG, ask(hive=named))
+
+    assert admitted is not None
+    assert ("held" in admitted) is held
 
 
 @pytest.mark.feature("hub-admission-hive-max-agents")

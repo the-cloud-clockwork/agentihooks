@@ -138,6 +138,30 @@ def test_a_withdrawn_task_is_terminated_without_launching(rig):
     rig.runtime.spawn.assert_not_called()
 
 
+@pytest.mark.feature("hub-admission-hive-max-agents")
+def test_an_offer_held_at_max_agents_stays_queued_and_a_hive_below_its_cap_takes_it(rig: SimpleNamespace) -> None:
+    import json
+
+    from scripts.hive import admission
+    from scripts.hive.spoke import Spoke, claim_key
+
+    rig.tasks.request.side_effect = admission.Held("2 of 2 agents on the hive")
+    assert rig.spoke.poll() == "held"
+    rig.runtime.spawn.assert_not_called()
+    rig.tasks.reopen.assert_not_called()
+    assert json.loads(rig.bus.state("spoke-work").get(claim_key(rig.event)).value) == {"state": "ready"}
+
+    rig.clock.now += rig.config.policy.ack_wait_ms
+    other_tasks, other_runtime = Mock(), Mock()
+    other_tasks.request.return_value = rig.request
+    other_runtime.spawn.return_value = rig.runtime.spawn.return_value
+    other = Spoke(replace(rig.config, hive="hive-b"), rig.bus, other_runtime, other_tasks, reading)
+
+    assert other.poll() == "started"
+    other_tasks.request.assert_called_once_with(rig.event)
+    other_runtime.spawn.assert_called_once()
+
+
 def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging(rig):
     from scripts.events.envelope import Envelope
 

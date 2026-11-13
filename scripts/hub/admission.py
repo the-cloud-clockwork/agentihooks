@@ -3,6 +3,7 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
 import sys
+import threading
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -10,6 +11,7 @@ from packaging.version import InvalidVersion, Version
 
 from scripts import updater
 from scripts.hive import account_slots
+from scripts.hive import admission as hive_admission
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
@@ -52,6 +54,7 @@ class Admission:
     ):
         self._store, self.ledger, self.clock = store, ledger or LedgerClient(service=True), clock
         self.source = source or readiness.Source(store, self.ledger)
+        self._hives: dict[str, threading.Lock] = {}
 
     @property
     def store(self) -> RedisStore:
@@ -89,9 +92,6 @@ class Admission:
                 file=sys.stderr,
             )
             return None
-        if full := self._full(request["hive"]):
-            refused(slug, request, full)
-            return None
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
@@ -99,7 +99,12 @@ class Admission:
                 f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
             )
             return None
-        admitted = self._claim(slug, request, view.rows, view.doc)
+        with self._hives.setdefault(request["hive"], threading.Lock()):
+            if full := self._full(request["hive"]):
+                refused(slug, request, full)
+                held: dict[str, str] = {hive_admission.HELD: full}
+                return held
+            admitted = self._claim(slug, request, view.rows, view.doc)
         if admitted is None:
             refused(slug, request, "another holder took the claim")
             return None
@@ -149,11 +154,12 @@ class Admission:
         if cap is None:
             return ""
         slugs = cast(list[str], self.store.slugs())  # pragma: no mutate
+        hosts = {hive, ""} if hive == readiness.ROOT else {hive}
         live = sum(
             1
             for slug in slugs
             for agent in self.store.execution_registry.agents(slug)
-            if agent.hive == hive and agent.lane != "master" and agent.state not in TERMINAL_STATES
+            if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
         )
         return f"{live} of {cap} agents on the hive" if live >= cap else ""
 

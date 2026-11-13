@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
-from scripts.hive import account_slots, registry, workstation
+from scripts.hive import account_slots, admission, registry, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
@@ -44,6 +44,8 @@ class LaneTasks:
         admitted = self._ask("admit", event)
         if admitted is None:
             return None
+        if admission.HELD in admitted:
+            raise admission.Held(admitted[admission.HELD])
         config = self.configs(event.swarm)
         if config.repo_origin:
             config = replace(config, repo=config.repo_origin)
