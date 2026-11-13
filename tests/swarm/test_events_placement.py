@@ -53,9 +53,14 @@ def test_an_offer_carries_its_hive_pin_and_needs_and_nothing_for_an_unpinned_tas
 
 
 def test_a_workstation_task_pinned_off_the_root_hive_is_never_offered() -> None:
-    pinned = [task("desk", workstation=True, hive="hive-b"), task("root", workstation=True, hive=ROOT)]
+    pinned = [
+        task("desk", workstation=True, hive="hive-b"),
+        task("root", workstation=True, hive=ROOT),
+        task("blank", workstation=True, hive=""),
+    ]
     assert [event.data for event in readiness.offers(snapshot(doc(pinned)), NOW)] == [
-        {"lane": "eng", "generation": 0, "hive": ROOT}
+        {"lane": "eng", "generation": 0, "hive": ROOT},
+        {"lane": "eng", "generation": 0, "hive": ROOT},
     ]
 
 
