@@ -56,7 +56,7 @@ def test_the_ledger_check_takes_the_fields_swarm_pr_writes(fields: dict) -> None
 @pytest.mark.parametrize(
     "fields,refusal",
     [
-        ({"pr_number": "7"}, "task_update may set only"),
+        ({"pr_number": "7"}, "pr_number must be a positive integer"),
         ({"pr_number": True}, "pr_number must be a positive integer"),
         ({"pr_number": 0}, "pr_number must be a positive integer"),
         ({"pr_number": -3}, "pr_number must be a positive integer"),
