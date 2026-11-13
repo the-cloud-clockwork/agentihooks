@@ -32,7 +32,7 @@ def test_free_slots_never_go_below_zero() -> None:
 
 @pytest.mark.parametrize(
     ("total", "busy", "expected"),
-    [(0, 0, 0.0), (0, 3, 0.0), (8, 2, 0.25), (4, 4, 1.0), (4, 6, 1.0)],
+    [(0, 0, 0.0), (0, 3, 0.0), (1, 1, 1.0), (8, 2, 0.25), (4, 4, 1.0), (4, 6, 1.0)],
 )
 def test_utilisation_is_busy_over_total(total: int, busy: int, expected: float) -> None:
     assert capacity.utilisation(Load({}, {}, slots_total=total, slots_busy=busy)) == expected
