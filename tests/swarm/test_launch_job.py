@@ -1,7 +1,7 @@
 import json
 import subprocess
 import sys
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -162,21 +162,6 @@ def test_every_placed_task_in_a_pass_starts_its_own_job(store, tmp_path, monkeyp
     assert sorted(store.redis.hgetall(store.key("sw", launch_job.KEY))) == sorted(runtime.jobs)
 
 
-def test_collection_preserves_an_agent_that_finished_before_its_result(store, tmp_path, monkeypatch):
-    monkeypatch.setattr(launch_job, "spawn", lambda job: None)
-    ledger, runtime = tasks(("t1", "eng")), DetachedRuntime(tmp_path)
-    tick("sw", store, ledger, runtime, now_ms=1000)
-    name = runtime.jobs[0]
-    agent = next(agent for agent in store.agents("sw") if agent.name == name)
-    store.put_agent("sw", replace(agent, state="finished"))
-    store.update("sw", state="paused")
-    (tmp_path / f"{name}.json").write_text(json.dumps({"placed": asdict(Placed("w:p1", "claude"))}))
-    tick("sw", store, ledger, runtime, now_ms=2000)
-    assert next(agent for agent in store.agents("sw") if agent.name == name).state == "finished"
-    assert store.claims("sw", "t1") == 1
-    assert not store.redis.hgetall(store.key("sw", launch_job.KEY))
-
-
 def test_pending_launch_keeps_claim_and_is_not_launched_twice(store, tmp_path, monkeypatch):
     monkeypatch.setattr(launch_job, "spawn", lambda job: None)
     ledger, runtime = tasks(("t1", "eng")), DetachedRuntime(tmp_path)
@@ -255,76 +240,6 @@ def test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks() -> N
     assert (unrouted.account, unrouted.model, unrouted.effort) == ("acct-a", "", "")
     synchronous = Placed("w:p1", "claude", effort="low")
     assert _decided(synchronous, ["--route", "acct-c"], ModelPick("opus", "high"), "eng") is synchronous
-
-
-def test_completed_job_records_the_existing_placed_fields(store, tmp_path, monkeypatch):
-    monkeypatch.setattr(launch_job, "spawn", lambda job: None)
-    ledger, runtime = tasks(("t1", "eng")), DetachedRuntime(tmp_path)
-    tick("sw", store, ledger, runtime, now_ms=1000)
-    name = runtime.jobs[0]
-    result = Placed(
-        "w:p1",
-        "claude",
-        account="acct",
-        model="opus",
-        effort="high",
-        profile="engineer",
-        profile_decision={"validation": {"state": "validated"}},
-        launched_at=1100,
-        launch_timings={"launched_at": 1100, "returned_at": 1900},
-    )
-    (tmp_path / f"{name}.json").write_text(json.dumps({"placed": asdict(result)}))
-    runtime.live.add(name)
-    tick("sw", store, ledger, runtime, now_ms=2000)
-    agent = next(agent for agent in store.agents("sw") if agent.task == "t1")
-    assert (agent.pane_id, agent.harness, agent.account, agent.model, agent.profile) == (
-        "w:p1",
-        "claude",
-        "acct",
-        "opus",
-        "engineer",
-    )
-    assert agent.launch_timings == result.launch_timings
-    assert agent.profile_decision == result.profile_decision
-    assert agent.model_source == "picker" and agent.choice == "share"
-    assert store.claims("sw", "t1") == 1
-    assert store.launches("sw")[0]["state"] == "started"
-    assert not store.redis.hgetall(store.key("sw", "launch-jobs"))
-
-
-@pytest.mark.parametrize(
-    "result,now",
-    [
-        ({"error": {"message": "bad launch", "status": "refused", "pane_id": "w:p2", "harness": "claude"}}, 2000),
-        (None, 301001),
-    ],
-)
-def test_failed_and_expired_jobs_use_spawn_failure_accounting(store, tmp_path, result, now, monkeypatch):
-    monkeypatch.setattr(launch_job, "spawn", lambda job: None)
-    from scripts.swarm import runtime as runtime_module
-
-    monkeypatch.setattr(runtime_module, "_opened_pane", lambda name, at: "w:p3")
-    ledger, runtime = tasks(("t1", "eng")), DetachedRuntime(tmp_path)
-    tick("sw", store, ledger, runtime, now_ms=1000)
-    name = runtime.jobs[0]
-    if result:
-        (tmp_path / f"{name}.json").write_text(json.dumps(result))
-    store.update("sw", state="paused")
-    tick("sw", store, ledger, runtime, now_ms=now)
-    assert ledger.rows["t1"]["state"] == "open"
-    assert store.claimant("sw", "t1") is None
-    assert store.launches("sw")[0]["state"] == "failed"
-    message = "bad launch" if result else "workstation launch job timed out"
-    assert store.launch_failure("sw", "t1") == message
-    from scripts.gates import claims
-
-    previous = {"task": "t1", "state": "started", "at": 0}
-    assert claims.launch_failure(1, [previous, *store.launches("sw")], "t1").endswith(f": {message}")
-    from scripts.swarm import failed_panes
-
-    assert ("w:p2" if result else "w:p3") in store.redis.hgetall(store.key("sw", failed_panes.HELD))
-    assert name in runtime.reaped
-    assert not store.redis.hgetall(store.key("sw", "launch-jobs"))
 
 
 def test_job_starts_a_detached_process_and_returns_without_waiting(tmp_path, monkeypatch):

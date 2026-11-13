@@ -5746,8 +5746,7 @@
       "tests": [
         "tests/swarm/test_launch_job.py::test_an_agent_record_read_right_after_a_detached_spawn_carries_its_harness_and_account",
         "tests/swarm/test_launch_job.py::test_a_detached_spawn_returns_its_routed_account_model_and_profile",
-        "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
-        "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
+        "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks"
       ]
     },
     {

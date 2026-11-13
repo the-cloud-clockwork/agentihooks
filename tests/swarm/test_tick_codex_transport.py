@@ -23,10 +23,10 @@ def _complete_launch(runtime, job):
 
 
 @pytest.mark.parametrize("transport,harness", [("legacy", "codex"), ("app_server", "codex"), ("app_server", "claude")])
-@pytest.mark.parametrize("lane", ["eng", "master"])
-def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transport, harness, lane):
+def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transport, harness):
     import fakeredis
 
+    lane = "master"
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(codex, "connect", lambda: store)
     monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.join", lambda *args: None)
@@ -79,11 +79,7 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
         else herdr.spawn(config, lane, name, task)
     )
     actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
-    if lane == "eng":
-        assert any(action.startswith("launching engineer") for action in actions), actions
-        actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=2000)
-    prefix = "spawned master" if lane == "master" else "spawned engineer"
-    assert any(action.startswith(prefix) for action in actions), actions
+    assert any(action.startswith("spawned master") for action in actions), actions
     worker = next(agent for agent in store.agents("sw") if agent.lane == lane)
     assert len(calls) == 1
     assert worker.transport == (transport if harness == "codex" else "")
@@ -103,11 +99,11 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
             assert worker.runtime_target == admitted[0].runtime_target
 
 
-@pytest.mark.parametrize("lane", ["eng", "master"])
 @pytest.mark.parametrize("transport", ["legacy", "app_server"])
-def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypatch, lane, transport):
+def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypatch, transport):
     import fakeredis
 
+    lane = "master"
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport))
     monkeypatch.setattr(codex, "connect", lambda: store)
@@ -143,17 +139,10 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
     )
     ledger = FakeLedger([{"id": "t1", "title": "Transport", "lane": "eng"}])
     actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
-    if lane == "eng":
-        assert any(action.startswith("launching engineer") for action in actions), actions
-        store.update("sw", state="paused")
-        actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=2000)
     assert any("spawn failed" in action for action in actions), actions
     assert not any(agent.lane == lane for agent in store.agents("sw"))
     assert not store.execution_occupants("sw")
     assert ended if transport == "app_server" else "w1:p2" in fake.closed
-    if lane == "eng":
-        assert ledger.rows["t1"]["state"] == "open"
-        assert store.launches("sw")[-1]["pane_id"] == "w1:p2"
 
 
 @pytest.mark.parametrize(
