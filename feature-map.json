@@ -743,6 +743,35 @@
       ]
     },
     {
+      "id": "ledger-export-cost",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-export-cost",
+      "behaviour": "A scoped ledger export builds each live task row from the cached encoded bytes of its task, so a new generation re-encodes only the tasks that changed, and an export change read that names the newest event revision it holds gets only the newer events and the event count, which the API client and the tick view merge into the events they hold or read in full when they do not fit.",
+      "seam": "scripts.swarm_ledger.api.routes.export_text and export_changes, scripts.swarm_ledger.api.client.patched and ResourceClient.export, scripts.tick.view.refreshed",
+      "tests": [
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_builds_each_task_row_from_the_cached_bytes_of_its_task",
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_equals_the_encoded_scoped_view",
+        "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_names_only_the_events_newer_than_the_reader_holds",
+        "tests/swarm_ledger/test_export_cost.py::test_a_held_revision_the_server_no_longer_holds_gets_the_whole_events_list",
+        "tests/swarm_ledger/test_export_cost.py::test_a_reader_behind_every_held_event_gets_them_all_as_the_tail",
+        "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_without_a_held_revision_still_sets_the_whole_events_list",
+        "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_for_parts_without_meta_names_no_events",
+        "tests/swarm_ledger/test_export_cost.py::test_patching_appends_the_newer_events_and_drops_the_oldest_past_the_count",
+        "tests/swarm_ledger/test_export_cost.py::test_patching_keeps_no_event_when_the_count_is_zero",
+        "tests/swarm_ledger/test_export_cost.py::test_patching_refuses_events_that_do_not_reach_the_count",
+        "tests/swarm_ledger/test_export_cost.py::test_the_last_held_revision_is_that_of_the_newest_held_event",
+        "tests/swarm_ledger/test_export_cost.py::test_the_client_export_sends_the_newest_held_revision_and_merges_the_newer_events",
+        "tests/swarm_ledger/test_export_cost.py::test_the_client_changes_read_carries_the_held_revision_when_there_is_one",
+        "tests/swarm_ledger/test_export_cost.py::test_a_server_that_refuses_the_held_revision_is_read_again_without_it",
+        "tests/swarm_ledger/test_export_cost.py::test_a_refusal_the_held_revision_did_not_cause_is_raised",
+        "tests/swarm_ledger/test_export_cost.py::test_the_tick_view_reads_changes_after_its_newest_held_event",
+        "tests/swarm_ledger/test_export_cost.py::test_the_export_route_answers_a_held_revision_with_only_the_newer_events",
+        "tests/swarm_ledger/test_export_cost.py::test_a_ledger_without_events_answers_an_empty_tail",
+        "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_of_a_ledger_whose_tasks_are_no_list_encodes_the_rows",
+        "tests/swarm_ledger/test_export_cost.py::test_the_pass_view_sends_the_newest_held_revision_to_the_ledger"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",

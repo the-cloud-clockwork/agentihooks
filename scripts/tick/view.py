@@ -18,7 +18,13 @@ from pathlib import Path
 from typing import Any, NoReturn, cast
 
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
+from scripts.swarm_ledger.api.client import (
+    ResourceClient,
+    last_revision,
+    patched,
+    read_export_file,
+    write_export_file,
+)
 from scripts.swarm_ledger.api.schemas import LEDGER_PARTS
 from scripts.swarm_ledger.repository import live_rows
 
@@ -103,7 +109,7 @@ FRESH_VIEW_S = 300.0
 ROWS_READ = "rows_read"
 TICK_SCOPE = live_rows.Scope(closed=True, frozen=True)
 
-Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
+Reader = Callable[[int, tuple[str, ...], int | None], dict[str, Any]]
 
 
 class LedgerView:
@@ -187,11 +193,11 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
     view that no longer fits was replaced by a full read."""
     exported = read_export_file(path)
     generation, held = exported if exported is not None else (0, {})
-    reply = reader(generation, PARTS)
+    reply = reader(generation, PARTS, last_revision(held))
     try:
         state = patched(held, reply["changes"]) if "changes" in reply else reply["data"]
     except (KeyError, IndexError, TypeError, AttributeError):
-        reply, generation = reader(0, PARTS), None
+        reply, generation = reader(0, PARTS, None), None
         state = reply["data"]
     if exported is None or reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
@@ -226,7 +232,7 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
 
     def refresh() -> LedgerView:
         """The held view patched with one delta read, dropping the task fields offline passes queued."""
-        answered = refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
+        answered = refreshed(path, lambda since, parts, after: client.changes(slug, since, parts, TICK_SCOPE, after))
         queued_file(path).unlink(missing_ok=True)
         return answered
 

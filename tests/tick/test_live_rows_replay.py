@@ -40,10 +40,10 @@ def _reader(
 ) -> view.Reader:
     """The export route's answer for a scope read of doc: full, or the changes along paths."""
 
-    def read(since: int, parts: tuple[str, ...]) -> dict[str, Any]:
+    def read(since: int, parts: tuple[str, ...], after: int | None = None) -> dict[str, Any]:
         named = tuple(sorted(parts))
         answer = live_rows.answer(doc, scope)
-        changes = None if paths is None or not since else routes.export_changes(doc, paths, named, answer)
+        changes = None if paths is None or not since else routes.export_changes(doc, paths, named, answer, after)
         body = changes if changes is not None else routes.export_text(fragments.document(doc), named, answer)
         return {"generation": doc["generation"], **json.loads(body)}
 
@@ -184,7 +184,12 @@ def test_the_pass_view_reads_the_ledger_with_the_tick_scope(tmp_path: Path, monk
     asked: list[object] = []
 
     def changes(
-        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         """Answer a full read of an empty ledger and record the scope asked for."""
         asked.append(scope)

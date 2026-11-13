@@ -25,7 +25,7 @@ class Reader:
         self.replies = list(replies)
         self.calls: list[tuple[int, tuple[str, ...]]] = []
 
-    def __call__(self, since: int, parts: tuple[str, ...]) -> dict:
+    def __call__(self, since: int, parts: tuple[str, ...], after: int | None = None) -> dict:
         self.calls.append((since, parts))
         return self.replies.pop(0)
 
@@ -149,7 +149,14 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
         REQUEST_TIMEOUT=4,
     )
 
-    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None) -> dict:
+    def changes(
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
+    ) -> dict:
         sent.append((self.base, self.credentials, self.timeout, slug, since, parts))
         return {"generation": 11, "data": STATE}
 
@@ -176,7 +183,14 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
 
 
 def refusing(code: int) -> Callable[..., dict]:
-    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None) -> dict:
+    def changes(
+        self: api.ResourceClient,
+        slug: str,
+        since: int,
+        parts: tuple[str, ...],
+        scope: object = None,
+        after: int | None = None,
+    ) -> dict:
         raise urllib.error.HTTPError("http://ledger/export", code, "refused", Message(), io.BytesIO(b"{}"))
 
     return changes

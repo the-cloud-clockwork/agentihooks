@@ -1,6 +1,6 @@
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm_ledger import ledger_kinds
@@ -34,7 +34,8 @@ class Scope:
 @dataclass(frozen=True)
 class Answer:
     rows: list[dict[str, Any]]
-    frozen_ids: list[str] = field(default_factory=list)
+    frozen_ids: list[str]
+    sources: list[int]
 
 
 def ancestry(task: dict[str, Any], graph: dict[str, Any]) -> list[str]:
@@ -101,8 +102,9 @@ def answer(doc: dict[str, Any], scope: Scope) -> Answer:
     resolved = marks(doc)
     kept: list[dict[str, Any]] = []
     held: list[str] = []
+    sources: list[int] = []
     tasks: list[Row] = doc.get("tasks") or []
-    for task in tasks:
+    for index, task in enumerate(tasks):
         cold, focus = resolved[task["id"]]
         if not scope.closed and task.get("state") in CLOSED:
             continue
@@ -110,4 +112,5 @@ def answer(doc: dict[str, Any], scope: Scope) -> Answer:
             held.append(task["id"])
             continue
         kept.append({**task, "frozen": cold, "focus_rank": focus})
-    return Answer(kept, held)
+        sources.append(index)
+    return Answer(kept, held, sources)
