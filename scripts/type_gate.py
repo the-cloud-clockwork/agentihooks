@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 
 BASEDPYRIGHT_VERSION = "1.40.2"
 BASELINE = Path("tests/TYPE_BASELINE.json")
+DIRECT_IMPORTERS = "TYPE_GATE_DIRECT_IMPORTERS"
 CONFIG = {
     "include": ["hooks", "scripts", "tests"],
     "pythonVersion": "3.12",
@@ -150,8 +151,8 @@ def imported(path: str, source: bytes) -> set[str]:
     return {prefix for name in names for prefix in accumulate(name.split("."), lambda left, right: f"{left}.{right}")}
 
 
-def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
-    """Return every source that imports one of the modules, directly or through another source that does."""
+def importers(head: Path, files: list[str], modules: set[str], transitive: bool = True) -> set[str]:
+    """Return every source that imports one of the modules, directly or, when transitive, through another source."""
     imports: dict[str, set[str]] = {}
     for path in files:
         try:
@@ -163,15 +164,20 @@ def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
     for _ in files:
         reached = {path for path, names in imports.items() if path not in found and names & frontier}
         found |= reached
+        if not transitive:
+            break
         frontier = {module_name(path) for path in reached}
     return found
 
 
-def graded(base: Path, head: Path) -> set[str]:
-    """Return the sources the gate grades for growth: changed ones and every source that imports them."""
+def graded(base: Path, head: Path, transitive: bool = True) -> set[str]:
+    """Return the sources the gate grades for growth: changed ones and the sources that import them.
+
+    Importers are followed through other sources when transitive, else only the direct ones are kept.
+    """
     files = sources(head)
     touched = changed(base, head, set(files) | set(sources(base)))
-    return touched | importers(head, files, {module_name(path) for path in touched})
+    return touched | importers(head, files, {module_name(path) for path in touched}, transitive)
 
 
 def edited(base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
@@ -268,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
         base = load(args.base)
         touched = checked = None
         if base is not None:
-            touched = graded(args.base, args.head)
+            touched = graded(args.base, args.head, os.environ.get(DIRECT_IMPORTERS) != "1")
             checked = touched | edited(base, recorded or {})
         head = measure(args.head, None if checked is None else [path for path in sources(args.head) if path in checked])
     except (GradeError, ValueError, KeyError, OSError) as exc:

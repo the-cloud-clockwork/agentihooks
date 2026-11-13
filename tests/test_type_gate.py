@@ -390,6 +390,38 @@ def _fake_checker(
     return commands
 
 
+def test_direct_importers_stop_at_the_sources_that_import_the_modules(tmp_path: Path) -> None:
+    head = _tree(
+        tmp_path,
+        {
+            "hooks/lib.py": "",
+            "hooks/user.py": "from .lib import size\n",
+            "hooks/far.py": "from hooks import user\n",
+            "hooks/loop_a.py": "from hooks import loop_b, lib\n",
+            "hooks/loop_b.py": "from hooks import loop_a\n",
+        },
+    )
+    assert type_gate.importers(head, type_gate.sources(head), {"hooks.lib"}, transitive=False) == {
+        "hooks/user.py",
+        "hooks/loop_a.py",
+    }
+
+
+def test_the_direct_importers_setting_measures_only_changes_and_their_direct_importers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    same = {"hooks/user.py": "from hooks import lib\n", "hooks/far.py": "from hooks import user\n"}
+    base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n"}, {})
+    head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n"}, {})
+    commands = _fake_checker(monkeypatch, [])
+    monkeypatch.setenv(type_gate.DIRECT_IMPORTERS, "1")
+    assert type_gate.main(["--base", str(base), "--head", str(head)]) == 0
+    assert [command[-2:] for command in commands] == [["hooks/lib.py", "hooks/user.py"]]
+    monkeypatch.delenv(type_gate.DIRECT_IMPORTERS)
+    assert type_gate.main(["--base", str(base), "--head", str(head)]) == 0
+    assert commands[-1][-3:] == ["hooks/far.py", "hooks/lib.py", "hooks/user.py"]
+
+
 def test_a_head_without_source_changes_runs_no_checker(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

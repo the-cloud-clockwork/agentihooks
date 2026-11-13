@@ -100,6 +100,7 @@ def _type_step(root: Path, base: str, revision: str, grade: Path) -> list[tuple[
                 str(grader),
                 "--root",
                 str(root),
+                "--direct-importers",
                 "--base",
                 str(snapshot),
                 "--head",
