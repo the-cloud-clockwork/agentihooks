@@ -148,6 +148,17 @@
       ]
     },
     {
+      "id": "removed-hive-member-reaped",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-host-agent-records",
+      "behaviour": "An agent admitted to another hive is dropped and its task reopened once that hive has left the hive index without a report or a live heartbeat, past the startup window; an indexed, beating or unreadable hive keeps it.",
+      "seam": "Reports.vanished",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_member_of_a_removed_hive_is_dropped_and_its_task_reopened",
+        "tests/hive/test_reports.py::test_an_agent_that_names_no_hive_never_reads_as_vanished"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
