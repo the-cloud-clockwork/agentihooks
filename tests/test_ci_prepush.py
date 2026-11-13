@@ -208,6 +208,7 @@ def _type_command(repo: Path, grader: Path, snapshot: Path) -> list[str]:
         str(grader),
         "--root",
         str(repo),
+        "--direct-importers",
         "--base",
         str(snapshot),
         "--head",
