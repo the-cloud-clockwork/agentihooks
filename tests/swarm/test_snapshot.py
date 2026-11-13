@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import TextIO, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -314,6 +315,39 @@ def test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore(st
     redelivery.own("master@sw", "bridge-1")
     assert redelivery.reserve("master@sw", "bridge-1") == []
     assert restored.get(again.id).state == "pending"
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: RedisStore) -> None:
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    store.names.alias("sw-eng-old", eng)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "sw-eng-old", "carry on from the parser", ref="sw:2:a1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("sw-eng-old", "bridge-1")
+    [delivery] = dispatcher.reserve("sw-eng-old", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    journal = {
+        inbox.key("deliveries", eng),
+        inbox.key("delivery", delivery.id),
+        inbox.key("reservation", item.id),
+        inbox.key("ref-reservation", eng, "sw:2:a1"),
+    }
+    alias_keys, _ = inbox.keys_at(["sw-eng-old"])
+    assert not journal & set(alias_keys)
+    assert journal <= set(inbox.keys_at([eng])[0])
+    with patch.object(InboxStore, "keys_at", autospec=True, side_effect=InboxStore.keys_at) as listed:
+        exported = store.export("sw")
+    assert {"sw-eng-old", eng} <= set(listed.call_args.args[1])
+    assert journal <= set(exported["keys"])
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = Dispatcher(InboxStore(store.redis))
+    restored.own("sw-eng-old", "bridge-1")
+    assert restored.reserve("sw-eng-old", "bridge-1") == []
+    assert [(d.id, d.state) for d in restored.receipts.recover("sw-eng-old", "bridge-1")] == [(delivery.id, "unknown")]
 
 
 def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):

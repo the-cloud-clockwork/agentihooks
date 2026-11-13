@@ -395,7 +395,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -817,7 +818,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -1229,7 +1231,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -1706,7 +1709,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -2131,7 +2135,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -2559,7 +2564,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -3014,7 +3020,8 @@ cases:
       ruling: true
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -3453,7 +3460,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -3903,7 +3911,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -4342,7 +4351,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -4801,7 +4811,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false
@@ -5238,7 +5249,8 @@ cases:
       ruling: false
     covers: []
     sized:
-    - {}
+    - repo: the task's own repository
+      suffix: ''
   expected:
     verdict: pass
   control: false

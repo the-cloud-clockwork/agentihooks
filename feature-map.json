@@ -391,7 +391,8 @@
         "tests/inbox/test_dispatch.py::test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks",
         "tests/swarm/test_snapshot.py::test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore",
         "tests/swarm/test_snapshot.py::test_a_ref_shown_before_redis_is_lost_is_not_delivered_again_after_restore",
-        "tests/swarm/test_snapshot.py::test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore"
+        "tests/swarm/test_snapshot.py::test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore",
+        "tests/swarm/test_snapshot.py::test_an_alias_recipient_journal_is_exported_under_its_canonical_name"
       ]
     },
     {
@@ -2639,6 +2640,17 @@
         "tests/swarm_ledger/test_ledger_answer.py::test_a_worker_answer_is_refused_and_the_priority_stays",
         "tests/swarm_ledger/test_ledger_answer.py::test_cli_master_answers_at_delegate_and_full",
         "tests/swarm_ledger/test_ledger_answer.py::test_cli_refuses_below_delegate_autonomy"
+      ]
+    },
+    {
+      "id": "trace-plan-per-repository-size",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
+      "behaviour": "Trace plan sizes each repository a plan names on its own, so a plan with one pull request per repository passes, while any single repository slice sized above one pull request fails the plan.",
+      "seam": "trace_plan.trace with the trace-plan classifier definition",
+      "tests": [
+        "tests/swarm/test_trace_plan.py::test_a_two_repository_plan_with_one_pull_request_each_is_accepted",
+        "tests/swarm/test_trace_plan.py::test_a_single_repository_plan_sized_above_one_pull_request_is_refused"
       ]
     },
     {
