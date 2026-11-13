@@ -4,7 +4,6 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
 
 from scripts.doctor.priming import TEMPLATE, doctor_slug  # pyright: ignore[reportUnknownVariableType]
 from scripts.swarm import store
@@ -16,7 +15,7 @@ NO_ORIGIN = "skipped: no repository origin"
 
 def slugs(redis_store: RedisStore) -> list[str]:
     """Every stored swarm id."""
-    return cast("list[str]", redis_store.slugs())
+    return list(map(str, redis_store.slugs()))  # pyright: ignore[reportUnknownArgumentType]
 
 
 def watched(redis_store: RedisStore, slug: str) -> str:
