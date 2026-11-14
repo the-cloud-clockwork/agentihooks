@@ -1,6 +1,7 @@
 import json
 import shlex
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -218,22 +219,26 @@ def test_confirm_refuses_a_binding_that_differs_from_the_launch(tmp_path, change
         binding.confirm(report, "master", "claude", "acct")
 
 
-def _agent_exit(tmp_path, monkeypatch, *argv):
+def _agent_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str, harness: str, *flags: str
+) -> dict[str, Any]:
     from scripts import session_exit
 
     monkeypatch.delenv("HERDR_PANE_ID", raising=False)
     record = tmp_path / "exit.json"
-    assert session_exit.main([*argv[:-3], str(record), *argv[-3:]]) == 0
+    assert session_exit.main([*flags, str(record), status, harness, "eng-1"]) == 0
     return json.loads(record.read_text())
 
 
 @pytest.mark.feature("launch-canary-fails-on-agent-exit")
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_an_agent_that_exits_before_its_canary_fails_the_wait_at_once(tmp_path, monkeypatch, target):
+def test_an_agent_that_exits_before_its_canary_fails_the_wait_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
     report = tmp_path / "report.json"
     binding.request(report, "engineer", target)
     monkeypatch.setenv(binding.REPORT, str(report))
-    assert _agent_exit(tmp_path, monkeypatch, "3", target, "eng-1")["exit_status"] == 3
+    assert _agent_exit(tmp_path, monkeypatch, "3", target)["exit_status"] == 3
     clock = iter([0.0, 0.0, 271.0])
     monkeypatch.setattr(binding.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(binding.time, "sleep", lambda seconds: None)
@@ -243,29 +248,31 @@ def test_an_agent_that_exits_before_its_canary_fails_the_wait_at_once(tmp_path, 
 
 
 @pytest.mark.feature("launch-canary-fails-on-agent-exit")
-def test_a_viewer_exit_leaves_the_canary_to_its_app_server(tmp_path, monkeypatch):
+def test_a_viewer_exit_leaves_the_canary_to_its_app_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     report = tmp_path / "report.json"
     binding.request(report, "engineer", "codex")
     monkeypatch.setenv(binding.REPORT, str(report))
-    assert _agent_exit(tmp_path, monkeypatch, "--viewer", "0", "codex", "eng-1")["exit_status"] == 0
+    assert _agent_exit(tmp_path, monkeypatch, "0", "codex", "--viewer")["exit_status"] == 0
     assert json.loads(report.read_text()) == {"profile": "engineer", "harness": "codex", "state": "pending"}
 
 
 @pytest.mark.feature("launch-canary-fails-on-agent-exit")
-def test_an_exit_after_the_canary_keeps_the_validated_binding(tmp_path, monkeypatch):
+def test_an_exit_after_the_canary_keeps_the_validated_binding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     report = _report(tmp_path, state="validated", validation=VALIDATED)
     before = report.read_text()
     monkeypatch.setenv(binding.REPORT, str(report))
-    assert _agent_exit(tmp_path, monkeypatch, "0", "claude", "eng-1")["exit_status"] == 0
+    assert _agent_exit(tmp_path, monkeypatch, "0", "claude")["exit_status"] == 0
     assert report.read_text() == before
 
 
 @pytest.mark.feature("launch-canary-fails-on-agent-exit")
 @pytest.mark.parametrize("report", ["", "gone.json"])
-def test_an_exit_without_a_canary_report_records_only_the_exit(tmp_path, monkeypatch, report):
+def test_an_exit_without_a_canary_report_records_only_the_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: str
+) -> None:
     monkeypatch.setenv(binding.REPORT, str(tmp_path / report) if report else "")
-    assert _agent_exit(tmp_path, monkeypatch, "1", "claude", "eng-1")["exit_status"] == 1
-    assert not (tmp_path / "gone.json").exists()
+    assert _agent_exit(tmp_path, monkeypatch, "1", "claude")["exit_status"] == 1
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["exit.json"]
 
 
 @pytest.mark.feature("launch-canary-fails-on-agent-exit")
@@ -277,7 +284,9 @@ def test_an_exit_without_a_canary_report_records_only_the_exit(tmp_path, monkeyp
         (init_agent.AgentSpec(agent="codex", profile="engineer", transport=init_agent.APP_SERVER), True),
     ],
 )
-def test_only_an_app_server_launcher_records_its_exit_as_the_viewer(tmp_path, spec, viewer):
+def test_only_an_app_server_launcher_records_its_exit_as_the_viewer(
+    tmp_path: Path, spec: init_agent.AgentSpec, viewer: bool
+) -> None:
     environ = {"XDG_RUNTIME_DIR": str(tmp_path), "AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SLOT_HIVE": "hive-a"}
     launcher, _ = init_agent._write_launcher(tmp_path, "eng", "Open the task.", [], environ, spec)
     (line,) = [line for line in launcher.read_text().splitlines() if "scripts.session_exit" in line]
