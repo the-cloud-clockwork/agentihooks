@@ -16,7 +16,7 @@ from scripts import updater
 from scripts.handoff import transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
-from scripts.hub import lease
+from scripts.hub import branch_heads, lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
@@ -191,6 +191,7 @@ class Admission:
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
     ) -> dict[str, Any] | None:
+        from scripts.hive import orders
         from scripts.swarm import profile_choice, tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
@@ -212,7 +213,15 @@ class Admission:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
-        primed = tick.primed(self.store, slug, seat, {**row, **live})
+        claimed: dict[str, Any] = {**row, **live}
+        claimed.update(self._continuation(slug, name, claimed, rows))
+        claimed["overlaps"] = tick._sharing(claimed, rows, self.store.agents(slug))
+        members: list[str] = claimed.get("group_members") or []
+        claimed["group"] = [
+            {key: rows[member][key] for key in ("id", "title", "description")} for member in members if member in rows
+        ]
+        claimed[orders.SEEDS] = self._seeds(slug, claimed, doc, name)
+        primed = tick.primed(self.store, slug, seat, claimed)
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
@@ -243,13 +252,58 @@ class Admission:
             return tick._stack_base(task, rows, config.repo_origin, stack.repo_key)
         return tick._stack_base(task, rows, config.repo)
 
-    def _mark(self, slug: str, request: dict, row: dict, name: str) -> dict | None:
-        """The ledger row once claimed by name; its claim generation is one past the offer's."""
-        task_id = request["task"]
-        fields = {"state": "pr" if row.get("pr_url") else "claimed", "claimed_by": name}
+    def _continuation(self, slug: str, name: str, task: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
+        """The handoff or the recorded branch a reclaimed task continues from, resolved on the claimed row so a cleared
+        protected branch is never continued; empty for a first life with no branch."""
+        from scripts.swarm import continuation
+
+        task_id: str = task["id"]
+        handoff: str = self.store.handoff(slug, task_id)
+        lives: list[str] = self.store.earlier_lives(slug, task_id)
+        if not (handoff or lives or task.get("branch")):
+            return {}
+        config = self.store.config(slug)
+        reclaim, origin = branch_heads.reclaimer(config)
+        repo = config.repo_origin or config.repo
+        if handoff:
+            saved: dict[str, Any] = self.store.handoff_envelope(slug, task_id) or {}
+            resolved = continuation.resolve(repo, task, rows, lives, saved, reclaim, origin)
+            return {"handoff": handoff, "handoff_envelope": resolved}
+        found = continuation.resolve(repo, task, rows, lives, {}, reclaim, origin)
+        self.store.put_reclaim(slug, name, found)
+        return {"reclaim": found}
+
+    def _seeds(self, slug: str, task: dict[str, Any], doc: dict[str, Any], name: str) -> dict[str, str]:
+        """The files the hive writes into the task's work folder before the launch: steering from the task and the
+        latest copy that the hive of the task's previous agent synced."""
+        from scripts.swarm_ledger import ledger_workspace
+
+        earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
+        previous = max(earlier, key=lambda agent: agent.started_at, default=None)
+        held = self.store.redis.get(ledger_workspace.files_key(previous.hive)) if previous and previous.hive else None
+        synced: dict[str, dict[str, dict[str, str]]] = json.loads(held) if held else {}
+        return {**synced.get(slug, {}).get(task["id"], {}), "steering.md": ledger_workspace.steering(task, doc)}
+
+    def _mark(self, slug: str, request: dict[str, Any], row: dict[str, Any], name: str) -> dict[str, Any] | None:
+        """The ledger row once claimed by name with its portable work folder, a protected branch cleared and the lane
+        kind; its claim generation is one past the offer's."""
+        from scripts.swarm import continuation
+        from scripts.swarm_ledger import ledger_workspace
+
+        task_id: str = request["task"]
         expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": request["generation"]}
         try:
-            live = self.ledger.update_task(slug, task_id, fields, if_state=("open",), if_match=expected)
+            fields = {
+                "state": "pr" if row.get("pr_url") else "claimed",
+                "claimed_by": name,
+                "workspace": ledger_workspace.portable(slug, task_id),
+            }
+            if row.get("branch") in continuation.PROTECTED:
+                fields["branch"] = ""
+            kind: str = self.store.config(slug).lanes.get(request["lane"], {}).get("kind", "")
+            if kind not in ("", "auto") and not row.get("kind"):
+                fields["kind"] = kind
+            live: dict[str, Any] = self.ledger.update_task(slug, task_id, fields, if_state=("open",), if_match=expected)
         except Exception:
             self._unclaim(slug, task_id, name)
             raise

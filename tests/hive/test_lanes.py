@@ -221,6 +221,43 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     assert json.loads(claim.value)["state"] == "started"
 
 
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn(hub, monkeypatch):
+    from scripts.hive import orders
+    from scripts.swarm_ledger import ledger_workspace
+
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    seeds = {"steering.md": "# t1: steer\n", "progress.md": "- earlier step\n"}
+    hub.admitted["task"].update(workspace=ledger_workspace.portable("rig", "t1"), **{orders.SEEDS: seeds})
+    hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
+    folder = ledger_workspace.folder("rig", "t1")
+    written: dict[str, str] = {}
+    runtime = Mock()
+
+    def spawn(request):
+        written.update({name: (folder / name).read_text(encoding="utf-8") for name in seeds})
+        placed = SimpleNamespace(
+            pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+        )
+        return Outcome("spawn", Status.OK, "local", placed)
+
+    runtime.spawn.side_effect = spawn
+
+    assert lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, "hive-a", ("eng",), 0, {}) == ["started"]
+    [request] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert request.task["workspace"] == str(folder)
+    assert written == seeds
+
+
+def test_an_admitted_task_with_no_work_folder_is_spawned_unchanged(hub):
+    from scripts.swarm.store import SwarmConfig
+
+    request = lanes.LaneTasks(hub.bus, "hive-a", lambda slug: SwarmConfig("rig", "/repo", 1, 1)).request(offer())
+
+    assert request is not None
+    assert request.task == hub.admitted["task"]
+
+
 @pytest.mark.feature("root-hive-lane-spokes")
 @pytest.mark.parametrize(("hive", "taken"), [("root", True), ("hive-a", False)])
 def test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it(
