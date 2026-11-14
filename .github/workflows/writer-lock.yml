@@ -21,6 +21,7 @@ jobs:
       key: ${{ steps.key.outputs.key }}
       hive_join: ${{ steps.hive-join.outputs.due }}
       tick: ${{ steps.tick.outputs.due }}
+      events: ${{ steps.events.outputs.due }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,6 +80,35 @@ jobs:
             done
           done < "$RUNNER_TEMP/tick-changed"
           echo "due=$due" >> "$GITHUB_OUTPUT"
+
+      - name: Select events launch smoke inputs
+        id: events
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENTS_INPUTS: >-
+            scripts/hub/* scripts/hive/* scripts/tick/* scripts/events/* tests/events_smoke/*
+            scripts/swarm/readiness.py scripts/swarm/execution*.py scripts/swarm/tick*.py scripts/swarm/engine_migration.py
+            scripts/swarm/fleet_red.py
+            .github/workflows/events-smoke.yml .github/workflows/writer-lock.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/events-changed"
+          due=false
+          read -r -a inputs <<< "$EVENTS_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              # shellcheck disable=SC2053
+              if [[ "$path" == $input ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/events-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+  events:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.events == 'true'
+    uses: ./.github/workflows/events-smoke.yml
 
   tick:
     needs: [inputs]
