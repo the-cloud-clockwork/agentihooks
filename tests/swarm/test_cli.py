@@ -76,12 +76,26 @@ def run(*argv):
 
 
 def started(env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentRecord]) -> list[AgentRecord]:
-    """Starts swarm ``sw`` and seats an agent on t1 and on t2 through hub admission, each running in the fake runtime
-    as its hive's launch leaves it."""
+    """Starts swarm ``sw`` and seats an agent on t1 and on t2 through hub admission from the tick's own hive, each
+    running in the fake runtime as its hive's launch leaves it."""
     run("sw", "start")
-    agents = [seat(task) for task in ("t1", "t2")]
+    agents = [seat(task, hive=commands.hive_id()) for task in ("t1", "t2")]
     env[2].live.update(agent.name for agent in agents)
     return agents
+
+
+def test_create_is_paused_then_start_spawns_and_status_lists(
+    env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentRecord], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, ledger, rt = env
+    assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "1") == 0
+    assert store.config("sw").state == "paused" and rt.spawned == []
+    assert run("sw", "start") == 0
+    seated = [seat(task, hive=commands.hive_id()) for task in ("t1", "t2")]
+    rt.live.update(agent.name for agent in seated)
+    assert [agent.name for agent in seated] == ["engineer@a1b2c3-0001", "ci@a1b2c3-0001"]
+    run("sw", "status")
+    assert "engineer@a1b2c3-0001" in capsys.readouterr().out
 
 
 def test_start_reports_plan_shape_and_warns_before_spawning(env, capsys, monkeypatch):
@@ -1579,7 +1593,7 @@ def test_tick_redirects_a_late_handoff_item_to_the_successor(env, seat, tmp_path
     doc = _handoff_doc(tmp_path)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     cli.run_tick(store, "sw")
-    env[2].live.add(seat("t1").name)
+    env[2].live.add(seat("t1", hive=commands.hive_id()).name)
     inbox = InboxStore(store.redis)
     item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "late contract")
     cli.run_tick(store, "sw")
