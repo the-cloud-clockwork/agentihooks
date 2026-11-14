@@ -11,11 +11,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
 from scripts.inbox.seen import CLAIM_BATCH, claim
-from scripts.inbox.store import NOTIFY, InboxError, connect
+from scripts.inbox.store import NOTIFY, InboxError, InboxStore, connect
 
 NAME = "inbox"
 FLAG = f"--dangerously-load-development-channels=server:{NAME}"
@@ -139,7 +140,7 @@ async def _recheck(store, me, pubsub):
         raise error
 
 
-async def _deliver(store, me, write, pushed):
+async def _deliver(store: InboxStore, me: str, write: Any, pushed: Pushed) -> None:
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
@@ -147,7 +148,11 @@ async def _deliver(store, me, write, pushed):
     room = UNCONFIRMED_MAX - len(pushed.held)
     items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed.shown]
     for index, item in enumerate(items):
-        note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
+        try:
+            note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
+        except Exception:
+            store.requeue(item.id, me, UNSHOWN)
+            continue
         try:
             await write.send(SessionMessage(types.JSONRPCMessage(note)))
         except BaseException:
