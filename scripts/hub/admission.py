@@ -371,7 +371,7 @@ class Admission:
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
             return False
-        self.store.redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
+        _ = self.store.redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         if any(getattr(occupant, field) != value for field, value in decision.items()):
             launch_check.begin(self.store, slug, occupant, self.clock())
         return True
