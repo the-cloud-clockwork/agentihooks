@@ -22,6 +22,7 @@ from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
 from scripts.tick.steps import agents as agent_steps
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
+from tests.swarm.test_ready import seated
 
 _fixture = env, tmp_path
 AGENT = "engineer@a1b2c3-0001"
@@ -108,7 +109,7 @@ def parked(env, monkeypatch, tmp_path):
     store, ledger, rt = env
     monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["sw", "create", "--repo", "/repo"])
-    cli.main(["sw", "start"])
+    seated(store, ledger)
     ledger.rows["a"] = {"id": "a", "title": "Build the parser", "state": "pr", "branch": "eng-a", "lane": "eng"}
     ledger.rows["b"] = {"id": "b", "title": "Write the schema", "state": "done", "branch": "eng-b", "lane": "eng"}
     ledger.rows["t1"].update({"depends_on": ["a", "b"], "branch": "eng-t1", "issue_url": ISSUE})

@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm import hive_release
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import _handoff_doc, env, run
-from tests.swarm.test_ready import AGENT, release, released
+from tests.swarm.test_ready import AGENT, release, released, seated
 from tests.swarm.test_stack import park, parked
 
 pytestmark = pytest.mark.unit
@@ -19,7 +19,7 @@ def _on_hive(monkeypatch: pytest.MonkeyPatch, member: str) -> None:
 def _started(env: tuple, workstation: bool) -> tuple:
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seated(store, ledger)
     ledger.rows["t1"]["workstation"] = workstation
     return store, ledger
 
