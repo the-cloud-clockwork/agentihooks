@@ -1,12 +1,13 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import fencing, idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
-from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -279,10 +280,14 @@ def recovery_state(store, name):
     return json.loads(raw)["state"] if raw else None
 
 
-def pending_owners(store, tmp_path, monkeypatch, worktree=True):
+def pending_owners(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worktree: bool = True, admit: bool = False
+) -> tuple[Any, RecoveringRuntime, list[AgentRecord]]:
     from scripts.swarm import snapshot
 
     ledger, runtime, _ = three_owners(store)
+    for owner in owners(store) if admit else []:
+        store.start_execution("sw", owner, "")
 
     def worktrees(repo, names):
         assert repo == store.config("sw").repo
@@ -442,6 +447,43 @@ def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
     for _ in range(2):
         resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert runtime.nudged.count(stuck.name) == 1
+
+
+@pytest.mark.feature("swarm-resume-keeps-execution-identity")
+def test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, admit=True)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    reopened = next(agent for agent in owners(store) if agent.name == dead.name)
+    assert (reopened.execution_id, reopened.generation, reopened.started_at) == (
+        dead.execution_id,
+        dead.generation,
+        dead.started_at,
+    )
+    assert (reopened.pane_id, reopened.launched_at, reopened.idle_ticks) == ("recovered:pane", 9 * MINUTE, 0)
+    assert recovery_state(store, dead.name) == "done"
+
+
+@pytest.mark.feature("swarm-resume-keeps-execution-identity")
+def test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the_restart_as_launch(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.handoff import transfers
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False, admit=True)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    transfers.record(store, "sw", dead, "quota", "## Next\nContinue.\n", 2 * MINUTE)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    restarted = next(agent for agent in owners(store) if agent.name == dead.name)
+    assert (restarted.execution_id, restarted.started_at) == (dead.execution_id, dead.started_at)
+    assert (restarted.launched_at, restarted.idle_ticks) == (9 * MINUTE, 0)
+    assert recovery_state(store, dead.name) == "done"
 
 
 @pytest.mark.parametrize("conversation", ["fresh-conversation", ""])
