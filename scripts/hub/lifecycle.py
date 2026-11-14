@@ -107,7 +107,7 @@ class Lifecycle:
         if not hive or data.get("reason") == "lost":
             return False
         orders, pending = Orders(cast(Any, self.store).redis), value.get("resume")
-        if pending and pending["launched_at"] == agent.launched_at:
+        if pending and (pending["launched_at"], pending["pane_id"]) == (agent.launched_at, agent.pane_id):
             ack = orders.command(hive, CommandOrder(**pending["order"]))
             if ack is not None and ack.status != DONE:
                 ledger: Any = self.ledger
@@ -127,7 +127,7 @@ class Lifecycle:
             agent.generation,
             RESUME_TEXT,
         )
-        resume = {"order": asdict(order), "launched_at": agent.launched_at}
+        resume = {"order": asdict(order), "launched_at": agent.launched_at, "pane_id": agent.pane_id}
         claims.update(key, json.dumps({**value, "resumes": attempts + 1, "resume": resume}).encode(), revision)
         orders.command(hive, order)
         return True

@@ -192,12 +192,12 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig: SimpleNamespace
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_an_answered_resume_is_never_dropped_by_an_exit_read_before_it(rig: SimpleNamespace) -> None:
+def test_a_resumed_pane_that_dies_again_orders_the_next_resume(rig: SimpleNamespace) -> None:
     rig.react.poll()
     consumer, _runtime = _hive(rig, _resumed(launched_at=rig.agent.launched_at))
     consumer.poll_commands()
     _next_pass(rig)
-    assert len(_commands(rig)) == 1
+    assert [order.id for order in _commands(rig)] == ["resume:execution:3:1", "resume:execution:3:2"]
     assert rig.ledger.writes == rig.returned == []
     assert [agent.pane_id for agent in rig.store.agents("rig")] == ["pane-2"]
 
