@@ -327,6 +327,17 @@ def test_a_stale_share_names_every_open_outage_it_still_holds(
 
 
 @pytest.mark.feature("events-outage-hold-hub-agents")
+def test_a_share_read_exactly_at_the_stale_limit_is_not_logged(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import outage
+
+    _open_outage(rig, "redis")
+    assert outage.shared_open(rig.store, SLUG, NOW + outage.SHARED_STALE_MS)
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
 def test_an_open_outage_never_pins_an_agent_whose_row_reads_done(rig: SimpleNamespace) -> None:
     rig.row.update(state="done")
     _open_outage(rig, "provider")
