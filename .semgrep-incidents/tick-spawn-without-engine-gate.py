@@ -29,6 +29,14 @@ def gated(tick: Any, config: Any, args: tuple[Any, ...]) -> Any:
     return []
 
 
+def observed(tick: Any, config: Any, args: tuple[Any, ...]) -> Any:
+    if config.state == "running" and config.engine != tick.EVENTS_ENGINE:
+        if tick.panic.state(None) is None:
+            # ok: tick-spawn-without-engine-gate
+            return tick.skip_refused(tick._spawn, *args)
+    return []
+
+
 def other(tick: Any, args: tuple[Any, ...]) -> Any:
     # ok: tick-spawn-without-engine-gate
     return tick.skip_refused(tick._reap, *args)

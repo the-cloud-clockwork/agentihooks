@@ -5,7 +5,7 @@ rules:
     message: >-
       A tick step runs the tick's own lane launch without asking readiness.tick_launches for the swarm's engine, so
       a swarm on the events engine gets a second, legacy launch beside the hive spokes the hub admits. Run tick._spawn
-      only inside a branch that tests tick.readiness.tick_launches(config.engine).
+      only inside a branch that tests tick.readiness.tick_launches(config.engine) or config.engine != tick.EVENTS_ENGINE.
     paths:
       include:
         - /scripts/tick/
@@ -16,4 +16,7 @@ rules:
           - pattern: tick.skip_refused(tick._spawn, ...)
       - pattern-not-inside: |
           if <... tick.readiness.tick_launches(...) ...>:
+              ...
+      - pattern-not-inside: |
+          if <... $CONFIG.engine != tick.EVENTS_ENGINE ...>:
               ...

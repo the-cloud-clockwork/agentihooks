@@ -62,6 +62,19 @@ def connect(url: str, provision: bool = True) -> Any:
     return nats.open_bus(BusConfig(backend="nats", url=url, provision=provision, scoped=True))
 
 
+def trap_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Puts a gh first on PATH that records its command line and fails, with no GitHub token set; returns its log."""
+    folder, log = tmp_path / "gh-trap", tmp_path / "gh-calls"
+    folder.mkdir()
+    trapped = folder / "gh"
+    trapped.write_text(f'#!/usr/bin/env bash\necho "gh $*" >> "{log}"\nexit 1\n')
+    trapped.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    return log
+
+
 def unread() -> Any:
     """No spoke side readiness view: the hub rechecks every offer when it admits it."""
     return None
@@ -119,6 +132,11 @@ class Smoke:
     ledger: Ledger
     admitter: admission.Admission
     opened: list[Any]
+    gh_log: Path
+
+    def gh_calls(self) -> list[str]:
+        """Every gh command line anything in the smoke ran; the trapped gh refuses each one."""
+        return self.gh_log.read_text().splitlines() if self.gh_log.exists() else []
 
     def spoke(self, hive: str, lane: str) -> SimpleNamespace:
         """A hive lane spoke on its own bus connection, asking this hub, with a runtime that launches at once."""
@@ -163,6 +181,7 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
+    gh_log = trap_gh(tmp_path, monkeypatch)
     client = redis.Redis.from_url(url, decode_responses=True)
     client.flushdb()
     store = RedisStore(client)
@@ -185,7 +204,7 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
         try:
             buckets.provision(bus)
             slots.serve(bus, admitter=admitter)
-            yield Smoke(nats_url, bus, store, ledger, admitter, opened)
+            yield Smoke(nats_url, bus, store, ledger, admitter, opened, gh_log)
         finally:
             for each in reversed(opened):
                 each.close()

@@ -5942,7 +5942,7 @@
       "id": "events-smoke-pull-request-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
-      "behaviour": "On a real nats-server and Redis, a hive spoke taking the ready offer of an open task carrying a pull request url is admitted by the hub with one admission that answers in under a quarter of the hive's eight second wait, makes no live GitHub pull request listing, and marks the ledger row in review for the admitted agent.",
+      "behaviour": "On a real nats-server and Redis, a hive spoke taking the ready offer of an open task carrying a pull request url is admitted by the hub with one admission that answers in under a quarter of the hive's eight second wait, runs no gh command and no live pull request listing, and marks the ledger row in review for the admitted agent.",
       "seam": "slots.serve answering Admission.admit for LaneTasks.request from Spoke.poll over NATS",
       "tests": [
         "tests/events_smoke/test_launch_path.py::test_a_pull_request_task_is_admitted_well_under_the_hive_wait_with_no_live_github_listing"
@@ -5968,7 +5968,7 @@
       "id": "events-smoke-orphan-reopen",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
-      "behaviour": "On the real Redis store, a tick pass over a swarm on the events engine reopens a claimed task whose claimant has no agent record and no claim.",
+      "behaviour": "On a real nats-server and Redis, a task the hub admitted for a hive spoke whose agent record and claim are then lost is reopened by a tick pass over the swarm on the events engine.",
       "seam": "scripts.swarm.tick.tick through the agents orphan step",
       "tests": [
         "tests/events_smoke/test_launch_path.py::test_a_claimed_task_with_no_live_agent_is_reopened_by_the_tick_on_the_events_engine"
@@ -5994,7 +5994,7 @@
       "id": "events-smoke-engine-switch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
-      "behaviour": "On a real nats-server and Redis, the engine migration leaves an events swarm unchanged and skips a legacy swarm with a live agent, and the hub hive loss pass exits no running execution of a swarm switched to the legacy engine while its hive stops beating; every agent record stays as it was.",
+      "behaviour": "On a real nats-server and Redis, the engine migration leaves an events swarm unchanged and skips a legacy swarm with a live agent; a hub hive loss pass with its real emitter exits no running execution of a swarm switched to the legacy engine while its hive stops beating, every agent record and the started claim stay as they were, and once the swarm is back on events the same pass exits it as hive lost.",
       "seam": "engine_migration.migrate and HiveLoss.poll",
       "tests": [
         "tests/events_smoke/test_launch_path.py::test_an_engine_switch_exits_no_running_execution"
@@ -6007,7 +6007,7 @@
       "id": "events-smoke-no-legacy-launch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
-      "behaviour": "On a real nats-server and Redis, a running swarm on the events engine gets its work launched only by the hive spoke the hub admitted: a tick pass never calls the tick lane launch and spawns no worker, and an open task stays open.",
+      "behaviour": "On a real nats-server and Redis, a running swarm on the events engine with its spawn due mark set gets its work launched only by the hive spoke the hub admitted: a tick pass never calls the tick lane launch from either the observe or the place step and spawns no worker, and an open task stays open.",
       "seam": "readiness.tick_launches gating tick._spawn in the tick place step",
       "tests": [
         "tests/events_smoke/test_launch_path.py::test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work"
@@ -6020,7 +6020,7 @@
       "id": "events-smoke-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
-      "behaviour": "Every pull request touching the hub, the hive or the tick runs the events launch smoke on a real nats-server and a Redis service container through the writer lock workflow, which feeds Gate Required, and the smoke must pass exactly its six seam tests.",
+      "behaviour": "Every pull request touching the hub, the hive, the tick, the events bus or the swarm readiness, execution, tick, engine migration and fleet red modules runs the events launch smoke on a real nats-server and a Redis service container through the writer lock workflow, which feeds Gate Required, and the smoke must pass exactly its six seam tests.",
       "seam": "writer-lock.yml events selection and caller, events-smoke.yml smoke job",
       "tests": [
         "tests/test_ci_events_smoke_pr.py::test_events_smoke_selection",

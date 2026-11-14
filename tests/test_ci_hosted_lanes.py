@@ -29,6 +29,7 @@ DIRECT = {
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
     "writer-lock.yml": ("Writer lock", "writer-lock"),
     "tick-equivalence.yml": ("Tick equivalence", "tick-equivalence"),
+    "events-smoke.yml": ("Events launch smoke", "events-smoke"),
     "feature-suite.yml": ("Feature suite", "feature-suite"),
     "worker-resources.yml": ("Worker resources", "worker-resources"),
     "startup-stages.yml": ("Startup stages", "startup-stages"),
@@ -58,8 +59,6 @@ CALLED = {
 }
 if (_WORKFLOWS / "hive-join.yml").is_file():
     CALLED["hive-join.yml"] = "called hive join smoke must not hold the caller lane"
-if (_WORKFLOWS / "events-smoke.yml").is_file():
-    CALLED["events-smoke.yml"] = "called events launch smoke must not hold the caller lane"
 
 EXCLUDED = {
     "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",

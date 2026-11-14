@@ -88,7 +88,9 @@ jobs:
           PR_BASE: origin/${{ github.base_ref }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           EVENTS_INPUTS: >-
-            scripts/hub/* scripts/hive/* scripts/tick/* tests/events_smoke/*
+            scripts/hub/* scripts/hive/* scripts/tick/* scripts/events/* tests/events_smoke/*
+            scripts/swarm/readiness.py scripts/swarm/execution*.py scripts/swarm/tick*.py scripts/swarm/engine_migration.py
+            scripts/swarm/fleet_red.py
             .github/workflows/events-smoke.yml .github/workflows/writer-lock.yml
         run: |
           base=$(git merge-base "$PR_BASE" "$PR_HEAD")

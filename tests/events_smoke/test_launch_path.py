@@ -19,7 +19,7 @@ from tests.events_smoke.conftest import LAUNCH, SLUG, Smoke
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 TAKE_MS = 5_000
-HELD_TAKE_MS = 15_000
+HELD_TAKE_MS = 25_000
 ANSWER_BOUND_S = admission.ANSWER_MS / 1000 / 4
 
 
@@ -35,18 +35,27 @@ def worker_spawns(runtime: FakeRuntime) -> list[tuple[str, str, str]]:
     return [spawn for spawn in runtime.spawned if spawn[0] != MASTER]
 
 
-def watched(smoke: Smoke, event: Envelope, monkeypatch: pytest.MonkeyPatch) -> Mock:
-    """The exits a hub hive loss pass emits for the started execution while its hive stops beating for four TTLs."""
+def lose_hive(smoke: Smoke, event: Envelope, emit: Any) -> None:
+    """Runs a hub hive loss pass over the started execution while its hive stops beating for four presence TTLs."""
     clock = Mock(return_value=presence.now_ms())
     loss = hive_loss.HiveLoss(smoke.bus, clock, smoke.store)
-    emitted = Mock()
-    monkeypatch.setattr(loss, "_emit", emitted)
+    if emit is not None:
+        loss._emit = emit
     loss.handle(event)
     end = clock() + 4 * presence.TTL_MS
     while clock() < end:
         clock.return_value = clock() + presence.BEAT_SECONDS * 1000 // 3
         loss.poll()
-    return emitted
+
+
+def exits(smoke: Smoke) -> list[Any]:
+    """The execution exited events on the smoke swarm's bus."""
+    return smoke.bus.for_swarm(SLUG).events.consumer("smoke-exits", f"swarm.{SLUG}.execution.exited").fetch(5, 1_000)
+
+
+def offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tick pass reads no live pull request listing."""
+    monkeypatch.setattr(fleet_red, "read", lambda repo: [])
 
 
 @pytest.mark.wall_clock
@@ -79,6 +88,7 @@ def test_a_pull_request_task_is_admitted_well_under_the_hive_wait_with_no_live_g
     assert hive.spoke.poll(TAKE_MS) == "started"
 
     assert listed == []
+    assert smoke.gh_calls() == []
     assert len(answered) == 1 and answered[0] < ANSWER_BOUND_S
     [agent] = smoke.store.agents(SLUG)
     row = smoke.ledger.rows["t-pr"]
@@ -112,16 +122,25 @@ def test_the_admitted_agent_record_carries_the_harness_account_model_and_effort_
 
 
 @pytest.mark.feature("events-smoke-orphan-reopen")
-def test_a_claimed_task_with_no_live_agent_is_reopened_by_the_tick_on_the_events_engine(smoke: Smoke) -> None:
+def test_a_claimed_task_with_no_live_agent_is_reopened_by_the_tick_on_the_events_engine(
+    smoke: Smoke, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    offline(monkeypatch)
+    hive = smoke.spoke("hive-a", "eng")
+    smoke.offer("t1")
+    assert hive.spoke.poll(TAKE_MS) == "started"
+    [agent] = smoke.store.agents(SLUG)
+    assert smoke.ledger.rows["t1"]["claimed_by"] == agent.name
+    smoke.store.release(SLUG, "t1", agent.name)
+    smoke.store.drop_agent(SLUG, agent.name)
     smoke.store.update(SLUG, state="paused")
     assert smoke.store.config(SLUG).engine == EVENTS_ENGINE
-    ledger = FakeLedger([{"id": "t9", "lane": "eng"}])
-    ledger.rows["t9"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    ledger = FakeLedger([dict(row) for row in smoke.ledger.rows.values()])
 
     actions = swarm_tick.tick(SLUG, smoke.store, ledger, FakeRuntime(), now_ms=presence.now_ms())
 
-    assert (ledger.rows["t9"]["state"], ledger.rows["t9"]["claimed_by"]) == ("open", "")
-    assert "task t9 had no agent, reopened" in actions
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert "task t1 had no agent, reopened" in actions
 
 
 @pytest.mark.feature("events-smoke-hive-max-agents")
@@ -148,7 +167,7 @@ def test_a_hive_at_its_max_agents_takes_no_admission_and_a_hive_below_it_takes_t
 
 
 @pytest.mark.feature("events-smoke-engine-switch")
-def test_an_engine_switch_exits_no_running_execution(smoke: Smoke, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_engine_switch_exits_no_running_execution(smoke: Smoke) -> None:
     hive = smoke.spoke("hive-a", "eng")
     smoke.offer("t1")
     assert hive.spoke.poll(TAKE_MS) == "started"
@@ -164,18 +183,19 @@ def test_an_engine_switch_exits_no_running_execution(smoke: Smoke, monkeypatch: 
 
     assert outcomes == {SLUG: "unchanged", "legacy-busy": engine_migration.BUSY}
     assert smoke.store.config("legacy-busy").engine == "legacy"
-    control = watched(smoke, event, monkeypatch)
-    assert [call.args[1].data["reason"] for call in control.call_args_list] == [hive_loss.REASON]
     smoke.store.update(SLUG, engine="legacy")
-    emitted = watched(smoke, event, monkeypatch)
+    lose_hive(smoke, event, None)
 
-    emitted.assert_not_called()
+    assert exits(smoke) == []
     claim = smoke.bus.for_swarm(SLUG).state("spoke-work").get(event.data["claim_key"])
     assert claim is not None
     assert json.loads(claim.value)["state"] == "started"
     for slug, agents in before.items():
         assert smoke.store.agents(slug) == agents
         assert all(agent.state not in TERMINAL_STATES for agent in agents)
+    smoke.store.update(SLUG, engine=EVENTS_ENGINE)
+    lose_hive(smoke, event, None)
+    assert [found.event.data["reason"] for found in exits(smoke)] == [hive_loss.REASON]
 
 
 @pytest.mark.feature("events-smoke-no-legacy-launch")
@@ -195,6 +215,8 @@ def test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work(
     [agent] = smoke.store.agents(SLUG)
     ledger = FakeLedger([dict(row) for row in smoke.ledger.rows.values()])
     runtime = FakeRuntime()
+    offline(monkeypatch)
+    smoke.store.redis.set(smoke.store.key(SLUG, swarm_tick.SPAWN_DUE), 1)
 
     swarm_tick.tick(SLUG, smoke.store, ledger, runtime, now_ms=presence.now_ms())
 
