@@ -256,6 +256,15 @@ def test_items_waiting_before_the_session_opened_arrive_once_it_lists_its_tools(
 
 
 @pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_the_heartbeat_is_due_exactly_one_period_after_the_last(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(channel.time, "monotonic", lambda: 1000.0 + channel.HEARTBEAT_S)
+    assert channel._heartbeat("bob", 1000.0, 3) == 1000.0 + channel.HEARTBEAT_S
+    assert "push loop alive for bob; 3 items pushed" in capsys.readouterr().err
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
 def test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed(
     store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -345,15 +354,6 @@ def test_the_push_loop_writes_a_heartbeat_on_stderr(
     assert len(beats) >= 2
     assert any(line.endswith("push loop alive for bob; 1 items pushed") for line in beats)
     assert "agentihooks inbox channel: push loop for bob waiting for the tools list" in logged
-
-
-@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
-def test_the_heartbeat_is_due_exactly_one_period_after_the_last(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(channel.time, "monotonic", lambda: 1000.0 + channel.HEARTBEAT_S)
-    assert channel._heartbeat("bob", 1000.0, 3) == 1000.0 + channel.HEARTBEAT_S
-    assert "push loop alive for bob; 3 items pushed" in capsys.readouterr().err
 
 
 @pytest.mark.feature("inbox-channel-push-survives-failed-pass")
