@@ -878,6 +878,36 @@
       ]
     },
     {
+      "id": "operator-master-up-resume-retired-master",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",
+      "behaviour": "Operator master up that brings back a master the swarm already retired restores its ended execution with its generation and start time, so the record write after the pane opens is accepted, the master holds its seat and swarm handoff resolves it, chosen by flag or by answering the prompt.",
+      "seam": "agentihooks swarm master up --last",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_master_the_swarm_retired_resumes_into_its_own_execution"
+      ]
+    },
+    {
+      "id": "operator-master-up-resume-second-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",
+      "behaviour": "Operator master up that brings back a master of a second master seat keeps that master in its own seat and task instead of rewriting it to the front door seat the registry refuses.",
+      "seam": "agentihooks swarm master up --last",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_second_seat_master_resumes_in_its_own_seat_not_the_front_door"
+      ]
+    },
+    {
+      "id": "operator-master-up-resume-retires-failed-pane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",
+      "behaviour": "When a record write fails after operator master up resumed the last master's pane, that pane is retired and the master's exit from its seat recorded before a new master is offered and started.",
+      "seam": "agentihooks swarm master up",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_record_write_refused_after_the_pane_resumed_retires_that_pane_before_a_new_master"
+      ]
+    },
+    {
       "id": "operator-dead-starting-front-door",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
