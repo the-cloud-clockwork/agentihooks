@@ -77,13 +77,10 @@ def run(*argv):
 
 def started(env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentRecord]) -> list[AgentRecord]:
     """Starts swarm ``sw`` and seats an agent on t1 and on t2 through hub admission from the tick's own hive, each
-    running in the fake runtime as its hive's launch leaves it; the runtime retires their panes as it retires any
-    agent."""
+    running in the fake runtime as its hive's launch leaves it."""
     run("sw", "start")
-    runtime = env[2]
     agents = [seat(task, hive=commands.hive_id()) for task in ("t1", "t2")]
-    runtime.live.update(agent.name for agent in agents)
-    setattr(runtime, "retire_pane", runtime.retire)
+    env[2].live.update(agent.name for agent in agents)
     return agents
 
 

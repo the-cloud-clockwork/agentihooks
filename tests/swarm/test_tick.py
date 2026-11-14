@@ -176,6 +176,10 @@ class FakeRuntime:
         self.closed.append(agent.pane_id)
         return True
 
+    def retire_pane(self, agent: AgentRecord, homes: tuple[str, ...] = ()) -> bool:
+        """Retires the pane of an execution backed agent with no process target as ``retire`` retires any agent."""
+        return self.retire(agent, homes)
+
     def refusal(self, agent):
         return self.refusals.get(agent.name, {"process": 0, "refusal": "stuck"})
 
