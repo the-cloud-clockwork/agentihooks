@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.890 · 2026-11-14
+
+### 2026-11-14 · c079742f3d2e · #11214 · @agenticore-app
+
+**Quiet gate measures a resumed worker from its launch**
+
+This fix corrects the quiet claim gate so it measures idle time from a worker's most recent launch, not just its original start. Previously, a dead pane resumed via `dead_resume.reopen` kept its original `started_at` while only updating `launched_at`, so if more than thirty minutes had passed since its last progress signal, it was wrongly flagged quiet, blocking tool calls and triggering stale claim findings. Now `last_signal` also considers `launched_at`, leaving never-resumed agents unaffected while correctly tracking resumed ones.
+
 ## v2.17.889 · 2026-11-14
 
 ### 2026-11-14 · 0b33b2dbcd45 · #11242 · @agenticore-app
