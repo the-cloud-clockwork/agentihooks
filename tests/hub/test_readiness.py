@@ -1,3 +1,4 @@
+import json
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
@@ -164,13 +165,22 @@ def test_snapshot_holds_a_task_red_only_from_checks_failing_across_its_repositor
             OpenChange(f"https://github.com/x/y/pull/{n}", checks) for n, checks in enumerate([mine, *others], start=1)
         ]
 
+    saved: dict[str, str] = {}
+
+    def save(conclusion: str) -> None:
+        rows = [[p.url, [[c.name, c.result, c.at] for c in p.checks]] for p in listing(conclusion)]
+        saved["rig:fleet-red-pulls:x/y"] = json.dumps(rows)
+
     reads = []
     monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or listing("FAILURE"))
+    store.key.side_effect = lambda slug, name: f"{slug}:{name}"
+    store.redis.get.side_effect = saved.get
     provider = readiness.Source(store, ledger)
+    save("FAILURE")
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
-    assert reads == ["x/y"]
-    monkeypatch.setattr(fleet_red, "read", lambda repo: listing("SUCCESS"))
+    save("SUCCESS")
     assert readiness.claimable(row, "eng", provider.snapshot("rig"))
+    assert reads == []
 
 
 def test_readiness_passes_export_a_large_ledger_once_per_revision(monkeypatch):
