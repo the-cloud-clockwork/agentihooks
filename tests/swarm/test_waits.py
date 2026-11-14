@@ -1,4 +1,6 @@
 import json
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -9,6 +11,7 @@ from scripts.swarm import cli, idle, merge_queue, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import head as github_head
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from tests.helpers.seat import seat  # noqa: F401
 from tests.swarm.graph_port import view as github_view
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
@@ -26,10 +29,15 @@ FINISH_TURN = (
 
 
 @pytest.fixture
-def started(env, monkeypatch):  # noqa: F811
+def started(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    seat: Callable[..., AgentRecord],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RedisStore, Any]:
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat("t1")
+    seat("t2")
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False, head="first"))
