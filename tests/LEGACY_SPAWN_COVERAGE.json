@@ -1,0 +1,135 @@
+{
+  "features": {
+    "engine-config-migration": {
+      "covered_by": [
+        "tests/swarm/test_engine_migration.py::test_every_stored_legacy_config_moves_to_events_with_an_origin_the_doctor_included",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_takes_the_origin_of_its_peer_and_a_watched_swarm_keeps_its_own",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin"
+      ]
+    },
+    "events-smoke-no-legacy-launch": {
+      "retires": "The clause that the tick lane launch is never called patches the legacy spawn function the removal deletes; the removal drops that patch and keeps the no worker spawn and open task assertions."
+    },
+    "hive-stop-recovery-handoff": {
+      "gap": "The events hub admission claim carries no handoff document text, so a successor primed with a recovery handoff exists only on the legacy spawn; ported by the handoff text follow up."
+    },
+    "swarm-agent-record-launch-decision-at-spawn": {
+      "retires": "The detached launch job and successor retry clauses retire with the launch job module."
+    },
+    "swarm-claim-lives": {
+      "covered_by": [
+        "tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution",
+        "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
+      ]
+    },
+    "swarm-focus": {
+      "covered_by": [
+        "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
+        "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
+        "tests/swarm/test_events_placement.py::test_focused_offers_go_out_by_rank_band_then_focus_record_order",
+        "tests/swarm/test_events_placement.py::test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band",
+        "tests/swarm/test_events_placement.py::test_a_focused_offer_goes_out_before_an_urgent_doctor_fix_outside_the_focus"
+      ],
+      "gap": "The dispatcher band over ledger rank and the demotion of a task whose launch failed order only the legacy spawn; the hub readiness offers hold no dispatcher claim key or demotion list, filed as a follow up."
+    },
+    "swarm-freeze": {
+      "covered_by": [
+        "tests/swarm/test_freeze.py::test_a_task_under_a_frozen_node_or_matching_a_frozen_selector_is_held",
+        "tests/swarm/test_freeze.py::test_a_claimed_task_under_a_new_freeze_keeps_its_agent"
+      ]
+    },
+    "swarm-handoff-binding": {
+      "covered_by": [
+        "tests/handoff/test_transfers.py::test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start"
+      ]
+    },
+    "swarm-launch-bounded-reads": {
+      "covered_by": [
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_reads_every_field_across_pages",
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_stops_after_its_page_bound",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set"
+      ]
+    },
+    "swarm-launch-check": {
+      "covered_by": [
+        "tests/swarm/test_launch_check.py::test_a_clean_launch_passes",
+        "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched",
+        "tests/swarm/test_launch_check.py::test_not_joined_is_named"
+      ]
+    },
+    "swarm-master-skips-host-hold": {
+      "covered_by": [
+        "tests/swarm/test_master_fill.py::test_a_full_host_never_holds_the_seat"
+      ],
+      "retires": "The held engineer clause is the legacy spawn host room hold."
+    },
+    "swarm-reclaim": {
+      "gap": "The events hub admission claim never resolves a continuation, so a reclaimed task continues from its recorded branch only on the legacy spawn; ported by the continuation resolve follow up."
+    },
+    "swarm-restore-decision": {
+      "covered_by": [
+        "tests/swarm/test_restore_decisions.py::test_retry_resume_and_explicit_fresh_are_separate_choices",
+        "tests/swarm/test_handoff_commands.py::test_a_worker_cannot_decide_another_seats_restore"
+      ]
+    },
+    "swarm-spawn-claim-before-launch": {
+      "covered_by": [
+        "tests/hub/test_admission.py::test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed",
+        "tests/hub/test_admission.py::test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent",
+        "tests/hub/test_admission.py::test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent"
+      ]
+    },
+    "swarm-spawn-order-once-per-pass": {
+      "covered_by": [
+        "tests/swarm/test_spawn_order_budget.py::test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds",
+        "tests/swarm/test_spawn_order_budget.py::test_the_freeze_index_is_built_once_per_freeze_list",
+        "tests/tick/steps/test_claim_order.py::test_ready_by_lane_orders_every_lane_from_one_claim_view"
+      ],
+      "retires": "The spawn pass claim order and its replayed ledger timing clauses retire with the legacy spawn pass."
+    },
+    "swarm-tick-cached-ledger": {
+      "covered_by": [
+        "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
+        "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
+        "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing"
+      ]
+    },
+    "swarm-tick-launch-budget": {
+      "retires": "The launch budget bounds the legacy spawn pass."
+    },
+    "swarm-tick-launch-cluster": {
+      "retires": "The behaviour is the legacy launch cluster the spawn step drives."
+    },
+    "swarm-tick-panic-holds-spawn": {
+      "covered_by": [
+        "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ],
+      "retires": "The spawn due clause retires with the spawn due marker; the dispatch seat clause stays covered."
+    },
+    "swarm-tick-spawn": {
+      "retires": "The behaviour is the legacy tick spawn step itself."
+    },
+    "tick-runtime-port-fence": {
+      "covered_by": [
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_fences_its_pass_runtime_and_acts_through_the_fenced_one_after",
+        "tests/tick/test_runtime_port_fence.py::test_a_runtime_port_without_a_fence_refuses_to_fence",
+        "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
+      ],
+      "retires": "The ack pass clauses retire with the legacy launch acknowledgement collection."
+    },
+    "tick-spawn-metrics-processes": {
+      "covered_by": [
+        "tests/tick/test_spawn_metrics_ports.py::test_a_failing_claim_cap_writes_its_fail_open_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port"
+      ],
+      "retires": "The process table rescan clause belongs to the legacy spawn launch."
+    },
+    "tick-time-left-server-error": {
+      "covered_by": [
+        "tests/swarm/test_tick_time_left.py::test_under_events_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_reaping"
+      ]
+    }
+  }
+}

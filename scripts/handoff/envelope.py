@@ -5,8 +5,9 @@ A fact the runtime looked for and could not find is "unknown"; one it found abse
 
 import json
 import subprocess
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timezone
+from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import effort_range, publish, snapshot
@@ -113,17 +114,22 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
+def candidates(lives: list[str], recorded: str) -> list[str]:
+    """The branches a reclaim checks: the recorded one, else each earlier life's branch once."""
+    return [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
+
+
 def reclaim(
     repo: str,
     lives: list[str],
     recorded: str,
-    run=subprocess.run,
+    run: Callable[..., Any] = subprocess.run,
     forbidden: Collection[str] = (),
     heads: Mapping[str, str] | None = None,
-) -> dict:
-    checked = [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
-    checked = [branch for branch in checked if branch not in forbidden]
-    unread = []
+) -> dict[str, str]:
+    """Where a reclaimed task continues: the first checked branch with a remote head, else fresh and why."""
+    checked = [branch for branch in candidates(lives, recorded) if branch not in forbidden]
+    unread: list[str] = []
     for branch in checked:
         head = _remote_head(repo, branch, run) if heads is None else heads.get(branch, NONE)
         if head == UNKNOWN:
@@ -165,7 +171,8 @@ def _remote_head(worktree, remote, run):
     return done.stdout.split()[0] if done.returncode == 0 else UNKNOWN
 
 
-def remote_heads(repo: str, run=subprocess.run) -> dict[str, str] | None:
+def remote_heads(repo: str, run: Callable[..., Any] = subprocess.run) -> dict[str, str] | None:
+    """Every branch head on the checkout's origin; None when the remote could not be listed."""
     argv = ["git", "-C", repo, "ls-remote", "--heads", "origin"]
     try:
         done = run(argv, capture_output=True, text=True, timeout=20)

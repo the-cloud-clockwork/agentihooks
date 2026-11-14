@@ -4,6 +4,7 @@ Distinct from the Priorities panel, which holds operator decisions. `next` is an
 """
 
 import re
+from typing import Any
 
 from scripts.swarm_ledger import ports
 
@@ -26,7 +27,7 @@ def canonical(value) -> str:
     return rank
 
 
-def order(task: dict) -> int:
+def order(task: dict[str, Any]) -> int:
     rank = task.get("rank")
     if rank not in RANKS:
         rank = RANKS[-1] if generated(task) else DEFAULT
