@@ -67,7 +67,7 @@ class Source:
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
         released = release_wait.checker(config)
         applied = apply_wait.checker(config, rows)
-        unshared = fleet_red.checker()
+        unshared = fleet_red.checker(fleet_red.saved_reader(self._store, slug))
         return Snapshot(
             slug,
             rows,

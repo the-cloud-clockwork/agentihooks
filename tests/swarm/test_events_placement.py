@@ -325,7 +325,12 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
     )
     runtime = Mock()
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a")
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(
+            pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+        ),
     )
 
     assert lanes.run_once(configs, scoped, runtime, ROOT, ("eng",), 0, {}) == ["started"]

@@ -257,7 +257,7 @@
   "scripts/doctor/ci_read.py": 182,
   "scripts/doctor/ci_speed.py": 349,
   "scripts/doctor/ci_speed_read.py": 131,
-  "scripts/doctor/cli.py": 533,
+  "scripts/doctor/cli.py": 500,
   "scripts/doctor/context_overruns.py": 8,
   "scripts/doctor/detect.py": 292,
   "scripts/doctor/features.py": 14,

@@ -315,6 +315,75 @@ def test_set_pane_on_an_earlier_run_of_a_live_name_keeps_the_latest_projection(s
     assert store.redis.hgetall(store.key("fixture", "agents")) == live
 
 
+DECISION = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_set_launch_writes_the_decision_onto_the_live_head_and_its_projection(store):
+    current = started(store, "eng-1@fixture")
+
+    assert store.execution_registry.set_launch("fixture", current.execution_id, DECISION) is True
+
+    record = store.execution("fixture", current.execution_id)
+    [agent] = store.agents("fixture")
+    assert {field: getattr(record, field) for field in DECISION} == DECISION
+    assert (record.name, record.seat, record.state) == (current.name, current.seat, current.state)
+    assert {field: getattr(agent, field) for field in DECISION} == DECISION
+    assert (agent.name, agent.seat, agent.execution_id) == (current.name, "eng-1@fixture", current.execution_id)
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_set_launch_never_shows_an_agent_dropped_during_the_write(store, monkeypatch):
+    from scripts.swarm import execution
+
+    current = started(store, "eng-1@fixture")
+    project = store.project_agent
+    writes = execution._writes
+    locked = []
+
+    def lock(slug):
+        locked.append(slug)
+        return writes(slug)
+
+    def dropped_first(slug, *args, **kwargs):
+        store.redis.hdel(store.key(slug, "agents"), current.name)
+        return project(slug, *args, **kwargs)
+
+    monkeypatch.setattr(execution, "_writes", lock)
+    monkeypatch.setattr(store, "project_agent", dropped_first)
+
+    assert store.execution_registry.set_launch("fixture", current.execution_id, DECISION) is True
+
+    assert locked == ["fixture"]
+    assert store.execution("fixture", current.execution_id).harness == "codex"
+    assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
+
+
+@pytest.mark.feature("events-launch-decision-record")
+@pytest.mark.parametrize("which", ["replaced", "dropped", "unknown", "earlier", "unlisted"])
+def test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head(store, which):
+    first, _, _, other = history(store)
+    agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
+    earlier = store.start_execution("fixture", agent)
+    store.start_execution("fixture", replace(agent, state="working"), earlier.execution_id)
+    unlisted = started(store, "eng-4@fixture")
+    store.redis.hdel(store.key("fixture", "agents"), unlisted.name)
+    execution_id = {
+        "replaced": first.execution_id,
+        "dropped": other.execution_id,
+        "unknown": "missing",
+        "earlier": earlier.execution_id,
+        "unlisted": unlisted.execution_id,
+    }[which]
+    executions = section(store, "executions")
+    live = store.redis.hgetall(store.key("fixture", "agents"))
+
+    assert store.execution_registry.set_launch("fixture", execution_id, DECISION) is False
+
+    assert section(store, "executions") == executions
+    assert store.redis.hgetall(store.key("fixture", "agents")) == live
+
+
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
     agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
     one = store.start_execution("fixture", agent)
