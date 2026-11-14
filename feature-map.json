@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "swarm-resume-keeps-execution-identity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-started-at-sites",
+      "behaviour": "A snapshot restore that reopens an agent's conversation, an outage recovery that reopens a dead owner's conversation and an outage recovery that restarts a dead owner from its handoff keep that execution's identity and start time, record the new launch time, and leave the record stored, so the store never refuses the write as a changed execution identity.",
+      "seam": "agentihooks swarm restore and the tick outage recovery pass, through resume.reopen and resume.recover_outages",
+      "tests": [
+        "tests/swarm/test_resume.py::test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resume_as_launch",
+        "tests/swarm/test_outage_resume.py::test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch",
+        "tests/swarm/test_outage_resume.py::test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the_restart_as_launch"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
