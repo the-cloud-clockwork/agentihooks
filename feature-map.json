@@ -2755,7 +2755,8 @@
         "tests/test_profile_render_login.py::test_the_next_render_replaces_a_home_holding_a_credentials_link",
         "tests/test_profile_render_login.py::test_the_master_home_keeps_its_login_credentials_link",
         "tests/test_profile_render_login.py::test_a_render_drops_the_link_from_an_older_home_a_running_worker_holds",
-        "tests/test_master_claude_login_isolation.py::test_the_master_login_home_never_touches_the_shared_credential_link"
+        "tests/test_master_claude_login_isolation.py::test_the_master_login_home_never_touches_the_shared_credential_link",
+        "tests/test_profile_render_login.py::test_the_master_is_named_by_its_chain_with_or_without_the_package_prefix"
       ]
     },
     {

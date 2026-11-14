@@ -56,3 +56,12 @@ def test_a_render_drops_the_link_from_an_older_home_a_running_worker_holds(world
     assert older.is_dir()
     assert not (older / LOGIN).is_symlink()
     assert not (out / LOGIN).is_symlink()
+
+
+@pytest.mark.feature("render-no-login-credentials")
+@pytest.mark.parametrize(
+    ("chain", "master"),
+    [(["package:master"], True), (["master", "brain"], True), (["package:engineer", "brain"], False)],
+)
+def test_the_master_is_named_by_its_chain_with_or_without_the_package_prefix(chain: list[str], master: bool) -> None:
+    assert render._is_master([(name, Path(name)) for name in chain]) is master
