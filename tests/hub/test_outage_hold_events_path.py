@@ -311,4 +311,4 @@ def test_the_outage_probes_step_shares_the_tick_outages(rig: SimpleNamespace, mo
         outage.observe(SLUG, "ledger", ["Ledger health probe failed"], NOW)
         values = {"store": rig.store, "slug": SLUG, "runtime": None}
         host._outage_probes(SimpleNamespace(now_ms=lambda: NOW), values.__getitem__)
-    assert [record["kind"] for record in outage.shared_open(rig.store, SLUG)] == ["ledger"]
+    assert [record["kind"] for record in outage.shared_open(rig.store, SLUG, NOW)] == ["ledger"]
