@@ -14,7 +14,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events
 from scripts.hub import claims, lifecycle, reconciler
-from scripts.swarm import launch_check
+from scripts.swarm import launch_check, readiness
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_KILL_TICKS
@@ -88,7 +88,7 @@ def launched(
     running = replace(agent, state="working", pane_id="w1:p1", started_at=NOW, launched_at=NOW)
     store.put_agent(SLUG, running)
     rt.live.add(agent.name)
-    event = start_event(running, ledger.rows["t1"].get("claim_generation", 0))
+    event = start_event(running, readiness.generation(ledger.rows["t1"]))
     execution_events.started(bus, event)
     claims.Claims(store).handle(event)
     assert store.claims(SLUG, "t1") == 1
@@ -131,14 +131,15 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
 
 
 @pytest.mark.feature("events-parked-retirement-after-release-refunds-nothing")
-@pytest.mark.parametrize("released, lives", [(True, 1), (False, 0)])
+@pytest.mark.parametrize("released, expected_claims", [(True, 1), (False, 0)])
 def test_an_events_exit_of_a_quota_handoff_refunds_nothing_once_its_claim_was_released(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], released: bool, lives: int
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], released: bool, expected_claims: int
 ) -> None:
     store, ledger, _ = env
     agent, event = launched(env, bus, seat)
     store.put_handoff(SLUG, "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
-    assert (released and store.release(SLUG, "t1", agent.name)) == released
+    if released:
+        assert store.release(SLUG, "t1", agent.name)
     bus.for_swarm(SLUG).state("spoke-work").create(
         "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
     )
@@ -147,4 +148,4 @@ def test_an_events_exit_of_a_quota_handoff_refunds_nothing_once_its_claim_was_re
     react.handle(replace(event, id=f"exited:{agent.execution_id}", type="execution.exited"))
 
     assert [seated.name for seated in store.agents(SLUG)] == []
-    assert store.claims(SLUG, "t1") == lives
+    assert store.claims(SLUG, "t1") == expected_claims
