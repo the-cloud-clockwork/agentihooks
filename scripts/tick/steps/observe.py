@@ -3,7 +3,6 @@
 # pyright: reportUnusedFunction=false
 
 import json
-import sys
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
@@ -13,7 +12,7 @@ from types import MappingProxyType
 from typing import Any
 
 from scripts.swarm.ledger_client import LedgerOffline
-from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
@@ -371,72 +370,6 @@ def _acknowledging(slug: str, store: Any, agent: Any) -> bool:
         return False
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)
     return bool(raw) and json.loads(raw).get("state") in (tick.ACKNOWLEDGING, "launching")
-
-
-def _expire_launch(config: SwarmConfig, runtime: Any, agent: Any, error: Exception) -> Exception:
-    try:
-        kept = runtime.expire(
-            config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, tick.ACK_LATER: True}
-        )
-    except Exception as exc:
-        return RuntimeError(f"expiring the launch raised {exc!r}")
-    return error if kept is False else tick.SpawnError(tick.ACK_EXPIRED)
-
-
-def _finished_launch(slug: str, store: Any, doc: dict[str, Any], agent: Any) -> str:
-    tick._release_hive_launch(slug, store, agent)
-    store.count_claim(slug, agent.task)
-    store.count_spawn(slug, agent.harness)
-    store.record_launch(
-        slug, agent, "started", after=store.take_restart(slug, agent.task) or tick._master_set(doc, agent.task)
-    )
-    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
-    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
-
-
-def _collect_acks(
-    slug: str, config: SwarmConfig, store: Any, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
-) -> list[str]:
-    from scripts.swarm import launch_job
-    from scripts.swarm_v2.runtime import codex
-
-    rows = {t["id"]: t for t in doc["tasks"]}
-    actions: list[str]
-    pending: set[str]
-    actions, pending = (
-        ([], set())
-        if config.engine == EVENTS_ENGINE
-        else launch_job.collect(tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms))  # pyright: ignore[reportUnknownMemberType]
-    )
-    for agent in [
-        a
-        for a in store.agents(slug)
-        if readiness.tick_launches(config.engine) and tick._acknowledging(slug, store, a) and a.name not in pending
-    ]:
-        task = rows.get(agent.task) or {"id": agent.task}
-        try:
-            placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, tick.ACK_LATER: True})
-            if agent.state == "finished":
-                actions.append(tick._finished_launch(slug, store, doc, agent))
-                continue
-            launched = codex.admit_legacy(store, slug, tick.placed_record(agent, placed), runtime)
-        except Exception as exc:
-            error = exc
-            transient = tick._acknowledging_error(exc) or not isinstance(exc, tick.SpawnError | SwarmError)
-            if transient and now_ms - agent.started_at >= tick.LEASE_MS:
-                error = tick._expire_launch(config, runtime, agent, error)
-            if tick._acknowledging_error(error):
-                store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
-            elif isinstance(error, tick.SpawnError | SwarmError):
-                actions += tick._spawn_failed(
-                    slug, store, ledger, runtime, rows, tick.Failed(agent, task, error), now_ms
-                )
-            else:
-                print(f"{agent.name} collect for {task['id']} raised {error!r}, waiting for the hive", file=sys.stderr)
-                store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
-            continue
-        actions += tick._started(slug, config, store, ledger, doc, tick.Started(agent, task, placed, launched), now_ms)
-    return actions
 
 
 STEPS = (

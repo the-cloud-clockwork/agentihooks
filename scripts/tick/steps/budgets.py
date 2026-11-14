@@ -103,7 +103,6 @@ FLOORS: dict[str, Timing] = {
     "dispatcher group": Timing(LIGHT_S, CRITICAL_S),
     "settle": Timing(LIGHT_S, CRITICAL_S),
     "close space": Timing(LIGHT_S, CRITICAL_S),
-    "collect acks": Timing(7.0, CRITICAL_S),
     "codex hook order": Timing(LIGHT_S, CRITICAL_S),
     "rank pass": Timing(7.0, CRITICAL_S),
     "bottleneck remedy": Timing(LIGHT_S, CRITICAL_S),
