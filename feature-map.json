@@ -2792,6 +2792,21 @@
       ]
     },
     {
+      "id": "render-no-login-credentials",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-render-no-credentials-link",
+      "behaviour": "A rendered Claude profile home never links the login credentials file to the operator login home unless its chain is the master profile, so engineer, ci and planner sessions cannot read or inherit the master claude ai login while the master keeps its interactive login; a worker home that still holds such a link is stale, and the next render replaces it and drops the link from every older home rendered under the same key.",
+      "seam": "render_claude and its freshness check _claude_fresh in scripts.profiles.render",
+      "tests": [
+        "tests/test_profile_render_login.py::test_a_rendered_engineer_home_has_no_credentials_link_to_the_login_home",
+        "tests/test_profile_render_login.py::test_the_next_render_replaces_a_home_holding_a_credentials_link",
+        "tests/test_profile_render_login.py::test_the_master_home_keeps_its_login_credentials_link",
+        "tests/test_profile_render_login.py::test_a_render_drops_the_link_from_an_older_home_a_running_worker_holds",
+        "tests/test_master_claude_login_isolation.py::test_the_master_login_home_never_touches_the_shared_credential_link",
+        "tests/test_profile_render_login.py::test_the_master_is_named_by_its_chain_with_or_without_the_package_prefix"
+      ]
+    },
+    {
       "id": "hook-redis-reuse",
       "origin": "inventory",
       "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
