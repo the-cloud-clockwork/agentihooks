@@ -17,13 +17,11 @@ def typed_unchecked(payload: dict, env: dict) -> bool:
     return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))
 
 
-class Checked:
-    @staticmethod
-    def typed_unchecked(payload: dict, env: dict) -> bool:
-        if scheduled_prompts.fired(payload.get("session_id") or "", payload.get("prompt")):
-            return False
-        if env.get("AGENTIHOOKS_AGENT_NAME"):
-            # ok: presence-counts-scheduled-prompts
-            return heard(payload)
+def typed_checked(payload: dict, env: dict) -> bool:
+    if scheduled_prompts.fired(payload.get("session_id") or "", payload.get("prompt")):
+        return False
+    if env.get("AGENTIHOOKS_AGENT_NAME"):
         # ok: presence-counts-scheduled-prompts
-        return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))
+        return heard(payload)
+    # ok: presence-counts-scheduled-prompts
+    return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))
