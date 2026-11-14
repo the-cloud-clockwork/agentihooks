@@ -6359,6 +6359,21 @@
       ]
     },
     {
+      "id": "events-outage-hold-hub-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-hold-hub",
+      "behaviour": "On an events engine swarm on a nats bus, whose engineer the hive spoke started so the tick reap leaves it to the hub, an exit the hub reads while a Redis, ledger or provider outage is open, or while an outage resume is pending for the engineer, neither drops the agent, reopens its task, releases its claim nor returns its slot; after the outage closes the outage resume prompt reaches its pane, and once nothing holds it the exit retires and reclaims as before.",
+      "seam": "Reconciler.poll and the lifecycle reactor through Lifecycle.handle, with resume.track_outages and resume.recover_outages",
+      "tests": [
+        "tests/hub/test_outage_hold_events_path.py::test_the_engineer_is_hub_owned_on_a_nats_bus",
+        "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_holds_a_hub_agent_whose_hive_is_lost",
+        "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_holds_the_exit_the_spoke_published",
+        "tests/hub/test_outage_hold_events_path.py::test_a_pending_outage_resume_holds_the_exit_after_the_outage_closed",
+        "tests/hub/test_outage_hold_events_path.py::test_after_recovery_the_held_hub_agent_gets_the_resume_prompt",
+        "tests/hub/test_outage_hold_events_path.py::test_once_no_outage_holds_it_the_exit_retires_and_reclaims"
+      ]
+    },
+    {
       "id": "swarm-tick-legacy-lane-fill",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-tick",
