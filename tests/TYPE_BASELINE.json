@@ -614,7 +614,7 @@
   "scripts/swarm/model_pick.py": 38,
   "scripts/swarm/mutation_wait.py": 274,
   "scripts/swarm/name_state.py": 3,
-  "scripts/swarm/naming.py": 505,
+  "scripts/swarm/naming.py": 510,
   "scripts/swarm/operator_email.py": 33,
   "scripts/swarm/operator_mail.py": 134,
   "scripts/swarm/outage.py": 218,

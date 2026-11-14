@@ -114,6 +114,11 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
+def candidates(lives: list[str], recorded: str) -> list[str]:
+    """The branches a reclaim checks: the recorded one, else each earlier life's branch once."""
+    return [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
+
+
 def reclaim(
     repo: str,
     lives: list[str],
@@ -123,8 +128,7 @@ def reclaim(
     heads: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Where a reclaimed task continues: the first checked branch with a remote head, else fresh and why."""
-    checked: list[str] = [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
-    checked = [branch for branch in checked if branch not in forbidden]
+    checked = [branch for branch in candidates(lives, recorded) if branch not in forbidden]
     unread: list[str] = []
     for branch in checked:
         head = _remote_head(repo, branch, run) if heads is None else heads.get(branch, NONE)

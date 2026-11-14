@@ -6,12 +6,11 @@ from functools import partial
 from typing import Any
 
 from scripts.handoff import envelope
-from scripts.swarm import merge_queue, naming, stack
+from scripts.swarm import merge_queue, stack
 from scripts.swarm.store import SwarmConfig, SwarmError
 
 TIMEOUT_S = 3
 Reclaim = Callable[..., dict[str, str]]
-plain: Callable[[str], str] = naming.plain
 
 
 def heads(origin: str, branches: Collection[str], run: Callable[..., Any] = subprocess.run) -> dict[str, str]:
@@ -52,8 +51,7 @@ def reclaimer(config: SwarmConfig) -> tuple[Reclaim, str]:
         return partial(envelope.reclaim, heads=envelope.remote_heads(config.repo)), stack.origin_key(config.repo)
 
     def reclaim(repo: str, lives: list[str], recorded: str, forbidden: Collection[str] = ()) -> dict[str, str]:
-        checked = [recorded] if recorded else [plain(name) for name in lives]
-        found = heads(config.repo_origin, checked)
+        found = heads(config.repo_origin, envelope.candidates(lives, recorded))
         return envelope.reclaim(repo, lives, recorded, forbidden=forbidden, heads=found)
 
     return reclaim, stack.repo_key(config.repo_origin)
