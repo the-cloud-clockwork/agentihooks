@@ -48,3 +48,43 @@ def test_hive_runtime_account_refusal_does_not_launch(tmp_path, monkeypatch):
             {"id": "one", "title": "work", "account_slot_hive": "hive-a", "execution_id": "execution-a"},
         )
     assert terminated == ["agent-a"]
+
+
+@pytest.mark.feature("hive-saved-account-slot-preference")
+@pytest.mark.parametrize("room,routed", [(False, []), (True, ["full-account"])])
+def test_a_saved_handoff_account_routes_a_hive_launch_only_while_its_account_slot_has_a_worker_seat(
+    tmp_path, monkeypatch, room, routed
+):
+    from scripts.hive import account_slots
+
+    asked, calls = [], []
+
+    def answer(hive, execution, harness, account):
+        asked.append((hive, execution, harness, account))
+        return room
+
+    monkeypatch.setattr(account_slots, "room", answer, raising=False)
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="rig", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    runtime.spawn(
+        config,
+        "eng",
+        "agent-a",
+        {
+            "id": "one",
+            "title": "work",
+            "account_slot_hive": "hive-a",
+            "execution_id": "execution-a",
+            "handoff_envelope": {"launch": {"profile": "engineer", "harness": "claude", "account": "full-account"}},
+        },
+    )
+    passed = calls[0][calls[0].index("--") + 1 :]
+    assert [passed[index + 1] for index, arg in enumerate(passed) if arg == "--route"] == routed
+    assert asked == [("hive-a", "execution-a", "claude", "full-account")]

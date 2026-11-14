@@ -13,6 +13,17 @@
       ]
     },
     {
+      "id": "hive-saved-account-slot-preference",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-saved-account-pin",
+      "behaviour": "A hive spoke launch keeps the account saved in a task's exit handoff or relaunch assignment only while the hub account slot holds or takes a worker seat on it for the launching execution; when the slot refuses, the launch passes no account route and the normal account choice runs, so a successor is never pinned to a full account that refuses every launch with no account slot available.",
+      "seam": "HerdrRuntime.spawn for a task with an account slot hive and a saved account, through account_slots.room",
+      "tests": [
+        "tests/swarm/test_runtime_account_slots.py::test_a_saved_handoff_account_routes_a_hive_launch_only_while_its_account_slot_has_a_worker_seat",
+        "tests/hive/test_account_slots.py::test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the_execution"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",

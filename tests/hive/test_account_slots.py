@@ -154,6 +154,30 @@ def test_launch_selects_only_the_requested_harness_and_account(rig):
     assert first.take("two", "codex", "other") == "other"
 
 
+@pytest.mark.feature("hive-saved-account-slot-preference")
+@pytest.mark.parametrize("cap,sessions,expected", [(1, 0, True), (1, 1, False), (0, 0, False)])
+def test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the_execution(
+    monkeypatch, cap, sessions, expected
+):
+    from scripts.events import factory
+    from scripts.hive import account_slots
+
+    bus = open_bus(BusConfig())
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: reading(cap=cap, sessions=sessions))
+    monkeypatch.setattr(bus, "close", lambda: None)
+    assert account_slots.room("one", "execution", "claude", "a") is expected
+    assert account_slots.room("one", "execution", "claude", "missing") is False
+    entry = bus.state("account-slots").get(account_slots.key("claude", "a"))
+    holders = json.loads(entry.value)["holders"] if entry else {}
+    assert ("execution" in holders) is expected
+    assert account_slots.Slots(bus, "one", lambda: reading(cap=cap, sessions=sessions)).take(
+        "execution", "claude", "a"
+    ) == ("a" if expected else None)
+    bus.close()
+
+
 def test_hive_restart_recovers_the_counter_index_and_releases_dead_agents(rig):
     from scripts.hive import account_slots
 
