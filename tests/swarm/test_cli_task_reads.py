@@ -5,6 +5,7 @@ import pytest
 from scripts.handoff import envelope as handoff_envelope
 from scripts.swarm import cli
 from scripts.swarm.store import SwarmError
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import _handoff_doc, env, run
 
 _fixture = env
@@ -15,6 +16,8 @@ def started(env):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(store, ledger, "sw", "t1")
+    seat_agent(store, ledger, "sw", "t2")
     return ledger
 
 

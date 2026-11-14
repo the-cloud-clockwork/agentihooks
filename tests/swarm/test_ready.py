@@ -17,6 +17,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers import store_seed
 from tests.helpers.seat import seat_agent
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
@@ -94,7 +95,7 @@ def seated(store: RedisStore, ledger: Any, runtime: Any) -> None:
         ledger_workspace.scaffold("sw", ledger.task("sw", task_id), ledger.state("sw"))
         live = replace(agent, state="working", pane_id=f"w1:{task_id}")
         store.put_agent("sw", live)
-        store.record_launch("sw", live, "started")
+        store_seed.record_launch(store, "sw", live, "started")
         runtime.live.add(agent.name)
 
 
