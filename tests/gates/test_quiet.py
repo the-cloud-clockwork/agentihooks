@@ -1,6 +1,7 @@
 import io
 import json
 import os
+from typing import Any
 
 import pytest
 
@@ -200,7 +201,7 @@ def test_an_agent_with_no_signal_at_all_is_not_measured(rig):
 
 
 @pytest.mark.feature("quiet-gate-resumed-agent-launch")
-def test_a_resumed_agent_with_old_progress_is_measured_from_its_launch(rig):
+def test_a_resumed_agent_with_old_progress_is_measured_from_its_launch(rig: Any) -> None:
     agent = rig.store.agents(SLUG)[0]
     rig.store.put_agent(SLUG, AgentRecord(**{**agent.__dict__, "launched_at": NOW - 2 * MIN}))
     assert rig.minutes() == {ME: 2}
@@ -210,7 +211,7 @@ def test_a_resumed_agent_with_old_progress_is_measured_from_its_launch(rig):
 
 
 @pytest.mark.feature("quiet-gate-resumed-agent-launch")
-def test_a_later_progress_signal_still_wins_over_an_older_launch(rig):
+def test_a_later_progress_signal_still_wins_over_an_older_launch(rig: Any) -> None:
     agent = rig.store.agents(SLUG)[0]
     rig.store.put_agent(SLUG, AgentRecord(**{**agent.__dict__, "launched_at": NOW - 20 * MIN}))
     Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 5 * MIN)
@@ -218,7 +219,7 @@ def test_a_later_progress_signal_still_wins_over_an_older_launch(rig):
 
 
 @pytest.mark.feature("quiet-gate-resumed-agent-launch")
-def test_a_never_resumed_agent_is_still_measured_from_its_start(rig):
+def test_a_never_resumed_agent_is_still_measured_from_its_start(rig: Any) -> None:
     assert rig.store.agents(SLUG)[0].launched_at == 0
     assert rig.minutes() == {ME: 40}
     assert rig.run() == [f"raised the quiet flag on {ME}: 40 minutes with no progress on task t1"]

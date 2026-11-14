@@ -3,9 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A resume keeps the agent's execution and its started_at, and records the resume time only as launched_at, so a
-      quiet clock measured from started_at without launched_at flags a resumed worker as quiet the moment it comes
-      back and refuses its tool calls. Take launched_at in the same max as started_at.
+      A dead pane resume keeps the agent's execution and its started_at, and records the resume time only as
+      launched_at, so a quiet clock measured from started_at without launched_at flags a worker resumed that way as
+      quiet the moment it comes back and refuses its tool calls. Take launched_at in the same max as started_at.
     paths:
       include:
         - /scripts/gates/quiet.py
