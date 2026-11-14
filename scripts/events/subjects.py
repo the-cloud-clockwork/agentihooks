@@ -4,6 +4,7 @@ from .resource_names import consumer_name
 
 PREFIX = "swarm"
 SLOTS = "slots"
+EXITS = "exits"
 
 _TOKEN = re.compile(r"[^.*>\s]+")
 

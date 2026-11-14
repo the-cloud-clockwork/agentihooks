@@ -244,7 +244,7 @@ def controller_claims() -> dict:
     return {
         **user_claims(),
         "pub": {"allow": list(CONTROLLER_PUBLISH)},
-        "sub": {"allow": ["_INBOX.>", "swarm.*.slots", f"{subjects.SLOTS}.*.*"]},
+        "sub": {"allow": ["_INBOX.>", "swarm.*.slots", f"{subjects.SLOTS}.*.*", f"{subjects.EXITS}.*.*"]},
     }
 
 
