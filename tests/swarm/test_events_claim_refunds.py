@@ -92,6 +92,7 @@ def launched(
     execution_events.started(bus, event)
     claims.Claims(store).handle(event)
     assert store.claims(SLUG, "t1") == 1
+    assert reconciler.legacy_agents(store, SLUG) == []
     return running, event
 
 
@@ -130,22 +131,54 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
 
 
-@pytest.mark.feature("events-parked-retirement-after-release-refunds-nothing")
-@pytest.mark.parametrize("released, expected_claims", [(True, 1), (False, 0)])
-def test_an_events_exit_of_a_quota_handoff_refunds_nothing_once_its_claim_was_released(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], released: bool, expected_claims: int
-) -> None:
+def handed_off(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], cause: str
+) -> tuple[AgentRecord, Envelope]:
+    """Runs an agent on t1 that then ends its life for ``cause``: a quota handoff, or a park on the open task t2.
+    The hive spoke still holds its started claim for the hub lifecycle to settle on exit."""
     store, ledger, _ = env
     agent, event = launched(env, bus, seat)
-    store.put_handoff(SLUG, "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
-    if released:
-        assert store.release(SLUG, "t1", agent.name)
+    if cause == "quota":
+        store.put_handoff(SLUG, "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
+    else:
+        ledger.rows["t1"]["parked_on"] = ["t2"]
     bus.for_swarm(SLUG).state("spoke-work").create(
         "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
     )
-    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, _agent: None)
+    return agent, event
 
-    react.handle(replace(event, id=f"exited:{agent.execution_id}", type="execution.exited"))
+
+def exited(env: tuple[RedisStore, Any, Any], bus: Bus, event: Envelope) -> None:
+    """Hands the hub lifecycle reactor the hive's execution.exited event for the start ``event``."""
+    store, ledger, _ = env
+    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, _agent: None)
+    react.handle(replace(event, id=f"exited:{event.key}", type="execution.exited"))
+
+
+@pytest.mark.feature("events-parked-retirement-after-release-refunds-nothing")
+@pytest.mark.parametrize("cause", ["quota", "parked"])
+def test_an_events_parked_retirement_refunds_nothing_once_its_claim_was_released(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], cause: str
+) -> None:
+    store, _, _ = env
+    agent, event = handed_off(env, bus, seat, cause)
+    assert store.release(SLUG, "t1", agent.name)
+
+    exited(env, bus, event)
 
     assert [seated.name for seated in store.agents(SLUG)] == []
-    assert store.claims(SLUG, "t1") == expected_claims
+    assert store.claims(SLUG, "t1") == 1
+
+
+@pytest.mark.feature("events-parked-retirement-after-release-refunds-nothing")
+@pytest.mark.parametrize("cause", ["quota", "parked"])
+def test_an_events_parked_retirement_still_holding_its_claim_refunds_its_life(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], cause: str
+) -> None:
+    store, _, _ = env
+    _, event = handed_off(env, bus, seat, cause)
+
+    exited(env, bus, event)
+
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert store.claims(SLUG, "t1") == 0

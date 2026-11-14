@@ -6090,10 +6090,11 @@
       "id": "events-parked-retirement-after-release-refunds-nothing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
-      "behaviour": "The hub lifecycle exit of an events launched agent that handed off for quota refunds nothing once the agent no longer holds its claim, and refunds the one counted life while it still holds it; either way the agent is dropped.",
+      "behaviour": "The hub lifecycle exit of an events launched agent whose life ended in a parked retirement, a quota handoff or a park on an open dependency, refunds nothing once the agent no longer holds its claim, and refunds the one counted life while it still holds it; either way the agent is dropped.",
       "seam": "Lifecycle.handle on execution.exited refunding a parked retirement through the held claim refund",
       "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_an_events_exit_of_a_quota_handoff_refunds_nothing_once_its_claim_was_released"
+        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_refunds_nothing_once_its_claim_was_released",
+        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_still_holding_its_claim_refunds_its_life"
       ]
     },
     {
