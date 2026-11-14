@@ -1,0 +1,20 @@
+rules:
+  - id: hive-launch-report-unguarded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive spoke reported its launch decision to the hub bare after the claim was written started, so a hub refusal
+      or timeout raised out of the spawn, the poll nacked the offer and the started event waited a redelivery. Report
+      the launch through Spoke._report_launch after the started event is published and the offer acknowledged, where
+      a failed report is logged and never raised.
+    paths:
+      include:
+        - /scripts/hive/
+        - hive-launch-report-unguarded.py
+    patterns:
+      - pattern: $SELF.tasks.launched(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except Exception as $EXC:
+              ...

@@ -1,9 +1,12 @@
 import inspect
 import json
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -424,6 +427,60 @@ def test_the_claim_view_admits_every_task_when_the_saved_listing_records_a_faile
     assert reads == []
 
 
+def events_admits(store: RedisStore, tmp_path: Path, row: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
+    """Return the events readiness snapshot's admission of an events swarm whose ledger holds only ``row``."""
+    from scripts.swarm import readiness
+
+    store.create(SwarmConfig("ev", str(tmp_path), max_eng=2, max_ci=0, engine="events"))
+    ledger = Mock()
+    ledger.metadata.return_value = {"_meta": {"rev": 1}}
+    ledger.state.return_value = {"phases": [], "tasks": [row]}
+    return readiness.Source(store, ledger).snapshot("ev").admits
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    row = task("red", pr_url=MINE)
+
+    assert events_admits(store, tmp_path, row)(row) is True
+    assert reads == []
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    both = [run("Tests", "FAILURE", datetime.now(UTC).isoformat())]
+    listed(store, "ev", "o/r", lambda repo: fleet(both, *[both] * 3))
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
+    row = task("red", pr_url=MINE)
+
+    assert events_admits(store, tmp_path, row)(row) is False
+    assert reads == []
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    events = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    events.create(SwarmConfig("sw", str(tmp_path), max_eng=2, max_ci=0, engine="events"))
+    monkeypatch.setattr(fleet_red, "read", lambda repo: SAVED)
+    tick.tick("sw", events, FakeLedger([task("a", pr_url=MINE)]), FakeRuntime(), now_ms=4_321)
+
+    assert fleet_red.saved_reader(events, "sw")("o/r") == tuple(SAVED)
+
+
 def test_the_notice_step_budget_outlasts_the_live_listing_so_its_save_is_kept() -> None:
     (step,) = [step for step in tasks.STEPS if step.name == "fleet red notice"]
 
@@ -514,6 +571,48 @@ def test_holds_carry_the_listing_saves_out_and_write_nothing(
     assert [(save.domain, save.key) for save in saves] == [(fleet_red.LISTINGS, key)]
     assert json.loads(str(saves[0].value))[0][0] == MINE
     assert store.redis.get(key) is None
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_holds_save_the_listing_of_every_repository_with_a_pull_request_task_not_done(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or SAVED)
+    rows = {
+        "busy": task("busy", state="claimed", claimed_by="engineer@1", pr_url=MINE),
+        "review": task("review", state="pr", pr_url="https://github.com/o/q/pull/2"),
+        "gone": task("gone", state="done", pr_url="https://github.com/x/y/pull/3"),
+    }
+    passes = []
+    for _ in range(3):
+        found, _, saves = fleet_red.holds("sw", store, rows, NOW_MS)
+        passes.append((found, [save.key for save in saves], list(reads)))
+        for save in saves:
+            fleet_red.saver(store)(save)
+
+    assert passes == [
+        ([], [store.key("sw", "fleet-red-pulls:o/r")], ["o/r"]),
+        ([], [store.key("sw", "fleet-red-pulls:o/q")], ["o/r", "o/q"]),
+        ([], [], ["o/r", "o/q"]),
+    ]
+
+
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_a_pass_that_lists_a_waiting_repository_live_warms_no_other_one(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or SAVED)
+    rows = {
+        "red": task("red", pr_url=MINE),
+        "review": task("review", state="pr", pr_url="https://github.com/o/q/pull/2"),
+    }
+
+    _, _, saves = fleet_red.holds("sw", store, rows, NOW_MS)
+
+    assert reads == ["o/r"]
+    assert [save.key for save in saves] == [store.key("sw", "fleet-red-pulls:o/r")]
 
 
 def test_the_engine_saves_the_listing_the_notice_step_returns(

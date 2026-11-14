@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
-from scripts.hive import account_slots, registry, workstation
+from scripts.hive import account_slots, presence, registry, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
@@ -55,6 +55,10 @@ class LaneTasks:
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         self._ask("failed", event, harness=harness, reason=reason)
 
+    def launched(self, event: Envelope, placed: Any) -> None:
+        decision = {field: getattr(placed, field) for field in account_slots.LAUNCH_DECISION}
+        self._ask("launched", event, launch=decision)  # pyright: ignore[reportUnknownMemberType]
+
 
 def lanes(excluded: str | None) -> tuple[str, ...]:
     left_out = excluded.split(",") if excluded else ()
@@ -92,10 +96,17 @@ def draining(store: Any, hive: str) -> bool:
     return redis is not None and registry.member_draining(redis, hive, registry.member_name())
 
 
+def beat(store: Any, bus: Any, hive: str) -> None:
+    """A draining hive polls no spoke but keeps beating presence on every events swarm, so the hub never judges its
+    running executions lost."""
+    for slug in readiness.Source(store).slugs():
+        presence.beat(bus.for_swarm(slug), hive, presence.now_ms())
+
+
 def run(
-    store,
-    bus,
-    runtime,
+    store: Any,
+    bus: Any,
+    runtime: Any,
     hive: str,
     taken: Iterable[str],
     wait: Callable[[float], object] = scheduled_wait,
@@ -103,7 +114,10 @@ def run(
 ) -> None:
     held: dict = {}
     for _ in itertools.count() if passes is None else passes:
-        if draining(store, hive) or "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
+        if draining(store, hive):
+            beat(store, bus, hive)
+            wait(IDLE_S)
+        elif "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
             wait(IDLE_S)
 
 
@@ -153,12 +167,10 @@ def _wait_failed(exc: BaseException | None) -> None:
 
 
 def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
-    if workstation.runs_engine(environ):
-        return None
     if (environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == "memory":
         print(
             "hive lane spokes refused: the memory bus never sees the hub's ready offers; "
-            f"a distributed hive needs {BACKEND_ENV}=nats and {URL_ENV}",
+            f"a hive needs {BACKEND_ENV}=nats and {URL_ENV}",
             file=sys.stderr,
         )
         return None

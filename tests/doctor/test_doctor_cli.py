@@ -157,6 +157,34 @@ def test_start_returns_before_any_tick_step_and_leaves_the_first_tick_to_a_detac
     assert store.config(DOCTOR).state == "running" and store.agents(DOCTOR) == []
 
 
+@pytest.mark.feature("engine-config-migration")
+def test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin(
+    env: tuple[RedisStore, FakeRuntime, Path],
+) -> None:
+    store, _, _ = env
+    store.update(WATCHED, repo_origin="github.com/team/watched")
+
+    assert doctor.main([WATCHED, "start"]) == 0
+
+    config = store.config(DOCTOR)
+    assert (config.engine, config.repo_origin) == ("events", "github.com/team/watched")
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_start_puts_the_doctor_on_its_own_origin_when_the_watched_swarm_has_none(
+    env: tuple[RedisStore, FakeRuntime, Path],
+) -> None:
+    store, _, tmp = env
+    git = tmp / "doctor-checkout" / ".git"
+    git.mkdir(parents=True)
+    (git / "config").write_text('[remote "origin"]\n\turl = git@github.com:Team/Doctor.git\n')
+
+    assert doctor.main([WATCHED, "start", "--repo", str(git.parent)]) == 0
+
+    config = store.config(DOCTOR)
+    assert (config.engine, config.repo_origin) == ("events", "github.com/team/doctor")
+
+
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0
