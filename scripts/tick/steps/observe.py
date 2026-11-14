@@ -216,7 +216,7 @@ ROWS = pass_domains("rows")
 
 
 def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], now_ms: int) -> list[str]:
-    from scripts.hub.reconciler import admitted_agents, legacy_agents, stop_admitted
+    from scripts.hub.reconciler import admitted_agents, legacy_agents
 
     judged, listed = launch_check.judged(store, slug), legacy_agents(store, slug) + admitted_agents(store, slug)
     agents, actions = [a for a in listed if a.name not in judged], list[str]()
@@ -268,11 +268,8 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
-        stop_admitted(slug, agent, "mismatch")
-        actions.append(
-            f"retired {agent.name} after mismatched {fields}"
-            + tick._drop(slug, store, ledger, rows, agent, refund=True)
-        )
+        dropped = tick._stop_hive(slug, agent, "mismatch", tick._drop(slug, store, ledger, rows, agent, refund=True))
+        actions.append(f"retired {agent.name} after mismatched {fields}" + dropped)
     return actions
 
 

@@ -3,10 +3,10 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A tick path that retires an agent through retire_unless_gone and then drops it with a claim refund must send the
-      hub to hive execution stop through stop_admitted first, so a hub admitted agent freed for a revoked account,
-      repeated content refusals or a stuck provider error also ends on its hive. Without the stop the hive keeps the
-      execution running after the swarm released its seat.
+      A tick path that retires an agent through retire_unless_gone and then drops it with a claim refund must pass the
+      drop through the tick hive stop helper _stop_hive, so a hub admitted agent freed for a revoked account, repeated
+      content refusals or a stuck provider error also ends on its hive. Without the stop the hive keeps the execution
+      running after the swarm released its seat.
     paths:
       include:
         - /scripts/tick/
@@ -18,14 +18,12 @@ rules:
               if not $T.retire_watch.retire_unless_gone(...):
                   ...
               ...
-      - pattern-not-inside: |
-          def $FREE(...):
-              ...
-              $T.timing.timed(stop_admitted, ...)
-              ...
-      - pattern-not-inside: |
-          def $FREE(...):
-              ...
-              stop_admitted(...)
-              ...
       - pattern: $T._drop(..., refund=True)
+      - pattern-not-inside: $T._stop_hive(..., $T._drop(...))
+      - pattern-not-inside: |
+          def $FREE(...):
+              ...
+              $DROPPED = $T._drop(...)
+              ...
+              $T._stop_hive(..., $DROPPED)
+              ...

@@ -160,6 +160,35 @@ def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
     assert sent[0].data["reason"] == ending
 
 
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize(
+    ("free", "reason"),
+    [
+        (agent_steps._free_refused, "refused"),
+        (agent_steps._free_revoked, "revoked"),
+        (agent_steps._free_stuck, "stuck"),
+    ],
+)
+def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_the_agent(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    free: Callable[..., list[str]],
+    reason: str,
+) -> None:
+    store, ledger, rt = env
+    agent, event = launched(env, bus, seat)
+
+    free(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
+
+    assert agent.name in rt.killed
+    assert store.claims(SLUG, "t1") == 0
+    events = bus.for_swarm(SLUG).events
+    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
+    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
+
+
 FREES = [
     (agent_steps._free_revoked, "revoked"),
     (agent_steps._free_refused, "refused"),
@@ -174,24 +203,7 @@ def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
     return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
 
 
-@pytest.mark.feature("events-freed-agent-stops-the-execution")
-@pytest.mark.parametrize(("free", "reason"), FREES)
-def test_a_freed_events_agent_gets_one_stop_sent_to_the_hive_that_started_it(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., Any], reason: str
-) -> None:
-    store, ledger, rt = env
-    agent, event = launched(env, bus, seat)
-    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
-
-    free(SLUG, store, ledger, rt, rows, agent, NOW + 1)
-
-    sent = sent_stops(bus, agent)
-    assert [(stop.type, stop.key, stop.cause) for stop in sent] == [(execution_stop.TYPE, agent.execution_id, event.id)]
-    assert sent[0].data["reason"] == reason
-    assert [seated.name for seated in store.agents(SLUG)] == []
-
-
-@pytest.mark.feature("events-freed-agent-stops-the-execution")
+@pytest.mark.feature("events-legacy-free-sends-no-stop")
 @pytest.mark.parametrize(("free", "reason"), FREES)
 def test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., Any], reason: str

@@ -69,6 +69,16 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     return f", task {agent.task} reopened" if reopen else ""
 
 
+def _stop_hive(slug: str, agent: Any, reason: str, dropped: str) -> str:
+    """Sends the execution stop for a retired agent to the hive that recorded its start, naming ``reason``, once the
+    store took its drop, and returns the drop's action text ``dropped``."""
+    from scripts.hub.reconciler import stop_admitted
+
+    if dropped != DROP_REFUSED:
+        stop_admitted(slug, agent, reason)
+    return dropped
+
+
 def _settle_exit(store: Any, name: str, seat: str) -> None:
     from scripts.tick.adapters.calls import SpawnStoreCalls
 

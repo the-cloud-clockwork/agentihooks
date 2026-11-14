@@ -40,9 +40,11 @@ def _start(bus: Bus, slug: str, agent: AgentRecord) -> Envelope | None:
 
 def _by_start(store: RedisStore, slug: str, recorded: bool) -> list[AgentRecord]:
     """The agents of ``slug`` whose start a hive recorded on a real bus when ``recorded``, else the rest; on the memory
-    bus no start counts as recorded."""
-    agents = store.agents(slug)
+    bus no start counts as recorded, so the recorded ones are read without touching the store."""
     config = BusConfig.from_environ()
+    if config.backend == "memory" and recorded:
+        return []
+    agents = store.agents(slug)
     if config.backend == "memory" or not agents:
         return [] if recorded else agents
     bus = open_bus(config)

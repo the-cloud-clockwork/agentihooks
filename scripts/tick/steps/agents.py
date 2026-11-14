@@ -29,7 +29,8 @@ def _reap(
     now_ms: int,
     deadline: Deadline | None = None,
 ) -> list[str]:
-    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order.
+    """Judge every agent of the swarm, legacy and hub admitted, one task per pass worker, returning actions in agent
+    order.
 
     Past ``deadline`` no further agent is judged: the rest are left for the next pass, named in one closing action.
     """
@@ -301,8 +302,8 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
 
 
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
-    """Return the actions watching one agent whose hive recorded its start: only its idling is judged here, its exit
-    and its lease stay with the hub lifecycle."""
+    """Return the actions the live agent watch takes on one agent whose hive recorded its start; its exit and its lease
+    stay with the hub lifecycle."""
     slug, store = judging.slug, judging.store
     if (
         agent.state in {"awaiting-decision", "retiring"}
@@ -361,10 +362,8 @@ def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     tick.content_refusal.handoff(store, slug, agent, now_ms)
-    return [
-        f"freed {agent.name} after repeated content refusals"
-        + tick._drop(slug, store, ledger, rows, agent, refund=True)
-    ]
+    dropped = tick._stop_hive(slug, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    return [f"freed {agent.name} after repeated content refusals" + dropped]
 
 
 def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
@@ -377,10 +376,8 @@ def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     tick.revoked_seats.worker_handoff(store, slug, agent, now_ms)
-    return [
-        f"freed the seat of {agent.name}: {account} was revoked"
-        + tick._drop(slug, store, ledger, rows, agent, refund=True)
-    ]
+    dropped = tick._stop_hive(slug, agent, "revoked", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    return [f"freed the seat of {agent.name}: {account} was revoked" + dropped]
 
 
 def _watch_agent(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
@@ -398,8 +395,6 @@ def _watch_idle(
     agent: Any,
     now_ms: int,
 ) -> list[str]:
-    from scripts.hub.reconciler import stop_admitted
-
     automated_gc: Any = import_module("scripts.swarm.automated_gc")
 
     observed = tick.timing.timed(tick._observe, runtime, agent)
@@ -479,8 +474,8 @@ def _watch_idle(
             if pending
             else ""
         )
-        tick.timing.timed(stop_admitted, slug, idle, "idle")
         dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, idle, refund=True)
+        tick.timing.timed(tick._stop_hive, slug, idle, "idle", dropped)
         return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
 
@@ -544,10 +539,8 @@ def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, age
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     tick.resume.free_seat(store, slug, agent, now_ms)
     tick.outage.clear_pane(store, slug, agent.name)
-    return [
-        f"freed the seat of {agent.name}, stuck on a provider error"
-        + tick._drop(slug, store, ledger, rows, agent, refund=True)
-    ]
+    dropped = tick._stop_hive(slug, agent, "stuck", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    return [f"freed the seat of {agent.name}, stuck on a provider error" + dropped]
 
 
 def _operator_at_pane(slug: Any, store: Any, agent: Any, observed: Any, now_ms: Any) -> bool:

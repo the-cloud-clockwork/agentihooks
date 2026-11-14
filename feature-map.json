@@ -1,13 +1,12 @@
 {
   "features": [
     {
-      "id": "events-freed-agent-stops-the-execution",
+      "id": "events-legacy-free-sends-no-stop",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-retire-stop-all",
-      "behaviour": "When the agents reap step frees a hub admitted worker whose hive recorded its start, for a revoked account, repeated content refusals or a stuck provider error, the hub sends that hive exactly one execution stop for its started execution naming the reason; a legacy launched agent freed the same way sends no stop and is retired as before.",
-      "seam": "_free_revoked, _free_refused and _free_stuck retiring an agent through reconciler.stop_admitted",
+      "behaviour": "When the agents reap step frees a legacy launched agent, one whose hive recorded no start, for a revoked account, repeated content refusals or a stuck provider error, the agent is retired and dropped as before and no execution stop is sent to any hive.",
+      "seam": "_free_revoked, _free_refused and _free_stuck on an agent the hub reconciler counts as legacy",
       "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_freed_events_agent_gets_one_stop_sent_to_the_hive_that_started_it",
         "tests/swarm/test_events_claim_refunds.py::test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired"
       ]
     },
@@ -6149,10 +6148,11 @@
       "id": "events-retirement-stops-the-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-idle-mismatch-retire",
-      "behaviour": "When the observe verify step retires a hub admitted agent whose hive recorded its start for an account mismatch, or the agents reap step retires it for idling, the hub sends that hive the execution stop for its started execution, naming the retirement reason, so the hive spoke ends the execution through its exited event.",
-      "seam": "observe verify and agents reap retiring an events owned agent through execution_stop.stop",
+      "behaviour": "When the tick retires a hub admitted agent whose hive recorded its start, for an account mismatch in the observe verify step, or for idling, a revoked account, repeated content refusals or a stuck provider error in the agents reap step, the hub sends that hive the execution stop for its started execution once the store took the drop, naming the retirement reason, so the hive spoke ends the execution through its exited event.",
+      "seam": "observe verify and the agents reap watch retiring an events owned agent through execution_stop.stop",
       "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent"
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent",
+        "tests/swarm/test_events_claim_refunds.py::test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_the_agent"
       ]
     },
     {
