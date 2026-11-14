@@ -75,7 +75,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | run window | task passes | tick | 2 | 60 | drained resume | none | none |
 | size pass | task passes | tick | 2 | 60 | ledger state | none | none |
 | verification notices | task passes | tick | 2 | 60 | ledger state | none | none |
-| orphans | tasks | tick | 2 | 60 | drained resume, reap | none | none |
+| orphans | tasks | tick | 2 | 60 | drained resume, reap | none | swarm-tick-events-orphans |
 | command runner | wrapper commands | tick | 2 | 60 | none | none | none |
 | doc items map | wrapper events | slow | 2 | 60 | drained resume, ledger state, tick view | coordination, ledger | tick-doc-items-map |
 | doc report | wrapper events | slow | 2 | 600 | none | none | none |

@@ -85,7 +85,6 @@ def test_swarm_page_lists_what_the_tick_skips_for_event_swarms():
     for skipped in (
         "spawns no lane agent",
         "reaps no lane agent",
-        "runs no orphan pass",
         "collects no acknowledgement",
     ):
         assert skipped in text, skipped

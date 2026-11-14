@@ -5,6 +5,7 @@ import contextlib
 import fcntl
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -233,6 +234,16 @@ def _unlist(member: str) -> list[str]:
     return remove.unlist(None, bao, plan, remove.Host())
 
 
+def _revoke_member(redis: "Redis", member_id: str) -> None:
+    from scripts.hive import root_bus
+    from scripts.swarm.probe import ROOT
+
+    if member_id == ROOT:
+        root_bus.remove(registry.home())
+        return
+    auth.revoke(redis, member_id)
+
+
 def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
         from scripts.hive import nats_grant
@@ -240,7 +251,7 @@ def _retire(args: argparse.Namespace) -> str:
         unlisted = _unlist(args.id)
         redis, signer = redis_client(), _signer()
         bus = [nats_grant.revoke(redis, signer, args.id)] if signer is not None else []
-        auth.revoke(redis, args.id)
+        _revoke_member(redis, args.id)
         return "\n".join([*unlisted, *bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
@@ -278,6 +289,62 @@ def _nats_trust(args: argparse.Namespace) -> str:
     values, lines = nats_trust.bootstrap(bao, redis_client(), users, args.url, retired)
     Path(args.values).write_text(yaml.safe_dump(values, sort_keys=False))
     return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
+
+
+def _root_signer(hive: str, named: list[str]) -> tuple["Signer", list[str]]:
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms
+
+    signer = _signer()
+    if signer is None:
+        raise auth.HiveError("AGENTIHOOKS_NATS_SIGNER must name the hub NATS signer to mint the root hive credential")
+    if signer.member_swarms is None:
+        return signer, []
+    wanted = member_swarms.swarms(redis_client(), named)
+    if set(wanted) <= set(signer.member_swarms.get(hive, ())):
+        return signer, []
+    bao, path = openbao_kv.from_env(os.environ), member_swarms.signer_path(os.environ)
+    if bao is None or path is None:
+        raise auth.HiveError(
+            f"the hub signer record does not list {hive} for every swarm and this host cannot update it"
+        )
+    added = member_swarms.extend(bao, path, hive, wanted)
+    lines = member_swarms.sync(member_swarms.sync_target(os.environ))
+    signer = _signer()
+    if signer is None or signer.member_swarms is None or not set(wanted) <= set(signer.member_swarms.get(hive, ())):
+        raise auth.HiveError(f"listed hive {hive} in the hub signer record, but a fresh read does not list it")
+    return signer, [f"listed hive {hive} for {', '.join(added)} in the hub signer record", *lines]
+
+
+def _restart_service(path: Path) -> None:
+    from scripts.hive import daemon
+
+    try:
+        restarted = daemon.install() and daemon.restart()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise auth.HiveError(f"wrote {path}, but the hive user service did not restart ({exc})") from exc
+    if not restarted:
+        raise auth.HiveError(f"wrote {path}, but the hive user service did not restart")
+
+
+def _root_bus(args: argparse.Namespace) -> str:
+    from scripts import operator_env
+    from scripts.hive import root_bus, scope
+    from scripts.swarm import commands
+    from scripts.swarm.probe import ROOT
+
+    operator_env.fill(os.environ)
+    if member := scope.member():
+        raise auth.HiveError(f"this host joined as hive member {member}, whose hive env carries its bus settings")
+    if (hive := commands.hive_id()) != ROOT:
+        raise auth.HiveError(f"hive root-bus serves the {ROOT} hive only, and this host is hive {hive}")
+    if registry.home() != Path.home() / ".agentihooks":
+        raise auth.HiveError(f"the hive user service loads its env from ~/.agentihooks, not {registry.home()}")
+    signer, lines = _root_signer(hive, args.swarm)
+    path = root_bus.write(registry.home(), signer, hive)
+    root_bus.verify(path)
+    _restart_service(path)
+    return "\n".join([*lines, f"wrote the NATS bus settings of hive {hive} to {path} and restarted the hive service"])
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -387,6 +454,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
     sub.add_parser("install", help="Write and enable the hive user service")
+    root_bus = sub.add_parser(
+        "root-bus",
+        help="Mint the root hive's NATS credential with the hub signer and write the bus env its service loads",
+    )
+    root_bus.add_argument("--swarm", action="append", default=[], help="swarm to list root for; every swarm if omitted")
     compare = sub.add_parser("compare", help="List each live hive's configuration against a base hive's")
     compare.add_argument("--base", help="The base hive id; defaults to this machine's hive")
     origin = sub.add_parser(
@@ -499,7 +571,8 @@ def _registry(args: argparse.Namespace) -> None:
 def _daemon(command: str) -> int:
     from scripts.hive import daemon, lanes
 
-    def run():
+    def run() -> object:
+        daemon.fill_operator_env()
         lanes.serve(os.environ)
         return daemon.run(lambda: daemon.clients(redis_client()))
 
@@ -586,8 +659,8 @@ def _run(args: argparse.Namespace) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
-        elif args.command in ("setup", "nats-trust"):
-            print((_setup if args.command == "setup" else _nats_trust)(args))
+        elif args.command in ("setup", "nats-trust", "root-bus"):
+            print({"setup": _setup, "nats-trust": _nats_trust, "root-bus": _root_bus}[args.command](args))
         else:
             return _serve(args)
     except auth.HiveError as exc:
