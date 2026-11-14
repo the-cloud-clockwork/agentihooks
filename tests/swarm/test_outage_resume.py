@@ -10,6 +10,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
 
@@ -56,15 +57,17 @@ def outage_home(tmp_path, monkeypatch):
     monkeypatch.setattr(outage, "HOME", tmp_path)
 
 
-def three_owners(store):
+def three_owners(store: RedisStore) -> tuple[Any, RecoveringRuntime, list[AgentRecord]]:
+    """Seats idle working owners on t1 to t3 through hub admission on the tick's own hive, each in a live pane."""
     store.update("sw", max_eng=3)
     ledger = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng"))
     runtime = RecoveringRuntime()
-    tick("sw", store, ledger, runtime, 1_000)
+    agents = [
+        seat_owner(store, ledger, runtime, task, 1_000, conversation_id=f"conversation-{index}")
+        for index, task in enumerate(("t1", "t2", "t3"))
+    ]
     store.update("sw", state="paused")
-    agents = [agent for agent in store.agents("sw") if agent.lane == "eng"]
-    for index, agent in enumerate(agents):
-        store.put_agent("sw", replace(agent, conversation_id=f"conversation-{index}", profile="engineer"))
+    for agent in agents:
         runtime.statuses[agent.name] = "idle"
     return ledger, runtime, agents
 
@@ -281,13 +284,11 @@ def recovery_state(store, name):
 
 
 def pending_owners(
-    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worktree: bool = True, admit: bool = False
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worktree: bool = True
 ) -> tuple[Any, RecoveringRuntime, list[AgentRecord]]:
     from scripts.swarm import snapshot
 
     ledger, runtime, _ = three_owners(store)
-    for owner in owners(store) if admit else []:
-        store.start_execution("sw", owner, "")
 
     def worktrees(repo, names):
         assert repo == store.config("sw").repo
@@ -369,7 +370,7 @@ def test_a_working_heartbeat_after_closure_keeps_a_pending_recovery(store, tmp_p
 
 def test_an_owner_restarted_after_the_outage_completes_its_recovery(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
-    store.put_agent("sw", replace(agents[0], started_at=10 * MINUTE))
+    store.put_agent("sw", replace(agents[0], launched_at=10 * MINUTE))
     resume.track_outages("sw", store, runtime, rows_of(ledger), 10 * MINUTE)
     assert recovery_state(store, agents[0].name) == "done"
     assert recovery_state(store, agents[1].name) == "pending"
@@ -378,7 +379,7 @@ def test_an_owner_restarted_after_the_outage_completes_its_recovery(store, tmp_p
 def test_an_owner_started_after_the_outage_does_not_stop_tracking_the_others(store):
     ledger, runtime, _ = three_owners(store)
     first, healthy, stuck = owners(store)
-    store.put_agent("sw", replace(first, started_at=10 * MINUTE))
+    store.put_agent("sw", replace(first, launched_at=10 * MINUTE))
     runtime.statuses[healthy.name] = idle.WORKING
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     outage.observe("sw", "provider", [], 9 * MINUTE)
@@ -453,7 +454,7 @@ def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
 def test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch(
     store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, admit=True)
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     dead = agents[2]
     runtime.live.remove(dead.name)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
@@ -475,7 +476,7 @@ def test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the
 ) -> None:
     from scripts.handoff import transfers
 
-    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False, admit=True)
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
     dead = agents[2]
     runtime.live.remove(dead.name)
     transfers.record(store, "sw", dead, "quota", "## Next\nContinue.\n", 2 * MINUTE)
@@ -661,9 +662,8 @@ def test_an_owner_whose_task_is_in_review_is_recovered(store):
 def test_an_outage_ending_at_the_owner_start_counts_toward_recovery(store):
     ledger, runtime, _ = three_owners(store)
     first = owners(store)[0]
-    store.put_agent("sw", replace(first, started_at=0, launched_at=0))
-    outage.observe("sw", "provider", ["provider unavailable"], 0)
-    outage.observe("sw", "provider", [], 0)
+    outage.observe("sw", "provider", ["provider unavailable"], first.started_at)
+    outage.observe("sw", "provider", [], first.started_at)
     resume.track_outages("sw", store, runtime, rows_of(ledger), MINUTE)
     assert recovery_state(store, first.name) == "pending"
 
