@@ -1,0 +1,19 @@
+rules:
+  - id: master-resume-rewrites-start
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A resumed master keeps its own execution, and started_at is part of that execution's identity, so writing a new
+      started_at onto it makes put_agent refuse the record after the pane already opened and the master stops being an
+      agent of its swarm. Record the resume time as launched_at instead.
+    paths:
+      include:
+        - /scripts/swarm/master_launch.py
+        - master-resume-rewrites-start.py
+    patterns:
+      - pattern-inside: |
+          def $F(...):
+              ...
+              $RT.resume(...)
+              ...
+      - pattern: replace(..., started_at=$AT, ...)

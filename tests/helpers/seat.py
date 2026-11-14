@@ -13,11 +13,13 @@ from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.repository import hierarchy
 
 SLUG = "sw"
-LAUNCH = {"harness": "claude", "profile": "engineer", "account": "work", "model": "opus", "effort": "medium"}
+LAUNCH = {"harness": "claude", "account": "acct", "model": "opus", "effort": "high"}
+PROFILES = {"eng": "engineer", "ci": "cicd"}
 
 
 def view(store: RedisStore, ledger: Any, slug: str) -> readiness.Snapshot:
-    """The readiness snapshot hub admission rechecks, read from the test ledger with every task admitted."""
+    """The snapshot hub admission rechecks, read from the test ledger in place of ``readiness.Source``: every task is
+    admitted, so the running swarm state and the release, apply and fleet red waits are not consulted."""
     doc = ledger.state(slug)
     rows = {task["id"]: task for task in doc["tasks"]}
     return readiness.Snapshot(
@@ -39,21 +41,26 @@ def seat_agent(
     hive: str = readiness.ROOT,
     launch: dict[str, str] | None = None,
 ) -> AgentRecord:
-    """Seats one agent on an open task of a created swarm and returns its record.
+    """Seats one agent on an open task of a created swarm and returns its record as the events path leaves it.
 
     The hub ``Admission`` admits the offer for the task's lane and claim generation from ``hive``: it claims the task,
-    names the agent, starts its execution, occupies its seat and marks the ledger row claimed by that name. The hive's
-    ``launched`` acknowledgement then writes ``launch`` (``LAUNCH`` by default) onto the record. The swarm stays as
-    created, paused included, and nothing is spawned. ``ledger`` needs ``task``, ``state`` and ``update_task`` with
-    the ``if_state`` and ``if_match`` guards; a refused admission or acknowledgement fails the test."""
+    names the agent, starts its execution in a lane seat, occupies the seat, pends the claim life and marks the ledger
+    row claimed by that name. The hive's ``launched`` acknowledgement then writes the launch decision onto the record:
+    ``LAUNCH`` with the lane's ``PROFILES`` entry, each key of ``launch`` overriding its default.
+
+    The record is admitted and acknowledged, never run by a hive: its state stays ``starting``, ``pane_id`` stays
+    empty, ``launched_at`` stays 0, the claim life stays pending, no runtime lists the agent and no launch row is
+    written. The swarm stays as created, paused included. ``ledger`` needs ``task``, ``state`` and ``update_task``
+    with the ``if_state`` and ``if_match`` guards; a refused admission or acknowledgement fails the test."""
     row = ledger.task(slug, task_id)
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
+    decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
     source = SimpleNamespace(snapshot=lambda name: view(store, ledger, name))
     admitter = admission.Admission(store, ledger, source)  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:
         pytest.fail(f"hub admission refused {task_id}: {admitted}")
-    if not admitter.launched(slug, {**request, "launch": launch or LAUNCH}):
+    if not admitter.launched(slug, {**request, "launch": decision}):
         pytest.fail(f"the launched acknowledgement for {task_id} was refused")
     return next(agent for agent in store.agents(slug) if agent.name == admitted["name"])
 
