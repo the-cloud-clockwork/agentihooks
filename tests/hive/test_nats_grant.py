@@ -194,9 +194,12 @@ def _member(signer: nats_grant.Signer, scope: str) -> str:
 
 @pytest.mark.feature("hub-only-execution-stop")
 @pytest.mark.parametrize("scope", ["unscoped", "scoped"])
-@pytest.mark.parametrize("hive", ["h2", "m1"])
-def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(signer, scope: str, hive: str) -> None:
-    stop = f"swarm.rig.execution.stop.{hive}"
+@pytest.mark.parametrize(
+    "stop", ["swarm.rig.execution.stop.h2", "swarm.rig.execution.stop.m1", "swarm.rig.execution.stop"]
+)
+def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(
+    signer: nats_grant.Signer, scope: str, stop: str
+) -> None:
 
     assert _publish_refusals(
         signer, _member(signer, scope), "swarm.rig.execution.started", "swarm.rig.execution.exited", stop
@@ -204,7 +207,7 @@ def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(signe
 
 
 @pytest.mark.feature("hub-only-execution-stop")
-def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer) -> None:
+def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer: nats_grant.Signer) -> None:
     hub = _signed(signer, "hub", nats_grant.controller_claims())
 
     assert _publish_refusals(signer, hub, "swarm.rig.execution.stop.h2", "outside.events") == [
@@ -765,7 +768,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {"allow": publish, "deny": ["swarm.*.execution.stop.>"]},
+        "pub": {"allow": publish, "deny": ["swarm.*.execution.stop", "swarm.*.execution.stop.>"]},
         "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,
