@@ -155,7 +155,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     )
 
 
-def _server_exited(spec: supervisor.Launch, status: int | None) -> None:
+def _server_exited(spec: supervisor.Launch, status: int) -> None:
     """Fail a still pending profile report once the app server exits, so init-agent stops waiting for its canary."""
     if report := spec.environ.get(binding.REPORT):
         binding.refuse(Path(report), SERVER_EXITED.format(status))
