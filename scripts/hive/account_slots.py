@@ -18,6 +18,7 @@ HIVE_ENV = "AGENTIHOOKS_SLOT_HIVE"
 EXECUTION_ENV = "AGENTIHOOKS_SLOT_EXECUTION"
 UNBOUND = "hive"
 REQUEST_TIMEOUT_MS = 10_000
+LAUNCH_DECISION = ("harness", "profile", "account", "model", "effort")
 
 
 class Unavailable(RuntimeError):

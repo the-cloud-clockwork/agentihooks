@@ -4,13 +4,14 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from typing import Any, Protocol
 
 from scripts.events.bus import Bus, Delivery, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
-from scripts.hive import admission, execution_events, headroom, presence
+from scripts.hive import account_slots, admission, execution_events, headroom, presence
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
@@ -23,6 +24,8 @@ class Tasks(Protocol):
     def reopen(self, event: Envelope) -> None: ...
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
+
+    def launched(self, event: Envelope, placed: Any) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,7 @@ class Spoke:
             status = "ready"
         if status == "started":
             self._publish(Envelope.from_dict(state["event"]))
+            self._report_launch(event, state.get("launch"))
         elif status == "dead_pending" or (status == "ready" and record["attempt"] >= self.config.policy.max_deliver):
             self._finish_dead(event, record["attempt"])
             status = "dead"
@@ -175,6 +179,7 @@ class Spoke:
             self._publish(Envelope.from_dict(prior["event"]))
             self._clear_current(event)
             delivery.ack()
+            self._report_launch(event, json.loads(entry.value).get("launch") if entry else None)
             return "started"
         if waiting := self._waiting(prior):
             delivery.nak(self.config.policy.ack_wait_ms)
@@ -199,7 +204,7 @@ class Spoke:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
             raise
         try:
-            started = self._spawn(event, key, revision, heartbeat)
+            spawned = self._spawn(event, key, revision, heartbeat)
         except admission.Held:
             self._clear_pending(pending_revision)
             delivery.nak(self.config.policy.ack_wait_ms)
@@ -210,16 +215,34 @@ class Spoke:
                 self._clear_pending(pending_revision)
                 self.tasks.reopen(event)
             raise
-        if started is None:
+        if spawned is None:
             self._clear_pending(pending_revision)
             delivery.term()
             return "withdrawn"
+        started, launch = spawned
         self._publish(started)
         self._clear_pending(pending_revision)
         delivery.ack()
+        self._report_launch(event, launch)
         return "started"
 
-    def _spawn(self, event: Envelope, key: str, revision: int, heartbeat: presence.Heartbeat) -> Envelope | None:
+    def _report_launch(self, event: Envelope, launch: dict[str, str] | None) -> None:
+        """Reports the stored launch decision to the hub once the started event is out; a refused or slow report is
+        logged and never undoes the start, and a claim stored without one reports nothing."""
+        if launch is None:
+            return
+        try:
+            self.tasks.launched(event, SimpleNamespace(**launch))
+        except Exception as exc:
+            swarm, lane = self.config.swarm.slug, self.config.lane
+            print(
+                f"hive spoke for swarm {swarm} lane {lane} launch report failed ({type(exc).__name__}: {exc})",
+                file=sys.stderr,
+            )
+
+    def _spawn(
+        self, event: Envelope, key: str, revision: int, heartbeat: presence.Heartbeat
+    ) -> tuple[Envelope, dict[str, str]] | None:
         claims = self.bus.state("spoke-work")
         try:
             request = self.tasks.request(event)
@@ -277,12 +300,15 @@ class Spoke:
             },
             cause=event.id,
         )
+        launch = {field: getattr(placed, field, "") for field in account_slots.LAUNCH_DECISION}
         claims.update(
             key,
-            json.dumps({"state": "started", "claim_revision": revision, "event": started.to_dict()}).encode(),
+            json.dumps(
+                {"state": "started", "claim_revision": revision, "event": started.to_dict(), "launch": launch}
+            ).encode(),
             revision,
         )
-        return started
+        return started, launch
 
     def _publish(self, event: Envelope) -> None:
         execution_events.started(self.bus, event)

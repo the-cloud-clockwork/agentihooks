@@ -206,20 +206,14 @@ def holds(
     ]
     waiting = set(unclaimed) - store.claimed(slug, unclaimed)
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
-    listings: dict[str, Pulls | None] = {}
     fetch: Callable[[str], Listed] = partial(_unsaved, reader) if reader else partial(cached, store, slug)
+    held_ids = [task_id for task_id in unclaimed if task_id in waiting]
+    listings, saves = _listed(list(dict.fromkeys(repository(rows[t]["pr_url"]) for t in held_ids)), fetch)
+    saves = saves or _warmed([repo for repo in watched(rows) if repo and repo not in listings], fetch)
     found: list[tuple[str, str, str]] = []
-    saves: list[Write] = []
-    for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
+    for task_id in held_ids:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
-        repo = repository(url)
-        if repo not in listings:
-            try:
-                listings[repo], listed = fetch(repo) if repo else ([], ())
-            except ERRORS:
-                listings[repo], listed = None, ()
-            saves.extend(listed)
-        pulls = listings[repo]
+        pulls = listings[repository(url)]
         if pulls is None:
             continue
         if not held(pulls, url, now_ms):
@@ -228,6 +222,45 @@ def holds(
         if not store.redis.exists(key):
             found.append((task_id, url, ", ".join(sorted(own(pulls, url)))))
     return found, cleared, saves
+
+
+def watched(rows: dict[str, dict[str, Any]]) -> list[str]:
+    """Return the repository of every task carrying a pull request that is not done, in row order.
+
+    A claimed or in review task can reopen and be offered at once, so its repository's listing is kept saved for the
+    claim view to read before that happens. A pass that listed nothing live for its waiting tasks warms one of them.
+    """
+    urls = [task["pr_url"] for task in rows.values() if task.get("pr_url") and task.get("state") != "done"]
+    return list(dict.fromkeys(repository(url) for url in urls))
+
+
+def _listed(repos: list[str], fetch: Callable[[str], Listed]) -> tuple[dict[str, Pulls | None], list[Write]]:
+    """Return the listing of each repository, none for a failed read, and the saves of the fresh listings."""
+    listings: dict[str, Pulls | None] = {}
+    saves: list[Write] = []
+    for repo in repos:
+        try:
+            listings[repo], listed = fetch(repo) if repo else ([], ())
+        except ERRORS:
+            listings[repo], listed = None, ()
+        saves.extend(listed)
+    return listings, saves
+
+
+def _warmed(repos: list[str], fetch: Callable[[str], Listed]) -> list[Write]:
+    """Return the save of the first repository in ``repos`` whose listing is not saved, listing none after it.
+
+    One live listing per pass keeps the notice step inside its budget; a listing lives ten minutes, so the others
+    are saved over the next passes.
+    """
+    for repo in repos:
+        try:
+            listed = fetch(repo)[1]
+        except ERRORS:
+            return []
+        if listed:
+            return list(listed)
+    return []
 
 
 def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, checks: str) -> str:

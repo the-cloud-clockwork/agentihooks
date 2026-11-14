@@ -288,5 +288,19 @@ class Admission:
             print(f"hub: events steering swarm={slug} task={task_id} avoid={harness}: {reason}", file=sys.stderr)
         return True
 
+    def launched(self, slug: str, request: dict[str, Any]) -> bool:
+        """Writes the launch decision the admitted hive reports onto its agent's record; False when the hive holds no
+        admission for the offer or another agent now occupies the admitted seat."""
+        held = self.store.redis.get(self._key(slug, request))
+        admitted = json.loads(held) if held else None
+        if not admitted or admitted["hive"] != request["hive"]:
+            return False
+        occupant = self.store.execution_occupants(slug).get(admitted["task"]["seat"])
+        if occupant is None or occupant.name != admitted["name"]:
+            return False
+        launch = request["launch"]
+        decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
+        return self.store.execution_registry.set_launch(slug, occupant.execution_id, decision)
 
-OPERATIONS = ("admit", "reopen", "failed")
+
+OPERATIONS = ("admit", "reopen", "failed", "launched")

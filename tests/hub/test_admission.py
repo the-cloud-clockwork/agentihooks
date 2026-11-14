@@ -120,6 +120,75 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     json.dumps(admitted)
 
 
+LAUNCH = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_the_hive_launch_decision_reaches_the_record_swarm_status_reads(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    [agent] = rig.store.agents(SLUG)
+    assert agent.name == admitted["name"]
+    assert (agent.harness, agent.profile, agent.account, agent.model, agent.effort) == (
+        "codex",
+        "engineer",
+        "work",
+        "gpt-5",
+        "high",
+    )
+    assert (agent.state, agent.seat, agent.hive) == ("starting", "eng-1@sw", "hive-a")
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record(rig):
+    rig.admitter.admit(SLUG, ask())
+    [before] = rig.store.agents(SLUG)
+
+    assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
+    assert rig.admitter.launched(SLUG, ask(generation=5, launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == [before]
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    [before] = rig.store.agents(SLUG)
+    held = rig.store.key(SLUG, "spoke-admission", "t1", "0")
+    rig.store.redis.set(held, json.dumps({**admitted, "name": "eng@sw-other"}))
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == [before]
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_decision_after_the_agent_was_dropped_never_brings_it_back(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.drop_agent(SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == []
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_the_hub_answers_a_launched_request_over_the_slot_subject(rig):
+    bus = open_bus(BusConfig(scoped=True))
+    slots.serve(bus, admitter=rig.admitter)  # pyright: ignore[reportArgumentType]
+    try:
+        rig.admitter.admit(SLUG, ask())
+        answered = account_slots.asker(bus.for_swarm(SLUG), SLUG, "hive-a")({"op": "launched", **ask(launch=LAUNCH)})
+    finally:
+        bus.close()
+
+    assert answered is True
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.harness, agent.profile, agent.account) == ("codex", "engineer", "work")
+
+
 def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
     admitted = rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
     assert rig.rows["t2"]["state"] == "pr"
@@ -299,6 +368,31 @@ def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleName
     assert rig.rows["t1"]["state"] == "claimed"
 
 
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fleet_red, readiness
+
+    now = [7_000]
+
+    def slow(repo: str) -> list[object]:
+        now[0] += 22_000
+        return []
+
+    monkeypatch.setattr(fleet_red, "read", slow)
+    rig.rows["t2"]["pr_url"] = "https://github.com/o/r/pull/1"
+    rig.ledger.metadata = lambda slug: {"_meta": {"rev": 1}}
+    rig.ledger.state = lambda slug: doc(list(rig.rows.values()))
+    source = readiness.Source(rig.store, rig.ledger)
+    admitter = admission.Admission(rig.store, rig.ledger, source, clock=lambda: now[0])
+
+    admitted = admitter.admit(SLUG, ask(task="t2", lane="ci"))
+
+    assert admitted is not None and admitted["task"]["seat"] == "ci-1@sw"
+    assert now == [7_000]
+
+
 def late_clock(offset: int) -> Callable[[], int]:
     readings: list[None] = []
 
@@ -435,7 +529,7 @@ def test_a_failure_report_without_its_admission_records_nothing(rig, fields):
 
 
 def test_the_slot_service_routes_failure_reports_to_admission():
-    assert admission.OPERATIONS == ("admit", "reopen", "failed")
+    assert admission.OPERATIONS == ("admit", "reopen", "failed", "launched")
 
 
 def test_the_slot_service_answers_admission_for_the_swarm_and_hive_of_its_subject():

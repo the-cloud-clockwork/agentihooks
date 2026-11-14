@@ -57,6 +57,10 @@ class LaneTasks:
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         self._ask("failed", event, harness=harness, reason=reason)
 
+    def launched(self, event: Envelope, placed: Any) -> None:
+        decision = {field: getattr(placed, field) for field in account_slots.LAUNCH_DECISION}
+        self._ask("launched", event, launch=decision)  # pyright: ignore[reportUnknownMemberType]
+
 
 def lanes(excluded: str | None) -> tuple[str, ...]:
     left_out = excluded.split(",") if excluded else ()
