@@ -1,6 +1,25 @@
 {
   "features": [
     {
+      "id": "hub-admission-hive-max-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-max-agents",
+      "behaviour": "The hub answers an events admission request from a hive whose live worker executions across every swarm, workers naming no hive counted for the root, already reach its registry max agents with a held answer, before any claim, execution, seat or ledger write; the spoke keeps the offer queued with a delayed nak so a hive below its cap takes it, and a hive below its cap or with none set is still admitted.",
+      "seam": "Admission.admit for a hive spoke request, LaneTasks.request and Spoke.poll",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents",
+        "tests/hub/test_admission.py::test_only_the_root_hive_counts_workers_that_name_no_hive",
+        "tests/hub/test_admission.py::test_two_hub_pods_on_one_store_never_admit_a_hive_past_its_max_agents",
+        "tests/hub/test_admission.py::test_the_hive_admitting_key_expires_and_a_held_key_holds_only_its_own_hive",
+        "tests/hive/test_lanes.py::test_an_offer_the_hub_holds_at_max_agents_raises_held_and_spawns_nothing",
+        "tests/hive/test_spoke.py::test_an_offer_held_at_max_agents_stays_queued_and_a_hive_below_its_cap_takes_it"
+      ],
+      "rules": [
+        "admission-skips-hive-max-agents"
+      ]
+    },
+    {
       "id": "controller-done-clears-awaiting",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",
@@ -477,6 +496,44 @@
       "tests": [
         "tests/hive/test_workstation_tasks.py::test_a_workstation_task_skips_another_headed_hive_for_the_root_hive",
         "tests/hive/test_workstation_tasks.py::test_a_workstation_task_waits_for_a_full_root_hive_over_an_emptier_headed_hive"
+      ]
+    },
+    {
+      "id": "hive-root-bus-settings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-bus-settings",
+      "behaviour": "hive root-bus runs only on the root hive with the default agentihooks home; it extends the hub signer record so root holds every wanted swarm, mints the root NATS member credential, refuses one past the NATS control line, writes a 0600 credential and a bus env outside the env files every agentihooks process loads, connects once to prove the hub accepts it, then reinstalls and restarts the hive service whose unit loads that env; agents the root spokes launch inherit the credential reference, and hive revoke root removes the files.",
+      "seam": "root_bus.write, daemon.unit and the hive root-bus command",
+      "tests": [
+        "tests/hive/test_root_bus.py::test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential",
+        "tests/hive/test_root_bus.py::test_the_root_bus_settings_stay_out_of_the_env_files_every_process_loads",
+        "tests/hive/test_root_bus.py::test_a_signer_that_lists_member_swarms_without_root_mints_nothing",
+        "tests/hive/test_root_bus.py::test_a_scoped_signer_writes_the_root_swarms_into_the_bus_env",
+        "tests/hive/test_root_bus.py::test_a_credential_past_the_nats_control_line_is_refused_before_writing",
+        "tests/hive/test_root_bus.py::test_root_bus_writes_into_a_missing_home_and_again_on_a_rerun",
+        "tests/hive/test_root_bus.py::test_verify_connects_once_with_the_written_bus_env_and_closes",
+        "tests/hive/test_root_bus.py::test_verify_turns_a_hub_refusal_into_a_hive_error",
+        "tests/hive/test_root_bus.py::test_remove_deletes_the_root_bus_files",
+        "tests/hive/test_root_bus.py::test_the_hive_service_loads_the_root_bus_env_after_the_hive_env",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_writes_verifies_then_reinstalls_and_restarts_the_service",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_extends_the_root_listing_with_missing_swarms",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_keeps_a_listing_that_covers_every_wanted_swarm",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_when_a_fresh_signer_read_still_lacks_a_swarm",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_without_the_hub_signer",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_on_a_joined_member_host",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_a_hive_other_than_root",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_a_home_the_hive_service_does_not_load",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_when_the_hive_service_does_not_restart",
+        "tests/hive/test_root_bus.py::test_hive_root_bus_refuses_when_systemctl_fails",
+        "tests/hive/test_root_bus.py::test_hive_revoke_root_removes_the_root_bus_files",
+        "tests/hive/test_root_bus.py::test_hive_help_names_the_root_bus_command_and_its_swarm_option",
+        "tests/hive/test_root_bus.py::test_a_root_spoke_agent_inherits_the_bus_credential_reference",
+        "tests/hive/test_root_bus.py::test_an_inline_bus_credential_never_reaches_the_launcher_script",
+        "tests/hive/test_root_bus.py::test_extend_adds_only_the_missing_swarms_and_keeps_other_members",
+        "tests/hive/test_root_bus.py::test_extend_lists_an_absent_member_and_writes_nothing_when_covered",
+        "tests/hive/test_root_bus.py::test_extend_turns_an_openbao_failure_into_a_hive_error",
+        "tests/hive/test_root_bus.py::test_extend_refuses_an_invalid_swarm_name"
       ]
     },
     {

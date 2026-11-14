@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -588,6 +589,148 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused, the hive is draining"
     ]
+
+
+def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: str, live: int) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import registry
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000})
+    if cap:
+        registry.update(rig.store.redis, "hive-a", [f"max-agents={cap}"])
+    rig.store.create(SwarmConfig("other", "/repo", 2, 2))
+    held = [("other", "eng", "eng-1", "working", "hive-a"), (SLUG, "ci", "ci-1", "starting", "hive-a")][:live]
+    ignored = [
+        ("other", "eng", "eng-2", "finished", "hive-a"),
+        ("other", "ci", "ci-1", "ended", "hive-a"),
+        (SLUG, "master", "master", "working", "hive-a"),
+        ("other", "ci", "ci-2", "working", "hive-b"),
+    ]
+    for slug, lane, seat, state, hive in [*held, *ignored]:
+        record = AgentRecord(rig.store.next_name(slug, lane), lane, "", seat=f"{seat}@{slug}", started_at=1, hive=hive)
+        agent = rig.store.start_execution(slug, record)
+        rig.store.put_agent(slug, replace(agent, state=state))
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+@pytest.mark.parametrize("cap, live", [("2", 2), ("0", 0)])
+def test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cap: str, live: int
+) -> None:
+    _hive_holding(rig, monkeypatch, cap, live)
+    before = {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")}
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted == {"held": f"{live} of {cap} agents on the hive"}
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")} == before
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {live} of {cap} agents on the hive"
+    ]
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+@pytest.mark.parametrize("hive, held", [("root", True), ("hive-a", False)])
+def test_only_the_root_hive_counts_workers_that_name_no_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, hive: str, held: bool
+) -> None:
+    from scripts.hive import registry
+    from scripts.swarm import readiness
+    from scripts.swarm.store import AgentRecord
+
+    named = readiness.ROOT if hive == "root" else hive
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, named, {"heartbeat_at": 6_000})
+    registry.update(rig.store.redis, named, ["max-agents=1"])
+    record = AgentRecord(rig.store.next_name(SLUG, "ci"), "ci", "t2", seat=f"ci-1@{SLUG}", started_at=1)
+    rig.store.start_execution(SLUG, record)
+
+    admitted = rig.admitter.admit(SLUG, ask(hive=named))
+
+    assert admitted is not None
+    assert ("held" in admitted) is held
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+def test_two_hub_pods_on_one_store_never_admit_a_hive_past_its_max_agents(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    _hive_holding(rig, monkeypatch, "2", 1)
+    monkeypatch.setattr(admission, "TURN_TRIES", 1)
+    monkeypatch.setattr(admission, "TURN_WAIT_S", 0)
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    claim = rig.admitter._claim
+    raced: list[dict[str, Any] | None] = []
+
+    def racing(*args: Any) -> dict[str, Any] | None:
+        raced.append(other.admit(SLUG, ask(task="t2", lane="ci")))
+        return claim(*args)
+
+    monkeypatch.setattr(rig.admitter, "_claim", racing)
+
+    first = rig.admitter.admit(SLUG, ask())
+
+    assert first is not None
+    assert first["hive"] == "hive-a"
+    assert raced == [{"held": admission.BUSY}]
+    assert rig.store.claimant(SLUG, "t2") is None
+    assert other.admit(SLUG, ask(task="t2", lane="ci")) == {"held": "2 of 2 agents on the hive"}
+    assert rig.store.redis.get(f"{registry.key('hive-a')}:admitting") is None
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+def test_the_hive_admitting_key_expires_and_a_held_key_holds_only_its_own_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    _hive_holding(rig, monkeypatch, "2", 0)
+    monkeypatch.setattr(admission, "TURN_TRIES", 1)
+    monkeypatch.setattr(admission, "TURN_WAIT_S", 0)
+    claim = rig.admitter._claim
+    expiries: list[int] = []
+
+    def watched(*args: Any) -> dict[str, Any] | None:
+        expiries.append(rig.store.redis.pttl(f"{registry.key('hive-a')}:admitting"))
+        return claim(*args)
+
+    monkeypatch.setattr(rig.admitter, "_claim", watched)
+    rig.store.redis.set(f"{registry.key('hive-a')}:admitting", "another pod")
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": admission.BUSY}
+    assert rig.store.redis.get(f"{registry.key('hive-a')}:admitting") == "another pod"
+
+    rig.store.redis.delete(f"{registry.key('hive-a')}:admitting")
+    rig.store.redis.set(f"{registry.key('hive-b')}:admitting", "another pod")
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert len(expiries) == 1
+    assert 0 < expiries[0] <= admission.TURN_MS
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
+@pytest.mark.parametrize("cap, live", [("2", 1), ("3", 2), ("", 2)])
+def test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cap: str, live: int
+) -> None:
+    _hive_holding(rig, monkeypatch, cap, live)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert capsys.readouterr().err == ""
 
 
 def _released(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, hub: str) -> None:
