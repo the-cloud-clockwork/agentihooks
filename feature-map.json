@@ -11,6 +11,7 @@
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents",
         "tests/hub/test_admission.py::test_only_the_root_hive_counts_workers_that_name_no_hive",
         "tests/hub/test_admission.py::test_two_hub_pods_on_one_store_never_admit_a_hive_past_its_max_agents",
+        "tests/hub/test_admission.py::test_the_hive_admitting_key_expires_and_a_held_key_holds_only_its_own_hive",
         "tests/hive/test_lanes.py::test_an_offer_the_hub_holds_at_max_agents_raises_held_and_spawns_nothing",
         "tests/hive/test_spoke.py::test_an_offer_held_at_max_agents_stays_queued_and_a_hive_below_its_cap_takes_it"
       ],
