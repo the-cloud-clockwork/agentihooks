@@ -871,14 +871,19 @@ class HerdrRuntime:
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = bool(forced)
+        repick = route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer))
         route = forced or (
             ["--route", "interactive"]
             if route_kind == "interactive"
-            else (["--route", saved["account"]] if _slot_room(task, agent, saved.get("account", "")) else [])
+            else (
+                ["--route", saved["account"]]
+                if not repick and _slot_room(task, agent, saved.get("account", ""))
+                else []
+            )
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer)):
+        if repick:
             account, routed = self._route_account(agent, saved, task["id"], lane, admitted)
             route = ["--route", routed.name]
         with self._seat_returned_on_failure(account, lane, agent):
