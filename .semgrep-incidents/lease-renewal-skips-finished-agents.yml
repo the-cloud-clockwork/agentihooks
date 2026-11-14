@@ -3,9 +3,8 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A claim lease renewal refreshes the claim of a swarm agent without reading its state. On 14 November three
-      reopened tasks stayed unclaimable because the hub renewal refreshed the claims of finished engineers every tick,
-      so their leases never lapsed. Leave out agents whose state is finished.
+      A claim lease renewal refreshes the claim of a swarm agent without reading its state, so a finished agent keeps
+      its claim and its reopened task is never offered again. Leave out agents whose state is finished.
     patterns:
       - pattern-inside: |
           for $AGENT in $STORE.agents(...):

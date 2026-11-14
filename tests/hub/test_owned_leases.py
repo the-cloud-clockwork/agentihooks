@@ -73,7 +73,7 @@ def test_a_finished_agent_claim_is_left_to_lapse(monkeypatch: pytest.MonkeyPatch
     store = _store(finished, working)
     _backend(monkeypatch, "nats")
     owned_leases.renew(store, "sw", [], LEASE_MS)
-    assert store.redis.pttl(store.key("sw", "claim", "t2")) <= SHORT_MS
+    assert 0 < store.redis.pttl(store.key("sw", "claim", "t2")) <= SHORT_MS
     assert LEASE_MS - SHORT_MS < store.redis.pttl(store.key("sw", "claim", "t3")) <= LEASE_MS
 
 
