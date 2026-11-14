@@ -76,6 +76,7 @@ def test_three_failed_lives_still_block_the_fourth_claim(store, ending, prior_li
     assert store.claimant("sw", "t1") is None
 
 
+@pytest.mark.feature("events-retirement-refunds-claim-life")
 @pytest.mark.parametrize("ending", ["mismatch", "idle", "stop"])
 def test_three_swarm_retirements_allow_a_fourth_claim(store, ending):  # noqa: F811
     from scripts.swarm.cli import stop_now
@@ -158,6 +159,7 @@ def test_stop_refunds_and_reopens_only_a_held_claimed_or_pr_task(store, agent_st
     assert ledger.rows["t1"]["state"] == ("open" if refunded else row_state)
 
 
+@pytest.mark.feature("events-parked-retirement-after-release-refunds-nothing")
 def test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
