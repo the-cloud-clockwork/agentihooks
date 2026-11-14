@@ -35,6 +35,10 @@ class Hub:
         self.seen.append(("failed", slug, request))
         return True
 
+    def launched(self, slug, request):
+        self.seen.append(("launched", slug, request))
+        return True
+
 
 @pytest.fixture
 def hub():
@@ -108,6 +112,22 @@ def test_a_launch_failed_on_a_harness_is_reported_to_the_hub(hub):
     ]
 
 
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_launch_is_reported_to_the_hub_with_its_harness_profile_and_account(hub):
+    placed = SimpleNamespace(
+        pane_id="pane-1", harness="codex", account="work", profile="engineer", model="m", effort="e"
+    )
+    lanes.LaneTasks(hub.bus, "hive-a", Mock()).launched(offer(), placed)
+    launch = {"harness": "codex", "profile": "engineer", "account": "work", "model": "m", "effort": "e"}
+    assert hub.hub.seen == [
+        (
+            "launched",
+            "rig",
+            {"op": "launched", "hive": "hive-a", "task": "t1", "lane": "eng", "generation": 2, "launch": launch},
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     ("excluded", "taken"),
     [
@@ -171,12 +191,19 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     monkeypatch.setattr(readiness.Source, "snapshot", Mock(side_effect=AssertionError("a hive reads no ledger")))
     hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
     runtime = Mock()
-    runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a")
+    placed = SimpleNamespace(
+        pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
     )
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
     store = configs({"rig": "events"})
 
     assert lanes.run_once(store, hub.bus, runtime, "hive-a", ("eng",), 0, {}) == ["started"]
+    launch = {"harness": "claude", "profile": "engineer", "account": "slot-a", "model": "opus", "effort": "high"}
+    assert hub.hub.seen[-1] == (
+        "launched",
+        "rig",
+        {"op": "launched", "hive": "hive-a", "task": "t1", "lane": "eng", "generation": 2, "launch": launch},
+    )
     [request] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert (request.lane, request.name, request.task["execution_id"]) == ("eng", "eng@rig-0001", "x1")
     claim = hub.bus.for_swarm("rig").state("spoke-work").get(spoke.claim_key(offer()))
