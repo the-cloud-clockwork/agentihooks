@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.880 · 2026-11-14
+
+### 2026-11-14 · fbfbbb52f00c · #11139 · @nestorcolt
+
+**Events admission claims carry reclaim, workspace, protected branch clear, lane kind, overlaps and group**
+
+This change brings the events hub's admission claim up to parity with what the legacy place prepare used to set, so tasks admitted through the hub now carry reclaim resolution, workspace folder naming, cleared protected branches, lane kind defaults, overlaps and group data. Since the hub has no checkout, branch heads are read remotely via a time-bounded GitHub call that degrades gracefully to "unknown" rather than stalling admission. It also deliberately changes continuation ordering so a cleared protected branch now continues from an earlier life's branch instead of the stale protected one, closing a gap from the legacy behavior.
+
 ## v2.17.879 · 2026-11-14
 
 ### 2026-11-14 · 450e2bde4d4a · #11149 · @agenticore-app
