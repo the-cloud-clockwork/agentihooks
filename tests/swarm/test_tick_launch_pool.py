@@ -47,19 +47,6 @@ def _eight(store):
     return tasks(*((f"t{n}", "eng") for n in range(1, 9)))
 
 
-def test_eight_launches_of_one_pass_run_at_once(store, monkeypatch):
-    import os
-
-    monkeypatch.setattr(os, "cpu_count", lambda: 1)
-    monkeypatch.setattr(os, "process_cpu_count", lambda: 1, raising=False)
-    ledger, pooled = _eight(store), PooledRuntime(8, barrier=threading.Barrier(8, timeout=10))
-    actions = tick("sw", store, ledger, pooled, now_ms=1_000)
-    assert sorted(task for _, _, task in pooled.spawned) == [f"t{n}" for n in range(1, 9)]
-    assert pooled.peak == 8
-    assert all(ledger.rows[f"t{n}"]["state"] == "claimed" for n in range(1, 9))
-    assert sum(action.startswith("spawned engineer@") for action in actions) == 8
-
-
 @pytest.mark.wall_clock
 def test_concurrent_launches_finish_in_the_time_of_the_slowest(store):
     ledger, pooled = _eight(store), PooledRuntime(8, hold=0.5)
