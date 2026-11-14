@@ -252,19 +252,19 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
-def require_listed(signer: Signer, member_id: str) -> None:
+def require_listed(signer: Signer, member_id: str) -> tuple[str, ...]:
     if signer.member_swarms is None:
         raise auth.HiveError(UNSCOPED_RECORD)
     if member_id not in signer.member_swarms:
         raise auth.HiveError(
             f"the hub record lists no member swarms for hive member {member_id}; it mints no unscoped bus credential"
         )
+    return tuple(signer.member_swarms[member_id])
 
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    require_listed(signer, member_id)
-    swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
+    swarms = require_listed(signer, member_id)
     claims = member_claims(user.public, swarms, member=member_id)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 

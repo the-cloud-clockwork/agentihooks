@@ -344,6 +344,19 @@ def test_hive_root_bus_refuses_without_the_hub_signer(tmp_path, monkeypatch, cap
     assert not (home / "root-bus").exists()
 
 
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_hive_root_bus_refuses_a_signer_record_without_member_swarms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer())
+
+    assert cli.main(["root-bus"]) == 1
+
+    assert capsys.readouterr().err == f"hive root-bus refused: {nats_grant.UNSCOPED_RECORD}\n"
+    assert not (home / "root-bus").exists()
+
+
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, capsys):
     from scripts.hive import scope

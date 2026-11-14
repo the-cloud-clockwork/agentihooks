@@ -139,13 +139,14 @@ def test_an_invite_without_a_sync_target_or_a_scoped_record_runs_no_sync(admin: 
         run=lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0),
     )
     del fake.records[SIGNER][member_swarms.FIELD]
-    invite.invite(
-        admin,
-        bao,
-        _scoped(),
-        PUBLIC,
-        run=lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0),
-    )
+    with pytest.raises(auth.HiveError):
+        invite.invite(
+            admin,
+            bao,
+            _scoped(),
+            PUBLIC,
+            run=lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0),
+        )
     assert runs == []
 
 

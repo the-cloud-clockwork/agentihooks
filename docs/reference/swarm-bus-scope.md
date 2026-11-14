@@ -21,7 +21,7 @@ changed list applies without restarting `hive serve`:
 
 | Signer record | Credential | `hive.env` |
 |---|---|---|
-| No `member_swarms` field | The unscoped member grant: legacy execution subjects, the shared dead letter stream and the shared `KV_<bucket>` store of every hive state bucket | No `AGENTIHOOKS_BUS_SCOPED` line |
+| No `member_swarms` field | None. The endpoint answers 403 `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential`, checked before it rotates the member's Redis password; `hive root-bus` refuses with the same text and writes no bus settings | Unchanged |
 | `member_swarms` maps the member id to a list of swarms | Publish and subscribe only under each listed swarm's prefix | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` maps the member id to an empty list | Publish denied on `>`; subscribe only on the member's own `_INBOX.<user>.>` | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` present, member id absent | None. The endpoint answers 403 `the hub record lists no member swarms for hive member <id>; it mints no unscoped bus credential`, checked before it rotates the member's Redis password | Unchanged |
@@ -47,9 +47,10 @@ The field is written by two commands, both with `AGENTIHOOKS_NATS_SIGNER` naming
 
 - `agentihooks hive scope [--swarm <swarm> ...]` creates the field and lists every existing member with the given
   swarms, or with every swarm in the store when none is given. Members already listed keep their swarms.
-- `agentihooks hive invite` lists each new member the same way once the field exists, and marks its invite
-  `AGENTIHOOKS_BUS_SCOPED=1`. It never creates the field, so invites issued before `hive scope` stay unscoped. A
-  `file:` signer is never written.
+- `agentihooks hive invite` lists each new member the same way, and marks its invite `AGENTIHOOKS_BUS_SCOPED=1`. It
+  never creates the field: on a record without it, `hive invite` and `hive create` refuse before minting a member with
+  `the hub signer record <path> has no member_swarms field, so the hub scopes no member and mints no bus credential;
+  run agentihooks hive scope on the hub first`. A `file:` signer is never written.
 
 `hive join` with an invite marked `AGENTIHOOKS_BUS_SCOPED=1` refuses an unscoped credential with `the hive offered an
 unscoped bus credential; ask its hub to list this member's swarms` and writes no `hive.env`. The refresh behind it
@@ -138,7 +139,6 @@ compares with that subject.
 | Who | Subject | Granted by |
 |---|---|---|
 | Scoped member minted for hive `<hive>` | `slots.<swarm>.<hive>` for each swarm in its `member_swarms` entry | `member_claims` in `scripts/hive/nats_grant.py`, called by `mint` with the member id |
-| Unscoped member minted for hive `<hive>` | `slots.*.<hive>` | The same function, with no swarm list |
 | Hub | Serves `slots.*.*` in queue group `hub-slots` | `scripts.hub.slots.serve`, started by the hub runner; the controller grant subscribes to `slots.*.*` |
 
 The hive is the member id the credential was minted for. A member credential carries no slot subject of any other
@@ -375,6 +375,7 @@ missing hive user is accepted only in operator mode, where the values file has n
 | Member gets `permissions violation` on every subject | `member_swarms` lists this member with no swarms | Add its swarms, then `agentihooks hive refresh` on the member |
 | `hive refresh` or `hive join` answers 403 `the hub record lists no member swarms for hive member <id>` | `member_swarms` exists but omits this member id | `agentihooks hive scope` on the hub, or add the member id with its swarms |
 | `the hive offered an unscoped bus credential; ask its hub to list this member's swarms` | The invite is marked scoped but the hub record has no `member_swarms` field | Run `agentihooks hive scope` on the hub, then join again |
+| `hive refresh`, `hive join` or `hive root-bus` refuses with `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential`, or `hive invite` or `hive create` with `the hub signer record <path> has no member_swarms field` | The hub signer record has no `member_swarms` field, so the hub mints no member bus credential | Run `agentihooks hive scope` on the hub, then retry |
 | A launch fails with `slot request names hive '<a>' but the sending credential is bound to hive '<b>'`, and the hub log shows `hub: refused a <op> in swarm <swarm>: ...` | The request body names a hive other than the one in its subject: a caller built `asker` and `Remote` with different hives | Pass the member's own hive to both; the launch path does this from `AGENTIHOOKS_SLOT_HIVE` |
 | `TimeoutError: no responders for 'slots.<swarm>.<hive>'` on a member | The member's credential does not grant that subject, because the hive is not the one it was minted for or the swarm is not in its `member_swarms` entry; or no hub is serving | Ask as the member's own hive and swarm; check the hub is running and `agentihooks hive refresh` the member |
 | `no responders for 'swarm.<swarm>.slots'` | The member runs code from before the slot subject moved to `slots.<swarm>.<hive>` | Update the member to current code and run `agentihooks hive refresh` |

@@ -325,13 +325,19 @@ def test_an_unreadable_signer_record_refuses_the_invite_before_any_member_is_min
     assert RECORD not in fake.records
 
 
-def test_invite_before_the_backfill_leaves_the_record_unscoped_and_the_invite_legacy(admin):
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_invite_against_a_signer_record_without_member_swarms_is_refused_before_minting(admin: "Redis") -> None:
     fake = Bao({SIGNER: {"account_seed": "kept"}})
     request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER, swarms=("rig",))
-    invite.invite(admin, _bao(fake), request, PUBLIC)
+    with pytest.raises(auth.HiveError) as refused:
+        invite.invite(admin, _bao(fake), request, PUBLIC)
+    assert str(refused.value) == (
+        f"the hub signer record {SIGNER} has no member_swarms field, so the hub scopes no member and mints no bus "
+        "credential; run agentihooks hive scope on the hub first"
+    )
     assert fake.records[SIGNER] == {"account_seed": "kept"}
-    assert _scoped_line(fake) == []
-    assert len(auth_members(admin)) == 1
+    assert RECORD not in fake.records
+    assert auth_members(admin) == []
 
 
 def test_invite_without_a_signer_record_leaves_member_swarms_alone(admin):
