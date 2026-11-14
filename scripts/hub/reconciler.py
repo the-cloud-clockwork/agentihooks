@@ -1,6 +1,8 @@
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
@@ -38,42 +40,44 @@ def _start(bus: Bus, slug: str, agent: AgentRecord) -> Envelope | None:
     return event
 
 
-def _by_start(store: RedisStore, slug: str, recorded: bool) -> list[AgentRecord]:
-    """The agents of ``slug`` whose start a hive recorded on a real bus when ``recorded``, else the rest; on the memory
-    bus no start counts as recorded, so the recorded ones are read without touching the store."""
-    config = BusConfig.from_environ()
-    if config.backend == "memory" and recorded:
-        return []
+def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
     agents = store.agents(slug)
+    config = BusConfig.from_environ()
     if config.backend == "memory" or not agents:
-        return [] if recorded else agents
+        return agents
     bus = open_bus(config)
     try:
-        return [agent for agent in agents if (_start(bus, slug, agent) is not None) == recorded]
+        return [agent for agent in agents if _start(bus, slug, agent) is None]
     finally:
         bus.close()
 
 
-def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
-    return _by_start(store, slug, recorded=False)
-
-
-def admitted_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
-    """The agents of ``slug`` whose hive recorded their start on a real bus, the ones ``legacy_agents`` leaves out."""
-    return _by_start(store, slug, recorded=True)
+def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[AgentRecord]:
+    """The agents of ``slug`` outside ``legacy``, the ``legacy_agents`` answer: those whose hive recorded their start
+    on a real bus; none on the memory bus, where no start counts as recorded."""
+    if BusConfig.from_environ().backend == "memory":
+        return []
+    kept = {agent.name for agent in legacy}
+    return [agent for agent in store.agents(slug) if agent.name not in kept]
 
 
 def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
-    """Sends the execution stop for ``agent`` to the hive that recorded its start and answers the stop outcome;
-    answers unknown on the memory bus, where no hive records a start."""
+    """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
+    answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
+    refused the stop."""
     config = BusConfig.from_environ()
     if config.backend == "memory":
         return execution_stop.UNKNOWN
-    bus = open_bus(config)
     try:
-        return execution_stop.stop(bus, slug, agent, reason)
-    finally:
-        bus.close()
+        bus = open_bus(config)
+        try:
+            outcome = execution_stop.stop(bus, slug, agent, reason)
+        finally:
+            bus.close()
+    except Exception as exc:
+        outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
+    print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
+    return outcome
 
 
 def event_slugs(store: RedisStore) -> list[str]:

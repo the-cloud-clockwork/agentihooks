@@ -42,7 +42,7 @@ def _reap(
     judging = tick._Reaping(slug, store, ledger, runtime, rows, live, now_ms)
     agents = list(tick.timing.timed(legacy_agents, store, slug))
     tick.timing.timed(owned_leases.renew, store, slug, agents, tick.LEASE_MS)
-    admitted = list(tick.timing.timed(admitted_agents, store, slug))
+    admitted = list(tick.timing.timed(admitted_agents, store, slug, agents))
     hub_owned = {agent.name for agent in admitted}
     agents += admitted
     by_task: dict[str, list[int]] = {}
@@ -302,11 +302,12 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
 
 
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
-    """Return the actions the live agent watch takes on one agent whose hive recorded its start; its exit and its lease
-    stay with the hub lifecycle."""
+    """Return the actions the live agent watch takes on one agent whose hive recorded its start while its pane is
+    live; its exit, its recovery and its lease stay with the hub lifecycle and reconciler."""
     slug, store = judging.slug, judging.store
     if (
-        agent.state in {"awaiting-decision", "retiring"}
+        agent.name not in judging.live
+        or agent.state in {"awaiting-decision", "retiring"}
         or (agent.lane == tick.MASTER and agent.state == "starting")
         or tick.timing.timed(tick._acknowledging, slug, store, agent)
         or tick._ended(agent, judging.rows)

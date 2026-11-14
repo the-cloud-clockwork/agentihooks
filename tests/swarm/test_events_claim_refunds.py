@@ -15,11 +15,13 @@ from scripts.events.memory import open_bus
 from scripts.hive import execution_events, execution_stop
 from scripts.hub import claims, lifecycle, reconciler
 from scripts.swarm import launch_check, readiness
+from scripts.swarm import tick as tick_module
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_KILL_TICKS
 from scripts.tick.steps import agents as agent_steps
 from scripts.tick.steps import observe
+from scripts.tick.steps.common import DROP_REFUSED
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
@@ -111,6 +113,13 @@ def test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent(
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
 
 
+def spoke_started(bus: Bus) -> None:
+    """Records the started claim the hive spoke holds for the running execution, so a stop finds it not yet ended."""
+    bus.for_swarm(SLUG).state("spoke-work").create(
+        "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
+    )
+
+
 def retire(ending: str, env: tuple[RedisStore, Any, Any], agent: AgentRecord) -> None:
     """Retires ``agent`` the way the swarm does for ``ending``: an account mismatch or idling."""
     store, ledger, rt = env
@@ -150,12 +159,11 @@ def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
     agent, event = launched(env, bus, seat)
+    spoke_started(bus)
 
     retire(ending, env, agent)
 
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
-    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    sent = sent_stops(bus, agent)
     assert [(stop.type, stop.key, stop.cause) for stop in sent] == [(execution_stop.TYPE, agent.execution_id, event.id)]
     assert sent[0].data["reason"] == ending
 
@@ -178,15 +186,50 @@ def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_
 ) -> None:
     store, ledger, rt = env
     agent, event = launched(env, bus, seat)
+    spoke_started(bus)
 
     free(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
 
     assert agent.name in rt.killed
     assert store.claims(SLUG, "t1") == 0
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
-    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    sent = sent_stops(bus, agent)
     assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
+
+
+def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
+    """The stops waiting for the hive that ``agent`` names."""
+    events = bus.for_swarm(SLUG).events
+    stops = events.consumer(
+        execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive), execution_stop.POLICY
+    )
+    return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize(("dropped", "stops"), [(DROP_REFUSED, 0), ("", 1)])
+def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], dropped: str, stops: int
+) -> None:
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+
+    assert tick_module._stop_hive(SLUG, agent, "idle", dropped) == dropped
+
+    assert len(sent_stops(bus, agent)) == stops
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+def test_a_legacy_agent_retirement_sends_no_stop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+) -> None:
+    store, _, _ = env
+    assert run(SLUG, "create", "--repo", "/repo") == 0
+    agent = seat("t1")
+    assert reconciler.legacy_agents(store, SLUG) == [agent]
+
+    assert reconciler.stop_admitted(SLUG, agent, "idle") == execution_stop.UNKNOWN
+
+    assert sent_stops(bus, agent) == []
 
 
 FREES = [
@@ -194,13 +237,6 @@ FREES = [
     (agent_steps._free_refused, "refused"),
     (agent_steps._free_stuck, "stuck"),
 ]
-
-
-def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
-    """The execution stops the hub sent the hive that runs ``agent``."""
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
-    return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
 
 
 @pytest.mark.feature("events-legacy-free-sends-no-stop")
@@ -220,6 +256,27 @@ def test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired(
     assert agent.name in rt.killed
     assert sent_stops(bus, agent) == []
     assert [seated.name for seated in store.agents(SLUG)] == []
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    store, ledger, _ = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    retire(ending, env, agent)
+    released: list[str] = []
+    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, gone: released.append(gone.name))
+
+    react.handle(replace(event, id=f"exited:{event.key}", type="execution.exited"))
+
+    assert released == [agent.name]
+    entry = bus.for_swarm(SLUG).state("spoke-work").get("claim")
+    assert entry is not None
+    assert json.loads(entry.value)["state"] == "exited"
+    assert store.claims(SLUG, "t1") == 0
 
 
 def handed_off(
