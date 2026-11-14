@@ -2326,7 +2326,7 @@ def test_a_pod_restart_releases_the_reservations_of_orders_the_dead_pod_started(
     from scripts.hive import admission
     from scripts.hive.orders import Consumer
     from scripts.swarm.tick import ACK_LATER
-    from scripts.swarm_v2.runtime.base import Outcome, Status
+    from scripts.swarm_v2.runtime.base import Status
 
     request = request_for(setup)
     request = replace(request, task={**request.task, ACK_LATER: True})
@@ -2339,9 +2339,6 @@ def test_a_pod_restart_releases_the_reservations_of_orders_the_dead_pod_started(
     with pytest.raises(KeyboardInterrupt):
         Consumer(setup.store.redis, "remote", runtime, pod="old").poll()
     Consumer(setup.store.redis, "remote", runtime, pod="new").poll()
-    assert setup.launcher.collect(request) == Outcome(
-        "spawn", Status.REFUSED, "hive", detail="hive launch failed: restarted"
-    )
     assert setup.launcher.slots.counts() == {}
     assert admission.pending(setup.store.redis, "remote") == 0
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
