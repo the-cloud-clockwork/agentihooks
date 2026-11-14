@@ -10,6 +10,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from hooks.context.ledger_decision import _bound
 
@@ -111,7 +112,7 @@ def reset(payload: dict) -> None:
         operator_expiry.cancel(session_id, state)
 
 
-def notice(payload: dict, typed: bool, now: float | None = None) -> str:
+def notice(payload: dict[str, Any], typed: bool, now: float | None = None) -> str:
     """The context a prompt gets: its switch notice, the typed reply window, the automated prompt notice and the away reminder."""
     from hooks.context.scheduled_prompts import AUTOMATED
 

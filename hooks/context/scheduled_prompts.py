@@ -7,6 +7,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any, cast
 
 SCHEDULERS = ("CronCreate", "ScheduleWakeup")
 KEPT = 50
@@ -28,19 +29,19 @@ def _path(session_id: str) -> Path:
 
 def _load(session_id: str) -> list[str]:
     try:
-        prompts = json.loads(_path(session_id).read_text())
+        prompts: object = json.loads(_path(session_id).read_text())
     except (OSError, ValueError):
         return []
-    return [p for p in prompts if isinstance(p, str)] if isinstance(prompts, list) else []
+    return [p for p in cast(list[object], prompts) if isinstance(p, str)] if isinstance(prompts, list) else []
 
 
-def record(payload: dict) -> bool:
+def record(payload: dict[str, Any]) -> bool:
     """Remember the prompt a cron or wakeup tool call scheduled in this session."""
-    session_id = payload.get("session_id") or ""
-    tool_input = payload.get("tool_input")
+    session_id = str(payload.get("session_id") or "")
+    tool_input: object = payload.get("tool_input")
     if payload.get("tool_name") not in SCHEDULERS or not session_id or not isinstance(tool_input, dict):
         return False
-    prompt = _norm(tool_input.get("prompt"))
+    prompt = _norm(cast(dict[str, object], tool_input).get("prompt"))
     if not prompt:
         return False
     prompts = [p for p in _load(session_id) if p != prompt] + [prompt]

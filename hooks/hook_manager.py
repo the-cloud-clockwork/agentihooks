@@ -1169,7 +1169,7 @@ def _operator_words(payload: dict) -> bool:
         return False
 
 
-def _scheduled_prompt(payload: dict) -> None:
+def _scheduled_prompt(payload: dict[str, Any]) -> None:
     try:
         from hooks.context.scheduled_prompts import record
 
