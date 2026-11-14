@@ -61,18 +61,24 @@ def test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_t
 def test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_the_other_two_are_pushed(
     channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import anyio
+
     _, inbox = channel_backend
     first, poisoned, last = _three(inbox)
     built = channel.event
+    attempts: list[str] = []
 
     def failing(item: Item) -> dict[str, Any]:
         if item.id == poisoned.id:
+            attempts.append(item.id)
             raise TypeError("text is not a string")
         return built(item)
 
     monkeypatch.setattr(channel, "event", failing)
-    session = Session()
-    _pass(inbox, session)
+    session, pushed = Session(), channel.Pushed()
+    for _ in range(2):
+        anyio.run(channel._deliver, inbox, "bob", session, pushed)  # pyright: ignore[reportPrivateUsage]
+    assert attempts == [poisoned.id]
     assert session.shown == [first.id, last.id]
     assert inbox.get(poisoned.id).state == "pending"
     assert _requeued(inbox, poisoned.id) == ("pending", "bob", channel.UNSHOWN)

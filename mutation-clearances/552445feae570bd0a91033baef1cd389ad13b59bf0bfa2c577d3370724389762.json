@@ -1,0 +1,6 @@
+{
+  "scripts/hive/execution_stop.py:scripts.hive.execution_stop.x__fields:88a7ed399af5ef6a943f232702442447d0983291fbe239c259a68441707301cb": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: typing.cast ignores its first argument at runtime and returns event.data unchanged."
+  }
+}
