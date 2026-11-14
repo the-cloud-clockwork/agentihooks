@@ -1,11 +1,15 @@
 import json
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from scripts.swarm import cli
+from scripts.swarm.store import AgentRecord, RedisStore
+from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
-_fixture = env
+_fixture = env, seat
 CI = "ci@a1b2c3-0001"
 ESCALATED = {
     "attempts": [{"after_critic": False}, {"after_critic": False}, {"after_critic": True}],
@@ -15,10 +19,11 @@ ESCALATED = {
 
 
 @pytest.fixture
-def started(env):
+def started(env: tuple[RedisStore, Any, Any], seat: Callable[..., AgentRecord]) -> tuple[RedisStore, Any]:
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat("t1")
+    seat("t2")
     return store, ledger
 
 
