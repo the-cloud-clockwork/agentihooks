@@ -15,7 +15,7 @@ from packaging.version import InvalidVersion, Version
 from scripts import updater
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
-from scripts.hub import lease
+from scripts.hub import branch_heads, lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
@@ -206,12 +206,20 @@ class Admission:
         except Exception:
             self._unclaim(slug, task_id, name)
             raise
-        live = self._mark(slug, request, row, name)
+        live = self._mark(slug, request, row, name, doc)
         if live is None:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
-        primed = tick.primed(self.store, slug, seat, {**row, **live})
+        claimed = {**row, **live}
+        claimed.update(self._continuation(slug, name, claimed, rows))
+        claimed["overlaps"] = tick._sharing(claimed, rows, self.store.agents(slug))
+        claimed["group"] = [
+            {key: rows[member][key] for key in ("id", "title", "description")}
+            for member in claimed.get("group_members") or []
+            if member in rows
+        ]
+        primed = tick.primed(self.store, slug, seat, claimed)
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
@@ -237,10 +245,42 @@ class Admission:
             return tick._stack_base(task, rows, config.repo_origin, stack.repo_key)
         return tick._stack_base(task, rows, config.repo)
 
-    def _mark(self, slug: str, request: dict, row: dict, name: str) -> dict | None:
-        """The ledger row once claimed by name; its claim generation is one past the offer's."""
+    def _continuation(self, slug: str, name: str, task: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
+        """The handoff or the recorded branch a reclaimed task continues from; empty for a first life with no branch."""
+        from scripts.swarm import continuation
+
+        task_id = task["id"]
+        handoff = self.store.handoff(slug, task_id)
+        lives = self.store.earlier_lives(slug, task_id)
+        config = self.store.config(slug)
+        reclaim, origin = branch_heads.reclaimer(config)
+        if handoff:
+            saved = self.store.handoff_envelope(slug, task_id) or {}
+            resolved = continuation.resolve(config.repo, task, rows, lives, saved, reclaim, origin)
+            return {"handoff": handoff, "handoff_envelope": resolved}
+        if not (lives or task.get("branch")):
+            return {}
+        found = continuation.resolve(config.repo, task, rows, lives, {}, reclaim, origin)
+        self.store.put_reclaim(slug, name, found)
+        return {"reclaim": found}
+
+    def _mark(self, slug: str, request: dict, row: dict, name: str, doc: dict[str, Any]) -> dict | None:
+        """The ledger row once claimed by name with its work folder, a protected branch cleared and the lane kind; its
+        claim generation is one past the offer's."""
+        from scripts.swarm import continuation
+        from scripts.swarm_ledger import ledger_workspace
+
         task_id = request["task"]
-        fields = {"state": "pr" if row.get("pr_url") else "claimed", "claimed_by": name}
+        fields = {
+            "state": "pr" if row.get("pr_url") else "claimed",
+            "claimed_by": name,
+            "workspace": str(ledger_workspace.scaffold(slug, row, doc)),
+        }
+        if row.get("branch") in continuation.PROTECTED:
+            fields["branch"] = ""
+        kind = self.store.config(slug).lanes.get(request["lane"], {}).get("kind", "")
+        if kind not in ("", "auto") and not row.get("kind"):
+            fields["kind"] = kind
         expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": request["generation"]}
         try:
             live = self.ledger.update_task(slug, task_id, fields, if_state=("open",), if_match=expected)

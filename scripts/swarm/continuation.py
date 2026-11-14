@@ -16,8 +16,17 @@ def retained(task: dict) -> str:
     return "" if branch in PROTECTED else branch
 
 
-def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict, reclaim: Callable[..., dict]) -> dict:
-    origin = stack.origin_key(repo)
+def resolve(
+    repo: str,
+    task: dict,
+    rows: dict,
+    lives: list[str],
+    envelope: dict,
+    reclaim: Callable[..., dict],
+    origin: str | None = None,
+) -> dict:
+    """The continuation a claimed task starts from; origin names the repository key when no checkout can tell it."""
+    origin = stack.origin_key(repo) if origin is None else origin
     if task.get("branch_repo") and stack.repo_key(task["branch_repo"]) != origin:
         return {**envelope, **fresh("the task branch belongs to another repository")}
     forbidden = {
