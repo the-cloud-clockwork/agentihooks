@@ -2120,6 +2120,18 @@
       ]
     },
     {
+      "id": "swarm-resumed-agent-grace",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
+      "behaviour": "A resumed agent keeps its original start time, so the tick start grace, the master down notice and the stale nudge measure from the later of its start and its launch.",
+      "seam": "The tick reaper start grace, the master down step and the stale nudge",
+      "tests": [
+        "tests/swarm/test_dead_resume.py::test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume",
+        "tests/swarm/test_tick.py::test_a_master_resumed_inside_the_start_grace_posts_no_down_notice",
+        "tests/swarm/test_stale_nudge.py::test_a_resumed_agent_counts_its_silence_from_its_launch"
+      ]
+    },
+    {
       "id": "swarm-reboot-recovery",
       "origin": "inventory",
       "behaviour": "After a reboot each recorded local agent resumes in its own conversation, seat and account, and one that cannot reopen awaits a decision.",

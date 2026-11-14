@@ -82,6 +82,16 @@ def test_last_activity_is_the_later_of_the_heartbeat_and_the_start(beat, started
     assert stale_nudge.last_activity(beat, agent(started_at)) == expected
 
 
+@pytest.mark.feature("swarm-resumed-agent-grace")
+def test_a_resumed_agent_counts_its_silence_from_its_launch(inbox: InboxStore) -> None:
+    resumed = AgentRecord(NAME, "eng", "t1", started_at=BASE, launched_at=BASE + 3 * LIMIT)
+    idle.beat(inbox.redis, "sw", NAME, idle.IDLE, BASE)
+
+    assert stale_nudge.last_activity({"at": BASE}, resumed) == BASE + 3 * LIMIT
+    assert stale_nudge.nudge(inbox, "sw", resumed, "", BASE + 3 * LIMIT + MINUTE) == []
+    assert inbox.pending_mail(NAME) == []
+
+
 def test_the_window_counts_whole_ten_minute_spans_of_silence():
     assert [stale_nudge.window(BASE, BASE + at) for at in (0, LIMIT - 1, LIMIT, 2 * LIMIT + 5)] == [0, 0, 1, 2]
 

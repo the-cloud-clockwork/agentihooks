@@ -2037,6 +2037,26 @@ def test_a_master_still_starting_posts_no_down_notice(store):
     assert MASTER_DOWN not in ledger.notes and [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
 
 
+@pytest.mark.feature("swarm-resumed-agent-grace")
+def test_a_master_resumed_inside_the_start_grace_posts_no_down_notice(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.tick.steps import masters as master_steps
+
+    start = 10**9
+    runtime, ledger = FakeRuntime(), tasks()
+    tick("sw", store, ledger, runtime, start)
+    [boss] = masters(store)
+    resumed_at = start + 2 * STARTUP_GRACE_MS
+    store.put_agent("sw", replace(boss, launched_at=resumed_at))
+    runtime.live.clear()
+    InboxStore(store.redis).send("operator", "master@sw", "how far along")
+
+    actions = master_steps._master_down("sw", store.config("sw"), store, ledger, runtime, resumed_at + STARTUP_GRACE_MS)
+
+    assert actions == []
+    assert MASTER_DOWN not in ledger.notes
+
+
 def test_a_stopping_swarm_posts_no_down_notice(store):
     from scripts.inbox.store import InboxStore
 
