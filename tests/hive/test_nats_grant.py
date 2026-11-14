@@ -2,6 +2,7 @@ import json
 import socket
 import subprocess
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +29,13 @@ def admin():
 def _user_creds(account: nkey.KeyPair, name: str) -> str:
     user = nkey.create(nkey.USER)
     return nkey.creds(nkey.encode_jwt(account, user.public, name, nats_grant.user_claims()), user.seed)
+
+
+def _unscoped(signer: nats_grant.Signer, member_id: str) -> str:
+    """Sign the swarm wide member claims directly, since the hub mint refuses every signer without member swarms."""
+    user = nats_grant.member_user(signer, member_id)
+    claims = nats_grant.member_claims(user.public, None, member=member_id)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 
 @pytest.fixture
@@ -97,7 +105,7 @@ def test_the_server_refuses_a_bus_with_no_signed_credential(signer):
 
 def test_hive_serve_mints_a_member_credential_the_bus_opens_with(admin, signer):
     member = auth.mint(admin, "h1", PUBLIC)
-    grant = _refresh(admin, signer, member["ledger_credential"])
+    grant = _refresh(admin, replace(signer, member_swarms={member["id"]: ("rig",)}), member["ledger_credential"])
     jwt, user = nkey.parse_creds(grant["nats_credentials"])
     assert user == nats_grant.member_user(signer, member["id"])
     assert _opens(signer, grant["nats_credentials"])
@@ -137,7 +145,7 @@ def test_a_member_credential_cannot_publish_outside_the_swarm_prefix(signer):
     async def act(nc):
         await nc.publish("outside.events", b"x")
 
-    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+    assert _violations(signer, _unscoped(signer, "m1"), act, refused=True) == [
         'nats: permissions violation for publish to "outside.events"'
     ]
 
@@ -146,7 +154,7 @@ def test_a_member_credential_cannot_subscribe_outside_the_swarm_prefix(signer):
     async def act(nc):
         await nc.subscribe("outside.>")
 
-    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+    assert _violations(signer, _unscoped(signer, "m1"), act, refused=True) == [
         'nats: permissions violation for subscription to "outside.>"'
     ]
 
@@ -155,7 +163,7 @@ def test_a_member_credential_cannot_read_the_replies_of_other_members(signer):
     async def act(nc):
         await nc.subscribe("_INBOX.>")
 
-    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+    assert _violations(signer, _unscoped(signer, "m1"), act, refused=True) == [
         'nats: permissions violation for subscription to "_inbox.>"'
     ]
 
@@ -167,7 +175,7 @@ def test_a_member_credential_cannot_change_a_stream(signer, verb):
     async def act(nc):
         await nc.publish(subject, b"{}")
 
-    assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
+    assert _violations(signer, _unscoped(signer, "m1"), act, refused=True) == [
         f'nats: permissions violation for publish to "{subject.lower()}"'
     ]
 
@@ -215,7 +223,7 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
 
     hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
     member = nats.open_bus(
-        BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, "m1"), provision=False)
+        BusConfig(backend="nats", url=signer.url, credentials=_unscoped(signer, "m1"), provision=False)
     )
     try:
         policy = QueuePolicy()
@@ -238,7 +246,7 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     finally:
         member.close()
         hub.close()
-    refused = " ".join(_refused(signer, nats_grant.mint(signer, "m1")))
+    refused = " ".join(_refused(signer, _unscoped(signer, "m1")))
     assert 'permissions violation for publish to "$js.api.stream.create.rogue"' in refused
     durable = f'"$js.api.consumer.durable.create.{nats.EVENT_STREAM}.rogue"'.lower()
     assert f"permissions violation for publish to {durable}" in refused
@@ -252,7 +260,7 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
     hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
     members = [
         nats.open_bus(
-            BusConfig(backend="nats", url=signer.url, credentials=nats_grant.mint(signer, name), provision=False)
+            BusConfig(backend="nats", url=signer.url, credentials=_unscoped(signer, name), provision=False)
         )
         for name in ("m1", "m2")
     ]
@@ -286,7 +294,7 @@ def test_a_member_credential_cannot_read_the_hub_owned_account_buckets(signer, b
         await nc.publish(f"$JS.API.STREAM.INFO.KV_{bucket}", b"")
         await nc.publish(f"$KV.{bucket}.key", b"")
 
-    seen = " ".join(_violations(signer, nats_grant.mint(signer, "m1"), act, refused=True)).lower()
+    seen = " ".join(_violations(signer, _unscoped(signer, "m1"), act, refused=True)).lower()
     assert f'permissions violation for publish to "$js.api.stream.info.kv_{bucket}"' in seen
 
 
@@ -300,8 +308,9 @@ def test_a_hive_endpoint_without_a_signer_mints_no_bus_credential(admin):
 def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     member = auth.mint(admin, "h1", PUBLIC)
     other = auth.mint(admin, "h2", PUBLIC)
-    creds = _refresh(admin, signer, member["ledger_credential"])["nats_credentials"]
-    kept = _refresh(admin, signer, other["ledger_credential"])["nats_credentials"]
+    listed = replace(signer, member_swarms={member["id"]: ("rig",), other["id"]: ("rig",)})
+    creds = _refresh(admin, listed, member["ledger_credential"])["nats_credentials"]
+    kept = _refresh(admin, listed, other["ledger_credential"])["nats_credentials"]
     assert remove.revoke(admin, member["id"], signer, dry_run=True) == [
         f"would revoke the NATS credential of {member['id']}",
         f"would revoke member {member['id']} and its Redis user",
@@ -358,7 +367,8 @@ def test_a_role_credential_named_in_openbao_opens_the_bus(signer, monkeypatch):
 
 def test_revoke_refuses_an_account_update_from_an_untrusted_operator(admin, signer):
     member = auth.mint(admin, "h1", PUBLIC)
-    creds = _refresh(admin, signer, member["ledger_credential"])["nats_credentials"]
+    listed = replace(signer, member_swarms={member["id"]: ("rig",)})
+    creds = _refresh(admin, listed, member["ledger_credential"])["nats_credentials"]
     stranger = nkey.create(nkey.OPERATOR)
     untrusted = nats_grant.Signer(
         stranger, signer.account, signer.system_credentials, signer.url, signer.trusted_operator
@@ -371,7 +381,7 @@ def test_revoke_refuses_an_account_update_from_an_untrusted_operator(admin, sign
         nats_grant.revoke(admin, untrusted, member["id"])
     assert str(refused.value) == message
     assert _opens(signer, creds)
-    assert _opens(signer, _refresh(admin, signer, member["ledger_credential"])["nats_credentials"])
+    assert _opens(signer, _refresh(admin, listed, member["ledger_credential"])["nats_credentials"])
 
 
 def test_the_trusted_operator_signs_the_revoking_account_update(admin, signer, monkeypatch):
@@ -686,9 +696,39 @@ def _offline_signer() -> nats_grant.Signer:
     return nats_grant.Signer(operator, nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222", operator.public)
 
 
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_a_mint_against_a_signer_record_without_member_swarms_is_refused() -> None:
+    with pytest.raises(auth.HiveError) as refused:
+        nats_grant.mint(_offline_signer(), "m1")
+    assert str(refused.value) == (
+        "the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential"
+    )
+
+
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_a_mint_against_a_signer_record_with_member_swarms_is_unchanged() -> None:
+    signed = replace(_offline_signer(), member_swarms={"m1": ("rig",)})
+    jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
+    assert user.public == nats_grant.member_user(signed, "m1").public
+    assert _claims(jwt)["nats"] == nats_grant.member_claims(user.public, ("rig",), member="m1")
+
+
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_a_refresh_against_a_signer_record_without_member_swarms_is_refused_before_rotating(admin) -> None:
+    member = auth.mint(admin, "h1", PUBLIC)
+    before = admin.acl_getuser(f"hive-{member['id']}")["passwords"]
+    with pytest.raises(auth.HiveError) as refused:
+        server._grant("refresh", admin, member["ledger_credential"], PUBLIC, _offline_signer())
+    assert str(refused.value) == (
+        "the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential"
+    )
+    assert admin.acl_getuser(f"hive-{member['id']}")["passwords"] == before
+    assert _refresh(admin, _offline_signer(), member["ledger_credential"]) == {"error": str(refused.value)}
+
+
 def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     signed = _offline_signer()
-    jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
+    jwt, user = nkey.parse_creds(_unscoped(signed, "m1"))
     claims = _claims(jwt)
     assert (claims["iss"], claims["sub"], claims["name"]) == (signed.account.public, user.public, "hive-m1")
     buckets = (

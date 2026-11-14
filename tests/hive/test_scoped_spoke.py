@@ -70,14 +70,18 @@ def test_scoped_join_grant_enables_the_scoped_client_layout(admin, signer):
     assert "AGENTIHOOKS_BUS_CREDENTIALS=/member/bus.creds" in text.splitlines()
 
 
-def test_an_unscoped_join_grant_names_no_swarms(admin, signer):
+def test_a_join_against_a_signer_record_without_member_swarms_is_refused(admin, signer):
     from scripts.hive import auth
     from tests.hive.test_nats_grant import PUBLIC, _refresh
 
     member = auth.mint(admin, "hive", PUBLIC)
     grant = _refresh(admin, signer, member["ledger_credential"])
-    assert grant["bus_scoped"] is False
-    assert "bus_swarms" not in grant
+    assert grant == {
+        "error": (
+            "the hub signer record has no member_swarms field, so it scopes no member; "
+            "it mints no unscoped bus credential"
+        )
+    }
 
 
 def test_the_join_env_lists_every_member_swarm_in_order():

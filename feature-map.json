@@ -573,6 +573,19 @@
       ]
     },
     {
+      "id": "hive-mint-refuses-unscoped-signer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-mint-refuse-unscoped",
+      "behaviour": "The hub mints a member bus credential only from a signer record that carries a member_swarms field: a record without one is refused with a HiveError naming the missing field before the hive endpoint rotates the member's Redis password, and the root hive writes no bus settings; a record that lists the member mints the scoped claims unchanged.",
+      "seam": "nats_grant.mint and require_listed, the hive endpoint refresh and root_bus.write",
+      "tests": [
+        "tests/hive/test_nats_grant.py::test_a_mint_against_a_signer_record_without_member_swarms_is_refused",
+        "tests/hive/test_nats_grant.py::test_a_mint_against_a_signer_record_with_member_swarms_is_unchanged",
+        "tests/hive/test_nats_grant.py::test_a_refresh_against_a_signer_record_without_member_swarms_is_refused_before_rotating",
+        "tests/hive/test_root_bus.py::test_a_signer_record_without_member_swarms_mints_no_root_credential"
+      ]
+    },
+    {
       "id": "hive-agent-token-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
