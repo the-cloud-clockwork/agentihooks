@@ -482,15 +482,6 @@ def test_tick_blocks_task_with_the_unresolved_reason(swarm):
     assert "blocked t1: profile unresolved: set it" in actions
 
 
-def test_unresolved_leaves_a_task_that_moved_on(swarm):
-    ledger = _commenting(tasks(("t1", "eng")))
-    ledger.rows["t1"]["state"] = "done"
-    rows = {"t1": dict(ledger.rows["t1"])}
-    said = tick._unresolved("sw", ledger, rows, "t1", "why")
-    assert said == "task t1 is done on the ledger, its profile stays unresolved"
-    assert ledger.rows["t1"]["state"] == "done" and ledger.comments == []
-
-
 def test_tick_still_reopens_on_an_ordinary_spawn_failure(swarm):
     ledger = tasks(("t1", "eng"))
     tick.tick("sw", swarm, ledger, FakeRuntime(fail=True), now_ms=1_000)

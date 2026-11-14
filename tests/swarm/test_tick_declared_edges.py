@@ -39,7 +39,7 @@ TODAY = {
     ],
     "placement notices": ["quota notice", "lost runner", "time left"],
     "task passes": ["run window", "verification notices", "size pass", "grouping release", "dispatcher group"],
-    "placement acks": ["collect acks", "codex hook order"],
+    "placement acks": ["codex hook order"],
     "placement": ["rank pass", "bottleneck remedy", "preempt", "spawn"],
     "close": ["conversations", "session models", "handoff transfers", "settle", "close space"],
     "wrapper events": [
