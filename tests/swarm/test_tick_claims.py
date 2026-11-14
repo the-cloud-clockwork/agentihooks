@@ -160,6 +160,7 @@ def test_a_dependency_that_is_not_active_or_has_no_branch_still_holds_the_task(s
 
 
 @pytest.mark.parametrize("field", ["depends_on", "parked_on"])
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_a_task_naming_a_task_missing_from_the_ledger_is_held(store, field):
     ledger, runtime = FakeLedger([{"id": "t2", field: ["gone"]}]), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -253,6 +254,7 @@ def test_only_a_claim_that_ends_parked_on_an_unfinished_blocker_keeps_its_claim_
     assert store.claims("sw", "t2") == lives
 
 
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_an_overlapping_task_is_claimed_once_the_non_overlapping_work_is_taken(store):
     ledger = FakeLedger(
         [
@@ -271,6 +273,7 @@ def test_an_overlapping_task_is_claimed_once_the_non_overlapping_work_is_taken(s
     assert runtime.tasks[0]["overlaps"] == [] and runtime.tasks[1]["overlaps"] == []
 
 
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_a_broad_territory_never_stops_a_claim(store):
     ledger = FakeLedger(
         [
@@ -290,6 +293,7 @@ def test_a_broad_territory_never_stops_a_claim(store):
     ]
 
 
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(store):
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
@@ -302,6 +306,7 @@ def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(
 
 
 @pytest.mark.parametrize("claimant", ["engineer@a1b2c3-0099", "eng-1@sw", ""])
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_an_overlap_released_for_checks_has_no_coordination_recipient(store, claimant):
     from scripts.swarm import prompt, ready
 
@@ -322,6 +327,7 @@ def test_an_overlap_released_for_checks_has_no_coordination_recipient(store, cla
     assert f"claimed by {claimant}" not in text
 
 
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_a_reused_seat_does_not_make_its_new_agent_the_owner_of_an_overlap(store):
     from scripts.swarm import prompt, ready
 
@@ -464,6 +470,7 @@ def test_a_rank_change_applies_on_the_next_tick(store):
     assert spawned_ids(runtime)[1:] == ["t3"]
 
 
+@pytest.mark.feature("swarm-tick-legacy-claim-holds-and-overlaps")
 def test_a_swarm_whose_only_open_task_waits_on_a_blocked_one_drains(store):
     ledger = FakeLedger([{"id": "t1", "state": "blocked"}, {"id": "t2", "depends_on": ["t1"]}])
     runtime = FakeRuntime()
