@@ -1,4 +1,4 @@
-"""The placement steps of the tick pass, run at their sites in today's order: notices, acks, ranking and preempt."""
+"""The placement steps of the tick pass, run at their sites in today's order: notices, acks and ranking."""
 
 # pyright: reportUnusedFunction=false, reportUnusedClass=false
 
@@ -6,7 +6,6 @@ import json
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import replace
-from functools import partial
 from importlib import import_module
 from typing import Any
 
@@ -28,13 +27,12 @@ claim_cap: Any = import_module("scripts.gates.claims")
 gate_log: Any = import_module("scripts.gates.log")
 preempt: Any = import_module("scripts.swarm.preempt")
 
-__all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "PREEMPT_NEEDS", "STEPS"]
+__all__ = ["ACKS", "NOTICES", "PLACED", "PLACEMENT", "STEPS"]
 
 Get = Callable[[str], Any]
 NOTICES = "placement notices"
 ACKS = "placement acks"
 PLACEMENT = "placement"
-PREEMPT_NEEDS = frozenset({"reap", "drained resume", "recover outages", "prerequisite reopen"})
 RESUMED = frozenset({"drained resume"})
 CONFIG_DOC = pass_domains("config", "doc")
 TASK_STATE = pass_domains("config", "rows", "doc")
@@ -74,17 +72,6 @@ def _bottleneck_remedy(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
         tick.bottleneck_remedy.step, get("slug"), get("store"), get("ledger"), get("doc"), get("now_ms")
     )
-
-
-def _preempt(tick: Any, get: Get) -> Any:
-    config, store = get("config"), get("store")
-    if config.state == "running" and config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:
-        placement = partial(tick.preempt.probe, get("runtime"))
-        seats = tick.preempt.Seats(
-            get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement, tick.claim_view
-        )
-        return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
-    return []
 
 
 def _admission(runtime: Any) -> Any:
@@ -248,14 +235,6 @@ STEPS = (
     ),
     CallStep(
         "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")
-    ),
-    CallStep(
-        "preempt",
-        PLACEMENT,
-        held(placing(_preempt)),
-        PREEMPT_NEEDS,
-        frozenset({AGENTS}) | TASK_STATE,
-        frozenset({AGENTS}),
     ),
 )
 

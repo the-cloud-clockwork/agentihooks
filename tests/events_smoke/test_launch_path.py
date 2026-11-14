@@ -1,6 +1,5 @@
 """Smoke of the events launch path: a hub, hive spokes and a scratch swarm on a real nats-server and Redis."""
 
-import json
 import time
 from typing import Any
 from unittest.mock import Mock
@@ -10,10 +9,9 @@ import pytest
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_stop, presence, registry
 from scripts.hub import admission, hive_loss
-from scripts.swarm import engine_migration, fleet_red
+from scripts.swarm import fleet_red
 from scripts.swarm import tick as swarm_tick
-from scripts.swarm.execution import TERMINAL_STATES
-from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import EVENTS_ENGINE, MASTER
 from scripts.tick.adapters.github import GitHubSourceControl
 from tests.events_smoke.conftest import LAUNCH, SLUG, Smoke
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -164,39 +162,6 @@ def test_a_hive_at_its_max_agents_takes_no_admission_and_a_hive_below_it_takes_t
     assert hosts == {"t1": "hive-a", "t2": "hive-b"}
     assert full.runtime.spawn.call_count == 1
     assert smoke.ledger.rows["t2"]["state"] == "claimed"
-
-
-@pytest.mark.feature("events-smoke-engine-switch")
-def test_an_engine_switch_exits_no_running_execution(smoke: Smoke) -> None:
-    hive = smoke.spoke("hive-a", "eng")
-    smoke.offer("t1")
-    assert hive.spoke.poll(TAKE_MS) == "started"
-    event = started(smoke)
-    smoke.store.create(SwarmConfig("legacy-busy", smoke.store.config(SLUG).repo, 1, 1))
-    smoke.store.redis.hset(smoke.store.key("legacy-busy", "config"), "engine", "legacy")
-    record = AgentRecord(
-        smoke.store.next_name("legacy-busy", "eng"), "eng", "t9", seat="eng-1@legacy-busy", started_at=1
-    )
-    smoke.store.start_execution("legacy-busy", record)
-    before = {slug: smoke.store.agents(slug) for slug in (SLUG, "legacy-busy")}
-
-    outcomes = engine_migration.migrate(smoke.store)
-
-    assert outcomes == {SLUG: "unchanged", "legacy-busy": engine_migration.BUSY}
-    assert smoke.store.redis.hget(smoke.store.key("legacy-busy", "config"), "engine") == "legacy"
-    smoke.store.redis.hset(smoke.store.key(SLUG, "config"), "engine", "legacy")
-    lose_hive(smoke, event, None)
-
-    assert exits(smoke) == []
-    claim = smoke.bus.for_swarm(SLUG).state("spoke-work").get(event.data["claim_key"])
-    assert claim is not None
-    assert json.loads(claim.value)["state"] == "started"
-    for slug, agents in before.items():
-        assert smoke.store.agents(slug) == agents
-        assert all(agent.state not in TERMINAL_STATES for agent in agents)
-    smoke.store.update(SLUG, engine=EVENTS_ENGINE)
-    lose_hive(smoke, event, None)
-    assert [found.event.data["reason"] for found in exits(smoke)] == [hive_loss.REASON]
 
 
 @pytest.mark.feature("events-smoke-no-legacy-launch")

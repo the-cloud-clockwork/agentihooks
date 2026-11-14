@@ -100,7 +100,6 @@ def test_budgets_come_from_the_p95_with_headroom_in_whole_seconds() -> None:
     assert budgets.budget_s(0.6) == 1.0
     assert budgets.budget_s(0.7) == 2.0
     assert budgets.budget_s(14.511) == 22.0
-    assert budgets.timing_of("preempt") == (18.0, 60.0)
     assert budgets.timing_of("night watch") == (22.0, 120.0)
     assert budgets.timing_of("config load") == (2.0, 60.0)
     assert budgets.timing_of("hive ledger") == (2.0, 120.0)
@@ -180,7 +179,6 @@ CRITICAL_STEPS = frozenset(
         "dispatcher group",
         "rank pass",
         "bottleneck remedy",
-        "preempt",
         "master down",
         "tick master",
         "master scale",

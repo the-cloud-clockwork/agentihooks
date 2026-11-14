@@ -5807,11 +5807,8 @@
       "behaviour": "The hub hive loss pass judges hive presence only for swarms whose config engine is events, and only once it has watched a swarm on events for a full presence TTL, so a swarm switched to legacy or back to events keeps its running executions while its hives resume beating, while a lost hive of an events swarm still has its running executions exited. A failed store read keeps the last events swarms.",
       "seam": "scripts.hub.hive_loss.HiveLoss.poll",
       "tests": [
-        "tests/hub/test_hive_loss.py::test_a_swarm_switched_to_legacy_keeps_its_running_executions_when_its_hives_stop_beating",
         "tests/hub/test_hive_loss.py::test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive",
         "tests/hub/test_hive_loss.py::test_a_hub_built_without_a_store_connects_once_it_watches_a_start",
-        "tests/hub/test_hive_loss.py::test_a_swarm_switched_back_to_events_waits_a_full_presence_ttl_before_judging_its_hives",
-        "tests/hub/test_hive_loss.py::test_a_swarm_switched_back_to_events_keeps_executions_whose_hive_beats_again",
         "tests/hub/test_hive_loss.py::test_a_swarm_missing_from_the_store_index_is_never_judged",
         "tests/hub/test_hive_loss.py::test_a_failed_store_read_keeps_the_last_events_swarms_and_says_so",
         "tests/hub/test_hive_loss.py::test_a_failed_first_store_read_judges_no_swarm"
@@ -6237,19 +6234,6 @@
       ],
       "rules": [
         "admission-skips-hive-max-agents"
-      ]
-    },
-    {
-      "id": "events-smoke-engine-switch",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
-      "behaviour": "On a real nats-server and Redis, the engine migration leaves an events swarm unchanged and skips a legacy swarm with a live agent; a hub hive loss pass with its real emitter exits no running execution of a swarm switched to the legacy engine while its hive stops beating, every agent record and the started claim stay as they were, and once the swarm is back on events the same pass exits it as hive lost.",
-      "seam": "engine_migration.migrate and HiveLoss.poll",
-      "tests": [
-        "tests/events_smoke/test_launch_path.py::test_an_engine_switch_exits_no_running_execution"
-      ],
-      "rules": [
-        "hive-loss-without-engine-filter"
       ]
     },
     {

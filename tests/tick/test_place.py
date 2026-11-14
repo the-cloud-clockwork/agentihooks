@@ -14,7 +14,6 @@ from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import (
-    AGENTS,
     PASS,
     CallStep,
     actions,
@@ -112,7 +111,6 @@ def _tick(log: list[Any]) -> SimpleNamespace:
         _current_owner="owner",
         ready_in_order="ready in order",
         claim_view="claim view",
-        preempt=SimpleNamespace(probe=_probe, Seats=_Seats, run="preempt"),
         bottleneck_remedy=bottleneck_remedy,
         panic=panic,
     )
@@ -140,15 +138,13 @@ def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
     assert [step.name for step in engine.group_steps(place.PLACEMENT)] == [
         "rank pass",
         "bottleneck remedy",
-        "preempt",
     ]
     declared = {
         step.name: (step.needs, step.reads - pass_domains(*BOXED), step.writes - {actions_of(step.name)})
         for step in place.STEPS
     }
-    assert declared["preempt"] == (place.PREEMPT_NEEDS, frozenset({AGENTS}), frozenset({AGENTS}))
     assert declared["rank pass"] == (frozenset({"drained resume"}), frozenset(), frozenset({tasks.RANK}))
-    assert {name: value[1:] for name, value in declared.items() if name not in {"preempt", "rank pass"}} == {
+    assert {name: value[1:] for name, value in declared.items() if name != "rank pass"} == {
         name: (frozenset(), frozenset())
         for name in (
             "quota notice",
@@ -206,15 +202,6 @@ def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: 
         (lost_runner.sweep, "sw", "config", "store", 7),
         (time_left.refresh, "sw", "store", "ledger", "runtime", "config", "doc"),
     ]
-
-
-@pytest.mark.parametrize(("state", "engine_name"), [("paused", "tick"), ("running", "events")])
-def test_preempt_waits_for_a_running_tick_engine(
-    calm: list[Any], monkeypatch: pytest.MonkeyPatch, state: str, engine_name: str
-) -> None:
-    found = _run(place.PLACEMENT, _tick(calm), _pass(calm, state, engine_name), monkeypatch)
-    assert found == ["ran rank_writes", "ran bottleneck remedy"]
-    assert "preempt" not in [entry[0] for entry in calm if isinstance(entry, tuple)]
 
 
 def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
