@@ -185,8 +185,13 @@ def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_sea
 
 
 @pytest.mark.feature("operator-master-up-resume-keeps-seat")
+@pytest.mark.parametrize(("flags", "replies"), [(("--last",), ()), ((), ("1",))])
 def test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it(
-    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    up: tuple[RedisStore, object, ResumingRuntime],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    flags: tuple[str, ...],
+    replies: tuple[str, ...],
 ) -> None:
     from argparse import Namespace
 
@@ -207,8 +212,8 @@ def test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it(
             started_at=5,
         ),
     )
-    answers(monkeypatch)
-    assert run("sw", "master", "up", "--last") == 0
+    answers(monkeypatch, *replies)
+    assert run("sw", "master", "up", *flags) == 0
     assert printed(capsys) == {"master": name, "pane": "w2:m9", "seat": "master@sw", "choice": "last"}
     [record] = masters(store)
     assert (record.name, record.pane_id, record.state) == (name, "w2:m9", "working")
