@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.892 · 2026-11-14
+
+### 2026-11-14 · 12eef2cef6aa · #11208 · @nestorcolt
+
+**Profile render never links the login credentials file into worker homes**
+
+This fixes a regression where rendered Claude profile homes failed to link the shared `.credentials.json` file, leaving engineer, ci, and planner worker sessions unable to read or inherit the master Claude login. The render logic now links the credentials file for the master profile chain only, while `_claude_fresh` correctly detects staleness and worker renders clean up links from older homes before collection. Tests and a new Semgrep incident rule guard against this regressing again, ensuring workers reliably get a valid login without touching the master's private credentials.
+
 ## v2.17.890 · 2026-11-14
 
 ### 2026-11-14 · c079742f3d2e · #11214 · @agenticore-app
