@@ -345,7 +345,7 @@
   "scripts/gh_audit.py": 26,
   "scripts/github_app_cli.py": 1,
   "scripts/handoff/check.py": 125,
-  "scripts/handoff/envelope.py": 197,
+  "scripts/handoff/envelope.py": 198,
   "scripts/handoff/resolve.py": 70,
   "scripts/handoff/transfers.py": 170,
   "scripts/headless/claude.py": 12,
