@@ -3,6 +3,7 @@ acknowledgement writes its launch decision and the hub reactor on execution star
 no tick pass and no runtime spawn run."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -37,6 +38,15 @@ def view(store: RedisStore, ledger: Any, slug: str) -> readiness.Snapshot:
     )
 
 
+@dataclass(frozen=True)
+class Launched:
+    """How a seated agent is launched: admitted, started and launched at ``at``, and listed by ``runtime``'s ``live``
+    set beside its ``started`` launch row when ``runtime`` is given."""
+
+    at: int = LAUNCHED_AT
+    runtime: Any = None
+
+
 def seat_agent(
     store: RedisStore,
     ledger: Any,
@@ -44,6 +54,7 @@ def seat_agent(
     task_id: str,
     hive: str = readiness.ROOT,
     launch: dict[str, str] | None = None,
+    started: Launched | None = None,
 ) -> AgentRecord:
     """Seats one agent on an open task of a created swarm and returns its record as the events path leaves it.
 
@@ -54,14 +65,18 @@ def seat_agent(
     lives reactor takes the hive's ``execution.started`` event: the record is ``working`` on pane ``PANE`` launched at
     ``LAUNCHED_AT``, and the claim life is counted.
 
-    No runtime lists the agent and no launch row is written. The swarm stays as created, paused included.
-    ``ledger`` needs ``task``, ``state`` and ``update_task`` with the ``if_state`` and ``if_match`` guards; a refused
-    admission or acknowledgement fails the test."""
+    With ``started`` the admission clock reads ``started.at``, the agent launches at it and, given
+    ``started.runtime``, that runtime lists the agent and the swarm holds its ``started`` launch row. Without it the
+    admission reads the wall clock, no runtime lists the agent and no launch row is written. The swarm stays as
+    created, paused included. ``ledger`` needs ``task``, ``state`` and ``update_task`` with the ``if_state`` and
+    ``if_match`` guards; a refused admission or acknowledgement fails the test."""
     row = ledger.task(slug, task_id)
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
     source = SimpleNamespace(snapshot=lambda name: view(store, ledger, name))
-    admitter = admission.Admission(store, ledger, source)  # pyright: ignore[reportArgumentType]
+    clock = {} if started is None else {"clock": lambda: started.at}
+    launched_at = LAUNCHED_AT if started is None else started.at
+    admitter = admission.Admission(store, ledger, source, **clock)  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:
         pytest.fail(f"hub admission refused {task_id}: {admitted}")
@@ -76,7 +91,7 @@ def seat_agent(
             entity="execution",
             key=execution["execution_id"],
             version=execution["execution_generation"],
-            time=LAUNCHED_AT,
+            time=launched_at,
             author=hive,
             data={
                 "task": task_id,
@@ -84,11 +99,15 @@ def seat_agent(
                 "claim_key": f"seat:{execution['execution_id']}",
                 "hive": hive,
                 "pane_id": PANE,
-                "launched_at": LAUNCHED_AT,
+                "launched_at": launched_at,
             },
         )
     )
-    return next(agent for agent in store.agents(slug) if agent.name == admitted["name"])
+    agent = next(agent for agent in store.agents(slug) if agent.name == admitted["name"])
+    if started is not None and started.runtime is not None:
+        started.runtime.live.add(agent.name)
+        store.record_launch(slug, agent, "started")
+    return agent
 
 
 @pytest.fixture
