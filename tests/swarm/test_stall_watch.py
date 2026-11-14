@@ -129,6 +129,14 @@ def test_a_queued_or_draft_or_running_pull_request_is_not_a_green_stall():
         assert swarm.tick(START + 30 * MINUTE) == [] and not _reopened(swarm)
 
 
+def test_a_pull_request_the_watch_cannot_read_is_left_alone() -> None:
+    swarm = Swarm(GREEN)
+    swarm.pulls = {}
+    swarm.tick(START)
+    assert swarm.tick(START + 30 * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == []
+
+
 def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
     swarm = Swarm(RED)
     assert swarm.tick(START + 14 * MINUTE) == []

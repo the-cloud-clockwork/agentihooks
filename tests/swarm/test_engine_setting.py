@@ -1,5 +1,7 @@
 import json
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -70,6 +72,16 @@ def test_events_switch_persists_the_checkout_origin_without_replacing_its_path(e
     config = store.config("sw")
     assert config.repo == str(checkout)
     assert config.repo_origin == "github.com/the-cloud-clockwork/agentihooks"
+
+
+def test_events_switch_fills_a_missing_origin_from_the_checkout(env: Any, checkout: Path) -> None:  # noqa: F811
+    store, _, _ = env
+    store.create(SwarmConfig("sw", str(checkout), 1, 1))
+    assert store.config("sw").repo_origin == ""
+
+    assert run("sw", "set", "engine=events") == 0
+    config = store.config("sw")
+    assert (config.repo, config.repo_origin) == (str(checkout), "github.com/the-cloud-clockwork/agentihooks")
 
 
 @pytest.fixture

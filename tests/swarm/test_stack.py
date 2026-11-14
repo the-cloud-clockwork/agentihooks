@@ -1079,6 +1079,17 @@ def test_shell_names_a_command_that_could_not_run(monkeypatch):
         stack.shell(["git", "status", "--short"])
 
 
+def test_origin_key_reads_the_checkout_origin_and_is_empty_without_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    def shell(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        if argv[2] == "/bare":
+            raise SwarmError("git remote get-url origin failed")
+        return subprocess.CompletedProcess(argv, 0, stdout="git@github.com:Org/Repo.git\n", stderr="")
+
+    monkeypatch.setattr(stack, "shell", shell)
+    assert stack.origin_key("/repo") == "github.com/org/repo"
+    assert stack.origin_key("/bare") == ""
+
+
 def _git(repo, *args):
     done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=10)
     assert done.returncode == 0, done.stderr

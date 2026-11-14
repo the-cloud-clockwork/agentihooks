@@ -289,6 +289,56 @@ def test_the_wait_pass_skips_ledger_reads_without_active_checked_waits(tick, mon
     assert tick.told() == []
 
 
+def test_the_wait_command_checks_other_swarms_despite_a_failure_or_slow_pass(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from argparse import Namespace
+    from threading import Event
+    from types import SimpleNamespace
+
+    slow, checked = Event(), Event()
+
+    def check(store: object, slug: str) -> list[str]:
+        if slug == "broken":
+            raise RuntimeError("unavailable")
+        if slug == "slow":
+            slow.set()
+            assert checked.wait(5)
+        else:
+            assert slow.wait(5)
+            checked.set()
+        return ["wait checked"]
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: True)
+    monkeypatch.setattr(cli, "run_waits", check)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: ["broken", "slow", "fast"]), Namespace())
+    output = capsys.readouterr()
+    assert set(output.out.splitlines()) == {"slow: wait checked", "fast: wait checked"}
+    assert output.err.splitlines() == ["broken: RuntimeError: unavailable"]
+
+
+def test_the_wait_command_runs_the_pass_of_every_swarm_at_once(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from argparse import Namespace
+    from threading import Barrier
+    from types import SimpleNamespace
+
+    slugs = [f"sw{index}" for index in range(30)]
+    together = Barrier(len(slugs), timeout=5)
+
+    def meet(store: object, slug: str) -> list[str]:
+        together.wait()
+        return []
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: True)
+    monkeypatch.setattr(cli, "run_waits", meet)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: slugs), Namespace())
+    assert capsys.readouterr() == ("", "")
+
+
 def test_the_wait_command_accepts_an_empty_swarm_list(monkeypatch, capsys):
     from argparse import Namespace
     from types import SimpleNamespace
