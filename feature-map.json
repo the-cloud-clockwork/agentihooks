@@ -6084,7 +6084,7 @@
       "id": "events-launch-check",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check",
-      "behaviour": "Under the events engine, where the legacy place step never runs, the hub starts a launch check with relaunch allowed when a hive reports a launch decision for the agent it admitted that differs from its record, in the same shape the place step writes, so the observe launch checks step judges that agent and a missing hive join report is an enforced miss; a republished decision matching the record, even one naming no harness, starts no second check and a refused report starts none.",
+      "behaviour": "Under the events engine, where the legacy place step never runs, the hub restarts its own launch check with relaunch allowed when a hive reports a launch decision for the agent it admitted that differs from its record, so the hub launch checks reactor judges that agent and a missing hive join report is an enforced miss; a republished decision matching the record, even one naming no harness, starts no second check and a refused report leaves the check admission started untouched.",
       "seam": "Admission.launched starting launch_check.begin for the admitted seat occupant",
       "tests": [
         "tests/hub/test_admission.py::test_the_first_launch_decision_starts_a_launch_check_the_tick_retires_and_relaunches_on",
@@ -6092,6 +6092,51 @@
         "tests/hub/test_admission.py::test_a_republished_decision_naming_no_harness_starts_no_second_launch_check",
         "tests/hub/test_admission.py::test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join",
         "tests/hub/test_admission.py::test_a_refused_launch_decision_starts_no_launch_check"
+      ]
+    },
+    {
+      "id": "events-launch-check-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "Admission starts a hub owned launch check, and the hub times a launched worker from the launch time its execution started write records, never from admission: a worker whose join report is missing is stopped on its hive only a full deadline after its reported launch, a joined worker passes at once, and each outcome is recorded and the check forgotten.",
+      "seam": "LaunchChecks.check in the hub launch checks reactor and Admission._claim starting launch_check.begin with the hub owner",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_admission_starts_a_hub_owned_launch_check",
+        "tests/hub/test_launch_checks.py::test_a_slow_spawn_is_timed_from_its_reported_launch_not_its_admission",
+        "tests/hub/test_launch_checks.py::test_a_launched_agent_that_joined_passes_without_a_stop"
+      ]
+    },
+    {
+      "id": "events-launch-check-hung-spawn",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "A hub admitted worker whose hive reports neither a launch nor a failure is stopped on its hive one launch window after admission with a launched miss; a failed check relaunches its task once and then reports the relaunch spent, and a check whose agent left the live list is forgotten without a stop.",
+      "seam": "LaunchChecks.check and hung in the hub launch checks reactor",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_a_spawn_that_reports_no_launch_is_stopped_one_launch_window_after_admission",
+        "tests/hub/test_launch_checks.py::test_a_failed_check_relaunches_its_task_once_then_reports_the_relaunch_spent",
+        "tests/hub/test_launch_checks.py::test_a_check_for_an_agent_no_longer_listed_is_forgotten"
+      ]
+    },
+    {
+      "id": "events-launch-check-tick-filter",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "The tick launch checks step judges only legacy launch checks: a hub owned check stays pending for the hub and the tick neither retires its worker through the local runtime nor drops its record.",
+      "seam": "the observe launch checks step filtering pending checks by owner",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_the_tick_leaves_a_hub_owned_launch_check_to_the_hub"
+      ]
+    },
+    {
+      "id": "events-launch-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "A hive launch report carries the overlays the hive placed and its profile decision with the host overlays it declared, and the hub writes both onto the admitted agent's record as legacy hive orders do, so the expected overlays match the legacy path.",
+      "seam": "Spoke._spawn launch report, Lanes.launched and Admission.launched",
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_launch_report_carries_the_placed_overlays_and_the_host_overlays_the_hive_declared",
+        "tests/hub/test_launch_checks.py::test_a_launch_report_writes_the_overlays_and_profile_decision_the_hive_placed"
       ]
     },
     {
