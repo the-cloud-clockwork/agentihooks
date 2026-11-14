@@ -26,7 +26,7 @@ UNFIT_NAK_MS = 5_000
 class Snapshot:
     slug: str
     rows: dict[str, Any]
-    doc: dict
+    doc: dict[str, Any]
     graph: dict
     fix: str
     claimed: Callable[[str], bool]
@@ -189,8 +189,9 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
         and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
         and claimable(task, task["lane"], view)
     ]
-    ranks = focus_budget.ranks(view.doc)
-    ordered = focus_budget.ordered(ready, ranks, ledger_rank.order, focus_budget.outside(view.doc))
+    ordered = focus_budget.ordered(
+        ready, focus_budget.ranks(view.doc), ledger_rank.order, focus_budget.outside(view.doc)
+    )
     return [offer(task, view, now_ms) for _, task in ordered]
 
 
