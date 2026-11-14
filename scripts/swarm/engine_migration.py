@@ -55,15 +55,15 @@ def drop_launch_jobs(redis_store: RedisStore, slug: str) -> None:
     redis_store.redis.delete(redis_store.key(slug, launch_job.KEY))  # pyright: ignore[reportUnknownMemberType]
 
 
-def stored_engine(redis_store: RedisStore, slug: str) -> str:
-    """The engine value stored in the swarm's config hash, empty when none is stored."""
-    return str(redis_store.redis.hget(redis_store.key(slug, "config"), "engine") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+def stored_on_events(redis_store: RedisStore, slug: str) -> bool:
+    """Whether the engine stored in the swarm's config hash is events; an absent value is the old legacy default."""
+    return redis_store.redis.hget(redis_store.key(slug, "config"), "engine") == EVENTS_ENGINE  # pyright: ignore[reportUnknownMemberType]  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def migrate_one(redis_store: RedisStore, slug: str) -> str:
     """Moves one stored config to the events engine with an origin and names the outcome."""
     config = redis_store.config(slug)
-    on_events = stored_engine(redis_store, slug) == EVENTS_ENGINE
+    on_events = stored_on_events(redis_store, slug)
     if on_events and config.repo_origin:
         return "unchanged"
     if not on_events and redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
