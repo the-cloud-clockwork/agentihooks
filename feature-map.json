@@ -6128,6 +6128,33 @@
       ]
     },
     {
+      "id": "events-execution-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-execution-stop",
+      "behaviour": "The hub stops an execution it admitted on the events engine by publishing an execution stop event to the hive that started it; that hive's lane loop reaps the named agent once and emits the normal execution exited event, which the hub lifecycle settles. A redelivered stop reaps nothing more, a hive that does not own the execution ignores it, a failed reap is retried, and the hub refuses to stop an execution that already ended or that no hive started.",
+      "seam": "execution_stop.stop on the hub and execution_stop.Stopper.poll from lanes.run on the hive",
+      "tests": [
+        "tests/hive/test_execution_stop.py::test_a_stop_reaps_the_execution_on_its_hive_and_ends_it_through_the_exited_lifecycle",
+        "tests/hive/test_execution_stop.py::test_a_redelivered_stop_reaps_nothing_more_and_emits_no_second_exit",
+        "tests/hive/test_execution_stop.py::test_a_spoke_that_does_not_own_the_execution_ignores_its_stop",
+        "tests/hive/test_execution_stop.py::test_the_hub_refuses_to_stop_an_execution_that_already_ended",
+        "tests/hive/test_execution_stop.py::test_the_hub_answers_unknown_for_an_execution_no_hive_started",
+        "tests/hive/test_execution_stop.py::test_a_failed_reap_emits_no_exit_and_is_retried",
+        "tests/hive/test_execution_stop.py::test_an_execution_already_gone_from_its_hive_still_ends_without_a_reap",
+        "tests/hive/test_execution_stop.py::test_the_lane_loop_honors_stops_every_pass_draining_or_not"
+      ]
+    },
+    {
+      "id": "events-smoke-execution-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-execution-stop",
+      "behaviour": "On a real nats-server and Redis, the hub stops a seated execution: the hive spoke that launched it reaps the agent and publishes one execution exited event carrying the started claim, and a second stop is refused as ended.",
+      "seam": "execution_stop.stop over NATS to execution_stop.Stopper.poll on the hive bus",
+      "tests": [
+        "tests/events_smoke/test_launch_path.py::test_the_hub_stops_a_seated_execution_and_its_hive_reaps_it_and_publishes_the_exit"
+      ]
+    },
+    {
       "id": "events-smoke-pull-request-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
