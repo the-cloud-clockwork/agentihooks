@@ -160,7 +160,7 @@ def test_the_registered_agent_steps_declare_writers_the_registry_accepts() -> No
     } | {AGENTS, TASKS}
     declared = {step.name: (step.needs, step.reads, step.writes - {actions_of(step.name)}) for step in agents.STEPS}
     assert declared["reap"] == (
-        frozenset({"spawn due"}),
+        frozenset({"stopped branch", "ledger state", "automated cleanup"}),
         frozenset({AGENTS, Domain("pass:rows")}),
         frozenset({AGENTS, TASKS}),
     )

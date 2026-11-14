@@ -5,7 +5,6 @@ import pytest
 
 from scripts.doctor import spawns
 from tests.doctor.recorded import load
-from tests.swarm.profile_fixture import validated
 
 
 def test_recorded_spawns_and_planted_failed_spawn():
@@ -115,93 +114,6 @@ def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
     assert found["dt2"].measure == 2
     assert found["dt2"].evidence == ("account reservation is full", "init-agent timed out")
     assert found["master"].evidence == ("boom",)
-
-
-def test_runtime_records_the_launcher_overflow_placement(tmp_path, monkeypatch):
-    import os
-    import subprocess
-    from dataclasses import asdict
-    from pathlib import Path
-
-    import fakeredis
-
-    from scripts.swarm import launch_job
-    from scripts.swarm.runtime import HerdrRuntime
-    from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm.tick import tick
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
-    store.create(config)
-    launched, live = [], set()
-
-    def run(argv, **kwargs):
-        from scripts.routing import native_login
-
-        if argv[1:] == list(native_login.COMMAND):
-            return subprocess.CompletedProcess(argv, 1, "", "")
-        launched.append(argv)
-        live.add(argv[argv.index("--name") + 1])
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            validated(
-                argv,
-                "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
-            ).replace('"pid": 123', f'"pid": {os.getpid()}'),
-            "",
-        )
-
-    runtime = HerdrRuntime(
-        home=tmp_path, run=run, choose=lambda *args: ("codex", "fallthrough: claude is at its session cap")
-    )
-
-    def complete(job):
-        spec = json.loads(Path(job["request"]).read_text())
-        placed = runtime._launch(SwarmConfig(**spec["config"]), spec["lane"], name=spec["name"], **spec["launch"])
-        Path(job["path"]).write_text(json.dumps({"placed": asdict(placed)}))
-
-    monkeypatch.setattr(launch_job, "spawn", complete)
-    runtime.live_names = lambda: live
-    runtime.conversations = lambda: {}
-    runtime.has_capacity = lambda config: True
-    runtime.quota_capacity = None
-
-    class Ledger:
-        def state(self, slug):
-            return {"tasks": self.tasks(slug)}
-
-        def tasks(self, slug):
-            return [
-                {
-                    "id": "task",
-                    "title": "Task",
-                    "description": "",
-                    "lane": "eng",
-                    "profile": "engineer",
-                    "state": "open",
-                    "depends_on": [],
-                    "territory": [],
-                }
-            ]
-
-        def update_task(self, slug, task_id, fields, **kwargs):
-            return {"state": "open", "claimed_by": "", **fields}
-
-        def notify(self, *args):
-            pass
-
-        def comment(self, *args):
-            pass
-
-    ledger = Ledger()
-    actions = tick("sw", store, ledger, runtime, 1000)
-    assert any(action.startswith("launching engineer") for action in actions), actions
-    actions = tick("sw", store, ledger, runtime, 2000)
-    agents = store.agents("sw")
-    assert len(agents) == 2, actions
-    assert all(a.placement == "overflow" for a in agents)
-    assert [a.choice for a in agents if a.lane == "eng"] == ["overflow"]
 
 
 def test_recorded_restores_and_planted_fresh_fallback():

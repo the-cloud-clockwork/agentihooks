@@ -10,6 +10,7 @@ from scripts.events.memory import open_bus
 from scripts.hive import account_slots
 from scripts.hub import admission, slots
 from scripts.swarm.store import RedisStore, SwarmConfig
+from tests.helpers import store_seed
 from tests.swarm.test_readiness import doc, snapshot, task
 
 SLUG = "sw"
@@ -57,7 +58,7 @@ def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(
     rig.ledger.comments = []
     rig.ledger.comment = lambda *args, **kwargs: rig.ledger.comments.append((args, kwargs))
     for _ in range(lives):
-        rig.store.count_claim(SLUG, "t1")
+        store_seed.count_claim(rig.store, SLUG, "t1")
     rig.store.put_handoff(SLUG, "t1", "handoff", envelope={"reason": "recycle"})
 
     assert rig.admitter.admit(SLUG, ask()) is None
@@ -79,7 +80,7 @@ def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(
 def test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes(rig, lives, mode):
     rig.store.update(SLUG, gates={"claims": mode})
     for _ in range(lives):
-        rig.store.count_claim(SLUG, "t1")
+        store_seed.count_claim(rig.store, SLUG, "t1")
 
     admitted = rig.admitter.admit(SLUG, ask())
 

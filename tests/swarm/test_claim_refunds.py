@@ -4,128 +4,49 @@ from typing import Any, NoReturn
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore
-from scripts.swarm.tick import STARTUP_GRACE_MS, tick
+from scripts.swarm.tick import tick
+from tests.helpers import store_seed
 from tests.helpers.seat import seat_agent
-from tests.swarm.test_claim_cap import CommentingLedger
 from tests.swarm.test_cli import env, run  # noqa: F401
-from tests.swarm.test_tick import FakeRuntime, store, workers  # noqa: F401
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, workers  # noqa: F401
 
 pytestmark = pytest.mark.unit
+
+
+class CommentingLedger(FakeLedger):
+    """A fake ledger whose state lists its tasks and that keeps every comment written to it."""
+
+    def __init__(self, tasks: list[dict[str, Any]]) -> None:
+        super().__init__(tasks)
+        self.comments: list[tuple[str, str, str, str]] = []
+
+    def state(self, slug: str) -> dict[str, Any]:
+        return {**super().state(slug), "tasks": [dict(row) for row in self.rows.values()]}
+
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict[str, Any],
+        by: str = "swarm",
+        if_state: tuple[str, ...] = (),
+        if_match: Any = None,
+    ) -> Any:
+        assert (slug, by) == ("sw", "swarm")
+        return super().update_task(slug, task_id, fields, by, if_state, if_match)
+
+    def comment(self, slug: str, task_id: str, text: str, by: str) -> None:
+        self.comments.append((slug, task_id, text, by))
 
 
 def launched(store: RedisStore, runtime: FakeRuntime, agent: AgentRecord) -> AgentRecord:  # noqa: F811
     """The seated ``agent`` as a started launch leaves it: its claim life counted, its record working on a pane from
     its start time and its name live in ``runtime``."""
-    store.count_claim("sw", agent.task)
+    store_seed.count_claim(store, "sw", agent.task)
     working = replace(agent, state="working", pane_id="w1:p1", launched_at=agent.started_at)
     store.put_agent("sw", working)
     runtime.live.add(agent.name)
     return working
-
-
-@pytest.mark.feature("swarm-claim-refunds-legacy")
-def test_three_quota_handoffs_allow_a_fourth_claim(store: RedisStore) -> None:  # noqa: F811
-    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    for at in (2_000, 3_000, 4_000):
-        agent = workers(store)[0]
-        store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
-        store.put_agent("sw", replace(agent, state="finished"))
-        tick("sw", store, ledger, runtime, now_ms=at)
-    assert [task for _, _, task in runtime.spawned] == ["t1"] * 4
-    assert ledger.rows["t1"]["state"] == "claimed"
-    assert store.claims("sw", "t1") == 1
-
-
-@pytest.mark.feature("swarm-claim-refunds-legacy")
-@pytest.mark.parametrize(
-    ("reason", "asked", "lives"), [("operator", True, 1), ("operator", False, 3), ("recycle", True, 3)]
-)
-def test_two_preemption_handoffs_then_a_reclaim_count_one_life(
-    store: RedisStore,  # noqa: F811
-    reason: str,
-    asked: bool,
-    lives: int,
-) -> None:
-    from scripts.swarm import preempt
-
-    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    for at in (2_000, 3_000):
-        agent = workers(store)[0]
-        if asked:
-            store.redis.hset(store.key("sw", preempt.VICTIMS), agent.name, "t9")
-        store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": reason})
-        store.put_agent("sw", replace(agent, state="finished"))
-        tick("sw", store, ledger, runtime, now_ms=at)
-    assert [task for _, _, task in runtime.spawned] == ["t1"] * 3
-    assert store.claims("sw", "t1") == lives
-    assert store.redis.hgetall(store.key("sw", preempt.VICTIMS)) == {}
-
-
-@pytest.mark.feature("swarm-claim-refunds-legacy")
-@pytest.mark.parametrize("ending", ["block", "pane gone"])
-@pytest.mark.parametrize("prior_life", ["none", "quota", "retirement"])
-def test_three_failed_lives_still_block_the_fourth_claim(store: RedisStore, ending: str, prior_life: str) -> None:  # noqa: F811
-    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    if prior_life == "quota":
-        agent = workers(store)[0]
-        store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
-        store.put_agent("sw", replace(agent, state="finished"))
-        tick("sw", store, ledger, runtime, now_ms=2_000)
-    elif prior_life == "retirement":
-        from scripts.swarm.cli import stop_now
-
-        stop_now(store, "sw", runtime, ledger)
-        store.update("sw", state="running")
-        tick("sw", store, ledger, runtime, now_ms=2_000)
-    for at in (100_000, 200_000, 300_000):
-        agent = workers(store)[0]
-        if ending == "block":
-            ledger.rows["t1"]["state"] = "blocked"
-            store.put_agent("sw", replace(agent, state="finished"))
-            tick("sw", store, ledger, runtime, now_ms=at)
-            ledger.rows["t1"].update(state="open", claimed_by="")
-            tick("sw", store, ledger, runtime, now_ms=at + 1)
-        else:
-            tick("sw", store, ledger, runtime, now_ms=agent.started_at + 1)
-            runtime.live.discard(agent.name)
-            tick("sw", store, ledger, runtime, now_ms=agent.started_at + STARTUP_GRACE_MS + 1)
-    assert [task for _, _, task in runtime.spawned] == ["t1"] * (3 if prior_life == "none" else 4)
-    assert ledger.rows["t1"]["state"] == "blocked"
-    assert store.claimant("sw", "t1") is None
-
-
-@pytest.mark.feature("swarm-claim-refunds-legacy")
-@pytest.mark.parametrize("ending", ["mismatch", "idle", "stop"])
-def test_three_swarm_retirements_allow_a_fourth_claim(store: RedisStore, ending: str) -> None:  # noqa: F811
-    from scripts.swarm.cli import stop_now
-    from scripts.swarm.tick import IDLE_KILL_TICKS
-
-    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    for at in (2_000, 3_000, 4_000):
-        agent = workers(store)[0]
-        tick("sw", store, ledger, runtime, now_ms=at)
-        if ending == "stop":
-            stop_now(store, "sw", runtime, ledger)
-            store.update("sw", state="running")
-        elif ending == "mismatch":
-            store.put_agent("sw", replace(agent, account="old-account"))
-            original = runtime.bindings
-            runtime.bindings = lambda agents: {
-                name: {**facts, "account": "new-account"} for name, facts in original(agents).items()
-            }
-        else:
-            runtime.statuses[agent.name] = "idle"
-            store.put_agent("sw", replace(agent, idle_ticks=IDLE_KILL_TICKS - 1))
-        tick("sw", store, ledger, runtime, now_ms=at + 1)
-        if ending == "mismatch":
-            runtime.bindings = original
-    assert [task for _, _, task in runtime.spawned] == ["t1"] * 4
-    assert ledger.rows["t1"]["state"] == "claimed"
-    assert store.claims("sw", "t1") == 1
 
 
 @pytest.mark.parametrize("ending", ["idle", "stop"])
@@ -181,22 +102,6 @@ def test_stop_refunds_and_reopens_only_a_held_claimed_or_pr_task(
     assert ledger.rows["t1"]["state"] == ("open" if refunded else row_state)
 
 
-@pytest.mark.feature("swarm-claim-refunds-legacy")
-def test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim(store: RedisStore) -> None:  # noqa: F811
-    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    agent = workers(store)[0]
-    store.put_handoff("sw", "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
-    store.put_agent("sw", replace(agent, state="finished"))
-    assert store.release("sw", "t1", agent.name)
-    lives, spawned = store.claims("sw", "t1"), len(runtime.spawned)
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert agent.name in runtime.killed
-    new_claims = len(runtime.spawned) - spawned
-    refunded = lives + new_claims - store.claims("sw", "t1")
-    assert refunded == 0
-
-
 @pytest.mark.parametrize("cause", ["quota", "parked"])
 @pytest.mark.parametrize("path", ["parked", "remote"])
 def test_a_second_tick_refund_for_the_same_claim_is_refused(store: RedisStore, path: str, cause: str) -> None:  # noqa: F811
@@ -225,7 +130,7 @@ def test_a_second_stop_refund_for_the_same_claim_is_refused(store: RedisStore) -
 
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     agent = launched(store, runtime, seat_agent(store, ledger, "sw", "t1"))
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     generation, lives = store.claim_generation("sw", "t1"), store.claims("sw", "t1")
 
     def refused(*args: Any, **kwargs: Any) -> NoReturn:

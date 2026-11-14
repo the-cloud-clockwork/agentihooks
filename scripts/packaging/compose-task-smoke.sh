@@ -40,6 +40,7 @@ from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events
 from scripts.hive.spoke import Spoke, SpokeConfig
+from scripts.hub import exits
 from scripts.swarm import freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmConfig, connect
@@ -113,6 +114,7 @@ report = {
     "executions": {admitted["execution"]: {"slug": slug, "name": admitted["name"],
                                            "generation": admitted["generation"], "pane": {"state": "exited"}}},
 }
+exits.serve(bus)
 execution_events.publish(bus, hive, report)
 bus.close()
 print(json.dumps(admitted))

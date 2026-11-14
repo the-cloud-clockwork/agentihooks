@@ -109,14 +109,6 @@ def test_fresh_exit_repairs_task_and_slot_without_an_exit_event(rig):
     assert json.loads(rig.bus.state("spoke-work").get("claim").value)["state"] == "exited"
 
 
-def test_a_swarm_on_the_legacy_engine_is_left_to_the_tick(rig):
-    rig.store.update("rig", engine="legacy")
-    rig.react.poll()
-    assert rig.row["state"] == "claimed"
-    assert rig.returned == [] and rig.ledger.writes == []
-    assert [a.name for a in rig.store.agents("rig")] == ["engineer"]
-
-
 def test_a_swarm_removed_mid_scan_does_not_stop_the_pass(rig):
     from scripts.swarm.store import PREFIX
 
