@@ -26,6 +26,7 @@ EFFORT_PREFIX = "model_reasoning_effort="
 QUOTE = '"'
 NO_HOME = "the app-server transport serves only the home init agent rendered; launch refused without --home"
 PUMP_EXITED = "agentihooks codex-session: inbox pump exited with status {}; stopping the app server"
+SERVER_EXITED = "Codex app server exited with status {} before the profile canary validated"
 
 
 def take_route(args: list[str]) -> tuple[str, list[str]]:
@@ -154,6 +155,12 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     )
 
 
+def _server_exited(spec: supervisor.Launch, status: int | None) -> None:
+    """Fail a still pending profile report once the app server exits, so init-agent stops waiting for its canary."""
+    if report := spec.environ.get(binding.REPORT):
+        binding.refuse(Path(report), SERVER_EXITED.format(status))
+
+
 def main(
     argv: list[str] | None = None, environ: dict[str, str] | None = None, deps: supervisor.Deps | None = None
 ) -> int:
@@ -197,7 +204,7 @@ def main(
         )
         while pump.poll() is None:
             try:
-                started.process.wait(timeout=supervisor.POLL_S)
+                _server_exited(spec, started.process.wait(timeout=supervisor.POLL_S))
                 break
             except subprocess.TimeoutExpired:
                 pass

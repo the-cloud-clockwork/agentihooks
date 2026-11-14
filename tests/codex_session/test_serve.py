@@ -640,7 +640,7 @@ def test_an_app_server_exit_after_launch_fails_the_pending_canary_at_once(
 ) -> None:
     from scripts import init_agent
 
-    supervised(monkeypatch, lambda: None, returncode=server_code)
+    supervised(monkeypatch, lambda: server_code, returncode=server_code)
     report = tmp_path / "profile.json"
     binding.request(report, "engineer", "codex")
     spec = SimpleNamespace(
@@ -660,7 +660,7 @@ def test_an_app_server_exit_after_launch_fails_the_pending_canary_at_once(
 def test_an_app_server_exit_after_a_validated_canary_keeps_the_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    supervised(monkeypatch, lambda: None)
+    supervised(monkeypatch, lambda: 0)
     report = tmp_path / "profile.json"
     validated = {"profile": "engineer", "harness": "codex", "state": "validated", "validation": {"canary": "c"}}
     report.write_text(json.dumps(validated))
