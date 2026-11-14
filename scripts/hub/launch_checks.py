@@ -20,7 +20,7 @@ store_module: Any = import_module("scripts.swarm.store")
 INTERVAL_MS = 10_000
 LAUNCH_WINDOW_MS = SPAWN_TIMEOUT_S * 1000
 
-Stop = Callable[[str, AgentRecord, str], None]
+Stop = Callable[[str, AgentRecord, str], object]
 Misses = dict[str, dict[str, Any]]
 
 

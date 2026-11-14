@@ -6141,12 +6141,13 @@
       "id": "events-launch-check-hung-spawn",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
-      "behaviour": "A hub admitted worker whose hive reports neither a launch nor a failure is stopped on its hive one launch window after admission with a launched miss; a failed check relaunches its task once and then reports the relaunch spent, and a check whose agent left the live list is forgotten without a stop.",
-      "seam": "LaunchChecks.check and hung in the hub launch checks reactor",
+      "behaviour": "The hub registry polls the launch checks and stops a failed worker through the execution stop to its hive. A hub admitted worker whose hive reports neither a launch nor a failure is stopped on its hive one launch window after admission with a launched miss; a failed check relaunches its task once and then reports the relaunch spent, and a check whose agent left the live list is forgotten without a stop.",
+      "seam": "LaunchChecks.check and hung in the hub launch checks reactor, wired in the hub registry with execution_stop.stop",
       "tests": [
         "tests/hub/test_launch_checks.py::test_a_spawn_that_reports_no_launch_is_stopped_one_launch_window_after_admission",
         "tests/hub/test_launch_checks.py::test_a_failed_check_relaunches_its_task_once_then_reports_the_relaunch_spent",
-        "tests/hub/test_launch_checks.py::test_a_check_for_an_agent_no_longer_listed_is_forgotten"
+        "tests/hub/test_launch_checks.py::test_a_check_for_an_agent_no_longer_listed_is_forgotten",
+        "tests/hub/test_launch_checks.py::test_the_hub_registry_polls_launch_checks_that_stop_through_the_execution_stop"
       ]
     },
     {

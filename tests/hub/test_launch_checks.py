@@ -161,3 +161,34 @@ def test_a_launch_report_writes_the_overlays_and_profile_decision_the_hive_place
     [agent] = rig.store.agents(SLUG)
     assert (agent.overlays, agent.profile_decision) == (["frontend"], decision)
     assert launch_check.expected(agent) == ["engineer", "frontend"]
+
+
+@pytest.mark.feature("events-launch-check-hung-spawn")
+def test_the_hub_registry_polls_launch_checks_that_stop_through_the_execution_stop(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.events.config import BusConfig
+    from scripts.events.memory import open_bus
+    from scripts.hive import execution_stop
+    from scripts.hub import registry
+
+    sent: list[tuple[Any, str, str, str]] = []
+
+    def stop(bus: Any, slug: str, agent: AgentRecord, reason: str) -> str:
+        sent.append((bus, slug, agent.name, reason))
+        return execution_stop.SENT
+
+    monkeypatch.setattr(execution_stop, "stop", stop)
+    admitted = rig.admitter.admit(SLUG, ask())
+    bus: Any = open_bus(BusConfig())
+    try:
+        found = {reactor.name: reactor for reactor in registry.configured(bus, lambda: 10**9)}
+        reactor = found["launch-checks"]
+        assert (reactor.subject, reactor.singleton) == ("swarm.*.launch-checks.requested", True)
+        poll: Any = reactor.poll
+        poll.__self__._store = rig.store
+        poll(lambda: True)
+    finally:
+        bus.close()
+
+    assert sent == [(bus, SLUG, admitted["name"], "its launch check failed on launched")]
