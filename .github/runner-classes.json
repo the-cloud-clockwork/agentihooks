@@ -15,6 +15,7 @@
   "coverage-stability.yml/compare": "batch",
   "docs-sanity.yml/scan": "light",
   "equivalence.yml/ledger-equivalence": "standard",
+  "events-smoke.yml/smoke": "standard",
   "feature-suite.yml/features": "standard",
   "gate-protected.yml/grade": "hosted",
   "gate-required.yml/report": "hosted",

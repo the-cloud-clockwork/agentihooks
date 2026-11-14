@@ -26,6 +26,8 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario() -> None
         expected["hive_join"] = "${{ steps.hive-join.outputs.due }}"
     if "tick" in jobs:
         expected["tick"] = "${{ steps.tick.outputs.due }}"
+    if "events" in jobs:
+        expected["events"] = "${{ steps.events.outputs.due }}"
     assert key["outputs"] == expected
     [lookup] = [step for step in key["steps"] if step.get("uses") == "./.github/actions/input-key"]
     assert lookup["id"] == "key"
