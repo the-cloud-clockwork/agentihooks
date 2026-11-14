@@ -8,9 +8,8 @@ import pytest
 
 from scripts.swarm import cli, freeze
 from scripts.swarm.store import RedisStore, SwarmConfig
-from scripts.swarm.tick import tick
 from scripts.swarm_ledger.repository import hierarchy
-from tests.swarm.test_freeze import FrozenLedger, doc, record, spawned, task
+from tests.swarm.test_freeze import FrozenLedger, doc, launch, record, spawned, task
 from tests.swarm.test_swarm_freeze_cli import acting, swarm  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime
 
@@ -39,14 +38,14 @@ def test_focus_only_a_phase_leaves_every_other_unfrozen_task_free_and_unclaimed_
         record("phases/p1", "focus"),
     )
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == ["focused"]
     assert ledger.rows["free"]["state"] == ledger.rows["later"]["state"] == "open"
     ledger.rows["focused"]["state"] = "pr"
-    tick("sw", store, ledger, runtime, now_ms=2_000)
+    launch(store, ledger, runtime, now_ms=2_000)
     assert spawned(runtime) == ["focused"]
     ledger.rows["focused"]["state"] = "done"
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    launch(store, ledger, runtime, now_ms=3_000)
     assert spawned(runtime) == ["focused", "free", "later"]
 
 
@@ -147,7 +146,7 @@ def test_focus_weight_never_lets_free_work_take_a_seat_from_focused_work(store: 
         record("phases/p1", "focus"),
     )
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert sorted(spawned(runtime)) == ["f1", "f2"]
     assert ledger.rows["free"]["state"] == "open"
 
@@ -156,8 +155,7 @@ def test_the_focus_queue_order_sets_the_claim_order(store: RedisStore) -> None:
     store.update("sw", max_eng=1)
     rows = [{"id": "bottom", "phase": "p1"}, {"id": "top", "phase": "p2"}]
     runtime = FakeRuntime()
-    tick(
-        "sw",
+    launch(
         store,
         FrozenLedger(rows, record("tasks/top", "focus"), record("tasks/bottom", "focus")),
         runtime,
@@ -170,8 +168,7 @@ def test_the_reversed_focus_queue_claims_the_other_task_first(store: RedisStore)
     store.update("sw", max_eng=1)
     rows = [{"id": "top", "phase": "p2"}, {"id": "bottom", "phase": "p1"}]
     runtime = FakeRuntime()
-    tick(
-        "sw",
+    launch(
         store,
         FrozenLedger(rows, record("tasks/bottom", "focus"), record("tasks/top", "focus")),
         runtime,
@@ -193,13 +190,13 @@ def test_an_unfrozen_task_is_free_and_claimed_only_after_the_focus_queue_is_empt
         record("tasks/thawed"),
     )
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == ["focused"]
     ledger.freezes = [record("tasks/focused", "focus")]
-    tick("sw", store, ledger, runtime, now_ms=2_000)
+    launch(store, ledger, runtime, now_ms=2_000)
     assert spawned(runtime) == ["focused"]
     ledger.rows["focused"]["state"] = "done"
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    launch(store, ledger, runtime, now_ms=3_000)
     assert spawned(runtime) == ["focused", "thawed"]
 
 
@@ -209,7 +206,7 @@ def test_urgent_rank_never_bypasses_the_focus_queue(store: RedisStore) -> None:
         record("plans/a", "focus"),
     )
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == ["focused"]
     assert ledger.rows["urgent"]["state"] == "open"
     assert gate(task(rank="urgent"), record("tasks/hot", "focus"), tasks=[task("hot", phase="p2")])

@@ -1,10 +1,11 @@
 import pytest
 
 from scripts.doctor import loop, priming
-from scripts.swarm import capacity, freeze
+from scripts.swarm import capacity, freeze, readiness
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from scripts.swarm_ledger.repository import hierarchy
+from tests.helpers.seat import seat_owner, view
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, workers
 
 pytestmark = pytest.mark.unit
@@ -239,12 +240,27 @@ def spawned(runtime):
     return [task_id for _, _, task_id in runtime.spawned]
 
 
+def launch(store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime, now_ms: int) -> list[str]:
+    """One pass of swarm ``sw`` at ``now_ms`` on the events path: the tick runs, then each task the readiness offers
+    name is seated through hub admission in offer order while its lane holds fewer agents than the swarm's lane cap,
+    each listed in ``runtime``'s spawned launches as the removed tick launch listed it."""
+    actions = tick("sw", store, ledger, runtime, now_ms=now_ms)
+    config = store.config("sw")
+    caps = {"eng": config.max_eng, "ci": config.max_ci}
+    for offer in readiness.offers(view(store, ledger, "sw"), now_ms):
+        lane = offer.data["lane"]
+        if sum(1 for agent in workers(store) if agent.lane == lane and agent.state != "finished") < caps.get(lane, 0):
+            agent = seat_owner(store, ledger, runtime, offer.key, now_ms)
+            runtime.spawned.append((lane, agent.name, offer.key))
+    return actions
+
+
 def test_a_frozen_phase_keeps_its_urgent_task_open(store):
     ledger = FrozenLedger(
         [{"id": "t1", "phase": "p1", "rank": "urgent"}, {"id": "t2", "phase": "p2"}], record("phases/p1")
     )
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == ["t2"]
     assert ledger.rows["t1"]["state"] == "open"
 
@@ -275,7 +291,7 @@ def test_a_focused_plan_without_open_work_leaves_an_urgent_task_and_a_normal_one
         record("plans/a", "focus"),
     )
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == ["urgent", "normal"]
     assert ledger.rows["normal"]["state"] != "open"
 
@@ -283,18 +299,18 @@ def test_a_focused_plan_without_open_work_leaves_an_urgent_task_and_a_normal_one
 @pytest.mark.feature("swarm-freeze")
 def test_a_claimed_task_under_a_new_freeze_keeps_its_agent(store):
     ledger, runtime = FrozenLedger([{"id": "t1", "phase": "p1"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     agent = workers(store)[0]
     ledger.freezes = [record("phases/p1")]
-    tick("sw", store, ledger, runtime, now_ms=2_000)
+    launch(store, ledger, runtime, now_ms=2_000)
     assert runtime.killed == []
     assert [a.name for a in workers(store)] == [agent.name]
     assert ledger.rows["t1"]["claimed_by"] == agent.name
     ledger.rows["t1"]["state"] = "pr"
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    launch(store, ledger, runtime, now_ms=3_000)
     assert runtime.killed == [] and ledger.rows["t1"]["state"] == "pr"
     ledger.rows["t1"]["state"] = "done"
-    tick("sw", store, ledger, runtime, now_ms=4_000)
+    launch(store, ledger, runtime, now_ms=4_000)
     assert spawned(runtime) == ["t1"] and ledger.rows["t1"]["state"] == "done"
 
 
@@ -332,12 +348,12 @@ def test_a_frozen_task_is_never_ready_and_an_unfocused_task_waits_for_the_focuse
 def test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_runs_again(store):
     ledger = FrozenLedger([{"id": "t1", "phase": "p1"}], record("plans/a"), record("lane:ci", "focus"))
     runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    launch(store, ledger, runtime, now_ms=1_000)
     assert store.config("sw").state == "drained"
     assert runtime.spawned == []
     assert ledger.notes == ["The swarm has no task it may start: 1 open task is held by the freeze on plan Swarm v2"]
     ledger.freezes = []
-    tick("sw", store, ledger, runtime, now_ms=2_000)
+    launch(store, ledger, runtime, now_ms=2_000)
     assert store.config("sw").state == "running"
     assert spawned(runtime) == ["t1"]
 
