@@ -30,6 +30,7 @@ def _failing(monkeypatch, runtime, failing, seconds=0):
     return clock
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_slow_failed_launch_leaves_the_pass_budget_to_the_next_task(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
     _failing(monkeypatch, runtime, {"t1"}, seconds=90)
@@ -39,6 +40,7 @@ def test_a_slow_failed_launch_leaves_the_pass_budget_to_the_next_task(store, mon
     assert not any("launch budget" in action for action in actions)
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_started_launches_still_spend_the_budget_after_a_failed_one(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
@@ -56,6 +58,7 @@ def test_started_launches_still_spend_the_budget_after_a_failed_one(store, monke
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_the_forgiven_failure_leaves_the_mean_of_started_launches_alone(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
@@ -65,6 +68,7 @@ def test_the_forgiven_failure_leaves_the_mean_of_started_launches_alone(store, m
     assert not any("launch budget" in action for action in actions)
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_only_the_first_failed_launch_of_a_pass_is_forgiven(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
@@ -83,6 +87,7 @@ def test_only_the_first_failed_launch_of_a_pass_is_forgiven(store, monkeypatch):
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_forgiven_failure_never_dilutes_the_mean_launch_cost(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
@@ -102,17 +107,6 @@ def test_a_forgiven_failure_never_dilutes_the_mean_launch_cost(store, monkeypatc
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
-def test_a_started_launch_clears_the_harness_its_task_avoided(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    failing = {"t1"}
-    _failing(monkeypatch, runtime, failing)
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert store.failed_harness("sw", "t1") == "codex"
-    failing.clear()
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert store.failed_harness("sw", "t1") == ""
-
-
 def test_resetting_claims_forgets_the_failed_harness(store):
     store.note_launch_failure("sw", "t1", "profile canary did not validate", "codex")
     store.note_launch_failure("sw", "t2", "placement refused")
@@ -121,6 +115,7 @@ def test_resetting_claims_forgets_the_failed_harness(store):
     assert (store.failed_harness("sw", "t1"), store.launch_failure("sw", "t1")) == ("", "")
 
 
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_launches_after_a_failed_launch_steer_off_its_harness(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
     failing = {"t1"}
@@ -132,14 +127,7 @@ def test_launches_after_a_failed_launch_steer_off_its_harness(store, monkeypatch
     assert [(task["id"], task["avoid_harness"]) for task in runtime.tasks] == [("t2", "codex"), ("t1", "codex")]
 
 
-def test_launches_without_a_failure_carry_no_harness_to_avoid(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _failing(monkeypatch, runtime, set())
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task["id"] for task in runtime.tasks] == ["t1", "t2"]
-    assert not any("avoid_harness" in task for task in runtime.tasks)
-
-
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_a_capacity_wait_never_steers_the_retry(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
     waiting, spawn = {"t1"}, runtime.spawn
@@ -159,6 +147,7 @@ def test_a_capacity_wait_never_steers_the_retry(store, monkeypatch):
     assert not any("avoid_harness" in task for task in runtime.tasks)
 
 
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_a_failure_naming_no_harness_steers_nothing(store):
     from tests.swarm.test_tick import FailingFor
 

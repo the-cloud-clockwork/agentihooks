@@ -16,12 +16,6 @@
     "swarm-agent-record-launch-decision-at-spawn": {
       "retires": "The detached launch job and successor retry clauses retire with the launch job module."
     },
-    "swarm-claim-lives": {
-      "covered_by": [
-        "tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution",
-        "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
-      ]
-    },
     "swarm-focus": {
       "covered_by": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
@@ -96,10 +90,17 @@
       ]
     },
     "swarm-tick-launch-budget": {
-      "retires": "The launch budget bounds the legacy spawn pass."
+      "retires": "The launch budget bounds the legacy spawn pass; its forgiveness of a failed launch and its pool pricing go with it.",
+      "gap": "The urgent head and failed task ordering inside a band orders only the legacy spawn, recorded under swarm-focus."
     },
     "swarm-tick-launch-cluster": {
       "retires": "The behaviour is the legacy launch cluster the spawn step drives."
+    },
+    "swarm-tick-launch-outcomes-legacy": {
+      "retires": "Reopening a failed launch, steering the pass's other launches, the pass capacity report and the drained note are legacy spawn pass outputs; under events a failed launch keeps its admission for redelivery steered off its own harness, covered by the hub admission steering tests and swarm-events-claim-cap."
+    },
+    "swarm-tick-launch-pool-legacy": {
+      "retires": "The launch pool, its room and its spawn budget exist only in the legacy spawn pass; events hives launch one admitted task at a time against the hive max agents."
     },
     "swarm-tick-panic-holds-spawn": {
       "covered_by": [
