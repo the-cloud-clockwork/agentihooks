@@ -113,7 +113,7 @@ class Lifecycle:
             if ack is not None and ack.status != DONE:
                 ledger: Any = self.ledger
                 ledger.notify(event.swarm, FRESH_NOTICE.format(name=agent.name, reason=f"resume failed: {ack.failure}"))
-            return ack is None
+            return ack is None or ack.status == DONE
         if pending and event.time < agent.launched_at:
             return True
         attempts: int = value.get("resumes", 0)

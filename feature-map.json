@@ -2209,6 +2209,7 @@
       "tests": [
         "tests/hub/test_dead_resume_hub.py::test_a_dead_hub_started_agent_is_resumed_once_through_its_hive",
         "tests/hub/test_dead_resume_hub.py::test_the_hive_reopens_the_conversation_in_the_same_seat",
+        "tests/hub/test_dead_resume_hub.py::test_an_answered_resume_is_never_dropped_by_an_exit_read_before_it",
         "tests/hub/test_dead_resume_hub.py::test_a_successors_work_is_never_resumed_by_the_old_agent",
         "tests/hub/test_dead_resume_hub.py::test_the_hive_refuses_a_resume_once_a_successor_holds_the_claim",
         "tests/hub/test_dead_resume_hub.py::test_a_failed_resume_hands_the_task_to_a_fresh_agent",

@@ -191,6 +191,17 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig):
 
 
 @pytest.mark.feature("hub-dead-resume")
+def test_an_answered_resume_is_never_dropped_by_an_exit_read_before_it(rig):
+    rig.react.poll()
+    consumer, _runtime = _hive(rig, _resumed(launched_at=rig.agent.launched_at))
+    consumer.poll_commands()
+    _next_pass(rig)
+    assert len(_commands(rig)) == 1
+    assert rig.ledger.writes == rig.returned == []
+    assert [agent.pane_id for agent in rig.store.agents("rig")] == ["pane-2"]
+
+
+@pytest.mark.feature("hub-dead-resume")
 @pytest.mark.parametrize("successor", ["seat", "claim", "row", "generation"])
 def test_a_successors_work_is_never_resumed_by_the_old_agent(rig, successor):
     if successor == "seat":
