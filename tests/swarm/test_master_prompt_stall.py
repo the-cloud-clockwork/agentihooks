@@ -350,3 +350,24 @@ def test_a_dead_master_pane_on_a_login_limit_is_left_to_master_down(store: Redis
     runtime.tails[agent.pane_id] = LOGIN_LIMIT
     runtime.live.discard(agent.name)
     assert run(store, runtime, START) == []
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_master_on_a_login_limit_holds_while_the_operator_is_at_its_pane(store: RedisStore) -> None:
+    import os
+
+    from scripts.inbox import wake
+    from scripts.swarm import idle
+
+    agent, runtime = master(store, PaneObservation("idle", typed="/login"))
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == []
+    runtime.panes[agent.name] = INTERRUPTED
+    idle.prompted(store.redis, "sw", agent.name, START)
+    quiet = wake.quiet_ms(os.environ)
+    assert run(store, runtime, START + quiet - 1) == []
+    assert run(store, runtime, START + quiet) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    [row] = [r for r in rows() if r["reason"] == master_prompt_stall.LOGIN_LIMITED]
+    assert (row["gate"], row["tool"], row["agent"]) == ("reset", "recycle", agent.name)

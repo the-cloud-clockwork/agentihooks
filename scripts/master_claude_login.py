@@ -31,6 +31,7 @@ GRANT = "claudeAiOauth"
 MANIFESTS = ("claude.sources.json", "claude.mounts.json")
 RENDERS = "renders.json"
 OWNER = "owner.json"
+FAILED = "failed.json"
 LOCK = "owner.lock"
 CREDS = "agentihooks/master-claude-login"
 SLOT_ENV = "AGENTIHOOKS_MASTER_LOGIN_SLOT"
@@ -475,7 +476,9 @@ def preferred() -> dict[str, int]:
     return ranks
 
 
-def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str, str]]:
+def _take(
+    name: str, bao: openbao_kv.OpenBao | None, skip: frozenset[int] = frozenset()
+) -> tuple[int, int, dict[str, str]]:
     from scripts import master_logins
     from scripts.routing import reservation
 
@@ -485,6 +488,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
             if not holders(folder):
                 _adopt()
         offered = {slot(): {}} if _private(home()) else {}
+    offered = {number: copy for number, copy in offered.items() if number not in skip}
     if not offered:
         raise LoginRefused(NO_LOGIN)
     named = {number: login_account(number, copy) for number, copy in offered.items()}
@@ -494,6 +498,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
         ranks = preferred()
         order.sort(
             key=lambda number: (
+                failed(number),
                 master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,
                 ranks.get(named[number], len(ranks)),
                 -master_logins.left(named[number], now),
@@ -517,14 +522,14 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     raise LoginRefused(ALL_HELD.format(held="; ".join(held)))
 
 
-def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
+def prepare(environ: Mapping[str, str], cwd: Path, skip: frozenset[int] = frozenset()) -> tuple[Path, str]:
     rendered = claude_home(environ)
     refused = refusal(rendered, cwd)
     if refused:
         raise LoginRefused(refused)
     bao = openbao_kv.from_env(environ)
     name = environ["AGENTIHOOKS_AGENT_NAME"]
-    number, epoch, copy = _take(name, bao)
+    number, epoch, copy = _take(name, bao, skip)
     with _locked(root(number)) as folder:
         target = home(number)
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
@@ -549,6 +554,50 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     found = account(target, environ, number=number)
     keep(bao, target, epoch, number)
     return target, found
+
+
+def _stamp(number: int) -> float:
+    path = home(number) / CREDENTIALS
+    return path.stat().st_mtime if path.is_file() else 0.0
+
+
+def mark_failed(number: int) -> None:
+    """Record that slot ``number`` failed its login check, against the time its login was last written."""
+    _write(root(number) / FAILED, {"credentials": _stamp(number)})
+
+
+def failed(number: int) -> bool:
+    """Whether slot ``number`` failed its login check and its login has not been written since."""
+    return _read(root(number) / FAILED).get("credentials") == _stamp(number)
+
+
+def _number(target: Path) -> int:
+    return next(number for number in numbers() if home(number) == target)
+
+
+def move(environ: Mapping[str, str], cwd: Path, failed: Path) -> tuple[Path, str] | None:
+    """Claim the next stored slot whose login passes its check and release the failed one; None keeps the failed slot.
+    Each slot that fails is marked so later launches try it last until its login changes."""
+    skip = {_number(failed)}
+    mark_failed(_number(failed))
+    for _ in numbers():
+        try:
+            target, found = prepare(environ, cwd, frozenset(skip))
+        except LoginRefused:
+            return None
+        if checked(target, environ, found):
+            release(failed, environ)
+            return target, found
+        release(target, environ)
+        skip.add(_number(target))
+        mark_failed(_number(target))
+    return None
+
+
+def _checked_or_moved(environ: Mapping[str, str], cwd: Path, target: Path, found: str) -> tuple[Path, str] | None:
+    if checked(target, environ, found):
+        return target, found
+    return move(environ, cwd, target)
 
 
 def rendered_overlays(home: Path, name: str | None) -> list[str]:
@@ -625,8 +674,10 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
                 target = target or claimed_home(environ)
                 return None
             raise
-        if not checked(target, environ, found):
+        usable = _checked_or_moved(environ, cwd, target, found)
+        if usable is None:
             return None
+        target, found = usable
         chain.notification(target, "current", "success")
         return target, found
 

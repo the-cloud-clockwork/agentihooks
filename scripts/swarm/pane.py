@@ -14,6 +14,15 @@ class PaneObservation:
     content_refusal: bool = False
 
 
+LOGIN_LINES = 12
+LOGIN_ERRORS = {
+    "claude": (
+        "Login reached its time limit · Please run /login",
+        "Login expired · Please run /login",
+        "OAuth token revoked · Please run /login",
+    ),
+}
+LOGIN_LINE = re.compile(r"^[\s●⎿]*(?P<text>.*?)\s*$")
 PROVIDER_ERRORS = {
     "claude": (
         r"API Error: (?:500|502|503|504|529)\b",
@@ -58,8 +67,10 @@ def provider_error(harness: str, text: str) -> str:
 
 
 def login_limit(harness: str, text: str) -> str:
-    """The Claude login error in the latest lines of a pane, or empty."""
-    return ""
+    """The Claude login error a line of the latest pane lines shows whole, or empty."""
+    lines = ESCAPE.sub("", text).splitlines()[-LOGIN_LINES:]
+    shown = {match["text"] for line in lines if (match := LOGIN_LINE.match(line))}
+    return next((error for error in LOGIN_ERRORS.get(harness, ()) if error in shown), "")
 
 
 def provider_error_id(harness: str, text: str) -> str:

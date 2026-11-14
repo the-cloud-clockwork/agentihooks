@@ -1,16 +1,21 @@
 """A master held on a question panel, a permission prompt or an interrupted prompt while operator items wait: the tick
 asks it for a handoff through its inbox, then recycles it in its seat like a stalled master, which also dismisses an
-open question panel. The reset enforcement starts log only."""
+open question panel. The reset enforcement starts log only. A master showing a Claude login limit is recycled at once,
+outside the gate, so its relaunch takes another stored login."""
+
+import os
+from typing import Any
 
 from scripts.gates import modes
 from scripts.gates.base import Who
 from scripts.gates.enforcement import MASTER_RESET as GATE
+from scripts.inbox import wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import affinity, master_retire, master_stall
+from scripts.swarm import affinity, idle, master_retire, master_stall
 from scripts.swarm.health.findings import MINUTE_MS
-from scripts.swarm.pane import interrupted_prompt
-from scripts.swarm.store import MASTER
+from scripts.swarm.pane import interrupted_prompt, login_limit
+from scripts.swarm.store import MASTER, AgentRecord
 
 TAIL_LINES = 40
 DAY_S = 86_400
@@ -23,6 +28,27 @@ REASON = HELD + "{prompt} with operator items waiting for {minutes} minutes"
 RESUMED = "the master left the prompt"
 RECYCLED = "the swarm recycled the master after fifteen minutes on the prompt"
 LOGIN_LIMITED = "showed a Claude login that reached its time limit"
+LOGIN_RECYCLED = "the swarm recycled the master on a Claude login limit"
+LOGIN_RECOVERY = """## Intent
+Continue as the master of {slug}; {name} {limited} and the swarm recycled it so the relaunch takes another stored login.
+
+## Done
+unknown: {name} could not run a turn once its login hit the limit and left no handoff document.
+
+## Stopped at
+unknown: {name} answered every turn with the login error and never reported its last step.
+
+## Decisions and promises
+unknown: none recorded outside the ledger and the master inbox.
+
+## Next
+Answer the open items in the master inbox first, then re-read the ledger and continue as master.
+
+## Read first
+- inbox:master
+
+<!-- handoff complete -->
+"""
 RECOVERY = """## Intent
 Continue as the master of {slug}; {name} sat {minutes} minutes on {prompt} while operator items waited, and the swarm recycled it.
 
@@ -74,12 +100,40 @@ def _clear(store, slug, master, key):
         master_retire.forget(store, slug, master.name, RESUMED)
 
 
-def run(slug, config, store, ledger, runtime, now_ms):
+def _prompted(store: Any, slug: str, master: AgentRecord, now_ms: int) -> bool:
+    last = idle.last_prompt(store.redis, slug, master.name)
+    return last is not None and now_ms - last < wake.quiet_ms(os.environ)
+
+
+def login_limited(slug: str, store: Any, runtime: Any, master: AgentRecord, now_ms: int) -> str:
+    """The Claude login error an idle live master pane shows, or empty while the operator is at the pane."""
+    observed = runtime.observe(master)
+    if observed.state != "idle" or observed.typed or _prompted(store, slug, master, now_ms):
+        return ""
+    try:
+        tail = runtime.pane_tail(master.pane_id, TAIL_LINES)
+    except Exception:
+        return ""
+    return login_limit(master.harness, tail)
+
+
+def _recycle_login(slug: str, store: Any, ledger: Any, master: AgentRecord, key: str, now_ms: int) -> list[str]:
+    master_retire.forget(store, slug, master.name, LOGIN_RECYCLED)
+    GATE.allows(store, Who(name=master.name, swarm=slug), "recycle", LOGIN_LIMITED, now_ms)
+    text = LOGIN_RECOVERY.format(slug=slug, name=master.name, limited=LOGIN_LIMITED)
+    master_stall.recycle(slug, store, ledger, master, text, now_ms, master_stall.STALLED)
+    store.redis.delete(key)
+    return [f"recycled master {master.name} in its seat: {LOGIN_LIMITED}"]
+
+
+def run(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     master = affinity.live_master(store, slug)
     if master is None or config.state in {"stopping", "stopped"}:
         return []
     key = store.key(slug, "master-prompt-stall", master.name)
     live = master.name in runtime.live_names()
+    if live and login_limited(slug, store, runtime, master, now_ms):
+        return _recycle_login(slug, store, ledger, master, key, now_ms)
     prompt = _prompt(runtime, master) if live and _operator_waiting(store, slug, master) else ""
     if not prompt:
         _clear(store, slug, master, key)

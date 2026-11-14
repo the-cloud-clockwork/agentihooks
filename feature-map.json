@@ -3134,7 +3134,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-login-refresh",
       "behaviour": "A live idle master whose pane shows a Claude login that reached its time limit, expired or was revoked is recycled in its seat on the next tick, whatever the reset gate mode and with no operator item waiting; its relaunch releases a stored master login slot that fails its native check and takes the next stored slot before any browser authorization.",
-      "seam": "pane.login_limit; master_prompt_stall.run; master_claude_login.prepare_launch and prepare with skipped slots",
+      "seam": "pane.login_limit; master_prompt_stall.run; master_claude_login.prepare_launch and prepare with skipped slots; semgrep incident rule master-login-check-skips-slots",
       "tests": [
         "tests/swarm/test_pane.py::test_login_limit_reports_the_claude_login_texts",
         "tests/swarm/test_pane.py::test_login_limit_ignores_other_text_and_harnesses",
@@ -3143,7 +3143,8 @@
         "tests/swarm/test_master_prompt_stall.py::test_a_master_not_idle_on_a_login_limit_stays",
         "tests/swarm/test_master_prompt_stall.py::test_a_dead_master_pane_on_a_login_limit_is_left_to_master_down",
         "tests/test_master_claude_login.py::test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_check",
-        "tests/test_master_claude_login.py::test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works"
+        "tests/test_master_claude_login.py::test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works",
+        "tests/swarm/test_master_prompt_stall.py::test_a_master_on_a_login_limit_holds_while_the_operator_is_at_its_pane"
       ]
     },
     {

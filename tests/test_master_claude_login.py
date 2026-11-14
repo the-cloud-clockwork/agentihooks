@@ -1206,7 +1206,7 @@ def test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_che
     _spare_slot(rendered, monkeypatch)
     checked = []
 
-    def check(environ: dict[str, str], account: str) -> dict:
+    def check(environ: dict[str, str], account: str) -> dict[str, str]:
         checked.append(account)
         if environ["CLAUDE_CONFIG_DIR"] == str(login.home(1)):
             raise native_login.LoginError(native_login.EXPIRED)
@@ -1219,6 +1219,14 @@ def test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_che
     assert (checked[0], checked[-1]) == ("masteratexample_com", "spareatexample_com")
     assert login.holders(login.root(1)) == {}
     assert login.holders(login.root(2)) == {"master@a-1": os.getpid()}
+    assert (login.failed(1), login.failed(2)) == (True, False)
+    login.release(login.home(2), _environ(rendered))
+    checked.clear()
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(2), "spareatexample_com")
+    assert checked == ["spareatexample_com"]
+    written = (login.home(1) / login.CREDENTIALS).stat().st_mtime + 5
+    os.utime(login.home(1) / login.CREDENTIALS, (written, written))
+    assert login.failed(1) is False
 
 
 @pytest.mark.feature("master-login-limit-recovery")
@@ -1230,7 +1238,7 @@ def test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works(
 
     _spare_slot(rendered, monkeypatch)
 
-    def check(environ: dict[str, str], account: str) -> dict:
+    def check(environ: dict[str, str], account: str) -> dict[str, str]:
         raise native_login.LoginError(native_login.EXPIRED)
 
     browsed = []

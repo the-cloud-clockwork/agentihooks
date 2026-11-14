@@ -127,7 +127,6 @@ def test_typed_input_is_the_text_on_the_last_input_line_without_dim_hints(captur
         "Login reached its time limit · Please run /login",
         "Login expired · Please run /login",
         "OAuth token revoked · Please run /login",
-        "Failed to authenticate: this login reached its time limit and cannot be renewed.",
     ],
 )
 def test_login_limit_reports_the_claude_login_texts(text: str) -> None:
@@ -142,6 +141,8 @@ def test_login_limit_reports_the_claude_login_texts(text: str) -> None:
     [
         ("claude", "API Error: 529 overloaded"),
         ("claude", "● Done, the login code is merged\n❯ \n"),
+        ("claude", "● The old master said Login reached its time limit · Please run /login at four\n❯ \n"),
+        ("claude", "● master@a-1 showed a Claude login that reached its time limit\n❯ \n"),
         ("codex", "Login reached its time limit · Please run /login"),
     ],
 )

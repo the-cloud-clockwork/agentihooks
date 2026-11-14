@@ -1,0 +1,19 @@
+rules:
+  - id: master-login-check-skips-slots
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A master launch whose taken login slot fails its native check gave up on the stored logins and went to browser
+      authorization, so a master whose login reached its time limit never moved to another stored slot that worked.
+      On a failed check, move to the next stored slot first and give up only when none passes.
+    paths:
+      include:
+        - /scripts/master_claude_login.py
+        - master-login-check-skips-slots.py
+    patterns:
+      - pattern-inside: |
+          def prepare_launch(...):
+              ...
+      - pattern: |
+          if not checked(...):
+              return None
