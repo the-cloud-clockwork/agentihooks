@@ -239,7 +239,7 @@ def test_the_resume_gate_admits_an_owner_and_refuses_after_a_handoff(
     from scripts.swarm import dead_resume
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = replace(next(a for a in store.agents("sw") if a.lane == "eng"), conversation_id="conversation")
     store.put_agent("sw", agent)
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)

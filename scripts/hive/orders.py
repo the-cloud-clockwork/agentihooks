@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
@@ -380,7 +380,8 @@ class Consumer:
         except SwarmError:
             return None
         store: Any = self.store
-        target: dict[str, Any] = cast(Any, current).runtime_target
+        record: Any = current
+        target: dict[str, Any] = record.runtime_target
         judged = (order.name, order.generation, order.launched_at, order.pane_id, self.hive)
         host = target.get("host_id") or current.hive
         found = (current.name, current.generation, current.launched_at, current.pane_id, host)

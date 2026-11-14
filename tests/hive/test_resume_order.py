@@ -76,7 +76,7 @@ def test_a_resume_order_process_that_fails_to_start_stores_a_failed_answer(
     monkeypatch.setattr(orders.Consumer, "local", classmethod(broken))
     order = _order()
     resume_order.run(HIVE, order.encode())
-    assert _ack(redis, order)["failure"] == "error: RuntimeError"
+    assert _ack(redis, order) == {"status": "failed", "target": {}, "failure": "error: RuntimeError"}
 
 
 @pytest.mark.feature("hub-dead-resume")
@@ -162,3 +162,59 @@ def test_a_record_placed_by_runtime_target_is_held_on_its_hive(redis: Any) -> No
     order = CommandOrder("resume:1", "resume", "rig", name, agent.execution_id, agent.generation, "", 0, "")
     held = Consumer(redis, HIVE, cast(Any, Mock()))._holding(order)
     assert held is not None and held.name == name
+
+
+def _resuming(redis: Any, monkeypatch: pytest.MonkeyPatch, reaped: bool = True, recovered: bool = True) -> Any:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    record = AgentRecord("x", "eng", "task", pane_id="old")
+    runtime = Mock()
+    runtime.reap.return_value = Outcome("reap", Status.OK if reaped else Status.UNAVAILABLE, "local", None, "no reap")
+    placed = SimpleNamespace(pane_id="new", launched_at=7)
+    status = Status.OK if recovered else Status.UNAVAILABLE
+    runtime.recover.return_value = Outcome("recover", status, "local", placed, "no recover")
+    consumer = orders.Consumer(redis, HIVE, runtime)
+    store = Mock()
+    store.config.return_value = SimpleNamespace(repo_origin="")
+    consumer.store = store
+    monkeypatch.setattr(consumer, "_holding", lambda order: record)
+    return SimpleNamespace(consumer=consumer, runtime=runtime, store=store, record=record)
+
+
+@pytest.mark.feature("hub-dead-resume")
+@pytest.mark.parametrize(("reaped", "failure"), [(False, "no reap"), (True, "no recover")])
+def test_a_resume_the_runtime_refuses_answers_failed_on_this_hive(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, reaped: bool, failure: str
+) -> None:
+    from scripts.hive.orders import FAILED, Ack
+
+    rig = _resuming(redis, monkeypatch, reaped=reaped, recovered=False)
+    assert rig.consumer.resume(_order(), rig.record) == Ack(FAILED, {"host_id": HIVE}, failure)
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_resume_answers_done_on_this_hive_and_records_the_new_pane(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from scripts.hive.orders import DONE, Ack
+
+    rig = _resuming(redis, monkeypatch)
+    assert rig.consumer.resume(_order(), rig.record) == Ack(DONE, {"host_id": HIVE})
+    expected = replace(rig.record, pane_id="new", launched_at=7, idle_ticks=0)
+    rig.store.put_agent.assert_called_once_with("rig", expected)
+    rig.runtime.terminate.assert_not_called()
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_resume_that_cannot_record_its_pane_closes_the_new_pane(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+
+    rig = _resuming(redis, monkeypatch)
+    rig.store.put_agent.side_effect = RuntimeError("redis gone")
+    with pytest.raises(RuntimeError):
+        rig.consumer.resume(_order(), rig.record)
+    rig.runtime.terminate.assert_called_once_with(replace(rig.record, pane_id="new"))
