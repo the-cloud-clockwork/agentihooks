@@ -6,12 +6,12 @@ from functools import partial
 from typing import Any
 
 from scripts.handoff import envelope
-from scripts.swarm import merge_queue, stack
-from scripts.swarm.naming import plain
+from scripts.swarm import merge_queue, naming, stack
 from scripts.swarm.store import SwarmConfig, SwarmError
 
 TIMEOUT_S = 3
 Reclaim = Callable[..., dict[str, str]]
+plain: Callable[[str], str] = naming.plain
 
 
 def heads(origin: str, branches: Collection[str], run: Callable[..., Any] = subprocess.run) -> dict[str, str]:
