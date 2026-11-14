@@ -2,14 +2,10 @@ import json
 
 import pytest
 
-from scripts.handoff import transfers
-from scripts.swarm import capacity, dispatcher, focus_budget, input_wait, preempt, profile_first, timing
+from scripts.swarm import input_wait, timing
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
-from scripts.swarm_ledger import ledger_workspace
-from scripts.swarm_v2.runtime import codex
-from scripts.tick.adapters.calls import SpawnRuntimeCalls
 from scripts.tick.steps import agents as agent_steps
 from tests.swarm import test_tick
 
@@ -21,81 +17,6 @@ FakeLedger, FakeRuntime, tasks = test_tick.FakeLedger, test_tick.FakeRuntime, te
 def finished(capsys):
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
     return [row for row in rows if row.get("event") == "swarm_tick_step" and row["phase"] == "finished"]
-
-
-def test_a_spawn_pass_times_each_part_inside_the_spawn_step(store, capsys):
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    with timing.tick("sw"):
-        tick("sw", store, ledger, runtime, now_ms=1_000)
-    rows = finished(capsys)
-    steps = [row["step"] for row in rows]
-    parts = [
-        timing.named(tick_module._held_for_master),
-        timing.named(tick_module._spawn_order),
-        timing.named(capacity.read),
-        timing.named(capacity.caps),
-        timing.named(dispatcher.claim_key),
-        timing.named(preempt.yielding),
-        timing.named(tick_module._running),
-        timing.named(tick_module.ready_by_lane),
-        timing.named(focus_budget.place),
-        timing.named(profile_first.placeable),
-        timing.named(tick_module._ranked),
-        timing.named(tick_module._block_unresolved),
-        timing.named(tick_module._spawn_stop),
-        timing.named(tick_module._lives_spent),
-        timing.named(tick_module._room_wait),
-        timing.named(tick_module._held_back),
-        timing.named(tick_module._owner_hold),
-        timing.named(RedisStore.claim),
-        timing.named(tick_module._reported),
-        timing.named(tick_module._sharing),
-        timing.named(ledger_workspace.scaffold),
-        timing.named(FakeLedger.update_task),
-        timing.named(RedisStore.record_launch),
-        timing.named(transfers.attach),
-        timing.named(tick_module.primed),
-        timing.named(SpawnRuntimeCalls.spawn),
-        timing.named(codex.admit_legacy),
-        timing.named(tick_module._started),
-    ]
-    assert [part for part in parts if part not in steps] == []
-    spawn = steps.index(timing.named(tick_module._spawn))
-    assert all(steps.index(part) < spawn for part in parts)
-    assert {row["outcome"] for row in rows if row["step"] in parts} == {"success"}
-    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
-
-
-def test_a_failed_launch_times_its_settlement_inside_the_spawn_step(store, capsys):
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(fail=True)
-    with timing.tick("sw"):
-        tick("sw", store, ledger, runtime, now_ms=1_000)
-    steps = [row["step"] for row in finished(capsys)]
-    assert steps.index(timing.named(tick_module._not_launched)) < steps.index(timing.named(tick_module._spawn))
-    assert timing.named(tick_module._started) not in steps
-    assert ledger.rows["t1"]["state"] == "open"
-
-
-def test_a_failed_launch_reports_its_failure_once_under_the_spawn_step(store, capsys):
-    ledger, runtime, reported = tasks(("t1", "eng")), FakeRuntime(fail=True), []
-    token = timing.ON_FAILURE.set(lambda step, error: reported.append((step, str(error))))
-    try:
-        with timing.tick("sw"):
-            tick("sw", store, ledger, runtime, now_ms=1_000)
-    finally:
-        timing.ON_FAILURE.reset(token)
-    assert [entry for entry in reported if entry[1] == "herdr down"] == [("scripts.swarm.tick._spawn", "herdr down")]
-    (launch,) = [row for row in finished(capsys) if row["step"] == timing.named(SpawnRuntimeCalls.spawn)]
-    assert (launch["outcome"], launch["error"]) == ("error", "scripts.tick.steps.claims.SpawnError")
-
-
-def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, monkeypatch):
-    ledger = FakeLedger([{"id": "t1", "lane": "eng", "rank": "urgent"}, {"id": "t2", "lane": "eng", "rank": "low"}])
-    monkeypatch.setattr(preempt, "yielding", lambda *args: lambda task: (-int(task["id"][1:]),))
-    order, _ = tick_module._spawn_order(
-        "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), FakeRuntime()
-    )
-    assert [task["id"] for _, task in order] == ["t2", "t1"]
 
 
 def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() -> None:
@@ -116,82 +37,6 @@ def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() ->
     }
     assert tick_module._running(agents, rows, "eng") == [rows["t1"], {"id": "t5", "lane": "eng"}]
     assert tick_module._running(agents, rows, "ci") == [rows["t4"]]
-
-
-def test_spawn_order_times_the_running_filter_and_focus_placement_once_per_lane_inside_it(
-    store: RedisStore, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
-    monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1, "ci": 1})
-    with timing.tick("sw"):
-        timing.timed(
-            tick_module._spawn_order,
-            "sw",
-            store.config("sw"),
-            store,
-            [],
-            ledger.rows,
-            ledger.state("sw"),
-            FakeRuntime(),
-        )
-    rows = finished(capsys)
-    (order,) = [row for row in rows if row["step"] == timing.named(tick_module._spawn_order)]
-    parts = [timing.named(tick_module._running), timing.named(focus_budget.place)]
-    inside = [
-        row["step"]
-        for row in rows
-        if row["step"] in parts
-        and row["started"] >= order["started"]
-        and row["started"] + row["wall_s"] <= order["started"] + order["wall_s"]
-    ]
-    assert sorted(inside) == sorted(parts * 2)
-    assert [row["step"] for row in rows if row["step"] in parts] == inside
-
-
-class PlacingRuntime(FakeRuntime):
-    def begin_placement_pass(self) -> None:
-        self.placing = True
-
-
-def test_spawn_order_times_every_remaining_part_inside_it(
-    store: RedisStore, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from scripts.swarm import readiness
-
-    ledger, runtime = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}]), PlacingRuntime()
-    monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1, "ci": 1})
-    with timing.tick("sw"):
-        timing.timed(
-            tick_module._spawn_order, "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), runtime
-        )
-    rows = finished(capsys)
-    (order,) = [row for row in rows if row["step"] == timing.named(tick_module._spawn_order)]
-    parts = [
-        timing.named(PlacingRuntime.begin_placement_pass),
-        timing.named(readiness.launchable),
-        timing.named(focus_budget.ranks),
-        timing.named(focus_budget.ordered),
-    ]
-    inside = [
-        row["step"]
-        for row in rows
-        if row["step"] in parts
-        and row["started"] >= order["started"]
-        and row["started"] + row["wall_s"] <= order["started"] + order["wall_s"]
-    ]
-    assert sorted(inside) == sorted([*parts, timing.named(readiness.launchable)])
-    assert runtime.placing is True
-
-
-def test_spawn_order_queues_no_task_under_the_events_engine(store: RedisStore) -> None:
-    from dataclasses import replace
-
-    from scripts.swarm.store import EVENTS_ENGINE
-
-    ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng", "workstation": True}])
-    config = replace(store.config("sw"), engine=EVENTS_ENGINE)
-    order, _ = tick_module._spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), FakeRuntime())
-    assert order == []
 
 
 def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):

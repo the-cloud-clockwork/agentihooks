@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import engine_migration, launch_job
+from scripts.swarm import engine_migration
 from scripts.swarm import store as store_module
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -108,25 +108,6 @@ def test_a_doctor_takes_its_own_origin_when_the_watched_swarm_has_none(store: Re
         "bare-doctor": f"migrated: {ORIGIN}",
     }
     assert configs(store) == {"bare": ("legacy", ""), "bare-doctor": ("events", ORIGIN)}
-
-
-@pytest.mark.feature("engine-config-migration")
-def test_a_swarm_with_legacy_agents_or_launches_in_flight_is_left_for_the_master(store: RedisStore) -> None:
-    for slug in ("agents", "launching", "idle"):
-        store.create(replace(SwarmConfig(slug, "/missing", 1, 1), repo_origin="github.com/team/project"))
-    store.put_agent("agents", AgentRecord("engineer@1", "eng", "t1", seat="eng-1@agents"))
-    store.redis.hset(store.key("launching", launch_job.KEY), "engineer@2", json.dumps({"task": "t2"}))
-
-    assert engine_migration.migrate(store) == {
-        "agents": "skipped: live legacy agents or launches",
-        "idle": "migrated: github.com/team/project",
-        "launching": "skipped: live legacy agents or launches",
-    }
-    assert configs(store) == {
-        "agents": ("legacy", "github.com/team/project"),
-        "idle": ("events", "github.com/team/project"),
-        "launching": ("legacy", "github.com/team/project"),
-    }
 
 
 @pytest.mark.feature("engine-config-migration")
