@@ -85,7 +85,7 @@ def launched(
     assert run(SLUG, "create", "--repo", "/repo") == 0
     agent = seat("t1")
     launch_check.forget(store, SLUG, agent.name)
-    running = replace(agent, state="working", pane_id="w1:p1", started_at=NOW, launched_at=NOW)
+    running = replace(agent, state="working", pane_id="w1:p1", launched_at=NOW)
     store.put_agent(SLUG, running)
     rt.live.add(agent.name)
     event = start_event(running, readiness.generation(ledger.rows["t1"]))
