@@ -687,6 +687,38 @@ def test_two_hub_pods_on_one_store_never_admit_a_hive_past_its_max_agents(
 
 
 @pytest.mark.feature("hub-admission-hive-max-agents")
+def test_the_hive_admitting_key_expires_and_a_held_key_holds_only_its_own_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    _hive_holding(rig, monkeypatch, "2", 0)
+    monkeypatch.setattr(admission, "TURN_TRIES", 1)
+    monkeypatch.setattr(admission, "TURN_WAIT_S", 0)
+    claim = rig.admitter._claim
+    expiries: list[int] = []
+
+    def watched(*args: Any) -> dict[str, Any] | None:
+        expiries.append(rig.store.redis.pttl(f"{registry.key('hive-a')}:admitting"))
+        return claim(*args)
+
+    monkeypatch.setattr(rig.admitter, "_claim", watched)
+    rig.store.redis.set(f"{registry.key('hive-a')}:admitting", "another pod")
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": admission.BUSY}
+    assert rig.store.redis.get(f"{registry.key('hive-a')}:admitting") == "another pod"
+
+    rig.store.redis.delete(f"{registry.key('hive-a')}:admitting")
+    rig.store.redis.set(f"{registry.key('hive-b')}:admitting", "another pod")
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert len(expiries) == 1
+    assert 0 < expiries[0] <= admission.TURN_MS
+
+
+@pytest.mark.feature("hub-admission-hive-max-agents")
 @pytest.mark.parametrize("cap, live", [("2", 1), ("3", 2), ("", 2)])
 def test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cap: str, live: int

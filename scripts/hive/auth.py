@@ -406,12 +406,12 @@ def revoke(redis, member_id: str) -> None:
 def write_env(home: Path | str, url: str, grant: dict) -> Path:
     creds = Path(home) / NATS_CREDS_FILE
     if grant.get("nats_credentials"):
-        grant = {**grant, "bus_credentials": str(_write_private(creds, grant["nats_credentials"]))}
+        grant = {**grant, "bus_credentials": str(write_private(creds, grant["nats_credentials"]))}
     elif (kept := kept_bus(home, grant["id"])) is not None:
         grant = {**grant, **kept}
     else:
         creds.unlink(missing_ok=True)
-    return _write_private(Path(home) / ENV_FILE, env_text(url, grant))
+    return write_private(Path(home) / ENV_FILE, env_text(url, grant))
 
 
 def kept_bus(home: Path | str, member_id: str) -> dict | None:
@@ -453,10 +453,10 @@ def env_text(url: str, grant: dict) -> str:
 
 
 def write_controller_env(home: Path | str, credential: str) -> Path:
-    return _write_private(Path(home) / CONTROLLER_ENV_FILE, f"AGENTIHOOKS_CONTROLLER_CREDENTIAL={credential}\n")
+    return write_private(Path(home) / CONTROLLER_ENV_FILE, f"AGENTIHOOKS_CONTROLLER_CREDENTIAL={credential}\n")
 
 
-def _write_private(path: Path, text: str) -> Path:
+def write_private(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)
