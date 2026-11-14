@@ -69,6 +69,27 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     return f", task {agent.task} reopened" if reopen else ""
 
 
+def _stop_hive(slug: str, store: Any, agent: Any, reason: str, dropped: str) -> str:
+    """Sends the execution stop for a retired agent to the hive that recorded its start, naming ``reason``, once the
+    store took its drop, and returns the drop's action text ``dropped``."""
+    from scripts.hub.reconciler import stop_admitted
+
+    if dropped != DROP_REFUSED:
+        stop_admitted(store, slug, agent, reason)
+    return dropped
+
+
+def _retire_or_stop(slug: str, store: Any, runtime: Any, agent: Any, reason: str) -> bool:
+    """True once ``agent`` is retired: its runtime reaped it, or, for an agent whose hive recorded its start and that
+    the runtime could not reach, the hub's execution stop reached that hive, which then reaps it."""
+    from scripts.hive import execution_stop
+    from scripts.hub.reconciler import stop_admitted
+
+    if runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+        return True
+    return stop_admitted(store, slug, agent, reason) in {execution_stop.SENT, execution_stop.PENDING}
+
+
 def _settle_exit(store: Any, name: str, seat: str) -> None:
     from scripts.tick.adapters.calls import SpawnStoreCalls
 
