@@ -84,7 +84,12 @@ def forget(payload: dict[str, Any]) -> None:
         return
     owners = _owners(session_id)
     for owner in owners if payload.get("reason") != "clear" else owners[:1]:
-        try:
-            _path(owner).unlink(missing_ok=True)
-        except OSError:
-            continue
+        _drop(owner)
+
+
+def _drop(owner: str) -> bool:
+    try:
+        _path(owner).unlink(missing_ok=True)
+    except OSError:
+        return False
+    return True
