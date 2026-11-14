@@ -6,7 +6,7 @@ from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
-from scripts.hive import execution_events, presence, reports
+from scripts.hive import execution_events, execution_stop, presence, reports
 from scripts.hub import lease
 from scripts.hub.lifecycle import Lifecycle
 from scripts.hub.registry import Reactor
@@ -46,6 +46,32 @@ def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
     bus = open_bus(config)
     try:
         return [agent for agent in agents if _start(bus, slug, agent) is None]
+    finally:
+        bus.close()
+
+
+def admitted_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
+    """The agents of ``slug`` whose hive recorded their start on a real bus, the ones ``legacy_agents`` leaves out."""
+    agents = store.agents(slug)
+    config = BusConfig.from_environ()
+    if config.backend == "memory" or not agents:
+        return []
+    bus = open_bus(config)
+    try:
+        return [agent for agent in agents if _start(bus, slug, agent) is not None]
+    finally:
+        bus.close()
+
+
+def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
+    """Sends the execution stop for ``agent`` to the hive that recorded its start and answers the stop outcome;
+    answers unknown on the memory bus, where no hive records a start."""
+    config = BusConfig.from_environ()
+    if config.backend == "memory":
+        return execution_stop.UNKNOWN
+    bus = open_bus(config)
+    try:
+        return execution_stop.stop(bus, slug, agent, reason)
     finally:
         bus.close()
 

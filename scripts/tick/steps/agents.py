@@ -34,13 +34,16 @@ def _reap(
     Past ``deadline`` no further agent is judged: the rest are left for the next pass, named in one closing action.
     """
     from scripts.hub import owned_leases
-    from scripts.hub.reconciler import legacy_agents
+    from scripts.hub.reconciler import admitted_agents, legacy_agents
 
     live, rows = tick.timing.timed(tick._live_names, runtime), dict(rows)
 
     judging = tick._Reaping(slug, store, ledger, runtime, rows, live, now_ms)
     agents = list(tick.timing.timed(legacy_agents, store, slug))
     tick.timing.timed(owned_leases.renew, store, slug, agents, tick.LEASE_MS)
+    admitted = list(tick.timing.timed(admitted_agents, store, slug))
+    hub_owned = {agent.name for agent in admitted}
+    agents += admitted
     by_task: dict[str, list[int]] = {}
     for index, agent in enumerate(agents):
         by_task.setdefault(agent.task or agent.name, []).append(index)
@@ -54,7 +57,8 @@ def _reap(
             agent = agents[index]
             with tick.timing.acting(agent.name):
                 try:
-                    judged.append((index, _kept_on_refusal(agent.name, tick._reap_agent(judging, agent))))
+                    judge = _reap_admitted if agent.name in hub_owned else tick._reap_agent
+                    judged.append((index, _kept_on_refusal(agent.name, judge(judging, agent))))
                 except tick.SwarmError as exc:
                     if _IDENTITY_CONFLICT not in str(exc):
                         raise
@@ -296,6 +300,22 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     return []
 
 
+def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
+    """Return the actions watching one agent whose hive recorded its start: only its idling is judged here, its exit
+    and its lease stay with the hub lifecycle."""
+    slug, store = judging.slug, judging.store
+    if (
+        agent.state in {"awaiting-decision", "retiring"}
+        or (agent.lane == tick.MASTER and agent.state == "starting")
+        or tick.timing.timed(tick._acknowledging, slug, store, agent)
+        or tick._ended(agent, judging.rows)
+    ):
+        return []
+    return tick.timing.timed(
+        tick._watch_agent, slug, store, judging.ledger, judging.runtime, judging.rows, agent, judging.now_ms
+    )
+
+
 def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
     if tick.deliberate_exit.take(store, slug, agent.name):
         runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task))
@@ -378,6 +398,8 @@ def _watch_idle(
     agent: Any,
     now_ms: int,
 ) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     automated_gc: Any = import_module("scripts.swarm.automated_gc")
 
     observed = tick.timing.timed(tick._observe, runtime, agent)
@@ -457,6 +479,7 @@ def _watch_idle(
             if pending
             else ""
         )
+        tick.timing.timed(stop_admitted, slug, idle, "idle")
         dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, idle, refund=True)
         return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
