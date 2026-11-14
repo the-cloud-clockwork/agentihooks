@@ -139,7 +139,7 @@ def test_tasks_filters_open_tasks_by_state_lane_and_title_text(reads, capsys, mo
 def test_tasks_prints_a_task_without_lane_or_title_with_empty_fields(monkeypatch, capsys):
     rows = [{"id": "t8", "state": "done"}, {"id": "t9"}]
     monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: rows)
-    ledger.cmd_tasks(SimpleNamespace(slug=SLUG, state=None, lane=None, text=None))
+    ledger.cmd_tasks(SimpleNamespace(slug=SLUG, state=None, lane=None, text=None, json=False))
     assert capsys.readouterr().out == "t9  open    \n"
 
 
