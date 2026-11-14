@@ -405,7 +405,8 @@ def test_a_master_resumed_after_a_later_master_ended_is_the_last_master(
         launched_at=ENDED + 20,
     )
     store.put_agent("sw", record)
-    assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
+    last = master_launch.last_master(store, "sw")
+    assert last is not None and last.name == "master@a1b2c3-0009"
 
 
 def test_a_new_master_records_its_launch_on_its_own_record_not_a_stale_seat_execution(up, monkeypatch):
