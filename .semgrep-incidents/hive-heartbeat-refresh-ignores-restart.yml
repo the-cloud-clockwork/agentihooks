@@ -3,16 +3,14 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A hive join heartbeat that refreshes stored running reports must first end the reports its own member wrote
-      before a pod restart, through join_report.end_restarted. Reports live in Redis and outlive the pod, so
-      otherwise agents killed with the restart keep fresh heartbeats, stay listed on the hive and hold its drain.
+      A hive join heartbeat that refreshes stored running reports must refresh only the reports join_report.end_restarted
+      kept, after it ended the ones its own member wrote before a pod restart. Reports live in Redis and outlive the pod,
+      so otherwise agents killed with the restart keep fresh heartbeats, stay listed on the hive and hold its drain.
     patterns:
       - pattern: 'graded({**$REPORT, ..., "heartbeat_at": $AT})'
       - pattern-inside: |
           def $F(...):
               ...
       - pattern-not-inside: |
-          def $F(...):
-              ...
-              <... end_restarted(...) ...>
+          for $REPORT in $KEEP(..., end_restarted(...), ...):
               ...
