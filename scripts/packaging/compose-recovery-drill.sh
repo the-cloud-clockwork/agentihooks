@@ -122,7 +122,7 @@ class Tasks:
 
 class StandIn:
     def spawn(self, request):
-        return Outcome("spawn", Status.OK, "recovery", SimpleNamespace(pane_id=f"pane-{request.name}", harness="claude", account=""))
+        return Outcome("spawn", Status.OK, "recovery", SimpleNamespace(pane_id=f"pane-{request.name}", harness="claude", account="", launched_at=0))
 
 
 def launched():

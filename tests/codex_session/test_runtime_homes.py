@@ -1,5 +1,6 @@
 import errno
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,35 @@ def test_launch_stages_only_startup_files_and_auth_references(store, server, roo
     assert not home.parent.exists()
     assert (profile / "auth.json").exists()
     assert (unrelated / "large").stat().st_size == 1024 * 1024
+
+
+@pytest.mark.feature("codex-execution-home-default-login-only")
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("default", "chatgpt", frozenset(), True),
+        ("token-slug", "", frozenset({"AH_CX_TOKEN_token-slug"}), False),
+        ("api", "apiKey", frozenset({"CODEX_API_KEY"}), False),
+    ],
+)
+def test_execution_home_links_the_operator_login_only_for_a_default_login_launch(
+    store: RedisStore, server: Server, root: Path, tmp_path: Path, case: tuple[str, str, frozenset[str], bool]
+) -> None:
+    account, account_type, allowed_tokens, linked = case
+    profile = Path(server.codex_home)
+    login = tmp_path / "login-reference"
+    login.touch()
+    (profile / "auth.json").symlink_to(login)
+    server.account = account_type or "chatgpt"
+    spec = launch_spec(store, server, tmp_path, account_type=account_type, allowed_tokens=allowed_tokens)
+    spec = replace(spec, agent=replace(spec.agent, account=account))
+    started = supervisor.launch(store, spec, deps(server, Clock(), root))
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+
+    assert (home / "auth.json").is_symlink() is linked
+    assert (home / "auth.json").exists() is linked
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
 
 
 def test_launch_stages_the_render_stamp_the_launch_check_reads(store, server, root, tmp_path):

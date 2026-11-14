@@ -19,6 +19,7 @@ EXECUTION_ENV = "AGENTIHOOKS_SLOT_EXECUTION"
 UNBOUND = "hive"
 REQUEST_TIMEOUT_MS = 10_000
 LAUNCH_DECISION = ("harness", "profile", "account", "model", "effort")
+LAUNCH_PLACEMENT = ("overlays", "profile_decision")
 
 
 class Unavailable(RuntimeError):
