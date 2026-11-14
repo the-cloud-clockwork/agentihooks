@@ -346,6 +346,20 @@ def test_zero_backoff_does_not_expire_a_delivery_inside_its_current_batch(clock)
         opened.close()
 
 
+@pytest.mark.feature("hive-own-stop-consumer")
+def test_an_exhausted_stop_is_dead_lettered_like_an_event(clock: Clock) -> None:
+    opened = memory.open_bus(BusConfig(queue=QueuePolicy(max_deliver=1, backoff_ms=(0,))), clock=clock)
+    try:
+        consumer = opened.stops.consumer("reader", "swarm.>")
+        opened.stops.publish("swarm.s.execution.stop.h", event())
+        assert [delivery.attempt for delivery in consumer.fetch(2, 0)] == [1]
+        assert consumer.fetch(2, 0) == []
+        [letter] = opened.dead.consumer("dead", "dead.>").fetch(2, 0)
+        assert letter.event.swarm == "s"
+    finally:
+        opened.close()
+
+
 def test_a_stale_delivery_cannot_settle_its_redelivery(bus, clock):
     queue = bus.queue("work", QueuePolicy(ack_wait_ms=10))
     queue.offer(event())

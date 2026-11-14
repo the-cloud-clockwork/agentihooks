@@ -187,6 +187,7 @@ def test_hub_fans_in_scoped_event_streams_with_existing_reactor_filters(hub):
 @pytest.mark.feature("hive-own-stop-consumer")
 def test_hub_fans_in_scoped_stop_streams_and_the_legacy_events_stream(hub: Any) -> None:
     consumer = hub.stops.consumer("aggregate-stops", "swarm.*.execution.stop.*")
+    assert hub.stops.consumer("aggregate-stops", "swarm.*.execution.stop.*", POLICY) is consumer
     assert hub.stops.publish(subject("rig", "execution", "stop", "h1"), event())
     assert hub.stops.publish(subject("other", "execution", "stop", "h2"), event("other", "second"))
     assert hub._legacy_stops.publish(subject("old", "execution", "stop", "h3"), event("old", "third"))

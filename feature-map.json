@@ -6421,6 +6421,7 @@
         "tests/hive/test_stop_consumer_grant.py::test_a_member_cannot_publish_onto_the_stop_stream",
         "tests/hive/test_stop_consumer_grant.py::test_a_member_subscribe_on_a_stop_subject_is_denied",
         "tests/events/test_scoped_memory.py::test_scoped_memory_aggregate_stops_include_legacy_and_owned_logs",
+        "tests/events/test_memory.py::test_an_exhausted_stop_is_dead_lettered_like_an_event",
         "tests/events/test_scoped_nats.py::test_hub_fans_in_scoped_stop_streams_and_the_legacy_events_stream",
         "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_denies_every_stop_subscription",
         "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_names_only_its_own_stop_consumer",
