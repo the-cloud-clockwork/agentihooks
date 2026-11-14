@@ -1,8 +1,13 @@
 """A lane successor spawned from a saved launch with no model or effort takes the lane model and a range effort."""
 
+import json
+
 import pytest
 
-from scripts.swarm import effort_range, store, successor_fill, tick
+from scripts.hub import admission
+from scripts.swarm import effort_range, profile_choice, store, successor_fill, tick
+from tests.helpers.seat import seat_agent
+from tests.swarm.test_tick import tasks
 
 pytestmark = pytest.mark.unit
 
@@ -16,6 +21,28 @@ def swarm(lanes: dict, low: str = "high", high: str = "xhigh") -> store.RedisSto
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, lanes=lanes, effort_min=low, effort_max=high))
     return saved
+
+
+@pytest.mark.feature("swarm-tick-successor-fill")
+def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane_model_inside_the_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    held = swarm({"eng": {"model": "sonnet-lane"}})
+    held.redis.set(held.key("sw", "handoff-envelope", "t1"), json.dumps({"reason": "context", "launch": SAVED}))
+    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+    seat_agent(held, tasks(("t1", "eng")), "sw", "t1", clock=lambda: 1_000)
+    admitted = json.loads(held.redis.get(held.key("sw", admission.ADMITTED, "t1", "0")))["task"]
+    launch = admitted["handoff_envelope"]["launch"]
+    assert launch["model"] == "sonnet-lane"
+    assert launch["effort"] in effort_range.EFFORTS["claude"][2:4]
+    assert launch["effort"] == "high"
+    assert {key: launch[key] for key in ("profile", "harness", "account")} == {
+        "profile": "engineer",
+        "harness": "claude",
+        "account": "a1",
+    }
+    assert "launch_assignment" not in admitted
 
 
 def test_a_filled_saved_effort_passes_the_preserved_effort_check_an_empty_one_fails() -> None:

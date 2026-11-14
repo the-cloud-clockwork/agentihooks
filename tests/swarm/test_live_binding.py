@@ -471,6 +471,19 @@ def launched(ticking: tuple[RedisStore, FakeRuntime, FakeLedger]) -> tuple[Redis
     return ticking
 
 
+def relaunched(store: RedisStore, ledger: FakeLedger, at: int) -> dict[str, Any]:
+    """Seats the successor hub admission places on task one once the tick reclaimed it, at ``at``, and returns the
+    task admission handed its hive, the saved launch assignment included."""
+    from scripts.hub import admission
+    from scripts.swarm import readiness
+    from scripts.swarm.commands import hive_id
+    from tests.helpers.seat import seat_agent
+
+    generation = readiness.generation(ledger.rows["one"])
+    seat_agent(store, ledger, "sw", "one", hive_id(), clock=lambda: at)
+    return json.loads(store.redis.get(store.key("sw", admission.ADMITTED, "one", str(generation))))["task"]
+
+
 @pytest.mark.parametrize("field", ["home", "profile", "model", "effort", "account", "hooks", "harness"])
 def test_tick_reclaims_each_mismatched_agent_on_its_task(
     launched: tuple[RedisStore, FakeRuntime, FakeLedger], field: str
@@ -490,14 +503,15 @@ def test_tick_reclaims_each_mismatched_agent_on_its_task(
         for a in agents
     }
     actions = tick("sw", store, ledger, runtime, 200)
+    admitted = relaunched(store, ledger, 200)
     new = next(a for a in store.agents("sw") if a.lane == "eng")
     assert new.name != old.name
     assert new.task == old.task
     assert new.seat == old.seat
     assert old.name in runtime.killed
     assert old.pane_id in runtime.closed
-    assert runtime.tasks[-1]["launch_assignment"]["model"] == old.model
-    assert runtime.tasks[-1]["launch_assignment"]["account"] == old.account
+    assert admitted["launch_assignment"]["model"] == old.model
+    assert admitted["launch_assignment"]["account"] == old.account
     assert any(field in action for action in actions)
     found = live_binding.findings(store, "sw")
     assert not any(f.subject.startswith(f"{old.name}/") for f in found)
@@ -1346,7 +1360,7 @@ def test_legacy_worker_relaunch_prefers_explicit_task_profile(
         a.name: {**live_binding.assignment(a), "hooks": a.name != old.name} for a in agents
     }
     tick("sw", store, ledger, runtime, 200)
-    assert runtime.tasks[-1]["launch_assignment"]["profile"] == "qa"
+    assert relaunched(store, ledger, 200)["launch_assignment"]["profile"] == "qa"
 
 
 def test_adopted_master_with_an_empty_record_takes_its_live_binding(ticking):
@@ -1531,8 +1545,10 @@ def _hosted(
             hive="stable",
             runtime_target={"host_id": "stable"},
             profile_decision={},
+            execution_id="",
+            generation=0,
         ),
-        "",
+        agent.execution_id,
     )
     if report:
         checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)

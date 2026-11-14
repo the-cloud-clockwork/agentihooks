@@ -20,3 +20,28 @@ def test_an_events_engine_swarm_still_reaps_a_worker_the_legacy_path_launched(st
     actions = tick("sw", store, ledger, runtime, now_ms=10_000_000)
     assert [action for action in actions if action.startswith("lost engineer@a1b2c3-0009")]
     assert [a.name for a in store.agents("sw") if a.lane == "eng"] == []
+
+
+def test_tick_holds_spawning_until_pass_budget_recovers(store: object, monkeypatch: object) -> None:  # noqa: F811
+    import json
+    from typing import Any, cast
+    from unittest.mock import patch
+
+    from scripts.swarm.tick import spawn_holds
+
+    memory = cast(Any, store)
+    cast(Any, monkeypatch).setenv("AGENTIHOOKS_TICK_STAGE", "S4")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    for _ in range(10):
+        memory.redis.xadd(memory.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 101.0})})
+    with patch("scripts.inbox.store.InboxStore") as inbox:
+        tick("sw", memory, ledger, runtime, now_ms=1_000)
+        assert runtime.spawned == []
+        assert spawn_holds(memory, "sw") == ["holding spawns: pass p95 101s exceeds S4 target 100s"]
+        tick("sw", memory, ledger, runtime, now_ms=2_000)
+        assert runtime.spawned == []
+        inbox.return_value.send.assert_called_once()
+        for _ in range(10):
+            memory.redis.xadd(memory.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 100.0})})
+        tick("sw", memory, ledger, runtime, now_ms=3_000)
+        assert spawn_holds(memory, "sw") == []
