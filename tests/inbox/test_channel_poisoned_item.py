@@ -24,6 +24,11 @@ def _three(inbox: InboxStore) -> list[Item]:
     return [inbox.send("alice", "bob", f"item {n}", ref=f"sw:{n}:c{n}") for n in range(3)]
 
 
+def _requeued(inbox: InboxStore, item_id: str) -> tuple[str, str, str]:
+    last = [entry for entry in inbox.history(item_id) if "state" in entry][-1]
+    return last["state"], last["by"], last["reason"]
+
+
 def _pass(inbox: InboxStore, session: Session) -> None:
     import anyio
 
@@ -48,6 +53,7 @@ def test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_t
     _pass(inbox, session)
     assert session.shown == [first.id, last.id]
     assert inbox.get(poisoned.id).state == "pending"
+    assert _requeued(inbox, poisoned.id) == ("pending", "bob", seen.UNCHECKED)
     assert {inbox.get(first.id).state, inbox.get(last.id).state} == {"delivered"}
 
 
@@ -69,6 +75,7 @@ def test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_
     _pass(inbox, session)
     assert session.shown == [first.id, last.id]
     assert inbox.get(poisoned.id).state == "pending"
+    assert _requeued(inbox, poisoned.id) == ("pending", "bob", channel.UNSHOWN)
     assert {inbox.get(first.id).state, inbox.get(last.id).state} == {"delivered"}
 
 
@@ -97,3 +104,23 @@ def test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behi
     assert session.shown == [healthy.id]
     assert sorted(attempts) == sorted(item.id for item in poisoned)
     assert {inbox.get(item.id).state for item in poisoned} == {"pending"}
+
+
+@pytest.mark.feature("inbox-push-poisoned-item")
+def test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_backoff(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from redis.exceptions import RedisError
+
+    _, inbox = channel_backend
+    item = inbox.send("alice", "bob", "during an outage", ref="sw:1:c1")
+
+    def failing(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
+        raise RedisError("connection lost")
+
+    monkeypatch.setattr(seen, "_shown_elsewhere", failing)
+    skip: set[str] = set()
+    with pytest.raises(RedisError):
+        seen.claim(inbox, "bob", skip=skip)
+    assert skip == set()
+    assert inbox.get(item.id).state == "delivered"
