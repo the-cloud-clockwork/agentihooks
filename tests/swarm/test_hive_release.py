@@ -17,9 +17,9 @@ def _on_hive(monkeypatch: pytest.MonkeyPatch, member: str) -> None:
 
 
 def _started(env: tuple, workstation: bool) -> tuple:
-    store, ledger, _ = env
+    store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    seated(store, ledger)
+    seated(store, ledger, rt)
     ledger.rows["t1"]["workstation"] = workstation
     return store, ledger
 

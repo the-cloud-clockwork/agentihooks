@@ -80,12 +80,20 @@ class Shell:
         return subprocess.CompletedProcess(argv, code, stdout=out + "\n", stderr=" boom\n" if code else "")
 
 
-def seated(store: RedisStore, ledger: Any) -> None:
+def seated(store: RedisStore, ledger: Any, runtime: Any) -> None:
     """Runs swarm ``sw`` and seats an agent on t1 and t2 through hub admission, so no tick pass or runtime spawn
-    places them."""
+    places them; each then stands as its hive leaves a launched agent: its work folder written, its record working
+    in a pane and its name live in ``runtime``."""
+    from dataclasses import replace
+
+    from scripts.swarm_ledger import ledger_workspace
+
     store.update("sw", state="running")
     for task_id in ("t1", "t2"):
-        seat_agent(store, ledger, "sw", task_id)
+        agent = seat_agent(store, ledger, "sw", task_id)
+        ledger_workspace.scaffold("sw", ledger.task("sw", task_id), ledger.state("sw"))
+        store.put_agent("sw", replace(agent, state="working", pane_id=f"w1:{task_id}"))
+        runtime.live.add(agent.name)
 
 
 @pytest.fixture
@@ -93,7 +101,7 @@ def released(env, monkeypatch, tmp_path):
     store, ledger, rt = env
     monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["sw", "create", "--repo", "/repo"])
-    seated(store, ledger)
+    seated(store, ledger, rt)
     ledger.rows["t1"].update({"state": "pr", "pr_url": URL, "branch": "eng-t1"})
     ledger.pulls[URL] = RUNNING
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []

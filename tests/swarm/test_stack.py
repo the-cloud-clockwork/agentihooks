@@ -109,7 +109,7 @@ def parked(env, monkeypatch, tmp_path):
     store, ledger, rt = env
     monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["sw", "create", "--repo", "/repo"])
-    seated(store, ledger)
+    seated(store, ledger, rt)
     ledger.rows["a"] = {"id": "a", "title": "Build the parser", "state": "pr", "branch": "eng-a", "lane": "eng"}
     ledger.rows["b"] = {"id": "b", "title": "Write the schema", "state": "done", "branch": "eng-b", "lane": "eng"}
     ledger.rows["t1"].update({"depends_on": ["a", "b"], "branch": "eng-t1", "issue_url": ISSUE})
