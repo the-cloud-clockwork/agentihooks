@@ -39,7 +39,7 @@ def test_retry_resume_and_explicit_fresh_are_separate_choices(store, tmp_path):
     assert runtime.resumed[0][:2] == ("sw-eng-1", "0f8e6d4c-1111-2222-3333-444455556666")
     assert snapshot.ledger_source("sw") in runtime.resumed[0][2]
     eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
-    assert (eng.state, eng.started_at) == ("working", 2000)
+    assert (eng.state, eng.launched_at) == ("working", 2000)
     fresh = resume.decide(store, "sw", "sw-master-1", "fresh", runtime, 2001, ledger)
     assert fresh.outcome == "fresh"
     assert next(a for a in store.agents("sw") if a.lane == "master").state == "finished"

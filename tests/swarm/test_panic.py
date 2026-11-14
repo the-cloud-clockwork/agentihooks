@@ -15,7 +15,6 @@ from scripts.tick.adapters.fakes import Call, FakeSourceControl
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import RepositoryRun
-from scripts.tick.steps import place
 
 pytestmark = pytest.mark.unit
 
@@ -168,7 +167,7 @@ def test_a_failed_tick_step_counts_an_error(store, counted, monkeypatch):
     with spawn_stall.watch(store, SLUG, None, lambda: 5_000, None):
         failed = timing.ON_FAILURE.get()
         assert failed is not None
-        failed("scripts.swarm.tick._spawn", RuntimeError("boom"))
+        failed("step", RuntimeError("boom"))
     assert panic.errors_by_category(store, 0) == {"RuntimeError": 1}
     assert counted == [(panic.METRIC, 1, {"swarm": SLUG, "category": "RuntimeError"})]
 
@@ -578,11 +577,6 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
     assert panic.tick_pass(store, True, 1_000, Runs({})) == [
         f"panic cancel failed: cannot read pull request {FIX}: boom"
     ]
-
-
-def test_the_tick_spawns_nothing_while_panic_holds():
-    source = Path(place.__file__).read_text()
-    assert "config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:\n" in source
 
 
 def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):

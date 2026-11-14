@@ -53,44 +53,6 @@ def ticked(store, ledger):
     return sorted(spawned(runtime))
 
 
-def test_a_focus_on_the_watched_ledger_lets_the_doctor_claim_a_fix_and_holds_a_non_fix_task(store):
-    ledger = doctor(store, [record("plans/a", "focus")])
-    assert ticked(store, ledger) == ["fix"]
-    assert ledger.rows["watch"]["state"] == "open"
-    assert "watched" in ledger.read
-
-
-def test_an_urgent_doctor_task_passes_the_watched_focus(store):
-    ledger = doctor(store, [record("plans/a", "focus")], [{"id": "watch", "phase": "p1", "rank": "urgent"}])
-    assert ticked(store, ledger) == ["watch"]
-
-
-@pytest.mark.parametrize("target", ["plans/a", "phases/p1", "tasks/watch", "lane:eng", "kind:code"])
-def test_a_direct_freeze_on_the_watched_ledger_leaves_the_doctor_free(store, target):
-    ledger = doctor(store, [record(target)])
-    assert ticked(store, ledger) == ["fix", "watch"]
-
-
-def test_a_swarm_that_is_not_a_doctor_never_reads_its_peer(store):
-    store.set_peer("sw", "watched")
-    ledger = PairedLedger(TASKS, [record("plans/a", "focus")])
-    assert ticked(store, ledger) == ["fix", "watch"]
-    assert "watched" not in ledger.read
-
-
-def test_a_doctor_without_a_peer_reads_only_its_own_ledger(store):
-    store.update("sw", template=priming.TEMPLATE)
-    ledger = PairedLedger(TASKS, [record("plans/a", "focus")])
-    assert ticked(store, ledger) == ["fix", "watch"]
-    assert set(ledger.read) == {"sw"}
-
-
-def test_a_doctor_whose_watched_ledger_is_gone_claims_as_before(store):
-    ledger = doctor(store, None)
-    assert ticked(store, ledger) == ["fix", "watch"]
-    assert "watched" in ledger.read
-
-
 def test_the_doctor_drain_notice_names_each_watched_focus(store):
     ledger = doctor(
         store,

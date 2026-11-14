@@ -14,7 +14,7 @@ from scripts.tick import registry
 from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
+from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, budgets, pass_domains
 
 Get = Callable[[str], Any]
 _IDENTITY_CONFLICT = "stale or changed execution identity"
@@ -291,7 +291,7 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     if tick.resume.recovery_pending(store, slug, agent):
         store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
         return []
-    if now_ms - agent.started_at > tick.STARTUP_GRACE_MS:
+    if now_ms - max(agent.started_at, agent.launched_at) > tick.STARTUP_GRACE_MS:
         return tick.timing.timed(tick._lost, slug, store, ledger, runtime, rows, agent, now_ms)
     return []
 
@@ -614,7 +614,7 @@ def _transfers(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick.transfers.observe, get("store"), get("slug"), get("runtime").live_names())
 
 
-LISTED = frozenset({"spawn due"})
+LISTED = budgets.OBSERVED
 ROWS = pass_domains("rows")
 
 STEPS = (

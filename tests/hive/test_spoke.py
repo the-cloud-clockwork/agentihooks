@@ -85,7 +85,10 @@ def rig():
     )
     tasks.request.return_value = request
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500),
     )
     event = Envelope(
         "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
@@ -162,6 +165,7 @@ def test_an_offer_held_at_max_agents_stays_queued_and_a_hive_below_its_cap_takes
     other_runtime.spawn.assert_called_once()
 
 
+@pytest.mark.feature("events-started-working")
 def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging(rig):
     from scripts.events.envelope import Envelope
 
@@ -216,11 +220,37 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
         "hive": "hive-a",
         "name": "agent-a",
         "pane_id": "pane-a",
+        "launched_at": 1_500,
         "harness": "claude",
         "account": "slot-a",
     }
     assert observed[2:] == ["ack"]
     assert real_take(0) is None
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_spawn_without_a_launch_time_starts_at_the_spoke_clock(rig):
+    from scripts.hive.spoke import Spoke
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    published = []
+    real_publish = rig.bus.events.publish
+
+    def publish(subject, event):
+        published.append(event)
+        return real_publish(subject, event)
+
+    rig.bus.events.publish = publish
+    rig.runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=0),
+    )
+    spoke = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading, clock=lambda: 4_242)
+
+    assert spoke.poll() == "started"
+    assert [event.data["launched_at"] for event in published] == [4_242]
 
 
 @pytest.mark.feature("events-launch-decision-record")
@@ -493,7 +523,10 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
                 {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7, "claim_generation": 3},
             )
             runtime.spawn.return_value = Outcome(
-                "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
+                "spawn",
+                Status.OK,
+                "local",
+                SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=0),
             )
             queue = bus.queue("swarm.rig.ready.eng", config.policy)
             queue.offer(
@@ -965,9 +998,12 @@ def test_spawned_agent_keeps_the_launch_claim_revision_after_started_publication
 
 
 @pytest.mark.parametrize("state", ["dead", "exited"])
-def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
+def test_hive_observations_end_the_same_execution_the_spoke_started(rig: SimpleNamespace, state: str) -> None:
     from scripts.hive.execution_events import publish
+    from scripts.hub import exits
 
+    registry = SimpleNamespace(get=lambda swarm, execution: SimpleNamespace(hive="hive-a"))
+    exits.serve(rig.bus, lambda: SimpleNamespace(execution_registry=registry))
     assert rig.spoke.poll() == "started"
     request = rig.runtime.spawn.call_args.args[0]
     report = {
@@ -1355,3 +1391,23 @@ def test_spoke_passes_hive_slot_ownership_to_the_launch_boundary(rig):
     request = rig.runtime.spawn.call_args.args[0]
     assert request.task["account_slot_hive"] == "hive-a"
     assert request.task["execution_id"] == "execution-a"
+
+
+@pytest.mark.feature("events-launch-placement")
+def test_a_launch_report_carries_the_placed_overlays_and_the_host_overlays_the_hive_declared(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import launch_check
+
+    monkeypatch.setattr(launch_check, "declared", lambda profile, overlays: [profile, *overlays])
+    placed = rig.runtime.spawn.return_value.value
+    placed.profile, placed.overlays = "engineer", ("frontend",)
+    placed.profile_decision = {"validation": {"state": "pending"}}
+
+    assert rig.spoke.poll() == "started"
+
+    [(_, reported)] = [call.args for call in rig.tasks.launched.call_args_list]
+    assert (reported.overlays, reported.profile_decision) == (
+        ["frontend"],
+        {"validation": {"state": "pending"}, launch_check.HOST_OVERLAYS: ["engineer", "frontend"]},
+    )
