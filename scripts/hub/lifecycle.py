@@ -64,7 +64,9 @@ class Lifecycle:
             event.data["name"],
         ) or (
             value["state"] == "started"
-            and self._resumed(event, agent, cast(Any, claims), key, cast(dict[str, Any], value), entry.revision)
+            and self._resumed(
+                event, agent, cast(Any, claims), cast(str, key), cast(dict[str, Any], value), entry.revision
+            )
         ):
             return
         revision = entry.revision
