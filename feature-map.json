@@ -947,10 +947,10 @@
       "id": "swarm-tick-cached-ledger",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dc4",
-      "behaviour": "A tick pass against a real ledger server made slow or stopped runs from the last good ledger view inside the pass deadline without launching, and the next pass that reaches the server claims and launches the ready task.",
+      "behaviour": "A tick pass against a real ledger server made slow or stopped runs from the last good ledger view inside the pass deadline without launching, and the next pass that reaches the server leaves the ready task unlaunched and unclaimed for hub admission.",
       "seam": "scripts.swarm.cli.run_tick with a real ledger server behind a proxy that delays or refuses connections",
       "tests": [
-        "tests/features/test_tick_cached_ledger.py::test_a_tick_holds_launches_while_the_ledger_is_slow_or_stopped_and_claims_before_launching",
+        "tests/features/test_tick_cached_ledger.py::test_a_tick_keeps_its_deadline_while_the_ledger_is_slow_or_stopped_and_never_launches",
         "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
         "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
         "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing",
