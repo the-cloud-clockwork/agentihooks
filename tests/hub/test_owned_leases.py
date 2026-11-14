@@ -1,7 +1,7 @@
 """The claim lease renewal for agents the hub owns, which the tick reap pass leaves out of its judging."""
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -64,6 +64,17 @@ def test_a_lapsed_claim_is_never_taken_back(monkeypatch: pytest.MonkeyPatch) -> 
     _backend(monkeypatch, "nats")
     owned_leases.renew(store, "sw", [], LEASE_MS)
     assert store.redis.exists(store.key("sw", "claim", "t2")) == 0
+
+
+@pytest.mark.feature("hub-renewal-skips-finished-agents")
+def test_a_finished_agent_claim_is_left_to_lapse(monkeypatch: pytest.MonkeyPatch) -> None:
+    finished = replace(_agent("ci@a-2", "t2"), state="finished")
+    working = _agent("ci@a-3", "t3")
+    store = _store(finished, working)
+    _backend(monkeypatch, "nats")
+    owned_leases.renew(store, "sw", [], LEASE_MS)
+    assert 0 < store.redis.pttl(store.key("sw", "claim", "t2")) <= SHORT_MS
+    assert LEASE_MS - SHORT_MS < store.redis.pttl(store.key("sw", "claim", "t3")) <= LEASE_MS
 
 
 @pytest.mark.feature("hub-owned-claim-lease-renewal")
