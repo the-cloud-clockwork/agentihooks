@@ -2,6 +2,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -22,7 +23,10 @@ if TYPE_CHECKING:
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 RECEIPT_SECONDS = 86400
-RESUME_RUN_SECONDS = 600
+RESUME_RUN_SECONDS = 120
+RESUME_RENEW_SECONDS = 30
+RESUME_RUNS = 3
+RESUME_DEADLINE_MS = 1_800_000
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,12 @@ class CommandOrder:
             if not fields[name]:
                 del fields[name]
         return json.dumps(fields)
+
+
+def answer(redis: Any, receipt: str, ack: "Ack") -> None:
+    """Store a command order's acknowledgement unless one is already stored, so a late answer never overwrites it."""
+    redis.hsetnx(receipt, "ack", ack.encode())
+    redis.expire(receipt, RECEIPT_SECONDS)
 
 
 DONE, FAILED = "done", "failed"
@@ -243,8 +253,7 @@ class Consumer:
             receipt = self.orders.command_receipt(self.hive, order.id)
             redis: Any = self.orders.redis
             if order.action == "resume" and not redis.hexists(receipt, "ack"):
-                if redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
-                    self.offbeat(order)
+                self._start_resume(order, receipt)
                 continue
             with self.store.redis.pipeline() as pipe:
                 if not self.store.redis.hexists(receipt, "ack"):
@@ -257,6 +266,18 @@ class Consumer:
                 pipe.xdel(stream, item)
                 pipe.execute()
         return len(entries)
+
+    def _start_resume(self, order: CommandOrder, receipt: str) -> None:
+        """Start a process for an unanswered resume order unless one holds its running marker; after RESUME_RUNS
+        starts that never answered, answer it failed so the hub hands the task to a fresh agent."""
+        redis: Any = self.orders.redis
+        if not redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
+            return
+        if redis.hincrby(receipt, "runs", 1) > RESUME_RUNS:
+            answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, "resume never answered"))
+            return
+        redis.expire(receipt, RECEIPT_SECONDS)
+        self.offbeat(order)
 
     def sync_workspaces(self, ttl: int) -> None:
         hosted = [
@@ -306,6 +327,9 @@ class Consumer:
         held = self._holding(order)
         if held is None:
             return FOREIGN
+        reaped = runtime.reap(held.name)
+        if not reaped.ok:
+            return Ack(FAILED, {"host_id": self.hive}, reaped.detail or reaped.status.value)
         config = store.config(order.slug)
         if config.repo_origin:
             config = replace(config, repo=config.repo_origin)
@@ -326,15 +350,25 @@ class Consumer:
         return Ack(DONE, {"host_id": self.hive})
 
     def run_resume(self, order: CommandOrder) -> None:
-        """Answer one resume order and store its acknowledgement, off the hive heartbeat."""
+        """Answer one resume order off the hive heartbeat, renewing its running marker while it works so no second
+        process starts it, and store the first acknowledgement only."""
+        receipt = self.orders.command_receipt(self.hive, order.id)
+        redis: Any = self.orders.redis
+        done = threading.Event()
+
+        def renew() -> None:
+            """Keep the running marker alive until the resume answers."""
+            while not done.wait(RESUME_RENEW_SECONDS):
+                redis.expire(f"{receipt}:running", RESUME_RUN_SECONDS)
+
+        threading.Thread(target=renew, daemon=True).start()
         try:
             ack = self.command(order)
         except Exception as exc:
             ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
-        receipt = self.orders.command_receipt(self.hive, order.id)
-        redis: Any = self.orders.redis
-        redis.hset(receipt, "ack", ack.encode())
-        redis.expire(receipt, RECEIPT_SECONDS)
+        finally:
+            done.set()
+        answer(redis, receipt, ack)
 
     def _spawn_resume(self, order: CommandOrder) -> None:
         """Run a resume order in its own process so a slow herdr resume never holds the heartbeat."""

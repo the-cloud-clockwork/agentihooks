@@ -134,6 +134,7 @@ def _hive(rig: SimpleNamespace, outcome: Any) -> tuple[Any, Mock]:
     runtime = Mock()
     runtime.recover.return_value = outcome
     runtime.terminate.return_value = SimpleNamespace(ok=True)
+    runtime.reap.return_value = SimpleNamespace(ok=True)
     consumer = Consumer(rig.store.redis, HIVE, runtime)
     consumer.offbeat = consumer.run_resume
     return consumer, runtime
@@ -324,6 +325,37 @@ def test_a_failed_resume_hands_the_task_to_a_fresh_agent(rig: SimpleNamespace) -
     assert rig.row["state"] == "open"
     assert rig.row["claimed_by"] == ""
     assert len(rig.returned) == 1
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_an_unanswered_resume_hands_the_task_to_a_fresh_agent_at_its_deadline(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import RESUME_DEADLINE_MS
+
+    rig.react.poll()
+    _next_pass(rig)
+    assert rig.ledger.writes == rig.returned == []
+    rig.clock.return_value += RESUME_DEADLINE_MS
+    _next_pass(rig)
+    assert len(_sent(rig)) == 1
+    assert rig.ledger.notices == [
+        f"Starting a fresh agent after {rig.agent.name} ended because resume failed: its hive never answered."
+    ]
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_the_hive_reaps_a_live_process_of_the_name_before_it_resumes(rig: SimpleNamespace) -> None:
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.react.poll()
+    consumer, runtime = _hive(rig, _resumed())
+    runtime.reap.return_value = Outcome("reap", Status.REFUSED, "local", detail="a process carrying it still runs")
+    consumer.poll_commands()
+    runtime.reap.assert_called_once_with(rig.agent.name)
+    runtime.recover.assert_not_called()
+    _next_pass(rig)
+    assert rig.row["state"] == "open"
 
 
 @pytest.mark.feature("hub-dead-resume")

@@ -2230,7 +2230,15 @@
         "tests/hub/test_dead_resume_hub.py::test_a_deliberately_ended_hub_agent_is_not_resumed",
         "tests/hub/test_dead_resume_hub.py::test_an_agent_on_a_lost_hive_is_handed_to_a_fresh_agent",
         "tests/hub/test_dead_resume_hub.py::test_a_failed_resume_hands_the_task_to_a_fresh_agent",
-        "tests/hub/test_dead_resume_hub.py::test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent"
+        "tests/hub/test_dead_resume_hub.py::test_an_unanswered_resume_hands_the_task_to_a_fresh_agent_at_its_deadline",
+        "tests/hub/test_dead_resume_hub.py::test_the_hive_reaps_a_live_process_of_the_name_before_it_resumes",
+        "tests/hub/test_dead_resume_hub.py::test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent",
+        "tests/hive/test_resume_order.py::test_the_hive_spawns_the_resume_order_process_with_the_encoded_order",
+        "tests/hive/test_resume_order.py::test_the_resume_order_process_stores_the_answer",
+        "tests/hive/test_resume_order.py::test_a_resume_order_process_that_fails_to_start_stores_a_failed_answer",
+        "tests/hive/test_resume_order.py::test_a_late_answer_never_overwrites_the_first",
+        "tests/hive/test_resume_order.py::test_a_resume_order_that_never_answers_is_answered_failed_after_its_run_bound",
+        "tests/hive/test_resume_order.py::test_a_running_resume_keeps_its_marker_alive"
       ]
     },
     {

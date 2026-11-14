@@ -7,7 +7,7 @@ from typing import Any, cast
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
 from scripts.hive.launch import release as release_slot
-from scripts.hive.orders import DONE, CommandOrder, Orders
+from scripts.hive.orders import DONE, RESUME_DEADLINE_MS, CommandOrder, Orders
 from scripts.hub.registry import Reactor
 from scripts.swarm import dead_resume, deliberate_exit
 from scripts.swarm.dead_resume import FRESH_NOTICE, RESUME_TEXT
@@ -112,10 +112,14 @@ class Lifecycle:
         orders, pending = Orders(cast(Any, store).redis), value.get("resume")
         if pending and (pending["launched_at"], pending["pane_id"]) == (agent.launched_at, agent.pane_id):
             ack = orders.command(hive, CommandOrder(**pending["order"]))
-            if ack is not None and ack.status != DONE:
-                ledger: Any = self.ledger
-                ledger.notify(event.swarm, FRESH_NOTICE.format(name=agent.name, reason=f"resume failed: {ack.failure}"))
-            return ack is None or ack.status == DONE
+            if ack is None and event.time - pending.get("ordered_at", event.time) < RESUME_DEADLINE_MS:
+                return True
+            if ack is not None and ack.status == DONE:
+                return True
+            failure = ack.failure if ack is not None else "its hive never answered"
+            ledger: Any = self.ledger
+            ledger.notify(event.swarm, FRESH_NOTICE.format(name=agent.name, reason=f"resume failed: {failure}"))
+            return False
         if pending and event.time < agent.launched_at:
             return True
         attempts: int = value.get("resumes", 0)
@@ -132,7 +136,12 @@ class Lifecycle:
             agent.launched_at,
             agent.pane_id,
         )
-        resume = {"order": asdict(order), "launched_at": agent.launched_at, "pane_id": agent.pane_id}
+        resume = {
+            "order": asdict(order),
+            "launched_at": agent.launched_at,
+            "pane_id": agent.pane_id,
+            "ordered_at": event.time,
+        }
         claims.update(key, json.dumps({**value, "resumes": attempts + 1, "resume": resume}).encode(), revision)
         orders.command(hive, order)
         return True
