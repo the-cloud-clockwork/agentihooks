@@ -83,7 +83,7 @@ class Shell:
 def seated(store: RedisStore, ledger: Any, runtime: Any) -> None:
     """Runs swarm ``sw`` and seats an agent on t1 and t2 through hub admission, so no tick pass or runtime spawn
     places them; each then stands as its hive leaves a launched agent: its work folder written, its record working
-    in a pane and its name live in ``runtime``."""
+    in a pane with its started launch life and its name live in ``runtime``."""
     from dataclasses import replace
 
     from scripts.swarm_ledger import ledger_workspace
@@ -92,7 +92,9 @@ def seated(store: RedisStore, ledger: Any, runtime: Any) -> None:
     for task_id in ("t1", "t2"):
         agent = seat_agent(store, ledger, "sw", task_id)
         ledger_workspace.scaffold("sw", ledger.task("sw", task_id), ledger.state("sw"))
-        store.put_agent("sw", replace(agent, state="working", pane_id=f"w1:{task_id}"))
+        live = replace(agent, state="working", pane_id=f"w1:{task_id}")
+        store.put_agent("sw", live)
+        store.record_launch("sw", live, "started")
         runtime.live.add(agent.name)
 
 
