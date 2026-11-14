@@ -72,12 +72,12 @@ from scripts.doctor import (
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.gates import Who
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import clearance, scheduled_tick
+from scripts.swarm import clearance, engine_migration, scheduled_tick
 from scripts.swarm import cli as swarm
 from scripts.swarm.health.findings import MINUTE_MS, limits
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_creator, ledger_link, ledger_relay
 
 BY = "doctor"
@@ -180,7 +180,7 @@ def _no_tick(store, slug):
     return []
 
 
-def cmd_start(store, args):
+def cmd_start(store: RedisStore, args: Namespace) -> None:
     bundle = linked_bundle()
     if bundle is None:
         raise SwarmError("rig doctor needs a linked bundle for its rules: link one with agentihooks init --bundle DIR")
@@ -207,6 +207,7 @@ def cmd_start(store, args):
                 slug=doctor, repo=repo, template=TEMPLATE, max_eng_agents=None, max_ci_agents=None, max_plan_agents=None
             ),
         )
+        engine_migration.start_on_events(store, doctor, slug)
     if caps:
         store.update(doctor, **caps, caps_pinned=True)
     _pair(store, slug, doctor)
