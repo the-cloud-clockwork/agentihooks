@@ -88,12 +88,15 @@ def _imports(tree: ast.Module) -> tuple[set[str], dict[str, frozenset[str]]]:
     return whole, owners
 
 
-def _patched(value: object, imported: frozenset[str]) -> bool:
-    """True for a string naming a removed member of an imported owner, or a dotted path to a removed symbol."""
-    if not isinstance(value, str):
-        return False
-    module, _, member = value.rpartition(".")
-    return value in imported or value in MODULES or module in MODULES or member in OWNED.get(module, frozenset())
+def _patched(call: ast.Call, owners: dict[str, frozenset[str]]) -> bool:
+    """True for a patch of a removed member of an imported owner by name, or of a dotted path to a removed symbol."""
+    strings = [arg.value for arg in call.args if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
+    if call.args and strings and strings[0] in owners.get(ast.unparse(call.args[0]), frozenset()):
+        return True
+    dotted = [value.rpartition(".") for value in strings]
+    return any(module in MODULES or member in OWNED.get(module, frozenset()) for module, _, member in dotted) or any(
+        value in MODULES for value in strings
+    )
 
 
 def _direct(node: Function, whole: set[str], owners: dict[str, frozenset[str]]) -> bool:
@@ -104,8 +107,7 @@ def _direct(node: Function, whole: set[str], owners: dict[str, frozenset[str]]) 
         return True
     if any(found.attr in owners.get(ast.unparse(found.value), frozenset()) for found in attributes):
         return True
-    imported = frozenset().union(*owners.values())
-    if any(_patched(found.value, imported) for found in ast.walk(node) if isinstance(found, ast.Constant)):
+    if any(_patched(found, owners) for found in ast.walk(node) if isinstance(found, ast.Call)):
         return True
     calls = {ast.unparse(found.func).rsplit(".", 1)[-1] for found in ast.walk(node) if isinstance(found, ast.Call)}
     events = "EVENTS_ENGINE" in names or any(
@@ -163,7 +165,6 @@ def test_every_feature_whose_tests_reach_the_legacy_spawn_is_in_the_coverage_map
 @pytest.mark.feature("legacy-spawn-events-coverage")
 def test_every_coverage_entry_names_mapped_tests_off_the_legacy_spawn_a_retirement_or_a_gap() -> None:
     features = {entry["id"]: entry for entry in _features()}
-    owned = {node for entry in features.values() for node in entry["tests"]}
     cache: dict[str, dict[str, bool]] = {}
     for feature, entry in _coverage().items():
         assert feature in features, feature
@@ -171,7 +172,7 @@ def test_every_coverage_entry_names_mapped_tests_off_the_legacy_spawn_a_retireme
         assert all(entry.values()), feature
         assert any(_reaches(node, cache) for node in features[feature]["tests"]), feature
         for node in entry.get("covered_by", []):
-            assert node in owned, node
+            assert node in features[feature]["tests"], node
             assert not _reaches(node, cache), node
 
 
@@ -205,6 +206,10 @@ def test_every_listed_legacy_spawn_symbol_still_exists_in_its_module(module: str
         ("from scripts.swarm import tick\ndef test_a(m):\n    m.setattr(tick, '_spawn', 1)\n", True),
         ("def test_a(m):\n    m.setattr('scripts.swarm.tick._prepare', 1)\n", True),
         ("def test_a(m):\n    m.setattr('scripts.swarm.tick.reclaim', 1)\n", False),
+        (
+            "from scripts.swarm import tick\ndef test_a(r):\n    assert r.state == 'expire'\n    tick.reclaim('_spawn')\n",
+            False,
+        ),
         ("import scripts.swarm.tick as t\ndef test_a():\n    t._launch_all(1)\n", True),
         ("def helper(r):\n    return r.spawned\ndef test_a(r):\n    tick(1)\n    helper(r)\n", False),
         ("def test_a(r):\n    tick(1)\n    assert r.spawned\n", True),

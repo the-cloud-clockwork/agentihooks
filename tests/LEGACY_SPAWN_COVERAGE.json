@@ -11,11 +11,7 @@
       "gap": "The events hub admission claim carries no handoff document text, so a successor primed with a recovery handoff exists only on the legacy spawn; ported by the handoff text follow up."
     },
     "swarm-agent-record-launch-decision-at-spawn": {
-      "covered_by": [
-        "tests/hub/test_admission.py::test_the_hive_launch_decision_reaches_the_record_swarm_status_reads",
-        "tests/hub/test_admission.py::test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record"
-      ],
-      "retires": "The launch job queue and successor retry relaunch clauses retire with the launch job module; events hives report the decision through the hub launched operation."
+      "retires": "The detached launch job and successor retry clauses retire with the launch job module; under the events engine the same record fields are written by the hub launched operation, proven by the events launch decision record feature."
     },
     "swarm-claim-lives": {
       "covered_by": [
