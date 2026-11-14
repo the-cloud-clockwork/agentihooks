@@ -80,7 +80,7 @@ def _previous(store, slug):
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
-    return max(current + ended, key=lambda p: (p.agent.started_at, p.ran_at), default=None)
+    return max(current + ended, key=lambda p: (p.agent.launched_at or p.agent.started_at, p.ran_at), default=None)
 
 
 def describe(previous):

@@ -389,6 +389,25 @@ def test_a_master_launched_later_is_the_last_master_even_when_an_older_one_ended
     assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
 
 
+@pytest.mark.feature("operator-master-up-resume-keeps-seat")
+def test_a_master_resumed_after_a_later_master_ended_is_the_last_master(
+    up: tuple[RedisStore, object, ResumingRuntime],
+) -> None:
+    store, _, _ = up
+    gone_master(store)
+    record = AgentRecord(
+        "master@a1b2c3-0009",
+        MASTER,
+        MASTER,
+        harness="claude",
+        conversation_id="c9",
+        started_at=5,
+        launched_at=ENDED + 20,
+    )
+    store.put_agent("sw", record)
+    assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
+
+
 def test_a_new_master_records_its_launch_on_its_own_record_not_a_stale_seat_execution(up, monkeypatch):
     store, _, rt = up
     stale = AgentRecord(store.next_name("sw", MASTER, 5), MASTER, MASTER, seat="master@sw", started_at=5)
