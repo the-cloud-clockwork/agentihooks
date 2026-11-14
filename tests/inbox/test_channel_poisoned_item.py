@@ -119,8 +119,8 @@ def test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_back
         raise RedisError("connection lost")
 
     monkeypatch.setattr(seen, "_shown_elsewhere", failing)
-    skip: set[str] = set()
+    left_out: set[str] = set()
     with pytest.raises(RedisError):
-        seen.claim(inbox, "bob", skip=skip)
-    assert skip == set()
+        seen.claim(inbox, "bob", seen.CLAIM_BATCH, left_out)
+    assert left_out == set()
     assert inbox.get(item.id).state == "delivered"
