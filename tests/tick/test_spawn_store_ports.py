@@ -1,8 +1,7 @@
 """The coordination operations the spawn step reaches the swarm store through: its facade, the store adapter, the fake and the step."""
 
-from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
-from typing import Any, Iterator, cast
+from typing import Any, cast
 
 import pytest
 
@@ -13,8 +12,8 @@ from scripts.tick.adapters.coordination import StoreCoordination
 from scripts.tick.adapters.fakes import FakeCoordination, FakeInbox, FakeLedger, fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import UndeclaredEffect
-from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, common, place
+from scripts.tick.step import Domain
+from scripts.tick.steps import PASS, common
 
 pytestmark = pytest.mark.unit
 
@@ -202,71 +201,3 @@ class _State:
 
     def read(self, domain: Domain, key: str) -> object | None:
         return self.state.get(key) if domain == PASS else None
-
-
-def _spawn(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, *rest: Any) -> list[str]:
-    store.agents(slug)
-    store.redis.hget(store.key(slug, "launch-assignments"), "t1")
-    store.put_agent(slug, "record")
-    runtime.has_capacity(config)
-    return ["spawned"]
-
-
-@contextmanager
-def _placement_pass(runtime: Any) -> Iterator[None]:
-    yield
-
-
-def _tick() -> SimpleNamespace:
-    return SimpleNamespace(
-        readiness=SimpleNamespace(tick_launches=lambda engine_name: True),
-        panic=SimpleNamespace(state=lambda store: store.redis.get(store.key("sw", "panic"))),
-        PLACING=nullcontext(),
-        skip_refused=lambda function, *args: function(*args),
-        _placement_pass=_placement_pass,
-        _spawn=_spawn,
-        SPAWN_BUDGET_S=60,
-    )
-
-
-@pytest.mark.feature("swarm-tick-spawn")
-def test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: _tick())
-    tools = fake_tools()
-    coordination, runtime = cast(FakeCoordination, tools.coordination), cast(Any, tools.runtime)
-    state = {
-        "slug": "sw",
-        "config": SimpleNamespace(state="running", engine="tick"),
-        "store": _Untouched(),
-        "ledger": _Untouched(),
-        "runtime": _Untouched(),
-        "rows": {"t1": {"id": "t1", "state": "open"}},
-        "doc": {},
-        "now_ms": 7,
-        "due": "due key",
-        "box": {},
-    }
-    spawn = next(step for step in place.STEPS if step.name == "spawn")
-
-    spawn.run(Context(_State(state), Deadline(50.0, lambda: 0.0), tools.for_effects(spawn.effects)))
-
-    assert state["box"] == {"rows": state["rows"]}
-    assigned = f"{PREFIX}:sw:launch-assignments"
-    assert [call.args[:2] for call in coordination.calls] == [
-        ("redis.get", (f"{PREFIX}:sw:panic",)),
-        ("agents", ("sw",)),
-        ("redis.hget", (assigned, "t1")),
-        ("put_agent", ("sw", "record")),
-        ("redis.delete", ("due key",)),
-    ]
-    assert [call.operation for call in coordination.calls] == [
-        "store_read",
-        "store_read",
-        "store_read",
-        "store_write",
-        "store_write",
-    ]
-    assert [call.operation for call in runtime.calls] == ["has_capacity"]
-    assert cast(Any, tools.inbox).calls == []

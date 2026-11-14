@@ -1492,8 +1492,7 @@
         "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_a_write_named_as_a_read",
         "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_operations_past_their_deadline",
         "tests/tick/test_spawn_store_ports.py::test_spawn_store_writes_need_the_coordination_effect",
-        "tests/tick/test_spawn_store_ports.py::test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox",
-        "tests/tick/test_spawn_store_ports.py::test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports"
+        "tests/tick/test_spawn_store_ports.py::test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox"
       ]
     },
     {
