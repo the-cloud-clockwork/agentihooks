@@ -259,9 +259,7 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
 
     hub = nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_user_creds(signer.account, "hub")))
     members = [
-        nats.open_bus(
-            BusConfig(backend="nats", url=signer.url, credentials=_unscoped(signer, name), provision=False)
-        )
+        nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=_unscoped(signer, name), provision=False))
         for name in ("m1", "m2")
     ]
     try:
