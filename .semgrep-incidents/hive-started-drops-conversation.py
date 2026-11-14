@@ -1,7 +1,9 @@
+from typing import Any
+
 from scripts.events.envelope import Envelope
 
 
-def without_either(placed, key: str) -> Envelope:
+def without_either(placed: Any, key: str) -> Envelope:
     # ruleid: hive-started-drops-conversation
     return Envelope(
         id="started",
@@ -16,7 +18,7 @@ def without_either(placed, key: str) -> Envelope:
     )
 
 
-def without_overlays(placed, key: str) -> Envelope:
+def without_overlays(placed: Any, key: str) -> Envelope:
     # ruleid: hive-started-drops-conversation
     return Envelope(
         id="started",
@@ -31,7 +33,7 @@ def without_overlays(placed, key: str) -> Envelope:
     )
 
 
-def carried(placed, key: str) -> Envelope:
+def carried(placed: Any, key: str) -> Envelope:
     # ok: hive-started-drops-conversation
     return Envelope(
         id="started",
