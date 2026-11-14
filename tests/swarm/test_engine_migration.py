@@ -111,22 +111,68 @@ def test_a_doctor_takes_its_own_origin_when_the_watched_swarm_has_none(store: Re
 
 
 @pytest.mark.feature("engine-config-migration")
-def test_a_swarm_with_legacy_agents_or_launches_in_flight_is_left_for_the_master(store: RedisStore) -> None:
-    for slug in ("agents", "launching", "idle"):
+def test_a_swarm_with_legacy_agents_in_flight_is_left_for_the_master_with_its_launch_jobs(store: RedisStore) -> None:
+    for slug in ("agents", "idle"):
         store.create(replace(SwarmConfig(slug, "/missing", 1, 1), repo_origin="github.com/team/project"))
     store.put_agent("agents", AgentRecord("engineer@1", "eng", "t1", seat="eng-1@agents"))
-    store.redis.hset(store.key("launching", launch_job.KEY), "engineer@2", json.dumps({"task": "t2"}))
+    store.redis.hset(store.key("agents", launch_job.KEY), "engineer@2", json.dumps({"task": "t2"}))
 
     assert engine_migration.migrate(store) == {
         "agents": "skipped: live legacy agents or launches",
         "idle": "migrated: github.com/team/project",
-        "launching": "skipped: live legacy agents or launches",
     }
     assert configs(store) == {
         "agents": ("legacy", "github.com/team/project"),
         "idle": ("events", "github.com/team/project"),
-        "launching": ("legacy", "github.com/team/project"),
     }
+    assert store.redis.hgetall(store.key("agents", launch_job.KEY)) == {"engineer@2": json.dumps({"task": "t2"})}
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_swarm_with_only_launch_jobs_whose_agents_are_gone_drops_them_and_migrates(store: RedisStore) -> None:
+    store.create(replace(SwarmConfig("launching", "/missing", 1, 1), repo_origin="github.com/team/project"))
+    store.create(replace(SwarmConfig("other", "/missing", 1, 1), repo_origin="github.com/team/project"))
+    store.put_agent("other", AgentRecord("engineer@9", "eng", "t9", seat="eng-1@other"))
+    for name in ("engineer@2", "engineer@3"):
+        store.redis.hset(store.key("launching", launch_job.KEY), name, json.dumps({"task": "t2"}))
+
+    assert engine_migration.migrate(store) == {
+        "launching": "migrated: github.com/team/project",
+        "other": "skipped: live legacy agents or launches",
+    }
+    assert configs(store) == {
+        "launching": ("events", "github.com/team/project"),
+        "other": ("legacy", "github.com/team/project"),
+    }
+    assert store.redis.exists(store.key("launching", launch_job.KEY)) == 0
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_swarm_without_an_origin_keeps_its_launch_jobs_when_skipped(store: RedisStore) -> None:
+    store.create(SwarmConfig("orphan", "/missing", 1, 1))
+    store.redis.hset(store.key("orphan", launch_job.KEY), "engineer@4", json.dumps({"task": "t4"}))
+
+    assert engine_migration.migrate(store) == {"orphan": "skipped: no repository origin"}
+    assert store.redis.hgetall(store.key("orphan", launch_job.KEY)) == {"engineer@4": json.dumps({"task": "t4"})}
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_stored_legacy_engine_with_an_origin_is_migrated_even_when_the_config_reads_events(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.create(replace(SwarmConfig("doctor", "/missing", 1, 0, template="doctor"), repo_origin=ORIGIN))
+    store.redis.hset(store.key("doctor", launch_job.KEY), "engineer@7", json.dumps({"task": "t7"}))
+    loaded = store.config
+
+    def as_events(slug: str) -> SwarmConfig:
+        return replace(loaded(slug), engine="events")
+
+    monkeypatch.setattr(store, "config", as_events)
+
+    assert engine_migration.migrate(store) == {"doctor": f"migrated: {ORIGIN}"}
+    assert store.redis.hget(store.key("doctor", "config"), "engine") == "events"
+    assert store.redis.exists(store.key("doctor", launch_job.KEY)) == 0
+    assert engine_migration.migrate(store) == {"doctor": "unchanged"}
 
 
 @pytest.mark.feature("engine-config-migration")
