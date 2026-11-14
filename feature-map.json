@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "hub-admission-relaunch-assignment",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
+      "behaviour": "The hub's events admission seats a reclaimed task in the seat its saved launch assignment names, ahead of the handoff seat, as the legacy place spawn did, and the admitted task carries that saved assignment so the hive spawn keeps its model, effort, account, harness and profile; an accepted launch report clears the saved assignment, as the legacy place started step did, so later lives take their handoff seat.",
+      "seam": "Admission.admit and Admission.launched for a hive spoke request, the admitted task's seat and launch assignment",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names",
+        "tests/hub/test_admission.py::test_a_reported_launch_clears_the_saved_launch_assignment_so_the_next_life_takes_its_handoff_seat",
+        "tests/hub/test_admission.py::test_a_refused_launch_report_keeps_the_saved_launch_assignment"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
@@ -2200,6 +2212,18 @@
         "tests/swarm/test_dead_resume.py::test_a_resume_that_comes_up_healthy_resets_the_attempt_count",
         "tests/swarm/test_dead_resume.py::test_a_master_that_dies_after_each_resume_is_never_capped",
         "tests/swarm/test_dead_resume.py::test_resumes_during_an_outage_or_a_reboot_do_not_count_toward_the_cap"
+      ]
+    },
+    {
+      "id": "swarm-resumed-agent-grace",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
+      "behaviour": "A resumed agent keeps its original start time, so the tick start grace, the master down notice and the stale nudge measure from the later of its start and its launch.",
+      "seam": "The tick reaper start grace, the master down step and the stale nudge",
+      "tests": [
+        "tests/swarm/test_dead_resume.py::test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume",
+        "tests/swarm/test_tick.py::test_a_master_resumed_inside_the_start_grace_posts_no_down_notice",
+        "tests/swarm/test_stale_nudge.py::test_a_resumed_agent_counts_its_silence_from_its_launch"
       ]
     },
     {
