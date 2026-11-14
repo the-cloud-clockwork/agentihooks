@@ -201,8 +201,8 @@ async def _push(
                 else:
                     await _pull(feed)
                 delay = RETRY_FIRST_S
-            except Exception as exc:
-                if isinstance(exc, (anyio.BrokenResourceError, anyio.ClosedResourceError)):
+            except Exception:
+                if isinstance(sys.exc_info()[1], (anyio.BrokenResourceError, anyio.ClosedResourceError)):
                     raise
                 _log(f"push pass failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
                 if pubsub is not None:
