@@ -1,5 +1,6 @@
 """Hub relay for hive exit reports: a hive reports on its own subject and the hub publishes only exits of its own executions."""
 
+import functools
 import json
 import sys
 from collections.abc import Callable
@@ -41,9 +42,5 @@ def handle(bus: Any, store: Callable[[], Any], reported: str, data: bytes) -> by
 
 
 def serve(bus: Any, store: Callable[[], Any] = connect) -> None:
-    """Serve every hive's exit report subject in one hub queue group."""
-
-    def answer(reported: str, data: bytes) -> bytes:
-        return handle(bus, store, reported, data)
-
-    bus.serve(f"{EXITS}.*.*", QUEUE, answer)
+    """Serve every hive's exit report subject in one hub queue group, opening the swarm store once."""
+    bus.serve(f"{EXITS}.*.*", QUEUE, functools.partial(handle, bus, functools.cache(store)))

@@ -1,6 +1,8 @@
 import json
+from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -30,7 +32,7 @@ def report(state: str) -> dict:
 
 
 @pytest.fixture
-def hub():
+def hub() -> Iterator[Any]:
     bus = open_bus(BusConfig())
     store = SimpleNamespace(execution_registry=Registry({"execution-a": "hive-a"}))
     exits.serve(bus, lambda: store)
@@ -38,12 +40,12 @@ def hub():
     bus.close()
 
 
-def shared(bus) -> list:
+def shared(bus: Any) -> list[Any]:
     return [item.event for item in bus.events.consumer("audit", Lifecycle(bus).reactor().subject).fetch(10, 0)]
 
 
 @pytest.mark.feature("hive-own-exit-subject")
-def test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub(hub) -> None:
+def test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub(hub: Any) -> None:
     execution_events.publish(hub, "hive-a", report("working"))
     execution_events.publish(hub, "hive-a", report("exited"))
     execution_events.publish(hub, "hive-a", report("exited"))
@@ -54,7 +56,7 @@ def test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub(hub) -> None:
 
 
 @pytest.mark.feature("hive-own-exit-subject")
-def test_the_hub_refuses_an_exit_reported_by_another_hive(hub) -> None:
+def test_the_hub_refuses_an_exit_reported_by_another_hive(hub: Any) -> None:
     execution_events.publish(hub, "hive-b", report("working"))
 
     with pytest.raises(execution_events.ExitRefused) as refused:
@@ -82,10 +84,10 @@ def test_a_hive_on_a_swarm_scoped_bus_reports_its_exit_through_the_hub() -> None
 
 
 @pytest.mark.feature("hive-own-exit-subject")
-def test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished(hub) -> None:
+def test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished(hub: Any) -> None:
     event = execution_events.initial(hub, "hive-a", "execution-z", report("exited")["executions"]["execution-a"], 1)
     assert event is not None
-    exited = event.__class__(**{**event.to_dict(), "key": "execution-z", "type": "execution.exited"})
+    exited = replace(event, key="execution-z", type="execution.exited")
 
     answer = exits.handle(
         hub,
@@ -112,7 +114,7 @@ def test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished
         ),
     ],
 )
-def test_the_hub_refuses_a_malformed_exit_report(hub, reported: str, change: dict, error: str) -> None:
+def test_the_hub_refuses_a_malformed_exit_report(hub: Any, reported: str, change: dict, error: str) -> None:
     event = execution_events.initial(hub, "hive-a", "execution-a", report("exited")["executions"]["execution-a"], 1)
     assert event is not None
     data = {**event.to_dict(), "type": "execution.exited", **change}
