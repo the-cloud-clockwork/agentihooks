@@ -28,7 +28,9 @@ def unguarded_local_actions(jobs: dict[str, Any]) -> list[tuple[str, int]]:
             if not str(step.get("uses", "")).startswith("./") or not _always(step):
                 continue
             provider = next((at for at, earlier in enumerate(steps[:index]) if _provides_actions(earlier)), None)
-            skippable = provider is not None and not _always(steps[provider]) and not all(map(_always, steps[:provider]))
+            skippable = (
+                provider is not None and not _always(steps[provider]) and not all(map(_always, steps[:provider]))
+            )
             if provider is None or skippable:
                 found.append((name, index))
     return found
