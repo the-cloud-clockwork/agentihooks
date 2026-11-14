@@ -410,6 +410,7 @@ def test_a_relaunched_master_on_a_login_limit_waits_out_the_recycle_window(store
         f"recycled master {third.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
     ]
     assert len(ledger.alerts) == 1
+    assert int(store.redis.get(store.key("sw", master_prompt_stall.LOGIN_ALERT_KEY))) == START + window
     assert 0 < store.redis.ttl(store.key("sw", master_prompt_stall.LOGIN_ALERT_KEY)) <= master_prompt_stall.DAY_S
 
 

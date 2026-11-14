@@ -66,8 +66,7 @@ def login_limit(harness: str, text: str) -> str:
     marks = [i for i, line in enumerate(lines) if INPUT_MARK.match(line)]
     above = lines[: marks[-1]] if marks else lines
     heads = [line.lstrip(LOGIN_MARKS).rstrip() for line in above if line.lstrip()[:1] in REPLY_HEADS]
-    last = heads[-1] if heads else ""
-    return next((error for error in LOGIN_ERRORS.get(harness, ()) if error == last), "")
+    return next((error for error in LOGIN_ERRORS.get(harness, ()) if heads and error == heads[-1]), "")
 
 
 def provider_error_id(harness: str, text: str) -> str:

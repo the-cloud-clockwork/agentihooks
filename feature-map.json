@@ -3224,7 +3224,8 @@
         "tests/test_master_claude_login.py::test_a_move_from_a_refused_slot_checks_each_other_slot_once_and_marks_both",
         "tests/swarm/test_pane.py::test_login_limit_reads_the_last_reply_above_the_input_box_whatever_the_footer",
         "tests/swarm/test_pane.py::test_login_limit_ignores_a_quote_or_an_earlier_reply",
-        "tests/swarm/test_master_prompt_stall.py::test_a_repeat_login_recycle_raises_no_alert_while_a_stored_slot_is_spare"
+        "tests/swarm/test_master_prompt_stall.py::test_a_repeat_login_recycle_raises_no_alert_while_a_stored_slot_is_spare",
+        "tests/test_master_claude_login.py::test_a_spare_slot_is_any_stored_login_not_failed_since_it_was_written"
       ]
     },
     {

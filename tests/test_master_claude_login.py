@@ -1291,6 +1291,17 @@ def test_marking_a_slot_failed_records_that_slot_against_its_own_login_write(
 
 
 @pytest.mark.feature("master-login-limit-recovery")
+def test_a_spare_slot_is_any_stored_login_not_failed_since_it_was_written(
+    ah: Path, rendered: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spare_slot(rendered, monkeypatch)
+    login.mark_failed(1)
+    assert login.spare() is True
+    login.mark_failed(2)
+    assert login.spare() is False
+
+
+@pytest.mark.feature("master-login-limit-recovery")
 def test_a_move_from_a_refused_slot_checks_each_other_slot_once_and_marks_both(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

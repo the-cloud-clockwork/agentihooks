@@ -163,6 +163,7 @@ def test_login_limit_ignores_an_old_error_far_above_the_latest_lines() -> None:
 
 FOOTER = [
     "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    "  ● opus · high effort",
     *[f"  status line {n}: dev, opus, 42 percent" for n in range(14)],
 ]
 

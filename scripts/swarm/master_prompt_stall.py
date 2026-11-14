@@ -141,13 +141,16 @@ def _recycle_login(slug: str, store: Any, ledger: Any, master: AgentRecord, key:
     stamp = store.key(slug, LOGIN_RECYCLE_KEY)
     repeat = store.redis.get(stamp) is not None
     store.redis.set(stamp, now_ms, ex=DAY_S)
-    return [f"recycled master {master.name} in its seat: {LOGIN_LIMITED}", *_alert_spent(slug, store, ledger, repeat)]
+    return [
+        f"recycled master {master.name} in its seat: {LOGIN_LIMITED}",
+        *_alert_spent(slug, store, ledger, repeat, now_ms),
+    ]
 
 
-def _alert_spent(slug: str, store: Any, ledger: Any, repeat: bool) -> list[str]:
+def _alert_spent(slug: str, store: Any, ledger: Any, repeat: bool, now_ms: int) -> list[str]:
     if not repeat or master_claude_login.spare():
         return []
-    if not store.redis.set(store.key(slug, LOGIN_ALERT_KEY), 1, nx=True, ex=DAY_S):
+    if not store.redis.set(store.key(slug, LOGIN_ALERT_KEY), now_ms, nx=True, ex=DAY_S):
         return []
     ledger.raise_alert(slug, LOGIN_ALERT_SOURCE, LOGIN_ALERT)
     return [f"raised the master login alert: {LOGIN_ALERT}"]
