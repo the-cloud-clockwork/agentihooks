@@ -238,6 +238,26 @@ def test_an_events_successor_with_no_handoff_left_carries_no_handoff_or_transfer
     assert ("handoff" in task, task.get("transfer")) == (False, None)
 
 
+@pytest.mark.feature("hub-admission-claim-continuity")
+def test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor(rig: SimpleNamespace) -> None:
+    from scripts.handoff import transfers
+    from scripts.swarm.store import AgentRecord
+
+    old = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", state="finished")
+    first = transfers.record(rig.store, SLUG, old, "recycle", CONTINUITY_DOC, 2)
+    rig.store.put_handoff(SLUG, "t1", CONTINUITY_DOC, seat=old.seat)
+    lost = rig.admitter.admit(SLUG, ask())["name"]
+    assert rig.admitter.reopen(SLUG, ask()) is True
+
+    admitted = rig.admitter.admit(SLUG, ask(generation=rig.rows["t1"]["claim_generation"]))
+
+    failed = transfers.get(rig.store, SLUG, first["id"])
+    assert (failed["successor"], failed["binding"]["state"], failed["binding"]["session"]) == (lost, "absent", lost)
+    retry = admitted["task"]["transfer"]
+    assert (retry["retry_of"], retry["successor"], retry["handoff"]) == (first["id"], admitted["name"], CONTINUITY_DOC)
+    assert retry == transfers.get(rig.store, SLUG, retry["id"])
+
+
 @pytest.mark.feature("swarm-tick-successor-fill")
 def test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range(
     rig: SimpleNamespace,

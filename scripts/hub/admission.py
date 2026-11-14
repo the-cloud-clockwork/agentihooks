@@ -213,11 +213,7 @@ class Admission:
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         handoff = self.store.handoff(slug, task_id)
-        continuity = {
-            **({"handoff": handoff} if handoff else {}),
-            "transfer": transfers.attach(self.store, slug, record),
-        }
-        primed = tick.primed(self.store, slug, seat, {**row, **live, **continuity})
+        primed = tick.primed(self.store, slug, seat, {**row, **live, **({"handoff": handoff} if handoff else {})})
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
@@ -226,6 +222,7 @@ class Admission:
             profile_choice.LEDGER_INTENT: profile_choice.carried(doc, task),
         }
         avoid = self.store.failed_harness(slug, task_id)
+        task["transfer"] = transfers.attach(self.store, slug, record)
         admitted = {
             "hive": request["hive"],
             "name": name,
@@ -269,6 +266,7 @@ class Admission:
             return False
         name = json.loads(held)["name"]
         self.store.cancel_pending_life(slug, request["task"])
+        transfers.failed(self.store, slug, SimpleNamespace(name=name))
         self._unclaim(slug, request["task"], name)
         self.ledger.update_task(
             slug,

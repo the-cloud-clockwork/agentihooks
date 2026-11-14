@@ -1,0 +1,25 @@
+rules:
+  - id: admission-claim-skips-continuity
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub events claim primes a successor's task without reading the predecessor's handoff and attaching its open
+      transfer, so the successor starts with no handoff document and its transfer never binds. Read
+      self.store.handoff onto the task and set its transfer with transfers.attach in the same claim, as the legacy
+      place prepare does.
+    paths:
+      include:
+        - /scripts/hub/
+        - admission-claim-skips-continuity.py
+    patterns:
+      - pattern-inside: |
+          def $CLAIM(...):
+              ...
+      - pattern: tick.primed(...)
+      - pattern-not-inside: |
+          def $CLAIM(...):
+              ...
+              $HANDOFF = $STORE.handoff(...)
+              ...
+              transfers.attach(...)
+              ...
