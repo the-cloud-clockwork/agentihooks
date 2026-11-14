@@ -84,6 +84,21 @@ def started(env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentR
     return agents
 
 
+def test_create_is_paused_then_start_spawns_and_status_lists(
+    env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentRecord], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, ledger, rt = env
+    assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "1") == 0
+    assert store.config("sw").state == "paused" and rt.spawned == []
+    assert run("sw", "start") == 0
+    assert [seat(task, hive=commands.hive_id()).name for task in ("t1", "t2")] == [
+        "engineer@a1b2c3-0001",
+        "ci@a1b2c3-0001",
+    ]
+    run("sw", "status")
+    assert "engineer@a1b2c3-0001" in capsys.readouterr().out
+
+
 def test_start_reports_plan_shape_and_warns_before_spawning(env, capsys, monkeypatch):
     store, ledger, _ = env
     ledger.rows = {"a": {"id": "a", "lane": "eng"}, "b": {"id": "b", "lane": "eng", "depends_on": ["a"]}}
