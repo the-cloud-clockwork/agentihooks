@@ -1,0 +1,15 @@
+jobs:
+  grade:
+    steps:
+      - name: Mark pending
+        # ok: gate-required-direct-status
+        run: gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=pending -f context="$CONTEXT"
+      - name: Report success
+        # ruleid: gate-required-direct-status
+        run: gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=success -f context="$CONTEXT"
+      - name: Report a computed state
+        # ruleid: gate-required-direct-status
+        run: gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$state" -f context="$CONTEXT"
+      - name: Report through the resolver
+        # ok: gate-required-direct-status
+        run: python -m scripts.gate_required_status --repository "$GITHUB_REPOSITORY" --head "$HEAD_SHA"

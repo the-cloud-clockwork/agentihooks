@@ -1,0 +1,14 @@
+rules:
+  - id: gate-required-direct-status
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      A workflow posts a final commit status straight to the statuses API. On 12 November the protected grader posted
+      Gate Required success before the Tests aggregator existed and a pull request merged with a failing type gate.
+      Post only pending directly and report the final state through scripts.gate_required_status, which waits for the
+      Tests aggregator.
+    paths:
+      include:
+        - '/.github/workflows/*.yml'
+        - '**/gate-required-direct-status.test.yaml'
+    pattern-regex: 'statuses/[^\n]*state=(?!pending\b)\S+'

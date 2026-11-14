@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   actions: read
+  checks: read
   contents: read
   statuses: write
 
@@ -67,10 +68,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OUTCOME: ${{ steps.grade.outcome }}
         run: |
+          protected=failure
           if [[ "$OUTCOME" == "success" ]]; then
-            state=success description="The protected branch's gate logic passed this head."
-          else
-            state=failure description="The protected branch's gate logic refused this head; see the run."
+            protected=success
           fi
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$state" -f context="$CONTEXT" \
-            -f target_url="$RUN_URL" -f description="$description"
+          python -m scripts.gate_required_status --repository "$GITHUB_REPOSITORY" --head "$HEAD_SHA" \
+            --protected "$protected" --target-url "$RUN_URL"
