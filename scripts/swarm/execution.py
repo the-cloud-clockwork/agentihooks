@@ -298,7 +298,7 @@ class ExecutionRegistry:
         if shown is not None:
             self.store.project_agent(slug, *shown, listed_only=True)
 
-    def set_launch(self, slug: str, execution_id: str, decision: dict[str, str]) -> bool:
+    def set_launch(self, slug: str, execution_id: str, decision: dict[str, Any]) -> bool:
         """Writes a hive's launch decision onto its execution inside the fence; False when the execution no longer
         heads its seat or its agent left the live list, so a dropped agent never reappears."""
         with _writes(slug):

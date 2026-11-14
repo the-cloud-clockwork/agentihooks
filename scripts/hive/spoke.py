@@ -295,6 +295,7 @@ class Spoke:
                 "hive": self.config.hive,
                 "name": request.name,
                 "pane_id": placed.pane_id,
+                "launched_at": getattr(placed, "launched_at", 0) or self.clock(),
                 "harness": placed.harness,
                 "account": placed.account,
             },
