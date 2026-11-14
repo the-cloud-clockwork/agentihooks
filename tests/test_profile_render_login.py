@@ -25,8 +25,7 @@ def test_the_next_render_replaces_a_home_holding_a_credentials_link(world: dict[
     login = _write(world["home"] / ".claude" / LOGIN, "fixture")
     out = render.render_claude("rb-role")
     assert out is not None
-    if not (out / LOGIN).is_symlink():
-        (out / LOGIN).symlink_to(login)
+    (out / LOGIN).symlink_to(login)
     assert render.render_claude("rb-role") is not None
     rendered = render.profile_dir("rb-role")
     assert rendered is not None
