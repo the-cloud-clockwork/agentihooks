@@ -323,7 +323,6 @@ def test_a_failed_pass_with_a_broken_stderr_still_retries_and_pushes(
     assert pushed["params"]["meta"]["item_id"] == item.id
 
 
-@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
 def test_the_push_loop_writes_a_heartbeat_on_stderr(
     store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -333,12 +332,18 @@ def test_the_push_loop_writes_a_heartbeat_on_stderr(
     monkeypatch.setattr(channel, "RECHECK_S", 0.1)
     monkeypatch.setattr(channel, "HEARTBEAT_S", 0.2, raising=False)
 
-    async def scenario(send: object, receive: object) -> None:
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> None:
+        store.send("alice", "bob", "counted")
+        with anyio.fail_after(5):
+            await receive()
         await anyio.sleep(2.0)
 
     session(store, scenario)
-    beats = [line for line in capsys.readouterr().err.splitlines() if "push loop alive for bob" in line]
+    logged = capsys.readouterr().err.splitlines()
+    beats = [line for line in logged if "push loop alive for bob" in line]
     assert len(beats) >= 2
+    assert any(line.endswith("push loop alive for bob; 1 items pushed") for line in beats)
+    assert "agentihooks inbox channel: push loop for bob waiting for the tools list" in logged
 
 
 @pytest.mark.feature("inbox-channel-push-survives-failed-pass")
