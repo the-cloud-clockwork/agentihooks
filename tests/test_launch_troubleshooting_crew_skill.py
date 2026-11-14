@@ -141,6 +141,24 @@ def test_scout_stops_other_work_sets_the_lane_and_records_the_order(
     assert saved["earlier_lane"] == {"model": "sonnet", "effort": "high", "effort_max": "xhigh"}
 
 
+@pytest.mark.feature("launch-troubleshooting-crew")
+def test_a_second_scout_adds_scouts_and_keeps_the_earlier_focus_and_lane(
+    crew: ModuleType, capsys: pytest.CaptureFixture
+) -> None:
+    run(crew, Ledger(), "scout", "demo", "--problem", "p", capsys=capsys)
+    ledger = Ledger()
+    result = run(crew, ledger, "scout", "demo", "--problem", "p", "--scouts", "2", capsys=capsys)
+    assert result["scouts"] == [f"{CID}-scout-6", f"{CID}-scout-7"]
+    assert not any(c[-2:] in (["get", "freezes"], ["status", "--json"]) for c in ledger.calls)
+    writes = ledger.writes()
+    assert [c[5] for c in writes if c[3] == "focus"] == ["--bottom", "--bottom"]
+    assert not any(c[3] == "learned" for c in writes)
+    saved = json.loads(crew.state_path("demo").read_text())
+    assert saved["scout_tasks"] == [f"{CID}-scout-{n}" for n in range(1, 8)]
+    assert saved["earlier_focus"] == ["phases/p1", "tasks/t2"]
+    assert saved["earlier_lane"] == {"model": "sonnet", "effort": "high", "effort_max": "xhigh"}
+
+
 def test_scout_at_an_effort_below_max_keeps_the_effort_ceiling(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
     ledger = Ledger()
     run(crew, ledger, "scout", "demo", "--problem", "p", "--scouts-effort", "xhigh", capsys=capsys)
@@ -210,3 +228,11 @@ def test_restore_brings_back_the_earlier_focus_and_lane(crew: ModuleType, capsys
 def test_later_stages_refuse_without_a_launched_crew(crew: ModuleType) -> None:
     with pytest.raises(SystemExit, match="run the scout stage first"):
         crew.main(["restore", "demo"], runner=Ledger(), now=NOW)
+
+
+def test_harden_refuses_a_crew_launched_without_hardening(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
+    run(crew, Ledger(), "scout", "demo", "--problem", "p", "--no-harden", capsys=capsys)
+    ledger = Ledger()
+    with pytest.raises(SystemExit, match="--no-harden"):
+        crew.main(["harden", "demo"], runner=ledger, now=NOW)
+    assert ledger.calls == []

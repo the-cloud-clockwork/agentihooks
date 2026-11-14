@@ -6170,6 +6170,7 @@
         "tests/test_launch_troubleshooting_crew_skill.py::test_plan_is_the_operators_default_layout_and_runs_nothing",
         "tests/test_launch_troubleshooting_crew_skill.py::test_every_stage_count_model_and_effort_is_overridable",
         "tests/test_launch_troubleshooting_crew_skill.py::test_scout_stops_other_work_sets_the_lane_and_records_the_order",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_second_scout_adds_scouts_and_keeps_the_earlier_focus_and_lane",
         "tests/test_launch_troubleshooting_crew_skill.py::test_fixers_wait_until_every_scout_is_done",
         "tests/test_launch_troubleshooting_crew_skill.py::test_fixers_are_added_for_the_proven_causes_and_focused",
         "tests/test_launch_troubleshooting_crew_skill.py::test_restore_brings_back_the_earlier_focus_and_lane"

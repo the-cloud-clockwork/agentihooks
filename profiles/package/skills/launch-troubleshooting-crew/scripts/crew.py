@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launch and step the operator's troubleshooting crew on one swarm ledger.
 
-Usage: crew.py STAGE SLUG [options]; every stage takes --dry-run, which prints the commands and runs none.
+Usage: crew.py STAGE SLUG [options]; every stage takes --dry-run, which prints the commands and writes nothing.
 
 plan     prints the whole crew plan for the given counts, models and efforts and runs nothing.
 scout    saves the earlier focus and eng lane settings, sets the eng lane to the scout model and effort, adds one
@@ -85,9 +85,9 @@ def crew_id(now: float) -> str:
     return "crew-" + time.strftime("%m%d%H%M", time.gmtime(now))
 
 
-def scout_ids(cid: str, count: int) -> list[str]:
-    """Task ids of the scouts of crew ``cid``."""
-    return [f"{cid}-scout-{n}" for n in range(1, count + 1)]
+def scout_ids(cid: str, count: int, start: int = 0) -> list[str]:
+    """Task ids of the scouts of crew ``cid``, numbered after the ``start`` scouts it already has."""
+    return [f"{cid}-scout-{n}" for n in range(start + 1, start + count + 1)]
 
 
 def fixer_ids(cid: str, count: int) -> list[str]:
@@ -320,22 +320,40 @@ def execute(commands: Sequence[list[str]], runner: Runner, dry: bool) -> None:
             runner(command)
 
 
+def launched(args: argparse.Namespace, crew: Crew, runner: Runner) -> State | None:
+    """The running crew's state, or a new state holding the focus and eng lane from before the crew."""
+    if state_path(args.slug).exists():
+        return load_state(args.slug)
+    if args.dry_run:
+        return None
+    focus, lane = earlier(args.slug, runner)
+    return State(crew_id(args.now), args.problem, asdict(crew), focus, lane)
+
+
 def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
-    """Launch the crew: save the earlier state, set the lane, add and focus the scouts, record the order."""
-    cid = crew_id(args.now)
-    scouts = scout_ids(cid, crew.scouts.count)
-    focus, lane = ([], {}) if args.dry_run else earlier(args.slug, runner)
-    state = State(cid, args.problem, asdict(crew), focus, lane, scouts)
+    """Launch the crew, or add scouts to the running one, keeping the focus and lane saved at its first launch."""
+    state = launched(args, crew, runner) or State(crew_id(args.now), args.problem, asdict(crew))
+    first = not state.scout_tasks
+    scouts = scout_ids(state.crew_id, crew.scouts.count, len(state.scout_tasks))
     hypotheses = hypotheses_for(len(scouts), args.hypothesis)
     commands = lane_commands(args.slug, crew.scouts)
     commands += [scout_task(args.slug, args.who, t, args.problem, h) for t, h in zip(scouts, hypotheses)]
-    commands += focus_commands(args.slug, scouts, args.quote, only=True)
-    commands.append(canon_note(args.slug))
+    commands += focus_commands(args.slug, scouts, args.quote, only=first)
+    if first:
+        commands.append(canon_note(args.slug))
+    state.scout_tasks = [*state.scout_tasks, *scouts]
     if not args.dry_run:
         save_state(args.slug, state)
     execute(commands, runner, args.dry_run)
     restore = f"python3 {Path(__file__).resolve()} restore {args.slug}"
-    return {"crew": cid, "scouts": scouts, "earlier_focus": focus, "cron": cron(args.slug), "restore": restore}
+    focus = state.earlier_focus
+    return {
+        "crew": state.crew_id,
+        "scouts": scouts,
+        "earlier_focus": focus,
+        "cron": cron(args.slug),
+        "restore": restore,
+    }
 
 
 def stage_fix(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
@@ -366,6 +384,8 @@ def stage_critics(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[
 def stage_harden(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
     """Add and focus the hardening task."""
     state = load_state(args.slug)
+    if not state.crew.get("harden", True):
+        sys.exit("this crew was launched with --no-harden")
     task = f"{state.crew_id}-harden"
     commands = [harden_task(args.slug, args.who, task, state.causes)]
     commands += focus_commands(args.slug, [task], args.quote, only=False)

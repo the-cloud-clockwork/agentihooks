@@ -13,7 +13,7 @@ problem statement, one hypothesis per scout and your judgement of the scouts' pr
 python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/launch-troubleshooting-crew/scripts/crew.py STAGE SLUG [options]
 ```
 
-Every stage takes `--dry-run`, which prints each command and runs none. Overrides: `--scouts N`,
+Every stage takes `--dry-run`, which prints each command and writes nothing. Overrides: `--scouts N`,
 `--fixers N`, `--critics N`, `--scouts-model M`, `--scouts-effort E` (fixers and critics likewise) and
 `--no-harden`. Defaults are the operator's order: scouts 5 opus max, fixers 5 opus xhigh, critics 3 fable
 xhigh, hardening on. Pass the operator's words with `--quote` when he asked for the crew; otherwise the
@@ -21,7 +21,7 @@ script quotes his standing order for this skill.
 
 ## When
 
-- **Two hours on one problem.** One problem has stayed unsolved for two hours at most, or the operator asks.
+- **Two hours on one problem.** One problem is still unsolved after two hours, or the operator asks.
 - **One hour is troubleshooting mode first.** A blocker of one category lasting one hour puts you in
   troubleshooting mode and you fix it yourself (the bundle's troubleshooting mode rule). When that fix has
   not solved it by the two hour mark, launch this crew. Both triggers hold; the crew is the second step.
@@ -40,8 +40,9 @@ script quotes his standing order for this skill.
    the scout tasks are focused and the cron is set.
 
 3. **Judge the proofs.** Read each scout task's proof as it closes. A claim counts only when its evidence
-   confirms it; a hypothesis is never a cause. A scout that ends unproven gets a new scout task from a fresh
-   `scout` stage only if causes remain unproven; keep scouting until every cause is proven. Done when every
+   confirms it; a hypothesis is never a cause. While causes remain unproven, run `scout` again with new hypotheses: it adds
+   scouts to the running crew and keeps the focus and lane saved at the first launch. Keep scouting until
+   every cause is proven. Done when every
    scout task is done and you can state each proven cause in one sentence.
 
 4. **Fix.** Run `crew.py fix SLUG --cause "<proven cause>" ...`. It refuses while any scout task is open,
@@ -52,8 +53,8 @@ script quotes his standing order for this skill.
    model and prompt, at most three at a time. Critics edit nothing; send each finding to the fixer task that
    owns it through `agentihooks msg send`. Done when every finding is fixed or ruled out by evidence.
 
-6. **Harden.** Once the old fallback is removed and the tick and controller work, run `crew.py harden SLUG`.
-   Done when the hardening task is merged.
+6. **Harden.** Once the old fallback is removed and the tick and controller work, run `crew.py harden SLUG`;
+   a crew launched with `--no-harden` skips this step. Done when the hardening task is merged.
 
 7. **Restore.** Run `crew.py restore SLUG`. It unfocuses the crew tasks, focuses the earlier targets in their
    order and puts the eng lane model, effort and effort ceiling back. Delete the cron. Done when the swarm

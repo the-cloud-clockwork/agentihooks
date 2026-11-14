@@ -195,7 +195,7 @@ Review each slice against its phase intent, then
 
 ## Troubleshooting crew
 
-- One problem unsolved for two hours at most, or the operator's order, stops all other work: run
+- One problem still unsolved after two hours, or the operator's order, stops all other work: run
   `$launch-troubleshooting-crew <slug>` and follow its stages, scout, fix, critics, harden, restore.
 - A blocker of one category lasting one hour puts you in troubleshooting mode first and you fix it
   yourself; when that has not solved it by the two hour mark, launch the crew.
