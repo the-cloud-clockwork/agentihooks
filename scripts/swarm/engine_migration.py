@@ -49,11 +49,14 @@ def repo_origin(redis_store: RedisStore, slug: str) -> str:
     return doctor_origin(redis_store, slug, peer) if peer else own_origin(redis_store, slug)
 
 
-def drop_launch_jobs(redis_store: RedisStore, slug: str) -> None:
-    """Drops the launch job rows of a swarm with no agents, since every agent they name is gone."""
+def drop_launch_jobs(redis_store: RedisStore, slug: str) -> int:
+    """Drops the launch job rows of a swarm with no agents, since every agent they name is gone, and counts them."""
     from scripts.swarm import launch_job
 
-    redis_store.redis.delete(redis_store.key(slug, launch_job.KEY))  # pyright: ignore[reportUnknownMemberType]
+    key = redis_store.key(slug, launch_job.KEY)
+    count = int(redis_store.redis.hlen(key))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    redis_store.redis.delete(key)  # pyright: ignore[reportUnknownMemberType]
+    return count  # pyright: ignore[reportUnknownMemberType]
 
 
 def stored_on_events(redis_store: RedisStore, slug: str) -> bool:
@@ -62,8 +65,11 @@ def stored_on_events(redis_store: RedisStore, slug: str) -> bool:
 
 
 def drop_stuck_launches(redis_store: RedisStore, slug: str) -> int:
-    """Drops the launch rows of a swarm with no agents that still wait for an acknowledgement, keeping its history."""
-    return drop_collecting(redis_store.redis, redis_store.key(slug, "launches"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    """Drops the launch job rows and the launch rows awaiting acknowledgement of a swarm with no agents; history stays."""
+    if redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
+        return 0
+    jobs = drop_launch_jobs(redis_store, slug)
+    return jobs + drop_collecting(redis_store.redis, redis_store.key(slug, "launches"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def drop_collecting(client: Any, key: str) -> int:
@@ -86,18 +92,15 @@ def migrate_one(redis_store: RedisStore, slug: str) -> str:
     """Moves one stored config to the events engine with an origin and names the outcome."""
     config = redis_store.config(slug)
     on_events = stored_on_events(redis_store, slug)
-    idle = not redis_store.agents(slug)  # pyright: ignore[reportUnknownMemberType]
     if on_events and config.repo_origin:
-        return dropped("unchanged", drop_stuck_launches(redis_store, slug) if idle else 0)
-    if not idle and not on_events:
+        return dropped("unchanged", drop_stuck_launches(redis_store, slug))
+    if not on_events and redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
         return BUSY
     found = repo_origin(redis_store, slug)
     if not found:
         return NO_ORIGIN
     redis_store.update(slug, engine=EVENTS_ENGINE, repo_origin=found)  # pyright: ignore[reportUnknownMemberType]
-    if not on_events:
-        drop_launch_jobs(redis_store, slug)
-    return dropped(f"migrated: {found}", drop_stuck_launches(redis_store, slug) if idle else 0)
+    return dropped(f"migrated: {found}", drop_stuck_launches(redis_store, slug))
 
 
 def migrate(redis_store: RedisStore) -> dict[str, str]:

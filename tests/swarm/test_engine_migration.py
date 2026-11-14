@@ -137,7 +137,7 @@ def test_a_swarm_with_only_launch_jobs_whose_agents_are_gone_drops_them_and_migr
         store.redis.hset(store.key("launching", launch_job.KEY), name, json.dumps({"task": "t2"}))
 
     assert engine_migration.migrate(store) == {
-        "launching": "migrated: github.com/team/project",
+        "launching": "migrated: github.com/team/project: dropped 2 stuck launches",
         "other": "skipped: live legacy agents",
     }
     assert configs(store) == {
@@ -199,9 +199,23 @@ def test_a_swarm_with_live_agents_keeps_its_launching_rows(store: RedisStore) ->
     store.update("busy", engine="events")
     store.put_agent("busy", AgentRecord("engineer@1", "eng", "t1", seat="eng-1@busy"))
     store.record_launch("busy", AgentRecord("engineer@2", "eng", "t2"), "launching")
+    store.redis.hset(store.key("busy", launch_job.KEY), "engineer@3", json.dumps({"task": "t3"}))
 
     assert engine_migration.migrate(store) == {"busy": "unchanged"}
     assert list(store.redis.hgetall(store.key("busy", "launches"))) == ["engineer@2"]
+    assert list(store.redis.hgetall(store.key("busy", launch_job.KEY))) == ["engineer@3"]
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_swarm_already_on_events_with_no_agents_drops_its_leftover_launch_jobs(store: RedisStore) -> None:
+    store.create(replace(SwarmConfig("moved", "/missing", 1, 1), repo_origin=ORIGIN))
+    store.update("moved", engine="events")
+    for name in ("engineer@5", "engineer@6"):
+        store.redis.hset(store.key("moved", launch_job.KEY), name, json.dumps({"task": "t5"}))
+
+    assert engine_migration.migrate(store) == {"moved": "unchanged: dropped 2 stuck launches"}
+    assert store.redis.exists(store.key("moved", launch_job.KEY)) == 0
+    assert engine_migration.migrate(store) == {"moved": "unchanged"}
 
 
 @pytest.mark.feature("engine-config-migration")
@@ -228,7 +242,7 @@ def test_a_stored_legacy_engine_with_an_origin_is_migrated_even_when_the_config_
 
     monkeypatch.setattr(store, "config", as_events)
 
-    assert engine_migration.migrate(store) == {"doctor": f"migrated: {ORIGIN}"}
+    assert engine_migration.migrate(store) == {"doctor": f"migrated: {ORIGIN}: dropped 1 stuck launches"}
     assert store.redis.hget(store.key("doctor", "config"), "engine") == "events"
     assert store.redis.exists(store.key("doctor", launch_job.KEY)) == 0
     assert engine_migration.migrate(store) == {"doctor": "unchanged"}
