@@ -4,6 +4,7 @@ import subprocess
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -712,7 +713,7 @@ def test_a_mint_against_a_signer_record_with_member_swarms_is_unchanged() -> Non
 
 
 @pytest.mark.feature("hive-mint-refuses-unscoped-signer")
-def test_a_refresh_against_a_signer_record_without_member_swarms_is_refused_before_rotating(admin) -> None:
+def test_a_refresh_against_a_signer_record_without_member_swarms_is_refused_before_rotating(admin: Any) -> None:
     member = auth.mint(admin, "h1", PUBLIC)
     before = admin.acl_getuser(f"hive-{member['id']}")["passwords"]
     with pytest.raises(auth.HiveError) as refused:

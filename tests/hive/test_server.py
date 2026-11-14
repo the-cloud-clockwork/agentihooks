@@ -1,6 +1,7 @@
 import json
 import socket
 import threading
+from typing import Any
 
 import pytest
 
@@ -36,7 +37,7 @@ def _post(port, path, body):
     return int(head.split()[1]), json.loads(rest)
 
 
-def test_signed_refresh_delivers_the_bus_address(admin):
+def test_signed_refresh_delivers_the_bus_address(admin: Any) -> None:
     from dataclasses import replace
 
     from tests.hive.test_nats_grant import _offline_signer, _refresh

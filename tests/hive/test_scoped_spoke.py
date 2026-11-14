@@ -1,5 +1,6 @@
 import hashlib
 import json
+from typing import Any
 
 import pytest
 
@@ -70,7 +71,7 @@ def test_scoped_join_grant_enables_the_scoped_client_layout(admin, signer):
     assert "AGENTIHOOKS_BUS_CREDENTIALS=/member/bus.creds" in text.splitlines()
 
 
-def test_a_join_against_a_signer_record_without_member_swarms_is_refused(admin, signer):
+def test_a_join_against_a_signer_record_without_member_swarms_is_refused(admin: Any, signer: Any) -> None:
     from scripts.hive import auth
     from tests.hive.test_nats_grant import PUBLIC, _refresh
 

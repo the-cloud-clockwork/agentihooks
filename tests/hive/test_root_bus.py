@@ -122,7 +122,7 @@ def test_a_signer_that_lists_member_swarms_without_root_mints_nothing(tmp_path):
 
 
 @pytest.mark.feature("hive-mint-refuses-unscoped-signer")
-def test_a_signer_record_without_member_swarms_mints_no_root_credential(tmp_path):
+def test_a_signer_record_without_member_swarms_mints_no_root_credential(tmp_path: Path) -> None:
     with pytest.raises(auth.HiveError) as refused:
         root_bus.write(tmp_path, _signer(), "root")
     assert str(refused.value) == (
