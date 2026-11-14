@@ -101,13 +101,11 @@ class Lifecycle:
         """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per
         execution and only while it holds its claim, claim generation and seat; True while that resume is ordered and
         unanswered or the exit predates it, False when the exit goes on to drop the agent and reopen its task."""
-        from scripts.hub.hive_loss import REASON as HIVE_LOST
-
         target: dict[str, Any] = cast(Any, agent).runtime_target
         data: dict[str, Any] = cast(Any, event).data
         store = cast(RedisStore, self.store)
         hive: str = agent.hive or target.get("host_id") or ""
-        if not hive or data.get("reason") in {"lost", HIVE_LOST}:
+        if not hive or data.get("reason"):
             return False
         if deliberate_exit.take(store, event.swarm, agent.name):
             return False

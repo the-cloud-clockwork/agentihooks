@@ -114,6 +114,14 @@ def _commands(rig: SimpleNamespace) -> list[Any]:
     return [CommandOrder(**json.loads(fields["order"])) for _, fields in entries]
 
 
+def _sent(rig: SimpleNamespace) -> list[str]:
+    from scripts.hive.orders import Orders
+
+    prefix = Orders(rig.store.redis).command_receipt(HIVE, "")
+    keys = rig.store.redis.scan_iter(f"{prefix}resume:*")
+    return sorted(key.removeprefix(prefix) for key in keys if not key.endswith(":running"))
+
+
 def _next_pass(rig: SimpleNamespace, pane_state: str = "exited") -> None:
     rig.clock.return_value += 300_000
     rig.report(pane_state)
@@ -135,7 +143,7 @@ def _resumed(launched_at: int = 1_150_000) -> Any:
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
-    placed = Placed("pane-2", "claude", "a", launched_at=launched_at, overlays=["tuner"])
+    placed = Placed("pane-2", "claude", "a", launched_at=launched_at)
     return Outcome("recover", Status.OK, "local", placed)
 
 
@@ -159,7 +167,7 @@ def test_a_dead_hub_started_agent_is_resumed_once_through_its_hive(rig: SimpleNa
     assert rig.store.claimant("rig", "task") == rig.agent.name
     assert [agent.name for agent in rig.store.agents("rig")] == [rig.agent.name]
     _next_pass(rig)
-    assert len(_commands(rig)) == 1
+    assert len(_sent(rig)) == 1
     assert rig.ledger.writes == rig.returned == []
 
 
@@ -182,31 +190,45 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig: SimpleNamespace
     assert config.repo == "/hive/repo"
     assert "Continue your task in this conversation and seat" in text
     [resumed] = rig.store.agents("rig")
-    assert (resumed.pane_id, resumed.launched_at, resumed.seat, resumed.overlays) == (
-        "pane-2",
-        1_150_000,
-        "eng-1@rig",
-        ["tuner"],
-    )
+    assert (resumed.pane_id, resumed.launched_at, resumed.seat) == ("pane-2", 1_150_000, "eng-1@rig")
     assert cast(Any, Orders(rig.store.redis).command(HIVE, order)).status == DONE
     _next_pass(rig, "working")
-    assert len(_commands(rig)) == 1
+    assert len(_sent(rig)) == 1
     assert rig.ledger.writes == rig.returned == []
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_the_hive_runs_a_resume_order_off_its_heartbeat(rig: SimpleNamespace) -> None:
-    from scripts.hive.orders import Orders
+def test_the_hive_runs_a_resume_order_off_its_heartbeat_and_keeps_it_until_answered(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import DONE, Orders
 
     rig.react.poll()
     [order] = _commands(rig)
     consumer, runtime = _hive(rig, _resumed())
     consumer.offbeat = Mock()
+    receipt = Orders(rig.store.redis).command_receipt(HIVE, order.id)
     assert consumer.poll_commands() == 1
     consumer.offbeat.assert_called_once_with(order)
     runtime.recover.assert_not_called()
     assert Orders(rig.store.redis).command(HIVE, order) is None
+    assert consumer.poll_commands() == 1
+    assert consumer.offbeat.call_count == 1
+    rig.store.redis.delete(f"{receipt}:running")
+    consumer.poll_commands()
+    assert consumer.offbeat.call_count == 2
+    consumer.run_resume(order)
+    consumer.poll_commands()
     assert _commands(rig) == []
+    assert cast(Any, Orders(rig.store.redis).command(HIVE, order)).status == DONE
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_an_order_without_a_judged_launch_parses_on_an_older_hive() -> None:
+    from scripts.hive.orders import CommandOrder
+
+    older = {"id", "action", "slug", "name", "execution_id", "generation", "text"}
+    assert set(json.loads(CommandOrder("retire:x:1", "retire", "rig", "n", "x", 1).encode())) == older
+    resume = json.loads(CommandOrder("resume:x:1:1", "resume", "rig", "n", "x", 1, "go", 5, "p").encode())
+    assert (resume["launched_at"], resume["pane_id"]) == (5, "p")
 
 
 @pytest.mark.feature("hub-dead-resume")
@@ -216,7 +238,7 @@ def test_a_resumed_pane_that_dies_again_orders_the_next_resume(rig: SimpleNamesp
     consumer.poll_commands()
     _next_pass(rig)
     prefix = f"resume:{rig.agent.execution_id}:{rig.agent.generation}"
-    assert [order.id for order in _commands(rig)] == [f"{prefix}:1", f"{prefix}:2"]
+    assert _sent(rig) == [f"{prefix}:1", f"{prefix}:2"]
     assert rig.ledger.writes == rig.returned == []
     assert [agent.pane_id for agent in rig.store.agents("rig")] == ["pane-2"]
 
@@ -238,7 +260,7 @@ def test_a_successors_work_is_never_resumed_by_the_old_agent(
     elif successor == "generation":
         rig.row["claim_generation"] = 8
     rig.react.poll()
-    assert len(_commands(rig)) == orders
+    assert len(_sent(rig)) == orders
     assert len(rig.returned) == returned
 
 
@@ -265,14 +287,14 @@ def test_a_deliberately_ended_hub_agent_is_not_resumed(rig: SimpleNamespace) -> 
 
     deliberate_exit.record(rig.store, "rig", rig.agent.name, NOW)
     rig.react.poll()
-    assert _commands(rig) == []
+    assert _sent(rig) == []
     assert rig.row["state"] == "open"
     assert len(rig.returned) == 1
     assert not deliberate_exit.recorded(rig.store, "rig", rig.agent.name)
 
 
 @pytest.mark.feature("hub-dead-resume")
-@pytest.mark.parametrize("reason", ["lost", "hive-lost"])
+@pytest.mark.parametrize("reason", ["lost", "hive-lost", "stopped"])
 def test_an_agent_on_a_lost_hive_is_handed_to_a_fresh_agent(rig: SimpleNamespace, reason: str) -> None:
     exited = replace(
         rig.started,
@@ -282,7 +304,7 @@ def test_an_agent_on_a_lost_hive_is_handed_to_a_fresh_agent(rig: SimpleNamespace
         data={**rig.started.data, "reason": reason},
     )
     rig.life.handle(exited)
-    assert _commands(rig) == []
+    assert _sent(rig) == []
     assert rig.row["state"] == "open"
     assert len(rig.returned) == 1
 
@@ -295,7 +317,7 @@ def test_a_failed_resume_hands_the_task_to_a_fresh_agent(rig: SimpleNamespace) -
     consumer, _runtime = _hive(rig, Outcome("recover", Status.REFUSED, "local", detail="no conversation"))
     consumer.poll_commands()
     _next_pass(rig)
-    assert len(_commands(rig)) == 1
+    assert len(_sent(rig)) == 1
     assert rig.ledger.notices == [
         f"Starting a fresh agent after {rig.agent.name} ended because resume failed: no conversation."
     ]
@@ -310,11 +332,11 @@ def test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent(rig: SimpleNames
 
     rig.react.poll()
     for attempt in range(RECOVERY_ATTEMPTS):
-        assert len(_commands(rig)) == attempt + 1
+        assert len(_sent(rig)) == attempt + 1
         assert rig.ledger.writes == rig.returned == []
         consumer, _runtime = _hive(rig, _resumed(launched_at=rig.clock() + 1))
         consumer.poll_commands()
         _next_pass(rig)
-    assert len(_commands(rig)) == RECOVERY_ATTEMPTS
+    assert len(_sent(rig)) == RECOVERY_ATTEMPTS
     assert rig.row["state"] == "open"
     assert len(rig.returned) == 1

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 RECEIPT_SECONDS = 86400
+RESUME_RUN_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,15 @@ class CommandOrder:
     text: str = ""
     launched_at: int = 0
     pane_id: str = ""
+
+    def encode(self) -> str:
+        """The order as JSON, leaving out the judged launch and pane while unset so a hive on an older release still
+        parses every order that carries neither."""
+        fields = asdict(self)
+        for name in ("launched_at", "pane_id"):
+            if not fields[name]:
+                del fields[name]
+        return json.dumps(fields)
 
 
 DONE, FAILED = "done", "failed"
@@ -154,7 +164,7 @@ class Orders:
                 pipe.multi()
                 pipe.hset(receipt, mapping=SENT)
                 pipe.expire(receipt, RECEIPT_SECONDS)
-                pipe.xadd(self.commands(hive), {"order": json.dumps(asdict(order))})
+                pipe.xadd(self.commands(hive), {"order": order.encode()})
                 pipe.execute()
             except WatchError:
                 return None
@@ -231,17 +241,19 @@ class Consumer:
                 self.store.redis.xdel(stream, item)
                 continue
             receipt = self.orders.command_receipt(self.hive, order.id)
+            redis: Any = self.orders.redis
+            if order.action == "resume" and not redis.hexists(receipt, "ack"):
+                if redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
+                    self.offbeat(order)
+                continue
             with self.store.redis.pipeline() as pipe:
                 if not self.store.redis.hexists(receipt, "ack"):
-                    if order.action == "resume":
-                        self.offbeat(order)
-                    else:
-                        try:
-                            ack = self.command(order)
-                        except Exception as exc:
-                            ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
-                        pipe.hset(receipt, "ack", ack.encode())
-                        pipe.expire(receipt, RECEIPT_SECONDS)
+                    try:
+                        ack = self.command(order)
+                    except Exception as exc:
+                        ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
+                    pipe.hset(receipt, "ack", ack.encode())
+                    pipe.expire(receipt, RECEIPT_SECONDS)
                 pipe.xdel(stream, item)
                 pipe.execute()
         return len(entries)
@@ -305,17 +317,12 @@ class Consumer:
         if current is None:
             runtime.terminate(replace(held, pane_id=placed.pane_id))
             return FOREIGN
-        store.put_agent(
-            order.slug,
-            replace(
-                current,
-                pane_id=placed.pane_id,
-                launched_at=placed.launched_at or lease.now_ms(store),
-                idle_ticks=0,
-                overlays=placed.overlays or current.overlays,
-                profile_decision={**current.profile_decision, **placed.profile_decision},
-            ),
-        )
+        launched = placed.launched_at or lease.now_ms(store)
+        try:
+            store.put_agent(order.slug, replace(current, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
+        except Exception:
+            runtime.terminate(replace(held, pane_id=placed.pane_id))
+            raise
         return Ack(DONE, {"host_id": self.hive})
 
     def run_resume(self, order: CommandOrder) -> None:
@@ -332,7 +339,7 @@ class Consumer:
     def _spawn_resume(self, order: CommandOrder) -> None:
         """Run a resume order in its own process so a slow herdr resume never holds the heartbeat."""
         subprocess.Popen(
-            [sys.executable, "-m", "scripts.hive.resume_order", self.hive, json.dumps(asdict(order))],
+            [sys.executable, "-m", "scripts.hive.resume_order", self.hive, order.encode()],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
         )
