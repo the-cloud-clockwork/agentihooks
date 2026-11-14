@@ -101,7 +101,18 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
         },
     )
     execution_events.started(bus, started)
-    bus.state("spoke-work").create("claim", json.dumps({"state": "started", "claim_revision": 1}).encode())
+    bus.for_swarm(SLUG).state("spoke-work").create(
+        "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
+    )
+    handled: list[str] = []
+    handle = life.handle
+
+    def observed(event: Envelope) -> None:
+        """Record the type of each event the reconciler hands the lifecycle, then handle it."""
+        handled.append(event.type)
+        handle(event)
+
+    life.handle = observed
 
     def report(state: str) -> None:
         """Save a fresh root hive report showing the agent's pane in ``state``."""
@@ -129,6 +140,7 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
         report=report,
         item=item,
         returned=returned,
+        handled=handled,
         react=reconciler.Reconciler(bus, store=store, lifecycle=life, clock=clock),
         home=tmp_path,
     )
@@ -155,15 +167,19 @@ def _incidents(rig: SimpleNamespace) -> list[dict[str, Any]]:
 
 @pytest.mark.feature("events-sweeps-dead-pane")
 def test_a_dead_pane_is_found_and_its_execution_exited(rig: SimpleNamespace) -> None:
+    from scripts.inbox.store import CLOSED
+
     rig.report("dead")
     actions = _sweeps(rig, _herdr_dead)
     assert actions == [f"pane evidence saved for {rig.agent.name}: pane lookup failed: RuntimeError"]
     assert [row["agent"] for row in _incidents(rig)] == [rig.agent.name]
     assert rig.store.agents(SLUG) == []
     assert (rig.row["state"], rig.row["claimed_by"]) == ("open", "")
+    assert rig.handled == ["execution.exited"]
     assert len(rig.returned) == 1
     settled = rig.inbox.get(rig.item.id)
-    assert (settled.address, settled.state) != (rig.agent.name, rig.item.state)
+    assert settled.address == SEAT
+    assert settled.state not in CLOSED
     assert rig.store.seats.exits([rig.agent.name])[rig.agent.name]
 
 
@@ -175,6 +191,7 @@ def test_a_live_agent_is_never_exited(rig: SimpleNamespace) -> None:
     assert _incidents(rig) == []
     assert [agent.name for agent in rig.store.agents(SLUG)] == [rig.agent.name]
     assert (rig.row["state"], rig.row["claimed_by"]) == ("claimed", rig.agent.name)
+    assert rig.handled == []
     assert rig.returned == []
     kept = rig.inbox.get(rig.item.id)
     assert (kept.address, kept.state) == (rig.agent.name, rig.item.state)

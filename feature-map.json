@@ -6117,7 +6117,7 @@
       "id": "events-sweeps-dead-pane",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-sweep-proofs",
-      "behaviour": "On an events engine swarm whose engineer was seated through next_name and start_execution on the root hive, a pane the hive reports dead is found by the pane evidence sweep, which saves an incident, the hub reconciler exits its execution so the lifecycle drops the agent, reopens its task and returns its slot, and the exits sweep records the exit and moves its open mail off the gone agent.",
+      "behaviour": "On an events engine swarm whose engineer holds a store started execution from next_name and start_execution on the root hive, with the execution started event and spoke claim the hive spoke writes, a pane the hive reports dead is found by the pane evidence sweep, which saves an incident, the hub reconciler hands the lifecycle one execution exited event, so the lifecycle drops the agent, reopens its task and returns its slot, and the exits sweep records the exit and moves its open mail off the gone agent.",
       "seam": "pane_evidence.sweep, Reconciler.poll with Lifecycle.handle, and exits.sweep",
       "tests": [
         "tests/hub/test_sweeps_events_path.py::test_a_dead_pane_is_found_and_its_execution_exited"
