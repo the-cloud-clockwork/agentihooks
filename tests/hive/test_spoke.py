@@ -85,7 +85,10 @@ def rig():
     )
     tasks.request.return_value = request
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500),
     )
     event = Envelope(
         "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
@@ -162,6 +165,7 @@ def test_an_offer_held_at_max_agents_stays_queued_and_a_hive_below_its_cap_takes
     other_runtime.spawn.assert_called_once()
 
 
+@pytest.mark.feature("events-started-working")
 def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging(rig):
     from scripts.events.envelope import Envelope
 
@@ -216,6 +220,7 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
         "hive": "hive-a",
         "name": "agent-a",
         "pane_id": "pane-a",
+        "launched_at": 1_500,
         "harness": "claude",
         "account": "slot-a",
     }

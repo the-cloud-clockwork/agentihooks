@@ -55,6 +55,28 @@ def test_a_counted_start_clears_the_harness_its_earlier_launch_failed_on(rig):
     assert rig.store.failed_harness(SLUG, "t1") == ""
 
 
+@pytest.mark.feature("events-started-working")
+def test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    event = started(admitted)
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "pane_id": "w1:p3", "launched_at": 6_500}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.name, agent.state, agent.pane_id, agent.launched_at) == (admitted["name"], "working", "w1:p3", 6_500)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    event = started(admitted)
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "pane_id": "w1:p3"}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("working", "w1:p3", 7_000)
+
+
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())

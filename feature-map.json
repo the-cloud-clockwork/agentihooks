@@ -6028,6 +6028,18 @@
       ]
     },
     {
+      "id": "events-started-working",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-started-working",
+      "behaviour": "A hive lane spoke puts the pane and the launch time of the agent it spawned on the execution started event, and the hub claim lives reactor on that event moves the admitted agent from starting to working with that pane and launch time inside the fence; a started event from a spoke without a launch time takes the event time.",
+      "seam": "Spoke._spawn building the execution started envelope, and Claims.handle through ExecutionRegistry.set_launch",
+      "tests": [
+        "tests/hub/test_claim_lives.py::test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time",
+        "tests/hub/test_claim_lives.py::test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time",
+        "tests/hive/test_spoke.py::test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging"
+      ]
+    },
+    {
       "id": "swarm-tick-events-orphans",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-orphan-reopen",
