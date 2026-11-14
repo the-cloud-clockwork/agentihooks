@@ -289,6 +289,7 @@ def test_a_draining_member_polls_no_lane_spoke_beats_presence_and_waits(monkeypa
     monkeypatch.setattr(lanes, "run_once", lambda *args: polled.append(args) or ["started"])
     monkeypatch.setattr(lanes, "draining", lambda store, hive: asked.append((store, hive)) or next(state))
     monkeypatch.setattr(lanes, "beat", lambda *args: beaten.append(args))
+    monkeypatch.setattr(lanes, "stop_once", lambda *args: [])
 
     lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(2))
 
