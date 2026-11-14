@@ -58,9 +58,6 @@ REACTORS = Registry()
 
 
 def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
-    from functools import partial
-
-    from scripts.hive import execution_stop
     from scripts.hub.claims import Claims
     from scripts.hub.hive_loss import HiveLoss
     from scripts.hub.inbox_wake import InboxWake
@@ -86,6 +83,6 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
             Readiness(bus, clock=clock).reactor(),
             Preemption(clock=clock).reactor(),
             Pulls(bus, clock=clock).reactor(),
-            LaunchChecks(partial(execution_stop.stop, bus), clock=clock).reactor(),
+            LaunchChecks(bus, clock=clock).reactor(),
         ]
     )

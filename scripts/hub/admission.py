@@ -339,6 +339,14 @@ class Admission:
             if_match={"claimed_by": name},
         )
 
+    def free(self, slug: str, agent: AgentRecord) -> None:
+        """Returns the claimed task of an admitted agent whose hive never started it to open, releasing its hive slot,
+        claim and seat."""
+        from scripts.hive.launch import release
+
+        release(self.store, slug, agent)
+        self._release(slug, agent.task, agent.name)
+
     def failed(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)
         held = self.store.redis.get(key)
@@ -355,10 +363,9 @@ class Admission:
 
     def launched(self, slug: str, request: dict[str, Any]) -> bool:
         """Writes the launch decision the admitted hive reports onto its agent's record, with the overlays and profile
-        decision the hive placed, and, when the decision is new, restarts its hub launch check; False when the hive
-        holds no admission for the offer or another agent now occupies the admitted seat."""
-        from scripts.swarm import launch_check
-
+        decision the hive placed; the hub launch check admission started stays as it is, so a late report never
+        restarts a judged check. False when the hive holds no admission for the offer or another agent now occupies
+        the admitted seat."""
         held = self.store.redis.get(self._key(slug, request))
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
@@ -369,11 +376,7 @@ class Admission:
         launch = request["launch"]
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
         placed = {field: launch[field] for field in account_slots.LAUNCH_PLACEMENT if field in launch}
-        if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
-            return False
-        if any(getattr(occupant, field) != value for field, value in decision.items()):
-            launch_check.begin(self.store, slug, occupant, self.clock(), owner=launch_check.HUB)
-        return True
+        return self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed})
 
 
 OPERATIONS = ("admit", "reopen", "failed", "launched")

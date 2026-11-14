@@ -1,17 +1,23 @@
 import json
+from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.hive import join_report
-from scripts.hub import claims
+from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
+from scripts.events.memory import open_bus
+from scripts.hive import execution_events, execution_stop, join_report
+from scripts.hub.launch_checks import HUNG_MS, STOPPING, LaunchChecks
 from scripts.swarm import commands, launch_check
 from scripts.swarm.store import AgentRecord
 from tests.hub.test_admission import LAUNCH, SLUG, ask
 from tests.hub.test_admission import rig as rig
 from tests.hub.test_claim_lives import started
+
+SKEWED = -600_000
 
 
 @pytest.fixture(autouse=True)
@@ -19,28 +25,36 @@ def root_hive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(commands, "hive_id", lambda: "root")
 
 
-def checker(rig: SimpleNamespace) -> tuple[Any, list[tuple[str, str, str]]]:
-    from scripts.hub.launch_checks import LaunchChecks
-
-    stops: list[tuple[str, str, str]] = []
-
-    def stop(slug: str, agent: AgentRecord, reason: str) -> None:
-        stops.append((slug, agent.name, reason))
-
-    return LaunchChecks(stop, rig.store, clock=lambda: 0), stops
+@pytest.fixture
+def bus() -> Iterator[Any]:
+    opened: Any = open_bus(BusConfig())
+    yield opened
+    opened.close()
 
 
-def start(rig: SimpleNamespace, launched_at: int) -> dict:
-    admitted = rig.admitter.admit(SLUG, ask())
+def checker(rig: SimpleNamespace, bus: Any, stop: Any = execution_stop.stop) -> LaunchChecks:
+    return LaunchChecks(bus, rig.store, rig.admitter, clock=lambda: 0, stop=stop)
+
+
+def spawned(bus: Any, admitted: dict[str, Any]) -> Envelope:
     event = started(admitted)
-    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": launched_at}))
-    return admitted
+    event = replace(event, time=SKEWED, data={**event.data, "claim_revision": 1, "launched_at": SKEWED})
+    value = {"state": "started", "claim_revision": 1, "event": event.to_dict()}
+    bus.for_swarm(SLUG).state("spoke-work").create("claim", json.dumps(value).encode())
+    execution_events.started(bus, event)
+    return event
 
 
-def joined(rig: SimpleNamespace, at: int) -> None:
+def joined(rig: SimpleNamespace) -> None:
     [agent] = rig.store.agents(SLUG)
     checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
-    join_report.start(rig.store.redis, SLUG, agent, "session", checks, {}, at)
+    join_report.start(rig.store.redis, SLUG, agent, "session", checks, {}, SKEWED)
+
+
+def stops(bus: Any) -> list[Envelope]:
+    subject = execution_stop.stop_subject(SLUG, "hive-a")
+    found = bus.for_swarm(SLUG).events.consumer(execution_stop.durable(SLUG, "hive-a"), subject).fetch(10, 0)
+    return [delivery.event for delivery in found]
 
 
 @pytest.mark.feature("events-launch-check-timing")
@@ -53,81 +67,134 @@ def test_admission_starts_a_hub_owned_launch_check(rig: SimpleNamespace) -> None
 
 
 @pytest.mark.feature("events-launch-check-timing")
-def test_a_slow_spawn_is_timed_from_its_reported_launch_not_its_admission(rig: SimpleNamespace) -> None:
-    admitted = start(rig, 200_000)
-    checks, stops = checker(rig)
+def test_a_skewed_slow_spawn_is_timed_on_the_hub_clock_from_its_started_record(rig: SimpleNamespace, bus: Any) -> None:
+    admitted = rig.admitter.admit(SLUG, ask())
+    spawned(bus, admitted)
+    checks = checker(rig, bus)
 
+    assert checks.check(SLUG, 200_000) == []
     assert checks.check(SLUG, 259_999) == []
-    assert stops == []
-    assert admitted["name"] in launch_check.pending(rig.store, SLUG)
+    assert stops(bus) == []
 
     [action] = checks.check(SLUG, 260_000)
 
-    assert stops == [(SLUG, admitted["name"], "its launch check failed on hive_join")]
-    assert action.startswith(f"stopped {admitted['name']} after its launch check failed on hive_join")
-    assert launch_check.pending(rig.store, SLUG) == {}
+    assert action.startswith(f"stop sent for {admitted['name']} because its launch check failed on hive_join")
+    [stop] = stops(bus)
+    assert (stop.type, stop.data["name"], stop.data["reason"]) == (
+        execution_stop.TYPE,
+        admitted["name"],
+        "its launch check failed on hive_join",
+    )
     report = launch_check.report(rig.store, SLUG, "t1")
     assert (report["state"], report["elapsed_ms"]) == ("failed", 60_000)
+    assert launch_check.pending(rig.store, SLUG)[admitted["name"]][STOPPING] == 260_000
 
 
 @pytest.mark.feature("events-launch-check-timing")
-def test_a_launched_agent_that_joined_passes_without_a_stop(rig: SimpleNamespace) -> None:
-    admitted = start(rig, 200_000)
-    joined(rig, 210_000)
-    checks, stops = checker(rig)
-
-    assert checks.check(SLUG, 215_000) == [f"{admitted['name']} passed its launch check in 15 seconds"]
-
-    assert stops == []
-    assert launch_check.pending(rig.store, SLUG) == {}
-    assert launch_check.report(rig.store, SLUG, "t1")["state"] == "passed"
-
-
-@pytest.mark.feature("events-launch-check-hung-spawn")
-def test_a_spawn_that_reports_no_launch_is_stopped_one_launch_window_after_admission(rig: SimpleNamespace) -> None:
-    from scripts.hub.launch_checks import LAUNCH_WINDOW_MS
-
+def test_a_started_agent_that_joined_passes_although_its_launch_time_is_unset(rig: SimpleNamespace, bus: Any) -> None:
     admitted = rig.admitter.admit(SLUG, ask())
-    checks, stops = checker(rig)
+    spawned(bus, admitted)
+    joined(rig)
+    checks = checker(rig, bus)
 
-    assert checks.check(SLUG, 7_000 + LAUNCH_WINDOW_MS - 1) == []
-    assert stops == []
+    assert checks.check(SLUG, 7_000 + HUNG_MS) == [f"{admitted['name']} passed its launch check in 0 seconds"]
 
-    checks.check(SLUG, 7_000 + LAUNCH_WINDOW_MS)
-
-    assert stops == [(SLUG, admitted["name"], "its launch check failed on launched")]
-    report = launch_check.report(rig.store, SLUG, "t1")
-    assert report["misses"] == {
-        "launched": {"expected": "a launch reported within 300 seconds of admission", "actual": "none reported"}
-    }
-    assert report["elapsed_ms"] == LAUNCH_WINDOW_MS
-
-
-@pytest.mark.feature("events-launch-check-hung-spawn")
-def test_a_failed_check_relaunches_its_task_once_then_reports_the_relaunch_spent(rig: SimpleNamespace) -> None:
-    admitted = start(rig, 200_000)
-    checks, _ = checker(rig)
-
-    [first] = checks.check(SLUG, 260_000)
     [agent] = rig.store.agents(SLUG)
-    launch_check.begin(rig.store, SLUG, agent, 260_000, owner=launch_check.HUB)
-    [second] = checks.check(SLUG, 320_000)
-
-    assert first.endswith("its task is relaunched once")
-    assert second.endswith("its one relaunch is spent")
-    assert launch_check.relaunched(rig.store, SLUG, "t1")
-    assert admitted["name"] == agent.name
+    assert agent.launched_at == 0
+    assert launch_check.pending(rig.store, SLUG) == {}
+    assert stops(bus) == []
 
 
 @pytest.mark.feature("events-launch-check-hung-spawn")
-def test_a_check_for_an_agent_no_longer_listed_is_forgotten(rig: SimpleNamespace) -> None:
+def test_a_hung_spawn_is_freed_through_the_real_stop_and_its_task_reopened(rig: SimpleNamespace, bus: Any) -> None:
     admitted = rig.admitter.admit(SLUG, ask())
+    execution_events.prepare(bus, SLUG, admitted["name"], admitted["task"]["execution_generation"])
+    checks = checker(rig, bus)
+
+    assert checks.check(SLUG, 10_000) == []
+    assert checks.check(SLUG, 10_000 + HUNG_MS - 1) == []
+
+    [action] = checks.check(SLUG, 10_000 + HUNG_MS)
+
+    assert action == (
+        f"freed {admitted['name']} and reopened t1 because its launch check failed on launched and no hive started it"
+    )
+    assert rig.store.agents(SLUG) == []
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.rows["t1"]["state"] == "open"
+    assert launch_check.pending(rig.store, SLUG) == {}
+    assert launch_check.report(rig.store, SLUG, "t1")["misses"] == {
+        "launched": {
+            "expected": f"a started execution within {HUNG_MS // 1000} seconds of the hive taking it",
+            "actual": "none started",
+        }
+    }
+
+
+@pytest.mark.feature("events-launch-check-hung-spawn")
+def test_a_spawn_the_hive_never_began_is_judged_from_admission(rig: SimpleNamespace, bus: Any) -> None:
+    rig.admitter.admit(SLUG, ask())
+    checks = checker(rig, bus)
+
+    assert checks.check(SLUG, 7_000 + HUNG_MS - 1) == []
+    [action] = checks.check(SLUG, 7_000 + HUNG_MS)
+
+    assert action.startswith("freed ")
+    assert rig.rows["t1"]["state"] == "open"
+
+
+@pytest.mark.feature("events-launch-check-hung-spawn")
+def test_a_late_launch_report_after_the_verdict_revives_nothing(rig: SimpleNamespace, bus: Any) -> None:
+    rig.admitter.admit(SLUG, ask())
+    checker(rig, bus).check(SLUG, 7_000 + HUNG_MS)
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert rig.store.agents(SLUG) == []
+    assert launch_check.pending(rig.store, SLUG) == {}
+    assert rig.rows["t1"]["state"] == "open"
+
+
+@pytest.mark.feature("events-launch-check-hung-spawn")
+def test_a_raising_stop_keeps_the_check_and_sends_again_one_deadline_later(rig: SimpleNamespace, bus: Any) -> None:
+    admitted = rig.admitter.admit(SLUG, ask())
+    spawned(bus, admitted)
+    calls: list[int] = []
+
+    def refused(bus: Any, slug: str, agent: AgentRecord, reason: str) -> str:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise ConnectionError("bus gone")
+        return execution_stop.stop(bus, slug, agent, reason)
+
+    checks = checker(rig, bus, refused)
+    checks.check(SLUG, 0)
+    with pytest.raises(ConnectionError):
+        checks.check(SLUG, 60_000)
+
+    assert launch_check.pending(rig.store, SLUG)[admitted["name"]][STOPPING] == 60_000
+    assert checks.check(SLUG, 119_999) == []
+    [action] = checks.check(SLUG, 120_000)
+
+    assert action.startswith(f"stop sent for {admitted['name']}")
+    assert len(stops(bus)) == 1
+    assert launch_check.report(rig.store, SLUG, "t1")["at"] == 60_000
+
+
+@pytest.mark.feature("events-launch-check-hung-spawn")
+def test_a_sent_stop_holds_the_check_until_the_exit_drops_the_agent(rig: SimpleNamespace, bus: Any) -> None:
+    admitted = rig.admitter.admit(SLUG, ask())
+    spawned(bus, admitted)
+    checks = checker(rig, bus)
+    checks.check(SLUG, 0)
+    checks.check(SLUG, 60_000)
+
+    assert checks.check(SLUG, 90_000) == []
+    assert admitted["name"] in launch_check.pending(rig.store, SLUG)
+
     rig.store.drop_agent(SLUG, admitted["name"])
-    checks, stops = checker(rig)
 
-    assert checks.check(SLUG, 10**9) == []
-
-    assert stops == []
+    assert checks.check(SLUG, 90_000) == []
     assert launch_check.pending(rig.store, SLUG) == {}
 
 
@@ -139,10 +206,10 @@ def test_the_tick_leaves_a_hub_owned_launch_check_to_the_hub(rig: SimpleNamespac
     entry = {"task": "t1", "at": 7_000, "relaunch": True, "owner": "hub"}
     rig.store.redis.hset(rig.store.key(SLUG, "launch-checks"), admitted["name"], json.dumps(entry))
 
-    def retire(agent: AgentRecord, homes: tuple = ()) -> bool:
+    def retire(agent: AgentRecord, homes: tuple[Any, ...] = ()) -> bool:
         raise AssertionError(f"the tick retired hub owned {agent.name}")
 
-    runtime = SimpleNamespace(bindings=lambda agents: {}, retire=retire, live_names=lambda: set())
+    runtime = SimpleNamespace(bindings=lambda agents: {}, retire=retire, live_names=lambda: set[str]())
 
     assert observe._launch_checks(SLUG, rig.store, rig.ledger, runtime, rig.rows, {}, 10**9) == []
 
@@ -164,31 +231,17 @@ def test_a_launch_report_writes_the_overlays_and_profile_decision_the_hive_place
 
 
 @pytest.mark.feature("events-launch-check-hung-spawn")
-def test_the_hub_registry_polls_launch_checks_that_stop_through_the_execution_stop(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from scripts.events.config import BusConfig
-    from scripts.events.memory import open_bus
-    from scripts.hive import execution_stop
+def test_the_hub_registry_polls_launch_checks_on_the_real_stop(rig: SimpleNamespace, bus: Any) -> None:
     from scripts.hub import registry
 
-    sent: list[tuple[Any, str, str, str]] = []
+    rig.admitter.admit(SLUG, ask())
+    found = {reactor.name: reactor for reactor in registry.configured(bus, lambda: 10**9)}
+    reactor = found["launch-checks"]
+    assert (reactor.subject, reactor.singleton) == ("swarm.*.launch-checks.requested", True)
+    poll: Any = reactor.poll
+    poll.__self__._store, poll.__self__._admission = rig.store, rig.admitter
 
-    def stop(bus: Any, slug: str, agent: AgentRecord, reason: str) -> str:
-        sent.append((bus, slug, agent.name, reason))
-        return execution_stop.SENT
+    poll(lambda: True)
 
-    monkeypatch.setattr(execution_stop, "stop", stop)
-    admitted = rig.admitter.admit(SLUG, ask())
-    bus: Any = open_bus(BusConfig())
-    try:
-        found = {reactor.name: reactor for reactor in registry.configured(bus, lambda: 10**9)}
-        reactor = found["launch-checks"]
-        assert (reactor.subject, reactor.singleton) == ("swarm.*.launch-checks.requested", True)
-        poll: Any = reactor.poll
-        poll.__self__._store = rig.store
-        poll(lambda: True)
-    finally:
-        bus.close()
-
-    assert sent == [(bus, SLUG, admitted["name"], "its launch check failed on launched")]
+    assert rig.store.agents(SLUG) == []
+    assert rig.rows["t1"]["state"] == "open"

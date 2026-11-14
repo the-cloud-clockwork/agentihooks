@@ -1391,7 +1391,9 @@ def test_spoke_passes_hive_slot_ownership_to_the_launch_boundary(rig):
 
 
 @pytest.mark.feature("events-launch-placement")
-def test_a_launch_report_carries_the_placed_overlays_and_the_host_overlays_the_hive_declared(rig, monkeypatch):
+def test_a_launch_report_carries_the_placed_overlays_and_the_host_overlays_the_hive_declared(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import launch_check
 
     monkeypatch.setattr(launch_check, "declared", lambda profile, overlays: [profile, *overlays])
