@@ -30,6 +30,18 @@ def test_steering_keeps_the_plan_link_for_a_task_without_plan_lines():
     assert "Plan: https://example.com/plan" in ledger_workspace.steering(task).splitlines()
 
 
+def test_steering_lists_the_proof_contract_rows_the_task_sets() -> None:
+    task = {
+        "id": "t1",
+        "title": "Build it",
+        "description": "Seams here.",
+        "contract": {"must": "it holds", "check": "ls"},
+    }
+    assert ledger_workspace.steering(task) == (
+        "# t1: Build it\n\nSeams here.\n\nProof contract\n- Must be true: it holds\n- Checked by: ls\n"
+    )
+
+
 def test_the_prompt_names_the_plan_read_command_for_a_sliced_task():
     lines = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", SLICED).splitlines()
     assert plan_read.pointer(SLICED) in lines

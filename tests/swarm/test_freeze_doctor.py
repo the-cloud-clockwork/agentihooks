@@ -94,6 +94,13 @@ def test_watched_attaches_the_named_focuses_and_leaves_other_swarms_untouched(st
     assert freeze.WATCHED == "watched_focus"
 
 
+def test_watched_keeps_the_own_document_when_the_watched_ledger_is_gone(store: RedisStore) -> None:
+    own: dict[str, object] = {"tasks": []}
+    ledger = doctor(store, None)
+    assert freeze.watched("sw", store, ledger, own) is own
+    assert "watched" in ledger.read
+
+
 def test_autoscale_demand_for_the_doctor_counts_no_task_the_watched_focus_holds(store, monkeypatch):
     ledger = doctor(store, [record("plans/a", "focus")])
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
