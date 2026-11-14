@@ -86,13 +86,22 @@ class Lifecycle:
         claims.update(key, json.dumps({**value, "state": "exited"}).encode(), revision)
 
     def _held(self, slug: str, agent: AgentRecord, value: dict[str, Any]) -> bool:
-        """True while an open swarm outage or a pending outage resume holds ``agent`` before its slot returned."""
-        from scripts.swarm import outage, resume
+        """True while a pending outage resume, or an outage the tick shared, holds ``agent`` before its slot returned.
+
+        A shared outage never holds an agent whose task is done or whose exit was deliberate.
+        """
+        from scripts.swarm import deliberate_exit, outage, resume
 
         store = cast(RedisStore, self.store)
         if value.get("returned"):
             return False
-        return bool(outage.held(store, slug, agent.name)) or resume.recovery_pending(store, slug, agent)
+        if resume.recovery_pending(store, slug, agent):
+            return True
+        if not outage.shared_open(store, slug):
+            return False
+        row = self.ledger.task(slug, agent.task) or {}
+        finished = bool(row.get("done")) or row.get("state") == "done"
+        return not finished and not deliberate_exit.recorded(store, slug, agent.name)
 
     def _refund(self, slug: str, agent: AgentRecord) -> None:
         from scripts.swarm import tick

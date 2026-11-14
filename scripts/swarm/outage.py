@@ -24,6 +24,8 @@ PANE_SINCE = "provider-error-since"
 HOLD_LIMIT_MS = 30 * 60 * 1000
 PAST_SPANS = 50
 HELD = {"idle with claim": "idle during outage", "stale claim": "stale during outage"}
+SHARED = "open-outages"
+SHARED_TTL_S = 600
 
 
 def home() -> Path:
@@ -68,6 +70,17 @@ def _history(record: dict) -> list:
 
 def open_records(slug: str) -> list[dict]:
     return [record for record in read(slug).values() if record["ended_at"] is None]
+
+
+def share(store: RedisStore, slug: str) -> None:
+    """Publish the open outage records of ``slug`` to Redis, where a hub on another host reads them."""
+    store.redis.set(store.key(slug, SHARED), json.dumps(open_records(slug)), ex=SHARED_TTL_S)
+
+
+def shared_open(store: RedisStore, slug: str) -> list[dict]:
+    """The open outage records of ``slug`` the tick last published to Redis."""
+    raw = store.redis.get(store.key(slug, SHARED))
+    return json.loads(raw) if raw else []
 
 
 def lines(slug: str) -> list[str]:
