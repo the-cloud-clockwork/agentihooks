@@ -276,6 +276,25 @@ def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
+def test_a_declared_wait_holds_an_idle_admitted_agent_from_retirement(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+) -> None:
+    from scripts.swarm import idle
+
+    store, ledger, rt = env
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+    idle.declare_wait(store.redis, SLUG, agent.name, NOW + 3_600_000, "checks", NOW)
+
+    retire("idle", env, agent)
+
+    assert agent.name not in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
+    assert store.claims(SLUG, "t1") == 1
+    assert sent_stops(bus, agent) == []
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
 @pytest.mark.parametrize("ending", ["mismatch", "idle"])
 def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
