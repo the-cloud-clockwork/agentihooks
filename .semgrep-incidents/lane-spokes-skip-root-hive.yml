@@ -1,0 +1,42 @@
+rules:
+  - id: lane-spokes-skip-root-hive
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive's lane spokes start only in a distributed deployment, so the workstation root hive runs no eng, ci or plan
+      spoke and beats no hive presence. Under the events engine the tick launches no workstation task and every one is
+      offered pinned to the root hive, so those offers get no taker. Start the lane spokes on every hive; refuse only a
+      memory bus.
+    paths:
+      include:
+        - /scripts/hive/
+        - lane-spokes-skip-root-hive.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def serve(...):
+                  ...
+          - pattern-either:
+              - pattern: |
+                  if $W.runs_engine(...):
+                      return ...
+              - pattern: |
+                  if runs_engine(...):
+                      return ...
+              - pattern: |
+                  if $ENV.get(DEPLOYMENT_ENV) != DISTRIBUTED:
+                      return ...
+              - pattern: |
+                  if $ENV.get($W.DEPLOYMENT_ENV) != $W.DISTRIBUTED:
+                      return ...
+      - patterns:
+          - pattern-inside: |
+              def _daemon(...):
+                  ...
+          - pattern-either:
+              - pattern: |
+                  if not $W.runs_engine(...):
+                      ...
+              - pattern: |
+                  if not runs_engine(...):
+                      ...
