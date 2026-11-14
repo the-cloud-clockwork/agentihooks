@@ -768,18 +768,21 @@ def test_another_hive_losing_presence_cannot_settle_this_execution(rig):
     assert rig.returned == []
 
 
-def _hub_admitted(rig: SimpleNamespace, names: list[str] | None, pod_started: int, age: int, **fields: int) -> None:
-    """Record the rig agent as a hub admitted one, with no host target or pane, and save a hive report of it."""
+def _hub_admitted(
+    rig: SimpleNamespace, names: list[str] | None, pod_started: int, age: int, lag: int = 0, **fields: int
+) -> None:
+    """Record the rig agent as a hub admitted one, with no host target or pane, and save a hive report of it observed
+    ``age`` past startup, read ``lag`` later."""
     from scripts.hive import reports
 
     agent = replace(rig.agent, runtime_target={}, pane_id="", **fields)
     rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
     rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
     rig.agent = agent
-    now = 900_000 + reports.STARTUP_MS + age
-    rig.clock.return_value = now
+    observed = 900_000 + reports.STARTUP_MS + age
+    rig.clock.return_value = observed + lag
     rig.report.clear()
-    rig.report.update(observed_at=now, executions={}, panes={}, names=names, started_at=pod_started)
+    rig.report.update(observed_at=observed, executions={}, panes={}, names=names, started_at=pod_started)
     rig.save()
 
 
@@ -802,20 +805,21 @@ def test_a_hub_admitted_agent_its_beating_hive_no_longer_lists_is_settled_once(
 
 @pytest.mark.feature("hub-reap-unlisted-agent")
 @pytest.mark.parametrize(
-    ("names", "pod_started", "age", "fields"),
+    ("names", "pod_started", "age", "lag", "fields"),
     [
-        (["engineer"], 900_001, 0, {}),
-        ([], 900_000, 0, {}),
-        (None, 900_001, 0, {}),
-        ([], 900_001, -1, {}),
-        ([], 850_000, 0, {"started_at": 800_000, "launched_at": 0}),
-        (["engineer@other"], 800_000, -1, {}),
+        (["engineer"], 900_001, 0, 0, {}),
+        ([], 900_000, 0, 0, {}),
+        (None, 900_001, 0, 0, {}),
+        ([], 900_001, -1, 0, {}),
+        ([], 900_001, -1, 2, {}),
+        ([], 850_000, 0, 0, {"started_at": 800_000, "launched_at": 0}),
+        (["engineer@other"], 800_000, -1, 0, {}),
     ],
 )
 def test_a_hub_admitted_agent_its_hive_still_lists_or_cannot_yet_disown_is_preserved(
-    rig: SimpleNamespace, names: list[str] | None, pod_started: int, age: int, fields: dict[str, int]
+    rig: SimpleNamespace, names: list[str] | None, pod_started: int, age: int, lag: int, fields: dict[str, int]
 ) -> None:
-    _hub_admitted(rig, names, pod_started, age, **fields)
+    _hub_admitted(rig, names, pod_started, age, lag, **fields)
     rig.react.poll()
     assert rig.returned == []
     assert rig.row["state"] == "claimed"
