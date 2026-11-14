@@ -6767,3 +6767,8 @@ notes:
 
 if __name__ == "__main__":
     main()
+
+
+def _probe_types_scope() -> int:
+    """Return one."""
+    return 1

@@ -150,8 +150,8 @@ def imported(path: str, source: bytes) -> set[str]:
     return {prefix for name in names for prefix in accumulate(name.split("."), lambda left, right: f"{left}.{right}")}
 
 
-def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
-    """Return every source that imports one of the modules, directly or through another source that does."""
+def importers(head: Path, files: list[str], modules: set[str], transitive: bool = True) -> set[str]:
+    """Return every source that imports one of the modules, directly or, when transitive, through another that does."""
     imports: dict[str, set[str]] = {}
     for path in files:
         try:
@@ -163,6 +163,8 @@ def importers(head: Path, files: list[str], modules: set[str]) -> set[str]:
     for _ in files:
         reached = {path for path, names in imports.items() if path not in found and names & frontier}
         found |= reached
+        if not transitive:
+            break
         frontier = {module_name(path) for path in reached}
     return found
 
