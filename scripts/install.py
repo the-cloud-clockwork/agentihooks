@@ -5332,7 +5332,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         select_launch_credential,
     )
     from scripts.hive.account_slots import execute
-    from scripts.master_claude_login import _token_lock
+    from scripts.master_claude_login import _token_lock, bare_refusal
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5373,16 +5373,16 @@ def cmd_claude(extra_args: list[str]) -> None:
             )
         )
     except RoutingError as exc:
-        if fallback_bare and not route:
+        if not (error := bare_refusal(exc, os.environ) if fallback_bare and not route else str(exc)):
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
             execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
-        print(f"agentihooks: {exc}", file=sys.stderr)
+        print(f"agentihooks: {error}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
-        _write_route_report(report, status="failed", error=str(exc))
+        _write_route_report(report, status="failed", error=error)
         raise SystemExit(3) from exc
     _write_route_report(report, status="routed", account=decision.account, placement="forced" if route else "open")
     print(
