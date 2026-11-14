@@ -968,6 +968,16 @@ def test_the_claim_write_keeps_a_real_branch_and_a_task_kind(
 
 
 @pytest.mark.feature("hub-admission-claim-context")
+def test_an_auto_lane_kind_writes_no_kind(rig: SimpleNamespace) -> None:
+    rig.store.update(SLUG, lanes={"eng": {"kind": "auto"}})
+
+    rig.admitter.admit(SLUG, ask())
+
+    [(_, _, fields, _, _)] = rig.ledger.writes
+    assert set(fields) == {"state", "claimed_by", "workspace"}
+
+
+@pytest.mark.feature("hub-admission-claim-context")
 def test_an_admitted_task_carries_its_territory_overlaps_and_its_group(rig: SimpleNamespace) -> None:
     rig.rows["t1"].update(territory=["scripts/hub"], group_members=["t2", "gone"])
     rig.rows["t2"].update(state="pr", territory=["scripts/hub/admission.py"], description="the ci task")

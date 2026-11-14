@@ -11,6 +11,7 @@
         "tests/hub/test_admission.py::test_a_handed_off_task_carries_its_handoff_and_resolved_envelope",
         "tests/hub/test_admission.py::test_the_claim_write_scaffolds_the_workspace_clears_a_protected_branch_and_sets_the_lane_kind",
         "tests/hub/test_admission.py::test_the_claim_write_keeps_a_real_branch_and_a_task_kind",
+        "tests/hub/test_admission.py::test_an_auto_lane_kind_writes_no_kind",
         "tests/hub/test_admission.py::test_an_admitted_task_carries_its_territory_overlaps_and_its_group"
       ]
     },
