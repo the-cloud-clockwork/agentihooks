@@ -1,0 +1,25 @@
+rules:
+  - id: member-grant-publishes-execution-stop
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive member publish grant that allows swarm subjects without denying the execution stop subjects lets one hive
+      stop another hive's agents, on the logical subject and on its scoped wire form under events. Only the hub
+      controller publishes a stop: give every member publish allow the deny list MEMBER_DENY.
+    paths:
+      include:
+        - /scripts/hive/
+        - member-grant-publishes-execution-stop.py
+    patterns:
+      - pattern-inside: |
+          def member_claims(...):
+              ...
+      - pattern-either:
+          - pattern: '{..., "pub": $PUB, ...}'
+          - pattern: '{**$BASE, ..., "pub": $PUB, ...}'
+      - metavariable-pattern:
+          metavariable: $PUB
+          patterns:
+            - pattern: '{"allow": $ALLOW, ...}'
+            - pattern-not: '{"allow": $ALLOW, "deny": list(MEMBER_DENY)}'
+      - focus-metavariable: $PUB

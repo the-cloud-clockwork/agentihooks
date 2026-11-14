@@ -222,7 +222,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
         "STATE_execution-starts",
         "STATE_inbox",
     )
-    expected = {"swarm.rig.>", "slots.rig.m1"}
+    expected = {"swarm.rig.>", "slots.rig.m1", "exits.rig.m1"}
     from scripts.events.subjects import stream_name
 
     for stream in [
@@ -241,7 +241,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
         expected.update(f"$JS.API.STREAM.{verb}.{stream}" for verb in ("INFO", "MSG.GET", "CREATE"))
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
-    assert set(claims["pub"]) == {"allow"}
+    assert claims["pub"]["deny"] == list(nats_grant.MEMBER_DENY)
     assert set(claims["pub"]["allow"]) == expected
     assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
 

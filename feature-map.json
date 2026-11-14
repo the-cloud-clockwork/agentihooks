@@ -195,6 +195,18 @@
       ]
     },
     {
+      "id": "ci-local-action-checkout-first",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43587437500-0",
+      "behaviour": "Every workflow step that runs a repository local action under always() follows a checkout or action fetch that no earlier failing step can skip, so the evidence upload of a job whose gate fails still finds its action.",
+      "seam": "the step order of every job in the GitHub workflows",
+      "tests": [
+        "tests/test_workflow_local_action_checkout.py::test_every_always_run_local_action_follows_a_checkout_no_failure_can_skip",
+        "tests/test_workflow_local_action_checkout.py::test_a_gate_step_before_checkout_is_flagged",
+        "tests/test_workflow_local_action_checkout.py::test_checkout_first_or_always_provided_actions_pass"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
@@ -2214,6 +2226,17 @@
       ]
     },
     {
+      "id": "swarm-stall-watch-resumed-owner-grace",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-watch-launch-floor",
+      "behaviour": "The stall watch measures a red, green or unmergeable pull request's grace from the later of its owner's start and launch, so a resumed owner keeps its task for the full limit after the resume while a never resumed owner is measured from its start.",
+      "seam": "scripts.swarm.stall_watch.stall_pass through its judged step",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_a_resumed_owner_gets_the_full_limit_from_its_launch",
+        "tests/swarm/test_stall_watch.py::test_a_never_resumed_owner_is_measured_from_its_start"
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
@@ -2385,6 +2408,18 @@
       "seam": "agentihooks swarm status health findings",
       "tests": [
         "tests/swarm/test_health.py::test_a_quiet_claim_names_the_task_its_holder_and_the_quiet_time"
+      ]
+    },
+    {
+      "id": "quiet-gate-resumed-agent-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quiet-gate-launch-time",
+      "behaviour": "The quiet claim gate and the stale claim finding measure a worker from the latest of its progress signals, its start and its launch, so a worker resumed long after its last progress signal is not quiet until thirty minutes after the resume, and a never resumed worker is still measured from its start.",
+      "seam": "scripts.gates.quiet quiet_minutes and quiet_pass",
+      "tests": [
+        "tests/gates/test_quiet.py::test_a_resumed_agent_with_old_progress_is_measured_from_its_launch",
+        "tests/gates/test_quiet.py::test_a_later_progress_signal_still_wins_over_an_older_launch",
+        "tests/gates/test_quiet.py::test_a_never_resumed_agent_is_still_measured_from_its_start"
       ]
     },
     {
@@ -2757,6 +2792,21 @@
       ]
     },
     {
+      "id": "render-no-login-credentials",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-render-no-credentials-link",
+      "behaviour": "A rendered Claude profile home never links the login credentials file to the operator login home unless its chain is the master profile, so engineer, ci and planner sessions cannot read or inherit the master claude ai login while the master keeps its interactive login; a worker home that still holds such a link is stale, and the next render replaces it and drops the link from every older home rendered under the same key.",
+      "seam": "render_claude and its freshness check _claude_fresh in scripts.profiles.render",
+      "tests": [
+        "tests/test_profile_render_login.py::test_a_rendered_engineer_home_has_no_credentials_link_to_the_login_home",
+        "tests/test_profile_render_login.py::test_the_next_render_replaces_a_home_holding_a_credentials_link",
+        "tests/test_profile_render_login.py::test_the_master_home_keeps_its_login_credentials_link",
+        "tests/test_profile_render_login.py::test_a_render_drops_the_link_from_an_older_home_a_running_worker_holds",
+        "tests/test_master_claude_login_isolation.py::test_the_master_login_home_never_touches_the_shared_credential_link",
+        "tests/test_profile_render_login.py::test_the_master_is_named_by_its_chain_with_or_without_the_package_prefix"
+      ]
+    },
+    {
       "id": "hook-redis-reuse",
       "origin": "inventory",
       "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
@@ -2825,6 +2875,19 @@
         "tests/swarm/test_waits.py::test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the_masters_reply",
         "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
         "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
+      ]
+    },
+    {
+      "id": "inbox-push-poisoned-item",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-push-batch-isolate",
+      "behaviour": "An inbox item whose seen check or channel notification always fails is requeued to pending alone and left out of that channel's later claims, and the other items claimed in the same batch, or waiting behind a full batch of such items, still reach the session.",
+      "seam": "scripts.inbox.seen.claim and scripts.inbox.channel._deliver over one claimed batch",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_two_are_pushed",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_the_other_two_are_pushed",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_backoff"
       ]
     },
     {
@@ -3258,40 +3321,6 @@
         "tests/swarm/test_failed_launch_panes.py::test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_then_closed",
         "tests/swarm/test_failed_launch_panes.py::test_status_lists_failed_launches_with_their_lines",
         "tests/swarm/test_failed_launch_panes.py::test_a_route_timeout_without_a_pane_report_closes_its_recorded_pane_after_two_minutes"
-      ]
-    },
-    {
-      "id": "swarm-legacy-outage-recovery-seeding",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-failure",
-      "behaviour": "An engineer that a legacy tick pass claimed and launched keeps its claim through an outage: a provider error holds its idle count without a nudge or retirement, every sender reaches it once after Redis, network or provider recovery, a stalled owner resumes its own conversation within three ticks without a new claim, and a dead engineer resumes its conversation and seat or records why a fresh agent is needed. These tests seed their engineer through the legacy tick spawn because an agent seated through hub admission is reaped as foreign to the hive and its claim dropped, and outage resume rewrites the start time an execution forbids; they move to the events path with task t-events-outage-recovery.",
-      "seam": "scripts.swarm.tick.tick reap, outage recovery and dead resume on an engineer seeded by the legacy tick spawn",
-      "tests": [
-        "tests/swarm/test_outage_hold.py::test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_and_unretired",
-        "tests/swarm/test_outage_hold.py::test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopped",
-        "tests/swarm/test_outage_hold.py::test_a_cleared_provider_error_lets_the_idle_count_run_again",
-        "tests/swarm/test_outage_drill.py::test_channel_delivery_after_redis_recovery_is_confirmed_once",
-        "tests/swarm/test_outage_drill.py::test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once",
-        "tests/swarm/test_outage_drill.py::test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim",
-        "tests/swarm/test_dead_resume.py::test_dead_resume_records_why_a_fresh_agent_is_needed",
-        "tests/swarm/test_dead_resume.py::test_confirmed_dead_process_reaches_resume_before_binding_retirement",
-        "tests/swarm/test_dead_resume.py::test_a_fresh_conversation_starts_a_new_life",
-        "tests/swarm/test_dead_resume.py::test_dead_retiring_agent_retries_retirement",
-        "tests/swarm/test_dead_resume.py::test_recovery_refuses_a_stopped_swarm_or_stale_ownership",
-        "tests/swarm/test_dead_resume.py::test_dead_resume_keeps_a_pull_request_claim_and_checks_ledger_identity",
-        "tests/swarm/test_dead_resume.py::test_recovery_uses_the_configured_compact_limit_or_default",
-        "tests/swarm/test_dead_resume.py::test_missing_conversation_records_the_exact_resume_failure",
-        "tests/swarm/test_dead_resume.py::test_recovery_renews_its_claim_for_the_tick_lease",
-        "tests/swarm/test_dead_resume.py::test_binding_deferral_keeps_retiring_and_reported_agents_in_verification",
-        "tests/swarm/test_dead_resume.py::test_a_legacy_lost_claim_without_a_generation_reopens",
-        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds",
-        "tests/swarm/test_dead_resume.py::test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone",
-        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_one_claim_field_moved",
-        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_a_legacy_claim_without_a_generation",
-        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone",
-        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read",
-        "tests/swarm/test_dead_resume.py::test_reap_reports_every_lost_engineer_in_the_pass",
-        "tests/swarm/test_dead_resume.py::test_a_deliberate_exit_overrides_a_pending_outage_recovery"
       ]
     },
     {
@@ -3810,6 +3839,51 @@
         "tests/test_claude_tool_failure_breaker.py::test_a_payload_with_neither_a_response_nor_an_error_is_not_counted",
         "tests/test_claude_tool_failure_breaker.py::test_a_disabled_breaker_leaves_a_claude_failure_uncounted",
         "tests/test_claude_tool_failure_breaker.py::test_the_installed_claude_settings_carry_the_failure_event"
+      ]
+    },
+    {
+      "id": "swarm-outage-recovery-hub-admitted",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
+      "behaviour": "An owner seated through hub admission on the tick's own hive keeps its claim through an outage hold, frees its seat once a provider error outlasts the hold window, is reached once by every sender after Redis, network or provider recovery and resumes within three ticks without a new claim, and a dead owner reopens on its own seat, records why a fresh agent is needed, or is dropped with its claim life refunded only while it still holds the claim.",
+      "seam": "The tick reaper and outage recovery passes judging an execution backed owner",
+      "tests": [
+        "tests/swarm/test_outage_hold.py::test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_and_unretired",
+        "tests/swarm/test_outage_seat_release.py::test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_outage_stays_open",
+        "tests/swarm/test_outage_drill.py::test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim",
+        "tests/swarm/test_dead_resume.py::test_confirmed_dead_process_reaches_resume_before_binding_retirement",
+        "tests/swarm/test_outage_hold.py::test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopped",
+        "tests/swarm/test_outage_hold.py::test_a_cleared_provider_error_lets_the_idle_count_run_again",
+        "tests/swarm/test_outage_drill.py::test_channel_delivery_after_redis_recovery_is_confirmed_once",
+        "tests/swarm/test_outage_drill.py::test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once",
+        "tests/swarm/test_dead_resume.py::test_dead_resume_records_why_a_fresh_agent_is_needed",
+        "tests/swarm/test_dead_resume.py::test_a_fresh_conversation_starts_a_new_life",
+        "tests/swarm/test_dead_resume.py::test_dead_retiring_agent_retries_retirement",
+        "tests/swarm/test_dead_resume.py::test_recovery_refuses_a_stopped_swarm_or_stale_ownership",
+        "tests/swarm/test_dead_resume.py::test_dead_resume_keeps_a_pull_request_claim_and_checks_ledger_identity",
+        "tests/swarm/test_dead_resume.py::test_recovery_uses_the_configured_compact_limit_or_default",
+        "tests/swarm/test_dead_resume.py::test_missing_conversation_records_the_exact_resume_failure",
+        "tests/swarm/test_dead_resume.py::test_recovery_renews_its_claim_for_the_tick_lease",
+        "tests/swarm/test_dead_resume.py::test_binding_deferral_keeps_retiring_and_reported_agents_in_verification",
+        "tests/swarm/test_dead_resume.py::test_a_legacy_lost_claim_without_a_generation_reopens",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_one_claim_field_moved",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_a_legacy_claim_without_a_generation",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read",
+        "tests/swarm/test_dead_resume.py::test_reap_reports_every_lost_engineer_in_the_pass",
+        "tests/swarm/test_dead_resume.py::test_a_deliberate_exit_overrides_a_pending_outage_recovery"
+      ]
+    },
+    {
+      "id": "swarm-legacy-outage-seat-release-successor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
+      "behaviour": "When an owner's turns still fail after its provider probe passes, it frees its seat one tick after its recovery attempts. The next legacy tick spawn then launches the successor in that seat, carrying a transfer that names the avoided harness and holds a handoff with the pane error. Only the legacy place step launches that successor, and the events hub admission claim carries no handoff text, so this test retires with the legacy launch engine.",
+      "seam": "scripts.swarm.tick.tick outage seat release followed by the legacy place spawn of the successor",
+      "tests": [
+        "tests/swarm/test_outage_seat_release.py::test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts"
       ]
     },
     {
@@ -5762,6 +5836,41 @@
       ]
     },
     {
+      "id": "hive-own-exit-subject",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-exited-own-subject",
+      "behaviour": "A hive reports an execution exit only on its own exit report subject: every hive member credential is refused by the NATS server when it publishes another hive's exit report subject or the shared execution exited subject, and the hub relays a reported exit onto the shared subject the lifecycle reactor reads only when the execution registry places that execution on the reporting hive, so a hive's own exit still drops its agent and reopens its task.",
+      "seam": "scripts.hive.nats_grant.member_claims as enforced by a live NATS server, scripts.hub.exits.handle, and scripts.hive.execution_events.publish driving the hub lifecycle reactor",
+      "tests": [
+        "tests/hive/test_nats_grant.py::test_a_member_credential_reports_an_exit_on_its_own_subject",
+        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_report_an_exit_on_another_subject",
+        "tests/hive/test_nats_grant.py::test_the_hub_credential_serves_every_hive_exit_subject",
+        "tests/hub/test_exits.py::test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub",
+        "tests/hub/test_exits.py::test_the_hub_refuses_an_exit_reported_by_another_hive",
+        "tests/hub/test_exits.py::test_a_hive_on_a_swarm_scoped_bus_reports_its_exit_through_the_hub",
+        "tests/hub/test_exits.py::test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished",
+        "tests/hub/test_exits.py::test_the_hub_refuses_a_malformed_exit_report",
+        "tests/hub/test_exits.py::test_an_exit_report_failing_without_a_message_names_its_error",
+        "tests/hub/test_exits.py::test_the_hub_serves_every_exit_subject_in_its_queue_group",
+        "tests/hub/test_exits.py::test_a_hive_waits_its_exit_timeout_and_marks_the_exit_sent"
+      ]
+    },
+    {
+      "id": "hub-only-execution-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-hub-only-stop",
+      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, the logical subject and its scoped wire form under events, while it still publishes execution started, and the hub controller credential publishes the stop on both forms.",
+      "seam": "scripts.hive.nats_grant.member_claims and controller_claims as enforced by a live NATS server, and the member grant render the grant parity check reads",
+      "rules": [
+        "member-grant-publishes-execution-stop"
+      ],
+      "tests": [
+        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive",
+        "tests/hive/test_nats_grant.py::test_the_hub_credential_publishes_an_execution_stop_for_a_hive",
+        "tests/test_ci_hive_nats_grants.py::test_the_member_grants_render_the_minted_member_claims"
+      ]
+    },
+    {
       "id": "workstation-events-route",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-workstation-events-route",
@@ -6241,14 +6350,63 @@
       "id": "events-launch-check",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check",
-      "behaviour": "Under the events engine, where the legacy place step never runs, the hub starts a launch check with relaunch allowed when a hive reports a launch decision for the agent it admitted that differs from its record, in the same shape the place step writes, so the observe launch checks step judges that agent and a missing hive join report is an enforced miss; a republished decision matching the record, even one naming no harness, starts no second check and a refused report starts none.",
-      "seam": "Admission.launched starting launch_check.begin for the admitted seat occupant",
+      "behaviour": "Under the events engine, where the legacy place step never runs, admission starts a hub owned launch check with relaunch allowed for the agent it admits, so the hub launch checks reactor judges that agent and a missing hive join report is an enforced miss; a hive launch report, first, republished, naming no harness or refused, never starts or restarts a check.",
+      "seam": "Admission._claim starting launch_check.begin with the hub owner, and Admission.launched leaving it untouched",
       "tests": [
         "tests/hub/test_admission.py::test_the_first_launch_decision_starts_a_launch_check_the_tick_retires_and_relaunches_on",
         "tests/hub/test_admission.py::test_a_republished_launch_decision_starts_no_second_launch_check",
         "tests/hub/test_admission.py::test_a_republished_decision_naming_no_harness_starts_no_second_launch_check",
         "tests/hub/test_admission.py::test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join",
         "tests/hub/test_admission.py::test_a_refused_launch_decision_starts_no_launch_check"
+      ]
+    },
+    {
+      "id": "events-launch-check-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "The hub times a hub owned launch check on its own clock alone: the join deadline runs from the poll that first reads the execution's started record, never from admission or a hive reported launch time, so a hive clock far behind the hub never fails a join; a started worker whose join report is graded passes at once even while its launch time is unset, and a worker still missing its join report a full deadline after that poll fails and is stopped.",
+      "seam": "LaunchChecks.check reading execution_stop.started, and Admission._claim starting launch_check.begin with the hub owner",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_admission_starts_a_hub_owned_launch_check",
+        "tests/hub/test_launch_checks.py::test_a_skewed_slow_spawn_is_timed_on_the_hub_clock_from_its_started_record",
+        "tests/hub/test_launch_checks.py::test_a_started_agent_that_joined_passes_although_its_launch_time_is_unset"
+      ]
+    },
+    {
+      "id": "events-launch-check-hung-spawn",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "The hub registry polls the launch checks. A hub admitted worker with no started execution fails one spawn timeout and one deadline after the hive began it, or after admission when the hive never began it; the real execution stop answers unknown for it, so the hub releases its hive slot, claim and seat and reopens its task, and neither a later launch report nor a redelivered offer revives the dropped admission, because admission drops a held admission whose agent is no longer listed. A failed started worker gets a stop to its hive and its check is held until its exit drops the agent; a raising stop leaves the check stopping and sends again one deadline later.",
+      "seam": "LaunchChecks.check, _halt and hung on execution_stop.stop and Admission.free, wired in the hub registry",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_a_hung_spawn_is_freed_through_the_real_stop_and_its_task_reopened",
+        "tests/hub/test_launch_checks.py::test_a_spawn_the_hive_never_began_is_judged_from_admission",
+        "tests/hub/test_launch_checks.py::test_a_late_launch_report_after_the_verdict_revives_nothing",
+        "tests/hub/test_launch_checks.py::test_a_redelivered_offer_after_a_free_never_answers_the_dropped_admission",
+        "tests/hub/test_launch_checks.py::test_a_raising_stop_keeps_the_check_and_sends_again_one_deadline_later",
+        "tests/hub/test_launch_checks.py::test_a_sent_stop_holds_the_check_until_the_exit_drops_the_agent",
+        "tests/hub/test_launch_checks.py::test_the_hub_registry_polls_launch_checks_on_the_real_stop"
+      ]
+    },
+    {
+      "id": "events-launch-check-tick-filter",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "The tick launch checks step judges only legacy launch checks: a hub owned check stays pending for the hub and the tick neither retires its worker through the local runtime nor drops its record.",
+      "seam": "the observe launch checks step filtering pending checks by owner",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_the_tick_leaves_a_hub_owned_launch_check_to_the_hub"
+      ]
+    },
+    {
+      "id": "events-launch-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
+      "behaviour": "A hive launch report carries the overlays the hive placed and its profile decision with the host overlays it declared, and the hub writes both onto the admitted agent's record as legacy hive orders do, so the expected overlays match the legacy path.",
+      "seam": "Spoke._spawn launch report, Lanes.launched and Admission.launched",
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_launch_report_carries_the_placed_overlays_and_the_host_overlays_the_hive_declared",
+        "tests/hub/test_launch_checks.py::test_a_launch_report_writes_the_overlays_and_profile_decision_the_hive_placed"
       ]
     },
     {
@@ -6695,6 +6853,11 @@
       "id": "monitor-every-interface-hive",
       "reason": "The HOME monitor no longer reads herdr pane counts; rows and the total count registered swarm seats, covered by monitor-counts-registered-seats.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506"
+    },
+    {
+      "id": "swarm-legacy-outage-recovery-seeding",
+      "reason": "Its outage hold, drill and dead resume tests now seat their owners through hub admission and are covered by swarm-outage-recovery-hub-admitted.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery"
     }
   ]
 }

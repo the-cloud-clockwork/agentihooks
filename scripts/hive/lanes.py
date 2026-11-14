@@ -58,7 +58,8 @@ class LaneTasks:
         self._ask("failed", event, harness=harness, reason=reason)
 
     def launched(self, event: Envelope, placed: Any) -> None:
-        decision = {field: getattr(placed, field) for field in account_slots.LAUNCH_DECISION}
+        fields = (*account_slots.LAUNCH_DECISION, *account_slots.LAUNCH_PLACEMENT)
+        decision = {field: getattr(placed, field) for field in fields if hasattr(placed, field)}
         self._ask("launched", event, launch=decision)  # pyright: ignore[reportUnknownMemberType]
 
 
