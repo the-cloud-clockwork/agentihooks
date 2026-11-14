@@ -1,6 +1,21 @@
 {
   "features": [
     {
+      "id": "hive-join-heartbeat-ends-restarted-member-reports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-ghost-agent-heartbeat",
+      "behaviour": "A join report records the hive member that runs its agent and that member's process epoch, the boot and the clock tick its process 1 started at; the hive heartbeat ends, instead of refreshing, every running report its own member wrote under an earlier epoch, since a pod restart killed that agent, so the hive list and the drain stop counting it, while reports of the current epoch, of other members and with no recorded epoch keep their heartbeat.",
+      "seam": "join_report.start and join_report.heartbeat, called by the hive daemon beat, read back through join_report.listing and join_report.live",
+      "tests": [
+        "tests/hive/test_join_report_restart.py::test_a_restarted_member_ends_the_reports_its_agents_wrote_before_the_restart",
+        "tests/hive/test_join_report_restart.py::test_a_report_is_kept_while_either_epoch_is_unknown_or_they_match",
+        "tests/hive/test_join_report_restart.py::test_a_join_report_records_its_member_and_that_members_epoch",
+        "tests/hive/test_join_report_restart.py::test_the_epoch_names_the_boot_and_the_tick_process_one_started_at",
+        "tests/hive/test_join_report_restart.py::test_an_unreadable_epoch_is_empty",
+        "tests/hive/test_join_report_restart.py::test_the_local_epoch_reads_this_hosts_boot_id_and_process_one"
+      ]
+    },
+    {
       "id": "swarm-resume-keeps-execution-identity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-started-at-sites",
