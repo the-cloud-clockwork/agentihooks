@@ -184,6 +184,39 @@ def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_sea
     assert rt.masters == []
 
 
+@pytest.mark.feature("operator-master-up-resume-keeps-seat")
+def test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from argparse import Namespace
+
+    from scripts.swarm import cli
+
+    store, _, rt = up
+    name = store.next_name("sw", MASTER, 5)
+    started = store.start_execution(
+        "sw",
+        AgentRecord(
+            name,
+            MASTER,
+            MASTER,
+            pane_id="w1:m1",
+            harness="claude",
+            conversation_id="conv-3",
+            seat="master@sw",
+            started_at=5,
+        ),
+    )
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--last") == 0
+    assert printed(capsys) == {"master": name, "pane": "w2:m9", "seat": "master@sw", "choice": "last"}
+    [record] = masters(store)
+    assert (record.name, record.pane_id, record.state) == (name, "w2:m9", "working")
+    assert (record.execution_id, record.started_at) == (started.execution_id, 5)
+    assert store.seats.occupant("master@sw").occupant == name
+    assert cli._me(store, Namespace(slug="sw", name=name)).name == name
+
+
 def test_choice_new_launches_a_fresh_master_reading_the_seat_handoff_recap_and_learned(up, monkeypatch, capsys):
     store, ledger, rt = up
     gone_master(store)
