@@ -10,9 +10,9 @@
         "tests/swarm/test_resume.py::test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the_restart_as_launch"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
@@ -2246,9 +2246,9 @@
         "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read",
         "tests/swarm/test_dead_resume.py::test_reap_reports_every_lost_engineer_in_the_pass",
         "tests/swarm/test_dead_resume.py::test_a_deliberate_exit_overrides_a_pending_outage_recovery"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
@@ -6532,6 +6532,11 @@
       "id": "monitor-every-interface-hive",
       "reason": "The HOME monitor no longer reads herdr pane counts; rows and the total count registered swarm seats, covered by monitor-counts-registered-seats.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506"
+    },
+    {
+      "id": "swarm-legacy-outage-recovery-seeding",
+      "reason": "Its outage hold, drill and dead resume tests now seat their owners through hub admission and are covered by swarm-outage-recovery-hub-admitted.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery"
     }
   ]
 }
