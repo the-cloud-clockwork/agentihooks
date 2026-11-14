@@ -28,6 +28,9 @@ class TestCheckProfile:
         assert [t["target"] for t in result["targets"]] == ["claude"]
 
     def test_reports_every_installed_target(self, tmp_path):
+        """Headline follows install_target, so `status` speaks for the target the operator last installed rather than
+        always for claude.
+        """
         result = self._check(
             tmp_path,
             {
@@ -41,12 +44,11 @@ class TestCheckProfile:
             },
         )
         assert [t["target"] for t in result["targets"]] == ["claude", "codex"]
-        # Headline follows install_target, so `status` speaks for the target
-        # the operator last installed rather than always for claude.
         assert result["name"] == "anton"
         assert result["settings_profile"] == "lean"
 
     def test_linked_profile_names_the_targets_carrying_it(self, tmp_path):
+        """Divergence is visible, not collapsed."""
         result = self._check(
             tmp_path,
             {
@@ -56,7 +58,7 @@ class TestCheckProfile:
         )
         lp = result["linked_profiles"][0]
         assert lp["in_chain"] is True
-        assert lp["in_targets"] == ["claude"]  # divergence is visible, not collapsed
+        assert lp["in_targets"] == ["claude"]
 
     def test_legacy_flat_state_still_reads(self, tmp_path):
         """Pre-multi-target state files must not regress to '(not installed)'."""
@@ -95,14 +97,13 @@ class TestCheckHooks:
 
 class TestCheckPython:
     def test_venv_exists(self, tmp_path):
-
+        """Create a fake settings.json with hook commands pointing to our python."""
         from scripts.status_checker import check_python
 
         venv_bin = tmp_path / ".venv" / "bin"
         venv_bin.mkdir(parents=True)
         (venv_bin / "python3").write_text("#!/usr/bin/env python3")
 
-        # Create a fake settings.json with hook commands pointing to our python
         claude_home = tmp_path / ".claude"
         claude_home.mkdir()
         fake_python = str(venv_bin / "python3")
@@ -125,9 +126,9 @@ class TestCheckPython:
             assert "3.12" in result.get("version", "")
 
     def test_no_python_in_settings(self, tmp_path):
+        """No settings.json → no Python path extractable."""
         from scripts.status_checker import check_python
 
-        # No settings.json → no Python path extractable
         with patch("scripts.status_checker.CLAUDE_HOME", tmp_path):
             result = check_python()
             assert result["ok"] is False
@@ -154,12 +155,12 @@ class TestCheckRedis:
 
 class TestCheckGuardrails:
     def test_all_enabled(self):
+        """Config values are module constants read at import — patch the config attributes directly (patching os.environ
+        would not reload them). context_compression is active only when scope == "all" (the default "refresh" is a
+        no-op since the context-refresh path was removed).
+        """
         from scripts.status_checker import check_guardrails
 
-        # config values are module constants read at import — patch the config
-        # attributes directly (patching os.environ would not reload them).
-        # context_compression is active only when scope == "all" (the default
-        # "refresh" is a no-op since the context-refresh path was removed).
         with (
             patch("hooks.config.BASH_FILTER_ENABLED", True),
             patch("hooks.config.FILE_READ_CACHE_ENABLED", True),
@@ -332,11 +333,6 @@ class TestRunAllChecks:
         with patch("hooks._redis.get_redis", return_value=None):
             results = run_all_checks(session_id="test-sess")
             assert "session" in results
-
-
-# ---------------------------------------------------------------------------
-# P0.4 — agentihooks doctor --debug-hook
-# ---------------------------------------------------------------------------
 
 
 class TestHookInjectionProbe:

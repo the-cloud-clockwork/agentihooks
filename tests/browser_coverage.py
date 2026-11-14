@@ -124,15 +124,17 @@ def drives_browser(root: Path, test: str) -> bool:
 
 
 def track_greenlets(config, path: Path) -> None:
+    """Greenlet tracking runs a Python lookup on every call and return, so only test files that drive Playwright get it.
+
+    Only this thread's tracer changes: restarting coverage would stop tracing threads that are already running. Each
+    item starts at the same depth with no measured frame live, so each mode resumes a stack that still matches.
+    """
     controller = getattr(config.pluginmanager.getplugin("_cov"), "cov_controller", None)
     if controller is None or not controller.started:
         return
     import greenlet
 
-    # Greenlet tracking runs a Python lookup on every call and return, so only test files that drive Playwright get it.
     browser = drives_browser(config.rootpath, path.relative_to(config.rootpath).as_posix())
-    # Only this thread's tracer changes: restarting coverage would stop tracing threads that are already running.
-    # Each item starts at the same depth with no measured frame live, so each mode resumes a stack that still matches.
     sys.gettrace().concur_id_func = greenlet.getcurrent if browser else None
 
 
@@ -143,8 +145,9 @@ def pytest_runtest_protocol(item, nextitem):
 
 @pytest.hookimpl(wrapper=True)
 def pytest_load_initial_conftests(early_config, parser, args):
-    # xdist starts each worker with the controller's -n, so pytest-cov starts a controller there that erases every
-    # .coverage.* file as it starts; a worker that replaces a crashed one would delete the live workers' data.
+    """Xdist starts each worker with the controller's -n, so pytest-cov starts a controller there that erases every
+    .coverage.* file as it starts; a worker that replaces a crashed one would delete the live workers' data.
+    """
     if os.environ.get("PYTEST_XDIST_WORKER"):
         early_config.known_args_namespace.cov_append = True
     return (yield)

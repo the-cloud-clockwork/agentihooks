@@ -267,6 +267,7 @@ def test_a_kept_split_wider_than_the_shard_limit_is_cut_again(tmp_path):
 
 
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
+    """A killer the stats never timed costs as much as the slowest timed test."""
     from types import SimpleNamespace
 
     from scripts.ci_mutation.killers import KillMemory
@@ -295,7 +296,6 @@ def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_i
         }
     ]
     traced = 5.6 + 1.25 * 202.0
-    # A killer the stats never timed costs as much as the slowest timed test.
     unmeasured = 5.6 + 1.25 * 200.0
     assert measured_costs(names, results, memory) == pytest.approx(
         {names[0]: 8.1, names[1]: traced, names[2]: traced, names[3]: unmeasured}
@@ -1424,7 +1424,7 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
         return None, ""
 
     def bases(*args):
-        # The record read is already running while the bases are worked out.
+        """The record read is already running while the bases are worked out."""
         assert not changed or started.wait(10)
         return ["base"]
 

@@ -1,4 +1,7 @@
-"""Tests for scripts/install.py — loadenv, mcp-lib, interactive uninstall."""
+"""Tests for scripts/install.py — loadenv, mcp-lib, interactive uninstall.
+
+Add scripts/ to path so we can import install directly.
+"""
 
 import argparse
 import json
@@ -8,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add scripts/ to path so we can import install directly
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
@@ -712,13 +714,9 @@ class TestInitTargets:
         assert [args.install_target for args in calls] == ["claude", "codex"]
 
 
-# ---------------------------------------------------------------------------
-# _cmd_loadenv / bashrc block management
-# ---------------------------------------------------------------------------
-
-
 class TestLoadenvBashrcBlock:
     def test_adds_block_when_absent(self, tmp_path):
+        """Function is defined AND auto-called."""
         bashrc = tmp_path / ".bashrc"
         env_file = tmp_path / ".env"
         env_file.write_text("KEY=val\n")
@@ -734,7 +732,6 @@ class TestLoadenvBashrcBlock:
         assert "# === agentihooks ===" in content
         assert "agentienv()" in content
         assert str(env_file) in content
-        # Function is defined AND auto-called
         assert "\nagentienv\n" in content
         assert "# === end-agentihooks ===" in content
 
@@ -787,11 +784,6 @@ class TestLoadenvBashrcBlock:
         assert exc.value.code == 1
 
 
-# ---------------------------------------------------------------------------
-# _find_requirements_files
-# ---------------------------------------------------------------------------
-
-
 class TestFindRequirementsFiles:
     def test_finds_in_state_dir(self, tmp_path):
         req = tmp_path / "requirements.txt"
@@ -824,11 +816,6 @@ class TestFindRequirementsFiles:
             with patch.object(install, "_state_get_mcp_lib", return_value=None):
                 found = install._find_requirements_files()
         assert found == []
-
-
-# ---------------------------------------------------------------------------
-# _detect_venv
-# ---------------------------------------------------------------------------
 
 
 class TestDetectVenv:
@@ -984,11 +971,6 @@ class TestDetectVenv:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# _deep_merge
-# ---------------------------------------------------------------------------
-
-
 class TestDeepMerge:
     def test_simple_values_override_wins(self):
         base = {"model": "sonnet", "flag": True}
@@ -1004,6 +986,10 @@ class TestDeepMerge:
         assert result["env"] == {"A": "1", "B": "99", "C": "3"}
 
     def test_hooks_arrays_append(self):
+        """PreToolUse: base + profile appended.
+
+        Stop: untouched.
+        """
         base = {
             "hooks": {
                 "PreToolUse": [{"hooks": [{"command": "python -m hooks"}]}],
@@ -1016,11 +1002,9 @@ class TestDeepMerge:
             }
         }
         result = install._deep_merge(base, override)
-        # PreToolUse: base + profile appended
         assert len(result["hooks"]["PreToolUse"]) == 2
         assert result["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "python -m hooks"
         assert result["hooks"]["PreToolUse"][1]["hooks"][0]["command"] == "my-linter.sh"
-        # Stop: untouched
         assert len(result["hooks"]["Stop"]) == 1
 
     def test_permissions_allow_replaced(self):
@@ -1049,15 +1033,11 @@ class TestDeepMerge:
         assert len(base["hooks"]["PreToolUse"]) == 1
 
 
-# ---------------------------------------------------------------------------
-# _prompt_install_requirements
-# ---------------------------------------------------------------------------
-
-
 class TestPromptInstallRequirements:
     def test_skips_when_no_files(self, tmp_path):
+        """Should not raise."""
         with patch.object(install, "_find_requirements_files", return_value=[]):
-            install._prompt_install_requirements()  # should not raise
+            install._prompt_install_requirements()
 
     def test_skips_when_uv_missing(self, tmp_path, capsys):
         req = tmp_path / "requirements.txt"
@@ -1152,11 +1132,6 @@ class TestPromptInstallRequirements:
         assert "failed" in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------------------
-# _state_set_mcp_lib / _state_get_mcp_lib
-# ---------------------------------------------------------------------------
-
-
 class TestMcpLibState:
     def test_round_trip(self, tmp_path):
         state_json = tmp_path / "state.json"
@@ -1173,11 +1148,6 @@ class TestMcpLibState:
         with patch.object(install, "STATE_JSON", state_json):
             result = install._state_get_mcp_lib()
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _cmd_mcp_lib
-# ---------------------------------------------------------------------------
 
 
 class TestCmdMcpLib:
@@ -1243,6 +1213,7 @@ class TestCmdMcpLib:
         assert "Using saved MCP library" in capsys.readouterr().out
 
     def test_skips_unreadable_json(self, tmp_path):
+        """Should not raise."""
         (tmp_path / "bad.json").write_text("not json{{{")
         self._make_mcp_file(tmp_path, "good.json", {"server-a": {}})
         with (
@@ -1251,7 +1222,7 @@ class TestCmdMcpLib:
             patch("builtins.input", return_value="1"),
             patch.object(install, "manage_user_mcp"),
         ):
-            install._cmd_mcp_lib(tmp_path)  # should not raise
+            install._cmd_mcp_lib(tmp_path)
 
     def test_eof_aborts(self, tmp_path):
         self._make_mcp_file(tmp_path, "a.json", {"server-a": {}})
@@ -1274,11 +1245,6 @@ class TestCmdMcpLib:
         ):
             install._cmd_mcp_lib(tmp_path)
         assert exc.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# _cmd_mcp_interactive_uninstall
-# ---------------------------------------------------------------------------
 
 
 class TestInteractiveUninstall:
@@ -1354,11 +1320,6 @@ class TestInteractiveUninstall:
         assert exc.value.code == 0
 
 
-# ---------------------------------------------------------------------------
-# Init idempotency — profile recall from state.json
-# ---------------------------------------------------------------------------
-
-
 class TestInitProfileRecall:
     """Verify that init reuses stored profile/settings_profile from state.json."""
 
@@ -1369,7 +1330,10 @@ class TestInitProfileRecall:
         return {"targets": {"global": entry}}
 
     def test_recalls_profile_from_state(self):
-        """When no CLI flag or env var, init uses profile from state.json."""
+        """When no CLI flag or env var, init uses profile from state.json.
+
+        Remove AGENTIHOOKS_PROFILE if set.
+        """
         import argparse
 
         state = self._make_state("anton")
@@ -1387,7 +1351,6 @@ class TestInitProfileRecall:
             patch.object(install, "install_global") as mock_install,
             patch.dict("os.environ", {}, clear=False),
         ):
-            # Remove AGENTIHOOKS_PROFILE if set
             import os
 
             os.environ.pop("AGENTIHOOKS_PROFILE", None)
@@ -1679,13 +1642,9 @@ class TestInitProfileRecall:
             assert called_args.profile == "anton"
 
 
-# ---------------------------------------------------------------------------
-# query_active_profile — settings_profile reporting
-# ---------------------------------------------------------------------------
-
-
 class TestQueryActiveProfile:
     def test_shows_settings_profile(self, capsys):
+        """No local .agentihooks.json."""
         state = {
             "targets": {
                 "global": {
@@ -1698,7 +1657,7 @@ class TestQueryActiveProfile:
         }
         with (
             patch.object(install, "_load_state", return_value=state),
-            patch("pathlib.Path.exists", return_value=False),  # no local .agentihooks.json
+            patch("pathlib.Path.exists", return_value=False),
         ):
             install.query_active_profile()
         out = capsys.readouterr().out
@@ -1725,16 +1684,14 @@ class TestQueryActiveProfile:
         assert "settings:" not in out
 
 
-# ---------------------------------------------------------------------------
-# link-profile feature
-# ---------------------------------------------------------------------------
-
-
 class TestLinkProfile:
     """Tests for `agentihooks link-profile <path>` and friends."""
 
     def _setup(self, tmp_path: Path):
-        """Create a fixture with a fresh STATE_JSON, CLAUDE_HOME, PROFILES_DIR, no bundle."""
+        """Create a fixture with a fresh STATE_JSON, CLAUDE_HOME, PROFILES_DIR, no bundle.
+
+        Pre-existing built-in 'anton' fixture.
+        """
         state_json = tmp_path / "state.json"
         claude_home = tmp_path / ".claude"
         claude_home.mkdir()
@@ -1742,11 +1699,8 @@ class TestLinkProfile:
             (claude_home / sub).mkdir()
         profiles_dir = tmp_path / "profiles"
         profiles_dir.mkdir()
-        # Pre-existing built-in 'anton' fixture
         (profiles_dir / "anton").mkdir()
         return state_json, claude_home, profiles_dir
-
-    # --- _resolve_profile_dir tier ordering ---
 
     def test_resolver_prefers_builtin_over_linked(self, tmp_path):
         state_json, _, profiles_dir = self._setup(tmp_path)
@@ -1788,8 +1742,6 @@ class TestLinkProfile:
             assert install._profile_source_label("brain") == "linked"
             assert install._profile_source_label("nope") == "unknown"
 
-    # --- collision guard ---
-
     def test_collision_with_builtin_rejects(self, tmp_path):
         state_json, _, profiles_dir = self._setup(tmp_path)
         external = tmp_path / "external" / "anton"
@@ -1803,9 +1755,8 @@ class TestLinkProfile:
             install._link_profile_link(external, name=None, append=True, run_init=False)
         assert exc.value.code == 1
 
-    # --- happy path link ---
-
     def test_link_appends_to_chain_and_writes_state(self, tmp_path):
+        """--no-init should bump installed_at."""
         state_json, _, profiles_dir = self._setup(tmp_path)
         external = tmp_path / "external" / "brain"
         external.mkdir(parents=True)
@@ -1820,10 +1771,10 @@ class TestLinkProfile:
         assert result["targets"]["global"]["claude"]["profile"] == "anton,brain"
         assert result["linked_profiles"][0]["name"] == "brain"
         assert result["linked_profiles"][0]["path"] == str(external)
-        # --no-init should bump installed_at
         assert "installed_at" in result["targets"]["global"]["claude"]
 
     def test_link_idempotent_re_link(self, tmp_path):
+        """No duplicate in chain."""
         state_json, _, profiles_dir = self._setup(tmp_path)
         external = tmp_path / "external" / "brain"
         external.mkdir(parents=True)
@@ -1842,11 +1793,8 @@ class TestLinkProfile:
         ):
             install._link_profile_link(external, name=None, append=True, run_init=False)
         result = json.loads(state_json.read_text())
-        # No duplicate in chain
         assert result["targets"]["global"]["claude"]["profile"] == "anton,brain"
         assert len(result["linked_profiles"]) == 1
-
-    # --- unlink ---
 
     def test_unlink_strips_chain(self, tmp_path):
         state_json, _, profiles_dir = self._setup(tmp_path)
@@ -1901,10 +1849,13 @@ class TestLinkProfile:
             install._link_profile_unlink("nope", run_init=False)
         assert exc.value.code == 1
 
-    # --- _sweep_symlinks_into ---
-
     def test_sweep_removes_dangling_symlink(self, tmp_path):
-        """Q3 regression: dangling symlink whose target was deleted alongside the linked profile."""
+        """Q3 regression: dangling symlink whose target was deleted alongside the linked profile.
+
+        Delete the external profile dir entirely → link is now dangling.
+
+        Dangling.
+        """
         state_json, claude_home, _ = self._setup(tmp_path)
         external = tmp_path / "external" / "brain"
         target = external / ".claude" / "rules" / "brain-only.md"
@@ -1912,31 +1863,34 @@ class TestLinkProfile:
         target.write_text("# brain rule")
         link = claude_home / "rules" / "brain-only.md"
         link.symlink_to(target)
-        # Delete the external profile dir entirely → link is now dangling
         import shutil
 
         shutil.rmtree(external)
-        assert link.is_symlink() and not link.exists()  # dangling
+        assert link.is_symlink() and not link.exists()
         with patch.object(install, "CLAUDE_HOME", claude_home):
             install._sweep_symlinks_into(external)
         assert not link.exists() and not link.is_symlink()
 
     def test_sweep_preserves_unrelated_symlinks(self, tmp_path):
+        """Sweep against an unrelated dir.
+
+        Untouched.
+        """
         state_json, claude_home, _ = self._setup(tmp_path)
         unrelated = tmp_path / "elsewhere" / "rule.md"
         unrelated.parent.mkdir(parents=True)
         unrelated.write_text("# elsewhere")
         link = claude_home / "rules" / "rule.md"
         link.symlink_to(unrelated)
-        # Sweep against an unrelated dir
         with patch.object(install, "CLAUDE_HOME", claude_home):
             install._sweep_symlinks_into(tmp_path / "external" / "brain")
-        assert link.exists()  # untouched
-
-    # --- _resolve_profile_chain stale-path resilience ---
+        assert link.exists()
 
     def test_resolve_chain_drops_missing_continues(self, tmp_path, capsys):
-        """Q6 regression: stale linked path must not brick the chain — surviving members proceed."""
+        """Q6 regression: stale linked path must not brick the chain — surviving members proceed.
+
+        Hint included.
+        """
         state_json, _, profiles_dir = self._setup(tmp_path)
         state_json.write_text(json.dumps({"linked_profiles": [{"name": "brain", "path": "/nonexistent/path"}]}))
         with (
@@ -1948,12 +1902,7 @@ class TestLinkProfile:
         assert len(result) == 1
         assert result[0][0] == "anton"
         captured = capsys.readouterr().out
-        assert "link-profile unlink brain" in captured  # hint included
-
-
-# ---------------------------------------------------------------------------
-# B1 — init --link-profile NAME=PATH (CLI consolidation)
-# ---------------------------------------------------------------------------
+        assert "link-profile unlink brain" in captured
 
 
 class TestInitLinkProfileFlag:
@@ -1980,6 +1929,10 @@ class TestInitLinkProfileFlag:
         return ns
 
     def test_single_link_profile_invokes_helper(self, tmp_path):
+        """Helper was called with the resolved directory and the chosen alias.
+
+        Global install still runs.
+        """
         external = tmp_path / "ext-profile"
         external.mkdir()
         (external / "profile.yml").write_text("name: ext-profile\n")
@@ -1991,13 +1944,12 @@ class TestInitLinkProfileFlag:
             patch.object(install, "_link_profile_link") as mock_link,
         ):
             install.cmd_init_unified(args)
-        # Helper was called with the resolved directory and the chosen alias.
         assert mock_link.called
         call = mock_link.call_args
         assert call.args[0] == external.resolve()
         assert call.kwargs["name"] == "foo"
         assert call.kwargs["run_init"] is False
-        assert mock_install.called  # global install still runs
+        assert mock_install.called
 
     def test_multiple_link_profiles(self, tmp_path):
         ext1 = tmp_path / "p1"
@@ -2080,11 +2032,6 @@ class TestInitInsideRenderedHome:
         assert mock_install.call_args.args[0].profile == "anton"
 
 
-# ---------------------------------------------------------------------------
-# B2 — bundle auto-discover hint
-# ---------------------------------------------------------------------------
-
-
 class TestBundleDiscoverHint:
     def test_prints_env_var_candidate_when_valid(self, tmp_path, monkeypatch, capsys):
         bundle = tmp_path / "mybundle"
@@ -2103,19 +2050,13 @@ class TestBundleDiscoverHint:
         assert "agentihooks init --bundle" in out
 
     def test_does_not_mutate_state(self, tmp_path, monkeypatch):
-        # Read-only: must NOT touch state.json.
+        """Read-only: must NOT touch state.json."""
         sj = tmp_path / "state.json"
         sj.write_text(json.dumps({"version": "1.0", "targets": {"global": {"profile": "anton"}}}))
         monkeypatch.setattr(install, "STATE_JSON", sj)
         before = sj.read_text()
         install._print_bundle_discover_hint(profile_hint="anton")
         assert sj.read_text() == before
-
-
-# ---------------------------------------------------------------------------
-# CLAUDE.md ownership detection — uninstall must remove real files, not only
-# legacy symlinks (regression: install writes a real file for WSL path safety)
-# ---------------------------------------------------------------------------
 
 
 class TestClaudeMdManagedDetection:
@@ -2133,7 +2074,7 @@ class TestClaudeMdManagedDetection:
         assert install._claude_md_is_managed(cm) is True
 
     def test_real_file_with_manifesto_marker_is_managed(self, tmp_path, monkeypatch):
-        # state.json predates managed_claude_md → content marker is the fallback
+        """State.json predates managed_claude_md → content marker is the fallback."""
         self._wire(tmp_path, monkeypatch)
         cm = tmp_path / "CLAUDE.md"
         cm.write_text(f"prompt\n<!-- {install._CLAUDE_MD_MANAGED_MARKER} -->\n")
@@ -2182,12 +2123,6 @@ class TestClaudeMdManagedDetection:
         assert json.loads(first)["managed_claude_md"] == str(cm)
 
 
-# ---------------------------------------------------------------------------
-# CLAUDE.md is additive (profile body + appended manifesto), never a symlink.
-# Uninstall must restore the pre-agentihooks original, or delete if none.
-# ---------------------------------------------------------------------------
-
-
 class TestClaudeMdOriginalBackup:
     def _wire(self, tmp_path, monkeypatch):
         state = tmp_path / "state.json"
@@ -2199,31 +2134,40 @@ class TestClaudeMdOriginalBackup:
         return state, home
 
     def test_first_install_records_user_original(self, tmp_path, monkeypatch):
+        """Pre-agentihooks."""
         state, home = self._wire(tmp_path, monkeypatch)
         dst = home / "CLAUDE.md"
-        dst.write_text("the user's own prompt\n")  # pre-agentihooks
+        dst.write_text("the user's own prompt\n")
         backup = install._backup_existing_claude_md(dst)
         assert backup is not None and backup.exists()
         assert json.loads(state.read_text())["claude_md_original_backup"] == str(backup)
 
     def test_reinstall_does_not_clobber_original_record(self, tmp_path, monkeypatch):
+        """Now agentihooks-managed.
+
+        Re-install backup.
+        """
         state, home = self._wire(tmp_path, monkeypatch)
         dst = home / "CLAUDE.md"
         dst.write_text("user original\n")
         first = install._backup_existing_claude_md(dst)
-        install._record_managed_claude_md(dst)  # now agentihooks-managed
+        install._record_managed_claude_md(dst)
         dst.write_text("agentihooks content\n")
-        install._backup_existing_claude_md(dst)  # re-install backup
+        install._backup_existing_claude_md(dst)
         assert json.loads(state.read_text())["claude_md_original_backup"] == str(first)
 
     def test_no_backup_when_absent_or_symlink(self, tmp_path, monkeypatch):
+        """Absent.
+
+        Symlink.
+        """
         state, home = self._wire(tmp_path, monkeypatch)
         dst = home / "CLAUDE.md"
-        assert install._backup_existing_claude_md(dst) is None  # absent
+        assert install._backup_existing_claude_md(dst) is None
         target = home / "src.md"
         target.write_text("x\n")
         dst.symlink_to(target)
-        assert install._backup_existing_claude_md(dst) is None  # symlink
+        assert install._backup_existing_claude_md(dst) is None
 
     def test_uninstall_restores_original(self, tmp_path, monkeypatch):
         state, home = self._wire(tmp_path, monkeypatch)
@@ -2266,14 +2210,6 @@ class TestClaudeMdOriginalBackup:
             install.uninstall_global(args)
 
         assert not dst.exists()
-
-
-# ---------------------------------------------------------------------------
-# Single-profile installs must carry the `<!-- profile: name -->` marker too
-# (regression: the init-loss guard sniffs this marker, but only the chain
-# writer emitted it — single profile installs, the common shape, were a
-# guard no-op).
-# ---------------------------------------------------------------------------
 
 
 class TestInstallSystemPromptMarker:
@@ -2324,13 +2260,6 @@ class TestInstallSystemPromptMarker:
         assert "already up to date" in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------------------
-# Init-loss guard — a bare init that resolves to 'default' while the
-# installed CLAUDE.md carries a different profile marker must abort rather
-# than silently overwrite the live profile.
-# ---------------------------------------------------------------------------
-
-
 class TestInitLostStateGuard:
     def _args(self):
         import argparse
@@ -2359,10 +2288,14 @@ class TestInitLostStateGuard:
                 install.cmd_init_unified(self._args())
 
     def test_empty_existing_file_does_not_crash(self, tmp_path, monkeypatch):
+        """Existing but empty — used to raise IndexError.
+
+        Must not raise.
+        """
         import os
 
         cm = tmp_path / "CLAUDE.md"
-        cm.write_text("")  # existing but empty — used to raise IndexError
+        cm.write_text("")
         state = {"managed_claude_md": str(cm), "targets": {}}
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -2371,14 +2304,18 @@ class TestInitLostStateGuard:
             patch.dict("os.environ", {}, clear=False),
         ):
             os.environ.pop("AGENTIHOOKS_PROFILE", None)
-            install.cmd_init_unified(self._args())  # must not raise
+            install.cmd_init_unified(self._args())
             called_args = mock_install.call_args[0][0]
             assert called_args.profile == "default"
 
     def test_missing_file_does_not_crash(self, tmp_path, monkeypatch):
+        """Never created.
+
+        Must not raise.
+        """
         import os
 
-        cm = tmp_path / "CLAUDE.md"  # never created
+        cm = tmp_path / "CLAUDE.md"
         state = {"managed_claude_md": str(cm), "targets": {}}
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -2387,7 +2324,7 @@ class TestInitLostStateGuard:
             patch.dict("os.environ", {}, clear=False),
         ):
             os.environ.pop("AGENTIHOOKS_PROFILE", None)
-            install.cmd_init_unified(self._args())  # must not raise
+            install.cmd_init_unified(self._args())
             called_args = mock_install.call_args[0][0]
             assert called_args.profile == "default"
 
@@ -2408,12 +2345,6 @@ class TestInitLostStateGuard:
         assert "agentihooks init --profile coding,anton" in err
 
 
-# ---------------------------------------------------------------------------
-# _save_state keeps one generation of state.json.bak so a profile-losing
-# init is always forensically reconstructable.
-# ---------------------------------------------------------------------------
-
-
 class TestSaveStateBackup:
     def _wire(self, tmp_path, monkeypatch):
         state_json = tmp_path / "state.json"
@@ -2422,6 +2353,7 @@ class TestSaveStateBackup:
         return state_json
 
     def test_creates_bak_with_prior_content(self, tmp_path, monkeypatch):
+        """_save_state persists verbatim (shape migration happens on load)."""
         state_json = self._wire(tmp_path, monkeypatch)
         install._save_state({"targets": {"global": {"profile": "anton"}}})
         first_content = state_json.read_text()
@@ -2431,18 +2363,12 @@ class TestSaveStateBackup:
         bak = state_json.with_suffix(".json.bak")
         assert bak.exists()
         assert bak.read_text() == first_content
-        # _save_state persists verbatim (shape migration happens on load).
         assert json.loads(state_json.read_text())["targets"]["global"]["profile"] == "coding"
 
     def test_no_bak_on_first_save(self, tmp_path, monkeypatch):
         state_json = self._wire(tmp_path, monkeypatch)
         install._save_state({"targets": {}})
         assert not state_json.with_suffix(".json.bak").exists()
-
-
-# ---------------------------------------------------------------------------
-# Chain edits are per-target (link-profile / settings-profile)
-# ---------------------------------------------------------------------------
 
 
 class TestChainTargets:
@@ -2467,8 +2393,6 @@ class TestChainTargets:
         external = tmp_path / "external" / "brain"
         external.mkdir(parents=True)
         return state_json, profiles_dir, external
-
-    # --- _chain_targets resolution ---
 
     def test_defaults_to_every_installed_target(self, tmp_path):
         state_json, _, _ = self._setup(tmp_path, self.BOTH)
@@ -2547,8 +2471,6 @@ class TestChainTargets:
             install._chain_targets("emacs")
         assert exc.value.code == 1
 
-    # --- link ---
-
     def test_link_appends_to_every_target_chain(self, tmp_path):
         state_json, profiles_dir, external = self._setup(tmp_path, self.BOTH)
         with (
@@ -2587,8 +2509,6 @@ class TestChainTargets:
             )
         assert [ns.install_target for ns in pending] == ["claude", "codex"]
         assert {ns.profile for ns in pending} == {"anton,brain"}
-
-    # --- unlink ---
 
     def test_unlink_strips_every_target_chain(self, tmp_path):
         state = json.loads(json.dumps(self.BOTH))
@@ -2631,8 +2551,6 @@ class TestChainTargets:
         assert result["codex"]["profile"] == "anton"
         assert "--for-target ignored" in capsys.readouterr().out
         mock_install.assert_not_called()
-
-    # --- settings-profile ---
 
     def test_settings_profile_applies_to_every_target(self, tmp_path):
         state_json, _, _ = self._setup(tmp_path, self.BOTH)
@@ -2677,11 +2595,6 @@ class TestChainTargets:
         assert exc.value.code == 1
 
 
-# ---------------------------------------------------------------------------
-# install_global honours install_target (end-to-end, the one seam nothing ran)
-# ---------------------------------------------------------------------------
-
-
 class TestInstallGlobalHonoursTarget:
     """`install_global` is the function the whole --for-target feature rests on,
     and no test in this suite has ever executed it (see the two
@@ -2696,6 +2609,7 @@ class TestInstallGlobalHonoursTarget:
     """
 
     def _tiny_profile(self, tmp_path):
+        """One native base per target — each target reads its own, in its own format."""
         profiles = tmp_path / "profiles"
         tiny = profiles / "tiny" / ".claude"
         tiny.mkdir(parents=True)
@@ -2703,22 +2617,22 @@ class TestInstallGlobalHonoursTarget:
         (tiny / "settings.overrides.json").write_text("{}")
         base = profiles / "_base"
         base.mkdir()
-        # One native base per target — each target reads its own, in its own format.
         (base / "settings.base.json").write_text(json.dumps({"hooks": {}}))
         (base / "settings.base.copilot.json").write_text(json.dumps({"disableAllHooks": False}))
         (base / "config.base.toml").write_text('approval_policy = "on-request"\n')
         return profiles
 
     def _run(self, tmp_path, monkeypatch, target):
+        """Heavy, network/tool-touching steps — not what this test is about.
+
+        Claude's MCP registration hard-exits unless it can find an interpreter that imports hooks from a neutral cwd —
+        an environment probe, and conftest deliberately points AGENTIHOOKS_ROOT at a scratch dir.
+        """
         profiles = self._tiny_profile(tmp_path)
         monkeypatch.setattr(install, "PROFILES_DIR", profiles, raising=False)
         monkeypatch.setattr(install, "_get_bundle_path", lambda: None)
-        # Heavy, network/tool-touching steps — not what this test is about.
         monkeypatch.setattr(install, "_install_cli_tool", lambda *a, **k: None, raising=False)
         monkeypatch.setattr(install, "_ensure_mcp_daemon", lambda *a, **k: None, raising=False)
-        # Claude's MCP registration hard-exits unless it can find an interpreter
-        # that imports hooks from a neutral cwd — an environment probe, and
-        # conftest deliberately points AGENTIHOOKS_ROOT at a scratch dir.
         monkeypatch.setattr(install, "_resolve_hooks_python", lambda *a, **k: Path(sys.executable), raising=False)
         install.install_global(argparse.Namespace(profile="tiny", settings_profile="", install_target=target))
         return Path.home()

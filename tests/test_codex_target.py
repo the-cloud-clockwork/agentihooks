@@ -1,11 +1,14 @@
-"""Tests for the Codex target adapter (scripts/targets/codex_target.py)."""
+"""Tests for the Codex target adapter (scripts/targets/codex_target.py).
+
+Import of install: binds the installer identity conftest patches; also used directly below.
+"""
 
 import json
 import shlex
 import subprocess
 from pathlib import Path
 
-import install  # binds the installer identity conftest patches; also used directly below
+import install
 import pytest
 
 from scripts.targets.codex_target import CODEX_HOOK_EVENTS, CodexAdapter, codex_home
@@ -160,9 +163,9 @@ class TestConfigToml:
         assert 'sandbox_mode = "workspace-write"' in text
 
     def test_operator_hand_set_approval_policy_survives_reinit(self, adapter, capsys):
+        """Operator hand-edits the live key only — not our sidecar record."""
         adapter.write_settings({"approval_policy": "on-request", "sandbox_mode": "workspace-write"})
         home = codex_home()
-        # Operator hand-edits the live key only — not our sidecar record.
         text = (
             (home / "config.toml")
             .read_text()
@@ -460,6 +463,11 @@ class TestSharedSkillsDir:
 
 class TestPersona:
     def test_agents_md_compiles_chain_rules_and_manifesto(self, adapter, tmp_path, monkeypatch):
+        """Identity preamble pins the persona ahead of everything else, naming the chain, so codex's own system-prompt
+        identity doesn't win.
+
+        Size ceiling landed in config.toml with margin above the payload.
+        """
         prof = tmp_path / "prof-anton"
         prof.mkdir()
         (prof / "CLAUDE.md").write_text("# Anton persona\n")
@@ -476,15 +484,12 @@ class TestPersona:
         text = (codex_home() / "AGENTS.md").read_text()
         assert "<!-- profile: anton -->" in text
         assert "# Anton persona" in text
-        # Identity preamble pins the persona ahead of everything else, naming
-        # the chain, so codex's own system-prompt identity doesn't win.
         assert "# Identity — who you are" in text
         assert "You are **anton**" in text
         assert text.index("# Identity") < text.index("<!-- profile: anton -->")
         assert "<!-- rule: 01-style.md" in text
         assert "Always be terse." in text
         assert "<!-- ci-manifesto -->" in text
-        # Size ceiling landed in config.toml with margin above the payload.
         cfg = (codex_home() / "config.toml").read_text()
         assert "project_doc_max_bytes" in cfg
 
@@ -637,8 +642,7 @@ class TestMcp:
         assert "a" in install._global_record(state, "codex").get("managed_mcp", [])
 
     def test_credential_shaped_header_dropped(self, adapter, capsys):
-        # Built by concatenation so the literal secret-shaped string never appears
-        # whole anywhere else in this file.
+        """Built by concatenation so the literal secret-shaped string never appears whole anywhere else in this file."""
         dummy_key = "AKIA" + "TESTDUMMY0000000"
         adapter.register_mcp(
             {
@@ -1070,13 +1074,17 @@ class TestTeardown:
         ) in capsys.readouterr().out
 
     def test_preserves_operator_content(self, adapter, tmp_path):
+        """Hand-edit ON a managed key.
+
+        Unedited managed key withdrawn.
+        """
         import tomlkit
 
         self._full_install(adapter, tmp_path)
         home = codex_home()
         doc = tomlkit.parse((home / "config.toml").read_text())
         doc["model"] = "gpt-5.6"
-        doc["approval_policy"] = "untrusted"  # hand-edit ON a managed key
+        doc["approval_policy"] = "untrusted"
         (home / "config.toml").write_text(tomlkit.dumps(doc))
         hooks_doc = json.loads((home / "hooks.json").read_text())
         hooks_doc["hooks"]["PreToolUse"].append({"hooks": [{"type": "command", "command": "/usr/bin/operator-hook"}]})
@@ -1089,7 +1097,7 @@ class TestTeardown:
         text = (home / "config.toml").read_text()
         assert 'model = "gpt-5.6"' in text
         assert 'approval_policy = "untrusted"' in text
-        assert "sandbox_mode" not in text  # unedited managed key withdrawn
+        assert "sandbox_mode" not in text
         hooks_doc = json.loads((home / "hooks.json").read_text())
         cmds = [h["command"] for g in hooks_doc["hooks"]["PreToolUse"] for h in g["hooks"]]
         assert cmds == ["/usr/bin/operator-hook"]

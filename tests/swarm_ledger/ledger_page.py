@@ -201,7 +201,10 @@ def page_source():
 
 
 class JoinedServer(ThreadingHTTPServer):
-    # Non daemon request threads are joined by server_close, so none outlives its test and imports a module mid flight.
+    """Daemon_threads: Non daemon request threads are joined by server_close, so none outlives its test and imports a
+    module mid flight.
+    """
+
     daemon_threads = False
 
 

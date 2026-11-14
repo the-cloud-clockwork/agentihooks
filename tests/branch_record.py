@@ -60,6 +60,7 @@ def _row(line: str, fields: dict) -> dict | None:
 
 
 def _rows(paths: list[Path], fields: dict) -> tuple[list[dict], bool]:
+    """A writer killed mid line leaves only its last line cut short; any other unreadable line is damage."""
     rows, readable = [], True
     for path in paths:
         try:
@@ -71,7 +72,6 @@ def _rows(paths: list[Path], fields: dict) -> tuple[list[dict], bool]:
             continue
         found = [_row(line, fields) for line in lines]
         readable = readable and None not in found
-        # A writer killed mid line leaves only its last line cut short; any other unreadable line is damage.
         rows += [row for row in [*found, _row(tail, fields) if tail else None] if row is not None]
     return rows, readable
 

@@ -1,3 +1,12 @@
+"""These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
+
+PROTECTED: The runner trust loader contract fixes this job's runner.
+
+TARGET: Runner trust never admits a pull_request_target run to a private runner.
+
+CLASSED: The runner class table holds the release path and the access read back on hosted runners.
+"""
+
 import json
 import re
 from pathlib import Path
@@ -133,7 +142,6 @@ if (WORKFLOWS / "actions-storage.yml").exists():
 if (WORKFLOWS / "ci-minutes.yml").exists():
     MOVED[("ci-minutes.yml", "measure")] = LIGHT
 
-# These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 if (WORKFLOWS / "hive-join.yml").exists():
     MOVED[("hive-join.yml", "smoke")] = QUEUED
 if (WORKFLOWS / "events-smoke.yml").exists():
@@ -141,13 +149,10 @@ if (WORKFLOWS / "events-smoke.yml").exists():
 
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
 
-# The runner trust loader contract fixes this job's runner.
 PROTECTED = {("runner-trust.yml", "actors")}
 
-# Runner trust never admits a pull_request_target run to a private runner.
 TARGET = {("gate-protected.yml", "grade")}
 
-# The runner class table holds the release path and the access read back on hosted runners.
 CLASSED = {
     ("mutation-deadline-proof.yml", "receipts"),
     ("ci-templates.yml", "actionlint"),
@@ -271,7 +276,8 @@ def test_each_job_runs_on_its_isolated_anton_pool_only_for_trusted_actors(workfl
 
 
 def test_test_count_timeout_holds_three_times_its_slowest_recent_run():
-    slowest_seconds = 311  # Tests run 38364025608: the 3.12 leg hit the old five minute timeout
+    """Tests run 38364025608: the 3.12 leg hit the old five minute timeout."""
+    slowest_seconds = 311
     assert workflows()["test.yml"]["jobs"]["test-count"]["timeout-minutes"] * 60 >= 3 * slowest_seconds
 
 

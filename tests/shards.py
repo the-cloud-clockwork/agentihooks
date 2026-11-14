@@ -1,3 +1,7 @@
+"""SECONDS_PER_SOURCE_BYTE: Every xdist worker of a shard rewrites each file it collects, while stored durations split
+between workers; measured.
+"""
+
 import ast
 import importlib
 import os
@@ -6,7 +10,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
 FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
 OWNER_COPIES = 2
@@ -65,8 +68,9 @@ def assign_nodes(
     workers: int,
     sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
-    # Every shard that holds one of a file's tests collects all of them, and a named group's tests reuse what its first
-    # test built, so a file stays on one shard; a file longer than an even shard share still splits.
+    """Every shard that holds one of a file's tests collects all of them, and a named group's tests reuse what its first
+    test built, so a file stays on one shard; a file longer than an even shard share still splits.
+    """
     share = sum(durations.values()) / shards
     file_seconds: dict[str, float] = {}
     for node, duration in durations.items():
@@ -95,9 +99,9 @@ def _assign_work(
     serial_groups: dict[str, str] | None = None,
     collection_groups: dict[str, str] | None = None,
 ) -> list[list[str]]:
+    """Serial loads only grow, so each shard's largest one is kept instead of rescanned for every unit."""
     loads = [0.0] * shards
     serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
-    # Serial loads only grow, so each shard's largest one is kept instead of rescanned for every unit.
     serial_peaks = [0.0] * shards
     collection_loads = [0.0] * shards
     collected: list[set[str]] = [set() for _ in range(shards)]
@@ -130,8 +134,8 @@ def _assign_work(
 
 
 def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float) -> list[str]:
+    """A group's later tests reuse what its first test built, so the group keeps collection order at its slowest place."""
     seconds = {nodeid: durations.get(re.sub(r"@[^\[\]]*$", "", nodeid), 0.0) for nodeid in nodeids}
-    # A group's later tests reuse what its first test built, so the group keeps collection order at its slowest place.
     groups = {nodeid: match[1] for nodeid in nodeids if (match := re.search(r"@([^\[\]]*)$", nodeid))}
     slowest = {}
     for nodeid, group in groups.items():
@@ -142,7 +146,7 @@ def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float)
 
 
 def assign_owners(seconds: dict[str, float], grouped: set[str], workers: int, copies: int) -> list[set[str]]:
-    # A named group runs on one worker, so every grouped file shares the same owners whatever group it names.
+    """A named group runs on one worker, so every grouped file shares the same owners whatever group it names."""
     units = {path: [path] for path in seconds if path not in grouped}
     if grouped:
         units[min(grouped)] = sorted(grouped)
@@ -158,12 +162,14 @@ def assign_owners(seconds: dict[str, float], grouped: set[str], workers: int, co
 
 
 def warm_imports(modules: list[str], workers: int) -> list[int]:
+    """The fork inherits the controller's coverage tracer; its data is never saved, so tracing only costs CPU the
+    collecting workers need.
+    """
     pids = []
     for start in range(workers):
         pid = os.fork()
         if pid == 0:
             try:
-                # The fork inherits the controller's coverage tracer; its data is never saved, so tracing only costs CPU the collecting workers need.
                 sys.settrace(None)
                 for module in modules[start::workers]:
                     try:

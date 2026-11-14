@@ -11,10 +11,10 @@ class TestMcpReporter:
     """Tests for MCP surface area reporting."""
 
     def test_load_all_mcp_configs_empty(self, tmp_path):
+        """User-scope configs may or may not exist; just verify it returns a dict."""
         from scripts.mcp_reporter import load_all_mcp_configs
 
         result = load_all_mcp_configs(str(tmp_path))
-        # User-scope configs may or may not exist; just verify it returns a dict
         assert isinstance(result, dict)
 
     def test_count_tools_per_server(self):
@@ -59,21 +59,23 @@ class TestMcpReporter:
         assert "test-server" in result
 
     def test_generate_warning_below_threshold(self):
+        """Default heuristic = 10 tools, threshold 40 → no warning."""
         from scripts.mcp_reporter import generate_warning
 
         servers = {
             "small": {"source": "user", "config": {"args": ["test"]}},
         }
-        # Default heuristic = 10 tools, threshold 40 → no warning
         result = generate_warning(servers, threshold=40)
         assert result is None
 
     def test_generate_warning_above_threshold(self):
+        """Create enough servers to exceed threshold.
+
+        5 servers * 10 tools = 50, threshold 40 → warning.
+        """
         from scripts.mcp_reporter import generate_warning
 
-        # Create enough servers to exceed threshold
         servers = {f"server-{i}": {"source": "user", "config": {"args": ["test"]}} for i in range(5)}
-        # 5 servers * 10 tools = 50, threshold 40 → warning
         result = generate_warning(servers, threshold=40)
         assert result is not None
         assert "MCP overhead" in result

@@ -32,8 +32,10 @@ def _isolated_home(monkeypatch, tmp_path):
 
 
 def _reload_config_with_env(monkeypatch, **env: str):
-    """Force hooks.config to re-read env after monkeypatch."""
-    # Reset both so no stale tokens leak through from the operator's real env.
+    """Force hooks.config to re-read env after monkeypatch.
+
+    Reset both so no stale tokens leak through from the operator's real env.
+    """
     monkeypatch.setenv("BRAIN_HTTP_TOKEN", "")
     monkeypatch.setenv("KB_ROUTER_TOKEN", "")
     for key, val in env.items():
@@ -53,9 +55,6 @@ def _fake_http_response(payload: dict[str, Any], status: int = 200):
     resp.__enter__ = MagicMock(return_value=resp)
     resp.__exit__ = MagicMock(return_value=False)
     return resp
-
-
-# ── _brain_http ───────────────────────────────────────────────────────
 
 
 def test_brain_http_disabled_when_url_empty(monkeypatch):
@@ -112,6 +111,7 @@ def test_brain_http_get_sends_bearer(monkeypatch):
 
 
 def test_brain_http_post_serializes_body_and_idem_key(monkeypatch):
+    """Urllib lower-cases custom headers."""
     _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t0ken")
     import hooks._brain_http as bh
 
@@ -130,7 +130,6 @@ def test_brain_http_post_serializes_body_and_idem_key(monkeypatch):
     assert captured["method"] == "POST"
     body = json.loads(captured["body"].decode())
     assert body["type"] == "lesson"
-    # urllib lower-cases custom headers
     assert any(k.lower() == "x-idempotency-key" for k in captured["headers"])
 
 
@@ -147,9 +146,6 @@ def test_brain_http_swallows_http_error(monkeypatch):
 
     with patch("hooks._brain_http.urlopen", side_effect=boom):
         assert bh.get("/feed") is None
-
-
-# ── brain_adapter.HttpBrainSource ─────────────────────────────────────
 
 
 def test_http_brain_source_parses_feed_payload(monkeypatch):
@@ -214,9 +210,6 @@ def test_brain_adapter_falls_back_to_file(monkeypatch):
     importlib.reload(ba)
     source = ba._get_source()
     assert isinstance(source, ba.FileBrainSource)
-
-
-# ── amygdala_hook._check_via_http ─────────────────────────────────────
 
 
 def test_amygdala_http_publishes_broadcast_on_active_signal(monkeypatch):
@@ -296,9 +289,6 @@ def test_amygdala_http_failure_preserves_existing_alert(monkeypatch):
     reconcile.assert_not_called()
 
 
-# ── brain_writer_hook._publish_to_http ────────────────────────────────
-
-
 def test_brain_writer_http_posts_each_marker(monkeypatch):
     _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
@@ -351,13 +341,6 @@ def test_brain_writer_http_noop_when_url_unset(monkeypatch):
     count, failed = bw._publish_to_http(markers, session_id="s")
     assert count == 0
     assert failed == markers
-
-
-# ---------------------------------------------------------------------------
-# P1.3 — phrase scrub
-# P1.4 — empty-signal severity normalization
-# A.2 — framing prefix for natural-language broadcasts
-# ---------------------------------------------------------------------------
 
 
 class TestBrainAdapterHelpers:

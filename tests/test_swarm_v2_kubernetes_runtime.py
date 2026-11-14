@@ -402,7 +402,7 @@ def test_apply_refuses_a_valid_launch_when_the_journal_holds_no_spec_digest():
 
 
 def defaulted(pod: dict) -> dict:
-    # The fields anton-prod's API server, LimitRange and RuntimeClass admission added in a server dry run.
+    """The fields anton-prod's API server, LimitRange and RuntimeClass admission added in a server dry run."""
     live = json.loads(json.dumps(pod))
     spec = live["spec"]
     spec.update(

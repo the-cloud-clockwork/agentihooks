@@ -1304,11 +1304,14 @@ def _collected_suite() -> tuple[list[str], str]:
 
 
 def _check_stored_durations(nodeids: list[str] | None = None):
+    """The queue split drops the tests its run reuses from the durations it hands the shards.
+
+    A partial run holds every test its change adds, so its missing share is judged against the stored suite.
+    """
     partial = nodeids is not None and not (_ROOT / "collected.json").exists()
     collected, output = (nodeids, "\n".join(nodeids)) if partial else _collected_suite()
     assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
-    # The queue split drops the tests its run reuses from the durations it hands the shards.
     reused = json.loads((_ROOT / "reused.json").read_text()) if (_ROOT / "reused.json").exists() else {}
     tests, files = set(reused.get("tests", ())), set(reused.get("files", ()))
     judged = [
@@ -1317,7 +1320,6 @@ def _check_stored_durations(nodeids: list[str] | None = None):
         if nodeid.split("::", 1)[0] not in files and re.sub(r"@[^\[\]]*$", "", nodeid) not in tests
     ]
     missing = [nodeid for nodeid in judged if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
-    # A partial run holds every test its change adds, so its missing share is judged against the stored suite.
     suite = max(len(judged), len(stored)) if partial else len(judged)
     assert len(missing) * 10 <= suite, (
         f"{len(missing)} of {suite} tests have no stored duration; refresh them with: python -m tests.refresh_durations"
@@ -2685,6 +2687,9 @@ PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "t
 
 
 def _planner_imports(path: Path) -> set[str]:
+    """A function's own third party import loads only when it runs; its first party ones decide what else the planner
+    reads.
+    """
     found, pending = set(), [ast.parse(path.read_text())]
     while pending:
         for child in ast.iter_child_nodes(pending.pop()):
@@ -2693,7 +2698,6 @@ def _planner_imports(path: Path) -> set[str]:
             elif isinstance(child, ast.ImportFrom) and child.level == 0:
                 found |= {child.module} | {f"{child.module}.{alias.name}" for alias in child.names}
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                # A function's own third party import loads only when it runs; its first party ones decide what else the planner reads.
                 found |= {
                     node.module
                     for node in ast.walk(child)

@@ -126,11 +126,11 @@ def _gone(pid, wait=5.0):
 
 @pytest.fixture
 def earlier_agent(tmp_path):
+    """Process start times count in clock ticks; the shell must start at least one tick later."""
     binary = tmp_path / "earlier" / "ssh-agent"
     binary.parent.mkdir()
     binary.symlink_to(shutil.which("sleep"))
     agent = Popen([str(binary), "300"])
-    # Process start times count in clock ticks; the shell must start at least one tick later.
     time.sleep(0.05)
     yield agent
     agent.kill()
@@ -185,13 +185,13 @@ def test_startup_process_that_is_no_agent_survives_the_cli(monkeypatch, tmp_path
 
 @needs_proc
 def test_caller_value_naming_a_later_agent_survives(tmp_path):
+    """Exec keeps the shell's pid and start time but gives it a caller environment naming the later agent."""
     binary = tmp_path / "ssh-agent"
     binary.symlink_to(shutil.which("sleep"))
     shell = Popen(["bash"], stdin=PIPE, text=True)
     time.sleep(0.05)
     agent = Popen([str(binary), "300"])
     try:
-        # exec keeps the shell's pid and start time but gives it a caller environment naming the later agent.
         script = f"exec env SSH_AGENT_PID={agent.pid} bash -c {shlex.quote(fallbacks.STOP_STARTUP_AGENT)}\n"
         shell.communicate(script, timeout=10)
         assert not _gone(agent.pid, wait=0.3)

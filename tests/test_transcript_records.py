@@ -20,8 +20,9 @@ class TestDetection:
         assert list(iter_transcript_records(tmp_path / "nope.jsonl")) == []
 
     def test_corrupt_first_line_still_detects_codex(self, tmp_path):
-        # A rollout read mid-write can have a truncated/corrupt first line.
-        # detection must look past it instead of misdetecting as claude.
+        """A rollout read mid-write can have a truncated/corrupt first line. detection must look past it instead of
+        misdetecting as claude.
+        """
         p = tmp_path / "corrupt_first.jsonl"
         p.write_text(
             "not valid json{{{\n"
@@ -66,15 +67,16 @@ class TestSameScenarioBothFormats:
         assert "@lesson" in assistant
 
     def test_codex_records(self):
+        """The fixture's task_complete repeats the same reply the response_item message already yielded as assistant_text
+        — turn_complete must be suppressed so consumers don't double-count the turn.
+
+        Injected context (role=developer) must NOT masquerade as assistant text.
+        """
         recs = list(iter_transcript_records(CODEX))
         kinds = [r["kind"] for r in recs]
         assert "meta" in kinds and "token_usage" in kinds
-        # The fixture's task_complete repeats the same reply the response_item
-        # message already yielded as assistant_text — turn_complete must be
-        # suppressed so consumers don't double-count the turn.
         assert "turn_complete" not in kinds
         assert kinds.count("assistant_text") == 1
-        # Injected context (role=developer) must NOT masquerade as assistant text.
         system = [r for r in recs if r["kind"] == "system_text"]
         assert any("CONTEXT INJECTION" in r["text"] for r in system)
         assistant = "\n".join(r["text"] for r in recs if r["kind"] == "assistant_text")
@@ -85,8 +87,9 @@ class TestSameScenarioBothFormats:
         assert call["tool_use_id"] == result["tool_use_id"] == "c1"
 
     def test_codex_truncated_rollout_falls_back_to_turn_complete(self, tmp_path):
-        # No response_item assistant message landed before task_complete —
-        # the reader must still surface the turn via the fallback text.
+        """No response_item assistant message landed before task_complete — the reader must still surface the turn via
+        the fallback text.
+        """
         p = tmp_path / "truncated.jsonl"
         p.write_text(
             "\n".join(
@@ -108,8 +111,9 @@ class TestSameScenarioBothFormats:
         assert turn_complete["text"] == "Truncated response"
 
     def test_claude_bare_string_message_yields_text(self, tmp_path):
-        # Some claude entries carry `message` as a plain string rather than
-        # {content: [...]} — a marker inside it must not be dropped.
+        """Some claude entries carry `message` as a plain string rather than {content: [...]} — a marker inside it must
+        not be dropped.
+        """
         p = tmp_path / "bare_string.jsonl"
         p.write_text(
             '{"type": "assistant", "message": "Done.\\n<!-- @lesson -->\\nbare string message\\n<!-- @/lesson -->"}\n'
@@ -145,9 +149,9 @@ class TestConsumers:
         assert "command not found" in entries[0]["error"]
 
     def test_tool_memory_scan_codex_no_false_positives(self):
+        """Codex outputs carry no is_error flag — scan must stay silent, not guess."""
         from hooks.tool_memory import _scan_transcript_for_errors
 
-        # Codex outputs carry no is_error flag — scan must stay silent, not guess.
         assert _scan_transcript_for_errors(str(CODEX), session_id="s") == []
 
     def test_auto_save_reads_both(self):

@@ -1,3 +1,8 @@
+"""_RECORDED_EVEN_SHARE: Forty merge group runs of 27 October planned at forty shards from one durations snapshot: every
+even shard carried a 100.0s four worker share and the first shard a 174.2s serial group; each value is a run's slowest
+Run tests step.
+"""
+
 import json
 import subprocess
 import sys
@@ -50,8 +55,6 @@ def test_a_merge_group_over_the_target_asks_for_sixteen_unit_shards_of_the_share
     assert result.stdout.splitlines()[-1] == "16"
 
 
-# Forty merge group runs of 27 October planned at forty shards from one durations snapshot: every even shard carried a
-# 100.0s four worker share and the first shard a 174.2s serial group; each value is a run's slowest Run tests step.
 _RECORDED_EVEN_SHARE = 100.0
 _RECORDED_SERIAL_GROUP = 174.2
 _RECORDED_SLOWEST_SHARDS = [
@@ -61,11 +64,11 @@ _RECORDED_SLOWEST_SHARDS = [
 
 
 def test_the_planned_slowest_queue_shard_matches_the_recorded_real_slowest_shards():
+    """Runner speed varies between runs; percentiles drop the one 371s outlier, and planning slow is the safe side."""
     planned = STARTUP_SECONDS + max(SLOWDOWN * _RECORDED_EVEN_SHARE, _RECORDED_SERIAL_GROUP)
     ratios = sorted(planned / real for real in _RECORDED_SLOWEST_SHARDS)
 
     assert 0.95 <= ratios[len(ratios) // 2] <= 1.05
-    # Runner speed varies between runs; percentiles drop the one 371s outlier, and planning slow is the safe side.
     assert 0.85 <= ratios[len(ratios) // 10] and ratios[len(ratios) * 9 // 10] <= 1.2
 
 

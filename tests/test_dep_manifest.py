@@ -624,6 +624,7 @@ def _imports(module):
 
 
 def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
+    """Mutation runs read mutmut's trampoline import in the mutated copy."""
     pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "tests.dep_manifest"], set()
     third_party = {"loaded": set(), "lazy": set()}
     while pending:
@@ -635,7 +636,6 @@ def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
             for name in names:
                 parts = name.split(".")
                 if parts[0] not in {"scripts", "tests", "hooks"}:
-                    # Mutation runs read mutmut's trampoline import in the mutated copy.
                     harness = parts[0] == "mutmut" and "MUTANT_UNDER_TEST" in os.environ
                     if parts[0] not in sys.stdlib_module_names and not harness:
                         third_party[kind].add(parts[0])

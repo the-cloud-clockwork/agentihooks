@@ -1,10 +1,12 @@
-"""Tests for hooks.mcp module."""
+"""Tests for hooks.mcp module.
+
+Pytestmark: build_server loads the MCP SDK: every file that loads it shares one worker.
+"""
 
 import json
 
 import pytest
 
-# build_server loads the MCP SDK: every file that loads it shares one worker.
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 
 _SESSION_ENV_VARS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")
@@ -113,15 +115,15 @@ class TestServerNetworkSettings:
     """Host/port/paths are FastMCP constructor settings, not .run() arguments."""
 
     def test_defaults(self, monkeypatch):
+        """Must match the installer's url default, not merely be loopback: a bind on 127.0.0.1 under a url naming
+        `localhost` breaks wherever that name resolves to ::1 first.
+        """
         from hooks.mcp import build_server
 
         for var in ("MCP_HOST", "MCP_PORT", "MCP_SSE_PATH", "MCP_STREAMABLE_HTTP_PATH", "MCP_STATELESS_HTTP"):
             monkeypatch.delenv(var, raising=False)
 
         settings = build_server().settings
-        # Must match the installer's url default, not merely be loopback: a bind
-        # on 127.0.0.1 under a url naming `localhost` breaks wherever that name
-        # resolves to ::1 first.
         assert settings.host == "localhost"
         assert settings.port == 8642
         assert settings.sse_path == "/sse"

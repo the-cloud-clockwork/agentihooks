@@ -1,3 +1,5 @@
+"""_COLLECT: Runs inside each tree so the base imports its own sources, never the head's."""
+
 import argparse
 import ast
 import hashlib
@@ -12,7 +14,6 @@ from pathlib import Path
 
 _SHARED = {"__init__.py", "conftest.py"}
 
-# Runs inside each tree so the base imports its own sources, never the head's.
 _COLLECT = """
 import json, os, sys, pytest
 from pathlib import Path
@@ -42,11 +43,11 @@ with open(sys.argv[2], "w") as out:
 
 
 def collection_identity(root: Path, tests: str, environment: str) -> str | None:
+    """The project's own version is derived from its commit; the tree hash already names its code."""
     status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
     if status.returncode or status.stdout:
         return None
     tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
-    # The project's own version is derived from its commit; the tree hash already names its code.
     packages = sorted(
         (name, None if name == "agentihooks" else dist.version)
         for dist in importlib.metadata.distributions()
@@ -134,6 +135,7 @@ def collect_sides(base: Path, head: Path, tests: str) -> dict[str, list[str] | N
 def collect_all(
     trees: dict[str, Path], tests: str, cache: Path | None = None, environment: str = ""
 ) -> dict[str, list[str] | None]:
+    """Groups are disjoint, so a node id from two groups means the split leaked and would inflate the count."""
     cached = {side: collection_cache(tree, tests, cache, environment) for side, tree in trees.items()}
     collected = {}
     for side in trees:
@@ -158,7 +160,6 @@ def collect_all(
                 run.wait()
                 results.append(json.loads(output.read_text()) if output.is_file() and not run.returncode else None)
             nodeids = None if any(result is None for result in results) else sum(results, [])
-            # Groups are disjoint, so a node id from two groups means the split leaked and would inflate the count.
             if nodeids and len(set(nodeids)) != sum(len(set(result)) for result in results):
                 nodeids = None
             collected[side] = nodeids
@@ -169,7 +170,7 @@ def collect_all(
 
 
 def collection_processes() -> int:
-    # Imported here: the dev record fetch imports this module from a base tree that may hold only the tests.
+    """Imported here: the dev record fetch imports this module from a base tree that may hold only the tests."""
     from scripts.ci_cpu_quota import quota_cpus, worker_count
 
     return worker_count(len(os.sched_getaffinity(0)), quota_cpus())

@@ -1,3 +1,5 @@
+"""LOCAL_ONLY: These API functions run only in local downloads or steps bound to the App token."""
+
 import ast
 import json
 import os
@@ -16,7 +18,6 @@ API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
 MODULE = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([\w.]+)")
 BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
-# These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
     ROOT / "scripts/ci_launch_hotfix.py": {"pulls_of", "timeline_of", "head_green"},

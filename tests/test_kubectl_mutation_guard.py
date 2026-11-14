@@ -2,6 +2,15 @@
 
 Validates the HARD-FLOOR live-patching guard against the doctrine in
 CI Manifesto §2 + rules/code-is-source.md.
+
+ALLOWED_COMMANDS: read-only diagnostics, including output redirected or piped to a local tee (kubectl prints, the
+local shell writes), lifecycle and troubleshooting ops (operational actions, not behavior changes encoded into the
+cluster), unrelated commands that happen to contain matching words, and kubectl, helm, docker or ssh text inside
+quoted arguments such as commit messages and echo bodies, which are content, not invocations.
+
+BLOCKED_COMMANDS: kubectl edit, patch, set and autoscale (manifest or behavior mutation). A whole-command kubectl
+edit inside an ssh quoted remote command is suppressed by the quote stripping, since it is not a local invocation,
+but the SSH detection parses inside and catches the kubectl mutation.
 """
 
 from __future__ import annotations
@@ -13,12 +22,7 @@ from hooks.context.kubectl_mutation_guard import (
     check_kubectl_mutation_command,
 )
 
-# ---------------------------------------------------------------------------
-# ALLOWED — read-only diagnostics
-# ---------------------------------------------------------------------------
-
 ALLOWED_COMMANDS = [
-    # kubectl read-only
     "kubectl logs deploy/foo -n bar",
     "kubectl get pods",
     "kubectl get pods -A",
@@ -27,7 +31,6 @@ ALLOWED_COMMANDS = [
     "kubectl explain deployment.spec",
     "kubectl events -n anton-prod",
     "kubectl auth can-i list pods",
-    # kubectl exec read-only
     "kubectl exec mypod -- ls /tmp",
     "kubectl exec mypod -- cat /etc/config.yaml",
     "kubectl exec mypod -- ps aux",
@@ -37,16 +40,10 @@ ALLOWED_COMMANDS = [
     "kubectl exec mypod -- ss -tlnp",
     "kubectl exec mypod -- curl http://localhost:8080/health",
     "kubectl exec mypod -- python3 -c 'import os; print(os.environ.get(\"FOO\"))'",
-    # outer redirect to LOCAL filesystem (kubectl prints to stdout, shell
-    # redirects locally — pod is read-only)
     "kubectl exec mypod -- cat /etc/config.yaml > /tmp/local-copy.yaml",
-    # outer pipe to local tee — same: kubectl prints, local shell pipes/tees
     "kubectl exec mypod -- cat data.txt | tee /tmp/local-saved",
-    # kubectl cp OUT of pod
     "kubectl cp mypod:/etc/config.yaml /tmp/config.yaml",
     "kubectl cp anton-prod/mypod:/var/log/app.log /tmp/app.log",
-    # lifecycle / troubleshooting ops — allowed (these are operational
-    # actions, not behavior changes encoded into the cluster)
     "kubectl delete pod mypod -n anton-prod",
     "kubectl port-forward svc/myservice 8080:80",
     "kubectl rollout restart deploy/foo",
@@ -65,54 +62,39 @@ ALLOWED_COMMANDS = [
     "kubectl create deployment foo --image=foo:latest",
     "kubectl apply -f manifest.yaml",
     "kubectl replace -f manifest.yaml",
-    # SSH read-only
     "ssh anton ls /tmp",
     "ssh anton 'cat /etc/hostname'",
     "ssh anton 'journalctl -u nginx --no-pager -n 50'",
     "ssh anton 'docker ps'",
     "ssh anton 'docker logs mycontainer --tail 100'",
     "ssh anton 'systemctl status nginx'",
-    # scp OUT of host
     "scp anton:/var/log/syslog /tmp/syslog",
-    # Generic non-kubectl commands
     "git status",
     "ls -la",
     "cat /tmp/foo.yaml",
     "grep -rn 'foo' .",
     "python3 -c 'print(1+1)'",
-    # Unrelated commands that happen to contain matching words
     "echo 'patch this manifest in the chart, then push'",
     "git log --oneline | grep edit",
-    # TEXT MENTIONS: kubectl/helm strings inside quoted arguments must NOT
-    # block — they are content, not invocations. Critical for commit
-    # messages, doc generation, echo statements, etc.
     'git commit -m "doctrine: forbid kubectl edit and kubectl patch fleet-wide"',
     "git commit -m 'helm upgrade outside CI is now blocked'",
     'echo "Forbidden patterns: kubectl exec writes, kubectl cp INTO pod, kubectl edit"',
     'printf "Rule names: kubectl-edit, kubectl-patch, kubectl-set\\n"',
     "cat <<EOF\nDocument body talking about kubectl edit and helm upgrade\nEOF",
-    # SSH text mentions inside commit/echo bodies — must not block
     'git commit -m "ssh-edit detection: blocks ssh with sed -i, vi, nano"',
     'echo "ssh into a pod" > /tmp/local-note',
     "git commit -m 'docs: list scp INTO host as forbidden'",
-    # docker / kubectl / helm mentions in commit messages
     'git commit -m "docker exec writes blocked; kubectl edit blocked; helm upgrade blocked"',
 ]
 
 
-# ---------------------------------------------------------------------------
-# BLOCKED — state mutation
-# ---------------------------------------------------------------------------
-
 BLOCKED_COMMANDS = [
-    # kubectl edit / patch / set / autoscale (manifest/behavior mutation only)
     ("kubectl edit deploy/foo", "kubectl-edit"),
     ("kubectl edit configmap myconfig -n anton-prod", "kubectl-edit"),
     ("kubectl patch deploy foo --type=strategic -p '{}'", "kubectl-patch"),
     ("kubectl set env deploy/foo FOO=bar", "kubectl-set"),
     ("kubectl set image deploy/foo container=img:tag", "kubectl-set"),
     ("kubectl autoscale deploy foo --min=2 --max=10", "kubectl-autoscale"),
-    # kubectl exec write
     ("kubectl exec mypod -- tee /etc/config.yaml", "exec-tee"),
     ("kubectl exec mypod -- sed -i 's/x/y/' /etc/config", "exec-sed-i"),
     ("kubectl exec mypod -- vi /etc/config", "exec-editor"),
@@ -122,40 +104,25 @@ BLOCKED_COMMANDS = [
     ("kubectl exec mypod -- rm -rf /var/log/old", "exec-fs-mutate"),
     ("kubectl exec mypod -- sh -c 'echo x > /etc/config'", "exec-shell-c:redirect-to-fs-path"),
     ('kubectl exec mypod -- bash -c "cat <<EOF > /etc/x.conf\\nfoo\\nEOF"', "exec-shell-c"),
-    # kubectl cp INTO pod
     ("kubectl cp /tmp/local.yaml mypod:/etc/config.yaml", "kubectl-cp-into-pod"),
     ("kubectl cp /tmp/local mypod:/tmp/", "kubectl-cp-into-pod"),
-    # helm
     ("helm install myrelease ./chart", "helm-deploy"),
     ("helm upgrade myrelease ./chart --set foo=bar", "helm-deploy"),
     ("helm rollback myrelease 3", "helm-deploy"),
-    # argocd local sync
     ("argocd app sync myapp --local /tmp/manifests", "argocd-sync-local"),
-    # ssh write
     ("ssh anton 'sed -i s/x/y/g /etc/foo'", "ssh-mutate:ssh-sed-i"),
     ("ssh anton 'echo new > /etc/motd'", "ssh-mutate:ssh-redirect"),
     ("ssh anton 'systemctl restart nginx'", "ssh-mutate:ssh-systemctl-mutate"),
     ("ssh anton 'apt-get install nginx'", "ssh-mutate:ssh-pkg-install"),
     ("ssh anton 'docker exec foo sh -c \"x\"'", "ssh-mutate:ssh-docker-exec"),
-    # ssh-wrapped kubectl mutation: whole-command kubectl-edit is suppressed
-    # by the quote-stripping (correctly — the kubectl is inside the ssh
-    # quoted remote command, not a local invocation), but the SSH detection
-    # parses inside and catches the kubectl-mutate.
     ("ssh anton 'kubectl edit deploy/foo'", "ssh-mutate:ssh-kubectl-mutate"),
-    # scp INTO host
     ("scp /tmp/foo anton:/etc/foo", "scp-into-host"),
     ("scp ./local.txt user@anton:/var/foo.txt", "scp-into-host"),
-    # docker exec writes
     ("docker exec mycon sh -c 'echo x > /etc/foo'", "docker-exec-mutate"),
     ("docker exec mycon apt-get install vim", "docker-exec-mutate"),
     ("docker exec mycon tee /etc/x", "docker-exec-mutate"),
     ("docker exec mycon sed -i s/x/y/ /etc/foo", "docker-exec-mutate"),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("command", ALLOWED_COMMANDS)
@@ -192,12 +159,14 @@ def test_chained_command_with_safe_prefix_still_blocks():
 
 
 def test_check_kubectl_mutation_payload_raises_block_action(monkeypatch):
-    """The payload-based entrypoint raises BlockAction."""
+    """The payload-based entrypoint raises BlockAction.
+
+    Bypass mode short-circuits the guard — force it off for this test.
+    """
     from hooks.context import controls_toggle
     from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
     from hooks.hook_manager import BlockAction
 
-    # Bypass mode short-circuits the guard — force it off for this test.
     monkeypatch.setattr(controls_toggle, "is_controls_disabled", lambda *_a, **_kw: False)
 
     payload = {"tool_input": {"command": "kubectl edit deploy/foo"}}
@@ -206,11 +175,14 @@ def test_check_kubectl_mutation_payload_raises_block_action(monkeypatch):
 
 
 def test_check_kubectl_mutation_payload_allows_safe_command():
-    """The payload-based entrypoint does NOT raise on safe commands."""
+    """The payload-based entrypoint does NOT raise on safe commands.
+
+    No exception expected.
+    """
     from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
 
     payload = {"tool_input": {"command": "kubectl get pods"}}
-    check_kubectl_mutation(payload)  # No exception expected
+    check_kubectl_mutation(payload)
 
 
 OTEL_EVENT = "agentihooks.guardrail.kubectl_mutation_detected"

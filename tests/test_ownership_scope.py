@@ -170,9 +170,10 @@ class TestManagedRootScope:
         assert install._link_is_managed(rules / "a.md") is True
 
     def test_shallow_root_does_not_claim_foreign_claude_md(self, home, monkeypatch):
+        """A profiles/ dir of the operator's own, beneath the too-shallow root: both ownership signals the old predicate
+        used are present here.
+        """
         workspace = self._register_shallow_profile(home, monkeypatch)
-        # A profiles/ dir of the operator's own, beneath the too-shallow root:
-        # both ownership signals the old predicate used are present here.
         foreign = workspace / "some-other-repo" / "profiles" / "work" / "CLAUDE.md"
         foreign.parent.mkdir(parents=True)
         foreign.write_text("operator's own\n")
@@ -184,14 +185,17 @@ class TestManagedRootScope:
 
 class TestPreLedgerLinks:
     def test_link_into_managed_root_is_ours_without_a_ledger_entry(self, home, monkeypatch):
-        """Links from installs predating the ledger stay reapable."""
+        """Links from installs predating the ledger stay reapable.
+
+        Source already deleted.
+        """
         root = home / "repos" / "agentihooks"
         dead_source = root / ".claude" / "rules" / "gone.md"
         dead_source.parent.mkdir(parents=True)
         monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
         rules = install.CLAUDE_HOME / "rules"
         rules.mkdir(parents=True, exist_ok=True)
-        (rules / "gone.md").symlink_to(dead_source)  # source already deleted
+        (rules / "gone.md").symlink_to(dead_source)
         install._save_state({"managed_links": []})
 
         assert install._link_is_managed(rules / "gone.md") is True
@@ -263,9 +267,9 @@ class TestSeparatorGuard:
     """`_under_root` is what stops a sibling segment reading as a child."""
 
     def test_profiles_sibling_is_not_claimed(self, home, monkeypatch):
+        """`profiles-backup` shares a prefix with `profiles` but is not under it."""
         root = home / "repos" / "agentihooks"
         monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
-        # `profiles-backup` shares a prefix with `profiles` but is not under it.
         foreign = root / "profiles-backup" / "anton" / "CLAUDE.md"
         foreign.parent.mkdir(parents=True)
         foreign.write_text("a copy the operator keeps\n")
@@ -363,7 +367,11 @@ class TestSettingsRestore:
         assert json.loads(settings.read_text()) == original
 
     def test_backup_records_only_the_first_unmanaged_file(self, home, monkeypatch):
-        """Later unmanaged files are not the pre-agentihooks original."""
+        """Later unmanaged files are not the pre-agentihooks original.
+
+        A later init sees an unmanaged file again — the operator overwrote settings.json by hand since. That is not
+        the pre-agentihooks original.
+        """
         import datetime as _dt
 
         class _Clock(_dt.datetime):
@@ -371,7 +379,8 @@ class TestSettingsRestore:
 
             @classmethod
             def now(cls, tz=None):
-                cls._n += 1  # distinct second per call, so backups get distinct names
+                """Distinct second per call, so backups get distinct names."""
+                cls._n += 1
                 return _dt.datetime(2026, 1, 1, 0, 0, cls._n, tzinfo=tz)
 
         monkeypatch.setattr(install, "datetime", _Clock)
@@ -381,8 +390,6 @@ class TestSettingsRestore:
         install._backup_settings(settings)
         first = install._load_state()["settings_original_backup"]
 
-        # A later init sees an unmanaged file again — the operator overwrote
-        # settings.json by hand since. That is not the pre-agentihooks original.
         settings.write_text('{"model": "written-later"}')
         install._backup_settings(settings)
 
@@ -394,9 +401,9 @@ class TestPruneUnderUncertainty:
     """Deleting on incomplete information is the bug class, not a fallback."""
 
     def test_orphan_sweep_skipped_when_sources_are_unresolvable(self, home, monkeypatch):
+        """A moved venv makes _build_mcp_config sys.exit(1) deep inside the collector."""
         _write_claude_json({"agentihooks": {"command": "python"}, "gateway": {"command": "x"}})
         install._save_state({"managed_mcp_servers": ["agentihooks", "gateway"]})
-        # A moved venv makes _build_mcp_config sys.exit(1) deep inside the collector.
         monkeypatch.setattr(install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1)))
 
         install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
@@ -453,6 +460,7 @@ class TestMovedSourceOwnership:
     """A source that moved is still a source — ownership must not evaporate."""
 
     def test_claude_md_symlink_survives_a_renamed_bundle(self, home, monkeypatch):
+        """Operator moves the checkout."""
         monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", home / "repos" / "agentihooks")
         bundle = home / "bundle"
         src = bundle / "profiles" / "anton" / "CLAUDE.md"
@@ -463,7 +471,7 @@ class TestMovedSourceOwnership:
         cm.symlink_to(src)
         assert install._claude_md_is_managed(cm) is True
 
-        bundle.rename(home / "bundle-renamed")  # operator moves the checkout
+        bundle.rename(home / "bundle-renamed")
 
         assert install._claude_md_is_managed(cm) is True, (
             "a renamed bundle stranded agentihooks' own CLAUDE.md as unowned"
@@ -516,9 +524,10 @@ class TestMcpNameCollision:
         assert "shared" not in install._load_state()["managed_mcp_servers"]
 
     def test_dropping_the_profile_does_not_delete_operator_server(self, home):
+        """Profile drops it."""
         self._collide()
         install._reconcile_managed_mcp_ledger({"shared", "agentihooks"})
-        install._reconcile_managed_mcp_ledger({"agentihooks"})  # profile drops it
+        install._reconcile_managed_mcp_ledger({"agentihooks"})
         assert "shared" in _read_claude_json(), "the operator's MCP server was deleted by a profile update"
 
     def test_uninstall_does_not_claim_by_name_match(self, home, monkeypatch):

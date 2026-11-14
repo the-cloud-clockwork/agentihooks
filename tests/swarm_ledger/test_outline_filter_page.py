@@ -129,13 +129,13 @@ def test_type_ahead_finds_a_done_task_not_yet_loaded_and_reveals_it(ledger):
 
 
 def test_remote_matches_page_until_every_match_is_listed(ledger):
+    """Both activations run in one task, before the first page response; dblclick lets it render in between."""
     page, reads = ledger
     page.fill("#outline-filter", "old task")
     count = "() => document.querySelectorAll('#ol-sec-tasks .ol-items a').length"
     page.wait_for_function(f"() => ({count})() === 5")
     more = page.locator('#ol-sec-tasks button[data-matches="tasks"]')
     assert more.text_content() == "Show more matches · 6 left"
-    # Both activations run in one task, before the first page response; dblclick lets it render in between.
     more.evaluate("button => { button.click(); button.click(); }")
     page.wait_for_function(f"() => ({count})() >= 10")
     assert reads.count({"state": "done", "q": "old task", "offset": "5", "limit": "50"}) == 1

@@ -190,8 +190,11 @@ def test_drain_forwards_original_ts_in_attrs(tmp_path, http_ok):
 
 
 def test_drain_backlog_only_no_outbox_dir(tmp_path, http_ok):
-    """A machine with only the orphaned backlog (outbox never recreated)."""
-    outbox = tmp_path / "brain-outbox"  # deliberately not created
+    """A machine with only the orphaned backlog (outbox never recreated).
+
+    Deliberately not created.
+    """
+    outbox = tmp_path / "brain-outbox"
     backlog = tmp_path / "brain-outbox-backlog"
     backlog.mkdir()
     (backlog / "one.json").write_text(json.dumps({"type": "lesson", "content": "orphan", "session_id": "s"}))
@@ -200,7 +203,10 @@ def test_drain_backlog_only_no_outbox_dir(tmp_path, http_ok):
 
 
 def test_drain_quarantines_poison_pill_and_continues(tmp_path, monkeypatch):
-    """One server-rejected (400) marker must not wedge files sorted after it."""
+    """One server-rejected (400) marker must not wedge files sorted after it.
+
+    Sorts first.
+    """
     monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
 
     def post(path, body=None, idempotency_key=None, **kw):
@@ -211,7 +217,7 @@ def test_drain_quarantines_poison_pill_and_continues(tmp_path, monkeypatch):
     monkeypatch.setattr(brain_http, "post", post)
     _write_to_outbox([{"type": "lesson", "content": "AAA poison", "attrs": {}}], "s", str(tmp_path))
     files = sorted(_queued(tmp_path, "*.json"))
-    files[0].rename(files[0].with_name("00000000T000000-lesson-aaaaaaaa.json"))  # sorts first
+    files[0].rename(files[0].with_name("00000000T000000-lesson-aaaaaaaa.json"))
     _write_to_outbox([{"type": "lesson", "content": "good marker", "attrs": {}}], "s", str(tmp_path))
 
     assert _drain_outbox(str(tmp_path)) == 1

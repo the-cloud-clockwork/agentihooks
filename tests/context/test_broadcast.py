@@ -31,11 +31,6 @@ def sessions_file(broadcast_dir):
     return broadcast_dir / "active-sessions.json"
 
 
-# ---------------------------------------------------------------------------
-# Broadcast file I/O
-# ---------------------------------------------------------------------------
-
-
 class TestBroadcastFileIO:
     def test_load_empty_file(self, broadcast_file):
         from hooks.context.broadcast import _load_broadcasts
@@ -75,23 +70,21 @@ class TestBroadcastFileIO:
         assert loaded[0]["message"] == "Deploy freeze"
 
     def test_atomic_write(self, broadcast_file):
-        """Verify writes go through .tmp then os.replace."""
+        """Verify writes go through .tmp then os.replace.
+
+        No .tmp file should remain.
+        """
         from hooks.context.broadcast import _save_broadcasts
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             _save_broadcasts([{"id": "test", "message": "msg"}])
         assert broadcast_file.exists()
-        # No .tmp file should remain
         assert not broadcast_file.with_suffix(".tmp").exists()
-
-
-# ---------------------------------------------------------------------------
-# Message creation
-# ---------------------------------------------------------------------------
 
 
 class TestCreateBroadcast:
     def test_create_alert(self, broadcast_file):
+        """Alert default."""
         from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
@@ -101,7 +94,7 @@ class TestCreateBroadcast:
         assert msg_id is not None
         assert len(msgs) == 1
         assert msgs[0]["severity"] == "alert"
-        assert msgs[0]["persistent"] is True  # alert default
+        assert msgs[0]["persistent"] is True
 
     def test_create_critical(self, broadcast_file):
         from hooks.context.broadcast import _load_broadcasts, create_broadcast
@@ -133,6 +126,7 @@ class TestCreateBroadcast:
         assert msgs[0]["ttl_seconds"] == 7200
 
     def test_max_messages_enforced(self, broadcast_file):
+        """Should keep the newest."""
         from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with (
@@ -144,17 +138,12 @@ class TestCreateBroadcast:
             msgs = _load_broadcasts()
 
         assert len(msgs) == 3
-        # Should keep the newest
         assert msgs[-1]["message"] == "Message 4"
-
-
-# ---------------------------------------------------------------------------
-# Expiry and cleanup
-# ---------------------------------------------------------------------------
 
 
 class TestExpiry:
     def test_expired_messages_cleaned_on_load(self, broadcast_file):
+        """Already expired."""
         from hooks.context.broadcast import _load_broadcasts, _save_broadcasts
 
         expired_msg = {
@@ -165,7 +154,7 @@ class TestExpiry:
             "source": "operator",
             "created_at": "2026-04-06T00:00:00Z",
             "ttl_seconds": 60,
-            "expires_at": "2026-04-06T00:01:00Z",  # already expired
+            "expires_at": "2026-04-06T00:01:00Z",
             "delivered_to": [],
         }
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
@@ -173,11 +162,6 @@ class TestExpiry:
             msgs = _load_broadcasts(cleanup=True)
 
         assert len(msgs) == 0
-
-
-# ---------------------------------------------------------------------------
-# Delivery tracking
-# ---------------------------------------------------------------------------
 
 
 class TestDelivery:
@@ -194,19 +178,23 @@ class TestDelivery:
             assert len(pending_after) == 0
 
     def test_persistent_always_pending(self, broadcast_file):
+        """Persistent by default.
+
+        Persistent messages are still pending (re-injected every turn)
+        """
         from hooks.context.broadcast import create_broadcast, get_pending_broadcasts, mark_delivered
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
-            create_broadcast("Alert msg", severity="alert")  # persistent by default
+            create_broadcast("Alert msg", severity="alert")
             pending = get_pending_broadcasts("sess-1")
             assert len(pending) == 1
 
             mark_delivered("sess-1", pending[0]["id"])
-            # Persistent messages are still pending (re-injected every turn)
             pending_after = get_pending_broadcasts("sess-1")
             assert len(pending_after) == 1
 
     def test_different_sessions_independent(self, broadcast_file):
+        """Sess-2 should still see it."""
         from hooks.context.broadcast import create_broadcast, get_pending_broadcasts, mark_delivered
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
@@ -214,14 +202,8 @@ class TestDelivery:
 
             mark_delivered("sess-1", get_pending_broadcasts("sess-1")[0]["id"])
 
-            # sess-2 should still see it
             pending_sess2 = get_pending_broadcasts("sess-2")
             assert len(pending_sess2) == 1
-
-
-# ---------------------------------------------------------------------------
-# Severity filtering for PreToolUse
-# ---------------------------------------------------------------------------
 
 
 class TestCriticalFiltering:
@@ -246,11 +228,6 @@ class TestCriticalFiltering:
             critical = get_critical_broadcasts("sess-1")
 
         assert len(critical) == 0
-
-
-# ---------------------------------------------------------------------------
-# Session registry
-# ---------------------------------------------------------------------------
 
 
 class TestSessionRegistry:
@@ -600,13 +577,14 @@ class TestSessionRegistry:
         assert everything["local"]["status"] == "dead"
 
     def test_stale_session_cleaned(self, broadcast_dir):
+        """Non-existent PID."""
         from hooks.context.broadcast import _save_sessions, get_active_sessions
 
         sessions_file = broadcast_dir / "active-sessions.json"
         stale = {
             "sess-dead": {
                 "started_at": "2026-04-07T00:00:00Z",
-                "pid": 999999999,  # non-existent PID
+                "pid": 999999999,
                 "cwd": "/tmp",
                 "model": "opus",
             }
@@ -616,11 +594,6 @@ class TestSessionRegistry:
             sessions = get_active_sessions(cleanup=True)
 
         assert "sess-dead" not in sessions
-
-
-# ---------------------------------------------------------------------------
-# Banner formatting
-# ---------------------------------------------------------------------------
 
 
 class TestBannerFormatting:
@@ -649,11 +622,6 @@ class TestBannerFormatting:
         assert "Incident" in context
         assert "Cred rotation" in context
         assert "CRITICAL" in context.upper()
-
-
-# ---------------------------------------------------------------------------
-# Clear and list
-# ---------------------------------------------------------------------------
 
 
 class TestClearAndList:
@@ -689,11 +657,6 @@ class TestClearAndList:
             result = list_broadcasts()
 
         assert len(result) == 2
-
-
-# ---------------------------------------------------------------------------
-# Integration: hook injection
-# ---------------------------------------------------------------------------
 
 
 class TestHookIntegration:
@@ -840,11 +803,6 @@ class TestHookIntegration:
             assert get_posttool_context("codex-session") is None
 
 
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
-
-
 class TestEdgeCases:
     def test_corrupt_broadcast_file(self, broadcast_file):
         from hooks.context.broadcast import _load_broadcasts
@@ -868,12 +826,6 @@ class TestEdgeCases:
             create_broadcast("msg", severity="nonexistent")
             msgs = _load_broadcasts()
         assert msgs[0]["severity"] == "alert"
-
-
-# ---------------------------------------------------------------------------
-# Injection robustness — size budget, empty suppression, dedup, display label
-# (P0.1, P0.2, A.1, A.3)
-# ---------------------------------------------------------------------------
 
 
 class TestInjectionRobustness:
@@ -923,6 +875,7 @@ class TestInjectionRobustness:
         assert format_critical_context(msgs) == ""
 
     def test_format_critical_context_dedups_by_content_hash(self):
+        """Only the newer (id:b) should remain."""
         from hooks.context.broadcast import format_critical_context
 
         msgs = [
@@ -944,7 +897,6 @@ class TestInjectionRobustness:
             },
         ]
         out = format_critical_context(msgs)
-        # Only the newer (id:b) should remain.
         assert "id:b" in out
         assert "id:a" not in out
 
@@ -969,7 +921,10 @@ class TestInjectionRobustness:
         assert len(out.encode("utf-8")) <= 4096
 
     def test_format_critical_context_no_cap_emits_all(self):
-        """Default 0 → all deduped messages reach the model in full."""
+        """Default 0 → all deduped messages reach the model in full.
+
+        No cap → 50 lines emitted (each at 1KB+ → 50+ KB total)
+        """
         from hooks.context.broadcast import format_critical_context
 
         msgs = [
@@ -983,7 +938,6 @@ class TestInjectionRobustness:
             for i in range(50)
         ]
         out = format_critical_context(msgs)
-        # No cap → 50 lines emitted (each at 1KB+ → 50+ KB total)
         assert out.count("- [ALERT]") == 50
 
     def test_format_broadcast_banner_truncates_long_body(self):
@@ -1018,11 +972,6 @@ class TestInjectionRobustness:
         assert "[ALERT]" not in out
 
 
-# ---------------------------------------------------------------------------
-# P1.2 — content_hash field on every broadcast entry
-# ---------------------------------------------------------------------------
-
-
 class TestContentHashField:
     def test_create_broadcast_sets_content_hash(self, broadcast_file):
         from hooks.context.broadcast import _load_broadcasts, create_broadcast
@@ -1035,6 +984,7 @@ class TestContentHashField:
         assert len(msgs[0]["content_hash"]) == 16
 
     def test_content_hash_stable_for_same_content(self, broadcast_file):
+        """But ids are different (UUIDs)"""
         from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
@@ -1042,7 +992,6 @@ class TestContentHashField:
             create_broadcast("same body", severity="info", channel="brain")
             msgs = _load_broadcasts()
         assert msgs[0]["content_hash"] == msgs[1]["content_hash"]
-        # but ids are different (UUIDs)
         assert msgs[0]["id"] != msgs[1]["id"]
 
     def test_find_broadcast_by_content_hash(self, broadcast_file):

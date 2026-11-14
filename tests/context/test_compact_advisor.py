@@ -54,10 +54,10 @@ class TestCompactAdvisor:
         assert "/compact now" in result
 
     def test_top_3_only(self):
+        """Should only show top 3."""
         from hooks.context.compact_advisor import suggest_compact_focus
 
         audit = {"Read": 50000, "Bash": 30000, "Agent": 20000, "Edit": 10000, "Write": 5000}
         result = suggest_compact_focus(audit)
-        # Should only show top 3
         assert "Write" not in result
         assert "Read" in result

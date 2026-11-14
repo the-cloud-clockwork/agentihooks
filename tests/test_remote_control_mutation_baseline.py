@@ -1,3 +1,7 @@
+"""Pytestmark: One xdist worker builds the baseline pass once; a module cache behind a function fixture keeps that pass
+inside the function scoped home isolation, which a module fixture would run before.
+"""
+
 import faulthandler
 import json
 import os
@@ -18,8 +22,6 @@ from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats
 
-# One xdist worker builds the baseline pass once; a module cache behind a function fixture keeps that pass inside
-# the function scoped home isolation, which a module fixture would run before.
 pytestmark = [pytest.mark.xdist_group("remote_control_mutation"), pytest.mark.timeout(250, method="signal")]
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "scripts/swarm/commands.py"
@@ -28,8 +30,9 @@ DEADLINE = 120
 
 @pytest.fixture(autouse=True)
 def hung_test_dump_past_both_passes(request):
-    # The test that builds the baseline runs both mutmut passes, each already bounded by DEADLINE, which the suite's
-    # one minute dump would interrupt.
+    """The test that builds the baseline runs both mutmut passes, each already bounded by DEADLINE, which the suite's one
+    minute dump would interrupt.
+    """
     if float(request.config.getini("faulthandler_timeout") or 0):
         faulthandler.dump_traceback_later(2 * DEADLINE + 10, file=request.config.stash[fault_handler_stderr_fd_key])
 
@@ -64,9 +67,10 @@ def clean_mutation_children(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def workspace_copy_in_child(monkeypatch):
-    # The suite's coverage tracer and input audit hook fire on every file of the in-process checkout copy, which took
-    # ten to twenty five seconds in CI against under one in a plain child.
     def prepare(root, work, paths, tests):
+        """The suite's coverage tracer and input audit hook fire on every file of the in-process checkout copy, which
+        took ten to twenty five seconds in CI against under one in a plain child.
+        """
         env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE", "COVERAGE"))}
         code = (
             "import json, sys; from pathlib import Path; from scripts.ci_mutation.runner import prepare_workspace; "
@@ -103,8 +107,9 @@ def baseline_cache():
 
 @pytest.fixture(scope="module")
 def checkout_scratch():
-    # Hard links copy the checkout into a workspace; on another device, as the runner's temp folder is, every file is
-    # copied, which took up to twenty seconds more per workspace in CI.
+    """Hard links copy the checkout into a workspace; on another device, as the runner's temp folder is, every file is
+    copied, which took up to twenty seconds more per workspace in CI.
+    """
     folder = Path(tempfile.mkdtemp(prefix="remote-control-mutation-", dir=ROOT.parent))
     yield folder
     shutil.rmtree(folder, ignore_errors=True)
@@ -112,7 +117,7 @@ def checkout_scratch():
 
 @pytest.fixture
 def baseline(baseline_cache, checkout_scratch, monkeypatch):
-    # A cached pass that recorded an error is rebuilt, so a rerun or the next test retries a load-bound overrun.
+    """A cached pass that recorded an error is rebuilt, so a rerun or the next test retries a load-bound overrun."""
     if not baseline_cache or baseline_cache[0][4]:
         baseline_cache.clear()
         line = next(

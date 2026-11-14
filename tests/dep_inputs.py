@@ -251,6 +251,7 @@ class DepInputs:
         return json.dumps({"test": test, "files": sorted(shared.union(self.relative(opened))), "escapes": escapes})
 
     def shared_relative(self) -> set[str]:
+        """A shared path read before its file existed counts once the file appears, as it does at session end."""
         log = self.children / f"{os.getpid()}-shared"
         try:
             size = log.stat().st_size
@@ -259,7 +260,6 @@ class DepInputs:
         if (len(self.shared[0]), size) != self.shared_key:
             self.shared_key = (len(self.shared[0]), size)
             self.shared_files = self.kept(self.shared[0] | self.child_reads(log))
-        # A shared path read before its file existed counts once the file appears, as it does at session end.
         return {relative for full, relative in self.shared_files.items() if os.path.isfile(full)}
 
     def finish(self, test: str) -> None:

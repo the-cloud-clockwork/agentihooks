@@ -421,9 +421,10 @@ def test_two_processes_refused_at_once_refresh_once_and_share_the_credential(
     clients, failures = [], []
 
     def connect(environ):
+        """Surfaced through the failures assertion below."""
         try:
             clients.append(store.redis_client(environ))
-        except Exception as exc:  # noqa: BLE001  surfaced through the failures assertion below
+        except Exception as exc:  # noqa: BLE001
             failures.append(exc)
 
     threads = [threading.Thread(target=connect, args=(environ,)) for environ in environs]

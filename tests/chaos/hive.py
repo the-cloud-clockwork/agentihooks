@@ -1,3 +1,7 @@
+"""CPUS_PER_SLOT: admission.room grants (80 * cpus - 100 * load5) // 50 launches, so these readings leave capacity minus
+running.
+"""
+
 import argparse
 import json
 import sys
@@ -24,7 +28,6 @@ OFFERS = 10_000
 GENERATIONS = "chaos-generations"
 POLL_MS = 500
 QUIET = frozenset({"empty", "held"})
-# admission.room grants (80 * cpus - 100 * load5) // 50 launches, so these readings leave capacity minus running.
 CPUS_PER_SLOT = 0.625
 LOAD_PER_AGENT = 0.5
 
@@ -105,6 +108,7 @@ def finish(bus, runtime: ChaosRuntime, journal: Journal) -> None:
 
 
 def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) -> None:
+    """Spoke.poll swallows a dead connection as retry, so a direct read raises it to reconnect."""
     previous = None
     while True:
         finish(bus, runtime, journal)
@@ -113,7 +117,6 @@ def work(bus, spoke: Spoke, runtime: ChaosRuntime, journal: Journal, hive: str) 
             journal.write("poll", outcome=outcome)
         previous = outcome
         if outcome == "retry":
-            # Spoke.poll swallows a dead connection as retry, so a direct read raises it to reconnect.
             bus.state("spoke-pending").get(hive)
         if outcome not in QUIET | {"started"}:
             time.sleep(0.5)

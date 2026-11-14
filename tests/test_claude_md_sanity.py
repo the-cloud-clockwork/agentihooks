@@ -42,13 +42,14 @@ class TestClaudeMdSanity:
     """Tests for hooks.context.claude_md_sanity.check_claude_md_write."""
 
     def test_skip_non_claude_md(self):
+        """Should not raise."""
         from hooks.context.claude_md_sanity import check_claude_md_write
 
         payload = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/tmp/README.md", "content": "x\n" * 999},
         }
-        check_claude_md_write(payload)  # should not raise
+        check_claude_md_write(payload)
 
     def test_write_under_limit(self):
         from hooks.context.claude_md_sanity import check_claude_md_write

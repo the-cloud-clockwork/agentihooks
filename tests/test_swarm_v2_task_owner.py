@@ -1,8 +1,10 @@
+"""Import of scripts.swarm_ledger.repository: puts the ledger folder on sys.path before ledger_core loads."""
+
 import json
 
 import pytest
 
-import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
+import scripts.swarm_ledger.repository  # noqa: F401
 from scripts.inbox import cli as inbox_cli
 from scripts.inbox.store import InboxError, InboxStore, now_ms
 from scripts.swarm import delivery, master_retire

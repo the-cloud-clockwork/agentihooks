@@ -22,11 +22,11 @@ class TestBaseChannelsEnv:
     """AGENTIHOOKS_BASE_CHANNELS env var → hooks.config.BASE_CHANNELS."""
 
     def _reload_config(self):
+        """Broadcast.py imports BASE_CHANNELS at module load — reload it too."""
         import hooks.config as cfg
         import hooks.context.broadcast as bcast
 
         importlib.reload(cfg)
-        # broadcast.py imports BASE_CHANNELS at module load — reload it too
         importlib.reload(bcast)
         return cfg, bcast
 
@@ -74,16 +74,18 @@ class TestChannelFiltering:
         assert _message_matches_channel(msg, ["*"]) is True
 
     def test_get_pending_filters_by_channel(self):
+        """Mock session channels.
+
+        Should get global + brain, not ops.
+        """
         from hooks.context.broadcast import create_broadcast, get_pending_broadcasts
 
         create_broadcast("global msg", severity="info")
         create_broadcast("brain msg", severity="info", channel="brain")
         create_broadcast("ops msg", severity="info", channel="ops")
 
-        # Mock session channels
         with patch("hooks.context.broadcast._get_session_channels", return_value=["brain"]):
             pending = get_pending_broadcasts("sess-1")
-        # Should get global + brain, not ops
         messages = [m["message"] for m in pending]
         assert "global msg" in messages
         assert "brain msg" in messages
@@ -104,6 +106,7 @@ class TestChannelFiltering:
 
 class TestClearByChannel:
     def test_clear_specific_channel(self):
+        """Global still there."""
         from hooks.context.broadcast import _load_broadcasts, clear_broadcasts, create_broadcast
 
         create_broadcast("global msg", severity="info")
@@ -116,7 +119,7 @@ class TestClearByChannel:
         remaining = _load_broadcasts()
         channels = [m.get("channel") for m in remaining]
         assert "brain" not in channels
-        assert None in channels  # global still there
+        assert None in channels
         assert "ops" in channels
 
     def test_clear_all(self):
@@ -130,6 +133,7 @@ class TestClearByChannel:
 
 class TestBrainAdapter:
     def test_file_brain_source_reads_files(self, tmp_path):
+        """Higher priority first."""
         from hooks.context.brain_adapter import FileBrainSource
 
         brain_dir = tmp_path / "brain"
@@ -140,7 +144,6 @@ class TestBrainAdapter:
         source = FileBrainSource(brain_dir)
         entries = source.fetch()
         assert len(entries) == 2
-        # Higher priority first
         assert entries[0].id == "hot"
         assert entries[0].priority == 10
         assert entries[1].id == "notes"
@@ -328,6 +331,7 @@ class TestBrainAdapter:
         publish.assert_called_once_with(entries)
 
     def test_get_status(self):
+        """Patch the config imports inside get_status."""
         with (
             patch("hooks.context.brain_adapter.BRAIN_ENABLED", True, create=True),
             patch("hooks.context.brain_adapter.BRAIN_SOURCE_TYPE", "file", create=True),
@@ -335,7 +339,6 @@ class TestBrainAdapter:
             patch("hooks.context.brain_adapter.BRAIN_CHANNEL", "brain", create=True),
             patch("hooks.context.brain_adapter.BRAIN_REFRESH_TOOL_CALLS", 20, create=True),
         ):
-            # Patch the config imports inside get_status
             with patch.dict(
                 "hooks.config.__dict__",
                 {

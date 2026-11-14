@@ -63,9 +63,6 @@ def ask(monkeypatch):
     return install
 
 
-# parse
-
-
 def test_parse_reads_one_piece_per_dash_line_and_skips_prose():
     pieces = trace_plan.parse(DOGHOUSE, "t1")
     assert pieces == [
@@ -283,9 +280,6 @@ def test_a_piece_appended_under_the_same_authorizations_is_traced_alone(monkeypa
 def test_a_trace_without_authorizations_records_none(ask):
     ask(0.9)
     assert "authorizations" not in trace_plan.trace([piece("a")], INTENT, None)
-
-
-# trace
 
 
 def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
@@ -744,9 +738,6 @@ def test_a_changed_failed_or_unchecked_plan_is_traced_whole(ask, previous):
     assert len(state["pieces"]) == 2 and "size" in questions
 
 
-# run
-
-
 class Ledger:
     def __init__(self, refuse=False):
         self.followups, self.refuse, self.ids, self.doc = [], refuse, [], {}
@@ -1128,9 +1119,6 @@ def test_run_reads_a_broken_verdict_file_as_no_verdict(ask, tmp_path):
     assert record["verdict"] == "pass" and len(fake.calls) == 1
     (folder / "plan-verdict.json").write_text("[1]")
     assert trace_plan.load(folder) == {}
-
-
-# report and block note
 
 
 def test_report_tells_the_agent_what_comes_next():
