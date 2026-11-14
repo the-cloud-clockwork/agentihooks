@@ -1,5 +1,7 @@
-"""A local slot pass cache reads each value once, and a fenced spawn times its parts."""
+"""Concurrent fenced launches stop at the local cap, a local slot pass cache reads each value once, and a fenced
+spawn times its parts."""
 
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -33,6 +35,33 @@ def local(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> tuple[Fenc
     readings = counted(monkeypatch, headroom, "measure", READING)
     monkeypatch.setattr(headroom, "read", lambda redis, machine, now: {"saved": machine})
     return FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local"), scans, readings
+
+
+def refuse_together(fenced: FencedRuntime, first: int) -> dict[int, str]:
+    barrier, refusals = threading.Barrier(LAUNCHES), {}
+
+    def refuse(index: int) -> None:
+        barrier.wait()
+        refusals[index] = fenced._refusal("eng", {"id": f"task-{index}"}, f"engineer-{index}")
+
+    threads = [threading.Thread(target=refuse, args=(index,)) for index in range(first, first + LAUNCHES)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return refusals
+
+
+def test_concurrent_launches_stop_at_the_local_cap(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    fenced, _, _ = local(setup, monkeypatch)
+    setup.store.update(setup.config.slug, local_max_agents=LAUNCHES - 2)
+    refusals = refuse_together(fenced, 0)
+    rechecked = fenced.placement_refusal("eng", {"id": "task-9"})
+    assert "local machine runs 3 of its 3 agents" in rechecked
+    admitted = [index for index, refused in refusals.items() if not refused]
+    full = [refused for refused in refusals.values() if "local machine runs 3 of its 3 agents" in refused]
+    assert (len(admitted), len(full)) == (LAUNCHES - 2, 2)
+    assert len(setup.store.redis.hgetall(local_slots.key("workstation"))) == LAUNCHES - 2
 
 
 def test_a_pass_cache_reads_each_value_once_and_hands_it_to_every_caller() -> None:

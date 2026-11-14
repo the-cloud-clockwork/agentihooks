@@ -900,8 +900,9 @@ listings for its three launches.
 ## One placement scan per placement pass
 
 Nothing opens a placement pass since the tick spawn step was removed. `controller.FencedRuntime` keeps
-`_local_slots_cache` empty, so each read below takes its outside a placement pass column. A caller that builds its own
-`local_slots.PassCache` and passes it to `local_slots.running`, `held` or `claim` still reads once per cache.
+`_local_slots_cache` empty, so every read in the table below behaves as its Outside a placement pass column says. A
+caller that builds its own `local_slots.PassCache` and passes it to `local_slots.running`, `held` or `claim` still
+reads once per cache.
 
 `PassCache.once(read, *args)` returns the pass's result of `read(*args)`. The first call with a given function and
 arguments runs the read under the cache's lock and keeps the value; every later call in that pass, from any launch
@@ -967,9 +968,7 @@ look at the placement reads in the table above.
 
 `_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
 `scripts.tick.steps.place._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
-while `_spawn_order` runs. Once per spawn order it first times the runtime's `begin_placement_pass` when the runtime
-has one, recorded under that method's name, such as `scripts.swarm.controller.FencedRuntime.begin_placement_pass`.
-Then it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
+while `_spawn_order` runs. It first times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
 `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for each lane in the caps, it times four
 parts in this order:
 
@@ -1022,15 +1021,15 @@ percentiles do not add, and the estimate runs low for a row with a long tail, so
 
 | What the report shows | Where the time goes |
 |---|---|
-| The `begin_placement_pass`, `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part is the slow one: the runtime's per pass hive and herdr reads, the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
+| The `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part is the slow one: the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
 | The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
 | `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
 | The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
 
 `tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
 row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
-inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `begin_placement_pass`, `ranks`
-and `ordered` row per spawn order. The running filter keeps only the lane's agents that have not ended and still own their
+inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `ranks` and `ordered` row per spawn
+order. The running filter keeps only the lane's agents that have not ended and still own their
 task, with a placeholder row for an agent whose task row is missing.
 
 ### Focus ranks in spawn order
