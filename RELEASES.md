@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.879 · 2026-11-14
+
+### 2026-11-14 · 450e2bde4d4a · #11149 · @agenticore-app
+
+**Prove pane evidence and exits sweeps on an events engine swarm**
+
+This PR adds regression coverage proving the pane evidence and exits sweeps still work correctly on the events-only engine, ahead of removing the legacy launch engine. It seats agents the same way the events path does (via `next_name`, `start_execution`, and an `execution.started` event) rather than the legacy tick spawn, then verifies both the dead-pane case (incident saved, execution exited, agent dropped, task reopened, slot returned, mail moved) and the live-agent case (nothing touched). This closes a gap that would otherwise let the legacy removal silently break sweep behavior.
+
 ## v2.17.878 · 2026-11-14
 
 ### 2026-11-14 · 9cf5fabefd00 · #11145 · @agenticore-app
