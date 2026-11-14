@@ -103,10 +103,16 @@ def _orphans(slug: Any, store: Any, ledger: Any, rows: Any) -> Any:
             and store.claimant(slug, task_id) is None
             and not tick.awaiting_merge(row)
         ):
-            expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": row.get("claim_generation", 0)}
-            if tick._reopen(slug, ledger, rows, task_id, expected):
+            if _reopen_orphan(slug, ledger, rows, task_id):
                 actions.append(f"task {task_id} had no agent, reopened")
     return actions
+
+
+def _reopen_orphan(slug: Any, ledger: Any, rows: Any, task_id: str) -> bool:
+    """Reopen an orphaned row only while it still holds the claimant and claim generation the pass read."""
+    row = rows[task_id]
+    expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": row.get("claim_generation", 0)}
+    return tick._reopen(slug, ledger, rows, task_id, expected)
 
 
 def _restore_owner(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any) -> None:
