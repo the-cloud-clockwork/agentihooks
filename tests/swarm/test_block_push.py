@@ -36,6 +36,7 @@ def _repository(tmp_path, name):
     return origin.resolve(), primary.resolve(), top.resolve()
 
 
+@pytest.fixture
 def worktree(
     env: tuple[RedisStore, Any, Any],
     seat: Callable[..., AgentRecord],

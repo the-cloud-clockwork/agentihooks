@@ -44,5 +44,7 @@ def test_seat_fails_the_test_when_admission_refuses(env: tuple[RedisStore, Any, 
     run("sw", "create", "--repo", "/repo")
     ledger.rows["t1"]["state"] = "done"
 
-    with pytest.raises(pytest.fail.Exception, match="^hub admission refused t1: None$"):
+    with pytest.raises(pytest.fail.Exception) as refused:
         seat("t1")
+
+    assert str(refused.value) == "hub admission refused t1: None"

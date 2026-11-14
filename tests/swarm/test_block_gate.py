@@ -18,6 +18,7 @@ ESCALATED = {
 }
 
 
+@pytest.fixture
 def started(env: tuple[RedisStore, Any, Any], seat: Callable[..., AgentRecord]) -> tuple[RedisStore, Any]:
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
