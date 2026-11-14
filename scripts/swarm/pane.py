@@ -16,7 +16,7 @@ class PaneObservation:
 
 LOGIN_LINES = 12
 LOGIN_ERRORS = {"claude": ("Login reached its time limit · Please run /login",)}
-LOGIN_LINE = re.compile(r"^[\s●⎿]*(?P<text>.*?)\s*$")
+LOGIN_MARKS = "●⎿ \t\r\f\v"
 PROVIDER_ERRORS = {
     "claude": (
         r"API Error: (?:500|502|503|504|529)\b",
@@ -63,7 +63,7 @@ def provider_error(harness: str, text: str) -> str:
 def login_limit(harness: str, text: str) -> str:
     """The Claude login error a line of the latest pane lines shows whole, or empty."""
     lines = ESCAPE.sub("", text).splitlines()[-LOGIN_LINES:]
-    shown = {match["text"] for line in lines if (match := LOGIN_LINE.match(line))}
+    shown = {line.lstrip(LOGIN_MARKS).rstrip() for line in lines}
     return next((error for error in LOGIN_ERRORS.get(harness, ()) if error in shown), "")
 
 
