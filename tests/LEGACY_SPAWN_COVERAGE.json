@@ -57,7 +57,8 @@
         "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched",
         "tests/swarm/test_launch_check.py::test_not_joined_is_named"
       ],
-      "retires": "The tick judged launch checks of workers the legacy spawn started, with their one relaunch, retire with it; events workers get no launch check yet, filed as a follow up."
+      "retires": "The tick judged launch checks of workers the legacy spawn started, with their one relaunch, retire with it.",
+      "gap": "Workers the hub admits get no launch check and no single relaunch; ported by the ledger follow up on hub admitted worker launch checks, raised by task t-leo-spawn-tick."
     },
     "swarm-master-skips-host-hold": {
       "covered_by": [
