@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from scripts.swarm.store import RedisStore
     from tests.swarm.test_tick import FakeRuntime
-from tests.helpers.seat import SLUG, seat_agent
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 
@@ -33,10 +33,11 @@ def closing(
     ledger.mark_closed = lambda slug, by: ledger.calls.append(("closed", by))
     monkeypatch.setattr(cli.snapshot, "path", lambda slug: tmp_path / slug / "snapshot.json")
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr(rt, "retire_pane", rt.retire, raising=False)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    seat_agent(store, ledger, SLUG, "t1")
-    seat_agent(store, ledger, SLUG, "t2")
+    seat_owner(store, ledger, rt, "t1", 1_000)
+    seat_owner(store, ledger, rt, "t2", 1_000)
     return store, ledger, rt, tmp_path
 
 
