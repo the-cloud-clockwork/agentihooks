@@ -1,7 +1,7 @@
 import json
 from collections.abc import Callable
 from copy import copy
-from typing import cast
+from typing import Any, cast
 
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
@@ -59,9 +59,7 @@ class Lifecycle:
             event.version,
             event.data["task"],
             event.data["name"],
-        ):
-            return
-        if not value.get("returned") and self._held(event.swarm, agent):
+        ) or self._held(event.swarm, agent, value):
             return
         revision = entry.revision
         if value["state"] != "exiting":
@@ -87,11 +85,13 @@ class Lifecycle:
         self._settle(event, agent)
         claims.update(key, json.dumps({**value, "state": "exited"}).encode(), revision)
 
-    def _held(self, slug: str, agent: AgentRecord) -> bool:
-        """True while an open swarm outage or a pending outage resume holds ``agent``, so its exit waits."""
+    def _held(self, slug: str, agent: AgentRecord, value: dict[str, Any]) -> bool:
+        """True while an open swarm outage or a pending outage resume holds ``agent`` before its slot returned."""
         from scripts.swarm import outage, resume
 
         store = cast(RedisStore, self.store)
+        if value.get("returned"):
+            return False
         return bool(outage.held(store, slug, agent.name)) or resume.recovery_pending(store, slug, agent)
 
     def _refund(self, slug: str, agent: AgentRecord) -> None:
