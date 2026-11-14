@@ -4,7 +4,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, master_retire
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
@@ -73,6 +73,16 @@ def test_master_idle_limit_comes_from_environment(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_MASTER_IDLE_HOURS", "2")
     _, rt = idle_master(store, "paused")
     tick("sw", store, FakeLedger([]), rt, 2 * HOUR + 2)
+    assert store.agents("sw") == []
+
+
+@pytest.mark.feature("operator-master-up-resume-keeps-seat")
+def test_a_master_resumed_inside_the_idle_limit_stays(store: RedisStore) -> None:
+    agent, rt = idle_master(store, "paused")
+    store.put_agent("sw", replace(agent, launched_at=5 * HOUR))
+    tick("sw", store, FakeLedger([]), rt, 6 * HOUR + 2)
+    assert [a.name for a in store.agents("sw")] == [agent.name]
+    tick("sw", store, FakeLedger([]), rt, 11 * HOUR + 2)
     assert store.agents("sw") == []
 
 

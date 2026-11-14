@@ -184,6 +184,45 @@ def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_sea
     assert rt.masters == []
 
 
+@pytest.mark.feature("operator-master-up-resume-keeps-seat")
+@pytest.mark.parametrize(("flags", "replies"), [(("--last",), ()), ((), ("1",))])
+def test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it(
+    up: tuple[RedisStore, object, ResumingRuntime],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    flags: tuple[str, ...],
+    replies: tuple[str, ...],
+) -> None:
+    from argparse import Namespace
+
+    from scripts.swarm import cli
+
+    store, _, rt = up
+    name = store.next_name("sw", MASTER, 5)
+    started = store.start_execution(
+        "sw",
+        AgentRecord(
+            name,
+            MASTER,
+            MASTER,
+            pane_id="w1:m1",
+            harness="claude",
+            conversation_id="conv-3",
+            seat="master@sw",
+            started_at=5,
+        ),
+    )
+    answers(monkeypatch, *replies)
+    assert run("sw", "master", "up", *flags) == 0
+    assert printed(capsys) == {"master": name, "pane": "w2:m9", "seat": "master@sw", "choice": "last"}
+    [record] = masters(store)
+    assert (record.name, record.pane_id, record.state) == (name, "w2:m9", "working")
+    assert (record.execution_id, record.started_at) == (started.execution_id, 5)
+    assert record.launched_at > ENDED
+    assert store.seats.occupant("master@sw").occupant == name
+    assert cli._me(store, Namespace(slug="sw", name=name)).name == name
+
+
 def test_choice_new_launches_a_fresh_master_reading_the_seat_handoff_recap_and_learned(up, monkeypatch, capsys):
     store, ledger, rt = up
     gone_master(store)
@@ -353,6 +392,26 @@ def test_a_master_launched_later_is_the_last_master_even_when_an_older_one_ended
     )
     store.put_agent("sw", record)
     assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
+
+
+@pytest.mark.feature("operator-master-up-resume-keeps-seat")
+def test_a_master_resumed_after_a_later_master_ended_is_the_last_master(
+    up: tuple[RedisStore, object, ResumingRuntime],
+) -> None:
+    store, _, _ = up
+    gone_master(store)
+    record = AgentRecord(
+        "master@a1b2c3-0009",
+        MASTER,
+        MASTER,
+        harness="claude",
+        conversation_id="c9",
+        started_at=5,
+        launched_at=ENDED + 20,
+    )
+    store.put_agent("sw", record)
+    last = master_launch.last_master(store, "sw")
+    assert last is not None and last.name == "master@a1b2c3-0009"
 
 
 def test_a_new_master_records_its_launch_on_its_own_record_not_a_stale_seat_execution(up, monkeypatch):
@@ -822,7 +881,13 @@ def test_a_resumed_master_without_launch_facts_keeps_its_own(up):
         "low",
         "boss",
     )
-    assert (record.started_at, record.idle_ticks, record.task, record.seat) == (AT, 0, MASTER, "master@sw")
+    assert (record.started_at, record.launched_at, record.idle_ticks, record.task, record.seat) == (
+        10,
+        AT,
+        0,
+        MASTER,
+        "master@sw",
+    )
     assert store.seats.history("master@sw")[-1]["at"] == AT
     assert rt.configs == ["sw"]
     text = rt.resumed[0][4]
