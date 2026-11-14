@@ -1,8 +1,11 @@
+import contextlib
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -168,3 +171,59 @@ def test_offline_codex_profile_passes_a_hook_child_that_exits_with_its_hook(tmp_
     result = profile_probe.codex_session_start(home)
 
     assert result["registered_at"] == int((home / "first").read_text()) / 1e9
+
+
+LIFECYCLE_JOB = (
+    "os.environ['AGENTIHOOKS_HOME'] = str(home / '.agentihooks')\n"
+    "from hooks._async import fork_and_call\n"
+    "fork_and_call(time.sleep, 30, task_name='lifecycle-gc')\n"
+)
+
+
+def stop_lifecycle_jobs(home: Path) -> set[int]:
+    """Kill and reap the lifecycle gc jobs a test hook left running, returning their pids."""
+    jobs = profile_probe.lifecycle_jobs(profile_probe.processes(), home)
+    for pid in jobs:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+        with contextlib.suppress(ChildProcessError):
+            os.waitpid(pid, 0)
+    return jobs
+
+
+@pytest.mark.feature("worker-profile-detached-lifecycle-gc")
+def test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    home = registering_hook(tmp_path, LIFECYCLE_JOB)
+
+    try:
+        result = profile_probe.codex_session_start(home)
+    finally:
+        jobs = stop_lifecycle_jobs(home)
+
+    assert jobs
+    assert result["registered_at"] == int((home / "first").read_text()) / 1e9
+
+
+@pytest.mark.feature("worker-profile-detached-lifecycle-gc")
+def test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    home = registering_hook(
+        tmp_path,
+        LIFECYCLE_JOB + "child = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+        "(home / 'child').write_text(str(child.pid))\n",
+    )
+
+    try:
+        with pytest.raises(AssertionError, match="Codex hook children outlived registration") as failed:
+            profile_probe.codex_session_start(home)
+    finally:
+        jobs = stop_lifecycle_jobs(home)
+
+    assert jobs
+    assert f"{int((home / 'child').read_text())} sleep 30" in str(failed.value)
+    assert "lifecycle-gc" not in str(failed.value)

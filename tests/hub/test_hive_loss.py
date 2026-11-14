@@ -42,7 +42,10 @@ def rig():
         task = {"id": "task", "execution_id": execution, "execution_generation": generation, "claim_generation": 3}
         tasks.request.return_value = SpawnRequest(SimpleNamespace(slug="rig"), "eng", name, task)
         runtime.spawn.return_value = Outcome(
-            "spawn", Status.OK, "local", SimpleNamespace(pane_id=f"{hive}:{name}", harness="claude", account="a")
+            "spawn",
+            Status.OK,
+            "local",
+            SimpleNamespace(pane_id=f"{hive}:{name}", harness="claude", account="a", launched_at=0),
         )
         config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", hive, policy)
         return SimpleNamespace(
