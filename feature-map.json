@@ -1552,7 +1552,7 @@
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1793",
       "behaviour": "A lane successor spawned from a saved handoff launch whose model or effort is empty takes the lane's pinned model, leaving an automatic lane's model to the band pick, and the lane effort clamped into the lane's effort range, else the range floor, before placement; keys the saved launch carries stay as saved and the launch assignment is left as saved.",
-      "seam": "scripts.swarm.successor_fill, called by the place step before runtime spawn and by hub admission before a hive successor is placed",
+      "seam": "scripts.swarm.successor_fill, called by hub admission before a hive successor is placed",
       "tests": [
         "tests/tick/steps/test_successor_fill.py::test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane_model_inside_the_range",
         "tests/hub/test_admission.py::test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range"
@@ -5236,7 +5236,7 @@
     {
       "id": "tick-scale-gate-step-floors",
       "origin": "inventory",
-      "behaviour": "The tick scale gate reports a miss for a gated launch path step, every step in scripts.tick.steps.budgets.SPAWN_NEEDS plus spawn and tick view, whose wall time outruns its floor, that is cut off or abandoned, that ends outside success, or that only rested and never ran, ignores steps outside the gate, and its CLI refuses a --redis URL that is not loopback before flushing it.",
+      "behaviour": "The tick scale gate reports a miss for a gated step, every step in scripts.tick.steps.budgets.SPAWN_NEEDS plus tick view, whose wall time outruns its floor, that is cut off or abandoned, that ends outside success, or that only rested and never ran, ignores steps outside the gate, and its CLI refuses a --redis URL that is not loopback before flushing it.",
       "seam": "tests.tick_scale.gate.misses and gate.main against scripts.tick.steps.budgets.floor_of",
       "tests": [
         "tests/tick_scale/test_gate.py::test_the_gate_covers_the_spawn_chain_reap_and_the_tick_view",

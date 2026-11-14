@@ -1008,7 +1008,7 @@ def test_a_failed_metrics_write_is_reported_as_an_action(store, home, monkeypatc
     ]
 
 
-def test_the_tick_runs_the_dispatcher_steps(monkeypatch):
+def test_the_tick_runs_the_dispatcher_steps(monkeypatch: pytest.MonkeyPatch) -> None:
     import inspect
 
     from scripts.swarm import tick
@@ -1018,7 +1018,7 @@ def test_the_tick_runs_the_dispatcher_steps(monkeypatch):
     source = inspect.getsource(tick.tick) + inspect.getsource(tasks) + inspect.getsource(place)
     assert "grouping.group_pass" not in source and "dispatcher.group" in source
     placing = [step.name for step in engine.group_steps(place.PLACEMENT)]
-    assert placing.index("rank pass") < placing.index("spawn")
+    assert "rank pass" in placing
     steps = inspect.getsource(report)
     assert "priority_sweep.priority_pass" not in steps and "dispatcher.priorities" in steps
 

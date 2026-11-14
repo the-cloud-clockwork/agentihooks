@@ -4,8 +4,10 @@ import json
 
 import pytest
 
+from scripts.hub import admission
 from scripts.swarm import effort_range, profile_choice, store, successor_fill, tick
-from tests.swarm.test_tick import FakeRuntime, tasks
+from tests.helpers.seat import seat_agent
+from tests.swarm.test_tick import tasks
 
 pytestmark = pytest.mark.unit
 
@@ -29,9 +31,9 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
     held.redis.set(held.key("sw", "handoff-envelope", "t1"), json.dumps({"reason": "context", "launch": SAVED}))
     decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
     monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
-    runtime = FakeRuntime()
-    tick.tick("sw", held, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    launch = runtime.tasks[0]["handoff_envelope"]["launch"]
+    seat_agent(held, tasks(("t1", "eng")), "sw", "t1", clock=lambda: 1_000)
+    admitted = json.loads(held.redis.get(held.key("sw", admission.ADMITTED, "t1", "0")))["task"]
+    launch = admitted["handoff_envelope"]["launch"]
     assert launch["model"] == "sonnet-lane"
     assert launch["effort"] in effort_range.EFFORTS["claude"][2:4]
     assert launch["effort"] == "high"
@@ -40,7 +42,7 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
         "harness": "claude",
         "account": "a1",
     }
-    assert "launch_assignment" not in runtime.tasks[0]
+    assert "launch_assignment" not in admitted
 
 
 def test_a_filled_saved_effort_passes_the_preserved_effort_check_an_empty_one_fails() -> None:
