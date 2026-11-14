@@ -155,9 +155,7 @@ from scripts.tick.steps.common import (
     _operator_line,  # noqa: F401
     _rebind,  # noqa: F401
     _reopen,  # noqa: F401
-    _retire_or_stop,  # noqa: F401
     _still_held,  # noqa: F401
-    _stop_hive,  # noqa: F401
     skip_dropped,  # noqa: F401
     skip_refused,  # noqa: F401
 )

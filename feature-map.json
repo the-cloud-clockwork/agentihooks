@@ -6243,28 +6243,13 @@
       "id": "events-retirement-refunds-claim-life",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
-      "behaviour": "A swarm retirement refunds the claim life of the agent it retires: three retirements for an account mismatch, idling or a swarm stop leave a fourth claim open on the legacy tick spawn, and an agent seated through hub admission whose hive recorded its start and whose life the hub counted gets that life back when the observe verify step retires it for an account mismatch, the agents reap step retires it for idling or a swarm stop retires it, retired and dropped with its task reopened unclaimed.",
+      "behaviour": "A swarm retirement refunds the claim life of the agent it retires: three retirements for an account mismatch, idling or a swarm stop leave a fourth claim open on the legacy tick spawn, and an agent seated through hub admission whose hive recorded its start and whose life the hub counted gets that life back when the observe verify step retires it for an account mismatch, the agents reap step retires it for idling or a swarm stop retires it, retired and dropped with its task reopened unclaimed. The tick judges such an agent only while its process is live, leaving a dead one to the hub reconciler; a declared wait or typed input holds an idle one; and the hive's exit after the tick retired it still releases its launch slot and settles the spoke claim without a second refund.",
       "seam": "stop_now, the observe verify step and the agents reap step, retiring an agent through the held claim refund",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
-        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent"
-      ]
-    },
-    {
-      "id": "events-retirement-stops-the-execution",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-idle-mismatch-retire",
-      "behaviour": "When the tick retires a hub admitted agent whose hive recorded its start, for an account mismatch in the observe verify step, or for idling, a revoked account, repeated content refusals or a stuck provider error in the agents reap step, the hub sends that hive the execution stop for its started execution once the store took the drop, naming the retirement reason, so the hive spoke ends the execution through its exited event. A refused drop sends no stop, and a legacy agent with no recorded start sends none. The hive's exit for a retired agent still releases its launch slot and settles the spoke claim as exited without a second refund. A stop the bus refused waits in the swarm's pending stops and is sent again on each reap pass until the bus takes it, only for an agent the swarm dropped; a refused stop for an agent still seated is discarded. When the runtime cannot reach a hub admitted agent retired for an account mismatch or idling, the stop the hive took retires it instead. A declared wait or typed input holds an idle hub admitted agent seated with its claim and sends no stop.",
-      "seam": "observe verify and the agents reap watch retiring an events owned agent through execution_stop.stop",
-      "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent",
-        "tests/swarm/test_events_claim_refunds.py::test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_the_agent",
-        "tests/swarm/test_events_claim_refunds.py::test_the_hive_stop_waits_for_the_store_to_take_the_drop",
-        "tests/swarm/test_events_claim_refunds.py::test_a_legacy_agent_retirement_sends_no_stop",
-        "tests/swarm/test_events_claim_refunds.py::test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim",
-        "tests/swarm/test_events_claim_refunds.py::test_a_stop_the_bus_refused_is_sent_again_only_once_its_agent_was_dropped",
-        "tests/swarm/test_events_claim_refunds.py::test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop",
-        "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement"
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
+        "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement",
+        "tests/swarm/test_events_claim_refunds.py::test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim"
       ]
     },
     {

@@ -12,16 +12,14 @@ from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
-from scripts.hive import execution_events, execution_stop
+from scripts.hive import execution_events
 from scripts.hub import claims, lifecycle, reconciler
 from scripts.swarm import launch_check, readiness
-from scripts.swarm import tick as tick_module
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_KILL_TICKS
 from scripts.tick.steps import agents as agent_steps
 from scripts.tick.steps import observe
-from scripts.tick.steps.common import DROP_REFUSED
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
@@ -153,138 +151,7 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
 
 
-@pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("ending", ["mismatch", "idle"])
-def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
-) -> None:
-    agent, event = launched(env, bus, seat)
-    spoke_started(bus)
-
-    retire(ending, env, agent)
-
-    sent = sent_stops(bus, agent)
-    assert [(stop.type, stop.key, stop.cause) for stop in sent] == [(execution_stop.TYPE, agent.execution_id, event.id)]
-    assert sent[0].data["reason"] == ending
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize(
-    ("free", "reason"),
-    [
-        (agent_steps._free_refused, "refused"),
-        (agent_steps._free_revoked, "revoked"),
-        (agent_steps._free_stuck, "stuck"),
-    ],
-)
-def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_the_agent(
-    env: tuple[RedisStore, Any, Any],
-    bus: Bus,
-    seat: Callable[..., AgentRecord],
-    free: Callable[..., list[str]],
-    reason: str,
-) -> None:
-    store, ledger, rt = env
-    agent, event = launched(env, bus, seat)
-    spoke_started(bus)
-
-    free(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
-
-    assert agent.name in rt.killed
-    assert store.claims(SLUG, "t1") == 0
-    sent = sent_stops(bus, agent)
-    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
-
-
-def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
-    """The stops waiting for the hive that ``agent`` names."""
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(
-        execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive), execution_stop.POLICY
-    )
-    return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize(("dropped", "stops"), [(DROP_REFUSED, 0), ("", 1)])
-def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], dropped: str, stops: int
-) -> None:
-    agent, _ = launched(env, bus, seat)
-    spoke_started(bus)
-
-    assert tick_module._stop_hive(SLUG, env[0], agent, "idle", dropped) == dropped
-
-    assert len(sent_stops(bus, agent)) == stops
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
-def test_a_legacy_agent_retirement_sends_no_stop(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
-) -> None:
-    store, _, _ = env
-    assert run(SLUG, "create", "--repo", "/repo") == 0
-    agent = seat("t1")
-    assert reconciler.legacy_agents(store, SLUG) == [agent]
-
-    assert reconciler.stop_admitted(store, SLUG, agent, "idle") == execution_stop.UNKNOWN
-
-    assert sent_stops(bus, agent) == []
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("dropped", [True, False])
-def test_a_stop_the_bus_refused_is_sent_again_only_once_its_agent_was_dropped(
-    env: tuple[RedisStore, Any, Any],
-    bus: Bus,
-    seat: Callable[..., AgentRecord],
-    monkeypatch: pytest.MonkeyPatch,
-    dropped: bool,
-) -> None:
-    store, ledger, rt = env
-    agent, event = launched(env, bus, seat)
-    spoke_started(bus)
-    working = reconciler.open_bus
-
-    def refused(_config: Any) -> Any:
-        raise ConnectionError("bus down")
-
-    monkeypatch.setattr(reconciler, "open_bus", refused)
-    assert reconciler.stop_admitted(store, SLUG, agent, "idle").startswith(execution_stop.FAILED)
-    monkeypatch.setattr(reconciler, "open_bus", working)
-    if dropped:
-        assert store.drop_agent(SLUG, agent.name)
-    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
-
-    actions = agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
-
-    resent = f"sent the idle stop for {agent.name} again: {execution_stop.SENT}"
-    assert (resent in actions) is dropped
-    expected = [(agent.execution_id, event.id)] if dropped else []
-    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == expected
-    assert reconciler.retry_stops(store, SLUG) == []
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("ending", ["mismatch", "idle"])
-def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
-) -> None:
-    store, ledger, rt = env
-    agent, event = launched(env, bus, seat)
-    spoke_started(bus)
-    rt.stuck.add(agent.name)
-
-    retire(ending, env, agent)
-
-    assert agent.name not in rt.killed
-    assert [seated.name for seated in store.agents(SLUG)] == []
-    assert store.claims(SLUG, "t1") == 0
-    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
-    assert [(stop.key, stop.data["reason"]) for stop in sent_stops(bus, agent)] == [(agent.execution_id, ending)]
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.feature("events-retirement-refunds-claim-life")
 @pytest.mark.parametrize("hold", ["wait", "typed"])
 def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], hold: str
@@ -304,10 +171,9 @@ def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retire
     assert agent.name not in rt.killed
     assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
     assert store.claims(SLUG, "t1") == 1
-    assert sent_stops(bus, agent) == []
 
 
-@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.feature("events-retirement-refunds-claim-life")
 @pytest.mark.parametrize("ending", ["mismatch", "idle"])
 def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
