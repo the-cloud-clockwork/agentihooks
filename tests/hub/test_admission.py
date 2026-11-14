@@ -999,7 +999,8 @@ def test_the_seeds_carry_the_folder_the_previous_agents_hive_synced(rig: SimpleN
     from scripts.swarm.store import AgentRecord
     from scripts.swarm_ledger import ledger_workspace
 
-    earlier = AgentRecord("eng@sw-0000", "eng", "t1", seat="eng-9@sw", state="starting", started_at=1, hive="hive-b")
+    named = rig.store.next_name(SLUG, "eng", 1)
+    earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", state="starting", started_at=1, hive="hive-b")
     rig.store.start_execution(SLUG, earlier, "")
     synced = {SLUG: {"t1": {"progress.md": "- earlier step\n", "steering.md": "stale"}}}
     rig.store.redis.set(ledger_workspace.files_key("hive-b"), json.dumps(synced))

@@ -192,7 +192,6 @@ class Admission:
     ) -> dict[str, Any] | None:
         from scripts.hive import orders
         from scripts.swarm import profile_choice, tick
-        from scripts.swarm_ledger import ledger_workspace
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -220,7 +219,7 @@ class Admission:
         claimed["group"] = [
             {key: rows[member][key] for key in ("id", "title", "description")} for member in members if member in rows
         ]
-        claimed[orders.SEEDS] = ledger_workspace.carried(self.store, slug, claimed, doc, name)
+        claimed[orders.SEEDS] = self._seeds(slug, claimed, doc, name)
         primed = tick.primed(self.store, slug, seat, claimed)
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
@@ -266,6 +265,17 @@ class Admission:
         found = continuation.resolve(config.repo, task, rows, lives, {}, reclaim, origin)
         self.store.put_reclaim(slug, name, found)
         return {"reclaim": found}
+
+    def _seeds(self, slug: str, task: dict[str, Any], doc: dict[str, Any], name: str) -> dict[str, str]:
+        """The files the hive writes into the task's work folder before the launch: steering from the task and the
+        latest copy that the hive of the task's previous agent synced."""
+        from scripts.swarm_ledger import ledger_workspace
+
+        earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
+        previous = max(earlier, key=lambda agent: agent.started_at, default=None)
+        held = self.store.redis.get(ledger_workspace.files_key(previous.hive)) if previous and previous.hive else None
+        synced: dict[str, dict[str, dict[str, str]]] = json.loads(held) if held else {}
+        return {**synced.get(slug, {}).get(task["id"], {}), "steering.md": ledger_workspace.steering(task, doc)}
 
     def _mark(self, slug: str, request: dict[str, Any], row: dict[str, Any], name: str) -> dict[str, Any] | None:
         """The ledger row once claimed by name with its portable work folder, a protected branch cleared and the lane
