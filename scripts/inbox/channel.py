@@ -183,7 +183,6 @@ async def _push(
     feed: SeatFeed | None = None,
 ) -> None:
     import anyio
-    from redis.exceptions import RedisError
 
     pubsub, delay, pushed, beat = None, RETRY_FIRST_S, Pushed(), float("-inf")
     try:
@@ -201,12 +200,11 @@ async def _push(
                 else:
                     await _pull(feed)
                 delay = RETRY_FIRST_S
-            except Exception as exc:
+            except Exception:
                 if pubsub is not None:
                     pubsub.close()
                     pubsub = None
-                if not isinstance(exc, RedisError):
-                    _log(f"push pass failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
+                _log(f"push pass failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
                 await anyio.sleep(delay)
                 delay = min(delay * 2, RETRY_MAX_S)
     finally:

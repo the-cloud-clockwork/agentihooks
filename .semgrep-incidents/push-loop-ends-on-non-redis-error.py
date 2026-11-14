@@ -30,3 +30,12 @@ async def _push_kept() -> None:
         except Exception as exc:
             print(f"push pass failed ({exc})", file=sys.stderr)
             await pause(1.0)
+
+
+async def _push_bare() -> None:
+    while True:
+        # ruleid: push-loop-ends-on-non-redis-error
+        try:
+            await deliver()
+        except:  # noqa: E722
+            await pause(1.0)

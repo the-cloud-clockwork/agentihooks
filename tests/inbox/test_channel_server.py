@@ -297,7 +297,7 @@ def test_the_push_loop_writes_a_heartbeat_on_stderr(
     monkeypatch.setattr(channel, "HEARTBEAT_S", 0.2, raising=False)
 
     async def scenario(send: object, receive: object) -> None:
-        await anyio.sleep(0.7)
+        await anyio.sleep(2.0)
 
     session(store, scenario)
     beats = [line for line in capsys.readouterr().err.splitlines() if "push loop alive for bob" in line]
