@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import resume, snapshot
+from scripts.swarm import naming, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_tick import FakeRuntime
@@ -114,11 +114,11 @@ def test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resum
     )
     store.claim("sw", "t1", name, 600_000)
     (tmp_path / "wt").mkdir()
-    listing = f"worktree {tmp_path / 'wt'}\nbranch refs/heads/{name}\n"
+    listing = f"worktree {tmp_path / 'wt'}\nbranch refs/heads/{naming.plain(name)}\n"
     snapshot.take(store, "sw", 99, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, listing, ""))
     store.redis.flushall()
     outcomes = restore(store, ResumingRuntime())
-    assert [(o.name, o.outcome) for o in outcomes] == [(name, "resumed")]
+    assert [(o.name, o.outcome, o.reason) for o in outcomes] == [(name, "resumed", "own conversation reopened")]
     [eng] = store.agents("sw")
     assert (eng.execution_id, eng.generation, eng.started_at) == (started.execution_id, started.generation, 5)
     assert (eng.state, eng.pane_id, eng.launched_at) == ("working", "w2:p9", 1_000)

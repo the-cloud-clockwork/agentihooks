@@ -458,6 +458,7 @@ def test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_a
     runtime.live.remove(dead.name)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name}" in actions
+    assert not [action for action in actions if "refused" in action]
     reopened = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (reopened.execution_id, reopened.generation, reopened.started_at) == (
         dead.execution_id,
@@ -480,6 +481,7 @@ def test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the
     transfers.record(store, "sw", dead, "quota", "## Next\nContinue.\n", 2 * MINUTE)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name}" in actions
+    assert not [action for action in actions if "refused" in action]
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (restarted.execution_id, restarted.started_at) == (dead.execution_id, dead.started_at)
     assert (restarted.launched_at, restarted.idle_ticks) == (9 * MINUTE, 0)
