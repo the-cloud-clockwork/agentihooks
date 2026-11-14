@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import pytest
@@ -25,6 +26,9 @@ def test_seat_claims_and_launches_an_agent_without_start_or_a_tick(env: tuple[Re
     assert agent.name == "ci@a1b2c3-0001"
     assert (agent.lane, agent.task, agent.seat, agent.hive) == ("ci", "t2", "ci-1@sw", "root")
     assert (agent.state, agent.pane_id, agent.launched_at) == ("starting", "", 0)
+    pending = store.redis.hget(store.key("sw", "pending-lives"), "t2")
+    assert json.loads(pending) == [agent.execution_id, agent.generation]
+    assert store.redis.hget(store.key("sw", "launches"), agent.name) is None
     assert launched(agent) == {
         "harness": "claude",
         "profile": "cicd",

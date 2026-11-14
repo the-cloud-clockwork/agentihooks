@@ -49,10 +49,9 @@ def seat_agent(
     ``LAUNCH`` with the lane's ``PROFILES`` entry, each key of ``launch`` overriding its default.
 
     The record is admitted and acknowledged, never run by a hive: its state stays ``starting``, ``pane_id`` stays
-    empty, ``launched_at`` stays 0, the claim life stays pending and uncounted, no runtime lists the agent, no launch
-    row is written and the work folder is not scaffolded. The swarm stays as created, paused included. ``ledger``
-    needs ``task``, ``state`` and ``update_task`` with the ``if_state`` and ``if_match`` guards; a refused admission
-    or acknowledgement fails the test."""
+    empty, ``launched_at`` stays 0, the claim life stays pending, no runtime lists the agent and no launch row is
+    written. The swarm stays as created, paused included. ``ledger`` needs ``task``, ``state`` and ``update_task``
+    with the ``if_state`` and ``if_match`` guards; a refused admission or acknowledgement fails the test."""
     row = ledger.task(slug, task_id)
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
