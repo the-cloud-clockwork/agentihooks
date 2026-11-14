@@ -2078,6 +2078,17 @@
       ]
     },
     {
+      "id": "swarm-stall-watch-resumed-owner-grace",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-watch-launch-floor",
+      "behaviour": "The stall watch measures a red, green or unmergeable pull request's grace from the later of its owner's start and launch, so a resumed owner keeps its task for the full limit after the resume while a never resumed owner is measured from its start.",
+      "seam": "scripts.swarm.stall_watch.stall_pass through its judged step",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_a_resumed_owner_gets_the_full_limit_from_its_launch",
+        "tests/swarm/test_stall_watch.py::test_a_never_resumed_owner_is_measured_from_its_start"
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
@@ -2249,6 +2260,18 @@
       "seam": "agentihooks swarm status health findings",
       "tests": [
         "tests/swarm/test_health.py::test_a_quiet_claim_names_the_task_its_holder_and_the_quiet_time"
+      ]
+    },
+    {
+      "id": "quiet-gate-resumed-agent-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quiet-gate-launch-time",
+      "behaviour": "The quiet claim gate and the stale claim finding measure a worker from the latest of its progress signals, its start and its launch, so a worker resumed long after its last progress signal is not quiet until thirty minutes after the resume, and a never resumed worker is still measured from its start.",
+      "seam": "scripts.gates.quiet quiet_minutes and quiet_pass",
+      "tests": [
+        "tests/gates/test_quiet.py::test_a_resumed_agent_with_old_progress_is_measured_from_its_launch",
+        "tests/gates/test_quiet.py::test_a_later_progress_signal_still_wins_over_an_older_launch",
+        "tests/gates/test_quiet.py::test_a_never_resumed_agent_is_still_measured_from_its_start"
       ]
     },
     {
@@ -3621,6 +3644,51 @@
         "tests/test_claude_tool_failure_breaker.py::test_a_payload_with_neither_a_response_nor_an_error_is_not_counted",
         "tests/test_claude_tool_failure_breaker.py::test_a_disabled_breaker_leaves_a_claude_failure_uncounted",
         "tests/test_claude_tool_failure_breaker.py::test_the_installed_claude_settings_carry_the_failure_event"
+      ]
+    },
+    {
+      "id": "swarm-outage-recovery-hub-admitted",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
+      "behaviour": "An owner seated through hub admission on the tick's own hive keeps its claim through an outage hold, frees its seat once a provider error outlasts the hold window, is reached once by every sender after Redis, network or provider recovery and resumes within three ticks without a new claim, and a dead owner reopens on its own seat, records why a fresh agent is needed, or is dropped with its claim life refunded only while it still holds the claim.",
+      "seam": "The tick reaper and outage recovery passes judging an execution backed owner",
+      "tests": [
+        "tests/swarm/test_outage_hold.py::test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_and_unretired",
+        "tests/swarm/test_outage_seat_release.py::test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_outage_stays_open",
+        "tests/swarm/test_outage_drill.py::test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim",
+        "tests/swarm/test_dead_resume.py::test_confirmed_dead_process_reaches_resume_before_binding_retirement",
+        "tests/swarm/test_outage_hold.py::test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopped",
+        "tests/swarm/test_outage_hold.py::test_a_cleared_provider_error_lets_the_idle_count_run_again",
+        "tests/swarm/test_outage_drill.py::test_channel_delivery_after_redis_recovery_is_confirmed_once",
+        "tests/swarm/test_outage_drill.py::test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once",
+        "tests/swarm/test_dead_resume.py::test_dead_resume_records_why_a_fresh_agent_is_needed",
+        "tests/swarm/test_dead_resume.py::test_a_fresh_conversation_starts_a_new_life",
+        "tests/swarm/test_dead_resume.py::test_dead_retiring_agent_retries_retirement",
+        "tests/swarm/test_dead_resume.py::test_recovery_refuses_a_stopped_swarm_or_stale_ownership",
+        "tests/swarm/test_dead_resume.py::test_dead_resume_keeps_a_pull_request_claim_and_checks_ledger_identity",
+        "tests/swarm/test_dead_resume.py::test_recovery_uses_the_configured_compact_limit_or_default",
+        "tests/swarm/test_dead_resume.py::test_missing_conversation_records_the_exact_resume_failure",
+        "tests/swarm/test_dead_resume.py::test_recovery_renews_its_claim_for_the_tick_lease",
+        "tests/swarm/test_dead_resume.py::test_binding_deferral_keeps_retiring_and_reported_agents_in_verification",
+        "tests/swarm/test_dead_resume.py::test_a_legacy_lost_claim_without_a_generation_reopens",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_one_claim_field_moved",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_a_legacy_claim_without_a_generation",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone",
+        "tests/swarm/test_dead_resume.py::test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read",
+        "tests/swarm/test_dead_resume.py::test_reap_reports_every_lost_engineer_in_the_pass",
+        "tests/swarm/test_dead_resume.py::test_a_deliberate_exit_overrides_a_pending_outage_recovery"
+      ]
+    },
+    {
+      "id": "swarm-legacy-outage-seat-release-successor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
+      "behaviour": "When an owner's turns still fail after its provider probe passes, it frees its seat one tick after its recovery attempts. The next legacy tick spawn then launches the successor in that seat, carrying a transfer that names the avoided harness and holds a handoff with the pane error. Only the legacy place step launches that successor, and the events hub admission claim carries no handoff text, so this test retires with the legacy launch engine.",
+      "seam": "scripts.swarm.tick.tick outage seat release followed by the legacy place spawn of the successor",
+      "tests": [
+        "tests/swarm/test_outage_seat_release.py::test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts"
       ]
     },
     {
@@ -6377,6 +6445,11 @@
       "id": "monitor-every-interface-hive",
       "reason": "The HOME monitor no longer reads herdr pane counts; rows and the total count registered swarm seats, covered by monitor-counts-registered-seats.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506"
+    },
+    {
+      "id": "swarm-legacy-outage-recovery-seeding",
+      "reason": "Its outage hold, drill and dead resume tests now seat their owners through hub admission and are covered by swarm-outage-recovery-hub-admitted.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery"
     }
   ]
 }

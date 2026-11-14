@@ -210,6 +210,43 @@ def test_a_new_owner_gets_the_full_limit_after_hours_without_a_push(pull):
     assert _reopened(swarm)
 
 
+def _limit(pull: PullRequest) -> int:
+    return 15 if pull.red else 10 if pull == GREEN else 5
+
+
+@pytest.mark.feature("swarm-stall-watch-resumed-owner-grace")
+@pytest.mark.parametrize("pull", [RED, GREEN, CONFLICTING])
+def test_a_resumed_owner_gets_the_full_limit_from_its_launch(pull: PullRequest) -> None:
+    swarm = Swarm(pull, live=False)
+    swarm.tick(START)
+    resumed_at = START + 180 * MINUTE
+    resumed = AgentRecord(OWNER, "eng", "t1", started_at=START, launched_at=resumed_at, seat="eng-1@sw")
+    swarm.store.put_agent(SLUG, resumed)
+    assert swarm.tick(resumed_at + MINUTE) == []
+    assert swarm.ledger.rows["t1"]["state"] == "pr"
+    assert swarm.retired == []
+    assert swarm.inbox() == []
+    assert swarm.tick(resumed_at + (_limit(pull) - 1) * MINUTE) == []
+    swarm.tick(resumed_at + _limit(pull) * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.feature("swarm-stall-watch-resumed-owner-grace")
+@pytest.mark.parametrize("pull", [RED, GREEN, CONFLICTING])
+@pytest.mark.parametrize("launched_at", [0, START + 60 * MINUTE])
+def test_a_never_resumed_owner_is_measured_from_its_start(pull: PullRequest, launched_at: int) -> None:
+    swarm = Swarm(pull, live=False)
+    swarm.tick(START)
+    started = START + 180 * MINUTE
+    owner = AgentRecord(OWNER, "eng", "t1", started_at=started, launched_at=launched_at, seat="eng-1@sw")
+    swarm.store.put_agent(SLUG, owner)
+    assert swarm.tick(started + MINUTE) == []
+    assert swarm.ledger.rows["t1"]["state"] == "pr"
+    assert swarm.tick(started + (_limit(pull) - 1) * MINUTE) == []
+    swarm.tick(started + _limit(pull) * MINUTE)
+    assert _reopened(swarm)
+
+
 def test_red_checks_in_the_merge_queue_never_reopen_the_task():
     swarm = Swarm(replace(RED, queued=True))
     assert swarm.tick(START + 180 * MINUTE) == []
