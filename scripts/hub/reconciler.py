@@ -1,7 +1,6 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
 
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
@@ -51,7 +50,7 @@ def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
         bus.close()
 
 
-def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[AgentRecord]:
+def admitted_agents(store: RedisStore, slug: str, legacy: list[AgentRecord]) -> list[AgentRecord]:
     """The agents of ``slug`` outside ``legacy``, the ``legacy_agents`` answer: those whose hive recorded their start
     on a real bus; none on the memory bus, where no start counts as recorded."""
     if BusConfig.from_environ().backend == "memory":

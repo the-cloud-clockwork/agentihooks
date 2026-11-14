@@ -14,7 +14,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events
 from scripts.hub import claims, lifecycle, reconciler
-from scripts.swarm import launch_check, readiness
+from scripts.swarm import idle, launch_check, readiness
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_KILL_TICKS
@@ -156,8 +156,6 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
 def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], hold: str
 ) -> None:
-    from scripts.swarm import idle
-
     store, _, rt = env
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
