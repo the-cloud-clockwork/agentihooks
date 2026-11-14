@@ -13,5 +13,5 @@ rules:
     patterns:
       - pattern: ($HOME / "auth.json").symlink_to(...)
       - pattern-not-inside: |
-          if <... $SPEC.allowed_tokens ...>:
+          if <... not $SPEC.allowed_tokens ...>:
               ...
