@@ -20,6 +20,7 @@ from scripts.swarm.store import AgentRecord, RedisStore
 DEADLINE_MS = 60 * 1000
 STAMP = ".agentihooks-render.json"
 HOST_OVERLAYS = "host_overlays"
+HUB = "hub"
 SETTINGS = ("hooks", "model", "effort")
 WORDS = {
     "joined": "joining the ledger and holding its seat",
@@ -48,8 +49,8 @@ class Miss:
     relaunch: bool
 
 
-def begin(store: RedisStore, slug: str, agent: AgentRecord, at: int, relaunch: bool = True) -> None:
-    entry = {"task": agent.task, "at": at, "relaunch": relaunch}
+def begin(store: RedisStore, slug: str, agent: AgentRecord, at: int, relaunch: bool = True, owner: str = "") -> None:
+    entry = {"task": agent.task, "at": at, "relaunch": relaunch, **({"owner": owner} if owner else {})}
     store.redis.hset(store.key(slug, "launch-checks"), agent.name, json.dumps(entry))
 
 
@@ -158,6 +159,21 @@ def _name(store, slug, agent):
     return {"name": {"expected": f"{naming.TYPES[agent.lane]}@{code}-<number>", "actual": agent.name}}
 
 
+def hive_misses(store: RedisStore, agent: AgentRecord) -> dict:
+    """The misses a hive agent's session join report names, or a missing report when the hive sent none."""
+    report = join_report.read(store.redis, agent)
+    if not report:
+        return {"hive_join": {"expected": "session join report", "actual": "missing"}}
+    return {
+        f"hive_{name}": {
+            "expected": "available",
+            "actual": "missing",
+            **({"reason": miss["reason"]} if "reason" in miss else {}),
+        }
+        for name, miss in join_report.graded(report)["misses"].items()
+    }
+
+
 def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
@@ -165,17 +181,7 @@ def misses(
     from scripts.swarm.commands import hive_id
 
     if agent.hive and agent.hive != hive_id() or reports.host(agent):
-        report = join_report.read(store.redis, agent)
-        if not report:
-            return {"hive_join": {"expected": "session join report", "actual": "missing"}}
-        return {
-            f"hive_{name}": {
-                "expected": "available",
-                "actual": "missing",
-                **({"reason": miss["reason"]} if "reason" in miss else {}),
-            }
-            for name, miss in join_report.graded(report)["misses"].items()
-        }
+        return hive_misses(store, agent)
     found = _joined(store, agent, doc, session_started_at(agent))
     if not facts or facts.get("process", True) is not True:
         found["observation"] = {"expected": "available process observation", "actual": "unavailable"}

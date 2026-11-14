@@ -100,7 +100,6 @@ def test_budgets_come_from_the_p95_with_headroom_in_whole_seconds() -> None:
     assert budgets.budget_s(0.6) == 1.0
     assert budgets.budget_s(0.7) == 2.0
     assert budgets.budget_s(14.511) == 22.0
-    assert budgets.timing_of("preempt") == (18.0, 60.0)
     assert budgets.timing_of("night watch") == (22.0, 120.0)
     assert budgets.timing_of("config load") == (2.0, 60.0)
     assert budgets.timing_of("hive ledger") == (2.0, 120.0)
@@ -118,23 +117,6 @@ def test_every_registered_call_step_declares_its_measured_timing() -> None:
     for step in (*observe.STEPS, *agents.STEPS, *masters.STEPS, *tasks.STEPS, *place.STEPS, *host.STEPS, *report.STEPS):
         assert (step.budget_s, step.interval_s) == budgets.timing_of(step.name)
         assert step.interval_s in {budgets.CRITICAL_S, budgets.WIDE_S, budgets.SLOW_S}
-
-
-@pytest.mark.feature("swarm-tick-step-isolation")
-def test_spawn_needs_only_judge_orphans_and_preempt() -> None:
-    assert budgets.JUDGE == {"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"}
-    assert budgets.SPAWN_NEEDS == budgets.JUDGE | {"orphans", "preempt"}
-    assert {step.name: step.needs for step in place.STEPS}["spawn"] == budgets.SPAWN_NEEDS
-
-
-@pytest.mark.feature("swarm-tick-step-isolation")
-def test_spawn_starts_by_forty_seconds_into_the_pass() -> None:
-    needed = [TimedStep(name, budgets.timing_of(name)[0]) for name in sorted(budgets.SPAWN_NEEDS)]
-    slow = TimedStep("night watch", 300.0)
-    spawn = TimedStep("spawn", budgets.timing_of("spawn")[0], needs=budgets.SPAWN_NEEDS)
-    start = registry.latest_start("spawn", [slow, *needed, spawn])
-    assert start == 22.0
-    assert start <= budgets.SPAWN_START_S
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
@@ -197,9 +179,6 @@ CRITICAL_STEPS = frozenset(
         "dispatcher group",
         "rank pass",
         "bottleneck remedy",
-        "preempt",
-        "spawn",
-        "collect acks",
         "master down",
         "tick master",
         "master scale",

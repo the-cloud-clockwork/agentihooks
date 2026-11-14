@@ -631,3 +631,43 @@ def test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report(
         with pytest.raises(ValueError) as failure:
             binding.wait(report, 0.1)
         assert str(failure.value) == "Codex provider refused the routed account"
+
+
+@pytest.mark.feature("codex-server-exit-canary")
+@pytest.mark.parametrize("server_code", [1, 0])
+def test_an_app_server_exit_after_launch_fails_the_pending_canary_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server_code: int
+) -> None:
+    from scripts import init_agent
+
+    supervised(monkeypatch, lambda: server_code, returncode=server_code)
+    report = tmp_path / "profile.json"
+    binding.request(report, "engineer", "codex")
+    spec = SimpleNamespace(
+        slug="sw", cwd=str(tmp_path), environ={binding.REPORT: str(report)}, agent=SimpleNamespace(account="alpha")
+    )
+    monkeypatch.setattr(serve, "prepare", lambda args, flags, environ: spec)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == server_code
+    monkeypatch.setattr(binding.time, "sleep", lambda seconds: pytest.fail("init-agent waited on an exited app server"))
+    with pytest.raises(ValueError) as failure:
+        init_agent._binding_result({binding.REPORT: str(report)}, 270.0, {})
+    reason = f"Codex app server exited with status {server_code} before the profile canary validated"
+    assert str(failure.value) == reason
+
+
+@pytest.mark.feature("codex-server-exit-canary")
+def test_an_app_server_exit_after_a_validated_canary_keeps_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    supervised(monkeypatch, lambda: 0)
+    report = tmp_path / "profile.json"
+    validated = {"profile": "engineer", "harness": "codex", "state": "validated", "validation": {"canary": "c"}}
+    report.write_text(json.dumps(validated))
+    spec = SimpleNamespace(
+        slug="sw", cwd=str(tmp_path), environ={binding.REPORT: str(report)}, agent=SimpleNamespace(account="alpha")
+    )
+    monkeypatch.setattr(serve, "prepare", lambda args, flags, environ: spec)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 0
+    assert json.loads(report.read_text()) == validated

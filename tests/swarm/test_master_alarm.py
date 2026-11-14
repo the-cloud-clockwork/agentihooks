@@ -1,12 +1,14 @@
 import json
+from typing import Any
 
 import pytest
 
 from scripts.doctor.priming import TEMPLATE
 from scripts.inbox.store import InboxStore
 from scripts.swarm import master_alarm, master_start, tick_master
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 from tests.swarm.test_tick_master import BROKEN, DOWN, ENGINEER, BrokenMaster
 
@@ -29,8 +31,10 @@ def notices(store, name):  # noqa: F811
     return [text for sender, text in mail(store, name) if text.startswith("The master of swarm sw is down")]
 
 
-def broken_outage(store, startup=True):  # noqa: F811
+def broken_outage(store: RedisStore, startup: bool = True) -> tuple[BrokenMaster, Any]:  # noqa: F811
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"), ("t2", "ci"))
+    for task in ("t1", "t2"):
+        seat_owner(store, ledger, runtime, task, 1)
     for at in (1, 2, 3, 130_000):
         tick("sw", store, ledger, runtime, at)
     if not startup:
@@ -98,11 +102,13 @@ def test_the_master_back_notice_reaches_agents_and_the_doctor_as_information(sto
     assert all(item.fyi for item in items)
 
 
-def test_an_agent_that_goes_live_during_the_outage_is_told_when_it_goes_live(store):  # noqa: F811
+def test_an_agent_that_goes_live_during_the_outage_is_told_when_it_goes_live(store: RedisStore) -> None:  # noqa: F811
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"))
+    seat_owner(store, ledger, runtime, "t1", 1)
     tick("sw", store, ledger, runtime, 1)
     tick("sw", store, ledger, runtime, 2)
     ledger.rows["t9"] = {"id": "t9", "lane": "eng", "state": "open", "claimed_by": "", "out_of_scope": False}
+    seat_owner(store, ledger, runtime, "t9", 3)
     tick("sw", store, ledger, runtime, 3)
     late = next(a for a in workers(store) if a.task == "t9")
     assert notices(store, late.name) == [master_alarm.NOTICE.format(slug="sw", error=BROKEN, name=late.name)]
@@ -141,7 +147,10 @@ def test_nothing_is_sent_without_a_recorded_failure(store):  # noqa: F811
     assert mail(store, DOCTOR_MASTER) == []
 
 
-def test_a_launch_with_no_hook_alarms_with_the_master_name(store, monkeypatch):  # noqa: F811
+def test_a_launch_with_no_hook_alarms_with_the_master_name(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AGENTIHOOKS_MASTER_DOWN_MINUTES", "60")
     doctored(store)
 
@@ -150,6 +159,7 @@ def test_a_launch_with_no_hook_alarms_with_the_master_name(store, monkeypatch): 
             return agent.lane != MASTER
 
     runtime, ledger = Silent(), tasks(("t1", "eng"))
+    seat_owner(store, ledger, runtime, "t1", 1)
     tick("sw", store, ledger, runtime, 1)
     name = masters(store)[0].name
     assert mail(store, DOCTOR_MASTER) == []
@@ -189,9 +199,11 @@ def test_the_promoted_engineer_gets_no_master_down_notice(store):  # noqa: F811
     assert notices(store, ENGINEER) == []
 
 
-def test_a_forced_launch_that_fails_first_alarms_the_doctor_and_the_unpromoted_agents(store):  # noqa: F811
+def test_a_forced_launch_that_fails_first_alarms_the_doctor_and_the_unpromoted_agents(store: RedisStore) -> None:  # noqa: F811
     doctored(store)
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"), ("t2", "ci"))
+    for task in ("t1", "t2"):
+        seat_owner(store, ledger, runtime, task, 1)
     runtime.broken = False
     tick("sw", store, ledger, runtime, 1)
     master = masters(store)[0]

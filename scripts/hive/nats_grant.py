@@ -59,6 +59,10 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
+MEMBER_DENY = (
+    *(f"{subjects.PREFIX}.*.{family}execution.stop{tail}" for family in ("", "events.") for tail in ("", ".>")),
+    *(f"{subjects.PREFIX}.*.{family}execution.exited" for family in ("", "events.")),
+)
 SCHEDULER_BUCKET = "scheduler"
 SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
@@ -225,14 +229,25 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
     if swarms is None:
         return {
             **user_claims(),
-            "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}", *own]},
+            "pub": {
+                "allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}", f"{subjects.EXITS}.*.{member}", *own],
+                "deny": list(MEMBER_DENY),
+            },
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
-    publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
+    publish = [
+        subject
+        for swarm in swarms
+        for subject in (
+            *swarm_publish(swarm),
+            subjects.slot_request(swarm, member),
+            subjects.exit_report(swarm, member),
+        )
+    ]
     publish += own
     return {
         **user_claims(),
-        "pub": {"allow": publish} if publish else {"deny": [">"]},
+        "pub": {"allow": publish, "deny": list(MEMBER_DENY)} if publish else {"deny": [">"]},
         "sub": {"allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"]},
     }
 
@@ -241,7 +256,7 @@ def controller_claims() -> dict:
     return {
         **user_claims(),
         "pub": {"allow": list(CONTROLLER_PUBLISH)},
-        "sub": {"allow": ["_INBOX.>", "swarm.*.slots", f"{subjects.SLOTS}.*.*"]},
+        "sub": {"allow": ["_INBOX.>", "swarm.*.slots", f"{subjects.SLOTS}.*.*", f"{subjects.EXITS}.*.*"]},
     }
 
 
