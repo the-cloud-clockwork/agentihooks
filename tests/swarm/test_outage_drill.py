@@ -310,6 +310,7 @@ def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(dri
 @pytest.mark.parametrize("kind", ("redis", "network", "provider"))
 @pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim(drill, monkeypatch, kind):
+    drill.store.update("sw", engine="events")
     calls = probe_recovery(drill, monkeypatch) if kind == "provider" else []
     drill.stop(kind)
     drill.runtime.live.remove(drill.agents[2].name)

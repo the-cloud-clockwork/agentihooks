@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-from scripts.hub import admission, lease
+from scripts.events.envelope import Envelope
+from scripts.hub import admission, claims, lease
 from scripts.swarm import commands, readiness
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.repository import hierarchy
@@ -85,10 +86,25 @@ def seat_owner(store: RedisStore, ledger: Any, runtime: Any, task_id: str, at: i
     """Seats a working owner on ``task_id`` of swarm ``sw`` as its hive leaves it once the pane runs.
 
     ``seat_agent`` admits it from the hive the tick runs as, at the test clock ``at``. The record then goes
-    ``working`` on pane ``w1:<task_id>``, launched at ``at`` with ``fields`` applied, and the fake ``runtime`` lists
-    it live, so the tick judges a local, execution backed owner of its own hive."""
-    seated = seat_agent(store, ledger, SLUG, task_id, hive=commands.hive_id(), clock=lambda: at)
+    ``working`` on pane ``w1:<task_id>``, launched at ``at`` with ``fields`` applied, the hub claim lives reactor
+    counts its claim life from the hive's ``execution.started`` event, and the fake ``runtime`` lists it live, so the
+    tick judges a local, execution backed owner of its own hive."""
+    hive = commands.hive_id()
+    seated = seat_agent(store, ledger, SLUG, task_id, hive=hive, clock=lambda: at)
     owner = replace(seated, pane_id=f"w1:{task_id}", state="working", launched_at=at, **fields)
     store.execution_registry.update(SLUG, owner)
+    claims.Claims(store).handle(
+        Envelope(
+            id=f"started:{owner.execution_id}",
+            type="execution.started",
+            swarm=SLUG,
+            entity="execution",
+            key=owner.execution_id,
+            version=owner.generation,
+            time=at,
+            author=hive,
+            data={"task": task_id, "name": owner.name, "claim_key": f"seat:{owner.execution_id}", "hive": hive},
+        )
+    )
     runtime.live.add(owner.name)
     return owner
