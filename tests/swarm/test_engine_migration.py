@@ -210,8 +210,9 @@ def test_a_legacy_swarm_with_no_agents_drops_its_stuck_launch_rows_when_it_migra
     store.record_launch("idle", AgentRecord("engineer@3", "eng", "t3"), "launching")
     store.record_launch("idle", AgentRecord("engineer@4", "eng", "t4"), "started")
 
-    assert engine_migration.migrate(store) == {"idle": f"migrated: {ORIGIN}"}
+    assert engine_migration.migrate(store) == {"idle": f"migrated: {ORIGIN}: dropped 1 stuck launches"}
     assert list(store.redis.hgetall(store.key("idle", "launches"))) == ["engineer@4"]
+    assert store.config("idle").engine == "events"
 
 
 @pytest.mark.feature("engine-config-migration")
