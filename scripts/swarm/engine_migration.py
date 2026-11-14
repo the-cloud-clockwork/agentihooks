@@ -68,11 +68,11 @@ def migrate_one(redis_store: RedisStore, slug: str) -> str:
         return "unchanged"
     if not on_events and redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
         return BUSY
-    if not on_events:
-        drop_launch_jobs(redis_store, slug)
     found = repo_origin(redis_store, slug)
     if not found:
         return NO_ORIGIN
+    if not on_events:
+        drop_launch_jobs(redis_store, slug)
     redis_store.update(slug, engine=EVENTS_ENGINE, repo_origin=found)  # pyright: ignore[reportUnknownMemberType]
     return f"migrated: {found}"
 

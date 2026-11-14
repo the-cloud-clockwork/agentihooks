@@ -148,6 +148,15 @@ def test_a_swarm_with_only_launch_jobs_whose_agents_are_gone_drops_them_and_migr
 
 
 @pytest.mark.feature("engine-config-migration")
+def test_a_swarm_without_an_origin_keeps_its_launch_jobs_when_skipped(store: RedisStore) -> None:
+    store.create(SwarmConfig("orphan", "/missing", 1, 1))
+    store.redis.hset(store.key("orphan", launch_job.KEY), "engineer@4", json.dumps({"task": "t4"}))
+
+    assert engine_migration.migrate(store) == {"orphan": "skipped: no repository origin"}
+    assert store.redis.hgetall(store.key("orphan", launch_job.KEY)) == {"engineer@4": json.dumps({"task": "t4"})}
+
+
+@pytest.mark.feature("engine-config-migration")
 def test_a_stored_legacy_engine_with_an_origin_is_migrated_even_when_the_config_reads_events(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
