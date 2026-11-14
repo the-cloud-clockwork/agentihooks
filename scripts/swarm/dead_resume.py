@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from hooks.context import context_recycle
+from scripts.swarm import outage
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 if TYPE_CHECKING:
@@ -85,9 +86,12 @@ def failed_resumes(store: RedisStore, slug: str, agent: AgentRecord) -> int:
     return record["count"]
 
 
-def _note_resume(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+def note_resume(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+    """Counts a reaper resume toward the cap, unless an open outage or a provider error on its pane holds the agent."""
     from scripts.swarm import idle
 
+    if outage.held(store, slug, agent.name):
+        return
     count = failed_resumes(store, slug, agent) + 1
     store.redis.set(_resumes_key(store, slug, agent.name), json.dumps({"count": count, "at": at}), ex=idle.BEAT_TTL_S)
 
@@ -113,7 +117,7 @@ def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     limit = store.config(slug).compact_limit or context_recycle.COMPACT_LIMIT
     if used is not None and used >= limit * 1000:
         return "the conversation reached its compact limit"
-    if failed_resumes(store, slug, agent) >= RESUME_ATTEMPTS:
+    if agent.lane != MASTER and failed_resumes(store, slug, agent) >= RESUME_ATTEMPTS:
         return CAPPED_REASON
     return ""
 
@@ -169,7 +173,6 @@ def reopen(
                     launch_timings=placed.launch_timings,
                 ),
             )
-            _note_resume(store, slug, agent, at)
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")
             return True

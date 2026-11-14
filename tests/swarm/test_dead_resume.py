@@ -643,10 +643,12 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     assert deliberate_exit.recorded(store, "sw", agent.name) is False
 
 
-def _dying_engineer(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, ResumingRuntime, AgentRecord]:
+def _dying_engineer(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, lane: str = "eng"
+) -> tuple[Any, ResumingRuntime, AgentRecord]:
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
     tick_module.tick("sw", store, ledger, runtime, 1)
-    agent = next(a for a in store.agents("sw") if a.lane == "eng")
+    agent = next(a for a in store.agents("sw") if a.lane == lane)
     store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
     monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [])
@@ -699,6 +701,37 @@ def test_a_resume_that_comes_up_healthy_resets_the_attempt_count(
     assert first == [[f"resumed {agent.name}"]] * 3
     assert later == [[f"resumed {agent.name}"]] * 3 + [[f"lost {agent.name}, task t1 reopened"]]
     assert len(runtime.resumed) == 6
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_a_master_that_dies_after_each_resume_is_never_capped(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime, master = _dying_engineer(store, monkeypatch, lane="master")
+
+    passes = [_die_and_reap(store, ledger, runtime, master.name, (n + 1) * RESUME_STEP) for n in range(4)]
+
+    assert passes == [[f"resumed {master.name}"]] * 4
+    assert store.handoff("sw", master.task) == ""
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_resumes_during_an_outage_or_a_reboot_do_not_count_toward_the_cap(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import dead_resume, outage
+
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+    outage.mark_pane(store, "sw", agent.name, "provider overloaded", RESUME_STEP)
+    held = [_die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP) for n in range(4)]
+    outage.clear_pane(store, "sw", agent.name)
+    current = next(a for a in store.agents("sw") if a.name == agent.name)
+    reopening: Any = runtime
+    rebooted = [dead_resume.reopen("sw", store, ledger, reopening, current, 5 * RESUME_STEP)]
+
+    assert held == [[f"resumed {agent.name}"]] * 4
+    assert rebooted == [True]
+    assert dead_resume.failed_resumes(store, "sw", agent) == 0
 
 
 def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):

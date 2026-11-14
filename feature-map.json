@@ -2193,11 +2193,13 @@
       "id": "swarm-dead-resume-cap",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-resume-attempt-cap",
-      "behaviour": "A dead agent that ends again after each of three resumes is retired with a fresh agent notice and its task reopens; a resume followed by a session heartbeat one start grace later resets the count.",
+      "behaviour": "An engineer that ends again after each of three resumes is retired with a recovery handoff and its task reopens; a session heartbeat one start grace after a resume resets the count; masters, reboot resumes and resumes during an outage or provider error never count.",
       "seam": "The tick reaper recovery path through dead agent reopen",
       "tests": [
         "tests/swarm/test_dead_resume.py::test_an_engineer_that_dies_after_each_resume_retires_at_the_cap_and_its_task_reopens",
-        "tests/swarm/test_dead_resume.py::test_a_resume_that_comes_up_healthy_resets_the_attempt_count"
+        "tests/swarm/test_dead_resume.py::test_a_resume_that_comes_up_healthy_resets_the_attempt_count",
+        "tests/swarm/test_dead_resume.py::test_a_master_that_dies_after_each_resume_is_never_capped",
+        "tests/swarm/test_dead_resume.py::test_resumes_during_an_outage_or_a_reboot_do_not_count_toward_the_cap"
       ]
     },
     {

@@ -304,6 +304,7 @@ def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: An
             + tick._drop(slug, store, ledger, rows, agent, refund=True)
         ]
     if tick.dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+        tick.dead_resume.note_resume(store, slug, agent, now_ms)
         return [f"resumed {agent.name}"]
     if agent not in store.agents(slug):
         return []
