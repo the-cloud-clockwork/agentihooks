@@ -201,7 +201,9 @@ async def _push(
                 else:
                     await _pull(feed)
                 delay = RETRY_FIRST_S
-            except Exception:
+            except Exception as exc:
+                if isinstance(exc, (anyio.BrokenResourceError, anyio.ClosedResourceError)):
+                    raise
                 _log(f"push pass failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
                 if pubsub is not None:
                     _close(pubsub)
@@ -275,7 +277,7 @@ async def run(store, me, read, write, active=True, feed=None):
             text = answer(store, me, arguments["item_id"], arguments["text"])
         return [types.TextContent(type="text", text=text)]
 
-    async def push():
+    async def push() -> None:
         nonlocal store
         delay = 1.0
         while store is None:
