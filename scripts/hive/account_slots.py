@@ -206,7 +206,7 @@ def _slots(bus: Bus, backend: str, hive: str, read: Callable[[], dict], environ:
     return Remote(asker(bus, _swarm(environ), hive), hive, read)
 
 
-def _reading(hive: str) -> dict:
+def _reading(hive: str) -> dict[str, Any]:
     from hooks.context import account_sessions
     from scripts.hive import daemon
     from scripts.swarm.store import connect
