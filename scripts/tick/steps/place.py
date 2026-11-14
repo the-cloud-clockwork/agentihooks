@@ -13,7 +13,6 @@ from scripts.swarm import lost_runner, quota_notice, time_left
 from scripts.swarm.naming import seat_label
 from scripts.tick import engine, registry
 from scripts.tick.adapters.calls import (
-    AdmissionCalls,
     LocalMetrics,
     MetricsCalls,
 )
@@ -77,7 +76,7 @@ def _admission(runtime: Any) -> Any:
     from scripts.swarm_v2.admission import PendingAdmission
 
     gate = getattr(runtime, "admission", None)
-    return gate if isinstance(gate, (PendingAdmission, AdmissionCalls)) else None
+    return gate if isinstance(gate, PendingAdmission) else None
 
 
 def _settle_admission(slug: str, runtime: Any, agent: Any) -> None:

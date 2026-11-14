@@ -4,11 +4,23 @@ import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 import scripts.swarm.store as swarm_store
-from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, nats_grant, registry
+from scripts.hive import (
+    auth,
+    cli,
+    create,
+    create_github,
+    create_render,
+    invite,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
 from tests.hive.test_invite import CA, LIKE, SWARM, Bao, _bao, _credential
 
 pytestmark = pytest.mark.unit
@@ -658,14 +670,17 @@ def test_a_finished_listing_is_not_resynced_on_the_rerun(world):
     )
 
 
-def test_a_hub_record_without_member_swarms_scopes_no_member(world):
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_a_hub_record_without_member_swarms_refuses_the_create_before_minting(world: Any) -> None:
     world.bao.records[SIGNER] = {"url": "nats://hub"}
 
-    create.create(world.tools, create.Options(timeout_s=60))
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(timeout_s=60))
 
+    assert str(refused.value) == member_swarms.unscoped(SIGNER)
     assert world.bao.records[SIGNER] == {"url": "nats://hub"}
     assert world.run.named("kubectl", "-n") == []
-    assert _listing_line(world) == f"the hub signer record {SIGNER} lists no member swarms, so the hub scopes no member"
+    assert auth.members(world.tools.redis) == {}
 
 
 def test_the_dry_run_names_the_listing_and_writes_no_hub_record(world):
@@ -689,12 +704,14 @@ def test_the_listing_names_every_swarm_it_grants(world, monkeypatch):
     )
 
 
-def test_the_dry_run_of_a_hub_record_without_member_swarms_promises_no_listing(world):
+def test_the_dry_run_of_a_hub_record_without_member_swarms_is_refused(world: Any) -> None:
     world.bao.records[SIGNER] = {"url": "nats://hub"}
 
-    create.create(world.tools, create.Options(dry_run=True))
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=True))
 
-    assert _listing_line(world) == f"the hub signer record {SIGNER} lists no member swarms, so the hub scopes no member"
+    assert str(refused.value) == member_swarms.unscoped(SIGNER)
+    assert world.bao.written == []
 
 
 def test_the_dry_run_of_a_kept_unlisted_member_names_its_listing(world):

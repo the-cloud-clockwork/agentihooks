@@ -5,10 +5,11 @@ import queue
 import re
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, NoReturn
 from unittest import mock
 
 import pytest
@@ -252,6 +253,184 @@ def test_items_waiting_before_the_session_opened_arrive_once_it_lists_its_tools(
             return [(await receive())["params"]["meta"]["item_id"] for _ in range(2)]
 
     assert session(store, scenario)[2] == [first.id, second.id]
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_the_heartbeat_is_due_exactly_one_period_after_the_last(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(channel.time, "monotonic", lambda: 1000.0 + channel.HEARTBEAT_S)
+    assert channel._heartbeat("bob", 1000.0, 3) == 1000.0 + channel.HEARTBEAT_S
+    assert "push loop alive for bob; 3 items pushed" in capsys.readouterr().err
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.2)
+    monkeypatch.setattr(channel, "RETRY_FIRST_S", 0.1, raising=False)
+    real_deliver, calls = channel._deliver, []
+
+    async def failing_once(*args: Any) -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise ValueError("planted pass failure")
+        await real_deliver(*args)
+
+    monkeypatch.setattr(channel, "_deliver", failing_once)
+
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> tuple[Item, dict[str, Any]]:
+        item = store.send("alice", "bob", "after the failure")
+        with anyio.fail_after(5):
+            return item, await receive()
+
+    _, _, (item, pushed) = session(store, scenario)
+    assert pushed["params"]["meta"]["item_id"] == item.id
+    logged = capsys.readouterr().err
+    assert "inbox channel: push pass failed for bob" in logged
+    assert "Traceback" in logged and "ValueError: planted pass failure" in logged
+
+
+class BrokenStderr:
+    def write(self, text: str) -> int:
+        raise OSError("stderr closed")
+
+    def flush(self) -> None:
+        raise OSError("stderr closed")
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_a_failed_pass_with_a_broken_stderr_still_retries_and_pushes(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.2)
+    monkeypatch.setattr(channel, "RETRY_FIRST_S", 0.1, raising=False)
+    monkeypatch.setattr(channel.sys, "stderr", BrokenStderr())
+    real_deliver, calls = channel._deliver, []
+
+    async def failing_once(*args: Any) -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise ValueError("planted pass failure")
+        await real_deliver(*args)
+
+    monkeypatch.setattr(channel, "_deliver", failing_once)
+
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> tuple[Item, dict[str, Any]]:
+        item = store.send("alice", "bob", "after the failure")
+        with anyio.fail_after(5):
+            return item, await receive()
+
+    _, _, (item, pushed) = session(store, scenario)
+    assert pushed["params"]["meta"]["item_id"] == item.id
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_the_push_loop_writes_a_heartbeat_on_stderr(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.1)
+    monkeypatch.setattr(channel, "HEARTBEAT_S", 0.2, raising=False)
+
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> None:
+        store.send("alice", "bob", "counted")
+        with anyio.fail_after(5):
+            await receive()
+        await anyio.sleep(2.0)
+
+    session(store, scenario)
+    logged = capsys.readouterr().err.splitlines()
+    beats = [line for line in logged if "push loop alive for bob" in line]
+    assert len(beats) >= 2
+    assert any(line.endswith("push loop alive for bob; 1 items pushed") for line in beats)
+    assert "agentihooks inbox channel: push loop for bob waiting for the tools list" in logged
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_a_failed_subscription_close_is_logged_and_the_loop_goes_on(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.2)
+    monkeypatch.setattr(channel, "RETRY_FIRST_S", 0.1)
+    real_deliver, real_close, calls = channel._deliver, FakePubSub.close, []
+
+    def refuse_close(pubsub: FakePubSub) -> NoReturn:
+        monkeypatch.setattr(FakePubSub, "close", real_close)
+        raise OSError("subscription gone")
+
+    async def failing_once(*args: Any) -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            monkeypatch.setattr(FakePubSub, "close", refuse_close)
+            raise ValueError("planted pass failure")
+        await real_deliver(*args)
+
+    monkeypatch.setattr(channel, "_deliver", failing_once)
+
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> tuple[Item, dict[str, Any]]:
+        item = store.send("alice", "bob", "after the failed close")
+        with anyio.fail_after(5):
+            return item, await receive()
+
+    _, _, (item, pushed) = session(store, scenario)
+    assert pushed["params"]["meta"]["item_id"] == item.id
+    logged = capsys.readouterr().err
+    assert "closing the inbox subscription failed" in logged and "OSError: subscription gone" in logged
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_a_failed_connect_is_logged_and_retried(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    attempts = []
+
+    def connect() -> FakeStore:
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise ValueError("planted connect failure")
+        return store
+
+    monkeypatch.setattr(channel, "connect", connect)
+    monkeypatch.setattr(channel, "feed_for", lambda found, me: None)
+
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> tuple[Item, dict[str, Any]]:
+        item = store.send("alice", "bob", "after the failed connect")
+        with anyio.fail_after(5):
+            return item, await receive()
+
+    _, _, (item, pushed) = session(None, scenario)
+    assert pushed["params"]["meta"]["item_id"] == item.id
+    logged = capsys.readouterr().err
+    assert "inbox connect failed for bob" in logged and "ValueError: planted connect failure" in logged
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_a_seat_feed_that_fails_to_bind_falls_back_to_the_redis_notify(
+    store: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def broken(found: FakeStore, me: str) -> NoReturn:
+        raise RuntimeError("planted feed failure")
+
+    monkeypatch.setattr(channel, "feed_for", broken)
+    assert channel._feed(store, "bob") is None
+    logged = capsys.readouterr().err
+    assert "seat feed failed for bob" in logged and "RuntimeError: planted feed failure" in logged
 
 
 def _close_idle_session(store, monkeypatch, delay=0, wake=True):

@@ -1,0 +1,16 @@
+rules:
+  - id: hive-heartbeat-refresh-ignores-restart
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive join heartbeat that refreshes stored running reports must refresh only the reports join_report.end_restarted
+      kept, after it ended the ones its own member wrote before a pod restart. Reports live in Redis and outlive the pod,
+      so otherwise agents killed with the restart keep fresh heartbeats, stay listed on the hive and hold its drain.
+    patterns:
+      - pattern: 'graded({**$REPORT, ..., "heartbeat_at": $AT})'
+      - pattern-inside: |
+          def $F(...):
+              ...
+      - pattern-not-inside: |
+          for $REPORT in $KEEP(..., end_restarted(...), ...):
+              ...
