@@ -93,19 +93,29 @@ def first_showing(marks, name, slug, events):
         return list(events)
 
 
-def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH) -> list[Item]:
-    """Deliver at most limit oldest pending items across me, my seat and aliases; close ledger writes already shown."""
+def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: set[str] | None = None) -> list[Item]:
+    """Deliver at most limit oldest pending items across me, my seat and aliases, leaving out the ids in skip.
+
+    Close ledger writes already shown; an item whose seen check fails returns to pending and joins skip.
+    """
+    from redis.exceptions import RedisError
+
+    skip = set() if skip is None else skip
     store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown: list[Item] = []
-    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:limit])):
+    waiting = [item for item in store.pending_mail(me) if item.id not in skip][:limit]
+    for item in filter(None, (store.deliver(item.id, me) for item in waiting)):
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:
             store.requeue(item.id, me, UNSETTLED)
             continue
+        except RedisError:
+            raise
         except Exception:
             store.requeue(item.id, me, UNCHECKED)
+            skip.add(item.id)
             continue
         if elsewhere:
             store.close(item.id, me, "done", SEEN_ON_LEDGER)

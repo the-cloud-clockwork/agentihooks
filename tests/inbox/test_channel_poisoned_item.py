@@ -70,3 +70,30 @@ def test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_
     assert session.shown == [first.id, last.id]
     assert inbox.get(poisoned.id).state == "pending"
     assert {inbox.get(first.id).state, inbox.get(last.id).state} == {"delivered"}
+
+
+@pytest.mark.feature("inbox-push-poisoned-item")
+def test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import anyio
+
+    _, inbox = channel_backend
+    poisoned = [inbox.send("alice", "bob", f"poisoned {n}", ref=f"sw:{n}:p{n}") for n in range(seen.CLAIM_BATCH)]
+    healthy = inbox.send("alice", "bob", "healthy", ref="sw:9:h9")
+    attempts: list[str] = []
+    checked = seen._shown_elsewhere  # pyright: ignore[reportPrivateUsage]
+
+    def failing(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
+        if item.id != healthy.id:
+            attempts.append(item.id)
+            raise ValueError("unreadable history entry")
+        return checked(marks, store, item, me)
+
+    monkeypatch.setattr(seen, "_shown_elsewhere", failing)
+    session, pushed = Session(), channel.Pushed()
+    for _ in range(3):
+        anyio.run(channel._deliver, inbox, "bob", session, pushed)  # pyright: ignore[reportPrivateUsage]
+    assert session.shown == [healthy.id]
+    assert sorted(attempts) == sorted(item.id for item in poisoned)
+    assert {inbox.get(item.id).state for item in poisoned} == {"pending"}

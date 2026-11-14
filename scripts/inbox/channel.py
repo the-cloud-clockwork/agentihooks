@@ -34,6 +34,7 @@ HELD = ("pending", "delivered")
 class Pushed:
     shown: set[str] = field(default_factory=set)
     held: set[str] = field(default_factory=set)
+    poisoned: set[str] = field(default_factory=set)
 
 
 def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
@@ -146,12 +147,14 @@ async def _deliver(store: InboxStore, me: str, write: Any, pushed: Pushed) -> No
 
     pushed.held.intersection_update([item_id for item_id in pushed.held if _held(store, item_id)])
     room = UNCONFIRMED_MAX - len(pushed.held)
-    items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed.shown]
+    claimed = claim(store, me, min(room, CLAIM_BATCH), pushed.poisoned)
+    items = [item for item in claimed if item.id not in pushed.shown]
     for index, item in enumerate(items):
         try:
             note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
         except Exception:
             store.requeue(item.id, me, UNSHOWN)
+            pushed.poisoned.add(item.id)
             continue
         try:
             await write.send(SessionMessage(types.JSONRPCMessage(note)))
