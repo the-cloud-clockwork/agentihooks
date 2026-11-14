@@ -17,7 +17,7 @@ from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep, Left, pass_domains
+from scripts.tick.steps import CallStep, Left, budgets, pass_domains
 
 reports: Any = import_module("scripts.hive.reports")
 dead_resume: Any = import_module("scripts.swarm.dead_resume")
@@ -130,32 +130,6 @@ def step_automated_cleanup(
     return automated_gc.run(slug, store, ledger, runtime, now_ms, partial(tick._collected, slug, store, ledger, rows))
 
 
-def step_spawn_due(
-    slug: str,
-    config: SwarmConfig,
-    store: Any,
-    ledger: Any,
-    runtime: Any,
-    now_ms: int,
-    box: dict[str, Any],
-) -> list[str]:
-    rows, doc = box["rows"], box["doc"]
-    actions: list[str] = []
-    due = store.key(slug, tick.SPAWN_DUE)
-    if (
-        config.state == "running"
-        and config.engine != tick.EVENTS_ENGINE
-        and not tick.lifetime.sleeping(slug, store, rows)
-    ):
-        if store.redis.exists(due) and tick.panic.state(store) is None:
-            claimed = dict(rows)
-            with tick.PLACING, tick._placement_pass(runtime):
-                actions += tick.skip_refused(tick._spawn, slug, config, store, ledger, runtime, claimed, doc, now_ms)
-            box["rows"] = MappingProxyType(claimed)
-        store.redis.set(due, now_ms)
-    return actions
-
-
 def step_exits_sweep(slug: str, store: Any, ledger: Any) -> list[str]:
     return tick.skip_dropped(
         tick.exits.sweep,
@@ -210,7 +184,7 @@ def step_pass_budget(slug: str, store: Any) -> list[str]:
 
 
 CONFIGURED = frozenset({"stopped branch"})
-LISTED = frozenset({"spawn due"})
+LISTED = budgets.OBSERVED
 CONFIG = pass_domains("config")
 ROWS = pass_domains("rows")
 
@@ -488,14 +462,6 @@ STEPS = (
     CallStep("recover master", "observe", partial(_run, step_recover_master), CONFIGURED, CONFIG),
     CallStep("ledger state", "observe", partial(_run, step_ledger_state), writes=pass_domains("doc", "rows")),
     CallStep("automated cleanup", "observe", partial(_run, step_automated_cleanup), frozenset({"ledger state"}), ROWS),
-    CallStep(
-        "spawn due",
-        "observe",
-        partial(_run, step_spawn_due),
-        frozenset({"stopped branch", "ledger state", "automated cleanup"}),
-        pass_domains("config", "rows", "doc"),
-        ROWS,
-    ),
     CallStep("exits sweep", "observe", partial(_run, step_exits_sweep)),
     CallStep("master start watch", "observe", partial(_run, step_master_start_watch), CONFIGURED, CONFIG),
     CallStep("launch checks", "observe", partial(_run, step_launch_checks), LISTED, pass_domains("rows", "doc")),

@@ -27,7 +27,7 @@ from scripts.tick.engine import SLOW
 from scripts.tick.ports.contracts import Coordination
 from scripts.tick.ports.tools import Tools
 from scripts.tick.step import Domain
-from scripts.tick.steps import CallStep, Left, pass_domains, tasks
+from scripts.tick.steps import CallStep, Left, budgets, pass_domains, tasks
 
 __all__ = [
     "DISPATCH",
@@ -283,7 +283,7 @@ CONFIG = pass_domains("config")
 STEPS = (
     CallStep("master wake", MASTERS, _held(_master_wake), CONFIGURED | LISTED, pass_domains("config", "doc")),
     CallStep(
-        "retire idle master", MASTERS, _held(_retire_idle_master), frozenset({"spawn"}), pass_domains("rows"), lane=SLOW
+        "retire idle master", MASTERS, _held(_retire_idle_master), budgets.SPAWN_NEEDS, pass_domains("rows"), lane=SLOW
     ),
     tasks.WriteStep(
         "master stall",

@@ -11,7 +11,6 @@ from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
 from importlib import import_module
-from types import MappingProxyType
 from typing import Any
 
 from scripts.swarm import ack_pass, hash_pages, ledger_client, lost_runner, quota_notice, time_left
@@ -21,15 +20,12 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
 from scripts.tick.adapters.calls import (
     AdmissionCalls,
-    LedgerCalls,
     LocalMetrics,
     MetricsCalls,
-    SpawnRuntimeCalls,
-    SpawnStoreCalls,
 )
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
+from scripts.tick.steps import AGENTS, TASKS, CallStep, pass_domains
 from scripts.tick.steps.tasks import RANK, WriteStep, held, placing, rank_writes
 
 transfers: Any = import_module("scripts.handoff.transfers")
@@ -66,7 +62,6 @@ TASK_STATE = pass_domains("config", "rows", "doc")
 PLACED = frozenset({AGENTS, TASKS})
 
 
-_SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
 PASS_DEADLINE: ContextVar[Deadline | None] = ContextVar("spawn_pass_deadline", default=None)
 PASS_METRICS: ContextVar[MetricsCalls | None] = ContextVar("spawn_pass_metrics", default=None)
 OFFLINE_HOLD = "the ledger is not answering, so its claim cannot land before the launch"
@@ -119,37 +114,6 @@ def _preempt(tick: Any, get: Get) -> Any:
         )
         return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
     return []
-
-
-def _spawn_step(tick: Any, get: Get) -> Any:
-    config, deadline, tools = get("config"), get(DEADLINE), get("tools")
-    recording = _recording(tick, deadline)
-    store = SpawnStoreCalls(tools.coordination, recording, tools.inbox)
-    if config.state == "running" and tick.readiness.tick_launches(config.engine) and tick.panic.state(store) is None:
-        rows = dict(get("rows"))
-        runtime = SpawnRuntimeCalls(tools.runtime, recording)
-        ledger = LedgerCalls(tools.ledger, recording)
-        bound = {"rows": rows, "store": store, "ledger": ledger, "runtime": runtime}
-        args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
-        token = PASS_DEADLINE.set(deadline)
-        ports = MetricsCalls(tools.metrics, tools.processes, recording)
-        measured, logged = PASS_METRICS.set(ports), dispatcher.PORT.set(ports)
-        try:
-            with tick._placement_pass(runtime):
-                found = tick.skip_refused(tick._spawn, *args)
-        finally:
-            dispatcher.PORT.reset(logged)
-            PASS_METRICS.reset(measured)
-            PASS_DEADLINE.reset(token)
-        get("box")["rows"] = MappingProxyType(rows)
-        store.redis.delete(get("due"))
-        return found
-    return []
-
-
-def _recording(tick: Any, deadline: Deadline) -> Deadline:
-    """Return ``deadline`` extended by the launch budget, so a task prepared before it is still recorded on the ledger."""
-    return Deadline(deadline.expires_at + tick.SPAWN_BUDGET_S, deadline.clock)
 
 
 @dataclass(frozen=True)
@@ -850,17 +814,6 @@ STEPS = (
         PREEMPT_NEEDS,
         frozenset({AGENTS}) | TASK_STATE,
         frozenset({AGENTS}),
-    ),
-    CallStep(
-        "spawn",
-        PLACEMENT,
-        held(placing(_spawn_step)),
-        budgets.SPAWN_NEEDS,
-        frozenset({AGENTS, TASKS, SWARM}) | TASK_STATE,
-        PLACED | pass_domains("rows"),
-        lane=CallStep.lane,
-        effects=frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"}),
-        feature="swarm-tick-spawn",
     ),
 )
 

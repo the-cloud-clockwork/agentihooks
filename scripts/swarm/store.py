@@ -138,7 +138,7 @@ class SwarmConfig:
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
-    engine: str = "legacy"
+    engine: str = EVENTS_ENGINE
     window: dict = field(default_factory=dict)
     focus_weight: int = 50
     watchdog_address: str = ""
@@ -314,7 +314,7 @@ class RedisStore:
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
-            raw.get("engine", "legacy"),
+            raw.get("engine") or EVENTS_ENGINE,
             json.loads(raw.get("window") or "{}"),
             int(raw.get("focus_weight", 50)),
             raw.get("watchdog_address", ""),

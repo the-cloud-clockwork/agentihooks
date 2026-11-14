@@ -3777,10 +3777,9 @@
       "id": "swarm-tick-panic-holds-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2402",
-      "behaviour": "While fleet panic is on, the spawn due step spawns no agent and keeps its due mark, and the dispatch seat step runs no dispatcher seat call; once panic clears both spawn again.",
-      "seam": "scripts.tick.steps.observe.step_spawn_due and the dispatch seat step in scripts.tick.steps.masters",
+      "behaviour": "While fleet panic is on, the dispatch seat step runs no dispatcher seat call; once panic clears it runs again.",
+      "seam": "the dispatch seat step in scripts.tick.steps.masters",
       "tests": [
-        "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
       ]
     },
@@ -6070,7 +6069,7 @@
     },
     {
       "id": "swarm-events-only-launch",
-      "origin": "task",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only",
       "behaviour": "Every swarm runs on the events engine: no registered tick step launches an agent, a swarm config built or stored without an engine reads as events, and swarm create stores the events engine, so agents launch only through hub admission and hive spokes.",
       "seam": "scripts.tick.registry steps, scripts.swarm.store SwarmConfig and RedisStore config, scripts.swarm.cli cmd_create",
