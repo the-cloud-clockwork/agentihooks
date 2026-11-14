@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -279,7 +280,7 @@ def test_a_legacy_counted_start_drops_a_stale_pending_life_so_its_refund_spends_
 
 
 @pytest.mark.feature("hub-conversation-overlays")
-def test_a_started_agent_records_the_conversation_and_overlays_its_hive_placed(rig):
+def test_a_started_agent_records_the_conversation_and_overlays_its_hive_placed(rig: SimpleNamespace) -> None:
     event = started(rig.admitter.admit(SLUG, ask()))
     [admitted] = rig.store.agents(SLUG)
     assert (admitted.conversation_id, admitted.overlays) == ("", [])
@@ -293,7 +294,7 @@ def test_a_started_agent_records_the_conversation_and_overlays_its_hive_placed(r
 
 
 @pytest.mark.feature("hub-conversation-overlays")
-def test_a_start_naming_no_conversation_or_overlays_keeps_the_recorded_ones(rig):
+def test_a_start_naming_no_conversation_or_overlays_keeps_the_recorded_ones(rig: SimpleNamespace) -> None:
     event = started(rig.admitter.admit(SLUG, ask()))
     [agent] = rig.store.agents(SLUG)
     rig.store.execution_registry.update(SLUG, replace(agent, conversation_id="thread-b", overlays=["brain"]))

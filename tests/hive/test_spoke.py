@@ -231,7 +231,7 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
 
 
 @pytest.mark.feature("hub-conversation-overlays")
-def test_the_started_event_carries_the_placed_conversation_and_overlays(rig):
+def test_the_started_event_carries_the_placed_conversation_and_overlays(rig: SimpleNamespace) -> None:
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
