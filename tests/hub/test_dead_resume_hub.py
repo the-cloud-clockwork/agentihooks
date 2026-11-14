@@ -49,10 +49,13 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
         pane_id="pane",
         launched_at=LAUNCHED,
         conversation_id="conversation",
+        idle_ticks=5,
     )
     store.put_agent("rig", agent)
     row = {"id": "task", "state": "claimed", "claimed_by": name, "claim_generation": 7, "done": False}
-    ledger: Any = SimpleNamespace(task=lambda *_: dict(row), writes=[], notices=[])
+    ledger: Any = SimpleNamespace(
+        task=lambda slug, task_id: dict(row) if (slug, task_id) == ("rig", "task") else None, writes=[], notices=[]
+    )
 
     def update(*args: Any, **kwargs: Any) -> None:
         ledger.writes.append((args, kwargs))
@@ -191,7 +194,12 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig: SimpleNamespace
     assert config.repo == "/hive/repo"
     assert "Continue your task in this conversation and seat" in text
     [resumed] = rig.store.agents("rig")
-    assert (resumed.pane_id, resumed.launched_at, resumed.seat) == ("pane-2", 1_150_000, "eng-1@rig")
+    assert (resumed.pane_id, resumed.launched_at, resumed.seat, resumed.idle_ticks) == (
+        "pane-2",
+        1_150_000,
+        "eng-1@rig",
+        0,
+    )
     assert cast(Any, Orders(rig.store.redis).command(HIVE, order)).status == DONE
     _next_pass(rig, "working")
     assert len(_sent(rig)) == 1
@@ -356,6 +364,70 @@ def test_the_hive_reaps_a_live_process_of_the_name_before_it_resumes(rig: Simple
     runtime.recover.assert_not_called()
     _next_pass(rig)
     assert rig.row["state"] == "open"
+    assert rig.ledger.notices == [
+        f"Starting a fresh agent after {rig.agent.name} ended because resume failed: a process carrying it still runs."
+    ]
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_the_hive_ends_the_new_pane_when_a_successor_claims_during_the_resume(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import FOREIGN, Orders
+
+    rig.react.poll()
+    [order] = _commands(rig)
+    consumer, runtime = _hive(rig, _resumed())
+
+    def claimed(*_args: Any) -> Any:
+        rig.store.redis.set(rig.store.key("rig", "claim", "task"), "successor")
+        return _resumed()
+
+    runtime.recover.side_effect = claimed
+    consumer.poll_commands()
+    ended = runtime.terminate.call_args.args[0]
+    assert (ended.name, ended.pane_id) == (rig.agent.name, "pane-2")
+    assert Orders(rig.store.redis).command(HIVE, order) == FOREIGN
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_an_exit_read_before_the_resumed_launch_is_held(rig: SimpleNamespace) -> None:
+    rig.react.poll()
+    consumer, _runtime = _hive(rig, _resumed())
+    consumer.poll_commands()
+    stale = replace(
+        rig.started, id="exited:started", type="execution.exited", time=LAUNCHED + 1, data=dict(rig.started.data)
+    )
+    rig.life.handle(stale)
+    assert len(_sent(rig)) == 1
+    assert rig.ledger.writes == rig.returned == []
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_stopped_swarm_resumes_no_agent(rig: SimpleNamespace) -> None:
+    rig.store.update("rig", state="stopped")
+    rig.react.poll()
+    assert _sent(rig) == []
+    assert len(rig.returned) == 1
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_row_without_a_claim_generation_matches_the_first_generation(rig: SimpleNamespace) -> None:
+    rig.row.pop("claim_generation")
+    exited = replace(
+        rig.started,
+        id="exited:started",
+        type="execution.exited",
+        time=NOW,
+        data={**rig.started.data, "task_generation": 0},
+    )
+    rig.life.handle(exited)
+    assert len(_sent(rig)) == 1
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_the_legacy_gate_admits_a_dead_agent_that_still_holds_its_seat_and_claim(rig: SimpleNamespace) -> None:
+    from scripts.swarm import dead_resume
+
+    assert dead_resume.resumable(rig.store, "rig", rig.agent, rig.ledger) is True
 
 
 @pytest.mark.feature("hub-dead-resume")

@@ -97,7 +97,11 @@ def test_a_resume_order_that_never_answers_is_answered_failed_after_its_run_boun
     consumer = Consumer(redis, HIVE, Mock())
     consumer.offbeat = Mock()
     receipt = Orders(redis).command_receipt(HIVE, order.id)
-    for _ in range(RESUME_RUNS + 1):
+    consumer.poll_commands()
+    assert redis.hget(receipt, "runs") == "1"
+    assert redis.ttl(f"{receipt}:running") > 0
+    redis.delete(f"{receipt}:running")
+    for _ in range(RESUME_RUNS):
         consumer.poll_commands()
         redis.delete(f"{receipt}:running")
     assert consumer.offbeat.call_count == RESUME_RUNS
@@ -126,3 +130,34 @@ def test_a_running_resume_keeps_its_marker_alive(redis: Any, monkeypatch: pytest
     monkeypatch.setattr(consumer, "command", slow)
     consumer.run_resume(order)
     assert redis.ttl(f"{receipt}:running") > 1
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_resume_that_raises_answers_failed_with_an_empty_target(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import orders
+
+    consumer = orders.Consumer(redis, HIVE, cast(Any, Mock()))
+
+    def broken(_order: Any) -> Any:
+        raise RuntimeError("herdr gone")
+
+    monkeypatch.setattr(consumer, "command", broken)
+    order = _order()
+    consumer.run_resume(order)
+    assert _ack(redis, order) == {"status": "failed", "target": {}, "failure": "error: RuntimeError"}
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_record_placed_by_runtime_target_is_held_on_its_hive(redis: Any) -> None:
+    from scripts.hive.orders import CommandOrder, Consumer
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(redis)
+    store.create(SwarmConfig("rig", "/repo", max_eng=1, max_ci=0, engine="events"))
+    name = store.next_name("rig", "eng")
+    assert store.claim("rig", "task", name, 600_000)
+    record = AgentRecord(name, "eng", "task", seat="eng-1@rig", state="starting", runtime_target={"host_id": HIVE})
+    agent = store.start_execution("rig", record)
+    order = CommandOrder("resume:1", "resume", "rig", name, agent.execution_id, agent.generation, "", 0, "")
+    held = Consumer(redis, HIVE, cast(Any, Mock()))._holding(order)
+    assert held is not None and held.name == name

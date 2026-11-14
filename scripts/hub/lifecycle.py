@@ -64,12 +64,7 @@ class Lifecycle:
             event.version,
             event.data["task"],
             event.data["name"],
-        ) or (
-            value["state"] == "started"
-            and self._resumed(
-                event, agent, cast(Any, claims), cast(str, key), cast(dict[str, Any], value), entry.revision
-            )
-        ):
+        ) or (value["state"] == "started" and self._resumed(event, agent, claims, key, value, entry.revision)):
             return
         revision = entry.revision
         if value["state"] != "exiting":
@@ -95,9 +90,7 @@ class Lifecycle:
         self._settle(event, agent)
         claims.update(key, json.dumps({**value, "state": "exited"}).encode(), revision)
 
-    def _resumed(
-        self, event: Envelope, agent: AgentRecord, claims: Any, key: str, value: dict[str, Any], revision: int
-    ) -> bool:
+    def _resumed(self, event: Envelope, agent: AgentRecord, claims: Any, key: Any, value: Any, revision: int) -> bool:
         """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per
         execution and only while it holds its claim, claim generation and seat; True while that resume is ordered and
         unanswered or the exit predates it, False when the exit goes on to drop the agent and reopen its task."""

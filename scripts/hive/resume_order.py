@@ -2,7 +2,7 @@
 
 import json
 import sys
-from typing import Any, cast
+from typing import Any
 
 from scripts.hive.orders import FAILED, Ack, CommandOrder, Consumer, Orders, answer
 
@@ -12,7 +12,7 @@ def run(hive: str, raw: str) -> None:
     from scripts.swarm import store
 
     order = CommandOrder(**json.loads(raw))
-    redis: Any = cast(Any, store).redis_client()
+    redis: Any = store.redis_client()  # pyright: ignore[reportUnknownMemberType]
     try:
         Consumer.local(redis, hive).run_resume(order)
     except Exception as exc:
