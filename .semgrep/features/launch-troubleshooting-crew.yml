@@ -16,5 +16,5 @@ rules:
           regex: ^["'](delete|remove|close|bin|purge|stop|shutdown|retire|lift|--lift)["']$
     paths:
       include:
-        - /profiles/package/skills/launch-troubleshooting-crew/scripts/
+        - /scripts/swarm/troubleshooting_crew.py
         - '*.test.py'
