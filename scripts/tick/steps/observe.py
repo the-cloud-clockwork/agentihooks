@@ -189,12 +189,15 @@ ROWS = pass_domains("rows")
 
 
 def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], now_ms: int) -> list[str]:
-    from scripts.hub.reconciler import legacy_agents
+    from scripts.hub.reconciler import admitted_agents, legacy_agents
 
-    judged, listed = launch_check.judged(store, slug), legacy_agents(store, slug)
+    judged, legacy = launch_check.judged(store, slug), legacy_agents(store, slug)
+    listed = legacy + admitted_agents(store, slug, legacy)
     agents, actions = [a for a in listed if a.name not in judged], list[str]()
     bound = [a for a in listed if a.name not in judged or live_binding.managed(a)]
     facts, live_names = runtime.bindings(bound), runtime.live_names()
+    legacy_names = {a.name for a in legacy}
+    agents = [a for a in agents if a.name in legacy_names or a.name in facts]
     holders = held_elsewhere.holders(store)
     for agent in agents:
         if (

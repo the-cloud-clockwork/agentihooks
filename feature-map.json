@@ -6170,10 +6170,13 @@
       "id": "events-retirement-refunds-claim-life",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
-      "behaviour": "An agent seated through hub admission whose hive recorded its start and whose claim life the hub counted gets that life back when the swarm stops: it is retired and dropped, and its task reopens unclaimed.",
-      "seam": "stop_now retiring an events launched agent through the held claim refund",
+      "behaviour": "A swarm retirement refunds the claim life of the agent it retires: three retirements for an account mismatch, idling or a swarm stop leave a fourth claim open on the legacy tick spawn, and an agent seated through hub admission whose hive recorded its start and whose life the hub counted gets that life back when the observe verify step retires it for an account mismatch, the agents reap step retires it for idling or a swarm stop retires it, retired and dropped with its task reopened unclaimed. The tick judges such an agent only while its process is live, leaving a dead one to the hub reconciler; a declared wait or typed input holds an idle one; and the hive's exit after the tick retired it still releases its launch slot and settles the spoke claim without a second refund.",
+      "seam": "stop_now, the observe verify step and the agents reap step, retiring an agent through the held claim refund",
       "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent"
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
+        "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement",
+        "tests/swarm/test_events_claim_refunds.py::test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim"
       ]
     },
     {

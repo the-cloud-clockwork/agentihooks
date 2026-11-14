@@ -14,9 +14,12 @@ from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events
 from scripts.hub import claims, lifecycle, reconciler
-from scripts.swarm import launch_check, readiness
+from scripts.swarm import idle, launch_check, readiness
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.tick import IDLE_KILL_TICKS
+from scripts.tick.steps import agents as agent_steps
+from scripts.tick.steps import observe
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
@@ -106,6 +109,87 @@ def test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent(
     assert [seated.name for seated in store.agents(SLUG)] == []
     assert store.claims(SLUG, "t1") == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+
+
+def spoke_started(bus: Bus) -> None:
+    """Records the started claim the hive spoke holds for the running execution, so a stop finds it not yet ended."""
+    bus.for_swarm(SLUG).state("spoke-work").create(
+        "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
+    )
+
+
+def retire(ending: str, env: tuple[RedisStore, Any, Any], agent: AgentRecord) -> None:
+    """Retires ``agent`` the way the swarm does for ``ending``: an account mismatch or idling."""
+    store, ledger, rt = env
+    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
+    if ending == "mismatch":
+        store.put_agent(SLUG, replace(agent, account="old-account"))
+        original = rt.bindings
+        rt.bindings = lambda agents: {
+            name: {**facts, "account": "new-account"} for name, facts in original(agents).items()
+        }
+        observe._verify(SLUG, store, ledger, rt, rows, NOW + 1)
+    else:
+        rt.statuses[agent.name] = "idle"
+        store.put_agent(SLUG, replace(agent, idle_ticks=IDLE_KILL_TICKS - 1))
+        agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
+
+
+@pytest.mark.feature("events-retirement-refunds-claim-life")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    store, ledger, rt = env
+    agent, _ = launched(env, bus, seat)
+
+    retire(ending, env, agent)
+
+    assert agent.name in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert store.claims(SLUG, "t1") == 0
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+
+
+@pytest.mark.feature("events-retirement-refunds-claim-life")
+@pytest.mark.parametrize("hold", ["wait", "typed"])
+def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], hold: str
+) -> None:
+    store, _, rt = env
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+    if hold == "wait":
+        idle.declare_wait(store.redis, SLUG, agent.name, NOW + 3_600_000, "checks", NOW)
+    else:
+        rt.typed[agent.name] = "a reply the operator is typing"
+
+    retire("idle", env, agent)
+
+    assert agent.name not in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
+    assert store.claims(SLUG, "t1") == 1
+
+
+@pytest.mark.feature("events-retirement-refunds-claim-life")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    store, ledger, _ = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    retire(ending, env, agent)
+    released: list[str] = []
+    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, gone: released.append(gone.name))
+
+    react.handle(replace(event, id=f"exited:{event.key}", type="execution.exited"))
+
+    assert released == [agent.name]
+    entry = bus.for_swarm(SLUG).state("spoke-work").get("claim")
+    assert entry is not None
+    assert json.loads(entry.value)["state"] == "exited"
+    assert store.claims(SLUG, "t1") == 0
 
 
 def handed_off(
