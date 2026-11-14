@@ -91,10 +91,9 @@ def test_create_is_paused_then_start_spawns_and_status_lists(
     assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "1") == 0
     assert store.config("sw").state == "paused" and rt.spawned == []
     assert run("sw", "start") == 0
-    assert [seat(task, hive=commands.hive_id()).name for task in ("t1", "t2")] == [
-        "engineer@a1b2c3-0001",
-        "ci@a1b2c3-0001",
-    ]
+    seated = [seat(task, hive=commands.hive_id()) for task in ("t1", "t2")]
+    rt.live.update(agent.name for agent in seated)
+    assert [agent.name for agent in seated] == ["engineer@a1b2c3-0001", "ci@a1b2c3-0001"]
     run("sw", "status")
     assert "engineer@a1b2c3-0001" in capsys.readouterr().out
 
