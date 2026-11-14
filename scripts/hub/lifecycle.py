@@ -99,7 +99,7 @@ class Lifecycle:
             return True
         if not outage.shared_open(store, slug):
             return False
-        row = self.ledger.task(slug, agent.task) or {}
+        row: dict[str, Any] = cast(Any, self.ledger).task(slug, agent.task) or {}
         finished = bool(row.get("done")) or row.get("state") == "done"
         return not finished and not deliberate_exit.recorded(store, slug, agent.name)
 

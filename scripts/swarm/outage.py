@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.records import _write
@@ -74,13 +74,15 @@ def open_records(slug: str) -> list[dict]:
 
 def share(store: RedisStore, slug: str) -> None:
     """Publish the open outage records of ``slug`` to Redis, where a hub on another host reads them."""
-    store.redis.set(store.key(slug, SHARED), json.dumps(open_records(slug)), ex=SHARED_TTL_S)
+    redis: Any = cast(Any, store).redis
+    redis.set(store.key(slug, SHARED), json.dumps(open_records(slug)), ex=SHARED_TTL_S)
 
 
-def shared_open(store: RedisStore, slug: str) -> list[dict]:
+def shared_open(store: RedisStore, slug: str) -> list[dict[str, Any]]:
     """The open outage records of ``slug`` the tick last published to Redis."""
-    raw = store.redis.get(store.key(slug, SHARED))
-    return json.loads(raw) if raw else []
+    redis: Any = cast(Any, store).redis
+    raw: str | None = redis.get(store.key(slug, SHARED))
+    return cast(list[dict[str, Any]], json.loads(raw)) if raw else []
 
 
 def lines(slug: str) -> list[str]:
