@@ -3,6 +3,7 @@ import socket
 import subprocess
 import threading
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -169,6 +170,45 @@ def test_a_member_credential_cannot_change_a_stream(signer, verb):
 
     assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
         f'nats: permissions violation for publish to "{subject.lower()}"'
+    ]
+
+
+def _signed(signer: nats_grant.Signer, name: str, claims: dict) -> str:
+    user = nkey.create(nkey.USER)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, name, claims), user.seed)
+
+
+def _publish_refusals(signer: nats_grant.Signer, credentials: str, *published: str) -> list[str]:
+    async def act(nc: Any) -> None:
+        for subject in published:
+            await nc.publish(subject, b"{}")
+
+    return _violations(signer, credentials, act, refused=True)
+
+
+def _member(signer: nats_grant.Signer, scope: str) -> str:
+    if scope == "unscoped":
+        return nats_grant.mint(signer, "m1")
+    return _signed(signer, "hive-m1", nats_grant.member_claims("UMEMBER", ("rig",), member="m1"))
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+@pytest.mark.parametrize("hive", ["h2", "m1"])
+def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(signer, scope: str, hive: str) -> None:
+    stop = f"swarm.rig.execution.stop.{hive}"
+
+    assert _publish_refusals(
+        signer, _member(signer, scope), "swarm.rig.execution.started", "swarm.rig.execution.exited", stop
+    ) == [f'nats: permissions violation for publish to "{stop}"']
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer) -> None:
+    hub = _signed(signer, "hub", nats_grant.controller_claims())
+
+    assert _publish_refusals(signer, hub, "swarm.rig.execution.stop.h2", "outside.events") == [
+        'nats: permissions violation for publish to "outside.events"'
     ]
 
 
