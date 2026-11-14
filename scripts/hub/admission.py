@@ -77,10 +77,12 @@ class Admission:
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
-            if admitted["hive"] == request["hive"]:
+            live = admitted["name"] in self.store.listed(slug)
+            if live and admitted["hive"] == request["hive"]:
                 return admitted
-            refused(slug, request, f"already admitted to hive {admitted['hive']}")
-            return None
+            if live:
+                refused(slug, request, f"already admitted to hive {admitted['hive']}")
+                return None
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             refused(slug, request, "claims are stopped")
             return None

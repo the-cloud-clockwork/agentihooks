@@ -6142,12 +6142,13 @@
       "id": "events-launch-check-hung-spawn",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
-      "behaviour": "The hub registry polls the launch checks. A hub admitted worker with no started execution fails one spawn timeout and one deadline after the hive began it, or after admission when the hive never began it; the real execution stop answers unknown for it, so the hub releases its hive slot, claim and seat and reopens its task, and a later launch report revives nothing. A failed started worker gets a stop to its hive and its check is held until its exit drops the agent; a raising stop leaves the check stopping and sends again one deadline later.",
+      "behaviour": "The hub registry polls the launch checks. A hub admitted worker with no started execution fails one spawn timeout and one deadline after the hive began it, or after admission when the hive never began it; the real execution stop answers unknown for it, so the hub releases its hive slot, claim and seat and reopens its task, and neither a later launch report nor a redelivered offer revives the dropped admission, because admission drops a held admission whose agent is no longer listed. A failed started worker gets a stop to its hive and its check is held until its exit drops the agent; a raising stop leaves the check stopping and sends again one deadline later.",
       "seam": "LaunchChecks.check, _halt and hung on execution_stop.stop and Admission.free, wired in the hub registry",
       "tests": [
         "tests/hub/test_launch_checks.py::test_a_hung_spawn_is_freed_through_the_real_stop_and_its_task_reopened",
         "tests/hub/test_launch_checks.py::test_a_spawn_the_hive_never_began_is_judged_from_admission",
         "tests/hub/test_launch_checks.py::test_a_late_launch_report_after_the_verdict_revives_nothing",
+        "tests/hub/test_launch_checks.py::test_a_redelivered_offer_after_a_free_never_answers_the_dropped_admission",
         "tests/hub/test_launch_checks.py::test_a_raising_stop_keeps_the_check_and_sends_again_one_deadline_later",
         "tests/hub/test_launch_checks.py::test_a_sent_stop_holds_the_check_until_the_exit_drops_the_agent",
         "tests/hub/test_launch_checks.py::test_the_hub_registry_polls_launch_checks_on_the_real_stop"

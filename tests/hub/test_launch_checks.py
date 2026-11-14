@@ -53,7 +53,8 @@ def joined(rig: SimpleNamespace) -> None:
 
 def stops(bus: Any) -> list[Envelope]:
     subject = execution_stop.stop_subject(SLUG, "hive-a")
-    found = bus.for_swarm(SLUG).events.consumer(execution_stop.durable(SLUG, "hive-a"), subject).fetch(10, 0)
+    durable = execution_stop.durable(SLUG, "hive-a")
+    found = bus.for_swarm(SLUG).events.consumer(durable, subject, execution_stop.POLICY).fetch(10, 0)
     return [delivery.event for delivery in found]
 
 
@@ -153,6 +154,18 @@ def test_a_late_launch_report_after_the_verdict_revives_nothing(rig: SimpleNames
     assert rig.store.agents(SLUG) == []
     assert launch_check.pending(rig.store, SLUG) == {}
     assert rig.rows["t1"]["state"] == "open"
+
+
+@pytest.mark.feature("events-launch-check-hung-spawn")
+def test_a_redelivered_offer_after_a_free_never_answers_the_dropped_admission(rig: SimpleNamespace, bus: Any) -> None:
+    stale = rig.admitter.admit(SLUG, ask())
+    checker(rig, bus).check(SLUG, 7_000 + HUNG_MS)
+
+    again = rig.admitter.admit(SLUG, ask())
+
+    assert again is None or again.get("name") != stale["name"]
+    assert again is None or again["name"] in rig.store.listed(SLUG)
+    assert stale["name"] not in rig.store.listed(SLUG)
 
 
 @pytest.mark.feature("events-launch-check-hung-spawn")
