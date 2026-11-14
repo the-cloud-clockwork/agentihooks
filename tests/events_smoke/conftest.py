@@ -55,6 +55,16 @@ def reading() -> dict[str, int]:
     return {"cpus": 32, "load5": 0, "available_mb": 60000, "total_mb": 64000}
 
 
+def connect(url: str, provision: bool = True) -> Any:
+    """A bus connection to the smoke's nats-server; the hub's provisions the streams and buckets."""
+    return nats.open_bus(BusConfig(backend="nats", url=url, provision=provision))
+
+
+def unread() -> Any:
+    """No spoke side readiness view: the hub rechecks every offer when it admits it."""
+    return None
+
+
 @dataclass
 class Ledger:
     """The ledger the hub reads and claims through: one document whose rows the admission marks."""
@@ -102,15 +112,15 @@ class Smoke:
     """The running hub, its store and ledger, and a way to start hive spokes and offer tasks on the real bus."""
 
     url: str
-    bus: nats.NatsBus
+    bus: Any
     store: RedisStore
     ledger: Ledger
     admitter: admission.Admission
-    opened: list[nats.NatsBus]
+    opened: list[Any]
 
     def spoke(self, hive: str, lane: str) -> SimpleNamespace:
         """A hive lane spoke on its own bus connection, asking this hub, with a runtime that launches at once."""
-        bus = nats.open_bus(BusConfig(backend="nats", url=self.url, provision=False))
+        bus = connect(self.url, provision=False)
         self.opened.append(bus)
         runtime = Mock()
         runtime.spawn.side_effect = lambda request: Outcome(
@@ -118,7 +128,7 @@ class Smoke:
         )
         tasks = lanes.LaneTasks(bus, hive, self.store.config)
         config = SpokeConfig(self.store.config(SLUG), lane, hive, POLICY)
-        return SimpleNamespace(spoke=Spoke(config, bus, runtime, tasks, reading, view=lambda: None), runtime=runtime)
+        return SimpleNamespace(spoke=Spoke(config, bus, runtime, tasks, reading, view=unread), runtime=runtime)
 
     def offer(self, task_id: str) -> None:
         """Publishes the ready offer readiness would publish for an open row."""
@@ -164,9 +174,10 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
             "t-pr": task("t-pr", lane="ci", pr_url=PULL),
         }
     )
-    admitter = admission.Admission(store, ledger, readiness.Source(store, ledger))
+    served: Any = ledger
+    admitter = admission.Admission(store, served, readiness.Source(store, served))
     with nats_server.running(tmp_path / "nats") as nats_url:
-        bus = nats.open_bus(BusConfig(backend="nats", url=nats_url))
+        bus = connect(nats_url)
         opened = [bus]
         try:
             buckets.provision(bus)

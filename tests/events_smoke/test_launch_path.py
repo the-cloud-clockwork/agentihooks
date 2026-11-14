@@ -146,12 +146,12 @@ def test_an_engine_switch_exits_no_running_execution(smoke: Smoke, monkeypatch: 
 
     assert outcomes == {SLUG: "unchanged", "legacy-busy": engine_migration.BUSY}
     assert smoke.store.config("legacy-busy").engine == "legacy"
-    loss = hive_loss.HiveLoss(smoke.bus, Mock(return_value=presence.now_ms()), smoke.store)
+    clock = Mock(return_value=presence.now_ms())
+    loss = hive_loss.HiveLoss(smoke.bus, clock, smoke.store)
     emitted = Mock()
     monkeypatch.setattr(loss, "_emit", emitted)
     loss.handle(event)
     smoke.store.update(SLUG, engine="legacy")
-    clock = loss._clock
     end = clock() + 4 * presence.TTL_MS
     while clock() < end:
         clock.return_value = clock() + presence.BEAT_SECONDS * 1000 // 3
