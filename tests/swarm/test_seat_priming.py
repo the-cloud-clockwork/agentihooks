@@ -1,11 +1,14 @@
 import json
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import cli, prompt
 from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
@@ -64,10 +67,14 @@ def test_the_master_prompt_carries_the_chain_too():
     assert text.index("caps go to four") < text.index("latest recap text") < text.index("learned note text")
 
 
-def test_a_handoff_writes_a_recap_under_the_seat(env, tmp_path):  # noqa: F811
-    swarm, _, _ = env
+def test_a_handoff_writes_a_recap_under_the_seat(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    tmp_path: Path,
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     doc, recap = _handoff_doc(tmp_path), tmp_path / "recap.md"
     recap.write_text("did seam 1, stopped at seam 2, promised the master a pr")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", str(recap)) == 0
@@ -79,10 +86,15 @@ def test_a_handoff_writes_a_recap_under_the_seat(env, tmp_path):  # noqa: F811
     assert "promised the master a pr" not in entry["text"]
 
 
-def test_a_malformed_handoff_writes_no_recap(env, tmp_path, capsys):  # noqa: F811
-    swarm, _, _ = env
+def test_a_malformed_handoff_writes_no_recap(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     doc = tmp_path / "handoff.md"
     doc.write_text("doc")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 1
@@ -91,10 +103,11 @@ def test_a_malformed_handoff_writes_no_recap(env, tmp_path, capsys):  # noqa: F8
     assert swarm.memory.recaps("eng-1@sw") == []
 
 
-def test_learned_appends_a_note_to_the_callers_seat(env):  # noqa: F811
-    swarm, _, _ = env
+def test_learned_appends_a_note_to_the_callers_seat(env: tuple[Any, Any, Any]) -> None:  # noqa: F811
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     assert (
         run(
             "sw",
@@ -111,22 +124,6 @@ def test_learned_appends_a_note_to_the_callers_seat(env):  # noqa: F811
     assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["note"]
 
 
-@pytest.mark.feature("swarm-seat-priming")
-def test_the_tick_primes_a_successor_from_its_seat(store):  # noqa: F811
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    (first,) = workers(store)
-    store.memory.add_recap(first.seat, first.name, "t1", "stopped at seam 2", at=1_500)
-    store.memory.learn(first.seat, first.name, "run the whole suite", at=1_500)
-    store.put_handoff("sw", "t1", "seam 2 is red", seat=first.seat)
-    store.put_agent("sw", replace(first, state="finished"))
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    primed = runtime.tasks[-1]
-    assert primed["seat"] == first.seat and primed["handoff"] == "seam 2 is red"
-    assert [r["text"] for r in primed["recaps"]] == ["stopped at seam 2"]
-    assert [n["text"] for n in primed["learned"]] == ["run the whole suite"]
-
-
 def test_the_tick_primes_the_next_master_from_the_master_seat(store):  # noqa: F811
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
@@ -138,13 +135,6 @@ def test_the_tick_primes_the_next_master_from_the_master_seat(store):  # noqa: F
     primed = runtime.masters[-1][1]
     assert primed["seat"] == "master@sw"
     assert [r["text"] for r in primed["recaps"]] == ["operator wants caps at four"]
-
-
-def test_a_first_occupant_is_primed_with_an_empty_seat(store):  # noqa: F811
-    runtime = FakeRuntime()
-    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    primed = runtime.tasks[-1]
-    assert (primed["seat"], primed["recaps"], primed["learned"]) == ("eng-1@sw", [], [])
 
 
 def _note(text, maturity):
@@ -188,20 +178,12 @@ def test_a_swarm_without_culture_names_it_missing():
     assert "Swarm culture: none" in _eng(seat="eng-1@sw", recaps=RECAPS)
 
 
-@pytest.mark.feature("swarm-culture")
-def test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture(store):  # noqa: F811
-    store.culture.set("sw", "say it plainly")
-    runtime = FakeRuntime()
-    tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, now_ms=1_000)
-    assert [t["culture"] for t in runtime.tasks] == ["say it plainly", "say it plainly"]
-    assert runtime.masters[-1][1]["culture"] == "say it plainly"
-
-
 @pytest.mark.feature("swarm-learned-notes")
-def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env):  # noqa: F811
-    swarm, _, _ = env
+def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env: tuple[Any, Any, Any]) -> None:  # noqa: F811
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     assert (
         run(
             "sw",
@@ -222,10 +204,15 @@ def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env):  # noqa
     assert [n["maturity"] for n in swarm.memory.learned("master@sw")] == ["canon"]
 
 
-def test_promote_rules_by_caller(env, capsys):  # noqa: F811
-    swarm, _, _ = env
+def test_promote_rules_by_caller(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
+    seat_agent(swarm, ledger, SLUG, "t2")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     assert run("sw", "--as", "ci@a1b2c3-0001", "promote", "eng-1", "1", "insight", "--reason", "held twice") == 0
     assert run("sw", "--as", "engineer@a1b2c3-0001", "promote", "eng-1", "1", "canon", "--reason", "always") == 1
@@ -241,19 +228,28 @@ def test_promote_rules_by_caller(env, capsys):  # noqa: F811
     ]
 
 
-def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
+def test_the_operator_may_promote_to_canon(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
-    swarm, _, _ = env
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     assert run("sw", "promote", "eng-1", "1", "canon", "--reason", "the operator says so") == 0
     assert swarm.memory.learned("eng-1@sw")[0]["promotions"][0]["by"] == "operator"
 
 
-def test_learned_without_text_lists_entries_with_seat_and_number(env, capsys):  # noqa: F811
+def test_learned_without_text_lists_entries_with_seat_and_number(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two because it held twice", "--maturity", "insight")
     capsys.readouterr()
@@ -264,10 +260,15 @@ def test_learned_without_text_lists_entries_with_seat_and_number(env, capsys):  
     ]
 
 
-def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(env, capsys, monkeypatch):  # noqa: F811
-    swarm, _, _ = env
+def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two because it held twice")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "retire", "eng-1", "1", "--reason", "stale") == 1
@@ -284,11 +285,16 @@ def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(env
     assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t3\tnote\tlesson three because it held"]
 
 
-def test_retire_reports_what_it_did_and_names_each_refusal(env, capsys, monkeypatch):  # noqa: F811
-    swarm, _, _ = env
+def test_retire_reports_what_it_did_and_names_each_refusal(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, _ = env
     monkeypatch.setattr(cli, "now_ms", lambda: 7_000)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     capsys.readouterr()

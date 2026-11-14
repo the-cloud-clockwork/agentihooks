@@ -86,35 +86,6 @@ def test_an_execution_without_task_authority_owns_its_recovery_only_when_local(s
     assert (owner.name in runtime.nudged) is recovered
 
 
-@pytest.mark.feature("swarm-legacy-outage-seat-release-successor")
-def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts(
-    store, monkeypatch
-):
-    from scripts.swarm import idle, provider_probe
-
-    ledger, runtime, owner = stuck_owner(store, monkeypatch)
-    monkeypatch.setattr(provider_probe, "check", lambda target, *args: provider_probe.Result(True, "ok"))
-    outage.providers(store, "sw", runtime, MINUTE)
-    tick("sw", store, ledger, runtime, 2 * MINUTE)
-    outage.providers(store, "sw", runtime, 5 * MINUTE)
-    assert not outage.open_records("sw")
-    for at in (6, 7, 8):
-        tick("sw", store, ledger, runtime, at * MINUTE)
-        idle.beat(store.redis, "sw", owner.name, "working", at * MINUTE + 1)
-    assert runtime.nudged.count(owner.name) == resume.RECOVERY_ATTEMPTS
-    assert store.claimant("sw", owner.task) == owner.name
-    claims = store.claims("sw", owner.task)
-    tick("sw", store, ledger, runtime, 9 * MINUTE)
-    assert_seat_freed(store, ledger, runtime, owner, 9 * MINUTE, claims)
-    store.update("sw", state="running")
-    tick("sw", store, ledger, runtime, 10 * MINUTE)
-    successor = next(agent for agent in store.agents("sw") if agent.task == owner.task)
-    transfer = runtime.tasks[-1]["transfer"]
-    assert (transfer["successor"], transfer["avoid_harness"]) == (successor.name, "codex")
-    assert store.seats.occupant(successor.seat).occupant == successor.name
-    assert transfer["handoff"].startswith("## Intent") and runtime.errors[owner.name] in transfer["handoff"]
-
-
 @pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_outage_stays_open(store, monkeypatch):
     ledger, runtime, owner = stuck_owner(store, monkeypatch)

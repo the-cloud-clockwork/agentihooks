@@ -59,48 +59,6 @@ class AdmissionCalls:
         return self.port.activate_admission(slug, task_id, reservation, deadline=self.deadline)
 
 
-@dataclass(frozen=True)
-class _Router:
-    placement: object
-
-
-@dataclass(frozen=True)
-class SpawnRuntimeCalls(RuntimeCalls):
-    """The runtime the spawn helpers call, bound to the spawn recording deadline and reached only through the port."""
-
-    def spawn(self, config: SwarmConfig, lane: str, name: str, task: Mapping[str, Any]) -> Any:
-        return self.port.place(config, lane, name, task, deadline=self.deadline)
-
-    def has_capacity(self, config: SwarmConfig) -> bool:
-        return self.port.has_capacity(config, deadline=self.deadline)
-
-    def launch_room(self, config: SwarmConfig) -> int | None:
-        return self.port.launch_room(config, deadline=self.deadline)
-
-    def reported(self, agent: AgentRecord) -> bool:
-        return self.port.reported(agent, deadline=self.deadline)
-
-    def placement_refusal(self, lane: str, task: Mapping[str, Any]) -> str:
-        return self.port.placement_refusal(lane, task, deadline=self.deadline)
-
-    def begin_placement_pass(self) -> None:
-        self.port.begin_placement(deadline=self.deadline)
-
-    def end_placement_pass(self) -> None:
-        self.port.end_placement(deadline=self.deadline)
-
-    def reap_name(self, name: str) -> bool:
-        return self.port.reap_name(name, deadline=self.deadline)
-
-    @property
-    def router(self) -> _Router:
-        return _Router(self.port.placement(deadline=self.deadline))
-
-    @property
-    def admission(self) -> AdmissionCalls | None:
-        return AdmissionCalls(self.port, self.deadline) if self.port.admits(deadline=self.deadline) else None
-
-
 _STORE_GROUPS = frozenset({"redis", "seats", "memory", "culture", "execution_registry", "names"})
 
 

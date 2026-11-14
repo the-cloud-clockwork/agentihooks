@@ -1,11 +1,14 @@
 import json
 from dataclasses import asdict, replace
+from typing import Any
 
 import pytest
 
 from scripts.handoff import transfers
+from scripts.hub import admission
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import SpawnError, tick
+from scripts.swarm.tick import tick
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.unit
@@ -24,23 +27,31 @@ def setup():
     return store, old
 
 
+def admitted(store: RedisStore) -> dict[str, Any]:
+    """The task hub admission handed the hive for the first claim of t1, its attached transfer included."""
+    return json.loads(store.redis.get(store.key("sw", admission.ADMITTED, "t1", "0")))["task"]
+
+
 @pytest.mark.feature("swarm-handoff-binding")
-def test_tick_binds_a_successor_without_claiming_continuity(setup):
+def test_tick_binds_a_successor_without_claiming_continuity(setup: tuple[RedisStore, AgentRecord]) -> None:
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 2)
     store.put_handoff("sw", "t1", DOC, seat=old.seat)
-    runtime = FakeRuntime()
-    tick("sw", store, FakeLedger([{"id": "t1"}]), runtime, 10)
+    ledger, runtime = FakeLedger([{"id": "t1"}]), FakeRuntime()
+    successor = seat_owner(store, ledger, runtime, "t1", 10)
+    tick("sw", store, ledger, runtime, 10)
     result = transfers.get(store, "sw", transfer["id"])
-    assert result["successor"] == runtime.spawned[0][1]
+    assert result["successor"] == successor.name
     assert result["binding"]["state"] == "live"
     assert result["continuity"]["state"] == "pending"
-    assert runtime.tasks[0]["transfer"]["id"] == transfer["id"]
+    assert admitted(store)["transfer"]["id"] == transfer["id"]
 
 
 @pytest.mark.parametrize("lane", ["eng", "master"])
 @pytest.mark.feature("swarm-handoff-binding")
-def test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start(setup, monkeypatch, lane):
+def test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start(
+    setup: tuple[RedisStore, AgentRecord], monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
     store, old = setup
     store.drop_agent("sw", old.name)
     old = replace(old, lane=lane, task="master" if lane == "master" else "t1")
@@ -49,7 +60,10 @@ def test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start(setup,
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
     clock = iter(range(100, 200))
     monkeypatch.setattr(transfers, "now_ms", lambda: next(clock))
-    tick("sw", store, FakeLedger([] if lane == "master" else [{"id": "t1"}]), FakeRuntime(), 10)
+    ledger, runtime = FakeLedger([] if lane == "master" else [{"id": "t1"}]), FakeRuntime()
+    if lane != "master":
+        seat_owner(store, ledger, runtime, "t1", 10)
+    tick("sw", store, ledger, runtime, 10)
     result = transfers.get(store, "sw", transfer["id"])
     assert (result["at"], result["attached_at"]) == (30, 100)
     assert result["binding"] == {"state": "live", "at": 101, "session": result["successor"]}
@@ -170,24 +184,6 @@ def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
     ]
 
 
-def test_a_spawn_waiting_on_a_full_account_leaves_its_task_and_transfer_for_the_next_spawn(setup):
-    store, old = setup
-    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
-    store.put_handoff("sw", "t1", DOC, seat=old.seat)
-    ledger = FakeLedger([{"id": "t1"}])
-    full = SpawnError("no approved account has quota and a free launch slot", "unavailable")
-    tick("sw", store, ledger, FakeRuntime(crash=full), 10)
-    [row] = transfers.list_transfers(store, "sw")
-    assert (row["id"], row["successor"], row["binding"]) == (transfer["id"], "", {"state": "pending"})
-    assert ledger.rows["t1"]["state"] == "open"
-    assert store.claims("sw", "t1") == 0
-    assert store.launch_failure("sw", "t1") == ""
-    assert [row["state"] for row in store.launches("sw")] == ["waiting"]
-    runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, 20)
-    assert transfers.get(store, "sw", transfer["id"])["successor"] == runtime.spawned[0][1]
-
-
 def test_now_ms_reads_the_wall_clock_in_milliseconds(monkeypatch):
     monkeypatch.setattr(transfers.time, "time", lambda: 12.3456)
     assert transfers.now_ms() == 12345
@@ -232,8 +228,10 @@ def test_a_missing_handoff_is_an_explicit_continuity_gap(setup):
     assert transfer["continuity"]["gap"] == "No handoff document"
 
 
-@pytest.mark.parametrize("lane", ["eng", "ci", "master"])
-def test_a_failed_successor_keeps_its_outcome_and_a_retry_can_confirm(setup, monkeypatch, lane):
+@pytest.mark.parametrize("lane", ["master"])
+def test_a_failed_successor_keeps_its_outcome_and_a_retry_can_confirm(
+    setup: tuple[RedisStore, AgentRecord], monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
     store, old = setup
     store.drop_agent("sw", old.name)
     old = replace(old, lane=lane, task="master" if lane == "master" else "t1")
