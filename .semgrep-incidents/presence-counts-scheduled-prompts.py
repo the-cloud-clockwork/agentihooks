@@ -9,7 +9,7 @@ def heard(payload: dict) -> bool:
     return True
 
 
-def typed(payload: dict, env: dict) -> bool:
+def typed_unchecked(payload: dict, env: dict) -> bool:
     if env.get("AGENTIHOOKS_AGENT_NAME"):
         # ruleid: presence-counts-scheduled-prompts
         return heard(payload)
@@ -19,7 +19,7 @@ def typed(payload: dict, env: dict) -> bool:
 
 class Checked:
     @staticmethod
-    def typed(payload: dict, env: dict) -> bool:
+    def typed_unchecked(payload: dict, env: dict) -> bool:
         if scheduled_prompts.fired(payload.get("session_id") or "", payload.get("prompt")):
             return False
         if env.get("AGENTIHOOKS_AGENT_NAME"):

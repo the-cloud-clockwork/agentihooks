@@ -46,10 +46,13 @@ def record(payload: dict[str, Any]) -> bool:
         return False
     prompts = [p for p in _load(session_id) if p != prompt] + [prompt]
     path = _path(session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(prompts[-KEPT:]))
-    os.replace(tmp, path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(prompts[-KEPT:]))
+        os.replace(tmp, path)
+    except OSError:
+        return False
     return True
 
 

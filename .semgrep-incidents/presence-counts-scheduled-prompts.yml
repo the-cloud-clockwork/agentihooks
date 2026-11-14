@@ -12,8 +12,11 @@ rules:
         - presence-counts-scheduled-prompts.py
     patterns:
       - pattern-inside: |
-          def typed(...):
+          def $TYPED(...):
               ...
+      - metavariable-regex:
+          metavariable: $TYPED
+          regex: ^typed
       - pattern-either:
           - pattern: return is_operator_prompt(...)
           - pattern: return heard(...)

@@ -220,12 +220,16 @@ def test_an_unreadable_record_counts_no_prompt_as_scheduled() -> None:
 
 
 @pytest.mark.feature("operator-presence-automated-prompts")
-def test_a_failing_record_is_logged_and_never_raises_into_the_hook(monkeypatch: pytest.MonkeyPatch) -> None:
-    logged = []
-    monkeypatch.setattr(scheduled_prompts, "record", lambda payload: (_ for _ in ()).throw(OSError("disk full")))
-    monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
-    hook_manager._scheduled_prompt({"session_id": "s", "tool_name": "CronCreate", "tool_input": {"prompt": "x"}})
-    assert logged == [("scheduled prompt record failed", {"error": "disk full"})]
+def test_an_unwritable_record_home_records_nothing_and_never_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    monkeypatch.setattr(scheduled_prompts, "_path", lambda session_id: blocker / "under" / "s.json")
+    payload = {"session_id": "s", "tool_name": "CronCreate", "tool_input": {"prompt": "x"}}
+    assert not scheduled_prompts.record(payload)
+    hook_manager._scheduled_prompt(payload)
+    assert not scheduled_prompts.fired("s", "x")
 
 
 def run_hook(env: dict[str, str], payload: dict) -> str:

@@ -1170,12 +1170,9 @@ def _operator_words(payload: dict) -> bool:
 
 
 def _scheduled_prompt(payload: dict[str, Any]) -> None:
-    try:
-        from hooks.context.scheduled_prompts import record
+    from hooks.context.scheduled_prompts import record
 
-        record(payload)
-    except Exception as e:
-        log("scheduled prompt record failed", {"error": str(e)})
+    record(payload)
 
 
 def _operator_mode(payload: dict, typed: bool) -> None:

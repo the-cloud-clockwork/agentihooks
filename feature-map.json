@@ -18,7 +18,7 @@
         "tests/context/test_scheduled_prompts.py::test_a_cron_prompt_is_never_recorded_as_the_operator_words",
         "tests/context/test_scheduled_prompts.py::test_only_scheduler_tools_with_a_prompt_are_recorded_and_the_newest_are_kept",
         "tests/context/test_scheduled_prompts.py::test_an_unreadable_record_counts_no_prompt_as_scheduled",
-        "tests/context/test_scheduled_prompts.py::test_a_failing_record_is_logged_and_never_raises_into_the_hook",
+        "tests/context/test_scheduled_prompts.py::test_an_unwritable_record_home_records_nothing_and_never_raises",
         "tests/context/test_scheduled_prompts.py::test_smoke_the_hook_entry_point_marks_a_cron_prompt_automated_and_a_typed_one_present"
       ]
     },

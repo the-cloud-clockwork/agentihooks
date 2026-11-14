@@ -668,7 +668,8 @@ def test_master_presence_notice_uses_supplied_clock_after_automated_prompt(monke
     operator_mode.observe("pane", "Explain the work", True, now=100)
     assert operator_mode.present("pane", SWARM, now=279.99)
     assert (
-        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280) == REMINDER
+        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280)
+        == AUTOMATED + "\n" + REMINDER
     )
 
 
@@ -703,10 +704,13 @@ def test_explicit_presence_keeps_reminders_off_past_the_supplied_clock(monkeypat
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == (
         "Operator on: the operator is present in this pane until he types operator off or the session restarts."
     )
-    assert operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == ""
+    assert (
+        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == AUTOMATED
+    )
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", ""]
     assert (
-        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=100 + WINDOW) == ""
+        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=100 + WINDOW)
+        == AUTOMATED
     )
     assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", ""]
 
