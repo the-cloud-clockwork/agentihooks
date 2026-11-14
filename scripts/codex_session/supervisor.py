@@ -415,7 +415,7 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         canonical.mkdir(parents=True, exist_ok=True)
         (home / name).symlink_to(canonical)
     auth = source / "auth.json"
-    if auth.is_file():
+    if auth.is_file() and not spec.allowed_tokens:
         (home / "auth.json").symlink_to(auth.resolve())
     binaries = source / "bin"
     if binaries.exists():

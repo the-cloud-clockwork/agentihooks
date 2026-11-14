@@ -1,0 +1,6 @@
+{
+  "scripts/hive/execution_stop.py:scripts.hive.execution_stop.x__fields:72d007cb6e7e954a36f35cd2af3244eeedfa0d1ca5099493395c6ae5aaa21bfa": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the first argument is a string literal that cast never reads, so the return value is identical."
+  }
+}

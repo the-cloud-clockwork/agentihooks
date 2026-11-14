@@ -75,7 +75,7 @@ def spoke(bus, provider, hive):
         {"id": "task-a", "execution_id": hive, "execution_generation": 1, "claim_generation": 3},
     )
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane", harness="claude", account="slot")
+        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane", harness="claude", account="slot", launched_at=0)
     )
     return Spoke(config, bus, runtime, tasks, reading, view=lambda: provider.snapshot("rig")), runtime
 

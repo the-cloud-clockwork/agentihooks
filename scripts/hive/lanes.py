@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
-from scripts.hive import account_slots, admission, presence, registry, workstation
+from scripts.hive import account_slots, admission, execution_stop, presence, registry, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
@@ -104,6 +104,16 @@ def run_once(store, bus, runtime, hive: str, taken: Iterable[str], timeout_ms: i
     return [spoke.poll(timeout_ms) for spoke in spokes(store, bus, runtime, hive, taken, held)]
 
 
+def stop_once(store: Any, bus: Any, runtime: Any, hive: str, held: dict[str, execution_stop.Stopper]) -> list[str]:
+    """Honors every execution stop the hub addressed to this hive in each events swarm, draining or not."""
+    outcomes: list[str] = []
+    for slug in readiness.Source(store).slugs():
+        if slug not in held:
+            held[slug] = execution_stop.Stopper(bus, slug, hive, runtime)
+        outcomes += held[slug].poll()
+    return outcomes
+
+
 def draining(store: Any, hive: str) -> bool:
     """True while this pod's member of hive takes no new agents; a store without Redis has no members."""
     redis = getattr(store, "redis", None)
@@ -127,7 +137,9 @@ def run(
     passes: Iterable[int] | None = None,
 ) -> None:
     held: dict = {}
+    stoppers: dict[str, execution_stop.Stopper] = {}
     for _ in itertools.count() if passes is None else passes:
+        stop_once(store, bus, runtime, hive, stoppers)
         if draining(store, hive):
             beat(store, bus, hive)
             wait(IDLE_S)

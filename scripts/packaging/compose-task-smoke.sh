@@ -95,7 +95,7 @@ class StandIn:
              "--output", "redis, nats and swarm healthy"],
             env={**os.environ, "AGENTIHOOKS_AGENT_NAME": request.name}, check=True, stdout=sys.stderr,
         )
-        return Outcome("spawn", Status.OK, "compose-task", SimpleNamespace(pane_id="stand-in", harness="claude", account=""))
+        return Outcome("spawn", Status.OK, "compose-task", SimpleNamespace(pane_id="stand-in", harness="claude", account="", launched_at=0))
 
 
 stand_in = {"cpus": 1, "load5": 0.0}
