@@ -98,9 +98,9 @@ def test_scoped_logs_receive_the_root_credential_context(monkeypatch):
     monkeypatch.setattr(nats_scope, "NatsEventLog", logs)
     nats_scope.NatsScopedBus(root, "rig")
     assert logs.call_args_list == [
+        call(owned_loop, js, config.queue, stream_name("rig", "STOP"), False, "rig", "member-creds"),
         call(owned_loop, js, config.queue, "events-stream", False, "rig", "member-creds"),
         call(owned_loop, js, config.queue, "dead-stream", False, "rig", "member-creds"),
-        call(owned_loop, js, config.queue, stream_name("rig", "STOP"), False, "rig", "member-creds"),
     ]
 
 

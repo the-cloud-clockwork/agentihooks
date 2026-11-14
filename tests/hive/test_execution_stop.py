@@ -14,6 +14,7 @@ from scripts.events import memory
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_events, execution_stop, lanes
+from scripts.hub import exits as hub_exits
 from scripts.hub import lifecycle
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -44,7 +45,14 @@ def rig() -> Iterator[SimpleNamespace]:
     now = [0]
     bus: Any = memory.open_bus(BusConfig(), clock=lambda: now[0])
     agent = AgentRecord(
-        name="engineer", lane="eng", task="task", execution_id="execution", generation=3, seat="eng-1", account="a"
+        name="engineer",
+        lane="eng",
+        task="task",
+        execution_id="execution",
+        generation=3,
+        seat="eng-1",
+        account="a",
+        hive=HIVE,
     )
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
 
@@ -57,6 +65,7 @@ def rig() -> Iterator[SimpleNamespace]:
     store.redis.hset(store.key(SLUG, "executions"), agent.execution_id, json.dumps(asdict(agent)))
     store.redis.hset(store.key(SLUG, "agents"), agent.name, json.dumps(asdict(agent)))
     store.redis.set(store.key(SLUG, "claim", agent.task), agent.name)
+    hub_exits.serve(bus, lambda: store)
     started = Envelope(
         id="started:claim",
         type="execution.started",

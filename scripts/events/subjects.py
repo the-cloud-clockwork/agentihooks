@@ -5,6 +5,7 @@ from .resource_names import consumer_name
 PREFIX = "swarm"
 SLOTS = "slots"
 STOPS = "STOP"
+EXITS = "exits"
 
 _TOKEN = re.compile(r"[^.*>\s]+")
 
@@ -25,8 +26,12 @@ def slot_request(swarm: str, hive: str) -> str:
     return ".".join([SLOTS, _token(swarm), _token(hive)])
 
 
+def exit_report(swarm: str, hive: str) -> str:
+    return ".".join([EXITS, _token(swarm), _token(hive)])
+
+
 def in_swarm(swarm: str, subject: str) -> bool:
-    return subject.startswith((f"{PREFIX}.{swarm}.", f"{SLOTS}.{swarm}."))
+    return subject.startswith((f"{PREFIX}.{swarm}.", f"{SLOTS}.{swarm}.", f"{EXITS}.{swarm}."))
 
 
 def inbox(user: str) -> str:

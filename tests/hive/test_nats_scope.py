@@ -222,7 +222,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
         "STATE_execution-starts",
         "STATE_inbox",
     )
-    expected = {"swarm.rig.>", "slots.rig.m1"}
+    expected = {"swarm.rig.>", "slots.rig.m1", "exits.rig.m1"}
     from scripts.events.subjects import stream_name
 
     for stream in [
