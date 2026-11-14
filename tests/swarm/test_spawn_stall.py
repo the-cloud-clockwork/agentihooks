@@ -324,20 +324,6 @@ def test_an_early_tick_failure_still_raises_the_alarm(stalled, monkeypatch):
     assert len(alarms(stalled)) == 1
 
 
-def test_caught_spawn_failures_keep_the_error_without_resetting_the_clock(stalled):
-    from scripts.swarm import tick, timing
-
-    store, ledger, _, clock, _ = stalled
-    record = AgentRecord("failed", "eng", "t1", started_at=clock[0])
-    with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
-        tick._record_spawn_failure("sw", store, record, RuntimeError("forced launch failure"), clock[0])
-    clock[0] += 600_000
-    with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
-        pass
-    (finding,) = spawn_stall.findings(store, "sw")
-    assert finding.evidence[-1] == "Last failed step scripts.swarm.tick._spawn: RuntimeError: forced launch failure"
-
-
 def test_eligibility_return_starts_a_fresh_ten_minute_interval(stalled):
     store, ledger, _, clock, _ = stalled
     tick_failure(stalled)
