@@ -34,7 +34,7 @@ from tests.swarm.test_readiness import doc, task
 ENABLED = "AGENTIHOOKS_EVENTS_SMOKE"
 REDIS = "AGENTIHOOKS_EVENTS_SMOKE_REDIS_URL"
 FOLDER = Path(__file__).resolve().parent
-SLUG = "smoke"
+SLUG = "sw"
 ORIGIN = "https://github.com/o/r"
 PULL = f"{ORIGIN}/pull/1"
 LOCAL = ("127.0.0.1", "localhost")
