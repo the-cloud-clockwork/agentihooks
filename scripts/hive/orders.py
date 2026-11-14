@@ -2,7 +2,6 @@ import hashlib
 import json
 import subprocess
 import sys
-import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
+from scripts.scheduler.process_interval import Interval
 from scripts.swarm import launch_check, lease, overlays, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -354,20 +354,14 @@ class Consumer:
         process starts it, and store the first acknowledgement only."""
         receipt = self.orders.command_receipt(self.hive, order.id)
         redis: Any = self.orders.redis
-        done = threading.Event()
-
-        def renew() -> None:
-            """Keep the running marker alive until the resume answers."""
-            while not done.wait(RESUME_RENEW_SECONDS):
-                redis.expire(f"{receipt}:running", RESUME_RUN_SECONDS)
-
-        threading.Thread(target=renew, daemon=True).start()
+        renewal = Interval(lambda: redis.expire(f"{receipt}:running", RESUME_RUN_SECONDS), every=RESUME_RENEW_SECONDS)
+        renewal.start()
         try:
             ack = self.command(order)
         except Exception as exc:
             ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
         finally:
-            done.set()
+            renewal.close()
         answer(redis, receipt, ack)
 
     def _spawn_resume(self, order: CommandOrder) -> None:
