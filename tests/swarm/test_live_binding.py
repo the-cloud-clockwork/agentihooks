@@ -453,11 +453,22 @@ def ticking():
     return store, runtime, ledger
 
 
-@pytest.mark.parametrize("field", ["home", "profile", "model", "effort", "account", "hooks", "harness"])
-def test_tick_reclaims_each_mismatched_agent_on_its_task(ticking, field):
-    from scripts.swarm.tick import tick
+@pytest.fixture
+def launched(ticking: tuple) -> tuple:
+    """``ticking`` with an agent already launched on task one: seated through hub admission and started at 100 on a
+    pane, listed by the runtime and holding its launch row, so no tick spawns it."""
+    from tests.helpers.seat import Launched, seat_agent
 
     store, runtime, ledger = ticking
+    seat_agent(store, ledger, "sw", "one", started=Launched(100, runtime))
+    return ticking
+
+
+@pytest.mark.parametrize("field", ["home", "profile", "model", "effort", "account", "hooks", "harness"])
+def test_tick_reclaims_each_mismatched_agent_on_its_task(launched, field):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = replace(next(a for a in store.agents("sw") if a.lane == "eng"), profile="engineer")
     store.put_agent("sw", old)
@@ -484,10 +495,10 @@ def test_tick_reclaims_each_mismatched_agent_on_its_task(ticking, field):
     assert ledger.rows["one"]["claimed_by"] == new.name
 
 
-def test_tick_keeps_an_agent_whose_live_model_reads_blank(ticking):
+def test_tick_keeps_an_agent_whose_live_model_reads_blank(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     agent = replace(next(a for a in store.agents("sw") if a.lane == "eng"), profile="engineer", model="gpt-6.1-sol")
     store.put_agent("sw", agent)
@@ -500,10 +511,10 @@ def test_tick_keeps_an_agent_whose_live_model_reads_blank(ticking):
     assert found == [f"{agent.name} has no observed model"]
 
 
-def test_matching_agents_are_checked_on_every_pass(ticking):
+def test_matching_agents_are_checked_on_every_pass(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     before = store.agents("sw")
     tick("sw", store, ledger, runtime, 200)
@@ -516,10 +527,10 @@ def test_matching_agents_are_checked_on_every_pass(ticking):
     assert not runtime.killed
 
 
-def test_failed_retirement_keeps_claim_and_retries(ticking):
+def test_failed_retirement_keeps_claim_and_retries(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     runtime.stuck.add(old.name)
@@ -534,10 +545,10 @@ def test_failed_retirement_keeps_claim_and_retries(ticking):
     assert old not in store.agents("sw")
 
 
-def test_partial_retirement_failure_retains_ownership_until_pane_closes(ticking):
+def test_partial_retirement_failure_retains_ownership_until_pane_closes(launched):
     from scripts.swarm.tick import STARTUP_GRACE_MS, tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     runtime.bindings = lambda agents: {
@@ -563,10 +574,10 @@ def test_partial_retirement_failure_retains_ownership_until_pane_closes(ticking)
     assert ledger.rows["one"]["claimed_by"] != old.name
 
 
-def test_finished_pane_is_closed_without_a_pane_finding(ticking):
+def test_finished_pane_is_closed_without_a_pane_finding(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(old, state="finished"))
@@ -808,10 +819,10 @@ def test_ended_task_closes_its_pane_on_the_same_tick_without_a_pane_finding(tick
     assert runtime.tasks[-1].get("launch_assignment") is None
 
 
-def test_finished_agent_on_open_task_closes_its_pane_without_a_pane_finding(ticking):
+def test_finished_agent_on_open_task_closes_its_pane_without_a_pane_finding(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(old, state="finished"))
@@ -850,10 +861,10 @@ def test_pending_master_relaunch_assignment_is_cleared_after_launch(ticking):
     assert store.redis.hget(store.key("sw", "launch-assignments"), "master") is None
 
 
-def test_awaiting_decision_agent_is_skipped_without_skipping_its_peer(ticking):
+def test_awaiting_decision_agent_is_skipped_without_skipping_its_peer(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(old, state="awaiting-decision"))
@@ -864,10 +875,10 @@ def test_awaiting_decision_agent_is_skipped_without_skipping_its_peer(ticking):
     assert any(name.startswith("master") for name in runtime.killed)
 
 
-def test_one_finished_or_missing_process_does_not_skip_later_agents(ticking):
+def test_one_finished_or_missing_process_does_not_skip_later_agents(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     ledger.rows["one"].update(state="done", done=True)
@@ -878,10 +889,10 @@ def test_one_finished_or_missing_process_does_not_skip_later_agents(ticking):
     assert all(action is not None for action in actions)
 
 
-def test_closed_finished_pane_does_not_create_an_open_pane_finding(ticking):
+def test_closed_finished_pane_does_not_create_an_open_pane_finding(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     ledger.rows["one"].update(state="done", done=True)
@@ -890,10 +901,10 @@ def test_closed_finished_pane_does_not_create_an_open_pane_finding(ticking):
     assert not any(f.subject == f"{old.name}/pane" for f in live_binding.findings(store, "sw"))
 
 
-def test_multiple_mismatches_are_reported_in_order(ticking):
+def test_multiple_mismatches_are_reported_in_order(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     runtime.stuck.add(old.name)
@@ -909,10 +920,10 @@ def test_multiple_mismatches_are_reported_in_order(ticking):
     assert actions == [f"could not retire {old.name} after mismatched model, effort, retrying next tick"]
 
 
-def test_recovered_registration_restores_working_state(ticking):
+def test_recovered_registration_restores_working_state(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(old, state="retiring"))
@@ -921,10 +932,10 @@ def test_recovered_registration_restores_working_state(ticking):
     assert not runtime.killed
 
 
-def test_missing_process_retry_has_named_evidence_and_checks_other_agents(ticking):
+def test_missing_process_retry_has_named_evidence_and_checks_other_agents(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(old, state="retiring"))
@@ -941,10 +952,10 @@ def test_missing_process_retry_has_named_evidence_and_checks_other_agents(tickin
     assert master.name in runtime.named
 
 
-def test_missing_unbound_agent_does_not_skip_the_live_master(ticking):
+def test_missing_unbound_agent_does_not_skip_the_live_master(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     runtime.live.remove(old.name)
@@ -1153,10 +1164,10 @@ def test_bindings_report_a_rebound_only_for_a_live_process_other_than_the_valida
 
 
 @pytest.mark.parametrize("panes", [{}, {"w1:p9": "conv", "w1:p8": "conv"}, {"w1:p9": "other"}])
-def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(ticking, panes):
+def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(launched, panes):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     old = replace(old, conversation_id="conv", profile_decision={"validation": {"pid": 99}})
@@ -1209,10 +1220,10 @@ def test_a_validated_agent_rebinds_to_its_earliest_resumed_session():
     assert live_binding.bound_session(agent, [session(31, 9), session(32, 4), session(33, 6)]).process.pid == 32
 
 
-def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking):
+def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     old = replace(
