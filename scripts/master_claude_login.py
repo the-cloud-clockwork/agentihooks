@@ -571,6 +571,14 @@ def failed(number: int) -> bool:
     return _read(root(number) / FAILED).get("credentials") == _stamp(number)
 
 
+def mark_held_failed(name: str) -> list[int]:
+    """Mark failed every local slot ``name`` holds, so its relaunch tries another stored login first."""
+    held = [number for number in numbers() if name in holders(root(number))]
+    for number in held:
+        mark_failed(number)
+    return held
+
+
 def _number(target: Path) -> int:
     return next(number for number in numbers() if home(number) == target)
 

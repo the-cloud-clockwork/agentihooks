@@ -388,3 +388,17 @@ def test_a_relaunched_master_on_a_login_limit_waits_out_the_recycle_window(store
     assert run(store, runtime, START + window) == [
         f"recycled master {successor.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
     ]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_login_limit_recycle_marks_the_slots_the_master_holds(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_claude_login
+
+    marked: list[str] = []
+    monkeypatch.setattr(master_claude_login, "mark_held_failed", lambda name: marked.append(name) or [1])
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    run(store, runtime, START)
+    assert marked == [agent.name]

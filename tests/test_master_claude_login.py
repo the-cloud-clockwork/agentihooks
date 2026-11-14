@@ -1251,6 +1251,24 @@ def test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works(
     assert login.holders(login.root(2)) == {}
 
 
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_slot_marked_from_the_pane_sends_the_relaunch_to_the_next_slot_even_when_its_check_passes(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _spare_slot(rendered, monkeypatch)
+    login._write(login.root(1) / login.OWNER, {"holders": {"master@old": os.getpid()}, "epoch": 3})
+    assert login.mark_held_failed("master@old") == [1]
+    assert login.mark_held_failed("master@none") == []
+    login._write(login.root(1) / login.OWNER, {"holders": {}, "epoch": 3})
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    monkeypatch.setattr(native_login, "rejected", lambda *_: False)
+    monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("a usable stored slot needs no browser"))
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(2), "spareatexample_com")
+
+
 def test_prepare_launch_keeps_incompatible_settings_out_of_every_fallback(ah, rendered, tmp_path, monkeypatch):
     from scripts import master_login_chain as chain
 

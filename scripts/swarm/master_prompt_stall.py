@@ -6,6 +6,7 @@ outside the gate, so its relaunch takes another stored login."""
 import os
 from typing import Any
 
+from scripts import master_claude_login
 from scripts.gates import modes
 from scripts.gates.base import Who
 from scripts.gates.enforcement import MASTER_RESET as GATE
@@ -126,6 +127,7 @@ def login_limited(slug: str, store: Any, runtime: Any, master: AgentRecord, now_
 def _recycle_login(slug: str, store: Any, ledger: Any, master: AgentRecord, key: str, now_ms: int) -> list[str]:
     master_retire.forget(store, slug, master.name, LOGIN_RECYCLED)
     GATE.allows(store, Who(name=master.name, swarm=slug), "recycle", LOGIN_LIMITED, now_ms)
+    master_claude_login.mark_held_failed(master.name)
     text = LOGIN_RECOVERY.format(slug=slug, name=master.name, limited=LOGIN_LIMITED)
     master_stall.recycle(slug, store, ledger, master, text, now_ms, master_stall.STALLED)
     store.redis.delete(key)
