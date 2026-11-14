@@ -1,0 +1,31 @@
+rules:
+  - id: tick-free-skips-execution-stop
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick path that retires an agent through retire_unless_gone and then drops it with a claim refund must send the
+      hub to hive execution stop through stop_admitted first, so a hub admitted agent freed for a revoked account,
+      repeated content refusals or a stuck provider error also ends on its hive. Without the stop the hive keeps the
+      execution running after the swarm released its seat.
+    paths:
+      include:
+        - /scripts/tick/
+        - tick-free-skips-execution-stop.py
+    patterns:
+      - pattern-inside: |
+          def $FREE(...):
+              ...
+              if not $T.retire_watch.retire_unless_gone(...):
+                  ...
+              ...
+      - pattern-not-inside: |
+          def $FREE(...):
+              ...
+              $T.timing.timed(stop_admitted, ...)
+              ...
+      - pattern-not-inside: |
+          def $FREE(...):
+              ...
+              stop_admitted(...)
+              ...
+      - pattern: $T._drop(..., refund=True)

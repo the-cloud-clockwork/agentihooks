@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "events-freed-agent-stops-the-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-retire-stop-all",
+      "behaviour": "When the agents reap step frees a hub admitted worker whose hive recorded its start, for a revoked account, repeated content refusals or a stuck provider error, the hub sends that hive exactly one execution stop for its started execution naming the reason; a legacy launched agent freed the same way sends no stop and is retired as before.",
+      "seam": "_free_revoked, _free_refused and _free_stuck retiring an agent through reconciler.stop_admitted",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_freed_events_agent_gets_one_stop_sent_to_the_hive_that_started_it",
+        "tests/swarm/test_events_claim_refunds.py::test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",

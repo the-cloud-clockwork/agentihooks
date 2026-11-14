@@ -160,6 +160,56 @@ def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
     assert sent[0].data["reason"] == ending
 
 
+FREES = [
+    (agent_steps._free_revoked, "revoked"),
+    (agent_steps._free_refused, "refused"),
+    (agent_steps._free_stuck, "stuck"),
+]
+
+
+def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
+    """The execution stops the hub sent the hive that runs ``agent``."""
+    events = bus.for_swarm(SLUG).events
+    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
+    return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+
+
+@pytest.mark.feature("events-freed-agent-stops-the-execution")
+@pytest.mark.parametrize(("free", "reason"), FREES)
+def test_a_freed_events_agent_gets_one_stop_sent_to_the_hive_that_started_it(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., Any], reason: str
+) -> None:
+    store, ledger, rt = env
+    agent, event = launched(env, bus, seat)
+    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
+
+    free(SLUG, store, ledger, rt, rows, agent, NOW + 1)
+
+    sent = sent_stops(bus, agent)
+    assert [(stop.type, stop.key, stop.cause) for stop in sent] == [(execution_stop.TYPE, agent.execution_id, event.id)]
+    assert sent[0].data["reason"] == reason
+    assert [seated.name for seated in store.agents(SLUG)] == []
+
+
+@pytest.mark.feature("events-freed-agent-stops-the-execution")
+@pytest.mark.parametrize(("free", "reason"), FREES)
+def test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., Any], reason: str
+) -> None:
+    store, ledger, rt = env
+    assert run(SLUG, "create", "--repo", "/repo") == 0
+    agent = replace(seat("t1"), state="working", pane_id="w1:p1", launched_at=NOW)
+    store.put_agent(SLUG, agent)
+    rt.live.add(agent.name)
+    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
+
+    free(SLUG, store, ledger, rt, rows, agent, NOW + 1)
+
+    assert agent.name in rt.killed
+    assert sent_stops(bus, agent) == []
+    assert [seated.name for seated in store.agents(SLUG)] == []
+
+
 def handed_off(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], cause: str
 ) -> tuple[AgentRecord, Envelope]:
