@@ -1,0 +1,18 @@
+rules:
+  - id: hive-saved-account-route-unchecked
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive launch routed the account saved in an exit handoff with only a truthiness check. On 14 November every
+      successor of one task launched on the full master reserved account, the account slot refused with no account
+      slot available and seven owners burned the 270 second canary deadline in 40 minutes. Route a saved account
+      through _slot_room, which keeps it only while the hub account slot has a worker seat for the execution.
+    paths:
+      include:
+        - /scripts/swarm/
+        - hive-saved-account-route-unchecked.py
+    patterns:
+      - pattern-inside: |
+          def spawn(...):
+              ...
+      - pattern: '["--route", $SAVED["account"]] if $SAVED.get("account") else $OTHER'
