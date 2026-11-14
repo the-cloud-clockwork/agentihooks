@@ -2038,7 +2038,7 @@ def test_a_master_still_starting_posts_no_down_notice(store):
 
 
 @pytest.mark.feature("swarm-resumed-agent-grace")
-def test_a_master_resumed_inside_the_start_grace_posts_no_down_notice(store):
+def test_a_master_resumed_inside_the_start_grace_posts_no_down_notice(store: RedisStore) -> None:
     from scripts.inbox.store import InboxStore
     from scripts.tick.steps import masters as master_steps
 

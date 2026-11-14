@@ -1,4 +1,5 @@
 import string
+from dataclasses import replace
 
 import pytest
 
@@ -88,6 +89,7 @@ def test_a_resumed_agent_counts_its_silence_from_its_launch(inbox: InboxStore) -
     idle.beat(inbox.redis, "sw", NAME, idle.IDLE, BASE)
 
     assert stale_nudge.last_activity({"at": BASE}, resumed) == BASE + 3 * LIMIT
+    assert stale_nudge.last_activity(None, replace(resumed, launched_at=BASE - LIMIT)) == BASE
     assert stale_nudge.nudge(inbox, "sw", resumed, "", BASE + 3 * LIMIT + MINUTE) == []
     assert inbox.pending_mail(NAME) == []
 

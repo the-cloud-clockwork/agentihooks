@@ -6,6 +6,7 @@ import pytest
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
 from tests.swarm.profile_fixture import validated
@@ -73,7 +74,9 @@ def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypat
 
 
 @pytest.mark.feature("swarm-resumed-agent-grace")
-def test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume(store, monkeypatch):
+def test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
     tick_module.tick("sw", store, ledger, runtime, 1)
     original = next(agent for agent in store.agents("sw") if agent.lane == "eng")
