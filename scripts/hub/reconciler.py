@@ -38,29 +38,27 @@ def _start(bus: Bus, slug: str, agent: AgentRecord) -> Envelope | None:
     return event
 
 
-def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
+def _by_start(store: RedisStore, slug: str, recorded: bool) -> list[AgentRecord]:
+    """The agents of ``slug`` whose start a hive recorded on a real bus when ``recorded``, else the rest; on the memory
+    bus no start counts as recorded."""
     agents = store.agents(slug)
     config = BusConfig.from_environ()
     if config.backend == "memory" or not agents:
-        return agents
+        return [] if recorded else agents
     bus = open_bus(config)
     try:
-        return [agent for agent in agents if _start(bus, slug, agent) is None]
+        return [agent for agent in agents if (_start(bus, slug, agent) is not None) == recorded]
     finally:
         bus.close()
+
+
+def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
+    return _by_start(store, slug, recorded=False)
 
 
 def admitted_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
     """The agents of ``slug`` whose hive recorded their start on a real bus, the ones ``legacy_agents`` leaves out."""
-    agents = store.agents(slug)
-    config = BusConfig.from_environ()
-    if config.backend == "memory" or not agents:
-        return []
-    bus = open_bus(config)
-    try:
-        return [agent for agent in agents if _start(bus, slug, agent) is not None]
-    finally:
-        bus.close()
+    return _by_start(store, slug, recorded=True)
 
 
 def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
