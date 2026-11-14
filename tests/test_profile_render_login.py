@@ -32,3 +32,27 @@ def test_the_next_render_replaces_a_home_holding_a_credentials_link(world: dict[
     assert rendered / "claude" != out
     assert not (rendered / "claude" / LOGIN).is_symlink()
     assert render.render_claude("rb-role") is None
+
+
+@pytest.mark.feature("render-no-login-credentials")
+def test_the_master_home_keeps_its_login_credentials_link(world: dict[str, Path]) -> None:
+    login = _write(world["home"] / ".claude" / LOGIN, "fixture")
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\n")
+    out = render.render_claude("master")
+    assert out is not None
+    assert (out / LOGIN).readlink() == login
+    assert render.render_claude("master") is None
+
+
+@pytest.mark.feature("render-no-login-credentials")
+def test_a_render_drops_the_link_from_an_older_home_a_running_worker_holds(world: dict[str, Path]) -> None:
+    login = _write(world["home"] / ".claude" / LOGIN, "fixture")
+    older = render.render_claude("rb-role")
+    assert older is not None
+    (older / LOGIN).symlink_to(login)
+    out = render.render_claude("rb-role", force=True)
+    assert out is not None
+    assert out != older
+    assert older.is_dir()
+    assert not (older / LOGIN).is_symlink()
+    assert not (out / LOGIN).is_symlink()
