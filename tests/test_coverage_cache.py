@@ -62,6 +62,25 @@ def test_a_head_split_another_way_grades_against_the_cached_base(measured, monke
     assert result.lost == {}
 
 
+def test_cached_grading_hands_its_worker_count_to_the_grade(
+    measured: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, target = measured
+    shard = root / ".coverage"
+    data = CoverageData(basename=str(shard))
+    data.add_lines({"hooks/example.py": {1, 2}})
+    data.write()
+    workers = []
+    graded = ratchet.grade
+    monkeypatch.setattr(ratchet, "renamed", lambda *args: {})
+    monkeypatch.setattr(
+        ratchet, "grade", lambda *args, **kwargs: workers.append(kwargs["workers"]) or graded(*args, **kwargs)
+    )
+    args = argparse.Namespace(head=root, base="base", shards=1, base_baseline=target, head_summaries=None)
+    assert ratchet._grade(args, [shard], root, 3)[2].lost == {}
+    assert workers == [3]
+
+
 def test_the_ratchet_refuses_a_cached_base_from_another_tree(measured, monkeypatch):
     root, target = measured
     monkeypatch.setattr(ratchet, "git", lambda *args, **kwargs: "another-tree")
