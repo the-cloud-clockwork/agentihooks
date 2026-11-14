@@ -6221,7 +6221,7 @@
       "id": "events-retirement-stops-the-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-idle-mismatch-retire",
-      "behaviour": "When the tick retires a hub admitted agent whose hive recorded its start, for an account mismatch in the observe verify step, or for idling, a revoked account, repeated content refusals or a stuck provider error in the agents reap step, the hub sends that hive the execution stop for its started execution once the store took the drop, naming the retirement reason, so the hive spoke ends the execution through its exited event. A refused drop sends no stop, and a legacy agent with no recorded start sends none. The hive's exit for a retired agent still releases its launch slot and settles the spoke claim as exited without a second refund. A stop the bus refused waits in the swarm's pending stops and is sent again on each reap pass until the bus takes it. When the runtime cannot reach a hub admitted agent retired for an account mismatch or idling, the stop the hive took retires it instead. A declared wait holds an idle hub admitted agent seated with its claim and sends no stop.",
+      "behaviour": "When the tick retires a hub admitted agent whose hive recorded its start, for an account mismatch in the observe verify step, or for idling, a revoked account, repeated content refusals or a stuck provider error in the agents reap step, the hub sends that hive the execution stop for its started execution once the store took the drop, naming the retirement reason, so the hive spoke ends the execution through its exited event. A refused drop sends no stop, and a legacy agent with no recorded start sends none. The hive's exit for a retired agent still releases its launch slot and settles the spoke claim as exited without a second refund. A stop the bus refused waits in the swarm's pending stops and is sent again on each reap pass until the bus takes it. When the runtime cannot reach a hub admitted agent retired for an account mismatch or idling, the stop the hive took retires it instead. A declared wait or typed input holds an idle hub admitted agent seated with its claim and sends no stop.",
       "seam": "observe verify and the agents reap watch retiring an events owned agent through execution_stop.stop",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent",
@@ -6231,7 +6231,7 @@
         "tests/swarm/test_events_claim_refunds.py::test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim",
         "tests/swarm/test_events_claim_refunds.py::test_a_stop_the_bus_refused_is_sent_again_on_the_next_reap_pass",
         "tests/swarm/test_events_claim_refunds.py::test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop",
-        "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_holds_an_idle_admitted_agent_from_retirement"
+        "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement"
       ]
     },
     {

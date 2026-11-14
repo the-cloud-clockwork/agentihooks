@@ -276,15 +276,19 @@ def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-def test_a_declared_wait_holds_an_idle_admitted_agent_from_retirement(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+@pytest.mark.parametrize("hold", ["wait", "typed"])
+def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], hold: str
 ) -> None:
     from scripts.swarm import idle
 
-    store, ledger, rt = env
+    store, _, rt = env
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
-    idle.declare_wait(store.redis, SLUG, agent.name, NOW + 3_600_000, "checks", NOW)
+    if hold == "wait":
+        idle.declare_wait(store.redis, SLUG, agent.name, NOW + 3_600_000, "checks", NOW)
+    else:
+        rt.typed[agent.name] = "a reply the operator is typing"
 
     retire("idle", env, agent)
 
