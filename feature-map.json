@@ -2411,6 +2411,18 @@
       ]
     },
     {
+      "id": "quiet-gate-resumed-agent-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quiet-gate-launch-time",
+      "behaviour": "The quiet claim gate and the stale claim finding measure a worker from the latest of its progress signals, its start and its launch, so a worker resumed long after its last progress signal is not quiet until thirty minutes after the resume, and a never resumed worker is still measured from its start.",
+      "seam": "scripts.gates.quiet quiet_minutes and quiet_pass",
+      "tests": [
+        "tests/gates/test_quiet.py::test_a_resumed_agent_with_old_progress_is_measured_from_its_launch",
+        "tests/gates/test_quiet.py::test_a_later_progress_signal_still_wins_over_an_older_launch",
+        "tests/gates/test_quiet.py::test_a_never_resumed_agent_is_still_measured_from_its_start"
+      ]
+    },
+    {
       "id": "swarm-health-over-monitoring",
       "origin": "inventory",
       "behaviour": "The over monitoring finding names an agent whose watch calls outnumber its actions, with a looser limit for the master.",
