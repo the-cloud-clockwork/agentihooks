@@ -1,0 +1,21 @@
+rules:
+  - id: hive-loss-without-engine-filter
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub poll judges hive presence for a swarm that may not be on the events engine. Only spokes beat presence
+      and they poll only events swarms, so a silent hive of a legacy swarm reads as lost and its running executions
+      are exited. Guard presence.lost with the hub's events judgement, membership in the events swarms, or a skip of
+      swarms whose engine is not EVENTS_ENGINE.
+    patterns:
+      - pattern-inside: |
+          def poll(...):
+              ...
+      - pattern: presence.lost(...)
+      - pattern-not-inside: $HUB._judged(...) and ...
+      - pattern-not-inside: $SWARM in events and ...
+      - pattern-not-inside: ... and $SWARM in events
+      - pattern-not-inside: |
+          if <... EVENTS_ENGINE ...>:
+              continue
+          ...

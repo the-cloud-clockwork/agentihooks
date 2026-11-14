@@ -607,6 +607,27 @@
       ]
     },
     {
+      "id": "engine-config-migration",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-engine-config-migration",
+      "behaviour": "python -m scripts.swarm.engine_migration moves every stored swarm config to the events engine with a repository origin: a stored origin is kept, a Doctor otherwise takes the origin of the stored swarm it watches and then its own; a legacy swarm with agents or launch jobs in flight, a swarm with no origin and a swarm that fails to load are reported as skipped while the rest migrate; a second run changes nothing. doctor start creates the Doctor on the events engine with the watched origin, else its own.",
+      "seam": "scripts.swarm.engine_migration.migrate, start_on_events and main, scripts.doctor.cli.cmd_start",
+      "tests": [
+        "tests/swarm/test_engine_migration.py::test_every_stored_legacy_config_moves_to_events_with_an_origin_the_doctor_included",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_takes_the_origin_of_its_peer_and_a_watched_swarm_keeps_its_own",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin",
+        "tests/swarm/test_engine_migration.py::test_a_swarm_without_any_origin_stays_legacy_and_is_reported",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_takes_its_own_origin_when_the_watched_swarm_has_none",
+        "tests/swarm/test_engine_migration.py::test_a_swarm_with_legacy_agents_or_launches_in_flight_is_left_for_the_master",
+        "tests/swarm/test_engine_migration.py::test_a_swarm_that_cannot_load_is_reported_and_the_rest_still_migrate",
+        "tests/swarm/test_engine_migration.py::test_a_new_doctor_starts_on_events_with_the_watched_origin",
+        "tests/swarm/test_engine_migration.py::test_a_new_doctor_takes_its_own_origin_when_the_watched_swarm_has_none_or_is_not_stored",
+        "tests/swarm/test_engine_migration.py::test_main_migrates_the_connected_store_and_prints_each_outcome",
+        "tests/doctor/test_doctor_cli.py::test_start_creates_the_doctor_on_the_events_engine_with_the_watched_origin",
+        "tests/doctor/test_doctor_cli.py::test_start_puts_the_doctor_on_its_own_origin_when_the_watched_swarm_has_none"
+      ]
+    },
+    {
       "id": "hub-admission-release-floor",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-release-floor",
@@ -4382,6 +4403,21 @@
       ]
     },
     {
+      "id": "events-admission-saved-fleet-red-listing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-admission-saved-listing",
+      "behaviour": "The events readiness snapshot judges an open task with a pull request only from the fleet red listing the tick saved for that events swarm, admitting it when nothing is saved, so a hub admission never lists GitHub live and answers inside the hive's wait; the tick's fleet red notice step keeps the listing of every repository with a pull request task that is not done saved, claimed and in review ones included, for an events swarm too, warming at most one such repository live per pass and only when its waiting tasks needed no live listing, so the step stays inside its budget.",
+      "seam": "scripts.hub.admission.Admission.admit through scripts.swarm.readiness.Source.snapshot and scripts.swarm.fleet_red.saved_reader, and scripts.swarm.fleet_red.holds in the fleet red notice step of the tick on an events swarm",
+      "tests": [
+        "tests/hub/test_admission.py::test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow",
+        "tests/swarm/test_fleet_red.py::test_holds_save_the_listing_of_every_repository_with_a_pull_request_task_not_done",
+        "tests/swarm/test_fleet_red.py::test_a_pass_that_lists_a_waiting_repository_live_warms_no_other_one",
+        "tests/swarm/test_fleet_red.py::test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live",
+        "tests/swarm/test_fleet_red.py::test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live",
+        "tests/swarm/test_fleet_red.py::test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
@@ -5642,6 +5678,26 @@
       ]
     },
     {
+      "id": "hive-loss-events-engine-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-loss-engine-filter",
+      "behaviour": "The hub hive loss pass judges hive presence only for swarms whose config engine is events, and only once it has watched a swarm on events for a full presence TTL, so a swarm switched to legacy or back to events keeps its running executions while its hives resume beating, while a lost hive of an events swarm still has its running executions exited. A failed store read keeps the last events swarms.",
+      "seam": "scripts.hub.hive_loss.HiveLoss.poll",
+      "tests": [
+        "tests/hub/test_hive_loss.py::test_a_swarm_switched_to_legacy_keeps_its_running_executions_when_its_hives_stop_beating",
+        "tests/hub/test_hive_loss.py::test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive",
+        "tests/hub/test_hive_loss.py::test_a_hub_built_without_a_store_connects_once_it_watches_a_start",
+        "tests/hub/test_hive_loss.py::test_a_swarm_switched_back_to_events_waits_a_full_presence_ttl_before_judging_its_hives",
+        "tests/hub/test_hive_loss.py::test_a_swarm_switched_back_to_events_keeps_executions_whose_hive_beats_again",
+        "tests/hub/test_hive_loss.py::test_a_swarm_missing_from_the_store_index_is_never_judged",
+        "tests/hub/test_hive_loss.py::test_a_failed_store_read_keeps_the_last_events_swarms_and_says_so",
+        "tests/hub/test_hive_loss.py::test_a_failed_first_store_read_judges_no_swarm"
+      ],
+      "rules": [
+        "hive-loss-without-engine-filter"
+      ]
+    },
+    {
       "id": "successor-upstream-branch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t549",
@@ -5821,6 +5877,28 @@
         "tests/tick/steps/test_lab_capacity.py::test_lab_capacity",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
+      ]
+    },
+    {
+      "id": "events-launch-decision-record",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-record-launch-fields",
+      "behaviour": "A hive lane spoke that spawned an events admitted agent stores its launch decision on the started claim and reports it to the hub after it publishes execution started and acknowledges the offer, and again whenever it republishes that started claim; a failing or slow report is logged and never holds back or fails the started event. The hub writes the harness, profile, account, model and effort onto that agent's execution inside the fence, which swarm status reads; a hive without the admission, a seat another agent now occupies, or an agent already dropped changes no record.",
+      "seam": "Admission.launched through ExecutionRegistry.set_launch for a hive spoke request, and LaneTasks.launched from Spoke._report_launch after the started event",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hive_launch_decision_reaches_the_record_swarm_status_reads",
+        "tests/hub/test_admission.py::test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record",
+        "tests/hub/test_admission.py::test_a_launch_decision_for_a_seat_another_agent_took_changes_no_record",
+        "tests/hub/test_admission.py::test_the_hub_answers_a_launched_request_over_the_slot_subject",
+        "tests/hive/test_lanes.py::test_a_launch_is_reported_to_the_hub_with_its_harness_profile_and_account",
+        "tests/hive/test_spoke.py::test_a_failing_launch_report_never_holds_back_the_started_event",
+        "tests/hive/test_spoke.py::test_a_redelivered_started_offer_reports_its_stored_launch_decision_again",
+        "tests/hive/test_spoke.py::test_a_started_claim_stored_without_a_launch_decision_reports_nothing",
+        "tests/hub/test_admission.py::test_a_launch_decision_after_the_agent_was_dropped_never_brings_it_back",
+        "tests/hive/test_spoke.py::test_a_recovered_started_claim_reports_its_launch_decision_before_taking_work",
+        "tests/swarm/test_execution_archive.py::test_set_launch_writes_the_decision_onto_the_live_head_and_its_projection",
+        "tests/swarm/test_execution_archive.py::test_set_launch_never_shows_an_agent_dropped_during_the_write",
+        "tests/swarm/test_execution_archive.py::test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head"
       ]
     }
   ],

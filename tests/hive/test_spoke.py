@@ -199,6 +199,103 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     assert real_take(0) is None
 
 
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_failing_launch_report_never_holds_back_the_started_event(rig, capsys):
+    observed = []
+    real_publish = rig.bus.events.publish
+
+    def publish(subject, event):
+        observed.append(subject)
+        return real_publish(subject, event)
+
+    def launched(event, placed):
+        observed.append("launched")
+        raise TimeoutError("hub timeout")
+
+    real_take = rig.queue.take
+
+    def take(timeout_ms):
+        delivery = real_take(timeout_ms)
+        real_ack = delivery.ack
+
+        def ack():
+            observed.append("ack")
+            real_ack()
+
+        delivery.ack = ack
+        return delivery
+
+    rig.queue.take = take
+    rig.bus.events.publish = publish
+    rig.tasks.launched.side_effect = launched
+
+    assert rig.spoke.poll() == "started"
+    assert observed == ["swarm.rig.execution.started", "ack", "launched"]
+    [(event, placed)] = [call.args for call in rig.tasks.launched.call_args_list]
+    assert event == rig.event
+    assert vars(placed) == {"harness": "claude", "profile": "", "account": "slot-a", "model": "", "effort": ""}
+    assert real_take(0) is None
+    assert (
+        "hive spoke for swarm rig lane eng launch report failed (TimeoutError: hub timeout)" in capsys.readouterr().err
+    )
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_redelivered_started_offer_reports_its_stored_launch_decision_again(rig):
+    from dataclasses import replace
+
+    rig.runtime.spawn.return_value.value.profile = "engineer"
+    rig.tasks.launched.side_effect = [TimeoutError("hub timeout"), None]
+    assert rig.spoke.poll() == "started"
+
+    rig.queue.offer(replace(rig.event, id="ready-again"))
+    assert rig.spoke.poll() == "started"
+
+    rig.runtime.spawn.assert_called_once()
+    assert [(call.args[0].id, vars(call.args[1])) for call in rig.tasks.launched.call_args_list] == [
+        (offer, {"harness": "claude", "profile": "engineer", "account": "slot-a", "model": "", "effort": ""})
+        for offer in ("ready-a", "ready-again")
+    ]
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_started_claim_stored_without_a_launch_decision_reports_nothing(rig):
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    assert rig.spoke.poll() == "started"
+    claims = rig.bus.state("spoke-work")
+    entry = claims.get(claim_key(rig.event))
+    stored = json.loads(entry.value)
+    del stored["launch"]
+    claims.update(claim_key(rig.event), json.dumps(stored).encode(), entry.revision)
+    rig.tasks.launched.reset_mock()
+
+    rig.queue.offer(replace(rig.event, id="ready-again"))
+    assert rig.spoke.poll() == "started"
+    rig.tasks.launched.assert_not_called()
+
+
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_recovered_started_claim_reports_its_launch_decision_before_taking_work(rig, monkeypatch):
+    from scripts.hive import spoke
+
+    real_publish = rig.bus.events.publish
+    rig.bus.events.publish = Mock(side_effect=RuntimeError("bus unavailable"))
+    assert rig.spoke.poll() == "retry"
+    rig.tasks.launched.assert_not_called()
+    rig.bus.events.publish = real_publish
+    monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=0))
+
+    assert rig.spoke.poll() == "started"
+
+    assert [(call.args[0], vars(call.args[1])) for call in rig.tasks.launched.call_args_list] == [
+        (rig.event, {"harness": "claude", "profile": "", "account": "slot-a", "model": "", "effort": ""})
+    ]
+    rig.runtime.spawn.assert_called_once()
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("failure", ["request", "outcome"])
 def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure):
@@ -482,8 +579,10 @@ def test_pending_publication_is_recovered_before_taking_new_work_from_a_busy_lan
         replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
     )
     rig.tasks.reopen.assert_not_called()
+    rig.tasks.launched.assert_not_called()
     rig.bus.events.publish = real_publish
     assert rig.spoke.poll() == "started"
+    assert rig.tasks.launched.call_args_list[0].args[0] == rig.event
     assert rig.spoke.poll() == "started"
     assert rig.runtime.spawn.call_count == 2
     rig.tasks.reopen.assert_not_called()
