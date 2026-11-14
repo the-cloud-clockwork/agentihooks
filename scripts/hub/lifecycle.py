@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable
 from copy import copy
 from dataclasses import asdict
-from typing import Any, cast
+from typing import Any
 
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
@@ -94,15 +94,18 @@ class Lifecycle:
         """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per
         execution and only while it holds its claim, claim generation and seat; True while that resume is ordered and
         unanswered or the exit predates it, False when the exit goes on to drop the agent and reopen its task."""
-        target: dict[str, Any] = cast(Any, agent).runtime_target
-        data: dict[str, Any] = cast(Any, event).data
-        store = cast(RedisStore, self.store)
+        record: Any = agent
+        envelope: Any = event
+        held: Any = self.store
+        target: dict[str, Any] = record.runtime_target
+        data: dict[str, Any] = envelope.data
+        store: RedisStore = held
         hive: str = agent.hive or target.get("host_id") or ""
         if not hive or data.get("reason"):
             return False
         if deliberate_exit.take(store, event.swarm, agent.name):
             return False
-        orders, pending = Orders(cast(Any, store).redis), value.get("resume")
+        orders, pending = Orders(held.redis), value.get("resume")
         if pending and (pending["launched_at"], pending["pane_id"]) == (agent.launched_at, agent.pane_id):
             ack = orders.command(hive, CommandOrder(**pending["order"]))
             if ack is None and event.time - pending["ordered_at"] < RESUME_DEADLINE_MS:
@@ -142,9 +145,11 @@ class Lifecycle:
     def _owned(self, event: Envelope, agent: AgentRecord) -> bool:
         """Whether the dead agent may reopen: the swarm runs, its task row still names it at the exit's claim
         generation and the legacy dead resume gate holds."""
-        store = cast(RedisStore, self.store)
+        held: Any = self.store
+        store: RedisStore = held
         ledger: Any = self.ledger
-        data: dict[str, Any] = cast(Any, event).data
+        envelope: Any = event
+        data: dict[str, Any] = envelope.data
         row: dict[str, Any] = ledger.task(event.swarm, agent.task) or {}
         return (
             store.config(event.swarm).state not in {"stopped", "stopping"}

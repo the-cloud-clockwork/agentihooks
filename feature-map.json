@@ -2076,6 +2076,13 @@
         "tests/hive/test_resume_order.py::test_a_resume_the_runtime_refuses_answers_failed_on_this_hive",
         "tests/hive/test_resume_order.py::test_a_resume_answers_done_on_this_hive_and_records_the_new_pane",
         "tests/hive/test_resume_order.py::test_a_resume_that_cannot_record_its_pane_closes_the_new_pane",
+        "tests/hub/test_dead_resume_hub.py::test_an_exit_at_the_resumed_launch_orders_the_next_resume",
+        "tests/hub/test_dead_resume_hub.py::test_an_exit_read_after_the_hive_answered_done_is_held",
+        "tests/hub/test_dead_resume_hub.py::test_an_unanswered_resume_is_held_until_its_deadline_exactly",
+        "tests/hive/test_resume_order.py::test_a_resume_without_a_launch_time_records_the_store_clock",
+        "tests/hive/test_resume_order.py::test_a_hive_runs_its_resume_orders_off_its_heartbeat_by_default",
+        "tests/hive/test_resume_order.py::test_one_poll_starts_every_unanswered_resume_order",
+        "tests/hive/test_resume_order.py::test_the_resume_order_process_runs_the_order_on_its_own_redis",
         "tests/swarm/test_dead_resume.py::test_the_resume_gate_admits_an_owner_and_refuses_after_a_handoff"
       ]
     },

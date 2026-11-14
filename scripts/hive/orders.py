@@ -273,7 +273,7 @@ class Consumer:
         redis: Any = self.orders.redis
         if not redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
             return
-        if redis.hincrby(receipt, "runs", 1) > RESUME_RUNS:
+        if redis.hincrby(receipt, "runs") > RESUME_RUNS:
             answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, "resume never answered"))
             return
         redis.expire(receipt, RECEIPT_SECONDS)
@@ -298,7 +298,7 @@ class Consumer:
         if order.action == "reap_execution":
             return self.reap_execution(order, agent)
         if order.action == "resume":
-            return self.resume(order, agent)
+            return self.resume(order)
         if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
             return FOREIGN
         if order.action == "name":
@@ -318,7 +318,7 @@ class Consumer:
             return Ack(DONE, agent.runtime_target)
         return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
 
-    def resume(self, order: CommandOrder, agent: AgentRecord) -> Ack:
+    def resume(self, order: CommandOrder) -> Ack:
         """Reopen a dead agent's own conversation in its seat while its execution still carries the launch and pane the
         hub judged and it still holds its task claim, then record the new pane; the hub checked the ledger claim,
         generation and seat first."""

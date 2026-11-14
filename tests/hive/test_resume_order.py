@@ -1,5 +1,6 @@
 import json
 import sys
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -100,6 +101,7 @@ def test_a_resume_order_that_never_answers_is_answered_failed_after_its_run_boun
     receipt = Orders(redis).command_receipt(HIVE, order.id)
     consumer.poll_commands()
     assert redis.hget(receipt, "runs") == "1"
+    assert redis.get(f"{receipt}:running") == "1"
     assert redis.ttl(f"{receipt}:running") > 0
     redis.delete(f"{receipt}:running")
     for _ in range(RESUME_RUNS):
@@ -191,19 +193,17 @@ def test_a_resume_the_runtime_refuses_answers_failed_on_this_hive(
     from scripts.hive.orders import FAILED, Ack
 
     rig = _resuming(redis, monkeypatch, reaped=reaped, recovered=False)
-    assert rig.consumer.resume(_order(), rig.record) == Ack(FAILED, {"host_id": HIVE}, failure)
+    assert rig.consumer.resume(_order()) == Ack(FAILED, {"host_id": HIVE}, failure)
 
 
 @pytest.mark.feature("hub-dead-resume")
 def test_a_resume_answers_done_on_this_hive_and_records_the_new_pane(
     redis: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from dataclasses import replace
-
     from scripts.hive.orders import DONE, Ack
 
     rig = _resuming(redis, monkeypatch)
-    assert rig.consumer.resume(_order(), rig.record) == Ack(DONE, {"host_id": HIVE})
+    assert rig.consumer.resume(_order()) == Ack(DONE, {"host_id": HIVE})
     expected = replace(rig.record, pane_id="new", launched_at=7, idle_ticks=0)
     rig.store.put_agent.assert_called_once_with("rig", expected)
     rig.runtime.terminate.assert_not_called()
@@ -211,10 +211,63 @@ def test_a_resume_answers_done_on_this_hive_and_records_the_new_pane(
 
 @pytest.mark.feature("hub-dead-resume")
 def test_a_resume_that_cannot_record_its_pane_closes_the_new_pane(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    from dataclasses import replace
-
     rig = _resuming(redis, monkeypatch)
     rig.store.put_agent.side_effect = RuntimeError("redis gone")
     with pytest.raises(RuntimeError):
-        rig.consumer.resume(_order(), rig.record)
+        rig.consumer.resume(_order())
     rig.runtime.terminate.assert_called_once_with(replace(rig.record, pane_id="new"))
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_resume_without_a_launch_time_records_the_store_clock(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import orders
+    from scripts.hive.orders import DONE, Ack
+
+    rig = _resuming(redis, monkeypatch)
+    rig.runtime.recover.return_value = replace(
+        rig.runtime.recover.return_value, value=SimpleNamespace(pane_id="new", launched_at=0)
+    )
+    monkeypatch.setattr(orders.lease, "now_ms", lambda store: 42 if store is rig.store else -1)
+    assert rig.consumer.resume(_order()) == Ack(DONE, {"host_id": HIVE})
+    assert rig.store.put_agent.call_args.args[1].launched_at == 42
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_hive_runs_its_resume_orders_off_its_heartbeat_by_default(redis: Any) -> None:
+    from scripts.hive.orders import Consumer
+
+    consumer = Consumer(redis, HIVE, cast(Any, Mock()))
+    assert consumer.offbeat == consumer._spawn_resume
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_one_poll_starts_every_unanswered_resume_order(redis: Any) -> None:
+    from scripts.hive.orders import Consumer, Orders
+
+    first, second = _order(), replace(_order(), id="resume:x:1:2")
+    Orders(redis).command(HIVE, first)
+    Orders(redis).command(HIVE, second)
+    consumer = Consumer(redis, HIVE, cast(Any, Mock()))
+    consumer.offbeat = Mock()
+    consumer.poll_commands()
+    assert [call.args[0] for call in consumer.offbeat.call_args_list] == [first, second]
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_the_resume_order_process_runs_the_order_on_its_own_redis(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import orders, resume_order
+    from scripts.swarm import store
+
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    monkeypatch.setattr(redis, "close", lambda: None)
+    seen: list[tuple[Any, Any]] = []
+
+    def local(cls: Any, client: Any, hive: str) -> Any:
+        consumer = orders.Consumer(client, hive, cast(Any, Mock()))
+        consumer.run_resume = lambda order: seen.append((client, order))
+        return consumer
+
+    monkeypatch.setattr(orders.Consumer, "local", classmethod(local))
+    order = _order()
+    resume_order.run(HIVE, order.encode())
+    assert seen == [(redis, order)]

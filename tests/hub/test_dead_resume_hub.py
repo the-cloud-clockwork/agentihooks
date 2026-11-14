@@ -404,9 +404,58 @@ def test_an_exit_read_before_the_resumed_launch_is_held(rig: SimpleNamespace) ->
     assert rig.ledger.writes == rig.returned == []
 
 
+def _ended(rig: SimpleNamespace, name: str, time: int) -> Any:
+    return replace(rig.started, id=f"exited:{name}", type="execution.exited", time=time, data=dict(rig.started.data))
+
+
+def _ordered_at(rig: SimpleNamespace) -> int:
+    entry = rig.bus.state("spoke-work").get("claim")
+    return json.loads(entry.value)["resume"]["ordered_at"]
+
+
 @pytest.mark.feature("hub-dead-resume")
-def test_a_stopped_swarm_resumes_no_agent(rig: SimpleNamespace) -> None:
-    rig.store.update("rig", state="stopped")
+def test_an_exit_at_the_resumed_launch_orders_the_next_resume(rig: SimpleNamespace) -> None:
+    rig.react.poll()
+    consumer, _runtime = _hive(rig, _resumed())
+    consumer.poll_commands()
+    rig.life.handle(_ended(rig, "at-launch", 1_150_000))
+    prefix = f"resume:{rig.agent.execution_id}:{rig.agent.generation}"
+    assert _sent(rig) == [f"{prefix}:1", f"{prefix}:2"]
+    assert rig.ledger.writes == rig.returned == []
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_an_exit_read_after_the_hive_answered_done_is_held(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import DONE, Ack, Orders, answer
+
+    rig.react.poll()
+    [order] = _commands(rig)
+    answer(rig.store.redis, Orders(rig.store.redis).command_receipt(HIVE, order.id), Ack(DONE, {"host_id": HIVE}))
+    rig.life.handle(_ended(rig, "after-done", _ordered_at(rig) + 1))
+    assert len(_sent(rig)) == 1
+    assert rig.ledger.writes == rig.returned == []
+    assert rig.ledger.notices == []
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_an_unanswered_resume_is_held_until_its_deadline_exactly(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import RESUME_DEADLINE_MS
+
+    rig.react.poll()
+    ordered_at = _ordered_at(rig)
+    rig.life.handle(_ended(rig, "before-deadline", ordered_at + RESUME_DEADLINE_MS - 1))
+    assert rig.returned == []
+    rig.life.handle(_ended(rig, "at-deadline", ordered_at + RESUME_DEADLINE_MS))
+    assert len(rig.returned) == 1
+    assert rig.ledger.notices == [
+        f"Starting a fresh agent after {rig.agent.name} ended because resume failed: its hive never answered."
+    ]
+
+
+@pytest.mark.feature("hub-dead-resume")
+@pytest.mark.parametrize("state", ["stopped", "stopping"])
+def test_a_stopped_swarm_resumes_no_agent(rig: SimpleNamespace, state: str) -> None:
+    rig.store.update("rig", state=state)
     rig.react.poll()
     assert _sent(rig) == []
     assert len(rig.returned) == 1
