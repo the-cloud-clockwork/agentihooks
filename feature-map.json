@@ -2792,6 +2792,16 @@
       ]
     },
     {
+      "id": "inbox-push-poisoned-item",
+      "origin": "regression",
+      "behaviour": "An inbox item whose seen check or channel notification always fails is requeued to pending alone, and the other items claimed in the same batch still reach the session in that push pass.",
+      "seam": "scripts.inbox.seen.claim and scripts.inbox.channel._deliver over one claimed batch",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_two_are_pushed",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_the_other_two_are_pushed"
+      ]
+    },
+    {
       "id": "inbox-redelivery",
       "origin": "inventory",
       "behaviour": "An item delivered and never confirmed returns to pending after the redelivery window with the same id, for whichever transport claims next; a confirmed item is never redelivered.",
