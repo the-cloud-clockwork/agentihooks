@@ -59,7 +59,9 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
-MEMBER_DENY = (f"{subjects.PREFIX}.*.execution.stop", f"{subjects.PREFIX}.*.execution.stop.>")
+MEMBER_DENY = tuple(
+    f"{subjects.PREFIX}.*.{family}execution.stop{tail}" for family in ("", "events.") for tail in ("", ".>")
+)
 SCHEDULER_BUCKET = "scheduler"
 SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
