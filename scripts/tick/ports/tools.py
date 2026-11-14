@@ -88,13 +88,6 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.live_names.__name__,
                 Runtime.observe.__name__,
                 Runtime.refusal.__name__,
-                Runtime.has_capacity.__name__,
-                Runtime.launch_room.__name__,
-                Runtime.reported.__name__,
-                Runtime.placement_refusal.__name__,
-                Runtime.placement.__name__,
-                Runtime.admits.__name__,
-                Runtime.held_admission.__name__,
             ]
         ),
         frozenset(
@@ -105,13 +98,6 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.name_pane.__name__,
                 Runtime.resume.__name__,
                 Runtime.dismiss.__name__,
-                Runtime.place.__name__,
-                Runtime.begin_placement.__name__,
-                Runtime.end_placement.__name__,
-                Runtime.reap_name.__name__,
-                Runtime.admit.__name__,
-                Runtime.release_admission.__name__,
-                Runtime.activate_admission.__name__,
                 Runtime.fence.__name__,
             ]
         ),

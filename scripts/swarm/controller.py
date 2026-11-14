@@ -97,18 +97,6 @@ class FencedRuntime:
         router = getattr(self.runtime, "router", None)
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
-    def begin_placement_pass(self) -> None:
-        if launch := getattr(self.runtime, "hive_launch", None):
-            launch.placement_cache = {}
-            launch.herdr.pass_memo = {}
-        self._local_slots_cache = local_slots.PassCache()
-
-    def end_placement_pass(self) -> None:
-        if launch := getattr(self.runtime, "hive_launch", None):
-            launch.placement_cache = None
-            launch.herdr.pass_memo = None
-        self._local_slots_cache = None
-
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
         return "" if _to_workstation(lane, refused, self._pass_memo()) else refused

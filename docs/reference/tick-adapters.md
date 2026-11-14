@@ -899,10 +899,9 @@ listings for its three launches.
 
 ## One placement scan per placement pass
 
-The spawn step places a lane's ready tasks in one placement pass: `_spawn_order` in `scripts.swarm.tick` calls the
-runtime's `begin_placement_pass` before it reads capacity, and the place and observe steps wrap their launches in
-`tick._placement_pass`, which calls `end_placement_pass` when the pass ends, even when it raises. On `controller.FencedRuntime` the pass holds one `local_slots.PassCache` in
-`_local_slots_cache`; `end_placement_pass` drops it, so the next pass starts empty.
+Nothing opens a placement pass since the tick spawn step was removed. `controller.FencedRuntime` keeps
+`_local_slots_cache` empty, so each read below takes its outside a placement pass column. A caller that builds its own
+`local_slots.PassCache` and passes it to `local_slots.running`, `held` or `claim` still reads once per cache.
 
 `PassCache.once(read, *args)` returns the pass's result of `read(*args)`. The first call with a given function and
 arguments runs the read under the cache's lock and keeps the value; every later call in that pass, from any launch
@@ -939,9 +938,8 @@ def placed(store, slug, tasks):
     return [local_slots.running(store, slug, task, cache) for task in tasks]
 ```
 
-`tests.hive.test_fenced_spawn_pass` holds the contract: five launches started together in one pass make one session
-scan and one host reading and claim five slots; with a local cap of three they admit three and refuse two; the next
-pass scans again; a refusal outside a pass scans on every call.
+`tests.hive.test_fenced_spawn_pass` holds the cache contract: a pass cache reads each value once, and a claim given
+the cache counts live workers from its one scan.
 
 ### Timed rows inside a fenced spawn
 
@@ -1450,7 +1448,7 @@ and call the port from the step.
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
-| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Check the caller runs inside `begin_placement_pass` and `end_placement_pass`, and route a repeated read through the pass cache, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
+| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Route a repeated read through `PassCache.once`, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
 | The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
 | Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
