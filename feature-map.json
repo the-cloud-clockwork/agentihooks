@@ -6077,6 +6077,26 @@
       ]
     },
     {
+      "id": "events-retirement-refunds-claim-life",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
+      "behaviour": "An agent seated through hub admission whose hive recorded its start and whose claim life the hub counted gets that life back when the swarm retires it for an account mismatch, idling or a swarm stop: the agent is retired and dropped, the task reopens unclaimed and the task's claim lives return to zero.",
+      "seam": "The observe verify step, the agents reap step and stop_now retiring an events launched agent through the held claim refund",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent"
+      ]
+    },
+    {
+      "id": "events-parked-retirement-after-release-refunds-nothing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
+      "behaviour": "The hub lifecycle exit of an events launched agent that handed off for quota refunds nothing once the agent no longer holds its claim, and refunds the one counted life while it still holds it; either way the agent is dropped.",
+      "seam": "Lifecycle.handle on execution.exited refunding a parked retirement through the held claim refund",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_an_events_exit_of_a_quota_handoff_refunds_nothing_once_its_claim_was_released"
+      ]
+    },
+    {
       "id": "swarm-tick-events-orphans",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-orphan-reopen",
