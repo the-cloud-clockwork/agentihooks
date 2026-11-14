@@ -1,13 +1,16 @@
 import json
 import os
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import cli, dispatcher, status
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_workspace
+from tests.helpers.seat import seat  # noqa: F401
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 ME = "engineer@a1b2c3-0001"
@@ -15,10 +18,17 @@ MIN = 60_000
 
 
 @pytest.fixture
-def started(env, monkeypatch):  # noqa: F811
+def started(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    seat: Callable[..., AgentRecord],  # noqa: F811
+) -> tuple[RedisStore, Any]:
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    store.update("sw", state="running")
+    for task_id in ("t1", "t2"):
+        seat(task_id, clock=lambda: MIN)
+        ledger_workspace.scaffold("sw", ledger.task("sw", task_id), ledger.state("sw"))
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
     return store, ledger
 
@@ -49,7 +59,7 @@ def test_progress_needs_both_lines_and_a_worker(started, capsys):
 def test_status_findings_flag_a_claim_quiet_past_the_limit(started, monkeypatch):
     store, ledger = started
     [agent] = [a for a in store.agents("sw") if a.name == ME]
-    store.put_agent("sw", AgentRecord(**{**agent.__dict__, "started_at": MIN}))
+    store.put_agent("sw", AgentRecord(**{**agent.__dict__, "started_at": MIN, "launched_at": MIN}))
     os.utime(ledger_workspace.folder("sw", "t1") / "progress.md", (0, 0))
     monkeypatch.setattr(status, "now_ms", lambda: 45 * MIN)
     tasks = [{"id": "t1", "state": "claimed", "claimed_by": ME}]

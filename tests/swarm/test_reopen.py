@@ -1,10 +1,15 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import cli
+from scripts.swarm.store import RedisStore
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
+from tests.swarm.test_tick import FakeRuntime
 
 
 @pytest.fixture
@@ -38,10 +43,11 @@ def test_reopen_keeps_settings_and_starts_a_new_master_with_only_open_work(close
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["swarm"] == "sw"
 
 
-def test_reopen_claims_open_tasks_only(closed):
-    store, ledger, _, _ = closed
+def test_reopen_claims_open_tasks_only(closed: tuple[RedisStore, Any, FakeRuntime, Path]) -> None:
+    store, ledger, rt, _ = closed
     ledger.rows["t2"].update(state="done", done=True)
     assert run("sw", "reopen") == 0
+    seat_owner(store, ledger, rt, "t1", 2_000)
     assert {a.task for a in store.agents("sw")} == {"master", "t1"}
     assert ledger.rows["t2"]["state"] == "done"
 

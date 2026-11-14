@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -8,6 +9,7 @@ from scripts.swarm import master_alarm, tick_master
 from scripts.swarm.status import status_report
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
 DOWN = 5 * 60 * 1000
@@ -36,8 +38,9 @@ class BrokenMaster(FakeRuntime):
         return agent.name in (self.live if self.registered is None else self.registered)
 
 
-def outage(store, startup=True):  # noqa: F811
+def outage(store: RedisStore, startup: bool = True) -> tuple[BrokenMaster, Any]:  # noqa: F811
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"))
+    seat_owner(store, ledger, runtime, "t1", 1)
     tick("sw", store, ledger, runtime, 1)
     for at in (2, 3, 130_000):
         tick("sw", store, ledger, runtime, at)
@@ -242,9 +245,10 @@ def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store
     assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions
 
 
-def test_a_gone_promoted_engineer_is_replaced(store):  # noqa: F811
+def test_a_gone_promoted_engineer_is_replaced(store: RedisStore) -> None:  # noqa: F811
     runtime, ledger = outage(store)
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "claimed_by": "", "out_of_scope": False}
+    seat_owner(store, ledger, runtime, "t2", DOWN)
     tick("sw", store, ledger, runtime, DOWN)
     tick("sw", store, ledger, runtime, 1 + DOWN)
     second = next(a for a in workers(store) if a.name != ENGINEER)

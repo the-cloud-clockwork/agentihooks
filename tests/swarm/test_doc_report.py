@@ -1,11 +1,14 @@
 import json
+from typing import Any
 
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import doc_report
+from scripts.swarm.store import RedisStore
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_ready import seated
 
 SLUG = "doc-report"
 PR = "https://github.com/o/r/pull/7"
@@ -13,7 +16,10 @@ AT = 1_792_850_000_000
 WATCHDOG = "master-watchdog"
 
 
-def test_configured_watchdog_receives_tick_and_done_reports(env, monkeypatch):  # noqa: F811
+def test_configured_watchdog_receives_tick_and_done_reports(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from scripts.swarm import cli
     from scripts.swarm.store import RedisStore
 
@@ -22,7 +28,7 @@ def test_configured_watchdog_receives_tick_and_done_reports(env, monkeypatch):  
     assert run("sw", "set", "watchdog-address=watchdog-session") == 0
     assert RedisStore(store.redis).config("sw").watchdog_address == "watchdog-session"
     monkeypatch.setenv(doc_report.ADDRESS_ENV, "wrong-address")
-    run("sw", "start")
+    seated(store, ledger, runtime)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     ledger.rows["t1"]["doc_items"] = ["1 First item"]
     assert run("sw", "done", "--pr", PR) == 0
@@ -268,10 +274,14 @@ def test_task_set_parses_doc_items_as_a_list():
     assert ledger._task_set_fields(["doc_items=10 a,13 b"]) == {"doc_items": ["10 a", "13 b"]}
 
 
-def test_swarm_done_sends_the_report_as_the_engineer(env, monkeypatch, capsys):  # noqa: F811
-    store, ledger, _ = env
+def test_swarm_done_sends_the_report_as_the_engineer(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seated(store, ledger, runtime)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     ledger.rows["t1"]["doc_items"] = ["13 Every completion triggers a watchdog update"]
     capsys.readouterr()

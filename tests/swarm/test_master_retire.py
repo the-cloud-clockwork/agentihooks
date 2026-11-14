@@ -8,6 +8,7 @@ from scripts.inbox.store import Contended, InboxStore, Item
 from scripts.swarm import launch_check, lifetime, live_binding, master_retire
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 WAIT = 5 * 60 * 1000
@@ -270,7 +271,8 @@ def test_a_worker_record_with_an_empty_field_is_flagged_and_never_retired():
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
-    runtime, ledger = FakeRuntime(), FakeLedger([{"id": "one"}])
+    runtime, ledger = FakeRuntime(), FakeLedger([{"id": "one", "lane": "eng"}])
+    seat_owner(store, ledger, runtime, "one", 100)
     tick("sw", store, ledger, runtime, 100)
     worker = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(worker, profile="engineer", account=""))

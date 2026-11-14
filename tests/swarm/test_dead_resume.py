@@ -10,9 +10,11 @@ from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers import store_seed
+from tests.helpers.seat import seat_owner
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _resuming
-from tests.swarm.test_tick import FakeRuntime, tasks
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, tasks
 
 
 @pytest.fixture
@@ -43,11 +45,18 @@ class ResumingRuntime(FakeRuntime):
         return Placed("reopened:pane", agent.harness, profile=agent.profile)
 
 
+def seeded(store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
+    """Seats a working engineer on t1 through hub admission on the tick's own hive at 1, then ticks once at 1 so the
+    master step seats the master."""
+    seat_owner(store, ledger, runtime, "t1", 1)
+    tick_module.tick("sw", store, ledger, runtime, 1)
+
+
 @pytest.mark.parametrize("lane", ["master", "eng"])
 @pytest.mark.feature("swarm-dead-resume")
 def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypatch, lane):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     original = next(agent for agent in store.agents("sw") if agent.lane == lane)
     original = replace(original, conversation_id="original-conversation", profile="engineer", idle_ticks=4)
     store.put_agent("sw", original)
@@ -79,7 +88,7 @@ def test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     original = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     store.put_agent("sw", replace(original, conversation_id="original-conversation", profile="engineer"))
     runtime.live.discard(original.name)
@@ -139,13 +148,13 @@ def test_resume_placement_carries_the_original_conversation(tmp_path):
 
 @pytest.mark.parametrize("lane", ["master", "eng"])
 @pytest.mark.parametrize("reason", ["handoff", "limit", "failed"])
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_dead_resume_records_why_a_fresh_agent_is_needed(store, monkeypatch, lane, reason):
     from scripts.swarm import dead_resume
     from scripts.swarm.tick import SpawnError
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == lane)
     agent = replace(agent, conversation_id="old-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -172,12 +181,12 @@ def test_dead_resume_records_why_a_fresh_agent_is_needed(store, monkeypatch, lan
 
 
 @pytest.mark.parametrize("lane", ["master", "eng"])
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, monkeypatch, lane):
     from scripts.swarm.live_binding import assignment
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == lane)
     agent = replace(agent, conversation_id="old-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -200,7 +209,7 @@ def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, 
 @pytest.mark.feature("swarm-dead-resume")
 def test_lost_agent_cannot_reopen_a_successors_claim(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     agent = replace(agent, conversation_id="old-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -228,7 +237,7 @@ def test_resumed_agent_keeps_the_runtime_model_and_route(store, monkeypatch):
     from scripts.swarm import dead_resume
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == "master")
     agent = store.start_execution(
         "sw",
@@ -288,7 +297,7 @@ def test_dead_master_recovers_after_a_peers_binding_mismatch(store, monkeypatch)
     from scripts.swarm.live_binding import assignment
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     master = next(agent for agent in store.agents("sw") if agent.lane == "master")
     master = replace(master, conversation_id="master-conversation", profile="engineer")
     store.put_agent("sw", master)
@@ -309,9 +318,10 @@ def test_dead_master_recovers_after_a_peers_binding_mismatch(store, monkeypatch)
     assert "engineer@a1b2c3-0001" in runtime.killed
 
 
-def prepared_recovery(store):
+def prepared_recovery(store: RedisStore) -> tuple[FakeLedger, ResumingRuntime, AgentRecord]:
+    """Seeds an engineer on t1 through ``seeded`` with a known conversation, then drops it from the live set."""
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     agent = replace(agent, conversation_id="original-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -376,13 +386,14 @@ def test_recorded_legacy_recovery_keeps_telemetry_attributed(store, monkeypatch)
     assert finding.measure == 1
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
-def test_a_fresh_conversation_starts_a_new_life(store):
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
+def test_a_fresh_conversation_starts_a_new_life(store: RedisStore) -> None:
     ledger, runtime, original = prepared_recovery(store)
     original = replace(original, conversation_id="")
     store.put_agent("sw", original)
 
     tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+    seat_owner(store, ledger, runtime, "t1", STARTUP_GRACE_MS + 2)
 
     fresh = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     assert runtime.resumed == []
@@ -391,7 +402,7 @@ def test_a_fresh_conversation_starts_a_new_life(store):
     assert fresh.started_at != original.started_at
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_dead_retiring_agent_retries_retirement(store, monkeypatch):
     from scripts.swarm.live_binding import assignment
 
@@ -415,7 +426,7 @@ def test_dead_retiring_agent_retries_retirement(store, monkeypatch):
 
 
 @pytest.mark.parametrize("control", ["stopped", "stopping", "record", "seat", "owner", "state", "claim"])
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_recovery_refuses_a_stopped_swarm_or_stale_ownership(store, monkeypatch, control):
     from scripts.swarm import dead_resume
 
@@ -441,7 +452,7 @@ def test_recovery_refuses_a_stopped_swarm_or_stale_ownership(store, monkeypatch,
     assert ledger.notes == notes
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_dead_resume_keeps_a_pull_request_claim_and_checks_ledger_identity(store, monkeypatch):
     from scripts.swarm import dead_resume
 
@@ -463,7 +474,7 @@ def test_dead_resume_keeps_a_pull_request_claim_and_checks_ledger_identity(store
 
 
 @pytest.mark.parametrize("compact_limit,expected", [(0, "the conversation reached its compact limit"), (700, "")])
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_recovery_uses_the_configured_compact_limit_or_default(store, monkeypatch, compact_limit, expected):
     from scripts.swarm import dead_resume
 
@@ -480,7 +491,7 @@ def test_recovery_uses_the_configured_compact_limit_or_default(store, monkeypatc
     assert dead_resume._reason(store, "sw", agent) == expected
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_missing_conversation_records_the_exact_resume_failure(store):
     from scripts.swarm import dead_resume
 
@@ -505,7 +516,7 @@ def test_resume_preserves_the_id_when_native_discovery_arrives_after_launch(tmp_
     assert placed.conversation_id == "c0ffee"
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_recovery_renews_its_claim_for_the_tick_lease(store, monkeypatch):
     from scripts.swarm import dead_resume
     from scripts.swarm.tick import LEASE_MS
@@ -535,7 +546,7 @@ def test_recovery_renews_its_claim_for_the_tick_lease(store, monkeypatch):
         ("working", "dead", True, False),
     ],
 )
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_binding_deferral_keeps_retiring_and_reported_agents_in_verification(store, state, fact, live, expected):
     from scripts.swarm import dead_resume
 
@@ -547,7 +558,7 @@ def test_binding_deferral_keeps_retiring_and_reported_agents_in_verification(sto
     assert dead_resume.skip_binding(agent, facts, names) is expected
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_legacy_lost_claim_without_a_generation_reopens(store):
     ledger, runtime, agent = prepared_recovery(store)
     ledger.rows["t1"].pop("claim_generation")
@@ -558,7 +569,7 @@ def test_a_legacy_lost_claim_without_a_generation_reopens(store):
     assert ledger.rows["t1"]["claimed_by"] == ""
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
@@ -568,11 +579,11 @@ def test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds(store):
     assert store.claims("sw", "t1") == lives - 1
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
     store.redis.hincrby(store.key("sw", "started-lives"), "t1", -1)
@@ -584,11 +595,11 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
 
 
 @pytest.mark.parametrize("live", [{"claimed_by": "engineer@other-0001"}, {"claim_generation": 7}, {"state": "done"}])
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.rows["t1"].update(live)
 
@@ -597,7 +608,7 @@ def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
     assert store.claims("sw", "t1") == lives
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_tick_drop_refunds_a_legacy_claim_without_a_generation(store):
     ledger, runtime, agent = prepared_recovery(store)
     ledger.rows["t1"].pop("claim_generation")
@@ -608,7 +619,7 @@ def test_a_tick_drop_refunds_a_legacy_claim_without_a_generation(store):
     assert store.claims("sw", "t1") == lives - 1
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
@@ -622,11 +633,11 @@ def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
     assert read == [("sw", "t1")]
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     lives = store.claims("sw", "t1")
     read = ledger.task
 
@@ -643,11 +654,12 @@ def test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_re
     assert store.claims("sw", "t1") == lives
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_reap_reports_every_lost_engineer_in_the_pass(store):
     store.update("sw", max_eng=2)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    for task in ("t1", "t2"):
+        seat_owner(store, ledger, runtime, task, 1)
     engineers = [agent for agent in store.agents("sw") if agent.lane == "eng"]
     for agent in engineers:
         runtime.live.discard(agent.name)
@@ -664,7 +676,7 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     from scripts.swarm import deliberate_exit
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
@@ -690,7 +702,7 @@ def _dying_engineer(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, lane: str = "eng"
 ) -> tuple[Any, ResumingRuntime, AgentRecord]:
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == lane)
     store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
@@ -805,7 +817,7 @@ def test_the_cap_records_its_count_key_boundary_and_recovery_handoff_exactly(
     assert rows == [(envelope["reason"], expected, 4 * RESUME_STEP)]
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):
     import json
 

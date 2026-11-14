@@ -9,6 +9,7 @@ import pytest
 from scripts.swarm import cli, idle, mutation_wait, waits
 from scripts.swarm.ledger_events import head as pull_head
 from scripts.swarm.ledger_events import view as pull_view
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME
 
@@ -84,7 +85,8 @@ def github(monkeypatch, tmp_path):
 def test_a_rate_limited_run_read_admits_the_mutation_wait_pending(env, github):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     ledger.tasks = lambda slug: list(ledger.rows.values())
     assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 0
     held = idle.wait(store.redis, "sw", ME)["on"]
@@ -233,7 +235,8 @@ def test_a_rate_limited_jobs_read_keeps_a_red_run_wait_for_its_evidence(github):
 def test_a_rate_limited_pull_request_head_admits_the_checks_wait_pending(env, github, monkeypatch):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     ledger.tasks = lambda slug: list(ledger.rows.values())
     monkeypatch.setattr(cli.ledger_events, "head", lambda url: pull_head(url, subprocess.run))
     assert cli.main(["sw", "--as", ME, "wait", "--on", "checks", PR]) == 0

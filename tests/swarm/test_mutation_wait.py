@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import cli, idle, mutation_wait, waits
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, tick  # noqa: F401
 
@@ -24,7 +25,8 @@ def pauses(monkeypatch):
 def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     ledger.tasks = lambda slug: list(ledger.rows.values())
     monkeypatch.setattr(
         subprocess,
@@ -416,7 +418,8 @@ def test_wait_declaration_rejects_an_invalid_run_target(target):
 def test_cli_refuses_an_unrelated_or_unbound_run(env, preflight, field, value, capsys):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     ledger.tasks = lambda slug: list(ledger.rows.values())
     preflight.run[field] = value
     assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 1
@@ -634,7 +637,8 @@ def _focused_proof(preflight):
 def _bind(env, preflight):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     ledger.tasks = lambda slug: list(ledger.rows.values())
     return cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL])
 

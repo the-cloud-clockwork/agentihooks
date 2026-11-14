@@ -1,0 +1,15 @@
+rules:
+  - id: codex-server-exit-canary
+    languages: [python]
+    severity: ERROR
+    message: Fail the pending profile report when the supervised Codex app server exits; a supervision loop that only breaks leaves init-agent waiting out the launch deadline for a canary that never arrives.
+    patterns:
+      - pattern-inside: |
+          while $PUMP.poll() is None:
+              ...
+      - pattern: |
+          $SERVER.wait(timeout=$TIMEOUT)
+          break
+      - pattern-not: |
+          $EXITED(..., $SERVER.wait(timeout=$TIMEOUT))
+          break
