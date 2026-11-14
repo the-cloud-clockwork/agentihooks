@@ -1,5 +1,6 @@
 import json
 import sys
+from typing import Any, cast
 
 from scripts.events.envelope import Envelope
 from scripts.hub.registry import Reactor
@@ -25,11 +26,12 @@ class Claims:
         return Reactor("claim-lives", "swarm.*.execution.started", self.handle, singleton=True)
 
     def handle(self, event: Envelope) -> None:
-        if event.type != "execution.started" or event.entity != "execution" or not event.data.get("claim_key"):
+        data = cast(dict[str, Any], event.data)
+        if event.type != "execution.started" or event.entity != "execution" or not data.get("claim_key"):
             return
         self.store = self.store or connect()
-        task = event.data["task"]
-        legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), event.data["name"])
+        task: str = data["task"]
+        legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), data["name"])
         if legacy and json.loads(legacy)["state"] == "started":
             return
         lives = self.store.redis.eval(
@@ -45,11 +47,7 @@ class Claims:
         self.store.execution_registry.set_launch(
             event.swarm,
             event.key,
-            {
-                "state": "working",
-                "pane_id": event.data.get("pane_id", ""),
-                "launched_at": event.data.get("launched_at", event.time),
-            },
+            {"state": "working", "pane_id": data.get("pane_id", ""), "launched_at": data.get("launched_at", event.time)},
         )
         if lives:
             self.store.clear_failed_harness(event.swarm, task)
