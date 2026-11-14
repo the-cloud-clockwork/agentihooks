@@ -52,7 +52,7 @@ class ChaosRuntime:
         time.sleep(self.launch_ms / 1000)
         self.agents.append(Agent(request.task["id"], fence["key"], now_ms() + self.work_ms, request.name))
         self.journal.write("launched", **fields)
-        placed = SimpleNamespace(pane_id=f"{self.hive}:{request.name}", harness="chaos", account="chaos")
+        placed = SimpleNamespace(pane_id=f"{self.hive}:{request.name}", harness="chaos", account="chaos", launched_at=0)
         return Outcome("spawn", Status.OK, self.backend, value=placed)
 
     def find(self, name: str) -> Outcome:

@@ -94,7 +94,10 @@ def test_a_master_spoke_spawns_offered_master_work_on_the_workstation(monkeypatc
     bus.queue("swarm.rig.ready.master", spoke.QueuePolicy()).offer(master_event())
     runtime = Mock()
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-m", harness="claude", account="slot-a")
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-m", harness="claude", account="slot-a", launched_at=0),
     )
     store = SimpleNamespace(slugs=lambda: ["rig"], config=lambda slug: SimpleNamespace(slug=slug))
 
