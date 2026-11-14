@@ -241,6 +241,11 @@ def execute(
         bus.close()
 
 
+def room(hive: str, execution: str, harness: str, account: str) -> bool:
+    """Whether the hub holds or takes a worker slot on ``account`` for ``execution`` on ``hive``, reserving it."""
+    return bool(hive and execution and harness and account)
+
+
 def release(hive: str, execution: str, harness: str, account: str) -> None:
     _remote(hive, lambda slots: slots.release(execution, harness, account))
 

@@ -157,8 +157,8 @@ def test_launch_selects_only_the_requested_harness_and_account(rig):
 @pytest.mark.feature("hive-saved-account-slot-preference")
 @pytest.mark.parametrize("cap,sessions,expected", [(1, 0, True), (1, 1, False), (0, 0, False)])
 def test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the_execution(
-    monkeypatch, cap, sessions, expected
-):
+    monkeypatch: pytest.MonkeyPatch, cap: int, sessions: int, expected: bool
+) -> None:
     from scripts.events import factory
     from scripts.hive import account_slots
 
@@ -172,9 +172,7 @@ def test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the
     entry = bus.state("account-slots").get(account_slots.key("claude", "a"))
     holders = json.loads(entry.value)["holders"] if entry else {}
     assert ("execution" in holders) is expected
-    assert account_slots.Slots(bus, "one", lambda: reading(cap=cap, sessions=sessions)).take(
-        "execution", "claude", "a"
-    ) == ("a" if expected else None)
+    assert account_slots.room("one", "execution", "claude", "a") is expected
     bus.close()
 
 

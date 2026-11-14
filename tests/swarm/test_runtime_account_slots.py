@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -53,19 +54,20 @@ def test_hive_runtime_account_refusal_does_not_launch(tmp_path, monkeypatch):
 @pytest.mark.feature("hive-saved-account-slot-preference")
 @pytest.mark.parametrize("room,routed", [(False, []), (True, ["full-account"])])
 def test_a_saved_handoff_account_routes_a_hive_launch_only_while_its_account_slot_has_a_worker_seat(
-    tmp_path, monkeypatch, room, routed
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, room: bool, routed: list[str]
+) -> None:
     from scripts.hive import account_slots
 
-    asked, calls = [], []
+    asked: list[tuple[str, str, str, str]] = []
+    calls: list[list[str]] = []
 
-    def answer(hive, execution, harness, account):
+    def answer(hive: str, execution: str, harness: str, account: str) -> bool:
         asked.append((hive, execution, harness, account))
         return room
 
-    monkeypatch.setattr(account_slots, "room", answer, raising=False)
+    monkeypatch.setattr(account_slots, "room", answer)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         calls.append(argv)
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
