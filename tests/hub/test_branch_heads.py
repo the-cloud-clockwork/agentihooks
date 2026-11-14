@@ -30,7 +30,9 @@ def _graphql(monkeypatch: pytest.MonkeyPatch, answer: Any) -> list[tuple[str, di
 
 def test_heads_reads_every_branch_once_in_one_query(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = _graphql(monkeypatch, {"b0": {"target": {"oid": "abc"}}, "b1": None})
-    run = object()
+
+    def run() -> None:
+        return None
 
     found = branch_heads.heads(ORIGIN, ["kept", "gone", "kept"], run)
 
