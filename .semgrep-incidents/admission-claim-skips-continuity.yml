@@ -1,0 +1,22 @@
+rules:
+  - id: admission-claim-skips-continuity
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub events claim primes a successor's task without attaching the task's open handoff transfer, so the
+      successor's transfer never binds and the hive cannot resume its predecessor's conversation. Set the task's
+      transfer with transfers.attach in the same claim, as the legacy place prepare does.
+    paths:
+      include:
+        - /scripts/hub/
+        - admission-claim-skips-continuity.py
+    patterns:
+      - pattern-inside: |
+          def $CLAIM(...):
+              ...
+      - pattern: tick.primed(...)
+      - pattern-not-inside: |
+          def $CLAIM(...):
+              ...
+              transfers.attach(...)
+              ...
