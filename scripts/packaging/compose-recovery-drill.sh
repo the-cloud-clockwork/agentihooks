@@ -55,7 +55,7 @@ from scripts.events.config import BusConfig
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
-from scripts.hub import runner
+from scripts.hub import exits, runner
 from scripts.swarm import freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmConfig, connect
@@ -122,7 +122,7 @@ class Tasks:
 
 class StandIn:
     def spawn(self, request):
-        return Outcome("spawn", Status.OK, "recovery", SimpleNamespace(pane_id=f"pane-{request.name}", harness="claude", account=""))
+        return Outcome("spawn", Status.OK, "recovery", SimpleNamespace(pane_id=f"pane-{request.name}", harness="claude", account="", launched_at=0))
 
 
 def launched():
@@ -153,6 +153,7 @@ def exit_report(agents):
     store.redis.sadd(registry.INDEX, HIVE)
     store.redis.set(reports.key(HIVE), json.dumps(report))
     bus = open_bus(BusConfig.from_environ())
+    exits.serve(bus)
     execution_events.publish(bus, HIVE, report)
     bus.close()
     return sorted(agent.task for agent in agents)

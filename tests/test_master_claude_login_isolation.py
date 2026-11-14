@@ -25,14 +25,15 @@ def _homes():
     return {name: render.profile_dir(name) / "claude" for name in ROLES}
 
 
+@pytest.mark.feature("render-no-login-credentials")
 def test_the_master_login_home_never_touches_the_shared_credential_link(roles):
     homes = _homes()
     operator = roles["home"] / ".claude" / ".credentials.json"
     target = login.build(homes["master"])
     (target / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "r"}}))
-    for name, home in homes.items():
-        link = home / ".credentials.json"
-        assert link.is_symlink() and link.readlink() == operator, name
+    assert (homes["master"] / ".credentials.json").readlink() == operator
+    for name in ("engineer", "cicd", "planner"):
+        assert not (homes[name] / ".credentials.json").is_symlink(), name
     assert operator.read_text() == "operator login"
     assert not (target / login.CREDENTIALS).is_symlink()
 

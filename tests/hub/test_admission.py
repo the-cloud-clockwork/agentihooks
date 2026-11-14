@@ -125,6 +125,7 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
 
 
 LAUNCH = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
+HUB_CHECK = {"task": "t1", "at": 7_000, "relaunch": True, "owner": "hub"}
 
 
 @pytest.mark.feature("events-launch-decision-record")
@@ -203,7 +204,7 @@ def test_the_first_launch_decision_starts_a_launch_check_the_tick_retires_and_re
 
     assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
 
-    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: {"task": "t1", "at": 7_000, "relaunch": True}}
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: HUB_CHECK}
 
 
 @pytest.mark.feature("events-launch-check")
@@ -226,7 +227,7 @@ def test_a_republished_decision_naming_no_harness_starts_no_second_launch_check(
     admitted = rig.admitter.admit(SLUG, ask())
     unnamed = {**LAUNCH, "harness": ""}
     rig.admitter.launched(SLUG, ask(launch=unnamed))
-    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: {"task": "t1", "at": 7_000, "relaunch": True}}
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: HUB_CHECK}
     launch_check.forget(rig.store, SLUG, admitted["name"])
 
     assert rig.admitter.launched(SLUG, ask(launch=unnamed)) is True
@@ -263,7 +264,7 @@ def test_a_refused_launch_decision_starts_no_launch_check(rig: SimpleNamespace) 
     assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
     assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
 
-    assert launch_check.pending(rig.store, SLUG) == {}
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: HUB_CHECK}
 
 
 def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
