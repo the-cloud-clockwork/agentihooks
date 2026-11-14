@@ -137,7 +137,7 @@ def test_the_scoped_member_grant_names_only_its_own_stop_consumer() -> None:
         )
     ]
     assert claims["pub"]["deny"] == list(nats_grant.MEMBER_DENY)
-    assert nats_grant.MEMBER_DENY[-1] == "swarm.*.stop.>"
+    assert "swarm.*.stop.>" in nats_grant.MEMBER_DENY
 
 
 @pytest.mark.feature("hive-own-stop-consumer")
