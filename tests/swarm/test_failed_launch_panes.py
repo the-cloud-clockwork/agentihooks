@@ -77,6 +77,7 @@ def _failed_row(store):
     return next(row for row in store.launches("sw") if row["state"] == "failed")
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_failed_launch_records_its_pane_and_keeps_it_open_for_two_minutes(store):
     ledger, runtime = _failed_once(store)
     tick("sw", store, ledger, runtime, now_ms=DUE - 1)
@@ -88,6 +89,7 @@ def test_a_failed_launch_records_its_pane_and_keeps_it_open_for_two_minutes(stor
     }
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_failed_launch_pane_closes_after_two_minutes_with_its_last_lines_kept(store):
     ledger, runtime = _failed_once(store)
     actions = tick("sw", store, ledger, runtime, now_ms=DUE)
@@ -104,6 +106,7 @@ def test_a_failed_launch_pane_closes_after_two_minutes_with_its_last_lines_kept(
     assert runtime.panes_closed == ["w1:p9"]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_pane_whose_lines_cannot_be_read_still_closes_and_says_so(store):
     _, runtime = _failed_once(store)
     runtime.screens.clear()
@@ -112,6 +115,7 @@ def test_a_pane_whose_lines_cannot_be_read_still_closes_and_says_so(store):
     assert _failed_row(store)["pane_lines"] == ["its lines could not be read: pane w1:p9 not found"]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_pane_that_no_longer_shows_the_launch_is_dropped_untouched(store):
     _, runtime = _failed_once(store)
     runtime.owned.clear()
@@ -122,6 +126,7 @@ def test_a_pane_that_no_longer_shows_the_launch_is_dropped_untouched(store):
     assert "pane_lines" not in _failed_row(store)
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_pane_herdr_refuses_to_close_stays_held_for_the_next_tick(store):
     _, runtime = _failed_once(store)
     runtime.close_error = "server down"
@@ -134,6 +139,7 @@ def test_a_pane_herdr_refuses_to_close_stays_held_for_the_next_tick(store):
     assert runtime.panes_closed == ["w1:p9"] and failed_panes.held(store, "sw") == {}
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_pane_herdr_cannot_list_stays_held_unread_for_the_next_tick(store):
     _, runtime = _failed_once(store)
     runtime.list_error = "server down"
@@ -144,6 +150,7 @@ def test_a_pane_herdr_cannot_list_stays_held_unread_for_the_next_tick(store):
     assert runtime.read == [] and runtime.panes_closed == [] and "pane_lines" not in _failed_row(store)
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_live_agent_pane_is_never_read_or_closed(store):
     _, runtime = _failed_once(store)
     live = AgentRecord("engineer@a1b2c3-0009", "eng", "t2", started_at=FAILED_AT, pane_id="w1:p9", state="working")
@@ -155,6 +162,7 @@ def test_a_live_agent_pane_is_never_read_or_closed(store):
     assert actions == ["kept pane w1:p9: engineer@a1b2c3-0009 holds it now"]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_failed_launch_whose_process_survived_closes_only_once_it_is_gone(store):
     _, runtime = _failed_once(store)
     agent = _failed_row(store)["agent"]
@@ -166,6 +174,7 @@ def test_a_failed_launch_whose_process_survived_closes_only_once_it_is_gone(stor
     assert runtime.panes_closed == ["w1:p9"]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_the_tick_reaps_a_surviving_failed_launch_and_then_closes_its_pane(store):
     ledger, runtime = _failed_once(store)
     agent = _failed_row(store)["agent"]
@@ -178,6 +187,7 @@ def test_the_tick_reaps_a_surviving_failed_launch_and_then_closes_its_pane(store
     assert runtime.panes_closed == ["w1:p9"]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_spawn_failure_without_a_pane_holds_nothing(store):
     runtime = PaneRuntime(crash=SpawnError("init-agent exit 2"))
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
@@ -185,6 +195,7 @@ def test_a_spawn_failure_without_a_pane_holds_nothing(store):
     assert _failed_row(store)["pane_id"] == ""
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_crash_that_is_no_spawn_error_records_no_pane(store):
     runtime = PaneRuntime(crash=OSError("worktree timer"))
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
@@ -192,12 +203,14 @@ def test_a_crash_that_is_no_spawn_error_records_no_pane(store):
     assert _failed_row(store)["pane_id"] == ""
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_launch_waiting_on_quota_holds_no_pane(store):
     runtime = PaneRuntime(crash=SpawnError("no seats", "unavailable", pane_id="w1:p9"))
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
     assert failed_panes.held(store, "sw") == {}
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_started_launch_records_its_pane(store):
     runtime = PaneRuntime()
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
@@ -205,6 +218,7 @@ def test_a_started_launch_records_its_pane(store):
     assert [row["pane_id"] for row in started] == ["w1:p1"]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_then_closed(store):
     ledger, runtime = tasks(("t1", "eng")), PaneRuntime({"w1:p1": "Error: model not available\n$ "})
     tick("sw", store, ledger, runtime, now_ms=FAILED_AT)
@@ -270,6 +284,7 @@ def test_lines_without_a_reason_keep_an_empty_error(store):
     assert [(r["error"], r["pane_lines"]) for r in store.launches("sw")] == [("", ["x"])]
 
 
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_status_lists_failed_launches_with_their_lines(store):
     ledger, runtime = _failed_once(store)
     tick("sw", store, ledger, runtime, now_ms=DUE)
@@ -342,6 +357,7 @@ def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("stdout", ["", "status=started\nroute_status=pending\n"])
+@pytest.mark.feature("swarm-legacy-failed-launch-panes")
 def test_a_route_timeout_without_a_pane_report_closes_its_recorded_pane_after_two_minutes(
     store, tmp_path, monkeypatch, stdout
 ):
