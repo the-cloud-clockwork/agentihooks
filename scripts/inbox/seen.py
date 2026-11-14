@@ -109,17 +109,30 @@ def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: dict[str, 
     store.redeliver(now, window)
     for item_id in [item_id for item_id, at in skip.items() if now - at >= window]:
         del skip[item_id]
+    waiting = [item for item in store.pending_mail(me) if item.id not in skip][:limit]
+    delivered: list[Item] = []
+    try:
+        return _check_batch(store, me, waiting, skip, delivered)
+    except RedisError:
+        _release(store, me, delivered)
+        raise
+
+
+def _check_batch(
+    store: InboxStore, me: str, waiting: list[Item], skip: dict[str, int], delivered: list[Item]
+) -> list[Item]:
+    from redis.exceptions import RedisError
+
     marks = SeenMarks(store.redis)
     shown: list[Item] = []
-    waiting = [item for item in store.pending_mail(me) if item.id not in skip][:limit]
     for item in filter(None, (store.deliver(item.id, me) for item in waiting)):
+        delivered.append(item)
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:
             store.requeue(item.id, me, UNSETTLED)
             continue
         except RedisError:
-            _release(store, me, [*shown, item])
             raise
         except Exception:
             store.requeue(item.id, me, UNCHECKED)

@@ -165,6 +165,28 @@ def test_a_failed_return_keeps_the_original_redis_error_and_still_returns_the_re
     assert _requeued(inbox, broken.id) == ("pending", "bob", seen.CLAIM_FAILED)
 
 
+@pytest.mark.feature("inbox-claim-redis-error-requeue")
+def test_a_redis_error_delivering_the_second_item_returns_the_first_to_pending(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from redis.exceptions import RedisError
+
+    _, inbox = channel_backend
+    first, broken, last = _three(inbox)
+    deliver = inbox.deliver
+
+    def flaky_deliver(item_id: str, receiver: str) -> Item | None:
+        if item_id == broken.id:
+            raise RedisError("connection lost")
+        return deliver(item_id, receiver)
+
+    monkeypatch.setattr(inbox, "deliver", flaky_deliver)
+    with pytest.raises(RedisError):
+        seen.claim(inbox, "bob")
+    assert [inbox.get(item.id).state for item in (first, broken, last)] == ["pending", "pending", "pending"]
+    assert _requeued(inbox, first.id) == ("pending", "bob", seen.CLAIM_FAILED)
+
+
 def _clocked_passes(inbox: InboxStore, monkeypatch: pytest.MonkeyPatch) -> tuple[Session, list[int], Any]:
     import anyio
 
