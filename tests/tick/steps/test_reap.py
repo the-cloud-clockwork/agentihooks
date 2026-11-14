@@ -53,6 +53,7 @@ def test_reap_renews_the_claim_lease_of_a_hub_owned_agent(monkeypatch: pytest.Mo
     store.redis.hset(store.key("sw", "agents"), owned.name, json.dumps(asdict(owned)))
     store.redis.set(store.key("sw", "claim", "promo"), owned.name, px=1_000)
     monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: [])
+    monkeypatch.setattr(reconciler, "admitted_agents", lambda store, slug: [])
     monkeypatch.setattr(BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
     tools = fake_tools()
     cast(FakeRuntime, tools.runtime).answers["live_names"] = set()

@@ -234,6 +234,27 @@ def test_a_legacy_agent_retirement_sends_no_stop(
     assert sent_stops(bus, agent) == []
 
 
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    store, ledger, _ = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    retire(ending, env, agent)
+    released: list[str] = []
+    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, gone: released.append(gone.name))
+
+    react.handle(replace(event, id=f"exited:{event.key}", type="execution.exited"))
+
+    assert released == [agent.name]
+    entry = bus.for_swarm(SLUG).state("spoke-work").get("claim")
+    assert entry is not None
+    assert json.loads(entry.value)["state"] == "exited"
+    assert store.claims(SLUG, "t1") == 0
+
+
 def handed_off(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], cause: str
 ) -> tuple[AgentRecord, Envelope]:
