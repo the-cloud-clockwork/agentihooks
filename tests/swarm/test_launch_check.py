@@ -264,6 +264,7 @@ def joined(ledger, runtime, at):
         ledger.members.setdefault(name, {"joined_at": at})
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_passes_a_launch_that_joined(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -302,6 +303,7 @@ def test_delayed_tick_passes_a_joined_agent_after_leave(store, monkeypatch, chec
     assert launch_check.pending(store, "sw") == {}
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     spawn = runtime.spawn
@@ -317,6 +319,7 @@ def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch)
     assert f"{name} passed its launch check in 50 seconds" in actions
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_the_tick_times_the_join_from_the_harness_start(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     spawn = runtime.spawn
@@ -336,6 +339,7 @@ def test_the_tick_times_the_join_from_the_harness_start(store, monkeypatch):
     assert name not in runtime.killed
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -354,6 +358,7 @@ def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch
 
 @pytest.mark.parametrize("hive,relaunch", [("", True), ("remote", True), ("remote", False)])
 @pytest.mark.parametrize("age", [0, 20 * 60_000 - 1])
+@pytest.mark.feature("swarm-launch-check")
 def test_a_working_heartbeat_keeps_a_failed_launch(store, monkeypatch, scratch, hive, relaunch, age):
     from scripts.swarm import idle
 
@@ -420,6 +425,7 @@ def test_an_idle_or_stale_heartbeat_does_not_keep_a_failed_launch(
     assert any(action.startswith(f"retired {agent.name} after its {reason}") for action in actions)
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -431,6 +437,7 @@ def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkey
     assert len(runtime.spawned) == 2
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -466,6 +473,7 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
 
 @pytest.mark.parametrize("delay", [launch_check.DEADLINE_MS, launch_check.DEADLINE_MS + 1, None])
 @pytest.mark.parametrize("master_joined", [False, True])
+@pytest.mark.feature("swarm-launch-check")
 def test_launch_judgment_refreshes_a_join_after_the_snapshot(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, delay: int | None, master_joined: bool
 ) -> None:
@@ -585,6 +593,7 @@ def test_master_notification_names_every_miss(store, monkeypatch, tmp_path):
     assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "base"]
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_path, scratch):
     from hooks.context import profile_chain
 
@@ -603,6 +612,7 @@ def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_
     assert launch_check.relaunched(store, "sw", "t1") is True
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
@@ -636,6 +646,7 @@ def test_expected_reads_the_overlays_the_host_rendered(monkeypatch):
     assert launch_check.expected(replace(agent, profile_decision={launch_check.HOST_OVERLAYS: []})) == []
 
 
+@pytest.mark.feature("swarm-launch-check")
 def test_tick_passes_a_hive_launch_without_an_overlay_its_host_cannot_render(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)

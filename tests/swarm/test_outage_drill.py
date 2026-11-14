@@ -255,6 +255,7 @@ def probe_recovery(drill, monkeypatch):
     return calls
 
 
+@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
 def test_channel_delivery_after_redis_recovery_is_confirmed_once(drill, monkeypatch):
     from scripts.inbox import cli
 
@@ -277,6 +278,7 @@ def test_channel_delivery_after_redis_recovery_is_confirmed_once(drill, monkeypa
 
 
 @pytest.mark.parametrize("kind", ("redis", "network", "provider"))
+@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
 def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(drill, monkeypatch, kind):
     if kind == "provider":
         probe_recovery(drill, monkeypatch)
@@ -305,6 +307,7 @@ def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(dri
 
 
 @pytest.mark.parametrize("kind", ("redis", "network", "provider"))
+@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
 def test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim(drill, monkeypatch, kind):
     calls = probe_recovery(drill, monkeypatch) if kind == "provider" else []
     drill.stop(kind)
