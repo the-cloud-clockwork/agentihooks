@@ -1,6 +1,6 @@
 """One inbox item that always fails to show is requeued alone while the rest of its push batch reaches the session."""
 
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
@@ -200,7 +200,7 @@ def test_a_redis_error_closing_an_item_shown_elsewhere_returns_it_and_the_first_
     def elsewhere(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
         return item.id == broken.id or checked(marks, store, item, me)
 
-    def failing_close(item_id: str, by: str, kind: str, detail: str = "") -> Item:
+    def failing_close(item_id: str, by: str, kind: str, detail: str = "") -> NoReturn:
         raise RedisError("connection lost")
 
     monkeypatch.setattr(seen, "_shown_elsewhere", elsewhere)
