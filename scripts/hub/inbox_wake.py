@@ -113,7 +113,12 @@ class InboxWake:
             inbox.requeue(item.id, REDELIVERER, REDELIVERED, now - redelivery_ms(self.environ))
             item = inbox.get(item.id)
         agents = [agent for agent in self.store.agents(event.swarm) if agent.state != "finished"]
-        if item is not None and item.state == "pending" and not item.fyi:
+        if (
+            item is not None
+            and item.state == "pending"
+            and not item.fyi
+            and not outage.shared_open(self.store, event.swarm)
+        ):
             clock = wake._Clock(now, window, wake.quiet_ms(self.environ))
             wake.wake_item(inbox, event.swarm, agents, self.herdr, self.ledger, item, clock)
         inbox, item = self._mail(event.data["key"])
@@ -141,8 +146,9 @@ class InboxWake:
         since = wake._seat_clock(
             inbox, receiver, held, {agent.name for agent in agents}, wake._swarm_config(inbox, slug)
         )
-        if since is None or outage.open_records(slug):
+        records = outage.shared(self.store, slug)
+        if since is None or any(record["ended_at"] is None for record in records.values()):
             return now + window
         last = max(since, *(row["at"] for row in history))
-        due = last + window + outage.paused_ms(slug, last, now)
+        due = last + window + outage.paused_in(records, last, now)
         return due if due > now else now + window

@@ -73,16 +73,21 @@ def open_records(slug: str) -> list[dict]:
 
 
 def share(store: RedisStore, slug: str) -> None:
-    """Publish the open outage records of ``slug`` to Redis, where a hub on another host reads them."""
+    """Publish the outage records of ``slug`` to Redis, where a hub on another host reads them."""
     redis: Any = cast(Any, store).redis
-    redis.set(store.key(slug, SHARED), json.dumps(open_records(slug)), ex=SHARED_TTL_S)
+    redis.set(store.key(slug, SHARED), json.dumps(read(slug)), ex=SHARED_TTL_S)
+
+
+def shared(store: RedisStore, slug: str) -> dict[str, Any]:
+    """The outage records of ``slug`` the tick last published to Redis."""
+    redis: Any = cast(Any, store).redis
+    raw: str | None = redis.get(store.key(slug, SHARED))
+    return cast(dict[str, Any], json.loads(raw)) if raw else {}
 
 
 def shared_open(store: RedisStore, slug: str) -> list[dict[str, Any]]:
     """The open outage records of ``slug`` the tick last published to Redis."""
-    redis: Any = cast(Any, store).redis
-    raw: str | None = redis.get(store.key(slug, SHARED))
-    return cast(list[dict[str, Any]], json.loads(raw)) if raw else []
+    return [record for record in shared(store, slug).values() if record["ended_at"] is None]
 
 
 def lines(slug: str) -> list[str]:
@@ -118,9 +123,14 @@ def held(store: RedisStore, slug: str, name: str | None) -> str:
 
 
 def paused_ms(slug: str, since_ms: int, now_ms: int) -> int:
+    return paused_in(read(slug), since_ms, now_ms)
+
+
+def paused_in(records: dict[str, Any], since_ms: int, now_ms: int) -> int:
+    """The outage time of ``records`` between ``since_ms`` and ``now_ms``, overlapping spans counted once."""
     spans = sorted(
         (max(started_at, since_ms), now_ms if ended_at is None else min(ended_at, now_ms))
-        for record in read(slug).values()
+        for record in records.values()
         for started_at, ended_at in [*record.get("past", []), [record["started_at"], record["ended_at"]]]
     )
     total, reach = 0, since_ms

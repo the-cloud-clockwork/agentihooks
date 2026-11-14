@@ -1,5 +1,6 @@
 import hashlib
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,7 +22,7 @@ def rig(monkeypatch):
     from scripts.hub.inbox_wake import InboxWake
     from scripts.hub.timers import Timers
     from scripts.inbox.store import InboxStore
-    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.store import AgentRecord, RedisStore
 
     clock = SimpleNamespace(now=1000)
     monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock.now)
@@ -29,7 +30,7 @@ def rig(monkeypatch):
     inbox = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     worker = AgentRecord("worker", "eng", "task", pane_id="p1", harness="codex")
     master = AgentRecord("boss", "master", "master", seat="master@sw")
-    store = SimpleNamespace(redis=inbox.redis, agents=lambda slug: [worker, master])
+    store = SimpleNamespace(redis=inbox.redis, agents=lambda slug: [worker, master], key=RedisStore(inbox.redis).key)
     bus, herdr, ledger = open_bus(BusConfig()), FakeHerdr({"p1": "idle"}), FakeLedger()
     reactor = InboxWake(bus, store=store, herdr=herdr, ledger=ledger, clock=lambda: clock.now)
     return SimpleNamespace(
@@ -39,6 +40,7 @@ def rig(monkeypatch):
         herdr=herdr,
         ledger=ledger,
         reactor=reactor,
+        store=store,
         timers=Timers(bus, lambda: clock.now),
         reader=bus.events.consumer("proof", "swarm.*.>"),
     )
@@ -279,9 +281,37 @@ def test_outage_time_is_excluded_before_timer_retry(rig):
     item, _ = send(rig)
     advance(rig, 1000)
     outage.observe("sw", "provider", ["worker (codex): stream disconnected before completion"], 1100)
+    outage.share(rig.store, "sw")
     advance(rig, 1000 + W)
     assert steps(rig, item) == ["woken"]
     outage.observe("sw", "provider", [], 1100 + W)
+    outage.share(rig.store, "sw")
+    advance(rig, 1000 + 2 * W - 1)
+    assert steps(rig, item) == ["woken"]
+    advance(rig, 1000 + 2 * W)
+    assert steps(rig, item) == ["woken", "woken"]
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_the_hub_wake_reads_the_outage_the_tick_shared_from_another_home(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import outage
+
+    def on_tick(kind_evidence: list[str], at_ms: int) -> None:
+        """Record the provider outage in the tick's home, share it, and leave the hub on its own empty home."""
+        monkeypatch.setattr(outage, "HOME", tmp_path / "tick")
+        outage.observe("sw", "provider", kind_evidence, at_ms)
+        outage.share(rig.store, "sw")
+        monkeypatch.setattr(outage, "HOME", tmp_path / "hub")
+
+    item, _ = send(rig)
+    advance(rig, 1000)
+    on_tick(["worker (codex): stream disconnected before completion"], 1100)
+    assert outage.open_records("sw") == []
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == ["woken"]
+    on_tick([], 1100 + W)
     advance(rig, 1000 + 2 * W - 1)
     assert steps(rig, item) == ["woken"]
     advance(rig, 1000 + 2 * W)
@@ -590,6 +620,7 @@ def test_partial_outage_keeps_the_remaining_window_instead_of_restarting_it(rig)
     item, _ = send(rig)
     outage.observe("sw", "provider", ["worker (codex): stream disconnected before completion"], 1100)
     outage.observe("sw", "provider", [], 1100 + W)
+    outage.share(rig.store, "sw")
     advance(rig, 1000 + W + 100)
     requests = rig.bus.events.consumer("remaining-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
     assert requests[-1].event.data["deadline_ms"] == 1000 + 2 * W
