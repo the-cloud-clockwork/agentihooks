@@ -14,6 +14,9 @@ class PaneObservation:
     content_refusal: bool = False
 
 
+REPLY_HEADS = ("●", "⎿")
+LOGIN_ERRORS = {"claude": ("Login reached its time limit · Please run /login",)}
+LOGIN_MARKS = "●⎿ \t\r\f\v"
 PROVIDER_ERRORS = {
     "claude": (
         r"API Error: (?:500|502|503|504|529)\b",
@@ -55,6 +58,15 @@ def provider_error(harness: str, text: str) -> str:
         if match := re.search(pattern, plain, re.I):
             return match.group(match.lastindex or 0)
     return ""
+
+
+def login_limit(harness: str, text: str) -> str:
+    """The Claude login error the last reply above the input box shows whole, or empty."""
+    lines = ESCAPE.sub("", text).splitlines()
+    marks = [i for i, line in enumerate(lines) if INPUT_MARK.match(line)]
+    above = lines[: marks[-1]] if marks else lines
+    heads = [line.lstrip(LOGIN_MARKS).rstrip() for line in above if line.lstrip()[:1] in REPLY_HEADS]
+    return next((error for error in LOGIN_ERRORS.get(harness, ()) if heads and error == heads[-1]), "")
 
 
 def provider_error_id(harness: str, text: str) -> str:

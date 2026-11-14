@@ -69,8 +69,17 @@ def operator_says(store, at, slug="sw", text="are you there"):
     return inbox.get(item.id)
 
 
-def run(store, runtime, at, slug="sw"):
-    return master_prompt_stall.run(slug, store.config(slug), store, FakeLedger([]), runtime, at)
+class AlertLedger(FakeLedger):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.alerts: list[tuple[str, str, str]] = []
+
+    def raise_alert(self, slug: str, source: str, text: str, item: str | None = None) -> None:
+        self.alerts.append((slug, source, text))
+
+
+def run(store, runtime, at, slug="sw", ledger=None):
+    return master_prompt_stall.run(slug, store.config(slug), store, ledger or AlertLedger(), runtime, at)
 
 
 def rows(slug="sw"):
@@ -314,3 +323,152 @@ def test_tick_recycles_a_master_on_a_question_and_a_fresh_master_answers_the_ope
 )
 def test_interrupted_prompt_reads_the_last_turn(harness, text, expected):
     assert interrupted_prompt(harness, text) is expected
+
+
+LOGIN_LIMIT = "● Login reached its time limit · Please run /login\n\n─────\n❯ \n─────\n"
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize("enforce", [True, False], ids=["reset-enforced", "reset-log-only"])
+@pytest.mark.parametrize("pane", [INTERRUPTED, PaneObservation("done")], ids=["idle", "done"])
+def test_a_master_on_a_login_limit_is_recycled_at_once_without_operator_items(
+    store: RedisStore, enforce: bool, pane: PaneObservation
+) -> None:
+    agent, runtime = master(store, pane, enforce=enforce)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert [a.state for a in store.agents("sw")] == ["finished"]
+    handoff = store.handoff("sw", MASTER)
+    assert f"{agent.name} {master_prompt_stall.LOGIN_LIMITED}" in handoff
+    assert handoff.endswith("<!-- handoff complete -->\n")
+    [row] = transfers.list_transfers(store, "sw")
+    assert (row["reason"], row["predecessor"]) == (master_stall.STALLED, agent.name)
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize("pane", [PaneObservation("working"), QUESTION], ids=["working", "question"])
+def test_a_master_not_idle_on_a_login_limit_stays(store: RedisStore, pane: PaneObservation) -> None:
+    agent, runtime = master(store, pane)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == []
+    assert [a.state for a in store.agents("sw")] != ["finished"]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_dead_master_pane_on_a_login_limit_is_left_to_master_down(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    runtime.live.discard(agent.name)
+    assert run(store, runtime, START) == []
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_master_on_a_login_limit_holds_while_the_operator_is_at_its_pane(store: RedisStore) -> None:
+    import os
+
+    from scripts.inbox import wake
+    from scripts.swarm import idle
+
+    agent, runtime = master(store, PaneObservation("idle", typed="/login"))
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == []
+    runtime.panes[agent.name] = INTERRUPTED
+    idle.prompted(store.redis, "sw", agent.name, START)
+    quiet = wake.quiet_ms(os.environ)
+    assert run(store, runtime, START + quiet - 1) == []
+    assert run(store, runtime, START + quiet) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    [row] = [r for r in rows() if r["reason"] == master_prompt_stall.LOGIN_LIMITED]
+    assert (row["gate"], row["tool"], row["agent"]) == ("reset", "recycle", agent.name)
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_relaunched_master_on_a_login_limit_waits_out_the_recycle_window(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    successor, _ = master(store, INTERRUPTED)
+    runtime.live.add(successor.name)
+    runtime.panes[successor.name] = INTERRUPTED
+    window = master_prompt_stall.RESET_MINUTES * MINUTE
+    assert run(store, runtime, START + window - 1) == []
+    ledger = AlertLedger()
+    assert run(store, runtime, START + window, ledger=ledger) == [
+        f"recycled master {successor.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}",
+        f"raised the master login alert: {master_prompt_stall.LOGIN_ALERT}",
+    ]
+    assert ledger.alerts == [("sw", master_prompt_stall.LOGIN_ALERT_SOURCE, master_prompt_stall.LOGIN_ALERT)]
+    third, _ = master(store, INTERRUPTED)
+    runtime.live.add(third.name)
+    runtime.panes[third.name] = INTERRUPTED
+    assert run(store, runtime, START + 2 * window, ledger=ledger) == [
+        f"recycled master {third.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert len(ledger.alerts) == 1
+    assert int(store.redis.get(store.key("sw", master_prompt_stall.LOGIN_ALERT_KEY))) == START + window
+    assert 0 < store.redis.ttl(store.key("sw", master_prompt_stall.LOGIN_ALERT_KEY)) <= master_prompt_stall.DAY_S
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_repeat_login_recycle_raises_no_alert_while_a_stored_slot_is_spare(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_claude_login
+
+    monkeypatch.setattr(master_claude_login, "spare", lambda: True)
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    ledger = AlertLedger()
+    run(store, runtime, START, ledger=ledger)
+    successor, _ = master(store, INTERRUPTED)
+    runtime.live.add(successor.name)
+    runtime.panes[successor.name] = INTERRUPTED
+    assert run(store, runtime, START + master_prompt_stall.RESET_MINUTES * MINUTE, ledger=ledger) == [
+        f"recycled master {successor.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert ledger.alerts == []
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_login_limit_recycle_marks_the_slots_the_master_holds(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_claude_login
+
+    marked: list[str] = []
+    monkeypatch.setattr(master_claude_login, "mark_held_failed", lambda name: marked.append(name) or [1])
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    run(store, runtime, START)
+    assert marked == [agent.name]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_login_limit_recycle_closes_the_retire_ask_and_stamps_its_window(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    master_retire.hold(store, "sw", agent, "a handoff was asked", True, START - MINUTE)
+    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert InboxStore(store.redis).get(ask.id).reason == f"done: {master_prompt_stall.LOGIN_RECYCLED}"
+    assert master_retire.reason(store, "sw", agent.name) == ""
+    assert f"Continue as the master of sw; {agent.name}" in store.handoff("sw", MASTER)
+    [row] = [r for r in rows() if r["reason"] == master_prompt_stall.LOGIN_LIMITED]
+    assert row["at"] == START
+    recycle = store.key("sw", master_prompt_stall.LOGIN_RECYCLE_KEY)
+    assert 0 < store.redis.ttl(recycle) <= master_prompt_stall.DAY_S
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_master_whose_pane_tail_cannot_be_read_stays(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = RuntimeError("pane gone")
+    assert run(store, runtime, START) == []
+    assert [a.state for a in store.agents("sw")] != ["finished"]
