@@ -4,10 +4,12 @@
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
-      "behaviour": "The hub's events admission seats a reclaimed task in the seat its saved launch assignment names, ahead of the handoff seat, as the legacy place spawn did, and the admitted task carries that saved assignment so the hive spawn keeps its model, effort, account, harness and profile.",
-      "seam": "Admission.admit for a hive spoke request, the admitted task's seat and launch assignment",
+      "behaviour": "The hub's events admission seats a reclaimed task in the seat its saved launch assignment names, ahead of the handoff seat, as the legacy place spawn did, and the admitted task carries that saved assignment so the hive spawn keeps its model, effort, account, harness and profile; an accepted launch report clears the saved assignment, as the legacy place started step did, so later lives take their handoff seat.",
+      "seam": "Admission.admit and Admission.launched for a hive spoke request, the admitted task's seat and launch assignment",
       "tests": [
-        "tests/hub/test_admission.py::test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names"
+        "tests/hub/test_admission.py::test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names",
+        "tests/hub/test_admission.py::test_a_reported_launch_clears_the_saved_launch_assignment_so_the_next_life_takes_its_handoff_seat",
+        "tests/hub/test_admission.py::test_a_refused_launch_report_keeps_the_saved_launch_assignment"
       ]
     },
     {

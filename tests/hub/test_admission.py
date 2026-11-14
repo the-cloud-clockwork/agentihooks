@@ -289,6 +289,29 @@ def test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names(
     assert admitted["task"]["launch_assignment"] == {**saved, "seat": "eng-3@sw"}
 
 
+@pytest.mark.feature("hub-admission-relaunch-assignment")
+def test_a_reported_launch_clears_the_saved_launch_assignment_so_the_next_life_takes_its_handoff_seat(
+    rig: SimpleNamespace,
+) -> None:
+    rig.store.redis.hset(rig.store.key(SLUG, "launch-assignments"), "t1", json.dumps({"seat": "eng-3@sw"}))
+    rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert rig.store.redis.hget(rig.store.key(SLUG, "launch-assignments"), "t1") is None
+
+
+@pytest.mark.feature("hub-admission-relaunch-assignment")
+def test_a_refused_launch_report_keeps_the_saved_launch_assignment(rig: SimpleNamespace) -> None:
+    saved = json.dumps({"seat": "eng-3@sw"})
+    rig.store.redis.hset(rig.store.key(SLUG, "launch-assignments"), "t1", saved)
+    rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
+
+    assert rig.store.redis.hget(rig.store.key(SLUG, "launch-assignments"), "t1") == saved
+
+
 CONTINUITY_DOC = "# Handoff v2\n## Next\nRead the saved proof and push the fix.\n## Read first\nNone\n"
 
 
