@@ -30,7 +30,8 @@ class Claims:
             return
         self.store = self.store or connect()
         task = event.data["task"]
-        legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), event.data["name"])
+        name = cast(str, event.data["name"])
+        legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), name)
         if legacy and json.loads(legacy)["state"] == "started":
             return
         lives = self.store.redis.eval(
@@ -46,7 +47,7 @@ class Claims:
         if lives:
             self.store.clear_failed_harness(event.swarm, task)
             store = cast(Any, self.store)
-            if store.claimant(event.swarm, task) == event.data["name"]:
+            if store.claimant(event.swarm, task) == name:
                 store.redis.hdel(store.key(event.swarm, "launch-assignments"), task)
             print(
                 f"hub: claim life swarm={event.swarm} task={task} execution={event.key} lives={lives}",
