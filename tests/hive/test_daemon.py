@@ -1143,6 +1143,7 @@ def test_service_contract():
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        "EnvironmentFile=-%h/.agentihooks/root-bus/bus.env\n"
         'ExecStart="/bin/agentihooks" hive run\n'
         "Restart=always\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING = "cpu", "ram", "quota", "placement", "node cap", "missing telemetry"
 MAX_AGENTS, DISK = "max agents", "disk"
+HELD = "held"
 HIVE_ADMISSION = "hive admission"
 REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
@@ -64,6 +65,10 @@ class Room:
     room: int
     reason: str
     detail: str
+
+
+class Held(RuntimeError):
+    """The hub kept an offer pending because the asking hive is at its max agents; another hive may take it."""
 
 
 def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
