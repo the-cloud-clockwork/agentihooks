@@ -86,7 +86,7 @@ def test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     original = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     store.put_agent("sw", replace(original, conversation_id="original-conversation", profile="engineer"))
     runtime.live.discard(original.name)

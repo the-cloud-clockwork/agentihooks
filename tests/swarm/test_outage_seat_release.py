@@ -86,6 +86,7 @@ def test_an_execution_without_task_authority_owns_its_recovery_only_when_local(s
     assert (owner.name in runtime.nudged) is recovered
 
 
+@pytest.mark.feature("swarm-legacy-outage-seat-release-successor")
 def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts(
     store, monkeypatch
 ):

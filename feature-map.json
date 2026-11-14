@@ -2249,6 +2249,16 @@
       ]
     },
     {
+      "id": "swarm-legacy-outage-seat-release-successor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
+      "behaviour": "When an owner's turns still fail after its provider probe passes, it frees its seat one tick after its recovery attempts. The next legacy tick spawn then launches the successor in that seat, carrying a transfer that names the avoided harness and holds a handoff with the pane error. Only the legacy place step launches that successor, and the events hub admission claim carries no handoff text, so this test retires with the legacy launch engine.",
+      "seam": "scripts.swarm.tick.tick outage seat release followed by the legacy place spawn of the successor",
+      "tests": [
+        "tests/swarm/test_outage_seat_release.py::test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts"
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
