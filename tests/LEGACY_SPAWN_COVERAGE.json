@@ -7,18 +7,6 @@
         "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin"
       ]
     },
-    "events-parked-retirement-after-release-refunds-nothing": {
-      "covered_by": [
-        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_refunds_nothing_once_its_claim_was_released",
-        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_still_holding_its_claim_refunds_its_life"
-      ]
-    },
-    "events-retirement-refunds-claim-life": {
-      "covered_by": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent"
-      ],
-      "gap": "An events launched agent with a recorded start is never retired for an account mismatch or idling: the observe verify and agents reap steps judge only hub reconciler legacy agents, and no hub or hive step retires it, so its claim life is never refunded on those retirements; ported by the events idle and mismatch retirement task."
-    },
     "events-smoke-no-legacy-launch": {
       "retires": "The clause that the tick lane launch is never called patches the legacy spawn function the removal deletes; the removal drops that patch and keeps the no worker spawn and open task assertions."
     },
@@ -27,6 +15,10 @@
     },
     "swarm-agent-record-launch-decision-at-spawn": {
       "retires": "The detached launch job and successor retry clauses retire with the launch job module."
+    },
+    "swarm-claim-refunds-legacy": {
+      "retires": "Each test counts tick respawns in the fake runtime's spawned list, which only the legacy spawn step fills; t-legacy-events-only deletes them with that step. The quota handoff and preemption refunds stay covered on the events path by tests/hub/test_lifecycle.py::test_exit_refunds_a_started_life_for_a_park_a_quota_handoff_or_an_operator_preemption, and the fourth claim block by tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution.",
+      "gap": "No events test yet refunds a life when the swarm retires an agent for an account mismatch or idling: the observe verify and agents reap steps judge only hub reconciler legacy agents, so an events launched agent with a recorded start is never retired for either; ported by the events idle and mismatch retirement task. The stop refund and the parked retirement refunds are covered by tests/swarm/test_events_claim_refunds.py."
     },
     "swarm-focus": {
       "covered_by": [
