@@ -56,7 +56,8 @@
         "tests/swarm/test_launch_check.py::test_a_clean_launch_passes",
         "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched",
         "tests/swarm/test_launch_check.py::test_not_joined_is_named"
-      ]
+      ],
+      "retires": "The tick judged launch checks of workers the legacy spawn started, with their one relaunch, retire with it; events workers get no launch check yet, filed as a follow up."
     },
     "swarm-master-skips-host-hold": {
       "covered_by": [
@@ -100,6 +101,18 @@
     },
     "swarm-tick-launch-cluster": {
       "retires": "The behaviour is the legacy launch cluster the spawn step drives."
+    },
+    "swarm-tick-legacy-claim-holds-and-overlaps": {
+      "retires": "The holds and the overlap payload are read off the legacy spawn's claims; under events hub readiness holds unready tasks and admission carries the overlaps (tests/hub/test_admission.py::test_an_admitted_task_carries_its_territory_overlaps_and_its_group)."
+    },
+    "swarm-tick-legacy-lane-fill": {
+      "retires": "The lane caps, spawn order, failed launch slots and per pass launch budget are the legacy spawn pass itself; under events hub readiness offers each task and a hive admits it against its own max agents (tests/hub/test_admission.py), so these retire with the spawn step."
+    },
+    "swarm-tick-legacy-master-start-holds-workers": {
+      "retires": "Only the clause that the legacy spawn launched no worker reaches the spawn; the removal drops that clause and keeps the master start, control command and state assertions."
+    },
+    "swarm-tick-legacy-respawn": {
+      "retires": "The same pass respawn after a reclaim is the legacy spawn; under events the tick reopens the task (swarm-tick-events-orphans) and hub admission seats the successor with its pull request state, handoff, branch and seat (tests/hub/test_admission.py)."
     },
     "swarm-tick-panic-holds-spawn": {
       "covered_by": [
