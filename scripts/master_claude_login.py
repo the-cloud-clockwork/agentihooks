@@ -697,6 +697,16 @@ def _token_lock(environ: Mapping[str, str]):
     return lock
 
 
+def bare_refusal(exc: Exception, environ: Mapping[str, str], fallback: bool) -> str | None:
+    """Return the route error for a failed launch, or None when it may fall back to bare Claude as a master."""
+    profile = environ.get("AGENTIHOOKS_PROFILE", "")
+    if not fallback:
+        return str(exc)
+    if not profile or profile == "master":
+        return None
+    return f"{exc}; bare Claude is refused for profile {profile}: it would start with no routed login"
+
+
 def trust_launch_folder(environ: Mapping[str, str], target: Path) -> None:
     """Record the launch folder as trusted in the Claude config home target, reporting a folder left untrusted."""
     from scripts.claude_trust import WAIT_NOTICE, ensure_trusted
