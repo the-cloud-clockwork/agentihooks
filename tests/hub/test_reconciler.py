@@ -793,6 +793,7 @@ def test_a_hub_admitted_agent_its_beating_hive_no_longer_lists_is_settled_once(
 ) -> None:
     _hub_admitted(rig, names, pod_started, 0)
     rig.react.poll()
+    assert len(rig.returned) == 1
     rig.clock.return_value += 300_000
     rig.report["observed_at"] = rig.clock()
     rig.save()
@@ -824,6 +825,17 @@ def test_a_hub_admitted_agent_its_hive_still_lists_or_cannot_yet_disown_is_prese
     assert rig.returned == []
     assert rig.row["state"] == "claimed"
     assert rig.store.agents("rig") == [rig.agent]
+
+
+@pytest.mark.feature("hub-reap-unlisted-agent")
+def test_a_host_targeted_agent_the_same_report_no_longer_lists_is_preserved(rig: SimpleNamespace) -> None:
+    _hub_admitted(rig, [], 900_001, 0)
+    agent = replace(rig.agent, runtime_target={"host_id": "hive"})
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    rig.react.poll()
+    assert rig.returned == []
+    assert rig.store.agents("rig") == [agent]
 
 
 @pytest.mark.feature("hub-reap-unlisted-agent")

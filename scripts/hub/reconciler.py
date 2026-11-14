@@ -71,7 +71,8 @@ def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) 
     if isinstance(panes, list) and bool(agent.pane_id) and agent.pane_id not in panes:
         return True
     launched = max(agent.started_at, agent.launched_at, event.time)
-    return observed - launched >= reports.STARTUP_MS and reports.unlisted(report, agent, launched)
+    hub_admitted = not agent.runtime_target
+    return hub_admitted and observed - launched >= reports.STARTUP_MS and reports.unlisted(report, agent, launched)
 
 
 def _ending(
