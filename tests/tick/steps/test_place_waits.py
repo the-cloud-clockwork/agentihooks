@@ -27,5 +27,3 @@ def test_a_settled_launch_activates_its_held_reservation(
     place._settle_admission("sw", "runtime", SimpleNamespace(task="t1"))
     expected: list[tuple[Any, ...]] = [("held", "sw", "t1")] if has_gate else []
     assert calls == expected + ([("activate", ("sw", "t1", "r1"))] if activated else [])
-
-

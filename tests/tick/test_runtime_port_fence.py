@@ -1,15 +1,12 @@
 """The runtime port fences the pass runtime to the held lease, and the ack pass takes its lease and fence through the
 port tools."""
 
-import os
 from typing import Any, cast
 
 import pytest
 
-from scripts.swarm import ack_pass, cli, commands, controller, lease, ledger_client
-from scripts.swarm import tick as engine
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.tick.adapters.fakes import FakeCoordination, FakeRuntime, fake_tools
+from scripts.swarm import cli, controller, lease
+from scripts.tick.adapters.fakes import FakeRuntime, fake_tools
 from scripts.tick.adapters.runtime import RouterRuntime
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import UndeclaredEffect
