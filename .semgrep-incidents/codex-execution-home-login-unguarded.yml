@@ -1,0 +1,17 @@
+rules:
+  - id: codex-execution-home-login-unguarded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The Codex execution home linked the operator default login for every launch, so a token or api routed account
+      ran beside the operator login. Link auth.json only when the launch carries no routed credential, under a test
+      of the launch allowed_tokens.
+    paths:
+      include:
+        - /scripts/codex_session/
+        - codex-execution-home-login-unguarded.py
+    patterns:
+      - pattern: ($HOME / "auth.json").symlink_to(...)
+      - pattern-not-inside: |
+          if <... not $SPEC.allowed_tokens ...>:
+              ...

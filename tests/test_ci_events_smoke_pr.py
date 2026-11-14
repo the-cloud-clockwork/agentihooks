@@ -17,6 +17,7 @@ SEAMS = {
     "test_a_hive_at_its_max_agents_takes_no_admission_and_a_hive_below_it_takes_the_offer",
     "test_an_engine_switch_exits_no_running_execution",
     "test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work",
+    "test_the_hub_stops_a_seated_execution_and_its_hive_reaps_it_and_publishes_the_exit",
 }
 
 

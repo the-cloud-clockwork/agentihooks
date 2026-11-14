@@ -22,7 +22,7 @@ def started(admitted):
         version=task["execution_generation"],
         time=7_000,
         author="hive-a",
-        data={"task": "t1", "name": admitted["name"], "claim_key": "claim", "hive": "hive-a"},
+        data={"task": "t1", "name": admitted["name"], "claim_key": "claim", "hive": "hive-a", "pane_id": "w1:p3"},
     )
 
 
@@ -53,6 +53,112 @@ def test_a_counted_start_clears_the_harness_its_earlier_launch_failed_on(rig):
     claims.Claims(rig.store).handle(started(admitted))
 
     assert rig.store.failed_harness(SLUG, "t1") == ""
+
+
+@pytest.mark.feature("events-started-working")
+def test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+    event = started(admitted)
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": 6_500}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.name, agent.state, agent.pane_id, agent.launched_at) == (admitted["name"], "working", "w1:p3", 6_500)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time(rig):
+    claims.Claims(rig.store).handle(replace(started(rig.admitter.admit(SLUG, ask())), time=7_100))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("working", "w1:p3", 7_100)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_late_start_never_revives_a_finished_agent(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    [agent] = rig.store.agents(SLUG)
+    rig.store.execution_registry.update(SLUG, replace(agent, state="finished"))
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": 6_500}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("finished", "", 0)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_launch_decision_after_the_start_still_reaches_the_working_agent(rig):
+    from tests.hub.test_admission import LAUNCH
+
+    claims.Claims(rig.store).handle(started(rig.admitter.admit(SLUG, ask())))
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.harness, agent.model) == ("working", "w1:p3", "codex", "gpt-5")
+
+
+@pytest.mark.feature("events-started-working")
+@pytest.mark.parametrize("launched_at", [0, None])
+def test_a_start_with_an_empty_launch_time_takes_the_event_time(rig, launched_at):
+    event = replace(started(rig.admitter.admit(SLUG, ask())), time=7_100)
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": launched_at}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.launched_at) == ("working", 7_100)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_rebuilt_start_without_a_pane_counts_the_life_and_leaves_the_agent_starting(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "pane_id": ""}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("starting", "", 0)
+    assert rig.store.claims(SLUG, "t1") == 1
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both(rig, monkeypatch):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    registry = rig.store.execution_registry
+    real = registry.set_launch
+
+    def refused(*args, **kwargs):
+        raise ConnectionError("redis gone")
+
+    monkeypatch.setattr(registry, "set_launch", refused)
+    with pytest.raises(ConnectionError):
+        claims.Claims(rig.store).handle(event)
+    assert rig.store.claims(SLUG, "t1") == 0
+
+    monkeypatch.setattr(registry, "set_launch", real)
+    claims.Claims(rig.store).handle(replace(event, id="redelivery"))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, rig.store.claims(SLUG, "t1")) == ("working", "w1:p3", 1)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_projection_that_raises_after_the_write_is_projected_again_on_redelivery(rig, monkeypatch):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    project = rig.store.project_agent
+
+    def refused(*args, **kwargs):
+        raise ConnectionError("redis gone")
+
+    monkeypatch.setattr(rig.store, "project_agent", refused)
+    with pytest.raises(ConnectionError):
+        claims.Claims(rig.store).handle(event)
+    monkeypatch.setattr(rig.store, "project_agent", project)
+    [shown] = rig.store.agents(SLUG)
+    assert (shown.state, rig.store.claims(SLUG, "t1")) == ("starting", 0)
+
+    claims.Claims(rig.store).handle(replace(event, id="redelivery"))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, rig.store.claims(SLUG, "t1")) == ("working", "w1:p3", 1)
 
 
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
