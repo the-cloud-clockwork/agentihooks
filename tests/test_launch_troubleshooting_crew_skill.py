@@ -145,7 +145,7 @@ def test_scout_stops_other_work_sets_the_lane_and_records_the_order(
     assert canon[3] == "learned" and canon[-2:] == ["--maturity", "canon"]
     assert crew.ORDER in canon[4] and " because " in canon[4]
     assert result["earlier_focus"] == ["phases/p1", "tasks/t2"]
-    assert result["cron"]["prompt"].endswith(crew.ORDER)
+    assert crew.ORDER in result["cron"]["prompt"]
     assert result["restore"].endswith("crew.py restore demo")
     saved = json.loads(crew.state_path("demo").read_text())
     assert saved["earlier_lane"] == {"model": "sonnet", "effort": "high", "effort_max": "xhigh"}

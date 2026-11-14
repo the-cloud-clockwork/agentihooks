@@ -1,6 +1,12 @@
 ---
 name: launch-troubleshooting-crew
-description: Launches the operator's brute force troubleshooting crew on a swarm: stop all other work, five scouts at opus max until every cause is proven, five fixers at opus xhigh working together, three critics at fable xhigh as master sub agents, then hardening with feature map, Semgrep, unit, smoke and anti regression tests. Counts, models and efforts are overridable on the call. Use when one problem has stayed unsolved for two hours, or when the operator says "launch the troubleshooting crew", "brute force this", "send the scouts" or "launch-troubleshooting-crew".
+description: >-
+  Launches the operator's brute force troubleshooting crew on a swarm: stop all other work, five
+  scouts at opus max until every cause is proven, five fixers at opus xhigh working together, three
+  critics at fable xhigh as master sub agents, then hardening with feature map, Semgrep, unit, smoke
+  and anti regression tests. Counts, models and efforts are overridable on the call. Use when one
+  problem has stayed unsolved for two hours, or when the operator says "launch the troubleshooting
+  crew", "brute force this", "send the scouts" or "launch-troubleshooting-crew".
 argument-hint: "<slug> [--scouts N] [--fixers N] [--critics N] [--<role>-model M] [--<role>-effort E]"
 ---
 
