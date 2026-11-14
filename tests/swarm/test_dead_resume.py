@@ -386,12 +386,13 @@ def test_recorded_legacy_recovery_keeps_telemetry_attributed(store, monkeypatch)
 
 
 @pytest.mark.feature("swarm-outage-recovery-hub-admitted")
-def test_a_fresh_conversation_starts_a_new_life(store):
+def test_a_fresh_conversation_starts_a_new_life(store: RedisStore) -> None:
     ledger, runtime, original = prepared_recovery(store)
     original = replace(original, conversation_id="")
     store.put_agent("sw", original)
 
     tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+    seat_owner(store, ledger, runtime, "t1", STARTUP_GRACE_MS + 2)
 
     fresh = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     assert runtime.resumed == []

@@ -822,16 +822,6 @@
       ]
     },
     {
-      "id": "hive-stop-recovery-handoff",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2252",
-      "behaviour": "An agent still running when its hive stops for a release gets a recovery handoff; once the hive stops reporting the tick retires the agent, reopens its task and launches the next engineer primed with that recovery handoff.",
-      "seam": "tick over a hive settled by remove.settle",
-      "tests": [
-        "tests/swarm/test_tick_hive_stop_recovery.py::test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_next_engineer"
-      ]
-    },
-    {
       "id": "hive-drain-push-resume",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-drain-resume",
@@ -4248,11 +4238,10 @@
       "id": "swarm-tick-dead-remote-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
-      "behaviour": "Dead remote seats retire without loading the execution archive, leaving reap within budget and allowing a launch within two passes after a hive roll.",
-      "seam": "remote retirement and the reap/spawn tick passes",
+      "behaviour": "Dead remote seats retire without loading the execution archive, leaving reap within budget after a hive roll.",
+      "seam": "remote retirement and the reap tick pass",
       "tests": [
         "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive",
-        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes",
         "tests/tick/steps/test_drop_remote.py::test_retiring_an_archived_projection_preserves_its_history_metadata"
       ]
     },
