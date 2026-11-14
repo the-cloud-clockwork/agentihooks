@@ -583,6 +583,9 @@
         "tests/hive/test_nats_grant.py::test_a_mint_against_a_signer_record_with_member_swarms_is_unchanged",
         "tests/hive/test_nats_grant.py::test_a_refresh_against_a_signer_record_without_member_swarms_is_refused_before_rotating",
         "tests/hive/test_root_bus.py::test_a_signer_record_without_member_swarms_mints_no_root_credential"
+      ],
+      "rules": [
+        "hub-mint-unscoped-member-grant"
       ]
     },
     {

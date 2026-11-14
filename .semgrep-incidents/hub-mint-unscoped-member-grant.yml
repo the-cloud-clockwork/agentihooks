@@ -1,0 +1,10 @@
+rules:
+  - id: hub-mint-unscoped-member-grant
+    languages: [python]
+    severity: ERROR
+    message: Refuse a hub signer record whose member_swarms is None instead of skipping the membership check, because a guard that only checked listed members let the hub mint swarm wide member bus credentials from a record without the field.
+    pattern: $SIGNER.member_swarms is not None and $LISTED
+    paths:
+      include:
+        - /scripts/hive/
+        - hub-mint-unscoped-member-grant.py
