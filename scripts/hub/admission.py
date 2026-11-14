@@ -200,7 +200,7 @@ class Admission:
         if not self.store.claim(slug, task_id, name, tick.LEASE_MS):
             return None
         taken = {agent.seat for agent in self.store.agents(slug)}
-        saved = cast(str | None, self.store.redis.hget(self.store.key(slug, "launch-assignments"), task_id))
+        saved = cast(Any, self.store).redis.hget(self.store.key(slug, "launch-assignments"), task_id)
         preferred = cast(str, json.loads(saved)["seat"] if saved else self.store.handoff_seat(slug, task_id))
         seat = tick._free_seat(slug, lane, taken, preferred)
         record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
@@ -371,7 +371,7 @@ class Admission:
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
             return False
-        _ = self.store.redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
+        cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         if any(getattr(occupant, field) != value for field, value in decision.items()):
             launch_check.begin(self.store, slug, occupant, self.clock())
         return True
