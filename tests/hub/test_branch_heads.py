@@ -107,6 +107,23 @@ def test_a_stored_origin_skips_a_forbidden_recorded_branch(monkeypatch: pytest.M
     assert found["continue_from"] == "fresh"
 
 
+def test_a_stored_origin_reclaim_hands_its_repository_and_read_heads_to_the_shared_reclaim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _graphql(monkeypatch, {"b0": {"target": {"oid": "abc"}}})
+    seen: list[tuple[str, list[str], str, Any, Any]] = []
+
+    def shared(repo: str, lives: list[str], recorded: str, forbidden: Any = (), heads: Any = None) -> dict[str, str]:
+        seen.append((repo, lives, recorded, forbidden, heads))
+        return {"continue_from": "seen"}
+
+    monkeypatch.setattr(envelope, "reclaim", shared)
+    reclaim, _ = branch_heads.reclaimer(SwarmConfig("sw", "/repo", 1, 1, repo_origin=ORIGIN))
+
+    assert reclaim(ORIGIN, [], "kept", forbidden={"other"}) == {"continue_from": "seen"}
+    assert seen == [(ORIGIN, [], "kept", {"other"}, {"kept": "abc"})]
+
+
 def test_no_stored_origin_reads_the_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(envelope, "remote_heads", lambda repo: {"kept": f"head of {repo}"})
     monkeypatch.setattr(stack, "origin_key", lambda repo: f"key of {repo}")
