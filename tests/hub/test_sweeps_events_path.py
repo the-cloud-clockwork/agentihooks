@@ -72,11 +72,10 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
     store.seats.occupy(SEAT, agent.name, agent.generation)
     store.redis.set(store.key(SLUG, "claim", agent.task), agent.name)
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
-    ledger: Any = SimpleNamespace(task=lambda *_: dict(row), writes=[])
+    ledger: Any = SimpleNamespace(task=lambda *_: dict(row))
 
     def update(*args: Any, **kwargs: Any) -> None:
-        """Record a ledger task write and apply it to the row."""
-        ledger.writes.append((args, kwargs))
+        """Apply a ledger task write to the row."""
         row.update(args[2])
 
     ledger.update_task = update
