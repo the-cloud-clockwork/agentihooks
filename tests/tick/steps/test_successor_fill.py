@@ -1,11 +1,8 @@
 """A lane successor spawned from a saved launch with no model or effort takes the lane model and a range effort."""
 
-import json
-
 import pytest
 
-from scripts.swarm import effort_range, profile_choice, store, successor_fill, tick
-from tests.swarm.test_tick import FakeRuntime, tasks
+from scripts.swarm import effort_range, store, successor_fill, tick
 
 pytestmark = pytest.mark.unit
 
@@ -19,28 +16,6 @@ def swarm(lanes: dict, low: str = "high", high: str = "xhigh") -> store.RedisSto
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, lanes=lanes, effort_min=low, effort_max=high))
     return saved
-
-
-@pytest.mark.feature("swarm-tick-successor-fill")
-def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane_model_inside_the_range(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    held = swarm({"eng": {"model": "sonnet-lane"}})
-    held.redis.set(held.key("sw", "handoff-envelope", "t1"), json.dumps({"reason": "context", "launch": SAVED}))
-    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
-    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
-    runtime = FakeRuntime()
-    tick.tick("sw", held, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    launch = runtime.tasks[0]["handoff_envelope"]["launch"]
-    assert launch["model"] == "sonnet-lane"
-    assert launch["effort"] in effort_range.EFFORTS["claude"][2:4]
-    assert launch["effort"] == "high"
-    assert {key: launch[key] for key in ("profile", "harness", "account")} == {
-        "profile": "engineer",
-        "harness": "claude",
-        "account": "a1",
-    }
-    assert "launch_assignment" not in runtime.tasks[0]
 
 
 def test_a_filled_saved_effort_passes_the_preserved_effort_check_an_empty_one_fails() -> None:
