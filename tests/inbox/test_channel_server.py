@@ -323,6 +323,7 @@ def test_a_failed_pass_with_a_broken_stderr_still_retries_and_pushes(
     assert pushed["params"]["meta"]["item_id"] == item.id
 
 
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
 def test_the_push_loop_writes_a_heartbeat_on_stderr(
     store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
