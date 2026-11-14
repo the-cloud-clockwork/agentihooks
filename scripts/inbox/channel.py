@@ -186,11 +186,12 @@ async def _push(
 
     pubsub, delay, pushed, beat = None, RETRY_FIRST_S, Pushed(), float("-inf")
     try:
+        _log(f"push loop for {me} waiting for the tools list")
         await ready.wait()
         await anyio.sleep(SETTLE_S)
         while True:
-            beat = _heartbeat(me, beat, len(pushed.shown))
             try:
+                beat = _heartbeat(me, beat, len(pushed.shown))
                 if pubsub is None and feed is None:
                     pubsub = store.redis.pubsub()
                     pubsub.subscribe(NOTIFY)
@@ -201,10 +202,8 @@ async def _push(
                     await _pull(feed)
                 delay = RETRY_FIRST_S
             except Exception:
-                if pubsub is not None:
-                    pubsub.close()
-                    pubsub = None
                 _log(f"push pass failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
+                pubsub = _dropped(pubsub)
                 await anyio.sleep(delay)
                 delay = min(delay * 2, RETRY_MAX_S)
     finally:
@@ -215,7 +214,28 @@ async def _push(
 
 
 def _log(text: str) -> None:
-    print(f"agentihooks inbox channel: {text}", file=sys.stderr, flush=True)
+    try:
+        print(f"agentihooks inbox channel: {text}", file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+def _dropped(pubsub: Any) -> None:
+    if pubsub is None:
+        return None
+    try:
+        pubsub.close()
+    except Exception:
+        _log(f"closing the inbox subscription failed\n{traceback.format_exc()}")
+    return None
+
+
+def _feed(store: "InboxStore", me: str) -> SeatFeed | None:
+    try:
+        return feed_for(store, me)
+    except Exception:
+        _log(f"seat feed failed for {me}; pushing from Redis notify\n{traceback.format_exc()}")
+        return None
 
 
 def _heartbeat(me: str, last: float, shown: int) -> float:
@@ -262,10 +282,11 @@ async def run(store, me, read, write, active=True, feed=None):
         while store is None:
             try:
                 store = await anyio.to_thread.run_sync(connect)
-            except InboxError:
+            except Exception:
+                _log(f"inbox connect failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
                 await anyio.sleep(delay)
                 delay = min(delay * 2, 30.0)
-        await _push(store, me, write, ready, feed if feed is not None else feed_for(store, me))
+        await _push(store, me, write, ready, feed if feed is not None else _feed(store, me))
 
     options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:
