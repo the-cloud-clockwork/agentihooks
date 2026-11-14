@@ -111,9 +111,11 @@ class Stopper:
             return []
 
     def _settle(self, delivery: Delivery) -> str:
-        """Acks a settled stop and returns a failed reap for redelivery."""
+        """Acks a settled stop and returns a failed reap for redelivery, saying so on stderr."""
         outcome = self.handle(delivery.event)
         if outcome == FAILED:
+            name = _fields(delivery.event)["name"]
+            print(f"hive execution stop for {name} in swarm {self.swarm} could not reap it; retrying", file=sys.stderr)
             delivery.nak()
         else:
             delivery.ack()
