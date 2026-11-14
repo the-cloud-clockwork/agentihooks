@@ -229,6 +229,8 @@ def test_status_keeps_remote_agents_outside_the_local_process_table(store, monke
 def test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from dataclasses import replace
+
     from scripts.swarm import commands
     from scripts.swarm.runtime import HerdrRuntime
 
@@ -236,10 +238,12 @@ def test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_ta
     monkeypatch.setattr(commands, "hive_id", lambda: "root")
     monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
     names: list[str] = []
-    for seat, hive in enumerate(("06db8fa06259f56a", "root", ""), 1):
+    for seat, hive in enumerate(("06db8fa06259f56a", "root", "", "06db8fa06259f56a"), 1):
         name = store.next_name("sw", "eng", 1_000)
         store.start_execution("sw", AgentRecord(name, "eng", f"t{seat}", seat=f"eng-{seat}@sw", hive=hive))
         names.append(name)
+    ended = next(agent for agent in store.agents("sw") if agent.name == names[3])
+    store.put_agent("sw", replace(ended, state="finished"))
     report = status.status_report(store, "sw", {"tasks": []})
     assert [agent["name"] for agent in report["agents"]] == names[:1]
     assert {agent.name for agent in store.agents("sw")} == set(names)
