@@ -28,7 +28,8 @@ from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
 SHARED_DIRS = ("projects", "sessions", "todos")
-SHARED = (*SHARED_DIRS, "plugins", ".credentials.json", "keybindings.json")
+SHARED = (*SHARED_DIRS, "plugins", "keybindings.json")
+LOGIN_CREDENTIALS = ".credentials.json"
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
@@ -442,6 +443,7 @@ def _claude_fresh(root: Path, stamp: dict[str, Any], required: set[str]) -> bool
     return (
         _read_json(out / STAMP) == stamp
         and all((out / item).is_symlink() for item in SHARED)
+        and not (out / LOGIN_CREDENTIALS).is_symlink()
         and not (out / "rules").exists()
         and sources.path(root.name, "claude", root.parent).is_file()
         and (out / binding.FILE).is_file()
