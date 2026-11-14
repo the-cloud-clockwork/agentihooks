@@ -9,6 +9,7 @@ from dataclasses import replace
 from typing import Any, cast
 
 from scripts.events.bus import Bus, Consumer, Delivery
+from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.subjects import subject
 from scripts.hive import execution_events
@@ -25,6 +26,9 @@ STOPPED = "stopped"
 FAILED = "failed"
 REASON = "stopped"
 BATCH = 10
+PENDING = "pending"
+RETRY_MS = 30_000
+POLICY = QueuePolicy(max_deliver=100_000, ack_wait_ms=RETRY_MS)
 
 
 def stop_subject(swarm: str, hive: str) -> str:
@@ -77,7 +81,8 @@ def request(event: Envelope, reason: str) -> Envelope:
 
 def stop(bus: Bus, slug: str, agent: AgentRecord, reason: str) -> str:
     """Publishes the stop for one admitted execution to the hive that started it; answers unknown when no hive started
-    it and ended when it already ended, publishing nothing for either."""
+    it and ended when it already ended, publishing nothing for either, and pending when the same stop is still inside
+    the bus dedupe window."""
     event = started(bus, slug, agent.name, agent.generation)
     if event is None or event.key != agent.execution_id:
         return UNKNOWN
@@ -85,9 +90,15 @@ def stop(bus: Bus, slug: str, agent: AgentRecord, reason: str) -> str:
         return ENDED
     hive = _fields(event)["hive"]
     events = bus.for_swarm(slug).events
-    events.consumer(durable(slug, hive), stop_subject(slug, hive))
-    events.publish(stop_subject(slug, hive), request(event, reason))
-    return SENT
+    events.consumer(durable(slug, hive), stop_subject(slug, hive), POLICY)
+    return SENT if events.publish(stop_subject(slug, hive), request(event, reason)) else PENDING
+
+
+def _unprovisioned(exc: Exception) -> bool:
+    """True when the bus refuses to bind a stop consumer because the hub has not created it yet."""
+    from nats.js.errors import NotFoundError
+
+    return isinstance(exc, NotFoundError)
 
 
 class Stopper:
@@ -98,40 +109,53 @@ class Stopper:
         self._consumer: Consumer | None = None
 
     def poll(self, timeout_ms: int = 0) -> list[str]:
-        """Settles every stop waiting for this hive and answers each outcome; a stop consumer the hub has not yet
-        provisioned or a failed read answers nothing until the next pass."""
+        """Settles every stop waiting for this hive and answers each outcome; before the hub creates this hive's stop
+        consumer, and on a failed read, it answers nothing until the next pass."""
         try:
             if self._consumer is None:
                 self._consumer = self.bus.events.consumer(
-                    durable(self.swarm, self.hive), stop_subject(self.swarm, self.hive)
+                    durable(self.swarm, self.hive), stop_subject(self.swarm, self.hive), POLICY
                 )
-            return [self._settle(delivery) for delivery in self._consumer.fetch(BATCH, timeout_ms)]
+            deliveries = self._consumer.fetch(BATCH, timeout_ms)
         except Exception as exc:
-            print(f"hive execution stops for swarm {self.swarm} failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            if not _unprovisioned(exc):
+                self._failed(exc)
             return []
+        return [self._settle(delivery) for delivery in deliveries]
+
+    def _failed(self, exc: Exception) -> None:
+        """Says on stderr that reading or handling a stop failed."""
+        print(f"hive execution stops for swarm {self.swarm} failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
     def _settle(self, delivery: Delivery) -> str:
-        """Acks a settled stop and returns a failed reap for redelivery, saying so on stderr."""
-        outcome = self.handle(delivery.event)
+        """Acks a settled stop; a stop whose reap failed or raised is said on stderr and redelivered after a delay, so
+        it is kept for as long as the agent lives."""
+        try:
+            outcome = self.handle(delivery.event)
+        except Exception as exc:
+            self._failed(exc)
+            outcome = FAILED
         if outcome == FAILED:
-            name = _fields(delivery.event)["name"]
+            name = _fields(delivery.event).get("name")
             print(f"hive execution stop for {name} in swarm {self.swarm} could not reap it; retrying", file=sys.stderr)
-            delivery.nak()
+            delivery.nak(RETRY_MS)
         else:
             delivery.ack()
         return outcome
 
     def handle(self, event: Envelope) -> str:
-        """Reaps the execution one stop names when this hive owns it and it has not ended, then emits its exit."""
+        """Reaps the execution one stop names when this hive owns it, then emits its exit; an execution that already
+        ended is still reaped when its agent outlived the exit, and emits nothing."""
         if event.type != TYPE or _fields(event).get("hive") != self.hive:
             return FOREIGN
         found = started(self.bus, event.swarm, _fields(event)["name"], event.version)
         if found is None or found.key != event.key or _fields(found).get("hive") != self.hive:
             return FOREIGN
-        if ended(self.bus, found):
-            return ENDED
+        gone = ended(self.bus, found)
         if not self._reap(_fields(event)["name"]):
             return FAILED
+        if gone:
+            return ENDED
         data = {**_fields(found), "reason": REASON, "stop_reason": _fields(event)["reason"]}
         exited = replace(
             found, id=f"exited:{found.id}", type="execution.exited", time=_now(), data=data, cause=found.id

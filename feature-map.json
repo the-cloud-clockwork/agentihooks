@@ -6203,11 +6203,17 @@
       "tests": [
         "tests/hive/test_execution_stop.py::test_a_stop_reaps_the_execution_on_its_hive_and_ends_it_through_the_exited_lifecycle",
         "tests/hive/test_execution_stop.py::test_a_redelivered_stop_reaps_nothing_more_and_emits_no_second_exit",
+        "tests/hive/test_execution_stop.py::test_a_second_stop_inside_the_dedupe_window_answers_pending",
         "tests/hive/test_execution_stop.py::test_a_spoke_that_does_not_own_the_execution_ignores_its_stop",
         "tests/hive/test_execution_stop.py::test_the_hub_refuses_to_stop_an_execution_that_already_ended",
+        "tests/hive/test_execution_stop.py::test_the_hub_refuses_to_stop_an_execution_whose_claim_is_gone",
         "tests/hive/test_execution_stop.py::test_the_hub_answers_unknown_for_an_execution_no_hive_started",
-        "tests/hive/test_execution_stop.py::test_a_failed_reap_emits_no_exit_and_is_retried",
+        "tests/hive/test_execution_stop.py::test_a_stop_reaching_a_hive_after_its_execution_ended_still_reaps_a_surviving_agent",
+        "tests/hive/test_execution_stop.py::test_a_failed_reap_emits_no_exit_and_is_retried_past_the_default_delivery_limit",
+        "tests/hive/test_execution_stop.py::test_a_stop_whose_handling_raises_is_retried_and_the_rest_of_the_batch_settles",
         "tests/hive/test_execution_stop.py::test_an_execution_already_gone_from_its_hive_still_ends_without_a_reap",
+        "tests/hive/test_execution_stop.py::test_a_hive_reads_nothing_and_says_nothing_before_the_hub_creates_its_stop_consumer",
+        "tests/hive/test_execution_stop.py::test_the_lane_loop_stops_executions_in_every_events_swarm_and_keeps_each_stopper",
         "tests/hive/test_execution_stop.py::test_the_lane_loop_honors_stops_every_pass_draining_or_not"
       ]
     },
