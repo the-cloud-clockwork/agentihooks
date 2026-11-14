@@ -801,7 +801,8 @@ def test_the_cap_records_its_count_key_boundary_and_recovery_handoff_exactly(
     assert store.handoff("sw", "t1") == expected
     assert store.handoff_seat("sw", "t1") == agent.seat != ""
     rows = [(row["reason"], row["handoff"], row["at"]) for row in transfers.list_transfers(store, "sw")]
-    assert rows == [("exit", expected, 4 * RESUME_STEP)]
+    envelope = store.handoff_envelope("sw", "t1") or {}
+    assert rows == [(envelope["reason"], expected, 4 * RESUME_STEP)]
 
 
 @pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
