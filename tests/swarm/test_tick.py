@@ -824,6 +824,26 @@ def test_a_stopping_master_is_retired_with_the_master_scratch_homes(store, scrat
     assert runtime.homes["master@a1b2c3-0001"] == homes
 
 
+RECLAIMED = {
+    "remote_branch": "engineer-a1b2c3-0001",
+    "remote_head": "4f2a9c0",
+    "continue_from": "origin/engineer-a1b2c3-0001",
+    "fresh_reason": "none",
+}
+
+
+@pytest.fixture
+def reclaims(monkeypatch):
+    seen = []
+
+    def lookup(repo, lives, recorded, heads=None):
+        seen.append((repo, lives, recorded))
+        return RECLAIMED
+
+    monkeypatch.setattr("scripts.swarm.tick.reclaim", lookup)
+    return seen
+
+
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     seat_owner(store, ledger, runtime, "t1", 1_000)
