@@ -22,7 +22,7 @@ def started(admitted):
         version=task["execution_generation"],
         time=7_000,
         author="hive-a",
-        data={"task": "t1", "name": admitted["name"], "claim_key": "claim", "hive": "hive-a"},
+        data={"task": "t1", "name": admitted["name"], "claim_key": "claim", "hive": "hive-a", "pane_id": "w1:p3"},
     )
 
 
@@ -60,7 +60,7 @@ def test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time
     admitted = rig.admitter.admit(SLUG, ask())
     event = started(admitted)
 
-    claims.Claims(rig.store).handle(replace(event, data={**event.data, "pane_id": "w1:p3", "launched_at": 6_500}))
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": 6_500}))
 
     [agent] = rig.store.agents(SLUG)
     assert (agent.name, agent.state, agent.pane_id, agent.launched_at) == (admitted["name"], "working", "w1:p3", 6_500)
@@ -68,13 +68,22 @@ def test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time
 
 @pytest.mark.feature("events-started-working")
 def test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time(rig):
-    admitted = rig.admitter.admit(SLUG, ask())
-    event = started(admitted)
-
-    claims.Claims(rig.store).handle(replace(event, data={**event.data, "pane_id": "w1:p3"}))
+    claims.Claims(rig.store).handle(replace(started(rig.admitter.admit(SLUG, ask())), time=7_100))
 
     [agent] = rig.store.agents(SLUG)
-    assert (agent.state, agent.pane_id, agent.launched_at) == ("working", "w1:p3", 7_000)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("working", "w1:p3", 7_100)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_late_start_never_revives_a_finished_agent(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    [agent] = rig.store.agents(SLUG)
+    rig.store.execution_registry.update(SLUG, replace(agent, state="finished"))
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": 6_500}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("finished", "", 0)
 
 
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])

@@ -228,6 +228,31 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     assert real_take(0) is None
 
 
+@pytest.mark.feature("events-started-working")
+def test_a_spawn_without_a_launch_time_starts_at_the_spoke_clock(rig):
+    from scripts.hive.spoke import Spoke
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    published = []
+    real_publish = rig.bus.events.publish
+
+    def publish(subject, event):
+        published.append(event)
+        return real_publish(subject, event)
+
+    rig.bus.events.publish = publish
+    rig.runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=0),
+    )
+    spoke = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, reading, clock=lambda: 4_242)
+
+    assert spoke.poll() == "started"
+    assert [event.data["launched_at"] for event in published] == [4_242]
+
+
 @pytest.mark.feature("events-launch-decision-record")
 def test_a_failing_launch_report_never_holds_back_the_started_event(rig, capsys):
     observed = []

@@ -47,11 +47,8 @@ class Claims:
         self.store.execution_registry.set_launch(
             event.swarm,
             event.key,
-            {
-                "state": "working",
-                "pane_id": data.get("pane_id", ""),
-                "launched_at": data.get("launched_at", event.time),
-            },
+            {"state": "working", "pane_id": data["pane_id"], "launched_at": data.get("launched_at", event.time)},
+            only_from="starting",
         )
         if lives:
             self.store.clear_failed_harness(event.swarm, task)
