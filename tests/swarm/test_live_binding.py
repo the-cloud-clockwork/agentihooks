@@ -6,6 +6,7 @@ import pytest
 
 from scripts.swarm import live_binding
 from scripts.swarm.store import AgentRecord, RedisStore
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 EVENTS = (
     "SessionStart",
@@ -454,7 +455,7 @@ def ticking():
 
 
 @pytest.fixture
-def launched(ticking: tuple[RedisStore, object, object]) -> tuple[RedisStore, object, object]:
+def launched(ticking: tuple[RedisStore, FakeRuntime, FakeLedger]) -> tuple[RedisStore, FakeRuntime, FakeLedger]:
     """``ticking`` with an agent already launched on task one: seated through hub admission and started at 100 on a
     pane, listed by the runtime and holding its launch row, so no tick spawns it."""
     from scripts.swarm.commands import hive_id
