@@ -878,6 +878,37 @@
       ]
     },
     {
+      "id": "operator-master-up-resume-retired-master",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",
+      "behaviour": "Operator master up that brings back a master the swarm already retired restores its ended execution with its generation and start time, so the record write after the pane opens is accepted, the master holds its seat and swarm handoff resolves it, chosen by flag or by answering the prompt.",
+      "seam": "agentihooks swarm master up --last",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_master_the_swarm_retired_resumes_into_its_own_execution",
+        "tests/swarm/test_master_launch.py::test_a_history_row_whose_execution_is_gone_stays_the_last_master_as_recorded"
+      ]
+    },
+    {
+      "id": "operator-master-up-resume-second-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",
+      "behaviour": "Operator master up that brings back a master of a second master seat keeps that master in its own seat and task instead of rewriting it to the front door seat the registry refuses.",
+      "seam": "agentihooks swarm master up --last",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_second_seat_master_resumes_in_its_own_seat_not_the_front_door"
+      ]
+    },
+    {
+      "id": "operator-master-up-resume-retires-failed-pane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",
+      "behaviour": "When a record write fails after operator master up resumed the last master's pane, that pane is retired and the master's exit from its seat recorded before a new master is offered and started.",
+      "seam": "agentihooks swarm master up",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_record_write_refused_after_the_pane_resumed_retires_that_pane_before_a_new_master"
+      ]
+    },
+    {
       "id": "operator-dead-starting-front-door",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
@@ -6157,6 +6188,33 @@
       ],
       "rules": [
         "tick-step-events-early-return"
+      ]
+    },
+    {
+      "id": "events-execution-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-execution-stop",
+      "behaviour": "The hub stops an execution it admitted on the events engine by publishing an execution stop event to the hive that started it; that hive's lane loop reaps the named agent once and emits the normal execution exited event, which the hub lifecycle settles. A redelivered stop reaps nothing more, a hive that does not own the execution ignores it, a failed reap is retried, and the hub refuses to stop an execution that already ended or that no hive started.",
+      "seam": "execution_stop.stop on the hub and execution_stop.Stopper.poll from lanes.run on the hive",
+      "tests": [
+        "tests/hive/test_execution_stop.py::test_a_stop_reaps_the_execution_on_its_hive_and_ends_it_through_the_exited_lifecycle",
+        "tests/hive/test_execution_stop.py::test_a_redelivered_stop_reaps_nothing_more_and_emits_no_second_exit",
+        "tests/hive/test_execution_stop.py::test_a_spoke_that_does_not_own_the_execution_ignores_its_stop",
+        "tests/hive/test_execution_stop.py::test_the_hub_refuses_to_stop_an_execution_that_already_ended",
+        "tests/hive/test_execution_stop.py::test_the_hub_answers_unknown_for_an_execution_no_hive_started",
+        "tests/hive/test_execution_stop.py::test_a_failed_reap_emits_no_exit_and_is_retried",
+        "tests/hive/test_execution_stop.py::test_an_execution_already_gone_from_its_hive_still_ends_without_a_reap",
+        "tests/hive/test_execution_stop.py::test_the_lane_loop_honors_stops_every_pass_draining_or_not"
+      ]
+    },
+    {
+      "id": "events-smoke-execution-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-execution-stop",
+      "behaviour": "On a real nats-server and Redis, the hub stops a seated execution: the hive spoke that launched it reaps the agent and publishes one execution exited event carrying the started claim, and a second stop is refused as ended.",
+      "seam": "execution_stop.stop over NATS to execution_stop.Stopper.poll on the hive bus",
+      "tests": [
+        "tests/events_smoke/test_launch_path.py::test_the_hub_stops_a_seated_execution_and_its_hive_reaps_it_and_publishes_the_exit"
       ]
     },
     {

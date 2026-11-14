@@ -2,6 +2,7 @@ import builtins
 import json
 import os
 import time
+from collections.abc import Callable
 
 import pytest
 
@@ -221,6 +222,146 @@ def test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it(
     assert record.launched_at > ENDED
     assert store.seats.occupant("master@sw").occupant == name
     assert cli._me(store, Namespace(slug="sw", name=name)).name == name
+
+
+def retired_execution(store: RedisStore, seat: str = "master@sw", task: str = MASTER) -> AgentRecord:
+    """A master the swarm started as an execution and then retired, so only its history row and ended execution
+    remain."""
+    started = store.start_execution(
+        "sw",
+        AgentRecord(
+            store.next_name("sw", MASTER, 5),
+            MASTER,
+            task,
+            pane_id="w1:m1",
+            harness="claude",
+            conversation_id="conv-3",
+            seat=seat,
+            started_at=5,
+        ),
+    )
+    store.drop_agent("sw", started.name, at=ENDED)
+    return started
+
+
+def handoff_identity(store: RedisStore, name: str) -> AgentRecord:
+    """The agent swarm handoff resolves for the named session."""
+    from argparse import Namespace
+
+    from scripts.swarm import cli
+
+    return cli._me(store, Namespace(slug="sw", name=name))
+
+
+@pytest.mark.feature("operator-master-up-resume-retired-master")
+@pytest.mark.parametrize(("flags", "replies"), [(("--last",), ()), ((), ("1",))])
+def test_a_master_the_swarm_retired_resumes_into_its_own_execution(
+    up: tuple[RedisStore, object, ResumingRuntime],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    flags: tuple[str, ...],
+    replies: tuple[str, ...],
+) -> None:
+    store, _, rt = up
+    started = retired_execution(store)
+    asked = answers(monkeypatch, *replies)
+    assert run("sw", "master", "up", *flags) == 0
+    assert printed(capsys) == {"master": started.name, "pane": "w2:m9", "seat": "master@sw", "choice": "last"}
+    assert asked == [master_launch.CHOOSE] * len(replies)
+    [record] = masters(store)
+    assert (record.execution_id, record.generation, record.started_at, record.state) == (
+        started.execution_id,
+        started.generation,
+        5,
+        "working",
+    )
+    assert store.seats.occupant("master@sw").occupant == started.name
+    assert handoff_identity(store, started.name) == record
+    assert (rt.closed, rt.masters) == ([], [])
+
+
+@pytest.mark.feature("operator-master-up-resume-second-seat")
+def test_a_second_seat_master_resumes_in_its_own_seat_not_the_front_door(
+    up: tuple[RedisStore, object, ResumingRuntime],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, _, rt = up
+    counted(store, 2)
+    started = retired_execution(store, seat="master-2@sw", task="master-2")
+    assert run("sw", "master", "up", "--last") == 0
+    assert printed(capsys) == {"master": started.name, "pane": "w2:m9", "seat": "master-2@sw", "choice": "last"}
+    [record] = masters(store)
+    assert (record.execution_id, record.generation, record.seat, record.task) == (
+        started.execution_id,
+        started.generation,
+        "master-2@sw",
+        "master-2",
+    )
+    assert store.seats.occupant("master-2@sw").occupant == started.name
+    assert not store.seats.occupant("master@sw").occupant
+    assert handoff_identity(store, started.name) == record
+    assert (rt.closed, rt.masters) == ([], [])
+
+
+@pytest.mark.feature("operator-master-up-resume-retired-master")
+def test_a_history_row_whose_execution_is_gone_stays_the_last_master_as_recorded(
+    up: tuple[RedisStore, object, ResumingRuntime],
+) -> None:
+    store, _, _ = up
+    name = store.next_name("sw", MASTER, 5)
+    row = {"name": name, "lane": MASTER, "task": MASTER, "seat": "master@sw", "started_at": 5, "ended_at": ENDED}
+    store.redis.rpush(store.key("sw", "history"), json.dumps({**row, "execution_id": "exe-gone", "harness": "codex"}))
+    assert master_launch.last_master(store, "sw") == AgentRecord(
+        name, MASTER, MASTER, seat="master@sw", started_at=5, execution_id="exe-gone", harness="codex"
+    )
+
+
+def registered_master(store: RedisStore) -> str:
+    """A master still on the registry whose pane is gone."""
+    name = store.next_name("sw", MASTER, 10)
+    store.put_agent(
+        "sw",
+        AgentRecord(
+            name, MASTER, MASTER, pane_id="w1:m1", harness="claude", conversation_id="conv-1", seat="master@sw"
+        ),
+    )
+    return name
+
+
+@pytest.mark.feature("operator-master-up-resume-retires-failed-pane")
+@pytest.mark.parametrize("earlier", [gone_master, registered_master])
+def test_a_record_write_refused_after_the_pane_resumed_retires_that_pane_before_a_new_master(
+    up: tuple[RedisStore, object, ResumingRuntime],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    earlier: Callable[[RedisStore], str],
+) -> None:
+    store, _, rt = up
+    old = earlier(store)
+    put = RedisStore.put_agent
+
+    def refused(self: RedisStore, slug: str, agent: AgentRecord) -> None:
+        if agent.name == old:
+            raise SwarmError("stale or changed execution identity")
+        put(self, slug, agent)
+
+    monkeypatch.setattr(RedisStore, "put_agent", refused)
+    asked = answers(monkeypatch, "1", "y")
+    assert run("sw", "master", "up") == 0
+    assert asked == [master_launch.CHOOSE, master_launch.OFFER]
+    launched = printed(capsys)
+    assert (launched["choice"], launched["seat"]) == ("new", "master@sw")
+    assert launched["master"] != old
+    assert "w2:m9" in rt.closed
+    assert old not in rt.live
+    assert store.seats.exit_of(old) == {
+        "seat": "master@sw",
+        "reason": "its resumed record was refused",
+        "generation": 1,
+    }
+    assert store.seats.occupant("master@sw").occupant == launched["master"]
+    assert [a.name for a in masters(store)] == [launched["master"]]
+    assert handoff_identity(store, launched["master"]).seat == "master@sw"
 
 
 def test_choice_new_launches_a_fresh_master_reading_the_seat_handoff_recap_and_learned(up, monkeypatch, capsys):
