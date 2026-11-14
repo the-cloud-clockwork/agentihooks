@@ -192,7 +192,9 @@ def stop_lifecycle_jobs(home: Path) -> set[int]:
 
 
 @pytest.mark.feature("worker-profile-detached-lifecycle-gc")
-def test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration(tmp_path, monkeypatch):
+def test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     home = registering_hook(tmp_path, LIFECYCLE_JOB)
 
@@ -206,7 +208,9 @@ def test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registrat
 
 
 @pytest.mark.feature("worker-profile-detached-lifecycle-gc")
-def test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job(tmp_path, monkeypatch):
+def test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     home = registering_hook(
         tmp_path,
