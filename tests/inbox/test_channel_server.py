@@ -5,10 +5,11 @@ import queue
 import re
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, NoReturn
 from unittest import mock
 
 import pytest
@@ -273,7 +274,7 @@ def test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed(
 
     monkeypatch.setattr(channel, "_deliver", failing_once)
 
-    async def scenario(send: object, receive: object) -> tuple[Item, dict[str, object]]:
+    async def scenario(send: object, receive: Callable[[], Awaitable[dict[str, Any]]]) -> tuple[Item, dict[str, Any]]:
         item = store.send("alice", "bob", "after the failure")
         with anyio.fail_after(5):
             return item, await receive()
