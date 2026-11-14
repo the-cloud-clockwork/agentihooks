@@ -13,6 +13,7 @@ from typing import Any, cast
 from packaging.version import InvalidVersion, Version
 
 from scripts import updater
+from scripts.handoff import transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import lease
@@ -211,7 +212,9 @@ class Admission:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
-        primed = tick.primed(self.store, slug, seat, {**row, **live})
+        handoff = self.store.handoff(slug, task_id)
+        continuity = {**({"handoff": handoff} if handoff else {}), "transfer": transfers.attach(self.store, slug, record)}
+        primed = tick.primed(self.store, slug, seat, {**row, **live, **continuity})
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {

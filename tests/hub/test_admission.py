@@ -204,26 +204,32 @@ CONTINUITY_DOC = "# Handoff v2\n## Next\nRead the saved proof and push the fix.\
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
-@pytest.mark.parametrize("reason", ["recycle", "exit"])
+@pytest.mark.parametrize("recovery", [False, True])
 def test_an_events_successor_reads_its_predecessors_handoff_and_binds_its_transfer(
-    rig: SimpleNamespace, reason: str
+    rig: SimpleNamespace, recovery: bool
 ) -> None:
     from scripts.handoff import transfers
+    from scripts.hive.remove import RECOVERY
     from scripts.swarm.prompt import priming_lines
     from scripts.swarm.store import AgentRecord
 
     old = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", state="finished")
-    transfer = transfers.record(rig.store, SLUG, old, reason, CONTINUITY_DOC, 2)
-    rig.store.put_handoff(SLUG, "t1", CONTINUITY_DOC, seat=old.seat)
+    text = (
+        RECOVERY.format(name=old.name, task="t1", hive="hive-b", wait=30, folder="/work/t1", pushed="")
+        if recovery
+        else CONTINUITY_DOC
+    )
+    transfer = transfers.record(rig.store, SLUG, old, "recycle", text, 2)
+    rig.store.put_handoff(SLUG, "t1", text, seat=old.seat)
 
     admitted = rig.admitter.admit(SLUG, ask())
 
     bound = transfers.get(rig.store, SLUG, transfer["id"])
-    assert admitted["task"]["handoff"] == CONTINUITY_DOC
+    assert admitted["task"]["handoff"] == text
     assert admitted["task"]["transfer"] == bound
     assert (bound["successor"], bound["seat"]) == (admitted["name"], "eng-1@sw")
     assert bound["generation"] == rig.store.seats.occupant("eng-1@sw").generation
-    assert CONTINUITY_DOC in priming_lines(admitted["task"])
+    assert text in priming_lines(admitted["task"])
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
