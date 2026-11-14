@@ -87,11 +87,18 @@ def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str
 
 
 def retry_stops(store: Any, slug: str) -> list[str]:
-    """Sends again every stop the bus refused in ``slug``, answering one action per stop it sent again."""
+    """Sends again every stop the bus refused in ``slug`` for an agent the swarm has since dropped, answering one
+    action per stop it sent again; a refused stop for an agent still seated is discarded, since the next judgement of
+    that agent decides afresh."""
     if BusConfig.from_environ().backend == "memory":
         return []
+    pending = store.key(slug, PENDING_STOPS)
+    seated = {agent.name for agent in store.agents(slug)}
     actions: list[str] = []
-    for name, raw in store.redis.hgetall(store.key(slug, PENDING_STOPS)).items():
+    for name, raw in store.redis.hgetall(pending).items():
+        if name in seated:
+            store.redis.hdel(pending, name)
+            continue
         held = json.loads(raw)
         outcome = stop_admitted(store, slug, AgentRecord(**held["agent"]), held["reason"])
         actions.append(f"sent the {held['reason']} stop for {name} again: {outcome}")
