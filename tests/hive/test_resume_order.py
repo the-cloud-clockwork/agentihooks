@@ -41,6 +41,7 @@ def test_the_hive_spawns_the_resume_order_process_with_the_encoded_order(
     order = _order()
     orders.Consumer(redis, HIVE, Mock())._spawn_resume(order)
     assert spawned.call_args.args[0] == [sys.executable, "-m", "scripts.hive.resume_order", HIVE, order.encode()]
+    assert spawned.call_args.kwargs == {"stdin": orders.subprocess.DEVNULL, "stdout": orders.subprocess.DEVNULL}
 
 
 @pytest.mark.feature("hub-dead-resume")

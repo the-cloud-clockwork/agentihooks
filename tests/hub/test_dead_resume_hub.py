@@ -354,6 +354,7 @@ def test_an_unanswered_resume_hands_the_task_to_a_fresh_agent_at_its_deadline(ri
 
 @pytest.mark.feature("hub-dead-resume")
 def test_the_hive_reaps_a_live_process_of_the_name_before_it_resumes(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import Orders
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     rig.react.poll()
@@ -362,6 +363,8 @@ def test_the_hive_reaps_a_live_process_of_the_name_before_it_resumes(rig: Simple
     consumer.poll_commands()
     runtime.reap.assert_called_once_with(rig.agent.name)
     runtime.recover.assert_not_called()
+    [order] = _commands(rig)
+    assert cast(Any, Orders(rig.store.redis).command(HIVE, order)).target == {"host_id": HIVE}
     _next_pass(rig)
     assert rig.row["state"] == "open"
     assert rig.ledger.notices == [
@@ -428,6 +431,20 @@ def test_the_legacy_gate_admits_a_dead_agent_that_still_holds_its_seat_and_claim
     from scripts.swarm import dead_resume
 
     assert dead_resume.resumable(rig.store, "rig", rig.agent, rig.ledger) is True
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_the_hub_finds_the_hive_of_a_record_placed_by_runtime_target(rig: SimpleNamespace) -> None:
+    from scripts.swarm import deliberate_exit
+    from scripts.swarm.store import AgentRecord
+
+    name = rig.store.next_name("rig", "eng")
+    record = AgentRecord(name, "eng", "other", state="working", runtime_target={"host_id": HIVE})
+    placed = rig.store.start_execution("rig", record)
+    deliberate_exit.record(rig.store, "rig", placed.name, NOW)
+    exited = replace(rig.started, type="execution.exited", key=placed.execution_id, version=placed.generation)
+    assert rig.life._resumed(exited, placed, rig.bus.state("spoke-work"), "claim", {"state": "started"}, 1) is False
+    assert not deliberate_exit.recorded(rig.store, "rig", placed.name)
 
 
 @pytest.mark.feature("hub-dead-resume")

@@ -105,7 +105,7 @@ class Lifecycle:
         orders, pending = Orders(cast(Any, store).redis), value.get("resume")
         if pending and (pending["launched_at"], pending["pane_id"]) == (agent.launched_at, agent.pane_id):
             ack = orders.command(hive, CommandOrder(**pending["order"]))
-            if ack is None and event.time - pending.get("ordered_at", event.time) < RESUME_DEADLINE_MS:
+            if ack is None and event.time - pending["ordered_at"] < RESUME_DEADLINE_MS:
                 return True
             if ack is not None and ack.status == DONE:
                 return True
