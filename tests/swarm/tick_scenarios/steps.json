@@ -12,6 +12,9 @@
   "lab capacity": [
    "running"
   ],
+  "orphans": [
+   "orphan"
+  ],
   "progress heads": [
    "running"
   ],
@@ -75,7 +78,6 @@
   "merge pass",
   "metrics record",
   "night watch",
-  "orphans",
   "outage probes",
   "outbox migration",
   "overrun pass",

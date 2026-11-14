@@ -22,7 +22,6 @@
   "step handoff transfers: no reads",
   "step handoff transfers: no writes",
   "step orphans: no effects",
-  "step orphans: no feature",
   "step orphans: no lane",
   "step recover outages: no effects",
   "step recover outages: no feature",
