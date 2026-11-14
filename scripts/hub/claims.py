@@ -34,6 +34,13 @@ class Claims:
         legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), data["name"])
         if legacy and json.loads(legacy)["state"] == "started":
             return
+        if data.get("pane_id"):
+            self.store.execution_registry.set_launch(
+                event.swarm,
+                event.key,
+                {"state": "working", "pane_id": data["pane_id"], "launched_at": data.get("launched_at") or event.time},
+                only_from="starting",
+            )
         lives = self.store.redis.eval(
             _COUNT,
             3,
@@ -43,12 +50,6 @@ class Claims:
             json.dumps([event.key, event.version]),
             task,
             self.store.claims(event.swarm, task),
-        )
-        self.store.execution_registry.set_launch(
-            event.swarm,
-            event.key,
-            {"state": "working", "pane_id": data["pane_id"], "launched_at": data.get("launched_at", event.time)},
-            only_from="starting",
         )
         if lives:
             self.store.clear_failed_harness(event.swarm, task)

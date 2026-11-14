@@ -97,6 +97,49 @@ def test_a_launch_decision_after_the_start_still_reaches_the_working_agent(rig):
     assert (agent.state, agent.pane_id, agent.harness, agent.model) == ("working", "w1:p3", "codex", "gpt-5")
 
 
+@pytest.mark.feature("events-started-working")
+@pytest.mark.parametrize("launched_at", [0, None])
+def test_a_start_with_an_empty_launch_time_takes_the_event_time(rig, launched_at):
+    event = replace(started(rig.admitter.admit(SLUG, ask())), time=7_100)
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "launched_at": launched_at}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.launched_at) == ("working", 7_100)
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_rebuilt_start_without_a_pane_counts_the_life_and_leaves_the_agent_starting(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "pane_id": ""}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.launched_at) == ("starting", "", 0)
+    assert rig.store.claims(SLUG, "t1") == 1
+
+
+@pytest.mark.feature("events-started-working")
+def test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both(rig, monkeypatch):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    registry = rig.store.execution_registry
+    real = registry.set_launch
+
+    def refused(*args, **kwargs):
+        raise ConnectionError("redis gone")
+
+    monkeypatch.setattr(registry, "set_launch", refused)
+    with pytest.raises(ConnectionError):
+        claims.Claims(rig.store).handle(event)
+    assert rig.store.claims(SLUG, "t1") == 0
+
+    monkeypatch.setattr(registry, "set_launch", real)
+    claims.Claims(rig.store).handle(replace(event, id="redelivery"))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, rig.store.claims(SLUG, "t1")) == ("working", "w1:p3", 1)
+
+
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())
