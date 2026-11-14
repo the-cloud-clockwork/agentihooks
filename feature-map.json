@@ -6424,9 +6424,9 @@
       ],
       "rules": [
         "stop-on-events-log"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "operator-presence-automated-prompts",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-presence-cron-prompts",
