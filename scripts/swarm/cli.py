@@ -90,7 +90,6 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
-    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -836,7 +835,7 @@ def cmd_waits(store, args):
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits,)]
     if jobs:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             list(pool.map(check, jobs))
