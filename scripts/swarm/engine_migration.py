@@ -74,9 +74,10 @@ def drop_stuck_launches(redis_store: RedisStore, slug: str) -> int:
 
 def drop_collecting(client: Any, key: str) -> int:
     """Deletes the rows of one launches hash still acknowledging or launching and counts them."""
+    from scripts.swarm import hash_pages
     from scripts.swarm.ack_pass import COLLECTING
 
-    rows: dict[str, str] = client.hgetall(key)
+    rows: dict[str, str] = hash_pages.fields(client, key)
     stuck = [name for name, raw in rows.items() if json.loads(raw).get("state") in COLLECTING]
     if stuck:
         client.hdel(key, *stuck)
