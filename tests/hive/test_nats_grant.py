@@ -198,9 +198,9 @@ def _member(signer: nats_grant.Signer, scope: str) -> str:
 def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(signer, scope: str, hive: str) -> None:
     stop = f"swarm.rig.execution.stop.{hive}"
 
-    assert _publish_refusals(
-        signer, _member(signer, scope), "swarm.rig.execution.started", "swarm.rig.execution.exited", stop
-    ) == [f'nats: permissions violation for publish to "{stop}"']
+    assert _publish_refusals(signer, _member(signer, scope), "swarm.rig.execution.started", stop) == [
+        f'nats: permissions violation for publish to "{stop}"'
+    ]
 
 
 @pytest.mark.feature("hub-only-execution-stop")
@@ -210,6 +210,24 @@ def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer) -> No
     assert _publish_refusals(signer, hub, "swarm.rig.execution.stop.h2", "outside.events") == [
         'nats: permissions violation for publish to "outside.events"'
     ]
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+def test_a_member_credential_reports_an_exit_only_on_its_own_subject(signer, scope: str) -> None:
+    shared = ["swarm.rig.execution.exited", "swarm.rig.events.execution.exited"]
+
+    assert _publish_refusals(signer, _member(signer, scope), "exits.rig.m1", "exits.rig.h2", *shared) == [
+        f'nats: permissions violation for publish to "{subject}"' for subject in ["exits.rig.h2", *shared]
+    ]
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_the_hub_credential_serves_every_hive_exit_subject() -> None:
+    claims = nats_grant.controller_claims()
+
+    assert "exits.*.*" in claims["sub"]["allow"]
+    assert "swarm.>" in claims["pub"]["allow"]
 
 
 def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
@@ -757,6 +775,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
         "slots.*.m1",
+        "exits.*.m1",
         "$KV.scheduler-m1.>",
         "$JS.API.STREAM.INFO.KV_scheduler-m1",
         "$JS.API.STREAM.MSG.GET.KV_scheduler-m1",
@@ -765,7 +784,10 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {"allow": publish, "deny": ["swarm.*.execution.stop.>"]},
+        "pub": {
+            "allow": publish,
+            "deny": ["swarm.*.execution.stop.>", "swarm.*.execution.exited", "swarm.*.events.execution.exited"],
+        },
         "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,
