@@ -111,6 +111,13 @@ def test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent(
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
 
 
+def spoke_started(bus: Bus) -> None:
+    """Records the started claim the hive spoke holds for the running execution, so a stop finds it not yet ended."""
+    bus.for_swarm(SLUG).state("spoke-work").create(
+        "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
+    )
+
+
 def retire(ending: str, env: tuple[RedisStore, Any, Any], agent: AgentRecord) -> None:
     """Retires ``agent`` the way the swarm does for ``ending``: an account mismatch or idling."""
     store, ledger, rt = env
@@ -150,6 +157,7 @@ def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
     agent, event = launched(env, bus, seat)
+    spoke_started(bus)
 
     retire(ending, env, agent)
 
@@ -178,6 +186,7 @@ def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_
 ) -> None:
     store, ledger, rt = env
     agent, event = launched(env, bus, seat)
+    spoke_started(bus)
 
     free(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
 
