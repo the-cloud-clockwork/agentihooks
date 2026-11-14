@@ -118,3 +118,42 @@ def claude(*box):
 )
 def test_typed_input_is_the_text_on_the_last_input_line_without_dim_hints(capture, typed):
     assert typed_input(capture) == typed
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Login reached its time limit · Please run /login",
+        "Login expired · Please run /login",
+        "OAuth token revoked · Please run /login",
+        "Failed to authenticate: this login reached its time limit and cannot be renewed.",
+    ],
+)
+def test_login_limit_reports_the_claude_login_texts(text: str) -> None:
+    from scripts.swarm.pane import login_limit
+
+    assert login_limit("claude", f"● {text}\n\n" + RULE + "\n❯ \n" + RULE + "\n") != ""
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize(
+    ("harness", "text"),
+    [
+        ("claude", "API Error: 529 overloaded"),
+        ("claude", "● Done, the login code is merged\n❯ \n"),
+        ("codex", "Login reached its time limit · Please run /login"),
+    ],
+)
+def test_login_limit_ignores_other_text_and_harnesses(harness: str, text: str) -> None:
+    from scripts.swarm.pane import login_limit
+
+    assert login_limit(harness, text) == ""
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_login_limit_ignores_an_old_error_far_above_the_latest_lines() -> None:
+    from scripts.swarm.pane import login_limit
+
+    recovered = "● Login reached its time limit · Please run /login\n" + "● working on the ledger\n" * 20 + "❯ \n"
+    assert login_limit("claude", recovered) == ""

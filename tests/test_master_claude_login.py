@@ -1183,6 +1183,66 @@ def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, 
     assert login.holders(login.root(2)) == {"master@a-1": os.getpid()}
 
 
+def _spare_slot(rendered: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import master_logins
+
+    _seed(rendered)
+    with login._locked(login.root(2)) as folder:
+        _login(login._rebuild(folder, rendered), account={"emailAddress": "spare@example.com"})
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 0.0, 0.0))
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 100.0)
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 100.0)
+    monkeypatch.setattr(reservation, "primary_reserved", lambda *_: False)
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_check(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _spare_slot(rendered, monkeypatch)
+    checked = []
+
+    def check(environ: dict[str, str], account: str) -> dict:
+        checked.append(account)
+        if environ["CLAUDE_CONFIG_DIR"] == str(login.home(1)):
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(native_login, "rejected", lambda *_: False)
+    monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("a usable stored slot needs no browser"))
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(2), "spareatexample_com")
+    assert (checked[0], checked[-1]) == ("masteratexample_com", "spareatexample_com")
+    assert login.holders(login.root(1)) == {}
+    assert login.holders(login.root(2)) == {"master@a-1": os.getpid()}
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _spare_slot(rendered, monkeypatch)
+
+    def check(environ: dict[str, str], account: str) -> dict:
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    browsed = []
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda environ, target: browsed.append(target) or "failure")
+    monkeypatch.setattr(login, "_alert", lambda *_: None)
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    assert browsed == [login.home(1)]
+    assert login.holders(login.root(1)) == {}
+    assert login.holders(login.root(2)) == {}
+
+
 def test_prepare_launch_keeps_incompatible_settings_out_of_every_fallback(ah, rendered, tmp_path, monkeypatch):
     from scripts import master_login_chain as chain
 

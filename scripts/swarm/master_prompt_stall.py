@@ -22,6 +22,7 @@ INTERRUPTED = "an interrupted prompt"
 REASON = HELD + "{prompt} with operator items waiting for {minutes} minutes"
 RESUMED = "the master left the prompt"
 RECYCLED = "the swarm recycled the master after fifteen minutes on the prompt"
+LOGIN_LIMITED = "showed a Claude login that reached its time limit"
 RECOVERY = """## Intent
 Continue as the master of {slug}; {name} sat {minutes} minutes on {prompt} while operator items waited, and the swarm recycled it.
 

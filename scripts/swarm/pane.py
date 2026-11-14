@@ -57,6 +57,11 @@ def provider_error(harness: str, text: str) -> str:
     return ""
 
 
+def login_limit(harness: str, text: str) -> str:
+    """The Claude login error in the latest lines of a pane, or empty."""
+    return ""
+
+
 def provider_error_id(harness: str, text: str) -> str:
     lines = [line.strip() for line in ESCAPE.sub("", text).splitlines() if provider_error(harness, line)]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest() if lines else ""

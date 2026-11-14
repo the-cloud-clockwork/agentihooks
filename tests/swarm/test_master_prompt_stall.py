@@ -314,3 +314,39 @@ def test_tick_recycles_a_master_on_a_question_and_a_fresh_master_answers_the_ope
 )
 def test_interrupted_prompt_reads_the_last_turn(harness, text, expected):
     assert interrupted_prompt(harness, text) is expected
+
+
+LOGIN_LIMIT = "● Login reached its time limit · Please run /login\n\n─────\n❯ \n─────\n"
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize("enforce", [True, False], ids=["reset-enforced", "reset-log-only"])
+def test_a_master_on_a_login_limit_is_recycled_at_once_without_operator_items(store: RedisStore, enforce: bool) -> None:
+    agent, runtime = master(store, INTERRUPTED, enforce=enforce)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert [a.state for a in store.agents("sw")] == ["finished"]
+    handoff = store.handoff("sw", MASTER)
+    assert f"{agent.name} {master_prompt_stall.LOGIN_LIMITED}" in handoff
+    assert handoff.endswith("<!-- handoff complete -->\n")
+    [row] = transfers.list_transfers(store, "sw")
+    assert (row["reason"], row["predecessor"]) == (master_stall.STALLED, agent.name)
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize("pane", [PaneObservation("working"), QUESTION], ids=["working", "question"])
+def test_a_master_not_idle_on_a_login_limit_stays(store: RedisStore, pane: PaneObservation) -> None:
+    agent, runtime = master(store, pane)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == []
+    assert [a.state for a in store.agents("sw")] != ["finished"]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_dead_master_pane_on_a_login_limit_is_left_to_master_down(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    runtime.live.discard(agent.name)
+    assert run(store, runtime, START) == []
