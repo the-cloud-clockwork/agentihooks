@@ -263,7 +263,11 @@ def test_session_end_drops_the_record_and_a_clear_keeps_the_agent_record(monkeyp
     assert not scheduled_prompts._path("t").exists()
     assert not scheduled_prompts._path("agent-7").exists()
     assert not scheduled_prompts.fired("t", "p")
+    schedule("u", "q")
     scheduled_prompts.forget({"reason": "other"})
+    assert scheduled_prompts.fired("v", "q")
+    assert not scheduled_prompts.fired("", "q")
+    assert scheduled_prompts._drop("never-recorded")
 
 
 @pytest.mark.feature("operator-presence-automated-prompts")
