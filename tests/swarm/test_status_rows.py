@@ -233,11 +233,14 @@ def test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_ta
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     monkeypatch.setattr(commands, "hive_id", lambda: "root")
     monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
-    for name, hive in (("remote", "06db8fa06259f56a"), ("here", "root"), ("bare", "")):
-        store.put_agent("sw", AgentRecord(name, "eng", f"t-{name}", seat=f"eng-{name}@sw", hive=hive))
+    names = []
+    for seat, hive in enumerate(("06db8fa06259f56a", "root", ""), 1):
+        name = store.next_name("sw", "eng", 1_000)
+        store.start_execution("sw", AgentRecord(name, "eng", f"t{seat}", seat=f"eng-{seat}@sw", hive=hive))
+        names.append(name)
     report = status.status_report(store, "sw", {"tasks": []})
-    assert [agent["name"] for agent in report["agents"]] == ["remote"]
-    assert {agent.name for agent in store.agents("sw")} == {"remote", "here", "bare"}
+    assert [agent["name"] for agent in report["agents"]] == names[:1]
+    assert {agent.name for agent in store.agents("sw")} == set(names)
 
 
 def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
