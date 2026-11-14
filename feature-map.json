@@ -6377,7 +6377,10 @@
         "tests/hub/test_inbox_wake.py::test_the_hub_wake_reads_the_outage_the_tick_shared_from_another_home",
         "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_never_pins_a_handoff_exit",
         "tests/hub/test_outage_hold_events_path.py::test_a_stale_share_of_an_open_outage_still_holds_and_is_logged",
-        "tests/tick/test_observe.py::test_a_stopped_swarm_clears_its_shared_outages"
+        "tests/tick/test_observe.py::test_a_stopped_swarm_clears_its_shared_outages",
+        "tests/hub/test_outage_hold_events_path.py::test_a_fresh_share_of_an_open_outage_is_read_without_a_stale_log",
+        "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_never_pins_an_agent_whose_row_reads_done",
+        "tests/hub/test_outage_hold_events_path.py::test_an_exit_whose_slot_already_returned_settles_during_an_open_outage"
       ]
     },
     {

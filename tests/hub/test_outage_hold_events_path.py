@@ -64,7 +64,9 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
         row.update(args[2])
 
     ledger: Any = SimpleNamespace(
-        task=lambda *_: dict(row), update_task=update, state=lambda _slug: {"tasks": [dict(row)]}
+        task=lambda slug, task_id: dict(row) if (slug, task_id) == (SLUG, "task") else None,
+        update_task=update,
+        state=lambda _slug: {"tasks": [dict(row)]},
     )
     returned: list[tuple[Any, ...]] = []
     life = lifecycle.Lifecycle(bus, store, ledger, release=lambda *args: returned.append(args))
@@ -299,6 +301,45 @@ def test_a_stale_share_of_an_open_outage_still_holds_and_is_logged(
     rig.life.handle(rig.exited)
     _kept(rig)
     assert f"outage share of {SLUG} is stale since {NOW}, still holding redis" in capsys.readouterr().err
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_a_fresh_share_of_an_open_outage_is_read_without_a_stale_log(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import outage
+
+    _open_outage(rig, "ledger")
+    assert [record["kind"] for record in outage.shared_open(rig.store, SLUG, NOW + 1)] == ["ledger"]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_an_open_outage_never_pins_an_agent_whose_row_reads_done(rig: SimpleNamespace) -> None:
+    rig.row.update(state="done")
+    _open_outage(rig, "provider")
+    rig.life.handle(rig.exited)
+    _retired(rig)
+    assert rig.row["state"] == "done"
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_an_exit_whose_slot_already_returned_settles_during_an_open_outage(rig: SimpleNamespace) -> None:
+    claims = rig.bus.for_swarm(SLUG).state("spoke-work")
+    entry = claims.get("claim")
+    exiting = {
+        "state": "exiting",
+        "claim_revision": 1,
+        "execution": rig.agent.execution_id,
+        "generation": rig.agent.generation,
+        "returned": True,
+    }
+    claims.update("claim", json.dumps(exiting).encode(), entry.revision)
+    _open_outage(rig, "redis")
+    rig.life.handle(rig.exited)
+    assert (rig.row["state"], rig.row["claimed_by"]) == ("open", "")
+    assert json.loads(claims.get("claim").value)["state"] == "exited"
+    assert rig.returned == []
 
 
 @pytest.mark.feature("events-outage-hold-hub-agents")
