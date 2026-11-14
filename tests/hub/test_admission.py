@@ -107,7 +107,7 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("claimed", name)
     from scripts.swarm_ledger import ledger_workspace
 
-    claimed = {"state": "claimed", "claimed_by": name, "workspace": str(ledger_workspace.folder(SLUG, "t1"))}
+    claimed = {"state": "claimed", "claimed_by": name, "workspace": ledger_workspace.portable(SLUG, "t1")}
     assert rig.ledger.writes == [(SLUG, "t1", claimed, ("open",), {"claimed_by": "", "claim_generation": 0})]
     assert admitted["hive"] == "hive-a"
     spawned = admitted["task"]
@@ -870,7 +870,7 @@ def _github_heads(monkeypatch: pytest.MonkeyPatch, found: dict[str, Any]) -> lis
 
     asked: list[dict[str, str]] = []
 
-    def graphql(query: str, variables: dict[str, str], run: Any = None) -> dict[str, Any]:
+    def graphql(query: str, variables: dict[str, str], run: Any = None, timeout: float = 0) -> dict[str, Any]:
         asked.append(variables)
         return {"repository": found}
 
@@ -923,10 +923,10 @@ def test_a_handed_off_task_carries_its_handoff_and_resolved_envelope(
     assert rig.store.reclaims(SLUG) == {}
 
 
-@pytest.mark.feature("hub-admission-claim-context")
-def test_the_claim_write_scaffolds_the_workspace_clears_a_protected_branch_and_sets_the_lane_kind(
+def test_the_claim_write_names_a_portable_workspace_clears_a_protected_branch_and_sets_the_lane_kind(
     rig: SimpleNamespace,
 ) -> None:
+    from scripts.hive import orders
     from scripts.swarm_ledger import ledger_workspace
 
     rig.store.update(SLUG, lanes={"eng": {"kind": "ops"}})
@@ -934,21 +934,22 @@ def test_the_claim_write_scaffolds_the_workspace_clears_a_protected_branch_and_s
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    folder = ledger_workspace.folder(SLUG, "t1")
+    portable = ledger_workspace.portable(SLUG, "t1")
     [(_, _, fields, _, _)] = rig.ledger.writes
     assert fields == {
         "state": "claimed",
         "claimed_by": admitted["name"],
-        "workspace": str(folder),
+        "workspace": portable,
         "branch": "",
         "kind": "ops",
     }
-    assert (folder / "steering.md").read_text(encoding="utf-8").startswith("# t1: title t1")
+    assert not ledger_workspace.folder(SLUG, "t1").exists()
     assert (admitted["task"]["workspace"], admitted["task"]["branch"], admitted["task"]["kind"]) == (
-        str(folder),
+        portable,
         "",
         "ops",
     )
+    assert admitted["task"][orders.SEEDS] == {"steering.md": "# t1: title t1\n"}
     assert "reclaim" not in admitted["task"]
 
 
@@ -989,3 +990,71 @@ def test_an_admitted_task_carries_its_territory_overlaps_and_its_group(rig: Simp
     ]
     assert admitted["task"]["group"] == [{"id": "t2", "title": "title t2", "description": "the ci task"}]
     json.dumps(admitted)
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_the_seeds_carry_the_folder_the_previous_agents_hive_synced(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_ledger import ledger_workspace
+
+    earlier = AgentRecord("eng@sw-0000", "eng", "t1", seat="eng-9@sw", state="starting", started_at=1, hive="hive-b")
+    rig.store.start_execution(SLUG, earlier, "")
+    synced = {SLUG: {"t1": {"progress.md": "- earlier step\n", "steering.md": "stale"}}}
+    rig.store.redis.set(ledger_workspace.files_key("hive-b"), json.dumps(synced))
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS] == {"progress.md": "- earlier step\n", "steering.md": "# t1: title t1\n"}
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_work_folder_refusal_releases_the_claim_and_the_agent(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import ledger_workspace
+
+    def refused(slug: str, task_id: str) -> str:
+        raise ValueError("work folder needs a plain slug and task id")
+
+    monkeypatch.setattr(ledger_workspace, "portable", refused)
+
+    with pytest.raises(ValueError, match="work folder needs a plain slug and task id"):
+        rig.admitter.admit(SLUG, ask())
+
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_first_life_with_no_branch_reads_no_branch_heads(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hub import branch_heads
+
+    def unread(config: SwarmConfig) -> None:
+        raise AssertionError("a first life with no branch needs no reclaim")
+
+    monkeypatch.setattr(branch_heads, "reclaimer", unread)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert "reclaim" not in admitted["task"]
+    assert rig.store.reclaims(SLUG) == {}
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_cleared_protected_branch_continues_from_the_earlier_life_instead(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    rig.rows["t1"]["branch"] = "dev"
+    life = {"task": "t1", "lane": "eng", "name": "eng@sw-0000", "ended_at": 1}
+    rig.store.redis.rpush(rig.store.key(SLUG, "history"), json.dumps(life))
+    asked = _github_heads(monkeypatch, {"b0": {"target": {"oid": "abc123"}}})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert asked == [{"owner": "acme", "name": "app", "b0": "refs/heads/eng-sw-0000"}]
+    assert admitted["task"]["reclaim"]["continue_from"] == "origin/eng-sw-0000"

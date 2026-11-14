@@ -19,7 +19,7 @@ from scripts.hub import branch_heads, lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, connect
+from scripts.swarm.store import AgentRecord, RedisStore, connect
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -190,7 +190,9 @@ class Admission:
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
     ) -> dict[str, Any] | None:
+        from scripts.hive import orders
         from scripts.swarm import profile_choice, tick
+        from scripts.swarm_ledger import ledger_workspace
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -206,18 +208,19 @@ class Admission:
         except Exception:
             self._unclaim(slug, task_id, name)
             raise
-        live = self._mark(slug, request, row, name, doc)
+        live = self._mark(slug, request, row, name)
         if live is None:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         claimed: dict[str, Any] = {**row, **live}
         claimed.update(self._continuation(slug, name, claimed, rows))
-        claimed["overlaps"] = cast(Any, tick)._sharing(claimed, rows, cast(Any, self.store).agents(slug))
+        claimed["overlaps"] = tick._sharing(claimed, rows, self.store.agents(slug))
         members: list[str] = claimed.get("group_members") or []
         claimed["group"] = [
             {key: rows[member][key] for key in ("id", "title", "description")} for member in members if member in rows
         ]
+        claimed[orders.SEEDS] = ledger_workspace.carried(self.store, slug, claimed, doc, name)
         primed = tick.primed(self.store, slug, seat, claimed)
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
@@ -245,47 +248,44 @@ class Admission:
         return tick._stack_base(task, rows, config.repo)
 
     def _continuation(self, slug: str, name: str, task: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
-        """The handoff or the recorded branch a reclaimed task continues from; empty for a first life with no branch."""
+        """The handoff or the recorded branch a reclaimed task continues from, resolved on the claimed row so a cleared
+        protected branch is never continued; empty for a first life with no branch."""
         from scripts.swarm import continuation
 
-        store: Any = self.store
         task_id: str = task["id"]
-        handoff: str = store.handoff(slug, task_id)
-        lives: list[str] = store.earlier_lives(slug, task_id)
-        config: SwarmConfig = store.config(slug)
+        handoff: str = self.store.handoff(slug, task_id)
+        lives: list[str] = self.store.earlier_lives(slug, task_id)
+        if not (handoff or lives or task.get("branch")):
+            return {}
+        config = self.store.config(slug)
         reclaim, origin = branch_heads.reclaimer(config)
         if handoff:
-            saved: dict[str, Any] = store.handoff_envelope(slug, task_id) or {}
+            saved: dict[str, Any] = self.store.handoff_envelope(slug, task_id) or {}
             resolved = continuation.resolve(config.repo, task, rows, lives, saved, reclaim, origin)
             return {"handoff": handoff, "handoff_envelope": resolved}
-        if not (lives or task.get("branch")):
-            return {}
         found = continuation.resolve(config.repo, task, rows, lives, {}, reclaim, origin)
-        store.put_reclaim(slug, name, found)
+        self.store.put_reclaim(slug, name, found)
         return {"reclaim": found}
 
-    def _mark(
-        self, slug: str, request: dict[str, Any], row: dict[str, Any], name: str, doc: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """The ledger row once claimed by name with its work folder, a protected branch cleared and the lane kind; its
-        claim generation is one past the offer's."""
+    def _mark(self, slug: str, request: dict[str, Any], row: dict[str, Any], name: str) -> dict[str, Any] | None:
+        """The ledger row once claimed by name with its portable work folder, a protected branch cleared and the lane
+        kind; its claim generation is one past the offer's."""
         from scripts.swarm import continuation
         from scripts.swarm_ledger import ledger_workspace
 
-        store: Any = self.store
         task_id: str = request["task"]
-        fields: dict[str, str] = {
-            "state": "pr" if row.get("pr_url") else "claimed",
-            "claimed_by": name,
-            "workspace": str(cast(Any, ledger_workspace).scaffold(slug, row, doc)),
-        }
-        if row.get("branch") in continuation.PROTECTED:
-            fields["branch"] = ""
-        kind: str = store.config(slug).lanes.get(request["lane"], {}).get("kind", "")
-        if kind not in ("", "auto") and not row.get("kind"):
-            fields["kind"] = kind
         expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": request["generation"]}
         try:
+            fields = {
+                "state": "pr" if row.get("pr_url") else "claimed",
+                "claimed_by": name,
+                "workspace": ledger_workspace.portable(slug, task_id),
+            }
+            if row.get("branch") in continuation.PROTECTED:
+                fields["branch"] = ""
+            kind: str = self.store.config(slug).lanes.get(request["lane"], {}).get("kind", "")
+            if kind not in ("", "auto") and not row.get("kind"):
+                fields["kind"] = kind
             live: dict[str, Any] = self.ledger.update_task(slug, task_id, fields, if_state=("open",), if_match=expected)
         except Exception:
             self._unclaim(slug, task_id, name)

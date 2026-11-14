@@ -58,10 +58,12 @@ def _failure(exc: subprocess.CalledProcessError) -> str:
     return stderr.strip()
 
 
-def graphql(query: str, variables: dict[str, str], run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+def graphql(
+    query: str, variables: dict[str, str], run: Callable[..., Any] = subprocess.run, timeout: float = TIMEOUT
+) -> dict[str, Any]:
     try:
         with pool.limit("github"), github_reads.calling(github_reads.CALLER.get()):
-            response = _port(run).graph(query, variables, deadline=Deadline.after(TIMEOUT))
+            response = _port(run).graph(query, variables, deadline=Deadline.after(timeout))
         if response.get("errors"):
             raise SwarmError("; ".join(error["message"] for error in response["errors"]))
         data = response["data"]

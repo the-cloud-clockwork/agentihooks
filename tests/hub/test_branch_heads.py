@@ -1,3 +1,4 @@
+import subprocess
 from functools import partial
 from typing import Any
 
@@ -15,11 +16,11 @@ QUERY = (
 )
 
 
-def _graphql(monkeypatch: pytest.MonkeyPatch, answer: Any) -> list[tuple[str, dict[str, str], Any]]:
-    asked: list[tuple[str, dict[str, str], Any]] = []
+def _graphql(monkeypatch: pytest.MonkeyPatch, answer: Any) -> list[tuple[str, dict[str, str], Any, float]]:
+    asked: list[tuple[str, dict[str, str], Any, float]] = []
 
-    def graphql(query: str, variables: dict[str, str], run: Any = None) -> dict[str, Any]:
-        asked.append((query, variables, run))
+    def graphql(query: str, variables: dict[str, str], run: Any = None, timeout: float = 0) -> dict[str, Any]:
+        asked.append((query, variables, run, timeout))
         if isinstance(answer, Exception):
             raise answer
         return {"repository": answer}
@@ -37,7 +38,26 @@ def test_heads_reads_every_branch_once_in_one_query(monkeypatch: pytest.MonkeyPa
     found = branch_heads.heads(ORIGIN, ["kept", "gone", "kept"], run)
 
     assert found == {"kept": "abc", "gone": "none"}
-    assert asked == [(QUERY, {"owner": "acme", "name": "app", "b0": "refs/heads/kept", "b1": "refs/heads/gone"}, run)]
+    variables = {"owner": "acme", "name": "app", "b0": "refs/heads/kept", "b1": "refs/heads/gone"}
+    assert asked == [(QUERY, variables, run, branch_heads.TIMEOUT_S)]
+
+
+def test_a_slow_github_read_ends_inside_the_admission_wait_as_unknown() -> None:
+    from scripts.hive import account_slots
+    from scripts.hub import admission
+
+    waited: list[float] = []
+
+    def slow(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        waited.append(options["timeout"])
+        raise subprocess.TimeoutExpired(argv, options["timeout"])
+
+    found = branch_heads.heads(ORIGIN, ["kept"], slow)
+
+    assert found == {"kept": "unknown"}
+    assert waited
+    assert max(waited) <= branch_heads.TIMEOUT_S
+    assert branch_heads.TIMEOUT_S * 1000 * 2 <= admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
 
 
 def test_heads_asks_nothing_for_no_branch(monkeypatch: pytest.MonkeyPatch) -> None:

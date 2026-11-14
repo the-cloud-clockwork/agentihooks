@@ -3,18 +3,20 @@
 import subprocess
 from collections.abc import Callable, Collection
 from functools import partial
-from typing import Any, cast
+from typing import Any
 
-from scripts.handoff import envelope as handoff_envelope
-from scripts.swarm import merge_queue, naming, stack
+from scripts.handoff import envelope
+from scripts.swarm import merge_queue, stack
+from scripts.swarm.naming import plain
 from scripts.swarm.store import SwarmConfig, SwarmError
 
-envelope: Any = handoff_envelope
-plain: Callable[[str], str] = cast(Any, naming).plain
+TIMEOUT_S = 3
+Reclaim = Callable[..., dict[str, str]]
 
 
 def heads(origin: str, branches: Collection[str], run: Callable[..., Any] = subprocess.run) -> dict[str, str]:
-    """Each branch's head on the origin repository in one query: none when absent, unknown when GitHub was not read."""
+    """Each branch's head on the origin repository in one query bounded well inside a hive's admission wait: none
+    when absent, unknown when GitHub was not read in time."""
     names = list(dict.fromkeys(branches))
     if not names:
         return {}
@@ -30,28 +32,28 @@ def heads(origin: str, branches: Collection[str], run: Callable[..., Any] = subp
         **{f"b{index}": f"refs/heads/{name}" for index, name in enumerate(names)},
     }
     try:
-        found = merge_queue.graphql(query, variables, run)["repository"]
+        found: dict[str, dict[str, dict[str, str]] | None] | None = merge_queue.graphql(
+            query, variables, run, TIMEOUT_S
+        )["repository"]
     except SwarmError:
         found = None
-    if not isinstance(found, dict):
-        return {name: str(envelope.UNKNOWN) for name in names}
-    answered: dict[str, Any] = cast(dict[str, Any], found)
-    return {name: _oid(answered.get(f"b{index}")) for index, name in enumerate(names)}
+    if found is None:
+        return dict.fromkeys(names, envelope.UNKNOWN)
+    return {name: _oid(found.get(f"b{index}")) for index, name in enumerate(names)}
 
 
-def _oid(ref: Any) -> Any:
+def _oid(ref: dict[str, dict[str, str]] | None) -> str:
     return ref["target"]["oid"] if ref else envelope.NONE
 
 
-def reclaimer(config: SwarmConfig) -> tuple[Callable[..., dict[str, Any]], str]:
+def reclaimer(config: SwarmConfig) -> tuple[Reclaim, str]:
     """The reclaim a hub continuation resolves with and the repository key it compares task branches against."""
     if not config.repo_origin:
         return partial(envelope.reclaim, heads=envelope.remote_heads(config.repo)), stack.origin_key(config.repo)
 
-    def reclaim(repo: str, lives: list[str], recorded: str, forbidden: Collection[str] = ()) -> dict[str, Any]:
+    def reclaim(repo: str, lives: list[str], recorded: str, forbidden: Collection[str] = ()) -> dict[str, str]:
         checked = [recorded] if recorded else [plain(name) for name in lives]
         found = heads(config.repo_origin, checked)
-        verdict: dict[str, Any] = envelope.reclaim(repo, lives, recorded, forbidden=forbidden, heads=found)
-        return verdict
+        return envelope.reclaim(repo, lives, recorded, forbidden=forbidden, heads=found)
 
     return reclaim, stack.repo_key(config.repo_origin)

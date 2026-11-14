@@ -3,8 +3,12 @@
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import plan_read, ports
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import AgentRecord
 
 PART_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,127}")
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
@@ -138,6 +142,18 @@ def materialize(slug, task_id, sent):
             continue
         (path / name).write_text(text, encoding="utf-8")
     return path
+
+
+def carried(store: Any, slug: str, task: dict[str, Any], doc: dict[str, Any], agent: str) -> dict[str, str]:
+    """The files an events launch writes into the work folder on its own hive: steering from the task and the latest
+    copy that the hive of the task's previous agent synced."""
+    records: list[AgentRecord] = store.agents(slug)
+    earlier = [record for record in records if record.task == task["id"] and record.name != agent]
+    previous = max(earlier, key=lambda record: record.started_at, default=None)
+    host = previous.hive if previous else ""
+    synced: dict[str, Any] = json.loads(store.redis.get(files_key(host)) or "{}") if host else {}
+    copy: dict[str, str] = synced.get(slug, {}).get(task["id"], {})
+    return {**copy, "steering.md": steering(task, doc)}
 
 
 def _holds(path, text):
