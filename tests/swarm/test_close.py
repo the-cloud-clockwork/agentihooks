@@ -33,7 +33,6 @@ def closing(
     ledger.mark_closed = lambda slug, by: ledger.calls.append(("closed", by))
     monkeypatch.setattr(cli.snapshot, "path", lambda slug: tmp_path / slug / "snapshot.json")
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
-    monkeypatch.setattr(rt, "retire_pane", rt.retire, raising=False)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     seat_owner(store, ledger, rt, "t1", 1_000)
