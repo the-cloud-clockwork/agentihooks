@@ -213,7 +213,10 @@ class Admission:
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
         handoff = self.store.handoff(slug, task_id)
-        continuity = {**({"handoff": handoff} if handoff else {}), "transfer": transfers.attach(self.store, slug, record)}
+        continuity = {
+            **({"handoff": handoff} if handoff else {}),
+            "transfer": transfers.attach(self.store, slug, record),
+        }
         primed = tick.primed(self.store, slug, seat, {**row, **live, **continuity})
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
