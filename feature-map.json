@@ -6080,10 +6080,11 @@
       "id": "events-retirement-refunds-claim-life",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
-      "behaviour": "An agent seated through hub admission whose hive recorded its start and whose claim life the hub counted gets that life back when the swarm retires it for an account mismatch, idling or a swarm stop: the agent is retired and dropped, the task reopens unclaimed and the task's claim lives return to zero.",
-      "seam": "The observe verify step, the agents reap step and stop_now retiring an events launched agent through the held claim refund",
+      "behaviour": "A swarm retirement refunds the claim life of the agent it retires: three retirements for an account mismatch, idling or a swarm stop leave a fourth claim open on the legacy tick spawn, and an agent seated through hub admission whose hive recorded its start and whose life the hub counted gets that life back on a swarm stop, retired and dropped with its task reopened unclaimed.",
+      "seam": "stop_now, and on the legacy spawn the observe verify and agents reap steps, retiring an agent through the held claim refund",
       "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent"
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
+        "tests/swarm/test_claim_refunds.py::test_three_swarm_retirements_allow_a_fourth_claim"
       ]
     },
     {
@@ -6094,7 +6095,8 @@
       "seam": "Lifecycle.handle on execution.exited refunding a parked retirement through the held claim refund",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_refunds_nothing_once_its_claim_was_released",
-        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_still_holding_its_claim_refunds_its_life"
+        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_still_holding_its_claim_refunds_its_life",
+        "tests/swarm/test_claim_refunds.py::test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim"
       ]
     },
     {

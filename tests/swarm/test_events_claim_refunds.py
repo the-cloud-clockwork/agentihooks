@@ -17,9 +17,6 @@ from scripts.hub import claims, lifecycle, reconciler
 from scripts.swarm import launch_check, readiness
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
-from scripts.swarm.tick import IDLE_KILL_TICKS
-from scripts.tick.steps import agents as agent_steps
-from scripts.tick.steps import observe
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
@@ -96,34 +93,14 @@ def launched(
     return running, event
 
 
-def retire(ending: str, env: tuple[RedisStore, Any, Any], agent: AgentRecord) -> None:
-    """Retires ``agent`` the way the swarm does for ``ending``: an account mismatch, idling or a swarm stop."""
-    store, ledger, rt = env
-    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
-    if ending == "stop":
-        stop_now(store, SLUG, rt, ledger)
-    elif ending == "mismatch":
-        store.put_agent(SLUG, replace(agent, account="old-account"))
-        original = rt.bindings
-        rt.bindings = lambda agents: {
-            name: {**facts, "account": "new-account"} for name, facts in original(agents).items()
-        }
-        observe._verify(SLUG, store, ledger, rt, rows, NOW + 1)
-    else:
-        rt.statuses[agent.name] = "idle"
-        store.put_agent(SLUG, replace(agent, idle_ticks=IDLE_KILL_TICKS - 1))
-        agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
-
-
 @pytest.mark.feature("events-retirement-refunds-claim-life")
-@pytest.mark.parametrize("ending", ["mismatch", "idle", "stop"])
-def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+def test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
 ) -> None:
     store, ledger, rt = env
     agent, _ = launched(env, bus, seat)
 
-    retire(ending, env, agent)
+    stop_now(store, SLUG, rt, ledger)
 
     assert agent.name in rt.killed
     assert [seated.name for seated in store.agents(SLUG)] == []
