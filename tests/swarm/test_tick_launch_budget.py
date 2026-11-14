@@ -14,6 +14,7 @@ def twenty_second_budget(monkeypatch):
 @pytest.mark.parametrize("autonomy", ["assist", "delegate"])
 @pytest.mark.parametrize("urgent_lane,occupied", [("ci", False), ("eng", True)])
 @pytest.mark.parametrize("fail_lower", [False, True])
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_the_urgent_head_spends_the_shared_launch_budget_first(
     store, monkeypatch, autonomy, urgent_lane, occupied, fail_lower
 ):
@@ -46,6 +47,7 @@ def test_the_urgent_head_spends_the_shared_launch_budget_first(
 
 @pytest.mark.parametrize("autonomy", ["assist", "delegate"])
 @pytest.mark.parametrize("rank,expected,deferred", [("normal", "healthy", "failed"), ("urgent", "failed", "healthy")])
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_recorded_launch_failures_follow_healthy_tasks_only_within_their_band(
     store, monkeypatch, autonomy, rank, expected, deferred
 ):
@@ -104,6 +106,7 @@ def test_a_slow_preparation_stops_the_pass_at_the_launch_budget(store, monkeypat
     assert store.claimant("sw", "t2") is None
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_pass_over_many_agents_with_failing_launches_ends_under_the_tick_deadline(store, monkeypatch):
     from scripts.swarm.tick_stop import DEADLINE_S
 
@@ -122,6 +125,7 @@ class PairedFailures(PooledFailures):
         return 2
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_forgiven_failed_pool_keeps_its_preparation_time_on_the_budget(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PairedFailures()
@@ -133,6 +137,7 @@ def test_a_forgiven_failed_pool_keeps_its_preparation_time_on_the_budget(store, 
     assert ledger.rows["t3"]["state"] == "open"
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_time_before_the_first_launch_never_holds_back_a_filling_pool(store, monkeypatch):
     from scripts.swarm import tick as tick_module
 
@@ -151,6 +156,7 @@ def test_time_before_the_first_launch_never_holds_back_a_filling_pool(store, mon
     assert not any("launch budget" in action for action in actions)
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_filling_pool_is_priced_at_its_mean_preparation_time(store, monkeypatch):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), PooledLaunches()
@@ -161,6 +167,7 @@ def test_a_filling_pool_is_priced_at_its_mean_preparation_time(store, monkeypatc
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_preparations_whose_mean_fits_the_rest_of_the_budget_fill_the_pool(store, monkeypatch):
     store.update("sw", max_eng=4)
     ledger, runtime = tasks(*((f"t{n}", "eng") for n in range(1, 5))), PooledLaunches()
@@ -176,6 +183,7 @@ class PairedLaunches(PooledLaunches):
         return 2
 
 
+@pytest.mark.feature("swarm-tick-launch-budget")
 def test_a_second_pool_fills_on_preparation_time_once_its_first_task_is_priced(store, monkeypatch):
     store.update("sw", max_eng=4)
     ledger, runtime = tasks(*((f"t{n}", "eng") for n in range(1, 5))), PairedLaunches()

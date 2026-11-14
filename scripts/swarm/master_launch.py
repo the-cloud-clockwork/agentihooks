@@ -76,11 +76,19 @@ def _previous(store, slug):
     names = {p.agent.name for p in current}
     history = [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)]
     ended = [
-        Previous(AgentRecord(**{k: v for k, v in row.items() if k in RECORD_FIELDS}), row["ended_at"])
+        Previous(_ended(store, slug, row), row["ended_at"])
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
-    return max(current + ended, key=lambda p: (p.agent.started_at, p.ran_at), default=None)
+    return max(current + ended, key=lambda p: (p.agent.launched_at or p.agent.started_at, p.ran_at), default=None)
+
+
+def _ended(store: RedisStore, slug: str, row: dict[str, Any]) -> AgentRecord:
+    """A retired master from its history row, as its recorded execution when the row names one, so its generation
+    and runtime identity match the registry a resume writes to."""
+    agent = AgentRecord(**{k: v for k, v in row.items() if k in RECORD_FIELDS})
+    executions = store.executions(slug, agent.seat) if agent.execution_id else []
+    return next((e for e in executions if e.execution_id == agent.execution_id), agent)
 
 
 def describe(previous):
@@ -119,24 +127,35 @@ def _why(previous, config, live):
     return blocker(previous.agent, config.repo)
 
 
-def _resume(store, slug, runtime, at, previous):
+def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previous) -> Launched:
     config = store.ensure_code(slug)
-    seat = seat_address(slug, MASTER)
-    agent = replace(previous.agent, task=MASTER, seat=seat, profile=previous.agent.profile or _profile(config))
+    seat = previous.agent.seat or seat_address(slug, MASTER)
+    agent = replace(
+        previous.agent,
+        task=previous.agent.task or MASTER,
+        seat=seat,
+        profile=previous.agent.profile or _profile(config),
+    )
     text = RESUMED.format(slug=slug, name=agent.name, ledger=ledger_source(slug))
     placed = runtime.resume(config, agent, text)
-    store.seats.occupy(seat, agent.name, at)
-    record = replace(
-        placed_record(agent, placed),
-        harness=placed.harness or agent.harness,
-        account=placed.account or agent.account,
-        profile=placed.profile or agent.profile,
-        model=placed.model or agent.model,
-        effort=placed.effort or agent.effort,
-        started_at=at,
-        idle_ticks=0,
-    )
-    store.put_agent(slug, record)
+    try:
+        store.seats.occupy(seat, agent.name, at)
+        record = replace(
+            placed_record(agent, placed),
+            harness=placed.harness or agent.harness,
+            account=placed.account or agent.account,
+            profile=placed.profile or agent.profile,
+            model=placed.model or agent.model,
+            effort=placed.effort or agent.effort,
+            launched_at=at,
+            idle_ticks=0,
+        )
+        store.put_agent(slug, record)
+    except Exception:
+        runtime.retire(replace(agent, pane_id=placed.pane_id))
+        store.seats.record_exit(agent.name, seat, "its resumed record was refused")
+        store.drop_agent(slug, agent.name)
+        raise
     return Launched(record.name, record.pane_id, seat, LAST)
 
 
