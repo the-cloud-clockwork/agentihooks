@@ -4812,6 +4812,17 @@
       ]
     },
     {
+      "id": "codex-server-exit-canary",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-server-exit-canary",
+      "behaviour": "When the supervised Codex app server exits after its launch returns and before the session validates its profile canary, the pending profile report fails at once with the server exit status, so init-agent reports the failure instead of waiting out the launch deadline. An exit after a validated canary leaves the report unchanged.",
+      "seam": "scripts.codex_session.serve.main server exit and the profile binding report init-agent waits on",
+      "tests": [
+        "tests/codex_session/test_serve.py::test_an_app_server_exit_after_launch_fails_the_pending_canary_at_once",
+        "tests/codex_session/test_serve.py::test_an_app_server_exit_after_a_validated_canary_keeps_the_report"
+      ]
+    },
+    {
       "id": "codex-execution-home-default-login-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-auth-link-default-only",
