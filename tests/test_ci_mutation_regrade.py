@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -95,6 +96,7 @@ def test_main_grades_in_place_with_the_tree_clearances_and_protected_scope(
         return CHANGES
 
     monkeypatch.setattr(module, "discover_changes", changes)
+    monkeypatch.setattr(module, "recollect", lambda output, wanted, shard: {PATH: [SURVIVOR, KILLED]})
     target = tmp_path / ".mutation-gate" / "report.json"
     target.parent.mkdir()
     target.write_text(json.dumps(_lenient_report({2})))
@@ -108,20 +110,13 @@ def test_main_grades_in_place_with_the_tree_clearances_and_protected_scope(
     assert main(["report", str(target), str(tmp_path), "one"]) == 0
     assert json.loads(target.read_text())["files"][0]["failures"] == []
     assert capsys.readouterr().out == "Protected grader: mutation report passed\n"
+    target.write_text(json.dumps({"files": [], "not_mutated": [], "failed": False}))
+    with pytest.raises(ValueError, match=r"^Mutation report does not cover exactly the changed Python files$"):
+        main(["report", str(target), str(tmp_path), "one"])
 
 
-@pytest.mark.parametrize(
-    ("claimed", "held"),
-    [
-        (["merge"], True),
-        (["merge", "green"], True),
-        (["merge", "green", "other"], False),
-        (["green", "merge"], False),
-        ([], False),
-    ],
-)
-def test_planned_bases_hold_only_within_the_protected_choice(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, claimed: list[str], held: bool
+def test_bases_prints_the_protected_choice_for_the_step_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     calls = []
 
@@ -130,22 +125,142 @@ def test_planned_bases_hold_only_within_the_protected_choice(
         return ["merge", "green"]
 
     monkeypatch.setattr(module, "own_bases", chosen)
-    assert module.bases_held(tmp_path, "origin/dev", claimed) is held
+    assert main(["bases", str(tmp_path), "origin/dev"]) == 0
     assert calls == [(tmp_path, "origin/dev", "HEAD", module.graded_green)]
+    assert capsys.readouterr().out == "bases=merge,green\n"
 
 
-@pytest.mark.parametrize(("bases", "status"), [("merge,green", 0), ("merge,other", 1)])
-def test_main_holds_the_planned_bases(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, bases: str, status: int
+FORGED = {**SURVIVOR, "status": "killed"}
+UNIT = {**SURVIVOR, "name": "hooks.sample.x_f__mutmut_3"}
+
+
+def test_rebuild_replaces_forged_runner_statuses_with_the_protected_rows(tmp_path: Path) -> None:
+    report = {"files": [], "not_mutated": [], "graded": [{"path": PATH, "lines": [], "rows": [FORGED]}]}
+    report["graded"].append({"path": "hooks/other.py", "lines": [], "rows": []})
+    rebuilt = module.rebuild(report, {PATH: [SURVIVOR, KILLED]}, set(), CHANGES, tmp_path)
+    other = {"path": "hooks/other.py", "lines": [], "rows": []}
+    assert rebuilt["graded"] == [{"path": PATH, "lines": [2], "rows": [SURVIVOR, KILLED]}, other]
+    assert rebuilt["units"] == []
+    assert module.rebuild({"files": []}, {}, set(), {}, tmp_path) == {"files": [], "graded": [], "units": []}
+
+
+def test_rebuild_moves_protected_split_names_into_units(tmp_path: Path) -> None:
+    report = {"files": [], "not_mutated": [], "graded": [{"path": PATH, "lines": [2], "rows": []}], "units": []}
+    rebuilt = module.rebuild(report, {PATH: [SURVIVOR, UNIT]}, {UNIT["name"]}, CHANGES, tmp_path)
+    assert rebuilt["graded"] == [{"path": PATH, "lines": [2], "rows": [SURVIVOR]}]
+    assert rebuilt["units"] == [{"path": PATH, "lines": [2], "rows": [UNIT]}]
+
+
+def test_rebuild_refuses_a_graded_file_with_functions_the_collector_did_not_read(tmp_path: Path) -> None:
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / PATH).write_text("def f():\n    return 1\n")
+    report = {"files": [], "not_mutated": [], "graded": [{"path": PATH, "lines": [2], "rows": []}]}
+    with pytest.raises(ValueError, match="Protected collector read no mutation rows for hooks/sample.py"):
+        module.rebuild(report, {}, set(), CHANGES, tmp_path)
+    (tmp_path / PATH).write_text("VALUE = 1\n")
+    assert module.rebuild(report, {}, set(), CHANGES, tmp_path)["graded"][0]["rows"] == []
+
+
+def test_recollect_runs_this_copys_collector_in_each_work_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    folders = {"0-a": ["tests/test_x.py"], "1-b": [PATH, "hooks/other.py"], "2-c": [PATH]}
+    for name, paths in folders.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "changed-lines.json").write_text(json.dumps(dict.fromkeys(paths, {})))
+    calls = []
+    found = {"1-b": [SURVIVOR], "2-c": [KILLED]}
+
+    def run(command: list[str], cwd: Path, env: dict[str, str], check: bool) -> None:
+        calls.append((command, cwd, env["PYTHONPATH"], env["PYTHONSAFEPATH"], check))
+        Path(command[3]).write_text(json.dumps({PATH: found[cwd.name]}))
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    monkeypatch.chdir(tmp_path)
+    assert module.recollect(Path("."), {PATH}, (1, 3)) == {PATH: [SURVIVOR, KILLED]}
+    expected = []
+    for name in ("1-b", "2-c"):
+        folder = tmp_path.resolve() / name
+        command = [module.sys.executable, "-m", "scripts.ci_mutation.report", str(folder / "protected-results.json")]
+        expected.append(([*command, "1", "3", PATH], folder, str(module.GRADER), "1", True))
+    assert calls == expected
+    assert module.GRADER == Path(module.__file__).resolve().parents[2]
+
+
+def _shard(folder: Path, shard: int, rows: list[dict[str, Any]]) -> None:
+    target = folder / f"mutation-report-{shard}" / "report.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps({"files": [], "not_mutated": [], "units": [{"path": PATH, "lines": [], "rows": rows}]})
+    )
+
+
+@pytest.mark.parametrize(("second", "status"), [({**UNIT, "status": "killed"}, 0), (UNIT, 1)])
+def test_units_grade_every_shards_slices_together_on_the_protected_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    second: dict[str, Any],
+    status: int,
 ) -> None:
     calls = []
 
-    def chosen(root: Path, base: str, head: str, graded: object) -> list[str]:
-        calls.append((root, base))
-        return ["merge", "green"]
+    def changes(root: Path, bases: list[str], head: str) -> dict[str, set[int]]:
+        calls.append((root, bases, head))
+        return CHANGES
 
-    monkeypatch.setattr(module, "own_bases", chosen)
-    assert main(["bases", str(tmp_path), "origin/dev", bases]) == status
-    assert calls == [(tmp_path, "origin/dev")]
-    expected = f"Protected grader: the planned mutation bases {bases} are not ones it would choose\n"
-    assert capsys.readouterr().out == (expected if status else "")
+    monkeypatch.setattr(module, "discover_changes", changes)
+    _shard(tmp_path / "reports", 0, [UNIT])
+    _shard(tmp_path / "reports", 1, [second])
+    other = {"path": "hooks/other.py", "lines": [1], "rows": [{**KILLED, "name": "hooks.other.x_g__mutmut_1"}]}
+    third = tmp_path / "reports" / "mutation-report-2" / "report.json"
+    third.parent.mkdir()
+    third.write_text(json.dumps({"files": [], "not_mutated": []}))
+    fourth = tmp_path / "reports" / "mutation-report-3" / "report.json"
+    fourth.parent.mkdir()
+    fourth.write_text(json.dumps({"files": [], "not_mutated": [], "units": [other]}))
+    assert main(["units", str(tmp_path / "reports"), "4", str(tmp_path), "merge,green"]) == status
+    assert calls == [(tmp_path, ["merge", "green"], "HEAD")]
+    verdict = "failed" if status else "passed"
+    out = capsys.readouterr().out
+    assert out.endswith(f"Protected grader: split mutation units {verdict}\n")
+    assert out.startswith("survived on lines 2: ") is bool(status)
+
+
+def test_units_fail_when_a_shard_report_is_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    monkeypatch.setattr(module, "discover_changes", lambda root, bases, head: CHANGES)
+    _shard(tmp_path, 0, [{**UNIT, "status": "killed"}])
+    assert module.grade_units(tmp_path, 3, tmp_path, ["merge"]) == 1
+    missing = [(tmp_path / f"mutation-report-{shard}" / "report.json").as_posix() for shard in (1, 2)]
+    assert capsys.readouterr().out == f"Protected grader: missing mutation shard reports {missing[0]}, {missing[1]}\n"
+
+
+def test_a_single_shard_report_grades_its_split_units_in_place(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(module, "discover_changes", lambda root, bases, head: CHANGES)
+    calls = []
+
+    def collected(output: Path, wanted: set[str], shard: tuple[int, int]) -> dict[str, list[dict]]:
+        calls.append((output, wanted, shard))
+        return {PATH: [KILLED, UNIT]}
+
+    monkeypatch.setattr(module, "recollect", collected)
+    stats = tmp_path / ".mutation-stats"
+    stats.mkdir()
+    (stats / "plan.json").write_text(json.dumps({"assignments": {UNIT["name"]: [0]}}))
+    target = tmp_path / ".mutation-gate" / "report.json"
+    target.parent.mkdir()
+    target.write_text(json.dumps(_lenient_report({2})))
+    assert main(["report", str(target), str(tmp_path), "merge", "--stats", str(stats)]) == 1
+    written = json.loads(target.read_text())
+    assert written["units"] == [{"path": PATH, "lines": [2], "rows": [UNIT]}]
+    assert written["failed"] is True
+    command = ["report", str(target), str(tmp_path), "merge", "--shard", "1", "--shards", "2", "--stats", str(stats)]
+    assert main(command) == 0
+    assert calls == [(target.parent, {PATH}, (0, 1)), (target.parent, {PATH}, (1, 2))]
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / PATH).write_text("def f():\n    return 1\n")
+    monkeypatch.setattr(module, "recollect", lambda output, wanted, shard: {})
+    with pytest.raises(ValueError, match="^Protected collector read no mutation rows for hooks/sample.py$"):
+        main(["report", str(target), str(tmp_path), "merge"])
