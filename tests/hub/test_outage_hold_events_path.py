@@ -142,7 +142,7 @@ def _open_outage(rig: SimpleNamespace, kind: str) -> None:
 
     with _on_tick(rig):
         outage.observe(SLUG, kind, [f"{kind} health probe failed"], NOW - 1_000)
-        outage.share(rig.store, SLUG)
+        outage.share(rig.store, SLUG, NOW)
 
 
 def _close_outages(rig: SimpleNamespace, at_ms: int) -> None:
@@ -152,7 +152,7 @@ def _close_outages(rig: SimpleNamespace, at_ms: int) -> None:
     with _on_tick(rig):
         for record in outage.open_records(SLUG):
             outage.observe(SLUG, record["kind"], [], at_ms)
-        outage.share(rig.store, SLUG)
+        outage.share(rig.store, SLUG, NOW)
 
 
 def _kept(rig: SimpleNamespace) -> None:
@@ -272,6 +272,33 @@ def test_an_open_outage_never_pins_a_deliberate_exit(rig: SimpleNamespace) -> No
     rig.life.handle(rig.exited)
     _retired(rig)
     assert (rig.row["state"], rig.row["claimed_by"]) == ("open", "")
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_an_open_outage_never_pins_a_handoff_exit(rig: SimpleNamespace) -> None:
+    from dataclasses import replace
+
+    rig.store.put_agent(SLUG, replace(rig.agent, state="finished"))
+    rig.row.update(state="handoff")
+    _open_outage(rig, "provider")
+    rig.life.handle(rig.exited)
+    _retired(rig)
+    assert rig.row["state"] == "handoff"
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_a_stale_share_of_an_open_outage_still_holds_and_is_logged(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import outage
+
+    _open_outage(rig, "redis")
+    key = rig.store.key(SLUG, outage.SHARED)
+    assert rig.store.redis.ttl(key) == -1
+    assert outage.shared_open(rig.store, SLUG, NOW + outage.SHARED_STALE_MS + 1)
+    rig.life.handle(rig.exited)
+    _kept(rig)
+    assert f"outage share of {SLUG} is stale since {NOW}, still holding redis" in capsys.readouterr().err
 
 
 @pytest.mark.feature("events-outage-hold-hub-agents")

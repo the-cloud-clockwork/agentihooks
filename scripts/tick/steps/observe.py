@@ -85,6 +85,7 @@ def step_stopped_branch(
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not tick._woken(slug, config, store, ledger) and (not retired or tick.lifetime.sleeping(slug, store, rows)):
             box["finished"] = True
+            tick.outage.unshare(store, slug)
             return (
                 actions
                 + tick.skip_refused(tick._close_space, slug, config, store, runtime)

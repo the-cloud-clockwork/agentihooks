@@ -281,11 +281,11 @@ def test_outage_time_is_excluded_before_timer_retry(rig):
     item, _ = send(rig)
     advance(rig, 1000)
     outage.observe("sw", "provider", ["worker (codex): stream disconnected before completion"], 1100)
-    outage.share(rig.store, "sw")
+    outage.share(rig.store, "sw", rig.clock.now)
     advance(rig, 1000 + W)
     assert steps(rig, item) == ["woken"]
     outage.observe("sw", "provider", [], 1100 + W)
-    outage.share(rig.store, "sw")
+    outage.share(rig.store, "sw", rig.clock.now)
     advance(rig, 1000 + 2 * W - 1)
     assert steps(rig, item) == ["woken"]
     advance(rig, 1000 + 2 * W)
@@ -302,7 +302,7 @@ def test_the_hub_wake_reads_the_outage_the_tick_shared_from_another_home(
         """Record the provider outage in the tick's home, share it, and leave the hub on its own empty home."""
         monkeypatch.setattr(outage, "HOME", tmp_path / "tick")
         outage.observe("sw", "provider", kind_evidence, at_ms)
-        outage.share(rig.store, "sw")
+        outage.share(rig.store, "sw", rig.clock.now)
         monkeypatch.setattr(outage, "HOME", tmp_path / "hub")
 
     item, _ = send(rig)
@@ -620,7 +620,7 @@ def test_partial_outage_keeps_the_remaining_window_instead_of_restarting_it(rig)
     item, _ = send(rig)
     outage.observe("sw", "provider", ["worker (codex): stream disconnected before completion"], 1100)
     outage.observe("sw", "provider", [], 1100 + W)
-    outage.share(rig.store, "sw")
+    outage.share(rig.store, "sw", rig.clock.now)
     advance(rig, 1000 + W + 100)
     requests = rig.bus.events.consumer("remaining-proof", "swarm.*.deadline.scheduled").fetch(10, 0)
     assert requests[-1].event.data["deadline_ms"] == 1000 + 2 * W

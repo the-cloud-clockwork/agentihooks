@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
@@ -25,7 +26,7 @@ HOLD_LIMIT_MS = 30 * 60 * 1000
 PAST_SPANS = 50
 HELD = {"idle with claim": "idle during outage", "stale claim": "stale during outage"}
 SHARED = "open-outages"
-SHARED_TTL_S = 600
+SHARED_STALE_MS = 600_000
 
 
 def home() -> Path:
@@ -72,22 +73,41 @@ def open_records(slug: str) -> list[dict]:
     return [record for record in read(slug).values() if record["ended_at"] is None]
 
 
-def share(store: RedisStore, slug: str) -> None:
-    """Publish the outage records of ``slug`` to Redis, where a hub on another host reads them."""
+def share(store: RedisStore, slug: str, now_ms: int) -> None:
+    """Publish the outage records of ``slug`` to Redis with their publish time, for a hub on another host.
+
+    The share never expires: a tick that stops publishing leaves its last state standing, open outages included.
+    """
     redis: Any = cast(Any, store).redis
-    redis.set(store.key(slug, SHARED), json.dumps(read(slug)), ex=SHARED_TTL_S)
+    redis.set(store.key(slug, SHARED), json.dumps({"at": now_ms, "records": read(slug)}))
 
 
-def shared(store: RedisStore, slug: str) -> dict[str, Any]:
-    """The outage records of ``slug`` the tick last published to Redis."""
+def unshare(store: RedisStore, slug: str) -> None:
+    """Remove the published outage records of a stopped swarm."""
+    redis: Any = cast(Any, store).redis
+    redis.delete(store.key(slug, SHARED))
+
+
+def shared(store: RedisStore, slug: str, now_ms: int) -> dict[str, Any]:
+    """The outage records of ``slug`` the tick last published, logging a stale share that still holds an outage."""
     redis: Any = cast(Any, store).redis
     raw: str | None = redis.get(store.key(slug, SHARED))
-    return cast(dict[str, Any], json.loads(raw)) if raw else {}
+    if not raw:
+        return {}
+    published: dict[str, Any] = json.loads(raw)
+    records: dict[str, Any] = published["records"]
+    still_open = [kind for kind, record in records.items() if record["ended_at"] is None]
+    if still_open and now_ms - published["at"] > SHARED_STALE_MS:
+        print(
+            f"outage share of {slug} is stale since {published['at']}, still holding {', '.join(still_open)}",
+            file=sys.stderr,
+        )
+    return records
 
 
-def shared_open(store: RedisStore, slug: str) -> list[dict[str, Any]]:
+def shared_open(store: RedisStore, slug: str, now_ms: int) -> list[dict[str, Any]]:
     """The open outage records of ``slug`` the tick last published to Redis."""
-    return [record for record in shared(store, slug).values() if record["ended_at"] is None]
+    return [record for record in shared(store, slug, now_ms).values() if record["ended_at"] is None]
 
 
 def lines(slug: str) -> list[str]:

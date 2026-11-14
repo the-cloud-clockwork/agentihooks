@@ -88,8 +88,9 @@ class Lifecycle:
     def _held(self, slug: str, agent: AgentRecord, value: dict[str, Any]) -> bool:
         """True while a pending outage resume, or an outage the tick shared, holds ``agent`` before its slot returned.
 
-        A shared outage never holds an agent whose task is done or whose exit was deliberate.
+        A shared outage never holds a finished agent, one whose task is done or one whose exit was deliberate.
         """
+        from scripts.hub import lease
         from scripts.swarm import deliberate_exit, outage, resume
 
         store = cast(RedisStore, self.store)
@@ -97,7 +98,7 @@ class Lifecycle:
             return False
         if resume.recovery_pending(store, slug, agent):
             return True
-        if not outage.shared_open(store, slug):
+        if agent.state == "finished" or not outage.shared_open(store, slug, lease.wall_ms()):
             return False
         row: dict[str, Any] = cast(Any, self.ledger).task(slug, agent.task) or {}
         finished = bool(row.get("done")) or row.get("state") == "done"

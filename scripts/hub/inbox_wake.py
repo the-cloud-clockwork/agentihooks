@@ -117,7 +117,7 @@ class InboxWake:
             item is not None
             and item.state == "pending"
             and not item.fyi
-            and not outage.shared_open(self.store, event.swarm)
+            and not outage.shared_open(self.store, event.swarm, now)
         ):
             clock = wake._Clock(now, window, wake.quiet_ms(self.environ))
             wake.wake_item(inbox, event.swarm, agents, self.herdr, self.ledger, item, clock)
@@ -146,7 +146,7 @@ class InboxWake:
         since = wake._seat_clock(
             inbox, receiver, held, {agent.name for agent in agents}, wake._swarm_config(inbox, slug)
         )
-        records = outage.shared(self.store, slug)
+        records = outage.shared(self.store, slug, now)
         if since is None or any(record["ended_at"] is None for record in records.values()):
             return now + window
         last = max(since, *(row["at"] for row in history))

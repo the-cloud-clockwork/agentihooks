@@ -6362,7 +6362,7 @@
       "id": "events-outage-hold-hub-agents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-hold-hub",
-      "behaviour": "On an events engine swarm on a nats bus, whose engineer the hive spoke started so the tick reap leaves it to the hub, an exit the hub reads while a Redis, ledger or provider outage the tick shared through Redis is open, read from Redis because the hub runs without the tick's outage home, or while an outage resume is pending for the engineer, neither drops the agent, reopens its task, releases its claim nor returns its slot; after the outage closes the outage resume prompt reaches its pane, the hub inbox wake reads the same shared outage records, so it neither wakes during an outage nor counts outage time toward its window; an open outage never holds an engineer whose task is done or whose exit was deliberate, and once nothing holds it the exit retires and reclaims as before.",
+      "behaviour": "On an events engine swarm on a nats bus, whose engineer the hive spoke started so the tick reap leaves it to the hub, an exit the hub reads while a Redis, ledger or provider outage the tick shared through Redis is open, read from Redis because the hub runs without the tick's outage home, or while an outage resume is pending for the engineer, neither drops the agent, reopens its task, releases its claim nor returns its slot; after the outage closes the outage resume prompt reaches its pane, the hub inbox wake reads the same shared outage records, so it neither wakes during an outage nor counts outage time toward its window; the share carries its publish time and never expires, so a stale share whose last state was open still holds and is logged, and a stopped swarm clears it; an open outage never holds a finished engineer, one whose task is done or one whose exit was deliberate, and once nothing holds it the exit retires and reclaims as before.",
       "seam": "Reconciler.poll and the lifecycle reactor through Lifecycle.handle, outage.share in the outage probes step and outage.shared_open, with resume.track_outages and resume.recover_outages",
       "tests": [
         "tests/hub/test_outage_hold_events_path.py::test_the_engineer_is_hub_owned_on_a_nats_bus",
@@ -6374,7 +6374,10 @@
         "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_never_pins_an_agent_whose_task_is_done",
         "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_never_pins_a_deliberate_exit",
         "tests/hub/test_outage_hold_events_path.py::test_the_outage_probes_step_shares_the_tick_outages",
-        "tests/hub/test_inbox_wake.py::test_the_hub_wake_reads_the_outage_the_tick_shared_from_another_home"
+        "tests/hub/test_inbox_wake.py::test_the_hub_wake_reads_the_outage_the_tick_shared_from_another_home",
+        "tests/hub/test_outage_hold_events_path.py::test_an_open_outage_never_pins_a_handoff_exit",
+        "tests/hub/test_outage_hold_events_path.py::test_a_stale_share_of_an_open_outage_still_holds_and_is_logged",
+        "tests/tick/test_observe.py::test_a_stopped_swarm_clears_its_shared_outages"
       ]
     },
     {
