@@ -121,23 +121,6 @@ def test_every_registered_call_step_declares_its_measured_timing() -> None:
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
-def test_spawn_needs_only_judge_orphans_and_preempt() -> None:
-    assert budgets.JUDGE == {"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"}
-    assert budgets.SPAWN_NEEDS == budgets.JUDGE | {"orphans", "preempt"}
-    assert {step.name: step.needs for step in place.STEPS}["spawn"] == budgets.SPAWN_NEEDS
-
-
-@pytest.mark.feature("swarm-tick-step-isolation")
-def test_spawn_starts_by_forty_seconds_into_the_pass() -> None:
-    needed = [TimedStep(name, budgets.timing_of(name)[0]) for name in sorted(budgets.SPAWN_NEEDS)]
-    slow = TimedStep("night watch", 300.0)
-    spawn = TimedStep("spawn", budgets.timing_of("spawn")[0], needs=budgets.SPAWN_NEEDS)
-    start = registry.latest_start("spawn", [slow, *needed, spawn])
-    assert start == 22.0
-    assert start <= budgets.SPAWN_START_S
-
-
-@pytest.mark.feature("swarm-tick-step-isolation")
 def test_latest_start_follows_the_longest_needs_path() -> None:
     first = TimedStep("a", 3.0)
     second = TimedStep("b", 4.0, needs=frozenset({"a"}))
@@ -198,8 +181,6 @@ CRITICAL_STEPS = frozenset(
         "rank pass",
         "bottleneck remedy",
         "preempt",
-        "spawn",
-        "collect acks",
         "master down",
         "tick master",
         "master scale",

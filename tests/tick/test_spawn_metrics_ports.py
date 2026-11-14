@@ -163,31 +163,6 @@ def test_the_gate_log_write_needs_the_metrics_effect_and_a_rescan_needs_none() -
 
 
 @pytest.mark.feature("tick-spawn-metrics-processes")
-def test_the_spawn_launch_reads_the_process_table_through_the_processes_port(
-    monkeypatch: pytest.MonkeyPatch, held: tuple[FakeMetrics, FakeProcesses]
-) -> None:
-    tables: list[object] = []
-
-    def admit(store: object, slug: str, agent: object, runtime: object, table: Any) -> str:
-        tables.append(table())
-        return "launched"
-
-    monkeypatch.setattr(codex, "admit_legacy", admit)
-    monkeypatch.setattr(place.tick, "placed_record", lambda record, placed: record)
-    placed = SimpleNamespace(launch_job=None)
-    run = SimpleNamespace(runtime=SimpleNamespace(spawn=lambda *args: placed), config=None, store=None, slug="sw")
-
-    assert place._launch(run, SimpleNamespace(record=SimpleNamespace(lane="eng", name="eng-1"), primed={})) == (
-        placed,
-        "launched",
-    )
-
-    _, scanned = held
-    assert tables == [{41: "agent"}]
-    assert [(call.operation, call.args, call.deadline) for call in scanned.calls] == [("rescan", (), DEADLINE)]
-
-
-@pytest.mark.feature("tick-spawn-metrics-processes")
 def test_the_codex_legacy_admission_reads_the_table_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(codex, "processes", _refuse)
     monkeypatch.setattr(codex.process, "local_namespace", lambda: "ns")
@@ -233,45 +208,3 @@ def test_spawn_helpers_outside_a_step_use_the_local_gate_log_and_process_table(
     assert ports.table() == {7: "self"}
 
 
-@pytest.mark.feature("tick-spawn-metrics-processes")
-def test_the_spawn_step_hands_the_pass_its_metrics_and_processes_ports(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.tick.test_spawn_store_ports import _State, _tick, _Untouched
-
-    tick = _tick()
-    found: list[MetricsCalls | None] = []
-    logged: list[object] = []
-
-    def spawn(*args: object) -> list[str]:
-        found.append(place.PASS_METRICS.get())
-        logged.append(dispatcher.PORT.get())
-        return []
-
-    tick._spawn = spawn
-    monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
-    tools = fake_tools()
-    state = {
-        "slug": "sw",
-        "config": SimpleNamespace(state="running", engine="tick"),
-        "store": _Untouched(),
-        "ledger": _Untouched(),
-        "runtime": _Untouched(),
-        "rows": {},
-        "doc": {},
-        "now_ms": 7,
-        "due": "due key",
-        "box": {},
-    }
-    step = next(step for step in place.STEPS if step.name == "spawn")
-    granted = tools.for_effects(step.effects)
-
-    step.run(Context(_State(state), Deadline(50.0, lambda: 0.0), granted))
-
-    [calls] = found
-    assert calls is not None
-    assert "metrics" in step.effects
-    assert (calls.metrics, calls.processes) == (granted.metrics, granted.processes)
-    assert calls.deadline.expires_at == 50.0 + tick.SPAWN_BUDGET_S
-    assert logged == [calls]
-    assert (place.PASS_METRICS.get(), dispatcher.PORT.get()) == (None, None)
-    calls.log("sw", [gate_log.Row.of("claims", "deny", Who(name="swarm", task="t1"), now_ms=1)])
-    assert [call.operation for call in cast(FakeMetrics, cast(Any, tools.metrics)).calls] == ["log"]

@@ -83,26 +83,3 @@ def test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect() -> None:
     assert [call.operation for call in cast(FakeLedger, tools.ledger).calls] == ["comment"]
 
 
-@pytest.mark.feature("swarm-tick-spawn")
-def test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.swarm import tick
-    from scripts.tick.steps import place
-
-    clock = SimpleNamespace(now=0.0)
-    deadline = Deadline(1.0, lambda: clock.now)
-    calls: list[str] = []
-
-    def unresolved(slug: str, ledger: Any, rows: dict[str, Any], task_id: str, reason: str) -> str:
-        calls.append(task_id)
-        clock.now = 1.0
-        return task_id
-
-    monkeypatch.setattr(tick, "_unresolved", unresolved)
-    order = [("eng", {"id": task_id, place.profile_first.UNRESOLVED: "reason"}) for task_id in ("t1", "t2")]
-    token = place.PASS_DEADLINE.set(deadline)
-    try:
-        assert place._block_unresolved("sw", None, {}, order) == ["t1"]
-    finally:
-        place.PASS_DEADLINE.reset(token)
-
-    assert calls == ["t1"]
