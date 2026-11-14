@@ -49,7 +49,7 @@ class LaneTasks:
         config = self.configs(event.swarm)
         if config.repo_origin:
             config = replace(config, repo=config.repo_origin)
-        return SpawnRequest(config, event.data["lane"], admitted["name"], admitted["task"])
+        return SpawnRequest(config, event.data["lane"], admitted["name"], placed(event.swarm, admitted["task"]))
 
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
@@ -60,6 +60,18 @@ class LaneTasks:
     def launched(self, event: Envelope, placed: Any) -> None:
         decision = {field: getattr(placed, field) for field in account_slots.LAUNCH_DECISION}
         self._ask("launched", event, launch=decision)  # pyright: ignore[reportUnknownMemberType]
+
+
+def placed(slug: str, task: dict[str, Any]) -> dict[str, Any]:
+    """The admitted task with its work folder written on this hive from the files the hub carried, as legacy hive
+    orders did before a launch."""
+    from scripts.hive import orders
+    from scripts.swarm_ledger import ledger_workspace
+
+    if not task.get("workspace"):
+        return task
+    folder = ledger_workspace.materialize(slug, task["id"], task.get(orders.SEEDS) or {})
+    return {**task, "workspace": str(folder)}
 
 
 def lanes(excluded: str | None) -> tuple[str, ...]:

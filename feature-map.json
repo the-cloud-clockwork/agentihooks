@@ -1,6 +1,30 @@
 {
   "features": [
     {
+      "id": "hub-admission-claim-context",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
+      "behaviour": "The hub's events admission claim does what the legacy place prepare did: a reclaimed task continues from its recorded branch or an earlier life's branch, read through the GitHub API when the swarm stores a repository origin, and a handed off task carries its handoff and resolved envelope; the ledger claim write names the portable work folder, which the hive spoke writes on its own host from the steering and the previous hive's synced files before the spawn, clears a recorded protected branch and sets the lane kind on a task with none; the admitted task carries its territory overlaps with running tasks and its group.",
+      "seam": "Admission.admit for a hive spoke request, the ledger claim write it makes and LaneTasks.request",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_reclaimed_task_continues_from_its_recorded_branch_read_through_github",
+        "tests/hub/test_admission.py::test_a_handed_off_task_carries_its_handoff_and_resolved_envelope",
+        "tests/hub/test_admission.py::test_the_claim_write_names_a_portable_workspace_clears_a_protected_branch_and_sets_the_lane_kind",
+        "tests/hub/test_admission.py::test_the_claim_write_keeps_a_real_branch_and_a_task_kind",
+        "tests/hub/test_admission.py::test_an_auto_lane_kind_writes_no_kind",
+        "tests/hub/test_admission.py::test_an_admitted_task_carries_its_territory_overlaps_and_its_group",
+        "tests/hub/test_admission.py::test_the_seeds_carry_the_folder_the_previous_agents_hive_synced",
+        "tests/hub/test_admission.py::test_a_work_folder_refusal_releases_the_claim_and_the_agent",
+        "tests/hub/test_admission.py::test_a_first_life_with_no_branch_reads_no_branch_heads",
+        "tests/hub/test_admission.py::test_a_cleared_protected_branch_continues_from_the_earlier_life_instead",
+        "tests/hub/test_admission.py::test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_continued",
+        "tests/hub/test_admission.py::test_the_seeds_follow_the_most_recently_started_earlier_agent",
+        "tests/hub/test_admission.py::test_a_plan_task_steering_carries_its_phase_evidence",
+        "tests/hub/test_admission.py::test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against",
+        "tests/hive/test_lanes.py::test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn"
+      ]
+    },
+    {
       "id": "hub-admission-hive-max-agents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-max-agents",
