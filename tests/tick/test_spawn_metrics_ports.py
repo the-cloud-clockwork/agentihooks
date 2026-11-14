@@ -6,7 +6,6 @@ from typing import Any, cast
 
 import pytest
 
-from scripts.gates import Who
 from scripts.gates import log as gate_log
 from scripts.swarm import dispatcher, metrics
 from scripts.swarm_v2.runtime import codex
@@ -15,7 +14,6 @@ from scripts.tick.adapters.fakes import FakeMetrics, FakeProcesses, fake_tools
 from scripts.tick.adapters.metrics import SpoolMetrics
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import UndeclaredEffect
-from scripts.tick.step import Context
 from scripts.tick.steps import place
 
 pytestmark = pytest.mark.unit
@@ -206,5 +204,3 @@ def test_spawn_helpers_outside_a_step_use_the_local_gate_log_and_process_table(
     assert isinstance(ports, LocalMetrics)
     assert landed == [("sw", "row")]
     assert ports.table() == {7: "self"}
-
-

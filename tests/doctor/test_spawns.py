@@ -5,7 +5,6 @@ import pytest
 
 from scripts.doctor import spawns
 from tests.doctor.recorded import load
-from tests.swarm.profile_fixture import validated
 
 
 def test_recorded_spawns_and_planted_failed_spawn():

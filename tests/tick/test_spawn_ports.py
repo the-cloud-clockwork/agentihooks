@@ -81,5 +81,3 @@ def test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect() -> None:
 
     assert str(error.value) == "ledger is not a declared effect"
     assert [call.operation for call in cast(FakeLedger, tools.ledger).calls] == ["comment"]
-
-

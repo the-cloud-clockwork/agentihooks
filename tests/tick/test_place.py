@@ -1,9 +1,9 @@
 """The placement steps run the tick's hand written acks, ranking, preempt and spawn calls at their sites in today's order."""
 
 import runpy
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 
@@ -96,12 +96,6 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         log.append((function, *args))
         return [f"ran {function if isinstance(function, str) else function.__name__}"]
 
-    @contextmanager
-    def placement_pass(runtime: Any) -> Iterator[None]:
-        log.append(("enter pass", runtime))
-        yield
-        log.append(("leave pass", runtime))
-
     class _Seats:
         def __init__(self, *args: Any) -> None:
             self.args = args
@@ -113,7 +107,6 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         skip_refused=skip_refused,
         PLACING=nullcontext(),
         EVENTS_ENGINE="events",
-        _placement_pass=placement_pass,
         _codex_hook_order="codex hook order",
         _ended="ended",
         _current_owner="owner",
