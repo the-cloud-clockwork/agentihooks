@@ -242,8 +242,20 @@ def execute(
 
 
 def room(hive: str, execution: str, harness: str, account: str) -> bool:
-    """Whether the hub holds or takes a worker slot on ``account`` for ``execution`` on ``hive``, reserving it."""
-    return bool(hive and execution and harness and account)
+    """Whether the hub holds or takes a worker slot on ``account`` for ``execution`` on ``hive``, reserving it so the
+    launcher's own take for the same execution finds the holder."""
+    from scripts.events.config import BusConfig
+    from scripts.events.factory import open_bus
+
+    config = BusConfig.from_environ()
+    bus = open_bus(config)
+    try:
+        slots = _slots(bus, config.backend, hive, lambda: _reading(hive), os.environ)
+        return slots.take(execution, harness, account) == account
+    except Exception as exc:
+        raise Unavailable("Account slot admission failed") from exc
+    finally:
+        bus.close()
 
 
 def release(hive: str, execution: str, harness: str, account: str) -> None:
