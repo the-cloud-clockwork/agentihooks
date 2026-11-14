@@ -6204,7 +6204,9 @@
         "tests/swarm/test_tick_launch_steering.py::test_a_failure_naming_no_harness_steers_nothing",
         "tests/swarm/test_tick_capacity_refusals.py::test_reservation_refusal_retains_only_this_pass_capacity",
         "tests/swarm/test_tick_capacity_refusals.py::test_open_accounts_excluded_by_handoff_do_not_establish_free_capacity",
-        "tests/swarm/test_tick_capacity_refusals.py::test_missing_capacity_and_refusal_harness_stay_unknown"
+        "tests/swarm/test_tick_capacity_refusals.py::test_missing_capacity_and_refusal_harness_stay_unknown",
+        "tests/swarm/test_tick_launch_steering.py::test_a_started_launch_clears_the_harness_its_task_avoided",
+        "tests/swarm/test_tick_launch_steering.py::test_launches_without_a_failure_carry_no_harness_to_avoid"
       ]
     },
     {

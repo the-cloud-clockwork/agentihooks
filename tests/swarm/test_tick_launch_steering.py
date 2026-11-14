@@ -107,6 +107,18 @@ def test_a_forgiven_failure_never_dilutes_the_mean_launch_cost(store, monkeypatc
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
+def test_a_started_launch_clears_the_harness_its_task_avoided(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    failing = {"t1"}
+    _failing(monkeypatch, runtime, failing)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert store.failed_harness("sw", "t1") == "codex"
+    failing.clear()
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert store.failed_harness("sw", "t1") == ""
+
+
 def test_resetting_claims_forgets_the_failed_harness(store):
     store.note_launch_failure("sw", "t1", "profile canary did not validate", "codex")
     store.note_launch_failure("sw", "t2", "placement refused")
@@ -125,6 +137,15 @@ def test_launches_after_a_failed_launch_steer_off_its_harness(store, monkeypatch
     failing.clear()
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert [(task["id"], task["avoid_harness"]) for task in runtime.tasks] == [("t2", "codex"), ("t1", "codex")]
+
+
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
+def test_launches_without_a_failure_carry_no_harness_to_avoid(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    _failing(monkeypatch, runtime, set())
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task["id"] for task in runtime.tasks] == ["t1", "t2"]
+    assert not any("avoid_harness" in task for task in runtime.tasks)
 
 
 @pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
