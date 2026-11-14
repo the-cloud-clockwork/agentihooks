@@ -2,6 +2,7 @@
 launched acknowledgement writes its launch decision. No swarm start, no tick pass and no runtime spawn run."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -76,3 +77,14 @@ def seat(env: tuple[RedisStore, Any, Any]) -> Callable[..., AgentRecord]:
         return seat_agent(store, ledger, SLUG, task_id, **options)
 
     return bound
+
+
+def launch_seated(
+    store: RedisStore, runtime: Any, agent: AgentRecord, pane: str, at: int, **fields: Any
+) -> AgentRecord:
+    """Stands in for the hive running ``agent`` of swarm ``sw`` after ``seat_agent``: the record goes ``working`` on
+    ``pane``, started and launched at ``at`` with ``fields`` applied, and the fake ``runtime`` lists it live."""
+    launched = replace(agent, pane_id=pane, state="working", started_at=at, launched_at=at, **fields)
+    store.execution_registry.update(SLUG, launched)
+    runtime.live.add(launched.name)
+    return launched
