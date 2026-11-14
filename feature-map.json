@@ -2354,6 +2354,7 @@
     {
       "id": "quiet-gate-resumed-agent-launch",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quiet-gate-launch-time",
       "behaviour": "The quiet claim gate and the stale claim finding measure a worker from the latest of its progress signals, its start and its launch, so a worker resumed long after its last progress signal is not quiet until thirty minutes after the resume, and a never resumed worker is still measured from its start.",
       "seam": "scripts.gates.quiet quiet_minutes and quiet_pass",
       "tests": [
