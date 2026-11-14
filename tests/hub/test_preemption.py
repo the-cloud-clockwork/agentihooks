@@ -111,9 +111,8 @@ def test_the_hub_preempts_with_the_tick_claim_view_builder(
     assert [seats.view for seats in seen] == [tick.claim_view]
 
 
-@pytest.mark.parametrize("fields", [{"state": "paused"}, {"engine": "legacy"}])
-def test_a_swarm_not_running_on_the_events_engine_asks_nobody(rig, fields):
-    rig.store.update(SLUG, **fields)
+def test_a_paused_swarm_asks_nobody(rig):
+    rig.store.update(SLUG, state="paused")
     poll_at(rig, 1_000, 1_000 + preemption.INTERVAL_MS)
     assert asks(rig.store, "e1") == asks(rig.store, "e2") == []
 

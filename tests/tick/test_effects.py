@@ -111,7 +111,6 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
     declared = {step.name: step.effects for step in registry.steps() if step.effects}
     assert declared == {
         "reap": frozenset({"ledger", "runtime", "inbox"}),
-        "spawn": frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"}),
         "hive sweep": frozenset({"coordination"}),
         "workflow runner": frozenset({"host"}),
         "knowledge warm": frozenset({"host"}),

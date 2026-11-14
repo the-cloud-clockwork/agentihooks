@@ -66,7 +66,6 @@ from scripts.swarm import (
     session_model,  # noqa: F401
     stack,  # noqa: F401
     stale_nudge,  # noqa: F401
-    successor_retry,  # noqa: F401
     timing,  # noqa: F401
 )
 from scripts.swarm import idle as idle_state  # noqa: F401
@@ -161,59 +160,23 @@ from scripts.tick.steps.common import (
 )
 from scripts.tick.steps.observe import (  # noqa: F401
     _acknowledging,
-    _collect_acks,
-    _expire_launch,
     _failed_hive_launch,
     _failed_launch,
-    _finished_launch,
     _launch_checks,
     _retire_launch,
     _verify,
 )
 from scripts.tick.steps.place import (  # noqa: F401
-    Failed,
-    Launch,
-    Started,
     _admission,
-    _block_unresolved,
     _claim_cap,
-    _failed_room_wait,
     _free_seat,
-    _held_back,
-    _held_for_master,
     _hold,
     _host_full,
-    _launch,
-    _launch_all,
-    _launch_room,
-    _LaunchClock,
     _lives_spent,
-    _not_launched,
-    _owner_hold,
-    _Pass,
-    _pass_reclaim,
-    _placement_pass,
-    _prepare,
-    _ranked,
-    _record_spawn_failure,
-    _refused_reservation,
-    _release_admission,
     _release_hive_launch,
-    _reported,
-    _retry_successor,
-    _room_refused,
-    _room_wait,
     _settle_admission,
-    _spawn,
-    _spawn_failed,
-    _spawn_order,
-    _spawn_stop,
     _spend_host,
     _spend_local,
-    _started,
-    _steer,
-    _steered_off,
-    _unresolved,
     host_spent,
     placed_record,
     primed,
@@ -224,7 +187,6 @@ from scripts.tick.steps.territory import (  # noqa: F401
     _bin_closed,
     _close_space,
     _end_awaiting_seats,
-    _master_set,
     _nested,
     _overlaps,
     _parked,
@@ -237,20 +199,15 @@ from scripts.tick.steps.territory import (  # noqa: F401
 )
 
 LEASE_MS = 10 * 60 * 1000
-SPAWN_BUDGET_S = 60
-SPAWN_POOL = 8
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
 ACKNOWLEDGING = "acknowledging"
-ACK_EXPIRED = "no hive acknowledged the launch within the claim lease"
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
-MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
 GROUP_BUDGET_S = 600.0
 MASTER_MOVE_MODULES = ("scripts.hive.launch", "scripts.hive.daemon", "scripts.swarm.local_slots")
-SPAWN_DUE = "spawn-due"
 HOST_SPENDS = f"{PREFIX}:host-spends"
 HOST_SPENDS_KEPT = 1000
 HOST_START_LAG_MS = 30 * 1000
@@ -294,12 +251,6 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         return [] if sites.left else steps.actions(records)
     finally:
         PASS_TOOLS.reset(token)
-
-
-def _acknowledging_error(exc):
-    from scripts.swarm_v2.runtime.base import Status
-
-    return isinstance(exc, SpawnError) and exc.status == Status.PENDING
 
 
 def _running(agents: list[AgentRecord], rows: dict[str, Any], lane: str) -> list[dict[str, Any]]:
