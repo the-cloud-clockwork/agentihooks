@@ -719,16 +719,8 @@ class RedisStore:
         }
         return json.dumps({**row, **placement, "ended_at": ended, "reason": reason})
 
-    def count_spawn(self, slug, harness):
-        self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
-
     def spawns(self, slug):
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
-
-    def count_claim(self, slug, task):
-        self.redis.hdel(self.key(slug, "pending-lives"), task)
-        self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
-        return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
     def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
         from redis.exceptions import WatchError
@@ -803,28 +795,8 @@ class RedisStore:
     def clear_failed_harness(self, slug, task):
         self.redis.hdel(self.key(slug, "launch-failure-harness"), task)
 
-    def record_launch(
-        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
-    ) -> None:
-        row = {
-            "agent": agent.name,
-            "task": agent.task,
-            "at": agent.started_at,
-            "state": state,
-            "error": error,
-            "pane_id": agent.pane_id,
-            "after": after,
-            "head": head,
-        }
-        self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
-
     def mark_restart(self, slug: str, task: str, cause: str) -> None:
         self.redis.hset(self.key(slug, "restart-causes"), task, cause)
-
-    def take_restart(self, slug: str, task: str) -> str:
-        cause = self.redis.hget(self.key(slug, "restart-causes"), task) or ""
-        self.redis.hdel(self.key(slug, "restart-causes"), task)
-        return cause
 
     def note_launch_pane(self, slug: str, name: str, lines: list[str], reason: str = "") -> None:
         raw = self.redis.hget(self.key(slug, "launches"), name)

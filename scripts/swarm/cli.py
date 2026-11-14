@@ -835,7 +835,7 @@ def cmd_waits(store, args):
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits,)]
+    jobs = [(slug, run_waits) for slug in store.slugs()]
     if jobs:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             list(pool.map(check, jobs))

@@ -6,6 +6,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, cli, commands, lease, local_slots, status, tick
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import AgentRecord, SwarmConfig
+from tests.helpers import store_seed
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -236,7 +237,7 @@ def test_a_successful_launch_restarts_the_clock(stalled):
     store, _, _, clock, _ = stalled
     tick_failure(stalled)
     clock[0] += 500_000
-    store.record_launch("sw", AgentRecord("finished", "eng", "t1", started_at=clock[0]), "started")
+    store_seed.record_launch(store, "sw", AgentRecord("finished", "eng", "t1", started_at=clock[0]), "started")
     tick_failure(stalled)
     clock[0] += 599_999
     tick_failure(stalled)
@@ -252,7 +253,7 @@ def test_a_failure_from_before_the_stall_is_not_named_as_its_cause(stalled):
     stored = store.redis.get(store.key("sw", "tick-failure"))
     assert '"at": 10000000' in stored
     clock[0] += 1
-    store.record_launch("sw", AgentRecord("finished", "eng", "t1", started_at=clock[0]), "started")
+    store_seed.record_launch(store, "sw", AgentRecord("finished", "eng", "t1", started_at=clock[0]), "started")
     for _ in range(2):
         with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
             pass
@@ -493,7 +494,7 @@ def test_no_launch_is_reported_until_an_agent_actually_starts(stalled):
     store, _, _, clock, _ = stalled
     store.drop_agent("sw", "boss")
     assert spawn_stall.launched(store, "sw") == 0
-    store.record_launch("sw", AgentRecord("pending", "eng", "t1", started_at=clock[0]), "pending")
+    store_seed.record_launch(store, "sw", AgentRecord("pending", "eng", "t1", started_at=clock[0]), "pending")
     store.put_agent("sw", AgentRecord("finished", "eng", "t1", started_at=clock[0], state="finished"))
     assert spawn_stall.launched(store, "sw") == 0
 

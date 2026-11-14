@@ -187,7 +187,6 @@ from scripts.tick.steps.territory import (  # noqa: F401
     _bin_closed,
     _close_space,
     _end_awaiting_seats,
-    _master_set,
     _nested,
     _overlaps,
     _parked,
@@ -206,7 +205,6 @@ ACKNOWLEDGING = "acknowledging"
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
-MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
 GROUP_BUDGET_S = 600.0
 MASTER_MOVE_MODULES = ("scripts.hive.launch", "scripts.hive.daemon", "scripts.swarm.local_slots")

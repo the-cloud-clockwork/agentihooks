@@ -1,6 +1,7 @@
 from scripts.swarm.status import findings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from tests.helpers import store_seed
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 
@@ -29,7 +30,7 @@ def test_started_lives_still_raise_the_proof_loop_finding():
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     for n in range(4):
-        store.record_launch("sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started")
+        store_seed.record_launch(store, "sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started")
     found = findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], [])
     assert [(f["kind"], f["subject"]) for f in found] == [("proof loop", "t1")]
     assert "started 4 times (3 reruns)" in found[0]["evidence"]
@@ -40,9 +41,11 @@ def test_restarts_that_are_all_parks_never_reach_the_reruns_threshold():
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
-    store.record_launch("sw", AgentRecord("worker0", "eng", "t1", started_at=0), "started")
+    store_seed.record_launch(store, "sw", AgentRecord("worker0", "eng", "t1", started_at=0), "started")
     for n in range(1, 8):
-        store.record_launch("sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started", after="park")
+        store_seed.record_launch(
+            store, "sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started", after="park"
+        )
     assert findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], []) == []
 
 
@@ -52,7 +55,9 @@ def test_restarts_that_each_start_on_a_new_pull_request_head_raise_no_proof_loop
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     for n, head in enumerate(["", "a", "b", "c", "c"]):
-        store.record_launch("sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started", head=head)
+        store_seed.record_launch(
+            store, "sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started", head=head
+        )
     assert findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], []) == []
 
 

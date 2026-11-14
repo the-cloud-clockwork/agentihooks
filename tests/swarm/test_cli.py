@@ -22,6 +22,7 @@ from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
+from tests.helpers import store_seed
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_delivery import FakeHerdr
@@ -1726,9 +1727,11 @@ def test_status_text_lists_a_closed_failed_launch_pane_with_its_lines(env, capsy
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     failed = AgentRecord("engineer@a1b2c3-0003", "eng", "t1", started_at=10, pane_id="w1:p9")
-    store.record_launch("sw", failed, "failed", "Codex account default not found")
+    store_seed.record_launch(store, "sw", failed, "failed", "Codex account default not found")
     store.note_launch_pane("sw", failed.name, ["$ agentihooks codex", "Codex account default not found", "$"])
-    store.record_launch("sw", AgentRecord("engineer@a1b2c3-0004", "eng", "t2", pane_id="w1:p8"), "failed", "x")
+    store_seed.record_launch(
+        store, "sw", AgentRecord("engineer@a1b2c3-0004", "eng", "t2", pane_id="w1:p8"), "failed", "x"
+    )
     capsys.readouterr()
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()

@@ -13,6 +13,7 @@ from scripts.swarm.stall_watch import ALERTED, REOPENED
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters import MasterSeats
+from tests.helpers import store_seed
 from tests.swarm.test_tick import FakeLedger
 
 SLUG = "sw"
@@ -139,10 +140,10 @@ def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
 def test_a_watchdog_reopen_marks_the_next_start_as_after_the_watchdog():
     swarm = Swarm(RED)
     swarm.tick(START + 14 * MINUTE)
-    assert swarm.store.take_restart(SLUG, "t1") == ""
+    assert store_seed.take_restart(swarm.store, SLUG, "t1") == ""
     swarm.tick(START + 15 * MINUTE)
     assert _reopened(swarm)
-    assert swarm.store.take_restart(SLUG, "t1") == "watchdog"
+    assert store_seed.take_restart(swarm.store, SLUG, "t1") == "watchdog"
 
 
 @pytest.mark.parametrize("newest", ["CANCELLED", "FAILURE"])

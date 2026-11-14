@@ -13,6 +13,7 @@ from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
+from tests.helpers import store_seed
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 LAUNCH_CHECKED = True
@@ -116,7 +117,7 @@ def test_lines_of_an_unknown_launch_are_not_recorded(store):
 
 
 def test_lines_without_a_reason_keep_an_empty_error(store):
-    store.record_launch("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1"), "started")
+    store_seed.record_launch(store, "sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1"), "started")
     store.note_launch_pane("sw", "engineer@a1b2c3-0001", ["x"])
     assert [(r["error"], r["pane_lines"]) for r in store.launches("sw")] == [("", ["x"])]
 

@@ -20,6 +20,7 @@ from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers import store_seed
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 from tests.swarm.test_ready import seated
@@ -1069,16 +1070,16 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
 
 def test_park_marks_the_next_start_as_after_a_park(parked, capsys):
     store, _, _, _, doc = parked
-    assert store.take_restart("sw", "t1") == ""
+    assert store_seed.take_restart(store, "sw", "t1") == ""
     assert park(doc) == 0
-    assert store.take_restart("sw", "t1") == "park"
+    assert store_seed.take_restart(store, "sw", "t1") == "park"
 
 
 def test_a_refused_park_leaves_no_restart_mark(parked, capsys):
     store, ledger, _, _, doc = parked
     del ledger.rows["t1"]["branch"]
     assert park(doc) == 1
-    assert store.take_restart("sw", "t1") == ""
+    assert store_seed.take_restart(store, "sw", "t1") == ""
 
 
 def test_the_life_launched_after_a_park_is_recorded_as_after_the_park(parked):

@@ -814,17 +814,15 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
     assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
 
 
-def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):
+def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key(store, home, shipped):
     from scripts.doctor import priming
 
-    found, ledger = held_fix_chain(FOCUS), Ledger()
+    found = held_fix_chain(FOCUS)
     claimed = found["tasks"][1]
     config = store.update(SLUG, autonomy="delegate")
     assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
     config = store.update(SLUG, template=priming.TEMPLATE)
     assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
 
 
 def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_head(store, home, shipped):
@@ -883,55 +881,6 @@ def test_the_claim_key_positions_the_doctor_fix_chain_before_watched_work(store)
     key = dispatcher.claim_key(config, found)
     known = {t["id"]: t for t in found["tasks"]}
     assert key(known["g"])[1] < key(known["b"])[1]
-
-
-def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):
-    config, ledger, found = chain_merge(store)
-    actions = dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW)
-    assert actions == ["chain guard claimed task b 30 seconds after task a merged on the critical chain"]
-    assert ledger.comments == [("b", CHAIN_COMMENT, "dispatcher")]
-    (row,) = gate_log.recent(SLUG, None, home)
-    assert (row["at"], row["gate"], row["kind"], row["task"], row["tool"], row["reason"]) == (
-        NOW,
-        "dispatcher",
-        "apply",
-        "b",
-        "chain-guard",
-        actions[0],
-    )
-    assert [(r["ts_ms"], r["task"], r["rule"], r["action"]) for _, rows, _ in shipped for r in rows] == [
-        (NOW, "b", "chain-guard", actions[0])
-    ]
-
-
-def test_a_refused_chain_comment_still_logs_the_claim(store, home, shipped):
-    config, _, found = chain_merge(store)
-    ledger = Ledger(refused={"comment:b"})
-    claimed = next(t for t in found["tasks"] if t["id"] == "b")
-    actions = dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW)
-    assert actions == [
-        "chain guard claimed task b 30 seconds after task a merged on the critical chain" + dispatcher.UNCOMMENTED
-    ]
-    assert [r["reason"] for r in gate_log.recent(SLUG, None, home)] == actions
-
-
-@pytest.mark.parametrize("autonomy", ["assist", "manual"])
-def test_an_unguarded_claim_below_delegate_or_without_a_merge_time_reports_nothing(store, home, shipped, autonomy):
-    config, ledger, found = chain_merge(store, autonomy)
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    config = store.update(SLUG, autonomy="delegate")
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["y"], "eng", NOW) == []
-    off = [task("a", phase="", state="done"), task("b", phase="", depends_on=["a"]), *chain_of("p", "q", "s")]
-    stamps = {"tasks/a/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000}}
-    off_chain = doc(off, phases=[], _meta={"stamps": stamps})
-    assert dispatcher.chain_claimed(SLUG, config, ledger, off_chain, off[1], "eng", NOW) == []
-    del found["_meta"]["stamps"]["tasks/a/state"], found["_meta"]["stamps"]["tasks/a2/state"]
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    del found["_meta"]["stamps"]
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    del found["_meta"]
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    assert (ledger.comments, shipped, gate_log.recent(SLUG, None, home)) == ([], [], [])
 
 
 def test_a_master_urgent_fix_phase_leaf_outside_the_focus_gets_no_rank_write_and_no_head_comment(store, home, shipped):

@@ -7,6 +7,7 @@ import pytest
 from scripts.swarm import engine_migration
 from scripts.swarm import store as store_module
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from tests.helpers import store_seed
 
 pytestmark = pytest.mark.unit
 
@@ -178,7 +179,7 @@ def test_a_swarm_whose_config_update_is_refused_keeps_its_launch_jobs_and_launch
 ) -> None:
     store.create(replace(SwarmConfig("refused", "/missing", 1, 1), repo_origin="github.com/team/project"))
     store.redis.hset(store.key("refused", engine_migration.LAUNCH_JOBS), "engineer@5", json.dumps({"task": "t5"}))
-    store.record_launch("refused", AgentRecord("engineer@6", "eng", "t6"), "launching")
+    store_seed.record_launch(store, "refused", AgentRecord("engineer@6", "eng", "t6"), "launching")
 
     def refuse(slug: str, **changes: object) -> None:
         raise SwarmError("scaling must be one of fixed")
@@ -201,7 +202,7 @@ def test_the_live_doctor_on_events_with_no_agents_drops_its_stuck_launch_rows_an
     states = {"started": 3, "launching": 7, "acknowledging": 1, "waiting": 2, "failed": 2, "pending": 1}
     for state, count in states.items():
         for n in range(count):
-            store.record_launch("watch-doctor", AgentRecord(f"{state}@{n}", "eng", f"t-{state}-{n}"), state)
+            store_seed.record_launch(store, "watch-doctor", AgentRecord(f"{state}@{n}", "eng", f"t-{state}-{n}"), state)
 
     assert engine_migration.migrate(store) == {"watch-doctor": "unchanged: dropped 8 stuck launches"}
     kept = sorted(json.loads(raw)["state"] for raw in store.redis.hvals(store.key("watch-doctor", "launches")))
@@ -214,7 +215,7 @@ def test_a_swarm_with_live_agents_keeps_its_launching_rows(store: RedisStore) ->
     store.create(replace(SwarmConfig("busy", "/missing", 1, 1), repo_origin=ORIGIN))
     store.update("busy", engine="events")
     store.put_agent("busy", AgentRecord("engineer@1", "eng", "t1", seat="eng-1@busy"))
-    store.record_launch("busy", AgentRecord("engineer@2", "eng", "t2"), "launching")
+    store_seed.record_launch(store, "busy", AgentRecord("engineer@2", "eng", "t2"), "launching")
     store.redis.hset(store.key("busy", engine_migration.LAUNCH_JOBS), "engineer@3", json.dumps({"task": "t3"}))
 
     assert engine_migration.migrate(store) == {"busy": "unchanged"}
@@ -237,8 +238,8 @@ def test_a_swarm_already_on_events_with_no_agents_drops_its_leftover_launch_jobs
 @pytest.mark.feature("engine-config-migration")
 def test_a_legacy_swarm_with_no_agents_drops_its_stuck_launch_rows_when_it_migrates(store: RedisStore) -> None:
     store.create(replace(SwarmConfig("idle", "/missing", 1, 1), repo_origin=ORIGIN))
-    store.record_launch("idle", AgentRecord("engineer@3", "eng", "t3"), "launching")
-    store.record_launch("idle", AgentRecord("engineer@4", "eng", "t4"), "started")
+    store_seed.record_launch(store, "idle", AgentRecord("engineer@3", "eng", "t3"), "launching")
+    store_seed.record_launch(store, "idle", AgentRecord("engineer@4", "eng", "t4"), "started")
 
     assert engine_migration.migrate(store) == {"idle": f"migrated: {ORIGIN}: dropped 1 stuck launches"}
     assert list(store.redis.hgetall(store.key("idle", "launches"))) == ["engineer@4"]

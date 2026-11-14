@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
+from tests.helpers import store_seed
 from tests.swarm.ledger_items import LedgerItems
 
 
@@ -374,7 +375,7 @@ def test_a_started_launch_records_why_its_task_was_open(store, marked, state_by,
         store.mark_restart("sw", "t1", marked)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [(row["state"], row["after"]) for row in store.launches("sw")] == [("started", after)]
-    assert store.take_restart("sw", "t1") == ""
+    assert store_seed.take_restart(store, "sw", "t1") == ""
 
 
 def test_a_failed_launch_keeps_the_restart_mark_for_the_next_start(store):

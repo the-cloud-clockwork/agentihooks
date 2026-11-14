@@ -5,18 +5,44 @@ import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
+from tests.helpers import store_seed
 from tests.helpers.seat import seat_agent
-from tests.swarm.test_claim_cap import CommentingLedger
 from tests.swarm.test_cli import env, run  # noqa: F401
-from tests.swarm.test_tick import FakeRuntime, store, workers  # noqa: F401
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, workers  # noqa: F401
 
 pytestmark = pytest.mark.unit
+
+
+class CommentingLedger(FakeLedger):
+    """A fake ledger whose state lists its tasks and that keeps every comment written to it."""
+
+    def __init__(self, tasks: list[dict[str, Any]]) -> None:
+        super().__init__(tasks)
+        self.comments: list[tuple[str, str, str, str]] = []
+
+    def state(self, slug: str) -> dict[str, Any]:
+        return {**super().state(slug), "tasks": [dict(row) for row in self.rows.values()]}
+
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict[str, Any],
+        by: str = "swarm",
+        if_state: tuple[str, ...] = (),
+        if_match: Any = None,
+    ) -> Any:
+        assert (slug, by) == ("sw", "swarm")
+        return super().update_task(slug, task_id, fields, by, if_state, if_match)
+
+    def comment(self, slug: str, task_id: str, text: str, by: str) -> None:
+        self.comments.append((slug, task_id, text, by))
 
 
 def launched(store: RedisStore, runtime: FakeRuntime, agent: AgentRecord) -> AgentRecord:  # noqa: F811
     """The seated ``agent`` as a started launch leaves it: its claim life counted, its record working on a pane from
     its start time and its name live in ``runtime``."""
-    store.count_claim("sw", agent.task)
+    store_seed.count_claim(store, "sw", agent.task)
     working = replace(agent, state="working", pane_id="w1:p1", launched_at=agent.started_at)
     store.put_agent("sw", working)
     runtime.live.add(agent.name)
@@ -104,7 +130,7 @@ def test_a_second_stop_refund_for_the_same_claim_is_refused(store: RedisStore) -
 
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     agent = launched(store, runtime, seat_agent(store, ledger, "sw", "t1"))
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     generation, lives = store.claim_generation("sw", "t1"), store.claims("sw", "t1")
 
     def refused(*args: Any, **kwargs: Any) -> NoReturn:

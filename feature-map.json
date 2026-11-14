@@ -1593,7 +1593,6 @@
         "tests/tick/steps/test_territory.py::test_shared_names_the_narrower_of_two_nested_areas",
         "tests/tick/steps/test_territory.py::test_a_parked_task_waits_until_every_parked_dependency_is_done",
         "tests/tick/steps/test_territory.py::test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere",
-        "tests/tick/steps/test_territory.py::test_master_set_reads_the_state_stamp_author_lane",
         "tests/tick/steps/test_territory.py::test_close_space_closes_only_an_empty_swarm",
         "tests/tick/steps/test_territory.py::test_refund_parked_returns_the_claim_of_a_parked_quota_or_preempted_handoff",
         "tests/tick/steps/test_territory.py::test_refund_parked_reads_a_task_missing_from_the_rows_as_not_parked",
