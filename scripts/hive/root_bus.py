@@ -24,11 +24,11 @@ def env_text(url: str, creds: Path, swarms: tuple[str, ...] | None) -> str:
 
 def write(home: Path, signer: nats_grant.Signer, member_id: str) -> Path:
     """Mint the member credential of member_id, write it and the bus env under home, and return the env path."""
+    swarms = nats_grant.require_listed(signer, member_id)
     minted = nats_grant.mint(signer, member_id)
-    swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
     if len(minted) > CONTROL_LINE - CONNECT_ROOM:
         raise auth.HiveError(
-            f"the {member_id} credential is {len(minted)} bytes for {len(swarms or ())} swarms, past the "
+            f"the {member_id} credential is {len(minted)} bytes for {len(swarms)} swarms, past the "
             f"{CONTROL_LINE} byte NATS control line; name fewer swarms with --swarm"
         )
     folder = Path(home) / FOLDER

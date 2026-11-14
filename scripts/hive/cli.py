@@ -293,13 +293,13 @@ def _nats_trust(args: argparse.Namespace) -> str:
 
 def _root_signer(hive: str, named: list[str]) -> tuple["Signer", list[str]]:
     from scripts import openbao_kv
-    from scripts.hive import member_swarms
+    from scripts.hive import member_swarms, nats_grant
 
     signer = _signer()
     if signer is None:
         raise auth.HiveError("AGENTIHOOKS_NATS_SIGNER must name the hub NATS signer to mint the root hive credential")
     if signer.member_swarms is None:
-        return signer, []
+        raise auth.HiveError(nats_grant.UNSCOPED_RECORD)
     wanted = member_swarms.swarms(redis_client(), named)
     if set(wanted) <= set(signer.member_swarms.get(hive, ())):
         return signer, []

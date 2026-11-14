@@ -2757,7 +2757,9 @@ swarm when none is given. From then on the hive endpoint rereads the record on
 each refresh and refuses a member it does not list before rotating its Redis
 password, and `hive invite` lists each new member and marks its invite
 `AGENTIHOOKS_BUS_SCOPED=1`. `hive join` with such an invite refuses an unscoped
-bus credential. Before the backfill, invites and refreshes stay unscoped. The
+bus credential. Before the backfill the hub mints no member bus credential:
+refreshes, joins and `hive root-bus` refuse, and `hive invite` and `hive create`
+refuse before minting a member, naming `agentihooks hive scope`. The
 join refusal guards a scoped member against a downgrade; the hub refusal is the
 enforcement, since anyone holding the invite file can edit its marker.
 

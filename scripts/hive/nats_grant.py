@@ -26,6 +26,9 @@ ACCOUNT_NAME = "SWARM"
 REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
 PUSH_TIMEOUT_S = 10
+UNSCOPED_RECORD = (
+    "the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential"
+)
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
 # A render with no member, such as the grant grader's, names no one hive.
 ANY_HIVE = "*"
@@ -264,17 +267,19 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
-def require_listed(signer: Signer, member_id: str) -> None:
-    if signer.member_swarms is not None and member_id not in signer.member_swarms:
+def require_listed(signer: Signer, member_id: str) -> tuple[str, ...]:
+    if signer.member_swarms is None:
+        raise auth.HiveError(UNSCOPED_RECORD)
+    if member_id not in signer.member_swarms:
         raise auth.HiveError(
             f"the hub record lists no member swarms for hive member {member_id}; it mints no unscoped bus credential"
         )
+    return tuple(signer.member_swarms[member_id])
 
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    require_listed(signer, member_id)
-    swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
+    swarms = require_listed(signer, member_id)
     claims = member_claims(user.public, swarms, member=member_id)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 

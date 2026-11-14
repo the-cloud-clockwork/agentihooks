@@ -60,7 +60,7 @@ def invite(
         CA_PEM: like.get(CA_PEM) or request.ledger_ca,
     }
     entries = {key: value for key, value in entries.items() if value}
-    signer = _read(bao, request.signer_path) if request.signer_path else {}
+    signer = _scoped_signer(bao, request.signer_path)
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
     if request.minted is not None:
         request.minted(f"{grant['id']}")
@@ -102,6 +102,16 @@ def _read(bao: openbao_kv.OpenBao, path: str) -> dict[str, str]:
         return openbao_kv.read(bao, path)[0]
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
+
+
+def _scoped_signer(bao: openbao_kv.OpenBao, path: str | None) -> dict[str, str]:
+    """Read the hub signer record at path, refusing one without member swarms; no path reads nothing."""
+    if not path:
+        return {}
+    signer = _read(bao, path)
+    if member_swarms.FIELD not in signer:
+        raise auth.HiveError(member_swarms.unscoped(path))
+    return signer
 
 
 def _env(text: str | None) -> dict[str, str]:

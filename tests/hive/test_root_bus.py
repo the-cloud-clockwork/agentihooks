@@ -18,6 +18,7 @@ pytestmark = pytest.mark.unit
 
 URL = "nats://hub.example:4222"
 BAO = cast(openbao_kv.OpenBao, "bao")
+ROOT = {"root": ("alpha",)}
 
 
 def _signer(member_swarms: dict | None = None) -> nats_grant.Signer:
@@ -74,7 +75,7 @@ def _swarms(monkeypatch: pytest.MonkeyPatch, named: list, chosen: tuple[str, ...
 
 @pytest.mark.feature("hive-root-bus-settings")
 def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_path):
-    signer = _signer()
+    signer = _signer(ROOT)
     path = root_bus.write(tmp_path, signer, "root")
 
     assert path == tmp_path / "root-bus" / "bus.env"
@@ -85,6 +86,8 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
         "AGENTIHOOKS_BUS_URL": URL,
         "AGENTIHOOKS_BUS_CREDENTIALS": str(creds),
         "AGENTIHOOKS_BUS_BIND": "1",
+        "AGENTIHOOKS_BUS_SCOPED": "1",
+        "AGENTIHOOKS_BUS_SWARMS": "alpha",
     }
     config = BusConfig.from_environ(values)
     assert (config.backend, config.url, config.provision) == ("nats", URL, False)
@@ -93,7 +96,7 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
     assert claims["name"] == "hive-root"
     assert claims["iss"] == signer.account.public
     assert claims["sub"] == user.public == nats_grant.member_user(signer, "root").public
-    assert claims["nats"] == nats_grant.member_claims(user.public, None, member="root")
+    assert claims["nats"] == nats_grant.member_claims(user.public, ("alpha",), member="root")
     assert stat.S_IMODE((tmp_path / "root-bus").stat().st_mode) == 0o700
     assert stat.S_IMODE(creds.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -102,7 +105,7 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
 @pytest.mark.feature("hive-root-bus-settings")
 def test_the_root_bus_settings_stay_out_of_the_env_files_every_process_loads(tmp_path):
     (tmp_path / ".env").write_text("")
-    root_bus.write(tmp_path, _signer(), "root")
+    root_bus.write(tmp_path, _signer(ROOT), "root")
 
     environ = {"HOME": str(tmp_path / "home"), "AGENTIHOOKS_HOME": str(tmp_path)}
     assert operator_env.files(environ) == [tmp_path / ".env"]
@@ -114,6 +117,16 @@ def test_a_signer_that_lists_member_swarms_without_root_mints_nothing(tmp_path):
         root_bus.write(tmp_path, _signer({"other": ("alpha",)}), "root")
     assert str(refused.value) == (
         "the hub record lists no member swarms for hive member root; it mints no unscoped bus credential"
+    )
+    assert not (tmp_path / "root-bus").exists()
+
+
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_a_signer_record_without_member_swarms_mints_no_root_credential(tmp_path: Path) -> None:
+    with pytest.raises(auth.HiveError) as refused:
+        root_bus.write(tmp_path, _signer(), "root")
+    assert str(refused.value) == (
+        "the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential"
     )
     assert not (tmp_path / "root-bus").exists()
 
@@ -148,14 +161,14 @@ def test_a_credential_past_the_nats_control_line_is_refused_before_writing(tmp_p
     )
     assert not (tmp_path / "root-bus").exists()
     monkeypatch.setattr(nats_grant, "mint", lambda signer, member: "x" * limit)
-    assert root_bus.write(tmp_path, _signer(), "root").is_file()
+    assert root_bus.write(tmp_path, _signer(ROOT), "root").is_file()
 
 
 @pytest.mark.feature("hive-root-bus-settings")
 def test_root_bus_writes_into_a_missing_home_and_again_on_a_rerun(tmp_path):
     home = tmp_path / "missing" / "home"
-    first = root_bus.write(home, _signer(), "root")
-    second = root_bus.write(home, _signer(), "root")
+    first = root_bus.write(home, _signer(ROOT), "root")
+    second = root_bus.write(home, _signer(ROOT), "root")
 
     assert first == second == home / "root-bus" / "bus.env"
     assert dotenv_values(second)["AGENTIHOOKS_BUS"] == "nats"
@@ -191,7 +204,7 @@ def test_verify_connects_once_with_the_written_bus_env_and_closes(tmp_path, monk
 def test_verify_turns_a_hub_refusal_into_a_hive_error(tmp_path, monkeypatch):
     from scripts.events import nats
 
-    path = root_bus.write(tmp_path, _signer(), "root")
+    path = root_bus.write(tmp_path, _signer(ROOT), "root")
 
     def refuse(config: BusConfig) -> None:
         raise ConnectionResetError("maximum control line exceeded")
@@ -207,7 +220,7 @@ def test_verify_turns_a_hub_refusal_into_a_hive_error(tmp_path, monkeypatch):
 
 @pytest.mark.feature("hive-root-bus-settings")
 def test_remove_deletes_the_root_bus_files(tmp_path):
-    path = root_bus.write(tmp_path, _signer(), "root")
+    path = root_bus.write(tmp_path, _signer(ROOT), "root")
 
     assert root_bus.remove(tmp_path) is True
     assert not path.exists()
@@ -227,7 +240,8 @@ def test_the_hive_service_loads_the_root_bus_env_after_the_hive_env():
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_writes_verifies_then_reinstalls_and_restarts_the_service(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_signer", _signer)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer(ROOT))
+    _swarms(monkeypatch, [], ("alpha",))
     steps: list[str] = []
     _service(monkeypatch, steps)
 
@@ -330,6 +344,19 @@ def test_hive_root_bus_refuses_without_the_hub_signer(tmp_path, monkeypatch, cap
     assert not (home / "root-bus").exists()
 
 
+@pytest.mark.feature("hive-mint-refuses-unscoped-signer")
+def test_hive_root_bus_refuses_a_signer_record_without_member_swarms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer())
+
+    assert cli.main(["root-bus"]) == 1
+
+    assert capsys.readouterr().err == f"hive root-bus refused: {nats_grant.UNSCOPED_RECORD}\n"
+    assert not (home / "root-bus").exists()
+
+
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, capsys):
     from scripts.hive import scope
@@ -377,7 +404,8 @@ def test_hive_root_bus_refuses_a_home_the_hive_service_does_not_load(tmp_path, m
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_when_the_hive_service_does_not_restart(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_signer", _signer)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer(ROOT))
+    _swarms(monkeypatch, [], ("alpha",))
     _service(monkeypatch, [], restarted=False)
 
     assert cli.main(["root-bus"]) == 1
@@ -391,7 +419,8 @@ def test_hive_root_bus_refuses_when_the_hive_service_does_not_restart(tmp_path, 
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_when_systemctl_fails(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_signer", _signer)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer(ROOT))
+    _swarms(monkeypatch, [], ("alpha",))
     _service(monkeypatch, [])
 
     def fail() -> bool:
@@ -411,7 +440,7 @@ def test_hive_root_bus_refuses_when_systemctl_fails(tmp_path, monkeypatch, capsy
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_revoke_root_removes_the_root_bus_files(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
-    root_bus.write(home, _signer(), "root")
+    root_bus.write(home, _signer(ROOT), "root")
     monkeypatch.setattr(cli, "_signer", lambda: None)
     monkeypatch.setattr(cli, "_unlist", lambda member: [])
     revoked: list[str] = []

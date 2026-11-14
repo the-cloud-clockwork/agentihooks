@@ -329,7 +329,7 @@ def _listed(tools: Tools, options: Options, listing: Listing, member: str) -> st
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
     if listed is None:
-        return f"the hub signer record {listing.path} lists no member swarms, so the hub scopes no member"
+        raise auth.HiveError(member_swarms.unscoped(listing.path))
     if member in listed and tools.state.get("resynced") == member:
         return f"kept {member} on the hub signer record {listing.path}"
     swarms = ", ".join(listing.swarms)
