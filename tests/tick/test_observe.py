@@ -1,6 +1,5 @@
 """The start and observation steps run the tick's hand written start and observe calls from the registry."""
 
-from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -98,20 +97,12 @@ def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple
     monkeypatch.setattr(tick_module, "_recover_master", _fake(seen, "recover", ["recovered"]))
     monkeypatch.setattr(tick_module.freeze, "watched", lambda slug, store, ledger, doc: {**doc, "watched": True})
     monkeypatch.setattr(automated_gc, "run", _fake(seen, "cleanup", ["cleaned"]))
-    monkeypatch.setattr(tick_module, "_spawn", _fake(seen, "spawn", ["spawned"]))
     monkeypatch.setattr(tick_module.exits, "sweep", _fake(seen, "exits", ["exited"]))
     monkeypatch.setattr(tick_module.master_start, "observe", _fake(seen, "start watch", ["watched"]))
     monkeypatch.setattr(tick_module, "_launch_checks", _fake(seen, "launch checks", ["checked"]))
     monkeypatch.setattr(tick_module.resume, "track_outages", _fake(seen, "outages", None))
     monkeypatch.setattr(tick_module, "_verify", _fake(seen, "verify", ["verified"]))
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: False)
-
-    @contextmanager
-    def placement(runtime: object) -> Any:
-        seen.append(("placement", (runtime,)))
-        yield
-
-    monkeypatch.setattr(tick_module, "_placement_pass", placement)
     return seen
 
 

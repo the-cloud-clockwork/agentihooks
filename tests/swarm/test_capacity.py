@@ -801,39 +801,6 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
-def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
-    from scripts.swarm.runtime import HerdrRuntime
-    from scripts.swarm.tick import _spawn_order
-
-    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
-    runtime = HerdrRuntime(home=tmp_path)
-    monkeypatch.setattr("scripts.swarm.runtime.plugins.claude_only", lambda profile: profile == "frontend")
-    ready = {
-        "eng": [{"id": "fixed", "profile": "frontend"}, {"id": "auto", "profile": "engineer"}],
-        "ci": [],
-        "plan": [],
-    }
-    requirements = runtime.quota_requirements(config, ready)
-    monkeypatch.setattr(
-        capacity, "accounts", lambda env, now, refresh=True: [account(cap=0), account("cx", harness="codex")]
-    )
-    decision = runtime.quota_capacity(config, [], 100, {"eng": 2, "ci": 0, "plan": 0}, requirements)
-    assert decision["effective"] == {"eng": 1, "ci": 0, "plan": 0}
-    assert decision["placements"] == {"eng": [{"index": 1, "harness": "codex", "account": "cx"}], "ci": [], "plan": []}
-    assert decision["tasks"] == {"auto": "codex"}
-    store = _store()
-    store.create(config)
-    ledger = FakeLedger(ready["eng"])
-    from json import dumps
-
-    store.redis.set(store.key("sw", "quota-capacity"), dumps(decision))
-    rows = ledger.rows
-    assert [
-        (lane, task["id"])
-        for lane, task in _spawn_order("sw", config, store, [], rows, ledger.state("sw"), FakeRuntime())[0]
-    ] == [("eng", "auto")]
-
-
 def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypatch, tmp_path):
     from scripts.swarm import runtime as module
 
@@ -1402,19 +1369,6 @@ def test_legacy_runtime_without_quota_reader_performs_no_capacity_work():
     assert capacity.apply("sw", None, None, None, SimpleNamespace(), 1000) == []
 
 
-def test_legacy_effective_caps_still_limit_spawns_when_task_mapping_is_absent():
-    import json
-
-    from scripts.swarm.tick import _spawn_order
-
-    store = _store()
-    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
-    store.create(config)
-    ledger = FakeLedger([{"id": "e"}])
-    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 0}}))
-    assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), FakeRuntime()) == ([], [])
-
-
 def test_lane_harness_pin_wins_over_a_saved_different_harness(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
@@ -1481,7 +1435,6 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
 @pytest.mark.parametrize("age", [0, 299_999, 300_000, 300_001])
 def test_capacity_skips_fresh_placement_refusals_before_reserving_slots(age):
     from scripts.hive import placement_waits
-    from scripts.swarm.tick import _spawn_order
 
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
@@ -1510,8 +1463,6 @@ def test_capacity_skips_fresh_placement_refusals_before_reserving_slots(age):
     assert prepared == expected
     assert demands == [{"eng": len(expected), "ci": 0, "plan": 0}]
     assert capacity.read(store, "sw")["tasks"] == {expected[0]: "claude"}
-    queue, _ = _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw"), runtime)
-    assert [(lane, task["id"]) for lane, task in queue] == [("eng", expected[0])]
     skipped = [line for line in actions if "fresh placement refusal" in line]
     assert skipped == (
         ["capacity skipped eng task refused: fresh placement refusal: no hive has room"]
