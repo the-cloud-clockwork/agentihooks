@@ -173,12 +173,11 @@ def lane_commands(slug: str, stage: Stage) -> list[list[str]]:
     return [swarm(slug, "set", f"eng-model={stage.model}", f"eng-effort={stage.effort}", *ceiling)]
 
 
-def focus_commands(slug: str, tasks: Sequence[str], quote: str, only: bool) -> list[list[str]]:
-    """Focus ``tasks`` in order; with ``only`` the first focus drops every other focus."""
-    flags = [["--only"] if only and not n else ["--bottom"] for n in range(len(tasks))]
+def focus_commands(slug: str, tasks: Sequence[str], quote: str, lead: str) -> list[list[str]]:
+    """Focus ``tasks`` in order, the first with ``lead``: --only drops every other focus, --bottom queues it."""
     return [
-        swarm(slug, "focus", f"tasks/{task}", *flag, "--reason", FOCUS_REASON, "--quote", quote)
-        for task, flag in zip(tasks, flags)
+        swarm(slug, "focus", f"tasks/{task}", "--bottom" if n else lead, "--reason", FOCUS_REASON, "--quote", quote)
+        for n, task in enumerate(tasks)
     ]
 
 
@@ -288,7 +287,7 @@ def save_state(slug: str, state: State) -> None:
 
 def run(command: list[str]) -> str:
     """Run one agentihooks command and return its output, raising CommandFailed on a failure."""
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    result = subprocess.run(command, text=True, capture_output=True)
     if result.returncode:
         raise CommandFailed(f"{' '.join(command[:4])} failed: {(result.stderr or result.stdout).strip()}")
     return result.stdout
@@ -369,7 +368,7 @@ def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[st
     commands += [
         scout_task(args.slug, args.who, t, args.problem, h) for t, h in hypotheses if t not in state.scout_tasks
     ]
-    commands += focus_commands(args.slug, scouts, args.quote, only=first)
+    commands += focus_commands(args.slug, scouts, args.quote, "--only" if first else "--bottom")
     commands += [canon_note(args.slug, crew), *stop_commands(args.slug, state)] if first else []
     if not args.dry_run:
         save_state(args.slug, state)
@@ -399,7 +398,7 @@ def stage_fix(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str,
     fixers = numbered(state.crew_id, "fix", crew.fixers.count)
     commands = lane_commands(args.slug, crew.fixers)
     commands += [fixer_task(args.slug, args.who, t, args.cause, [p for p in fixers if p != t]) for t in fixers]
-    commands += focus_commands(args.slug, fixers, args.quote, only=False)
+    commands += focus_commands(args.slug, fixers, args.quote, "--bottom")
     execute(commands, runner, args.dry_run)
     if not args.dry_run:
         state.fixer_tasks, state.causes = fixers, list(args.cause)
@@ -424,7 +423,7 @@ def stage_harden(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[s
         sys.exit(NO_FIXERS)
     task = f"{state.crew_id}-harden"
     commands = [harden_task(args.slug, args.who, task, state.causes)]
-    commands += focus_commands(args.slug, [task], args.quote, only=False)
+    commands += focus_commands(args.slug, [task], args.quote, "--bottom")
     execute(commands, runner, args.dry_run)
     if not args.dry_run:
         state.harden_task = task

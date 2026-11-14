@@ -65,6 +65,7 @@ def run(crew: ModuleType, ledger: Ledger, *argv: str, capsys: pytest.CaptureFixt
     assert crew.main(list(argv), runner=ledger, now=NOW) == 0
     out = capsys.readouterr().out
     start = out.index("{\n  ")
+    assert out[start : start + 5] == '{\n  "'
     assert out.endswith("\n}\n")
     return json.loads(out[start:])
 
@@ -193,10 +194,17 @@ def test_scout_stops_other_work_sets_the_lane_and_records_the_order(
         ["agentihooks", "swarm", "demo", "learned", canon, "--maturity", "canon"],
     ]
     assert crew.ORDER in canon and " because " in canon
-    assert result["earlier_focus"] == ["phases/p1", "tasks/t2"]
-    assert result["scouts"] == [f"{CID}-scout-{n}" for n in range(1, 6)]
-    assert result["cron"] == crew.cron("demo", crew.Crew())
-    assert result["restore"] == f"python3 {ENTRY} restore demo"
+    assert [c for c in ledger.calls if c not in ledger.writes()] == [
+        ["agentihooks", "ledger", "--slug", "demo", "get", "freezes"],
+        ["agentihooks", "swarm", "demo", "status", "--json"],
+    ]
+    assert result == {
+        "crew": CID,
+        "scouts": [f"{CID}-scout-{n}" for n in range(1, 6)],
+        "earlier_focus": ["phases/p1", "tasks/t2"],
+        "cron": crew.cron("demo", crew.Crew()),
+        "restore": f"python3 {ENTRY} restore demo",
+    }
     saved = json.loads(crew.state_path("demo").read_text())
     assert saved["earlier_lane"] == {"agent": "claude", "model": "sonnet", "effort": "high", "effort_max": "xhigh"}
     assert (saved["launched"], saved["crew_id"], saved["problem"]) == (True, CID, "p")
@@ -214,6 +222,7 @@ def test_a_dry_run_scout_writes_nothing(crew: ModuleType, capsys: pytest.Capture
     assert crew.main(["scout", "demo", "--problem", "p", "--dry-run", "--as", "x"], runner=ledger, now=NOW) == 0
     printed = capsys.readouterr().out.splitlines()
     assert ledger.calls == [] and not crew.state_path("demo").exists()
+    assert len([line for line in printed if line.startswith("[")]) == 12
     assert json.loads(printed[0]) == [
         "agentihooks",
         "swarm",
@@ -301,6 +310,11 @@ def test_fixers_wait_until_every_scout_is_done(crew: ModuleType, capsys: pytest.
     with pytest.raises(SystemExit, match=message):
         crew.main(["fix", "demo", "--cause", "hub drops offers"], runner=ledger, now=NOW)
     assert ledger.writes() == []
+    two = f"^the scouts {CID}-scout-4, {CID}-scout-5 are not done"
+    with pytest.raises(SystemExit, match=two):
+        crew.main(
+            ["fix", "demo", "--cause", "c"], runner=Ledger(done={f"{CID}-scout-{n}" for n in range(1, 4)}), now=NOW
+        )
 
 
 def test_fixers_need_a_proven_cause(crew: ModuleType) -> None:
@@ -315,27 +329,32 @@ def test_later_stages_refuse_without_a_launched_crew(crew: ModuleType) -> None:
 
 @pytest.mark.feature("launch-troubleshooting-crew")
 def test_fixers_are_added_for_the_proven_causes_and_focused(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
-    scouted(crew, capsys, "--fixers", "2")
-    writes = fixed(crew, capsys).writes()
-    texts = [
-        crew.FIXER_TEXT.format(proven="- c1\n- c2", peers=f"{CID}-fix-2"),
-        crew.FIXER_TEXT.format(proven="- c1\n- c2", peers=f"{CID}-fix-1"),
-    ]
-    assert writes == [
+    scouted(crew, capsys, "--fixers", "3")
+    dry = Ledger(done={f"{CID}-scout-{n}" for n in range(1, 6)})
+    run(crew, dry, "fix", "demo", "--cause", "c1", "--dry-run", capsys=capsys)
+    assert dry.writes() == [] and json.loads(crew.state_path("demo").read_text())["fixer_tasks"] == []
+    ledger = Ledger(done={f"{CID}-scout-{n}" for n in range(1, 6)})
+    result = run(crew, ledger, "fix", "demo", "--cause", "c1", "--cause", "c2", capsys=capsys)
+    fixers = [f"{CID}-fix-{n}" for n in range(1, 4)]
+    assert result == {"crew": CID, "fixers": fixers, "causes": ["c1", "c2"]}
+    reads = [c for c in ledger.calls if c not in ledger.writes()]
+    assert reads == [["agentihooks", "ledger", "--slug", "demo", "get", f"tasks/{CID}-scout-{n}"] for n in range(1, 6)]
+    peers = {1: f"{CID}-fix-2, {CID}-fix-3", 2: f"{CID}-fix-1, {CID}-fix-3", 3: f"{CID}-fix-1, {CID}-fix-2"}
+    assert ledger.writes() == [
         ["agentihooks", "swarm", "demo", "set", "eng-model=opus", "eng-effort=xhigh"],
         *[
             [
                 *ME, "task", "add", f"{CID}-fix-{n}", f"Troubleshooting crew {CID}-fix-{n}",
                 "--not-duplicate", "one fixer of the troubleshooting crew working with its peers",
-                "--lane", "eng", "--kind", "code", "--rank", "urgent", "--description", texts[n - 1],
+                "--lane", "eng", "--kind", "code", "--rank", "urgent",
+                "--description", crew.FIXER_TEXT.format(proven="- c1\n- c2", peers=peers[n]),
             ]
-            for n in (1, 2)
+            for n in (1, 2, 3)
         ],
-        focus(f"tasks/{CID}-fix-1", "--bottom"),
-        focus(f"tasks/{CID}-fix-2", "--bottom"),
+        *[focus(f"tasks/{fixer}", "--bottom") for fixer in fixers],
     ]  # fmt: skip
     saved = json.loads(crew.state_path("demo").read_text())
-    assert (saved["fixer_tasks"], saved["causes"]) == ([f"{CID}-fix-1", f"{CID}-fix-2"], ["c1", "c2"])
+    assert (saved["fixer_tasks"], saved["causes"]) == (fixers, ["c1", "c2"])
 
 
 @pytest.mark.feature("launch-troubleshooting-crew")
@@ -394,6 +413,12 @@ def test_restore_brings_back_the_earlier_focus_and_lane(crew: ModuleType, capsys
     run(crew, Ledger(), "harden", "demo", capsys=capsys)
     ledger = Ledger()
     result = run(crew, ledger, "restore", "demo", "--quote", "crew is over", capsys=capsys)
+    assert [c for c in ledger.calls if c not in ledger.writes()] == [
+        ["agentihooks", "ledger", "--slug", "demo", "get", "phases/p1"],
+        ["agentihooks", "ledger", "--slug", "demo", "get", "tasks/t2"],
+    ]
+    assert set(result) == {"crew", "restored_focus", "skipped_focus", "restored_lane", "stopped_agents"}
+    assert result["crew"] == CID
     ended = ("troubleshooting crew ended", "crew is over")
     crew_tasks = [*[f"{CID}-scout-{n}" for n in range(1, 6)], f"{CID}-fix-1", f"{CID}-harden"]
     words = ["--reason", ended[0], "--quote", ended[1]]
@@ -440,14 +465,46 @@ def test_a_scout_after_a_restore_starts_a_new_crew(crew: ModuleType, capsys: pyt
     assert [c for c in ledger.writes() if c[3] == "focus"][0] == focus(f"tasks/{CID}-scout-1", "--only")
 
 
-def test_state_lives_under_the_agentihooks_home(crew: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_state_lives_under_the_agentihooks_home(
+    crew: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    assert crew.state_path("demo") == tmp_path / "home" / "swarm" / "demo" / "troubleshooting-crew.json"
     monkeypatch.delenv("AGENTIHOOKS_HOME")
     assert crew.state_path("demo") == Path.home() / ".agentihooks" / "swarm" / "demo" / "troubleshooting-crew.json"
 
 
+def test_hypotheses_fill_the_scouts_past_the_given_ones() -> None:
+    spare = troubleshooting_crew.SPARE
+    assert troubleshooting_crew.hypotheses_for(3, ["a"]) == ["a", spare, spare]
+    assert troubleshooting_crew.hypotheses_for(1, ["a", "b"]) == ["a"]
+
+
+def test_an_unknown_stage_is_refused(crew: ModuleType) -> None:
+    with pytest.raises(SystemExit) as refused:
+        crew.main(["unknown", "demo"], runner=Ledger(), now=NOW)
+    assert refused.value.code == 2
+
+
+def test_a_dry_run_without_a_session_name_leaves_the_name_empty(
+    crew: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    assert crew.main(["scout", "demo", "--problem", "p", "--dry-run"], runner=Ledger(), now=NOW) == 0
+    add = json.loads(capsys.readouterr().out.splitlines()[1])
+    assert add[:7] == ["agentihooks", "ledger", "--slug", "demo", "--as", "", "task"]
+
+
+def test_a_dry_run_restore_writes_nothing_and_keeps_the_crew(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
+    scouted(crew, capsys)
+    ledger = Ledger()
+    run(crew, ledger, "restore", "demo", "--dry-run", capsys=capsys)
+    assert ledger.writes() == [] and crew.state_path("demo").exists()
+
+
 def test_run_returns_output_and_raises_on_a_failure(crew: ModuleType) -> None:
     assert crew.run(["sh", "-c", "echo out"]) == "out\n"
-    with pytest.raises(crew.CommandFailed, match="^sh -c echo bad >&2; exit 3 failed: bad$"):
-        crew.run(["sh", "-c", "echo bad >&2; exit 3"])
+    with pytest.raises(crew.CommandFailed, match="^sh -c echo bad >&2; exit 3 zero failed: bad$"):
+        crew.run(["sh", "-c", "echo bad >&2; exit 3", "zero", "one"])
     with pytest.raises(crew.CommandFailed, match="^sh -c echo shown; exit 1 failed: shown$"):
         crew.run(["sh", "-c", "echo shown; exit 1"])
