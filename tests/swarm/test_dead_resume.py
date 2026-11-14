@@ -6,6 +6,7 @@ import pytest
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
 from tests.swarm.profile_fixture import validated
@@ -70,6 +71,31 @@ def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypat
     if lane == "eng":
         assert ledger.rows["t1"]["claimed_by"] == original.name
         assert store.claimant("sw", "t1") == original.name
+
+
+@pytest.mark.feature("swarm-resumed-agent-grace")
+def test_a_resumed_engineer_not_yet_live_keeps_its_start_grace_from_the_resume(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    original = next(agent for agent in store.agents("sw") if agent.lane == "eng")
+    store.put_agent("sw", replace(original, conversation_id="original-conversation", profile="engineer"))
+    runtime.live.discard(original.name)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    resumed_at = STARTUP_GRACE_MS + 2
+    tick_module.tick("sw", store, ledger, runtime, resumed_at)
+    assert len(runtime.resumed) == 1
+    runtime.live.discard(original.name)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+
+    actions = agent_steps._reap("sw", store, ledger, runtime, rows, resumed_at + STARTUP_GRACE_MS)
+
+    assert [action for action in actions if original.name in action] == []
+    assert len(runtime.resumed) == 1
+    reopened = next(agent for agent in store.agents("sw") if agent.name == original.name)
+    assert (reopened.started_at, reopened.launched_at) == (original.started_at, resumed_at)
+    assert ledger.rows["t1"]["claimed_by"] == original.name
 
 
 def test_missing_pane_does_not_erase_a_known_conversation(store):
