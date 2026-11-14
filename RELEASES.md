@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.884 · 2026-11-14
+
+### 2026-11-14 · cfb94e621454 · #11180 · @agenticore-app
+
+**Events engine starts a launch check when a hive reports a launch**
+
+Under the events engine, workers that never properly joined their seat or launched with the wrong profile, base, or overlay were never retired or relaunched, because no path triggered the launch check that the legacy place step normally provides. This change makes Admission.launched start that check when a hive reports a launch decision differing from the agent's record, allowing relaunch, while ignoring repeat reports from republished claims and refused reports. Hives that never report their join are now correctly judged as missed and retired, closing a real gap in worker health enforcement for events-based deployments.
+
 ## v2.17.883 · 2026-11-14
 
 ### 2026-11-14 · ad199ea068e3 · #11174 · @agenticore-app
