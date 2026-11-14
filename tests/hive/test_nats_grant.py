@@ -196,7 +196,7 @@ def _publish_refusals(signer: nats_grant.Signer, credentials: str, *published: s
 
 def _member(signer: nats_grant.Signer, scope: str) -> str:
     if scope == "unscoped":
-        return nats_grant.mint(signer, "m1")
+        return _unscoped(signer, "m1")
     return _signed(signer, "hive-m1", nats_grant.member_claims("UMEMBER", ("rig",), member="m1"))
 
 
