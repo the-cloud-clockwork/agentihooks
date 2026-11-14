@@ -39,7 +39,7 @@ def rig() -> Iterator[SimpleNamespace]:
     """A started execution on hive-a with its claim, agent record, ledger row and hub lifecycle."""
     import fakeredis
 
-    bus = memory.open_bus(BusConfig())
+    bus: Any = memory.open_bus(BusConfig())
     agent = AgentRecord(
         name="engineer", lane="eng", task="task", execution_id="execution", generation=3, seat="eng-1", account="a"
     )
@@ -49,7 +49,7 @@ def rig() -> Iterator[SimpleNamespace]:
         row.update(args[2])
         return dict(row)
 
-    ledger = SimpleNamespace(task=lambda slug, task_id: dict(row), update_task=update)
+    ledger: Any = SimpleNamespace(task=lambda slug, task_id: dict(row), update_task=update)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.redis.hset(store.key(SLUG, "executions"), agent.execution_id, json.dumps(asdict(agent)))
     store.redis.hset(store.key(SLUG, "agents"), agent.name, json.dumps(asdict(agent)))
@@ -165,7 +165,7 @@ def test_the_hub_answers_unknown_for_an_execution_no_hive_started(rig: SimpleNam
 @pytest.mark.feature("events-execution-stop")
 def test_a_failed_reap_emits_no_exit_and_is_retried(rig: SimpleNamespace) -> None:
     hive = runtime()
-    hive.reap.return_value = outcome(Status.FAILED)
+    hive.reap.return_value = outcome(Status.REFUSED)
     stopper = execution_stop.Stopper(rig.bus, SLUG, HIVE, hive)
     execution_stop.stop(rig.bus, SLUG, rig.agent, "launch check failed")
 
