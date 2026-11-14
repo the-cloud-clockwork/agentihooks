@@ -30,7 +30,7 @@ def exit_report(swarm: str, hive: str) -> str:
 
 
 def in_swarm(swarm: str, subject: str) -> bool:
-    return subject.startswith((f"{PREFIX}.{swarm}.", f"{SLOTS}.{swarm}."))
+    return subject.startswith((f"{PREFIX}.{swarm}.", f"{SLOTS}.{swarm}.", f"{EXITS}.{swarm}."))
 
 
 def inbox(user: str) -> str:

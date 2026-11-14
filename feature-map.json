@@ -5773,6 +5773,8 @@
         "tests/hive/test_nats_grant.py::test_the_hub_credential_serves_every_hive_exit_subject",
         "tests/hub/test_exits.py::test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub",
         "tests/hub/test_exits.py::test_the_hub_refuses_an_exit_reported_by_another_hive",
+        "tests/hub/test_exits.py::test_a_hive_on_a_swarm_scoped_bus_reports_its_exit_through_the_hub",
+        "tests/hive/test_execution_stop.py::test_a_stop_reaps_the_execution_on_its_hive_and_ends_it_through_the_exited_lifecycle",
         "tests/hub/test_exits.py::test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished",
         "tests/hub/test_exits.py::test_the_hub_refuses_a_malformed_exit_report"
       ]

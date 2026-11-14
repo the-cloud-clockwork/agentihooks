@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -63,6 +64,21 @@ def test_the_hub_refuses_an_exit_reported_by_another_hive(hub) -> None:
         str(refused.value) == "hive 'hive-b' reported an exit for execution 'execution-a', which runs on hive 'hive-a'"
     )
     assert shared(hub) == []
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_a_hive_on_a_swarm_scoped_bus_reports_its_exit_through_the_hub() -> None:
+    bus = open_bus(BusConfig(scoped=True))
+    exits.serve(bus, lambda: SimpleNamespace(execution_registry=Registry({"execution-a": "hive-a"})))
+    hive = bus.for_swarm("rig")
+    event = execution_events.initial(hive, "hive-a", "execution-a", report("exited")["executions"]["execution-a"], 1)
+    assert event is not None
+
+    execution_events.report_exit(hive, "hive-a", replace(event, id=f"exited:{event.id}", type="execution.exited"))
+
+    found = hive.events.consumer("audit", "swarm.rig.execution.exited").fetch(10, 0)
+    assert [(item.event.type, item.event.key) for item in found] == [("execution.exited", "execution-a")]
+    bus.close()
 
 
 @pytest.mark.feature("hive-own-exit-subject")
