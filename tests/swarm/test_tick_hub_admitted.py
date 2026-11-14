@@ -32,8 +32,8 @@ def test_a_hub_admitted_agent_on_another_hive_outlives_the_local_startup_grace(
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     seated = seat_agent(store, ledger, "sw", "t1", hive=hive, clock=lambda: 1_000)
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    agent = replace(seated, runtime_target=target)
-    store.execution_registry.update("sw", agent)
+    fresh = replace(seated, execution_id="", generation=0, runtime_target=target)
+    agent = store.start_execution("sw", fresh, seated.execution_id)
     runtime.live.clear()
     runtime.statuses[agent.name] = "unknown"
     actions = tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
