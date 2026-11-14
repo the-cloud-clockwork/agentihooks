@@ -777,6 +777,33 @@ def test_resumes_during_an_outage_or_a_reboot_do_not_count_toward_the_cap(
     assert dead_resume.failed_resumes(store, "sw", agent) == 0
 
 
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_the_cap_records_its_count_key_boundary_and_recovery_handoff_exactly(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from scripts.handoff import transfers
+    from scripts.swarm import dead_resume, idle
+    from scripts.swarm_ledger.ledger_workspace import folder
+
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+    _die_and_reap(store, ledger, runtime, agent.name, RESUME_STEP)
+    key = store.key("sw", "dead-resumes", agent.name)
+    assert json.loads(store.redis.get(key)) == {"count": 1, "at": RESUME_STEP}
+    assert 0 < store.redis.ttl(key) <= idle.BEAT_TTL_S
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, RESUME_STEP + STARTUP_GRACE_MS)
+    assert dead_resume.failed_resumes(store, "sw", agent) == 1
+    for n in range(1, 4):
+        _die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP)
+
+    expected = dead_resume.CAPPED_HANDOFF.format(task="t1", name=agent.name, attempts=3, folder=folder("sw", "t1"))
+    assert store.handoff("sw", "t1") == expected
+    assert store.handoff_seat("sw", "t1") == agent.seat != ""
+    rows = [(row["reason"], row["handoff"], row["at"]) for row in transfers.list_transfers(store, "sw")]
+    assert rows == [("exit", expected, 4 * RESUME_STEP)]
+
+
 @pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
 def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):
     import json

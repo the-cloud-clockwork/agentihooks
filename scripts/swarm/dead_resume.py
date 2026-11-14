@@ -80,8 +80,8 @@ def failed_resumes(store: RedisStore, slug: str, agent: AgentRecord) -> int:
     if not raw:
         return 0
     record: dict[str, int] = json.loads(raw)
-    beat: dict[str, Any] = idle.heartbeat(store.redis, slug, agent.name) or {}
-    if int(beat.get("at") or 0) > record["at"] + STARTUP_GRACE_MS:
+    beat: dict[str, Any] | None = idle.heartbeat(store.redis, slug, agent.name)
+    if beat and int(beat["at"]) > record["at"] + STARTUP_GRACE_MS:
         return 0
     return record["count"]
 
