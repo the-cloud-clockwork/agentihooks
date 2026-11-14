@@ -293,8 +293,14 @@ def transport(agent: AgentRecord) -> dict:
 
 
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
-    names = runtime.live_names()
-    return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
+    from scripts.swarm.commands import hive_id
+
+    names, here = runtime.live_names(), hive_id()
+    return [
+        a
+        for a in agents
+        if a.runtime_backend != "local" or reports.host(a) or (a.hive and a.hive != here) or a.name in names
+    ]
 
 
 def agent_hive(agent: AgentRecord) -> str:
