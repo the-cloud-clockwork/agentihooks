@@ -9,7 +9,8 @@ from scripts import session_bands
 from scripts.swarm import capacity, notice_text
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, _spend_host, tick
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.helpers.seat import seat_owner
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, workers
 
 CODEX_COUNTS = capacity.account_sessions.codex_sessions_by_account
 COLLECT = balancer.collect_results
@@ -333,8 +334,10 @@ def test_reduced_caps_do_not_retire_running_agents_and_comment_once(monkeypatch)
     runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
         cfg, capacity.accounts({"AH_CC_TOKEN_a": "fake"}, now), agents, demand
     )
+    seat_owner(store, ledger, runtime, "e", 1000)
+    seat_owner(store, ledger, runtime, "c", 1000)
     tick("sw", store, ledger, runtime, 1000)
-    assert len(runtime.spawned) == 2
+    assert len(workers(store)) == 2
     monkeypatch.setattr(capacity, "accounts", lambda env, now: [account(cap=0)])
     tick("sw", store, ledger, runtime, 2000)
     assert not runtime.killed
@@ -1227,7 +1230,7 @@ def test_a_refused_swarm_notice_is_dropped_and_the_quota_step_still_runs(capsys)
         cfg, [account()], agents, demand
     )
     actions = tick("sw", store, ledger, runtime, 1000)
-    assert [task for _, _, task in runtime.spawned] == ["e"]
+    assert runtime.spawned == []
     assert not any(action.startswith("skipped") for action in actions)
     assert capacity.read(store, "sw")["at"] == 1000
     assert capsys.readouterr().err == (

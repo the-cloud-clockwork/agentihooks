@@ -5,6 +5,7 @@ import pytest
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm import phase_state, plan_review, prompt
 from scripts.swarm.store import AgentRecord
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_phase_planning import DONE_WHEN, SLUG, env, phase, run, set_phase, slice_done, state  # noqa: F401
 
 MASTER = "master@a1b2c3-0001"
@@ -54,7 +55,7 @@ def test_the_master_approves_at_delegate_and_full_and_the_tick_claims_at_once(re
     assert (phase("p1")["review"]["by"], phase("p1")["review"]["note"]) == (MASTER, "")
     assert phase_state.lifecycle(phase("p1"), state(SLUG)) == "building"
     store.update(SLUG, max_eng=1)
-    run(store, ledger)
+    seat_agent(store, ledger, SLUG, "t1")
     [t1] = [t for t in state(SLUG)["tasks"] if t["id"] == "t1"]
     assert t1["state"] == "claimed"
 
