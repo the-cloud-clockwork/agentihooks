@@ -1115,3 +1115,21 @@ def test_a_plan_task_steering_carries_its_phase_evidence(rig: SimpleNamespace) -
 
     assert seeds == {"steering.md": ledger_workspace.steering(planned, rig.found)}
     assert seeds["steering.md"] != ledger_workspace.steering(planned, None)
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read: list[Any] = []
+
+    def seeds(self: admission.Admission, slug: str, task: dict[str, Any], doc: Any, name: str) -> dict[str, str]:
+        read.append(doc)
+        return {}
+
+    monkeypatch.setattr(admission.Admission, "_seeds", seeds)
+
+    rig.admitter.admit(SLUG, ask())
+
+    assert read == [rig.found]
+    assert read[0] is rig.found

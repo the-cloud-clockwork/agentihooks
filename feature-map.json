@@ -20,6 +20,7 @@
         "tests/hub/test_admission.py::test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_continued",
         "tests/hub/test_admission.py::test_the_seeds_follow_the_most_recently_started_earlier_agent",
         "tests/hub/test_admission.py::test_a_plan_task_steering_carries_its_phase_evidence",
+        "tests/hub/test_admission.py::test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against",
         "tests/hive/test_lanes.py::test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn"
       ]
     },
