@@ -3183,6 +3183,16 @@
       ]
     },
     {
+      "id": "swarm-status-lists-remote-hub-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-hub-agents-visible",
+      "behaviour": "Swarm status lists an unfinished agent the hub admitted onto another hive, whose record names that hive but carries a local backend and no runtime target, while a finished or ended one, an agent on the local hive with no live pane and an agent naming no hive stay out of the table, so a released hub agent never counts as a live task owner.",
+      "seam": "status.status_report and the agentihooks swarm status agent table, through status.live_agents",
+      "tests": [
+        "tests/swarm/test_status_rows.py::test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target"
+      ]
+    },
+    {
       "id": "artifact-storage",
       "origin": "inventory",
       "behaviour": "Markdown, JSON and SVG artifacts are stored once by content hash, SVG without scripts; any other file or an oversize file is refused.",
