@@ -1,11 +1,15 @@
 import json
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from scripts.swarm import prompt, templates
-from scripts.swarm.store import AUTONOMY, MASTER, SwarmConfig, SwarmError
-from tests.swarm.test_cli import env, home, run  # noqa: F401
+from scripts.swarm.store import AUTONOMY, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from tests.helpers.seat import seat  # noqa: F401
+from tests.swarm.test_cli import env, home, run, started  # noqa: F401
 from tests.swarm.test_runtime import _spawn_env
+from tests.swarm.test_tick import FakeRuntime
 
 TASK = {"id": "t1", "title": "x", "phase": "p1"}
 
@@ -125,12 +129,14 @@ def test_only_a_full_master_queues_follow_ups_without_asking():
 
 
 @pytest.mark.parametrize(("level", "awaiting"), [("assist", "approval"), ("delegate", ""), ("manual", "")])
-def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(env, level, awaiting):  # noqa: F811
+def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(  # noqa: F811
+    env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentRecord], level: str, awaiting: str
+) -> None:
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "set", f"autonomy={level}")
-    run("sw", "start")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", "https://github.com/o/r/pull/3") == 0
+    agent = next(a for a in started(env, seat) if a.lane == "eng")
+    assert run("sw", "--as", agent.name, "pr", "https://github.com/o/r/pull/3") == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["awaiting"]) == ("pr", awaiting)
 
 

@@ -192,7 +192,7 @@ def test_the_wait_command_skips_a_remote_swarm_and_finishes_the_local_one(store,
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
     with authority_context.bound(None):
         cli.cmd_waits(store, Namespace())
-    assert acquired == ["other", "other"]
+    assert acquired == ["other"]
     assert capsys.readouterr() == ("", "")
 
 
