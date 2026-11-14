@@ -4726,6 +4726,19 @@
       ]
     },
     {
+      "id": "codex-execution-home-default-login-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-auth-link-default-only",
+      "behaviour": "A Codex execution home links the operator default login only for a launch that carries no routed credential, a default or interactive login launch. A token or api routed launch home holds no operator login link.",
+      "seam": "scripts.codex_session.supervisor.execution_home auth link",
+      "tests": [
+        "tests/codex_session/test_runtime_homes.py::test_execution_home_links_the_operator_login_only_for_a_default_login_launch"
+      ],
+      "rules": [
+        "codex-execution-home-login-unguarded"
+      ]
+    },
+    {
       "id": "codex-pump-account-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-wake",
