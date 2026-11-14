@@ -3,7 +3,6 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
-from typing import cast
 
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
@@ -290,9 +289,9 @@ class MemoryBus:
         raw_events = MemoryEventLog(self._runtime, config, self.dead)
         self._legacy_events = raw_events
         self.events = ScopedLog(raw_events, swarm, "events") if swarm is not None else raw_events
-        raw_stops = MemoryEventLog(self._runtime, config, cast("EventLog", self.dead))
+        raw_stops = MemoryEventLog(self._runtime, config, self.dead)
         self._legacy_stops = raw_stops
-        self.stops = ScopedLog(cast("EventLog", raw_stops), swarm, STOPS.lower()) if swarm is not None else raw_stops
+        self.stops = ScopedLog(raw_stops, swarm, STOPS.lower()) if swarm is not None else raw_stops
         if config.scoped:
             self.events = RoutedLog(
                 lambda owner: self.for_swarm(owner).events, lambda: self._logs("events"), config.queue
