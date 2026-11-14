@@ -1,5 +1,6 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -695,6 +696,125 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     assert ledger.rows["t1"]["claimed_by"] == ""
     assert store.claims("sw", "t1") == claims - 1
     assert deliberate_exit.recorded(store, "sw", agent.name) is False
+
+
+def _dying_engineer(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, lane: str = "eng"
+) -> tuple[Any, ResumingRuntime, AgentRecord]:
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    seeded(store, ledger, runtime)
+    agent = next(a for a in store.agents("sw") if a.lane == lane)
+    store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [])
+    return ledger, runtime, agent
+
+
+def _die_and_reap(store: RedisStore, ledger: Any, runtime: ResumingRuntime, name: str, at: int) -> list[str]:
+    runtime.live.discard(name)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+    return [action for action in agent_steps._reap("sw", store, ledger, runtime, rows, at) if name in action]
+
+
+RESUME_STEP = STARTUP_GRACE_MS + 2
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_an_engineer_that_dies_after_each_resume_retires_at_the_cap_and_its_task_reopens(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+
+    passes = [_die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP) for n in range(4)]
+
+    assert passes == [[f"resumed {agent.name}"]] * 3 + [[f"lost {agent.name}, task t1 reopened"]]
+    assert len(runtime.resumed) == 3
+    assert (
+        f"Starting a fresh agent after {agent.name} ended because it ended again after each of its last 3 resumes."
+        in ledger.notes
+    )
+    assert agent.name not in {a.name for a in store.agents("sw")}
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    handoff = store.handoff("sw", "t1")
+    assert f"{agent.name} ended again after each of its last 3 resumes" in handoff
+    assert handoff.rstrip().endswith("<!-- handoff complete -->")
+    assert (store.handoff_envelope("sw", "t1") or {}).get("agent") == agent.name
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_a_resume_that_comes_up_healthy_resets_the_attempt_count(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import idle
+
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+    first = [_die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP) for n in range(3)]
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, 3 * RESUME_STEP + STARTUP_GRACE_MS + 1)
+
+    later = [_die_and_reap(store, ledger, runtime, agent.name, (n + 4) * RESUME_STEP) for n in range(4)]
+
+    assert first == [[f"resumed {agent.name}"]] * 3
+    assert later == [[f"resumed {agent.name}"]] * 3 + [[f"lost {agent.name}, task t1 reopened"]]
+    assert len(runtime.resumed) == 6
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_a_master_that_dies_after_each_resume_is_never_capped(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime, master = _dying_engineer(store, monkeypatch, lane="master")
+
+    passes = [_die_and_reap(store, ledger, runtime, master.name, (n + 1) * RESUME_STEP) for n in range(4)]
+
+    assert passes == [[f"resumed {master.name}"]] * 4
+    assert store.handoff("sw", master.task) == ""
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_resumes_during_an_outage_or_a_reboot_do_not_count_toward_the_cap(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import dead_resume, outage
+
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+    outage.mark_pane(store, "sw", agent.name, "provider overloaded", RESUME_STEP)
+    held = [_die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP) for n in range(4)]
+    outage.clear_pane(store, "sw", agent.name)
+    current = next(a for a in store.agents("sw") if a.name == agent.name)
+    reopening: Any = runtime
+    rebooted = [dead_resume.reopen("sw", store, ledger, reopening, current, 5 * RESUME_STEP)]
+
+    assert held == [[f"resumed {agent.name}"]] * 4
+    assert rebooted == [True]
+    assert dead_resume.failed_resumes(store, "sw", agent) == 0
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_the_cap_records_its_count_key_boundary_and_recovery_handoff_exactly(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from scripts.handoff import transfers
+    from scripts.swarm import dead_resume, idle
+    from scripts.swarm_ledger.ledger_workspace import folder
+
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+    _die_and_reap(store, ledger, runtime, agent.name, RESUME_STEP)
+    key = store.key("sw", "dead-resumes", agent.name)
+    assert json.loads(store.redis.get(key)) == {"count": 1, "at": RESUME_STEP}
+    assert 0 < store.redis.ttl(key) <= idle.BEAT_TTL_S
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, RESUME_STEP + STARTUP_GRACE_MS)
+    assert dead_resume.failed_resumes(store, "sw", agent) == 1
+    for n in range(1, 4):
+        _die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP)
+
+    expected = dead_resume.CAPPED_HANDOFF.format(task="t1", name=agent.name, attempts=3, folder=folder("sw", "t1"))
+    assert store.handoff("sw", "t1") == expected
+    assert store.handoff_seat("sw", "t1") == agent.seat != ""
+    rows = [(row["reason"], row["handoff"], row["at"]) for row in transfers.list_transfers(store, "sw")]
+    envelope = store.handoff_envelope("sw", "t1") or {}
+    assert rows == [(envelope["reason"], expected, 4 * RESUME_STEP)]
 
 
 @pytest.mark.feature("swarm-outage-recovery-hub-admitted")

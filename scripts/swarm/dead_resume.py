@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import context_recycle
+from scripts.swarm import outage
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 if TYPE_CHECKING:
@@ -41,7 +43,72 @@ def _owns(store, slug, agent, ledger):
     )
 
 
-def _reason(store, slug, agent):
+RESUME_ATTEMPTS = 3
+CAPPED_REASON = f"it ended again after each of its last {RESUME_ATTEMPTS} resumes"
+CAPPED_HANDOFF = """## Intent
+Continue task {task}; {name} ended again after each of its last {attempts} resumes, so the swarm stopped resuming it.
+
+## Done
+unknown: {name} left no handoff document; its task folder records its steps and evidence.
+
+## Stopped at
+{name} ended again after its resume number {attempts}.
+
+## Decisions and promises
+unknown: none recorded outside the task folder and the ledger.
+
+## Next
+Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledger task {task}, then continue the task.
+
+## Read first
+{folder}/progress.md
+
+<!-- handoff complete -->
+"""
+
+
+def _resumes_key(store: RedisStore, slug: str, name: str) -> str:
+    return store.key(slug, "dead-resumes", name)
+
+
+def failed_resumes(store: RedisStore, slug: str, agent: AgentRecord) -> int:
+    """Resumes in a row after which the agent ended again; a heartbeat one start grace after the last resets it."""
+    from scripts.swarm import idle
+    from scripts.swarm.tick import STARTUP_GRACE_MS
+
+    raw = store.redis.get(_resumes_key(store, slug, agent.name))
+    if not raw:
+        return 0
+    record: dict[str, int] = json.loads(raw)
+    beat: dict[str, Any] | None = idle.heartbeat(store.redis, slug, agent.name)
+    if beat and int(beat["at"]) > record["at"] + STARTUP_GRACE_MS:
+        return 0
+    return record["count"]
+
+
+def note_resume(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+    """Counts a reaper resume toward the cap, unless an open outage or a provider error on its pane holds the agent."""
+    from scripts.swarm import idle
+
+    if outage.held(store, slug, agent.name):
+        return
+    count = failed_resumes(store, slug, agent) + 1
+    store.redis.set(_resumes_key(store, slug, agent.name), json.dumps({"count": count, "at": at}), ex=idle.BEAT_TTL_S)
+
+
+def _hand_off_capped(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+    from scripts.handoff import envelope, transfers
+    from scripts.swarm_ledger.ledger_workspace import folder
+
+    text = CAPPED_HANDOFF.format(
+        task=agent.task, name=agent.name, attempts=RESUME_ATTEMPTS, folder=folder(slug, agent.task)
+    )
+    built = envelope.build(store, slug, agent, "exit", None, at)
+    store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
+    transfers.record(store, slug, agent, "exit", text, at)
+
+
+def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     if store.handoff(slug, agent.task):
         return "a handoff was submitted"
     if not agent.conversation_id:
@@ -50,6 +117,8 @@ def _reason(store, slug, agent):
     limit = store.config(slug).compact_limit or context_recycle.COMPACT_LIMIT
     if used is not None and used >= limit * 1000:
         return "the conversation reached its compact limit"
+    if agent.lane != MASTER and failed_resumes(store, slug, agent) >= RESUME_ATTEMPTS:
+        return CAPPED_REASON
     return ""
 
 
@@ -107,6 +176,8 @@ def reopen(
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")
             return True
+    if reason == CAPPED_REASON:
+        _hand_off_capped(store, slug, agent, at)
     if notice:
         ledger.notify(slug, notice.format(name=agent.name, reason=reason))
     return False
