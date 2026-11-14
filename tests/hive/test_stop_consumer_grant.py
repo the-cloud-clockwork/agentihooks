@@ -116,7 +116,8 @@ def test_the_scoped_member_grant_names_only_its_own_stop_consumer() -> None:
             f"$JS.ACK.{stop_names.stream(swarm)}.{stop_names.consumer(swarm, 'm1')}.>",
         )
     ]
-    assert claims["pub"]["deny"] == ["swarm.*.execution.stop.>", "swarm.*.stop.>"]
+    assert claims["pub"]["deny"] == list(nats_grant.MEMBER_DENY)
+    assert nats_grant.MEMBER_DENY[-1] == "swarm.*.stop.>"
 
 
 @pytest.mark.feature("hive-own-stop-consumer")

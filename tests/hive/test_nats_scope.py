@@ -242,7 +242,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
     expected.update(nats_grant.stop_publish("rig", "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
-    assert claims["pub"]["deny"] == ["swarm.*.execution.stop.>", "swarm.*.stop.>"]
+    assert claims["pub"]["deny"] == list(nats_grant.MEMBER_DENY)
     assert set(claims["pub"]["allow"]) == expected
     assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
 

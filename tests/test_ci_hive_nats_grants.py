@@ -261,7 +261,18 @@ def test_the_member_grants_render_the_minted_member_claims() -> None:
     rendered = grants.member_grants(str(ROOT))
     assert claims["sub"] == {"allow": [grants.MEMBER_INBOX]}
     publish = frozenset({*nats_grant.MEMBER_PUBLISH, "slots.*.*"})
-    assert rendered["publish"] == {"allow": publish, "deny": frozenset({"swarm.*.execution.stop.>", "swarm.*.stop.>"})}
+    assert rendered["publish"] == {
+        "allow": publish,
+        "deny": frozenset(
+            {
+                "swarm.*.execution.stop",
+                "swarm.*.execution.stop.>",
+                "swarm.*.events.execution.stop",
+                "swarm.*.events.execution.stop.>",
+                "swarm.*.stop.>",
+            }
+        ),
+    }
     assert rendered["subscribe"] == {"allow": frozenset({"_INBOX.>"}), "deny": frozenset()}
 
 

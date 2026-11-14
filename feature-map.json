@@ -5737,6 +5737,21 @@
       ]
     },
     {
+      "id": "hub-only-execution-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-hub-only-stop",
+      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, the logical subject and its scoped wire form under events, while it still publishes execution started and exited, and the hub controller credential publishes the stop on both forms.",
+      "seam": "scripts.hive.nats_grant.member_claims and controller_claims as enforced by a live NATS server, and the member grant render the grant parity check reads",
+      "rules": [
+        "member-grant-publishes-execution-stop"
+      ],
+      "tests": [
+        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive",
+        "tests/hive/test_nats_grant.py::test_the_hub_credential_publishes_an_execution_stop_for_a_hive",
+        "tests/test_ci_hive_nats_grants.py::test_the_member_grants_render_the_minted_member_claims"
+      ]
+    },
+    {
       "id": "workstation-events-route",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-workstation-events-route",
@@ -6609,18 +6624,6 @@
       "tests": [
         "tests/test_worker_profile_offline.py::test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration",
         "tests/test_worker_profile_offline.py::test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job"
-      ]
-    },
-    {
-      "id": "hub-only-execution-stop",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-hub-only-stop",
-      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, while it still publishes execution started and exited, and the hub controller credential publishes the stop.",
-      "seam": "scripts.hive.nats_grant.member_claims and controller_claims as enforced by a live NATS server, and the member grant render the grant parity check reads",
-      "tests": [
-        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive",
-        "tests/hive/test_nats_grant.py::test_the_hub_credential_publishes_an_execution_stop_for_a_hive",
-        "tests/test_ci_hive_nats_grants.py::test_the_member_grants_render_the_minted_member_claims"
       ]
     },
     {
