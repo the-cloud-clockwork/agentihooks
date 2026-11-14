@@ -11,7 +11,7 @@
       "gap": "The events hub admission claim carries no handoff document text, so a successor primed with a recovery handoff exists only on the legacy spawn; ported by the handoff text follow up."
     },
     "swarm-agent-record-launch-decision-at-spawn": {
-      "retires": "The detached launch job and successor retry clauses retire with the launch job module; under the events engine the same record fields are written by the hub launched operation, proven by the events launch decision record feature."
+      "retires": "The detached launch job and successor retry clauses retire with the launch job module."
     },
     "swarm-claim-lives": {
       "covered_by": [
@@ -59,7 +59,7 @@
       "covered_by": [
         "tests/swarm/test_master_fill.py::test_a_full_host_never_holds_the_seat"
       ],
-      "retires": "The held engineer clause is the legacy spawn host room hold; events admission holds a hive at its max agents instead."
+      "retires": "The held engineer clause is the legacy spawn host room hold."
     },
     "swarm-reclaim": {
       "gap": "The events hub admission claim never resolves a continuation, so a reclaimed task continues from its recorded branch only on the legacy spawn; ported by the continuation resolve follow up."
@@ -93,10 +93,10 @@
       ]
     },
     "swarm-tick-launch-budget": {
-      "retires": "The launch budget bounds the legacy spawn pass; events launches run on hive lane spokes outside the tick pass."
+      "retires": "The launch budget bounds the legacy spawn pass."
     },
     "swarm-tick-launch-cluster": {
-      "retires": "The behaviour is the legacy launch cluster the spawn step drives; events launches happen on the hive lane spoke."
+      "retires": "The behaviour is the legacy launch cluster the spawn step drives."
     },
     "swarm-tick-panic-holds-spawn": {
       "covered_by": [
@@ -105,7 +105,7 @@
       "retires": "The spawn due clause retires with the spawn due marker; the dispatch seat clause stays covered."
     },
     "swarm-tick-spawn": {
-      "retires": "The behaviour is the legacy tick spawn step itself; the events engine places through hub offers, spoke takes and hub admission."
+      "retires": "The behaviour is the legacy tick spawn step itself."
     },
     "tick-runtime-port-fence": {
       "covered_by": [
@@ -121,7 +121,7 @@
         "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
         "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port"
       ],
-      "retires": "The process table rescan clause belongs to the legacy spawn launch; the claim cap rows stay because hub admission calls the same lives check."
+      "retires": "The process table rescan clause belongs to the legacy spawn launch."
     },
     "tick-time-left-server-error": {
       "covered_by": [
