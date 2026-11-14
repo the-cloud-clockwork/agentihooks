@@ -176,6 +176,7 @@ from scripts.swarm.store import (
     DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
+    EVENTS_ENGINE,
     FULL,
     MASTER,
     AgentRecord,
@@ -1015,6 +1016,8 @@ def cmd_create(store, args):
         caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
+        engine=EVENTS_ENGINE,
+        repo_origin=_create_origin(repo),
     )
     store.create(config)
     from scripts.swarm import commands
@@ -1354,6 +1357,13 @@ def _engine_origin(config, changes):
     if not identity:
         raise SwarmError("events engine requires a checkout with a Git origin or a stored repository origin")
     return {**changes, "repo_origin": identity}
+
+
+def _create_origin(repo: str) -> str:
+    """The Git origin of the checkout a new swarm works in, empty when it has none."""
+    from scripts.hive.daemon import origin
+
+    return origin(Path(repo))
 
 
 def on_off(value):
