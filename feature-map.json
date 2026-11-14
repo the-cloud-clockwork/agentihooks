@@ -6300,6 +6300,20 @@
         "tests/swarm/test_tick_launch_pool.py::test_the_pool_asks_the_runtime_room_for_this_pass_config",
         "tests/swarm/test_tick_launch_pool.py::test_the_spawn_step_sizes_its_pool_with_this_pass_config"
       ]
+    },
+    {
+      "id": "swarm-claim-refunds-legacy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-claim-refunds",
+      "behaviour": "A tick respawn after a quota handoff, an asked preemption handoff or a swarm retirement spends no new claim life, three failed lives still block the fourth claim, and a parked retirement whose agent no longer holds its claim refunds nothing.",
+      "seam": "The legacy tick spawn and retire passes of scripts.swarm.tick counted through RedisStore.claims",
+      "tests": [
+        "tests/swarm/test_claim_refunds.py::test_three_quota_handoffs_allow_a_fourth_claim",
+        "tests/swarm/test_claim_refunds.py::test_two_preemption_handoffs_then_a_reclaim_count_one_life",
+        "tests/swarm/test_claim_refunds.py::test_three_failed_lives_still_block_the_fourth_claim",
+        "tests/swarm/test_claim_refunds.py::test_three_swarm_retirements_allow_a_fourth_claim",
+        "tests/swarm/test_claim_refunds.py::test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim"
+      ]
     }
   ],
   "unmapped_rules": [
