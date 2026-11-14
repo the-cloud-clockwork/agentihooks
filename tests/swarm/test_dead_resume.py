@@ -1,11 +1,13 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
 from tests.swarm.profile_fixture import validated
@@ -639,6 +641,60 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     assert ledger.rows["t1"]["claimed_by"] == ""
     assert store.claims("sw", "t1") == claims - 1
     assert deliberate_exit.recorded(store, "sw", agent.name) is False
+
+
+def _dying_engineer(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, ResumingRuntime, AgentRecord]:
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [])
+    return ledger, runtime, agent
+
+
+def _die_and_reap(store: RedisStore, ledger: Any, runtime: ResumingRuntime, name: str, at: int) -> list[str]:
+    runtime.live.discard(name)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+    return [action for action in agent_steps._reap("sw", store, ledger, runtime, rows, at) if name in action]
+
+
+RESUME_STEP = STARTUP_GRACE_MS + 2
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_an_engineer_that_dies_after_each_resume_retires_at_the_cap_and_its_task_reopens(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+
+    passes = [_die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP) for n in range(4)]
+
+    assert passes == [[f"resumed {agent.name}"]] * 3 + [[f"lost {agent.name}, task t1 reopened"]]
+    assert len(runtime.resumed) == 3
+    assert (
+        f"Starting a fresh agent after {agent.name} ended because it ended again after each of its last 3 resumes."
+        in ledger.notes
+    )
+    assert agent.name not in {a.name for a in store.agents("sw")}
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+
+
+@pytest.mark.feature("swarm-dead-resume-cap")
+def test_a_resume_that_comes_up_healthy_resets_the_attempt_count(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import idle
+
+    ledger, runtime, agent = _dying_engineer(store, monkeypatch)
+    first = [_die_and_reap(store, ledger, runtime, agent.name, (n + 1) * RESUME_STEP) for n in range(3)]
+    idle.beat(store.redis, "sw", agent.name, idle.WORKING, 3 * RESUME_STEP + STARTUP_GRACE_MS + 1)
+
+    later = [_die_and_reap(store, ledger, runtime, agent.name, (n + 4) * RESUME_STEP) for n in range(4)]
+
+    assert first == [[f"resumed {agent.name}"]] * 3
+    assert later == [[f"resumed {agent.name}"]] * 3 + [[f"lost {agent.name}, task t1 reopened"]]
+    assert len(runtime.resumed) == 6
 
 
 def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):

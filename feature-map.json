@@ -2190,6 +2190,17 @@
       ]
     },
     {
+      "id": "swarm-dead-resume-cap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-resume-attempt-cap",
+      "behaviour": "A dead agent that ends again after each of three resumes is retired with a fresh agent notice and its task reopens; a resume followed by a session heartbeat one start grace later resets the count.",
+      "seam": "The tick reaper recovery path through dead agent reopen",
+      "tests": [
+        "tests/swarm/test_dead_resume.py::test_an_engineer_that_dies_after_each_resume_retires_at_the_cap_and_its_task_reopens",
+        "tests/swarm/test_dead_resume.py::test_a_resume_that_comes_up_healthy_resets_the_attempt_count"
+      ]
+    },
+    {
       "id": "swarm-reboot-recovery",
       "origin": "inventory",
       "behaviour": "After a reboot each recorded local agent resumes in its own conversation, seat and account, and one that cannot reopen awaits a decision.",
