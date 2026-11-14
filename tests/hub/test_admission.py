@@ -923,6 +923,7 @@ def test_a_handed_off_task_carries_its_handoff_and_resolved_envelope(
     assert rig.store.reclaims(SLUG) == {}
 
 
+@pytest.mark.feature("hub-admission-claim-context")
 def test_the_claim_write_names_a_portable_workspace_clears_a_protected_branch_and_sets_the_lane_kind(
     rig: SimpleNamespace,
 ) -> None:
