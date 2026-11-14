@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, prompt
-from scripts.swarm.store import MASTER, RedisStore
+from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
 from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
@@ -68,7 +68,7 @@ def test_the_master_prompt_carries_the_chain_too():
 
 
 def test_a_handoff_writes_a_recap_under_the_seat(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     tmp_path: Path,
 ) -> None:
     swarm, ledger, _ = env
@@ -87,7 +87,7 @@ def test_a_handoff_writes_a_recap_under_the_seat(
 
 
 def test_a_malformed_handoff_writes_no_recap(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -103,7 +103,7 @@ def test_a_malformed_handoff_writes_no_recap(
     assert swarm.memory.recaps("eng-1@sw") == []
 
 
-def test_learned_appends_a_note_to_the_callers_seat(env: tuple[RedisStore, Any, Any]) -> None:  # noqa: F811
+def test_learned_appends_a_note_to_the_callers_seat(env: tuple[Any, Any, Any]) -> None:  # noqa: F811
     swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -179,7 +179,7 @@ def test_a_swarm_without_culture_names_it_missing():
 
 
 @pytest.mark.feature("swarm-learned-notes")
-def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env: tuple[RedisStore, Any, Any]) -> None:  # noqa: F811
+def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env: tuple[Any, Any, Any]) -> None:  # noqa: F811
     swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -205,7 +205,7 @@ def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env: tuple[Re
 
 
 def test_promote_rules_by_caller(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     swarm, ledger, _ = env
@@ -229,7 +229,7 @@ def test_promote_rules_by_caller(
 
 
 def test_the_operator_may_promote_to_canon(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
@@ -243,7 +243,7 @@ def test_the_operator_may_promote_to_canon(
 
 
 def test_learned_without_text_lists_entries_with_seat_and_number(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     swarm, ledger, _ = env
@@ -261,7 +261,7 @@ def test_learned_without_text_lists_entries_with_seat_and_number(
 
 
 def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -286,7 +286,7 @@ def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(
 
 
 def test_retire_reports_what_it_did_and_names_each_refusal(
-    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

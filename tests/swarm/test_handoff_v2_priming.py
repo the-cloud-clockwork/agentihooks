@@ -111,7 +111,7 @@ def test_a_successor_spawn_receives_the_stored_envelope(
         "fresh_reason": "no branch was pushed",
     }
     monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda *args, **kwargs: continuation)
-    envelope = {"reason": "recycle", "agent": first.name, "task": first.task, **continuation}
+    envelope: dict[str, Any] = {"reason": "recycle", "agent": first.name, "task": first.task, **continuation}
     if lane == MASTER:
         envelope["launch"] = {"profile": "master", "harness": "claude", "model": "claude-opus-5-5", "effort": "high"}
     store.put_handoff("sw", first.task, "document", seat=first.seat, envelope=envelope)
