@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -24,7 +25,7 @@ def rig(monkeypatch):
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     clock = Mock(return_value=NOW)
-    bus = memory.open_bus(BusConfig())
+    bus = cast(Any, memory.open_bus(BusConfig()))
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
     monkeypatch.setattr(reconciler, "open_bus", lambda _: bus)
     monkeypatch.setattr(bus, "close", lambda: None)
@@ -54,7 +55,7 @@ def rig(monkeypatch):
     store.redis.set(store.key("rig", "claim", agent.task), agent.name)
     store.seats.occupy(agent.seat, agent.name, agent.started_at)
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
-    ledger = SimpleNamespace(task=lambda *_: dict(row), writes=[], notices=[])
+    ledger: Any = SimpleNamespace(task=lambda *_: dict(row), writes=[], notices=[])
 
     def update(*args, **kwargs):
         ledger.writes.append((args, kwargs))
@@ -183,7 +184,7 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig):
     assert "Continue your task in this conversation and seat" in text
     [resumed] = rig.store.agents("rig")
     assert (resumed.pane_id, resumed.launched_at, resumed.seat) == ("pane-2", 1_150_000, "eng-1@rig")
-    assert Orders(rig.store.redis).command(HIVE, order).status == DONE
+    assert cast(Any, Orders(rig.store.redis).command(HIVE, order)).status == DONE
     _next_pass(rig, "working")
     assert len(_commands(rig)) == 1
     assert rig.ledger.writes == rig.returned == []
