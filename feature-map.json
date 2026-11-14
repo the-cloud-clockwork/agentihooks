@@ -1,6 +1,30 @@
 {
   "features": [
     {
+      "id": "hub-started-clears-launch-assignment",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
+      "behaviour": "The hub clears a task's saved launch assignment when it counts the durable execution started event of the life that still holds the task's claim, so a lost or skipped hive launch report never pins every later life to a stale seat, model and account; a redelivered start, or a late start of a released life, keeps the assignment saved for the next life.",
+      "seam": "Claims.handle for an execution.started event, the launch assignments hash",
+      "tests": [
+        "tests/hub/test_seat_continuity.py::test_a_durable_start_clears_the_saved_launch_assignment_when_the_launch_report_is_lost",
+        "tests/hub/test_seat_continuity.py::test_a_redelivered_start_of_a_counted_life_keeps_a_later_saved_assignment",
+        "tests/hub/test_seat_continuity.py::test_a_late_start_of_a_released_life_keeps_the_assignment_saved_for_the_next_life"
+      ]
+    },
+    {
+      "id": "swarm-reclaim-keeps-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
+      "behaviour": "Every reclaim that reopens a task and hands the leaver's mail for the continuing task to its seat saves that seat for the task, so the next life is admitted into the leaver's seat, where that mail waits, instead of the lowest free seat.",
+      "seam": "The tick drop helper, the stall watchdog and the hub lifecycle exit settle reopen, then Admission.admit for the task's next life",
+      "tests": [
+        "tests/hub/test_seat_continuity.py::test_a_reclaimed_tasks_successor_takes_the_leavers_seat_and_its_mail",
+        "tests/swarm/test_stall_watch.py::test_a_watchdog_reopen_keeps_the_leavers_seat_for_the_next_life",
+        "tests/hub/test_seat_continuity.py::test_a_hub_exit_keeps_the_leavers_seat_only_when_it_reopens_the_task"
+      ]
+    },
+    {
       "id": "swarm-resume-keeps-execution-identity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-started-at-sites",

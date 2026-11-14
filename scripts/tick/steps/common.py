@@ -65,6 +65,8 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     if store.drop_agent(slug, agent.name) is False:
         return DROP_REFUSED
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
+    if reopen and agent.seat:
+        store.keep_seat(slug, agent.task, agent.seat)
     _settle_exit(store, agent.name, agent.seat if reopen else "")
     return f", task {agent.task} reopened" if reopen else ""
 
