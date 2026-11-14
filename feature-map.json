@@ -2695,8 +2695,35 @@
       "tests": [
         "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_two_are_pushed",
         "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_the_other_two_are_pushed",
-        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed",
-        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_backoff"
+        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed"
+      ]
+    },
+    {
+      "id": "inbox-claim-redis-error-requeue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-claim-redis-error-shown",
+      "behaviour": "A Redis or store error in any step of an inbox claim's batch, delivery, the seen check, a close or a return, ends the batch without raising: the items already checked are returned and shown without needing Redis, and only the item in flight goes back to pending, or stays delivered until the next redelivery when its return fails too.",
+      "seam": "scripts.inbox.seen.claim through scripts.inbox.channel._deliver on a Redis or store error mid batch",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_mid_batch_pushes_the_checked_item_and_returns_the_rest_to_pending",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_delivering_the_second_item_still_returns_the_first_for_showing",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_closing_an_item_shown_elsewhere_returns_it_to_pending_and_shows_the_first",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_store_error_closing_an_item_shown_elsewhere_returns_it_to_pending_and_shows_the_first",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_returning_an_unsettled_item_returns_it_to_pending_and_shows_the_first",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_in_flight_item_whose_return_hits_redis_too_stays_delivered_and_the_first_is_still_shown",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_in_flight_item_whose_return_is_refused_as_changed_stays_delivered_and_the_first_is_still_shown"
+      ]
+    },
+    {
+      "id": "inbox-poisoned-id-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-claim-redis-error-shown",
+      "behaviour": "An inbox item left out of the channel's claims after one failed seen check or notification build is claimed and pushed again once one redelivery window plus one wake window has passed since it was left out, and stays left out before that, so an always failing item to an idle channel session still reaches the master escalation of the wake ladder.",
+      "seam": "scripts.inbox.seen.claim and scripts.inbox.seen.leave_out over the channel's poisoned ids across scripts.inbox.channel._deliver passes",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_an_id_poisoned_by_one_seen_check_failure_is_pushed_again_once_its_hold_passes",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_id_poisoned_by_one_notification_failure_is_pushed_again_once_its_hold_passes",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_always_failing_item_to_an_idle_channel_session_is_escalated_to_the_master_at_default_windows"
       ]
     },
     {
