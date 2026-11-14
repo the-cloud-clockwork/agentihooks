@@ -265,7 +265,7 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
             actions.append(held)
             continue
         gone = retire_watch.reported_gone(store, agent, now_ms)
-        if not gone and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        if not gone and not tick._retire_or_stop(slug, store, runtime, agent, "mismatch"):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue

@@ -468,9 +468,7 @@ def _watch_idle(
     )
     if tick.timing.timed(tick.resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
-    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and runtime.retire(
-        idle, homes=tick.reaper.scratch_homes(slug, idle.task)
-    ):
+    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, store, runtime, idle, "idle"):
         why = (
             f"; outage recovery could not proceed: {tick.timing.timed(tick.resume.recovery_blocker, store, slug, agent)}"
             if pending

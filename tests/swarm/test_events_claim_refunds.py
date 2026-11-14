@@ -258,6 +258,25 @@ def test_a_stop_the_bus_refused_is_sent_again_on_the_next_reap_pass(
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
 @pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    store, ledger, rt = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    rt.stuck.add(agent.name)
+
+    retire(ending, env, agent)
+
+    assert agent.name not in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert store.claims(SLUG, "t1") == 0
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert [(stop.key, stop.data["reason"]) for stop in sent_stops(bus, agent)] == [(agent.execution_id, ending)]
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
 def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
