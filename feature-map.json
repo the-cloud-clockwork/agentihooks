@@ -1015,7 +1015,6 @@
       "behaviour": "A tick pass whose time left write meets a ledger server error skips that write and still runs its remaining steps, placing claimable tasks.",
       "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
       "tests": [
-        "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running",
         "tests/swarm/test_tick_time_left.py::test_under_events_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_reaping"
       ]
     },
@@ -4828,7 +4827,6 @@
         "tests/tick/test_slow_lane_start.py::test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lane",
         "tests/tick/test_slow_lane_start.py::test_a_handed_step_needing_a_lost_critical_step_is_still_dropped",
         "tests/tick/test_slow_lane_start.py::test_a_busy_handed_lane_leaves_the_critical_steps_their_workers",
-        "tests/tick/test_slow_lane_start.py::test_spawn_holds_no_later_site_behind_its_reserve",
         "tests/tick/test_slow_lane_start.py::test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker",
         "tests/tick/test_slow_lane_start.py::test_a_kept_handed_step_runs_on_the_handed_workers",
         "tests/tick/test_handed_lane_guards.py::test_the_handed_workers_are_named_and_bounded_by_the_pass_workers",
