@@ -317,17 +317,6 @@ def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
     )
 
 
-def _stop_hive(slug: str, agent: AgentRecord, reason: str, dropped: str) -> str:
-    """Sends the execution stop for a retired agent to the hive that recorded its start, naming ``reason``, once the
-    store took its drop, and returns the drop's action text ``dropped``."""
-    from scripts.hub.reconciler import stop_admitted
-    from scripts.tick.steps.common import DROP_REFUSED
-
-    if dropped != DROP_REFUSED:
-        stop_admitted(slug, agent, reason)
-    return dropped
-
-
 def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
     if tick.deliberate_exit.take(store, slug, agent.name):
         runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task))
@@ -373,7 +362,7 @@ def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     tick.content_refusal.handoff(store, slug, agent, now_ms)
-    dropped = _stop_hive(slug, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return [f"freed {agent.name} after repeated content refusals" + dropped]
 
 
@@ -387,7 +376,7 @@ def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     tick.revoked_seats.worker_handoff(store, slug, agent, now_ms)
-    dropped = _stop_hive(slug, agent, "revoked", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, agent, "revoked", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return [f"freed the seat of {agent.name}: {account} was revoked" + dropped]
 
 
@@ -486,7 +475,7 @@ def _watch_idle(
             else ""
         )
         dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, idle, refund=True)
-        tick.timing.timed(_stop_hive, slug, idle, "idle", dropped)
+        tick.timing.timed(tick._stop_hive, slug, idle, "idle", dropped)
         return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
 
@@ -550,7 +539,7 @@ def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, age
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     tick.resume.free_seat(store, slug, agent, now_ms)
     tick.outage.clear_pane(store, slug, agent.name)
-    dropped = _stop_hive(slug, agent, "stuck", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, agent, "stuck", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return [f"freed the seat of {agent.name}, stuck on a provider error" + dropped]
 
 
