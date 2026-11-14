@@ -416,7 +416,7 @@ def test_a_failed_connect_is_logged_and_retried(
 
 @pytest.mark.feature("inbox-channel-push-survives-failed-pass")
 def test_a_seat_feed_that_fails_to_bind_falls_back_to_the_redis_notify(
-    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    store: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def broken(found: FakeStore, me: str) -> NoReturn:
         raise RuntimeError("planted feed failure")
