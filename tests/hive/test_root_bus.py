@@ -391,7 +391,8 @@ def test_hive_root_bus_refuses_a_home_the_hive_service_does_not_load(tmp_path, m
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_when_the_hive_service_does_not_restart(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_signer", _signer)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer(ROOT))
+    _swarms(monkeypatch, [], ("alpha",))
     _service(monkeypatch, [], restarted=False)
 
     assert cli.main(["root-bus"]) == 1
@@ -405,7 +406,8 @@ def test_hive_root_bus_refuses_when_the_hive_service_does_not_restart(tmp_path, 
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_when_systemctl_fails(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "_signer", _signer)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer(ROOT))
+    _swarms(monkeypatch, [], ("alpha",))
     _service(monkeypatch, [])
 
     def fail() -> bool:
