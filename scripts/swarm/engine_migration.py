@@ -50,7 +50,7 @@ def repo_origin(redis_store: RedisStore, slug: str) -> str:
 
 def busy(redis_store: RedisStore, slug: str) -> bool:
     """Whether the swarm holds agents that only the legacy engine collects."""
-    return bool(redis_store.agents(slug))
+    return bool(redis_store.agents(slug))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def migrate_one(redis_store: RedisStore, slug: str) -> str:

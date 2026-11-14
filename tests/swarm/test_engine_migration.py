@@ -1,4 +1,3 @@
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -6,7 +5,7 @@ import pytest
 
 from scripts.swarm import engine_migration
 from scripts.swarm import store as store_module
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.unit
 

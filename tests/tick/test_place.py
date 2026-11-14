@@ -93,7 +93,7 @@ def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **e
 
 def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
     def skip_refused(function: Any, *args: Any) -> list[str]:
-        log.append((function, *args, *([place.PASS_DEADLINE.get()] if function == "spawn" else [])))
+        log.append((function, *args))
         return [f"ran {function if isinstance(function, str) else function.__name__}"]
 
     @contextmanager
@@ -114,9 +114,6 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         PLACING=nullcontext(),
         EVENTS_ENGINE="events",
         _placement_pass=placement_pass,
-        _spawn="spawn",
-        SPAWN_BUDGET_S=60,
-        _collect_acks="collect acks",
         _codex_hook_order="codex hook order",
         _ended="ended",
         _current_owner="owner",
@@ -244,32 +241,11 @@ def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatc
 
 
 SPAWN_CLUSTER = (
-    "_spawn",
-    "_Pass",
-    "_pass_reclaim",
-    "Launch",
-    "_prepare",
-    "_launch",
-    "_launch_all",
-    "_retry_successor",
-    "_reported",
-    "_spawn_order",
-    "_ranked",
-    "_block_unresolved",
-    "_unresolved",
     "_lives_spent",
     "_claim_cap",
     "_free_seat",
     "primed",
     "placed_record",
-    "_LaunchClock",
-    "_launch_room",
-    "_steer",
-    "_steered_off",
-    "_record_spawn_failure",
-    "_owner_hold",
-    "_placement_pass",
-    "_spawn_stop",
     "_host_full",
     "host_spent",
     "_spend_host",
@@ -277,7 +253,6 @@ SPAWN_CLUSTER = (
     "_release_hive_launch",
     "_hold",
     "spawn_holds",
-    "_held_for_master",
 )
 
 
