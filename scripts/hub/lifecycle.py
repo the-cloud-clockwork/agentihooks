@@ -62,7 +62,10 @@ class Lifecycle:
             event.version,
             event.data["task"],
             event.data["name"],
-        ) or (value["state"] == "started" and self._resumed(event, agent, claims, key, value, entry.revision)):
+        ) or (
+            value["state"] == "started"
+            and self._resumed(event, agent, cast(Any, claims), key, cast(dict[str, Any], value), entry.revision)
+        ):
             return
         revision = entry.revision
         if value["state"] != "exiting":
@@ -97,20 +100,21 @@ class Lifecycle:
         from scripts.hive.orders import DONE, CommandOrder, Orders
         from scripts.swarm.resume import RECOVERY_ATTEMPTS
 
-        hive = agent.hive or agent.runtime_target.get("host_id")
-        if not hive or event.data.get("reason") == "lost":
+        target: dict[str, Any] = cast(Any, agent).runtime_target
+        data: dict[str, Any] = cast(Any, event).data
+        hive: str = agent.hive or target.get("host_id") or ""
+        if not hive or data.get("reason") == "lost":
             return False
         orders, pending = Orders(cast(Any, self.store).redis), value.get("resume")
         if pending and pending["launched_at"] == agent.launched_at:
             ack = orders.command(hive, CommandOrder(**pending["order"]))
             if ack is not None and ack.status != DONE:
-                self.ledger.notify(
-                    event.swarm, FRESH_NOTICE.format(name=agent.name, reason=f"resume failed: {ack.failure}")
-                )
+                ledger: Any = self.ledger
+                ledger.notify(event.swarm, FRESH_NOTICE.format(name=agent.name, reason=f"resume failed: {ack.failure}"))
             return ack is None
         if pending and event.time < agent.launched_at:
             return True
-        attempts = value.get("resumes", 0)
+        attempts: int = value.get("resumes", 0)
         if attempts >= RECOVERY_ATTEMPTS or not self._owned(event, agent):
             return False
         order = CommandOrder(
@@ -131,12 +135,15 @@ class Lifecycle:
         """Whether the dead agent may reopen: the swarm runs, its task row still names it at the exit's claim
         generation, it holds its seat and claim, and no handoff or compact limit sends the task to a fresh agent."""
         store = cast(RedisStore, self.store)
-        row = self.ledger.task(event.swarm, agent.task) or {}
-        return (
+        fences: Any = dead_resume
+        ledger: Any = self.ledger
+        data: dict[str, Any] = cast(Any, event).data
+        row: dict[str, Any] = ledger.task(event.swarm, agent.task) or {}
+        return bool(
             store.config(event.swarm).state not in {"stopped", "stopping"}
-            and row.get("claim_generation", 0) == event.data["task_generation"]
-            and not dead_resume._reason(store, event.swarm, agent)
-            and dead_resume._owns(store, event.swarm, agent, self.ledger)
+            and row.get("claim_generation", 0) == data["task_generation"]
+            and not fences._reason(store, event.swarm, agent)
+            and fences._owns(store, event.swarm, agent, ledger)
         )
 
     def _refund(self, slug: str, agent: AgentRecord) -> None:

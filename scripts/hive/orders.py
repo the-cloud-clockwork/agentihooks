@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
@@ -281,18 +281,21 @@ class Consumer:
         holds its claim, then record the new pane; the hub checked the ledger claim, generation and seat first."""
         from scripts.swarm_v2.runtime.base import Recovery
 
+        runtime: Any = self.runtime
+        store: Any = self.store
+        target: dict[str, Any] = cast(Any, agent).runtime_target
         if not self._holds(order.slug, agent):
             return FOREIGN
-        outcome = self.runtime.recover(agent, Recovery.RESUME, self.store.config(order.slug), order.text)
+        outcome = runtime.recover(agent, Recovery.RESUME, store.config(order.slug), order.text)
         if not outcome.ok:
-            return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+            return Ack(FAILED, target, outcome.detail or outcome.status.value)
         placed = outcome.value
         if not self._holds(order.slug, agent):
-            self.runtime.terminate(replace(agent, pane_id=placed.pane_id))
+            runtime.terminate(replace(agent, pane_id=placed.pane_id))
             return FOREIGN
-        launched = placed.launched_at or lease.now_ms(self.store)
-        self.store.put_agent(order.slug, replace(agent, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
-        return Ack(DONE, agent.runtime_target)
+        launched = placed.launched_at or lease.now_ms(store)
+        store.put_agent(order.slug, replace(agent, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
+        return Ack(DONE, target)
 
     def _holds(self, slug: str, agent: AgentRecord) -> bool:
         """Whether the execution record is still the one the order named and the agent still holds its task claim."""
@@ -300,7 +303,8 @@ class Consumer:
             current = self.store.execution_registry.get(slug, agent.execution_id)
         except SwarmError:
             return False
-        return current == agent and self.store.claimant(slug, agent.task) == agent.name
+        store: Any = self.store
+        return bool(current == agent and store.claimant(slug, agent.task) == agent.name)
 
     def reap_execution(self, order: CommandOrder, agent: AgentRecord) -> Ack:
         receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
