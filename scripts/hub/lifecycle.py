@@ -7,10 +7,12 @@ from typing import Any, cast
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
 from scripts.hive.launch import release as release_slot
+from scripts.hive.orders import DONE, CommandOrder, Orders
 from scripts.hub.registry import Reactor
 from scripts.swarm import dead_resume
 from scripts.swarm.dead_resume import FRESH_NOTICE, RESUME_TEXT
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.resume import RECOVERY_ATTEMPTS
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
 
 _RELEASE_CLAIM = """
@@ -99,9 +101,6 @@ class Lifecycle:
         """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per
         execution and only while it holds its claim, claim generation and seat; True while that resume is ordered and
         unanswered or the exit predates it, False when the exit goes on to drop the agent and reopen its task."""
-        from scripts.hive.orders import DONE, CommandOrder, Orders
-        from scripts.swarm.resume import RECOVERY_ATTEMPTS
-
         target: dict[str, Any] = cast(Any, agent).runtime_target
         data: dict[str, Any] = cast(Any, event).data
         hive: str = agent.hive or target.get("host_id") or ""
@@ -135,17 +134,15 @@ class Lifecycle:
 
     def _owned(self, event: Envelope, agent: AgentRecord) -> bool:
         """Whether the dead agent may reopen: the swarm runs, its task row still names it at the exit's claim
-        generation, it holds its seat and claim, and no handoff or compact limit sends the task to a fresh agent."""
+        generation and the legacy dead resume gate holds."""
         store = cast(RedisStore, self.store)
-        fences: Any = dead_resume
         ledger: Any = self.ledger
         data: dict[str, Any] = cast(Any, event).data
         row: dict[str, Any] = ledger.task(event.swarm, agent.task) or {}
-        return bool(
+        return (
             store.config(event.swarm).state not in {"stopped", "stopping"}
             and row.get("claim_generation", 0) == data["task_generation"]
-            and not fences._reason(store, event.swarm, agent)
-            and fences._owns(store, event.swarm, agent, ledger)
+            and dead_resume.resumable(store, event.swarm, agent, ledger)
         )
 
     def _refund(self, slug: str, agent: AgentRecord) -> None:

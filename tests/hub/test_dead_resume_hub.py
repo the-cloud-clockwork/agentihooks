@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any, cast
@@ -13,7 +14,7 @@ NOW = 1_000_000
 
 
 @pytest.fixture
-def rig(monkeypatch):
+def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     import fakeredis
 
     from hooks.context import context_recycle
@@ -57,7 +58,7 @@ def rig(monkeypatch):
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
     ledger: Any = SimpleNamespace(task=lambda *_: dict(row), writes=[], notices=[])
 
-    def update(*args, **kwargs):
+    def update(*args: Any, **kwargs: Any) -> None:
         ledger.writes.append((args, kwargs))
         row.update(args[2])
 
@@ -113,20 +114,20 @@ def rig(monkeypatch):
     store.redis.close()
 
 
-def _commands(rig):
+def _commands(rig: SimpleNamespace) -> list[Any]:
     from scripts.hive.orders import CommandOrder, Orders
 
     entries = rig.store.redis.xrange(Orders(rig.store.redis).commands(HIVE))
     return [CommandOrder(**json.loads(fields["order"])) for _, fields in entries]
 
 
-def _next_pass(rig, pane_state: str = "exited") -> None:
+def _next_pass(rig: SimpleNamespace, pane_state: str = "exited") -> None:
     rig.clock.return_value += 300_000
     rig.report(pane_state)
     rig.react.poll()
 
 
-def _hive(rig, outcome):
+def _hive(rig: SimpleNamespace, outcome: Any) -> tuple[Any, Mock]:
     from scripts.hive.orders import Consumer
 
     runtime = Mock()
@@ -135,7 +136,7 @@ def _hive(rig, outcome):
     return Consumer(rig.store.redis, HIVE, runtime), runtime
 
 
-def _resumed(launched_at: int = 1_150_000):
+def _resumed(launched_at: int = 1_150_000) -> Any:
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
@@ -143,7 +144,7 @@ def _resumed(launched_at: int = 1_150_000):
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_a_dead_hub_started_agent_is_resumed_once_through_its_hive(rig):
+def test_a_dead_hub_started_agent_is_resumed_once_through_its_hive(rig: SimpleNamespace) -> None:
     from scripts.hub.reconciler import legacy_agents
 
     assert legacy_agents(rig.store, "rig") == []
@@ -166,7 +167,7 @@ def test_a_dead_hub_started_agent_is_resumed_once_through_its_hive(rig):
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_the_hive_reopens_the_conversation_in_the_same_seat(rig):
+def test_the_hive_reopens_the_conversation_in_the_same_seat(rig: SimpleNamespace) -> None:
     from scripts.hive.orders import DONE, Orders
     from scripts.swarm_v2.runtime.base import Recovery
 
@@ -191,7 +192,7 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig):
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_an_answered_resume_is_never_dropped_by_an_exit_read_before_it(rig):
+def test_an_answered_resume_is_never_dropped_by_an_exit_read_before_it(rig: SimpleNamespace) -> None:
     rig.react.poll()
     consumer, _runtime = _hive(rig, _resumed(launched_at=rig.agent.launched_at))
     consumer.poll_commands()
@@ -202,34 +203,43 @@ def test_an_answered_resume_is_never_dropped_by_an_exit_read_before_it(rig):
 
 
 @pytest.mark.feature("hub-dead-resume")
-@pytest.mark.parametrize("successor", ["seat", "claim", "row", "generation"])
-def test_a_successors_work_is_never_resumed_by_the_old_agent(rig, successor):
+@pytest.mark.parametrize(
+    ("successor", "orders", "returned"),
+    [("none", 1, 0), ("seat", 0, 1), ("claim", 0, 1), ("row", 0, 1), ("generation", 0, 1)],
+)
+def test_a_successors_work_is_never_resumed_by_the_old_agent(
+    rig: SimpleNamespace, successor: str, orders: int, returned: int
+) -> None:
     if successor == "seat":
         rig.store.seats.occupy(rig.agent.seat, "successor", 950_000)
     elif successor == "claim":
         rig.store.redis.set(rig.store.key("rig", "claim", "task"), "successor")
     elif successor == "row":
         rig.row["claimed_by"] = "successor"
-    else:
+    elif successor == "generation":
         rig.row["claim_generation"] = 8
     rig.react.poll()
-    assert _commands(rig) == []
-    assert len(rig.returned) == 1
+    assert len(_commands(rig)) == orders
+    assert len(rig.returned) == returned
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_the_hive_refuses_a_resume_once_a_successor_holds_the_claim(rig):
+def test_the_hive_refuses_a_resume_once_a_successor_holds_the_claim(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import FOREIGN, Orders
+
     rig.react.poll()
+    [order] = _commands(rig)
     rig.store.redis.set(rig.store.key("rig", "claim", "task"), "successor")
     consumer, runtime = _hive(rig, _resumed())
     consumer.poll_commands()
     runtime.recover.assert_not_called()
+    assert Orders(rig.store.redis).command(HIVE, order) == FOREIGN
     [agent] = rig.store.agents("rig")
     assert agent.pane_id == "pane"
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_a_failed_resume_hands_the_task_to_a_fresh_agent(rig):
+def test_a_failed_resume_hands_the_task_to_a_fresh_agent(rig: SimpleNamespace) -> None:
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     rig.react.poll()
@@ -237,20 +247,23 @@ def test_a_failed_resume_hands_the_task_to_a_fresh_agent(rig):
     consumer.poll_commands()
     _next_pass(rig)
     assert len(_commands(rig)) == 1
+    assert rig.ledger.notices == ["Starting a fresh agent after engineer ended because resume failed: no conversation."]
     assert rig.row["state"] == "open"
     assert rig.row["claimed_by"] == ""
     assert len(rig.returned) == 1
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent(rig):
+def test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent(rig: SimpleNamespace) -> None:
     from scripts.swarm.resume import RECOVERY_ATTEMPTS
 
-    claims = rig.bus.state("spoke-work")
-    entry = claims.get("claim")
-    value = {**json.loads(entry.value), "resumes": RECOVERY_ATTEMPTS}
-    claims.update("claim", json.dumps(value).encode(), entry.revision)
     rig.react.poll()
-    assert _commands(rig) == []
+    for attempt in range(RECOVERY_ATTEMPTS):
+        assert len(_commands(rig)) == attempt + 1
+        assert rig.ledger.writes == rig.returned == []
+        consumer, _runtime = _hive(rig, _resumed(launched_at=rig.clock() + 1))
+        consumer.poll_commands()
+        _next_pass(rig)
+    assert len(_commands(rig)) == RECOVERY_ATTEMPTS
     assert rig.row["state"] == "open"
     assert len(rig.returned) == 1
