@@ -691,55 +691,6 @@ def queue_ledger(store, autonomy, **fields):
     return config, ledger, found
 
 
-def spawned(store, config, ledger, found):
-    from scripts.swarm import tick
-    from tests.swarm.test_tick import FakeRuntime
-
-    return [
-        (lane, t["id"]) for lane, t in tick._spawn_order(SLUG, config, store, [], ledger.rows, found, FakeRuntime())[0]
-    ]
-
-
-@pytest.mark.parametrize("autonomy", ["delegate", "full"])
-def test_a_tick_with_four_free_seats_claims_the_top_four_of_the_dispatcher_queue(store, autonomy):
-    config, ledger, found = queue_ledger(store, autonomy)
-    assert dispatcher.queue(found, "")[:6] == ["l4", "h1", "h2", "h3", "s", "h4"]
-    assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "h1", "s", "l1")]
-
-
-def test_a_busy_seat_leaves_three_claims_from_the_top_of_the_queue(store):
-    from scripts.swarm import tick
-    from scripts.swarm.store import AgentRecord
-    from tests.swarm.test_tick import FakeRuntime
-
-    config, ledger, found = queue_ledger(store, "delegate")
-    ledger.rows["x"] = {"id": "x", "state": "claimed", "lane": "eng", "depends_on": []}
-    busy = [AgentRecord("engineer@abcdef-0001", "eng", "x", state="working")]
-    claims, _ = tick._spawn_order(SLUG, config, store, busy, ledger.rows, found, FakeRuntime())
-    assert [(lane, t["id"]) for lane, t in claims] == [("eng", t) for t in ("l4", "h1", "s")]
-
-
-def test_a_task_whose_launch_failed_falls_behind_its_band_in_the_dispatcher_queue(store, monkeypatch):
-    config, ledger, found = queue_ledger(store, "delegate")
-    monkeypatch.setattr(store, "launch_failure", lambda slug, task_id: "boom" if task_id in ("h1", "l4") else None)
-    monkeypatch.setattr(store, "launch_failures", lambda slug: {"h1": "boom", "l4": "boom"})
-    assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "s", "l1", "l2")]
-
-
-def test_a_handed_off_task_keeps_its_place_after_a_failed_launch(store):
-    config, ledger, found = queue_ledger(store, "delegate")
-    store.note_launch_failure(SLUG, "h1", "hive launch failed: refused: canary timeout")
-    store.note_launch_failure(SLUG, "l4", "boom")
-    store.put_handoff(SLUG, "h1", "released for an operator priority", seat="eng-3@" + SLUG)
-    assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "h1", "s", "l1")]
-
-
-@pytest.mark.parametrize("autonomy", ["assist", "manual"])
-def test_below_delegate_the_tick_keeps_claiming_by_rank(store, autonomy):
-    config, ledger, found = queue_ledger(store, autonomy)
-    assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l3", "l4", "h1", "s")]
-
-
 def test_the_claim_key_bands_only_operator_ranks_ahead_of_the_queue_position(store):
     config, _, found = queue_ledger(store, "delegate")
     key = dispatcher.claim_key(config, found)
@@ -779,17 +730,6 @@ CHAIN_COMMENT = (
 )
 
 
-def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent_and_resumed_work(store):
-    config, ledger, found = chain_merge(store)
-    assert dispatcher.guarded(found, "") == {"b"}
-    key = dispatcher.claim_key(config, found)
-    assert dispatcher.queue(found, "") == ["b", "x", "c", "r", "y"]
-    assert [key(ledger.rows[t]) for t in ("b", "x", "r")] == [(-1, 0), (0, 1), (2, 3)]
-    assert spawned(store, config, ledger, found) == [("eng", "b")]
-    config, ledger, found = chain_merge(store, "assist")
-    assert spawned(store, config, ledger, found) == [("eng", "x")]
-
-
 def documentation_wait(store, autonomy, *waiting, ranked=True):
     from tests.swarm.test_tick import FakeLedger
 
@@ -807,34 +747,11 @@ def documentation_wait(store, autonomy, *waiting, ranked=True):
     return config, ledger, found
 
 
-@pytest.mark.parametrize("autonomy", ["delegate", "full", "assist"])
-@pytest.mark.parametrize("rank", ["urgent", "high"])
-def test_a_free_seat_takes_urgent_or_high_work_over_a_newer_documentation_task(store, autonomy, rank):
-    config, ledger, found = documentation_wait(store, autonomy, task("u", phase="", rank=rank))
-    assert spawned(store, config, ledger, found) == [("eng", "u")]
-    assert "doc-s" not in dispatcher.guarded(found, "")
-
-
-@pytest.mark.parametrize("autonomy", ["delegate", "full", "assist"])
-def test_an_unranked_older_documentation_task_sorts_low_behind_urgent_work(store, autonomy):
-    config, ledger, found = documentation_wait(store, autonomy, task("u", phase="", rank="urgent"), ranked=False)
-    assert spawned(store, config, ledger, found) == [("eng", "u")]
-    assert "doc-s" not in dispatcher.guarded(found, "")
-    assert dispatcher.queue(found, "")[-1] == "doc-s"
-
-
 def test_a_documentation_task_ranked_above_low_keeps_its_chain_guard_place(store):
     _, ledger, found = documentation_wait(store, "delegate", ranked=False)
     ledger.rows["doc-s"]["rank"] = "high"
     found["_meta"]["stamps"]["tasks/doc-s/rank"] = {"by": MASTER_NAME}
     assert dispatcher.guarded(found, "") == {"doc-s"}
-
-
-@pytest.mark.parametrize("autonomy", ["delegate", "full", "assist"])
-def test_a_documentation_task_takes_the_seat_when_no_urgent_or_high_task_is_claimable(store, autonomy):
-    waiting = (task("w", phase="", state="claimed"), task("u", phase="", rank="urgent", depends_on=["w"]))
-    config, ledger, found = documentation_wait(store, autonomy, *waiting)
-    assert spawned(store, config, ledger, found) == [("eng", "doc-s")]
 
 
 @pytest.mark.parametrize("autonomy", ["assist", "delegate"])
@@ -897,17 +814,15 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
     assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
 
 
-def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):
+def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key(store, home, shipped):
     from scripts.doctor import priming
 
-    found, ledger = held_fix_chain(FOCUS), Ledger()
+    found = held_fix_chain(FOCUS)
     claimed = found["tasks"][1]
     config = store.update(SLUG, autonomy="delegate")
     assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
     config = store.update(SLUG, template=priming.TEMPLATE)
     assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
 
 
 def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_head(store, home, shipped):
@@ -966,55 +881,6 @@ def test_the_claim_key_positions_the_doctor_fix_chain_before_watched_work(store)
     key = dispatcher.claim_key(config, found)
     known = {t["id"]: t for t in found["tasks"]}
     assert key(known["g"])[1] < key(known["b"])[1]
-
-
-def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):
-    config, ledger, found = chain_merge(store)
-    actions = dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW)
-    assert actions == ["chain guard claimed task b 30 seconds after task a merged on the critical chain"]
-    assert ledger.comments == [("b", CHAIN_COMMENT, "dispatcher")]
-    (row,) = gate_log.recent(SLUG, None, home)
-    assert (row["at"], row["gate"], row["kind"], row["task"], row["tool"], row["reason"]) == (
-        NOW,
-        "dispatcher",
-        "apply",
-        "b",
-        "chain-guard",
-        actions[0],
-    )
-    assert [(r["ts_ms"], r["task"], r["rule"], r["action"]) for _, rows, _ in shipped for r in rows] == [
-        (NOW, "b", "chain-guard", actions[0])
-    ]
-
-
-def test_a_refused_chain_comment_still_logs_the_claim(store, home, shipped):
-    config, _, found = chain_merge(store)
-    ledger = Ledger(refused={"comment:b"})
-    claimed = next(t for t in found["tasks"] if t["id"] == "b")
-    actions = dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW)
-    assert actions == [
-        "chain guard claimed task b 30 seconds after task a merged on the critical chain" + dispatcher.UNCOMMENTED
-    ]
-    assert [r["reason"] for r in gate_log.recent(SLUG, None, home)] == actions
-
-
-@pytest.mark.parametrize("autonomy", ["assist", "manual"])
-def test_an_unguarded_claim_below_delegate_or_without_a_merge_time_reports_nothing(store, home, shipped, autonomy):
-    config, ledger, found = chain_merge(store, autonomy)
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    config = store.update(SLUG, autonomy="delegate")
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["y"], "eng", NOW) == []
-    off = [task("a", phase="", state="done"), task("b", phase="", depends_on=["a"]), *chain_of("p", "q", "s")]
-    stamps = {"tasks/a/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000}}
-    off_chain = doc(off, phases=[], _meta={"stamps": stamps})
-    assert dispatcher.chain_claimed(SLUG, config, ledger, off_chain, off[1], "eng", NOW) == []
-    del found["_meta"]["stamps"]["tasks/a/state"], found["_meta"]["stamps"]["tasks/a2/state"]
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    del found["_meta"]["stamps"]
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    del found["_meta"]
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
-    assert (ledger.comments, shipped, gate_log.recent(SLUG, None, home)) == ([], [], [])
 
 
 def test_a_master_urgent_fix_phase_leaf_outside_the_focus_gets_no_rank_write_and_no_head_comment(store, home, shipped):
@@ -1142,7 +1008,7 @@ def test_a_failed_metrics_write_is_reported_as_an_action(store, home, monkeypatc
     ]
 
 
-def test_the_tick_runs_the_dispatcher_steps(monkeypatch):
+def test_the_tick_runs_the_dispatcher_steps(monkeypatch: pytest.MonkeyPatch) -> None:
     import inspect
 
     from scripts.swarm import tick
@@ -1152,7 +1018,7 @@ def test_the_tick_runs_the_dispatcher_steps(monkeypatch):
     source = inspect.getsource(tick.tick) + inspect.getsource(tasks) + inspect.getsource(place)
     assert "grouping.group_pass" not in source and "dispatcher.group" in source
     placing = [step.name for step in engine.group_steps(place.PLACEMENT)]
-    assert placing.index("rank pass") < placing.index("spawn")
+    assert "rank pass" in placing
     steps = inspect.getsource(report)
     assert "priority_sweep.priority_pass" not in steps and "dispatcher.priorities" in steps
 

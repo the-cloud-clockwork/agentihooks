@@ -3,9 +3,18 @@ from dataclasses import replace
 import pytest
 
 from hooks.context import context_recycle
+from scripts.swarm import commands
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore, SwarmConfig
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+
+def seated(store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
+    """Seats a working engineer on t1 through hub admission on the tick's own hive at 1000, on pane ``w1:p1`` where
+    the removed tick spawn put it, and lists it live in ``runtime``."""
+    agent = seat_agent(store, ledger, "sw", "t1", hive=commands.hive_id(), clock=lambda: 1000)
+    runtime.live.add(agent.name)
 
 
 @pytest.fixture
@@ -30,7 +39,9 @@ def isolated_recycling(tmp_path, monkeypatch):
 def test_tick_bound_session_gets_handoff_without_identity_in_any_hook(store, monkeypatch, pane):
     runtime = FakeRuntime()
     runtime.conversation_ids = {pane: "bound", "unowned:pane": "unbound", f"{pane}/child": "nested"}
-    tick_module.tick("sw", store, FakeLedger([{"id": "t1"}]), runtime, 1000)
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
+    seated(store, ledger, runtime)
+    tick_module.tick("sw", store, ledger, runtime, 1000)
     assert "bound" in {agent.conversation_id for agent in store.agents("sw")}
     monkeypatch.setattr(context_recycle, "used_tokens", lambda session_id: 600_000)
     assert "HANDOFF PREPARATION" in context_recycle.directive("bound", {})
@@ -45,7 +56,8 @@ def test_tick_bound_session_gets_handoff_without_identity_in_any_hook(store, mon
 
 def test_tick_pins_an_already_known_conversation_without_a_prior_hook(store, monkeypatch):
     runtime = FakeRuntime()
-    ledger = FakeLedger([{"id": "t1"}])
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
+    seated(store, ledger, runtime)
     tick_module.tick("sw", store, ledger, runtime, 1000)
     agent = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     store.put_agent("sw", replace(agent, conversation_id="known"))
@@ -58,9 +70,10 @@ def test_tick_pins_an_already_known_conversation_without_a_prior_hook(store, mon
 @pytest.mark.parametrize("compact_limit", [0, 700])
 def test_tick_pin_retains_the_swarm_limit_and_an_existing_session_pin(store, monkeypatch, compact_limit):
     runtime = FakeRuntime()
-    ledger = FakeLedger([{"id": "t1"}])
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
     store.update("sw", compact_limit=compact_limit)
     runtime.conversation_ids = {"w1:p1": "bound"}
+    seated(store, ledger, runtime)
     tick_module.tick("sw", store, ledger, runtime, 1000)
     monkeypatch.setattr(context_recycle, "used_tokens", lambda session_id: 650_000)
     expected = None if compact_limit else 650_000
