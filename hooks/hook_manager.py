@@ -1169,6 +1169,15 @@ def _operator_words(payload: dict) -> bool:
         return False
 
 
+def _scheduled_prompt(payload: dict) -> None:
+    try:
+        from hooks.context.scheduled_prompts import record
+
+        record(payload)
+    except Exception as e:
+        log("scheduled prompt record failed", {"error": str(e)})
+
+
 def _operator_mode(payload: dict, typed: bool) -> None:
     try:
         from hooks.common import inject_context
@@ -1910,6 +1919,7 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
+    _scheduled_prompt(payload)
     _swarm_after_tool(payload)
     _conditions = None
     try:
