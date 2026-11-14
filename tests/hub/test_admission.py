@@ -1107,13 +1107,11 @@ def test_the_seeds_follow_the_most_recently_started_earlier_agent(rig: SimpleNam
 
 @pytest.mark.feature("hub-admission-claim-context")
 def test_a_plan_task_steering_carries_its_phase_evidence(rig: SimpleNamespace) -> None:
-    from scripts.hive import orders
     from scripts.swarm_ledger import ledger_workspace
 
-    rig.rows["t1"]["kind"] = "plan"
+    planned = {**rig.rows["t1"], "kind": "plan"}
 
-    admitted = rig.admitter.admit(SLUG, ask())
+    seeds = rig.admitter._seeds(SLUG, planned, rig.found, "eng@sw-0009")  # pyright: ignore[reportPrivateUsage]
 
-    steering = admitted["task"][orders.SEEDS]["steering.md"]
-    assert steering == ledger_workspace.steering(rig.rows["t1"], rig.found)
-    assert steering != ledger_workspace.steering(rig.rows["t1"], None)
+    assert seeds == {"steering.md": ledger_workspace.steering(planned, rig.found)}
+    assert seeds["steering.md"] != ledger_workspace.steering(planned, None)

@@ -86,7 +86,7 @@ def test_a_stored_origin_reclaims_an_earlier_life_branch_through_github(monkeypa
     asked = _graphql(monkeypatch, {"b0": {"target": {"oid": "abc"}}})
     reclaim, origin = branch_heads.reclaimer(SwarmConfig("sw", "/repo", 1, 1, repo_origin=ORIGIN))
 
-    found = reclaim("/repo", ["engineer@a1-0001"], "")
+    found = reclaim(ORIGIN, ["engineer@a1-0001"], "")
 
     assert origin == ORIGIN
     assert found == {
@@ -102,7 +102,7 @@ def test_a_stored_origin_skips_a_forbidden_recorded_branch(monkeypatch: pytest.M
     _graphql(monkeypatch, {"b0": {"target": {"oid": "abc"}}})
     reclaim, _ = branch_heads.reclaimer(SwarmConfig("sw", "/repo", 1, 1, repo_origin=ORIGIN))
 
-    found = reclaim("/repo", [], "taken", forbidden={"taken"})
+    found = reclaim(ORIGIN, [], "taken", forbidden={"taken"})
 
     assert found["continue_from"] == "fresh"
 
