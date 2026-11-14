@@ -1720,7 +1720,13 @@ The hub's `hive-loss` reactor keeps an index of every started execution, by hive
 these hold:
 
 - its presence has expired;
-- this hub has watched presence for a full 45 seconds with no gap longer than one beat.
+- this hub has watched presence for a full 45 seconds with no gap longer than one beat;
+- its swarm's config engine is `events`, and this hub has seen it on `events` for a full 45 seconds.
+
+Only spokes beat presence, and they poll only swarms on the `events` engine, so a swarm switched to `legacy` keeps
+its running executions however long its hives stay silent. After a switch back to `events` its spokes beat again
+before the 45 seconds pass. When the hub cannot read the swarm store, it keeps the swarms it last read and prints
+`hub: hive loss kept its last events swarms; the store read failed (<error>)`.
 
 The hub then publishes `execution.exited` with reason `hive-lost` for each of that hive's executions that are still
 running. The `lifecycle` reactor releases each one and reopens its task, which raises the claim generation, so another
