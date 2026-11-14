@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.889 · 2026-11-14
+
+### 2026-11-14 · 0b33b2dbcd45 · #11242 · @agenticore-app
+
+**Measure a resumed owner's stall grace from its launch**
+
+This fixes a bug where resuming a stalled owner on a red, green, or unmergeable pull request caused its grace period to still be measured from the owner's original start time rather than its resume, so the owner was retired and its task reopened on the very next tick after resuming. The judged step now floors the grace period at the later of the owner's start or launch time, so a resumed owner correctly gets the full grace limit measured from its launch, while an owner that was never resumed behaves exactly as before.
+
 ## v2.17.884 · 2026-11-14
 
 ### 2026-11-14 · cfb94e621454 · #11180 · @agenticore-app
