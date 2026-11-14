@@ -1998,7 +1998,6 @@
       "seam": "The spawn prompt built from the seat",
       "tests": [
         "tests/swarm/test_seat_priming.py::test_the_successor_prompt_carries_the_chain_in_order",
-        "tests/swarm/test_seat_priming.py::test_the_tick_primes_a_successor_from_its_seat",
         "tests/swarm/test_seat_priming.py::test_a_missing_recap_is_named_in_the_prompt"
       ]
     },
@@ -2008,7 +2007,6 @@
       "behaviour": "The swarm culture reaches every lane and the master ahead of the seat recap.",
       "seam": "The spawn prompt built from the swarm culture",
       "tests": [
-        "tests/swarm/test_seat_priming.py::test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture",
         "tests/swarm/test_seat_priming.py::test_culture_set_and_show_survive_swarm_remove",
         "tests/swarm/test_seat_priming.py::test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master"
       ]

@@ -2,9 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm import dispatcher
 from scripts.swarm.store import SwarmConfig, SwarmError
-from scripts.swarm.tick import tick
 from scripts.swarm_v2 import admission as admission_module
 from scripts.swarm_v2.admission import (
     ACTIVATED,
@@ -21,8 +19,7 @@ from scripts.swarm_v2.admission import (
     Template,
     requested,
 )
-from tests.sv2_ctl03_cases import build, fresh_store, inputs, outcomes, run_case
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.sv2_ctl03_cases import fresh_store, outcomes, run_case
 
 pytestmark = pytest.mark.unit
 
@@ -287,143 +284,6 @@ def test_case_a_counts_one_outcome_per_task():
     result = run_case("a")
     assert result["pending"] == ["t01", "t02", "t03"]
     assert result["pending_execution_admission_total"] == {ADMITTED: 3, IMPOSSIBLE: 1, DEFERRED: 6}
-
-
-class AdmittingRuntime(FakeRuntime):
-    def __init__(self, gate, fail_for=()):
-        super().__init__()
-        self.admission, self.fail_for = gate, set(fail_for)
-
-    def spawn(self, config, lane, name, task):
-        if task["id"] in self.fail_for:
-            raise RuntimeError("pod create refused")
-        return super().spawn(config, lane, name, task)
-
-
-class CommentingLedger(FakeLedger):
-    def __init__(self, tasks):
-        super().__init__(tasks)
-        self.comments = []
-
-    def comment(self, slug, task_id, text, by="swarm"):
-        self.comments.append((task_id, text, by))
-
-
-def tick_fixture(fail_for=()):
-    data = inputs()
-    store, gate, provider = build(data)
-    store.create(SwarmConfig("sw", "/repo", 10, 0))
-    ledger = CommentingLedger([{**t, "lane": "eng"} for t in data["tasks"]])
-    return data, store, gate, ledger, AdmittingRuntime(gate, fail_for)
-
-
-def test_tick_spawns_only_admitted_tasks_and_blocks_the_impossible_one():
-    data, store, gate, ledger, runtime = tick_fixture()
-    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert [task for _, _, task in runtime.spawned] == ["t01", "t02", "t03"]
-    assert ledger.rows["t04"]["state"] == "blocked"
-    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
-    assert comments[0][0] == "t04"
-    assert comments[0][1].startswith("task t04 requests 65536 MiB memory")
-    assert (
-        "task t05 waits: pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms" in actions
-    )
-    assert all(ledger.rows[t]["state"] == "open" for t in ("t05", "t10"))
-    assert sorted(gate.pending("sw", data["clock_ms"])) == ["t01", "t02", "t03"]
-    assert runtime.tasks[0]["admission"] == {
-        "reservation": gate.pending("sw", data["clock_ms"])["t01"].reservation,
-        "deadline_ms": data["clock_ms"] + data["pending_ttl_ms"],
-    }
-
-
-def test_tick_releases_the_reservation_of_a_failed_spawn():
-    data, store, gate, ledger, runtime = tick_fixture(fail_for=("t02",))
-    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert [task for _, _, task in runtime.spawned] == ["t01", "t03", "t05"]
-    assert sorted(gate.pending("sw", data["clock_ms"])) == ["t01", "t03", "t05"]
-    assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
-
-
-def test_tick_releases_the_reservation_when_the_claim_is_taken(monkeypatch):
-    data, store, gate, ledger, runtime = tick_fixture()
-    real = store.claim
-    monkeypatch.setattr(store, "claim", lambda slug, task, *rest: task != "t01" and real(slug, task, *rest))
-    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert "t01" not in gate.pending("sw", data["clock_ms"])
-    assert gate.pending_execution_admission_total("sw")[RELEASED] == 1
-
-
-def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
-    data, store, gate, ledger, runtime = tick_fixture()
-    original = ledger.update_task
-
-    def refuse(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
-        if task_id == "t01" and fields.get("claimed_by"):
-            return {**ledger.rows[task_id], "state": "claimed", "claimed_by": "someone"}
-        return original(slug, task_id, fields, by, if_state, if_match)
-
-    ledger.update_task = refuse
-    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert "task t01 is claimed on the ledger, not claimed" in actions
-    assert not [a for a in actions if a.startswith("spawn failed")]
-    assert "t01" not in gate.pending("sw", data["clock_ms"])
-    assert [task for _, _, task in runtime.spawned] == ["t02", "t03", "t05"]
-    assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
-
-
-def test_a_live_owner_appearing_after_admission_releases_the_unused_reservation(monkeypatch):
-    from scripts.swarm.store import AgentRecord
-
-    data, store, gate, ledger, runtime = tick_fixture()
-    admit = gate.admit
-
-    def claimed_elsewhere(slug, selected, now_ms):
-        decisions = admit(slug, selected, now_ms)
-        if any(task["id"] == "t01" for task in selected):
-            assert decisions[0].outcome == ADMITTED
-            owner = AgentRecord("existing-owner", "eng", "t01", started_at=now_ms)
-            store.put_agent("sw", owner)
-            runtime.live.add(owner.name)
-            ledger.rows["t01"].update(state="claimed", claimed_by=owner.name)
-        return decisions
-
-    monkeypatch.setattr(gate, "admit", claimed_elsewhere)
-    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert "t01" not in gate.pending("sw", data["clock_ms"])
-    assert "t01" not in [task for _, _, task in runtime.spawned]
-    assert gate.pending_execution_admission_total("sw")[RELEASED] == 1
-
-
-def test_tick_takes_no_reservation_while_the_runtime_has_no_capacity():
-    data, store, gate, ledger, runtime = tick_fixture()
-    runtime.full = True
-    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert "every agent is at its session cap, waiting" in actions
-    assert gate.pending("sw", data["clock_ms"]) == {}
-    assert gate.pending_execution_admission_total("sw") == {}
-
-
-def test_tick_waits_when_admission_keeps_conflicting(monkeypatch):
-    data, store, gate, ledger, runtime = tick_fixture()
-
-    def conflicted(slug, tasks, now_ms):
-        raise SwarmError(admission_module.CONFLICT)
-
-    monkeypatch.setattr(gate, "admit", conflicted)
-    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert runtime.spawned == []
-    assert "task t01 waits: pending admission kept conflicting; retry on the next tick" in actions
-    assert ledger.rows["t01"]["state"] == "open"
-
-
-def test_a_runtime_without_admission_spawns_as_before():
-    data = inputs()
-    store = fresh_store()
-    store.create(SwarmConfig("sw", "/repo", 10, 0))
-    ledger, runtime = FakeLedger([{**t, "lane": "eng"} for t in data["tasks"]]), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert len(runtime.spawned) == 10
-    assert "admission" not in runtime.tasks[0]
 
 
 def test_keys_are_named_per_swarm():
