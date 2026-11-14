@@ -8,6 +8,7 @@ import pytest
 from scripts.gates.claims import refusal
 from scripts.hub import claims
 from scripts.swarm.store import AgentRecord
+from tests.helpers import store_seed
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
 from tests.hub.test_claim_lives import started
@@ -26,7 +27,7 @@ def lives(rig: Any, n: int) -> None:
     rig.ledger.comments = []
     rig.ledger.comment = lambda slug, task_id, text, by: rig.ledger.comments.append((slug, task_id, text, by))
     for _ in range(n):
-        rig.store.count_claim(SLUG, "t1")
+        store_seed.count_claim(rig.store, SLUG, "t1")
 
 
 @pytest.mark.feature("swarm-events-claim-cap")
@@ -134,11 +135,11 @@ def test_the_refusal_dates_only_failures_within_the_counted_claims(
         ("first", 1_792_440_000_000),
         ("second", 1_792_440_002_000),
     ):
-        store.record_launch(SLUG, AgentRecord(name, "eng", "t1", started_at=at), "started")
+        store_seed.record_launch(store, SLUG, AgentRecord(name, "eng", "t1", started_at=at), "started")
     store.reset_claims(SLUG, "t1")
     lives(rig, 3)
-    store.record_launch(
-        SLUG, AgentRecord("failed", "eng", "t1", started_at=failure_at), "failed", "no space left on device"
+    store_seed.record_launch(
+        store, SLUG, AgentRecord("failed", "eng", "t1", started_at=failure_at), "failed", "no space left on device"
     )
     store.note_launch_failure(SLUG, "t1", "no space left on device")
     for name, task, at, state in (
@@ -148,7 +149,7 @@ def test_the_refusal_dates_only_failures_within_the_counted_claims(
         ("waiting", "t1", 1_792_440_102_000, "waiting"),
         ("pending", "t1", 1_792_440_103_000, "pending"),
     ):
-        store.record_launch(SLUG, AgentRecord(name, "eng", task, started_at=at), state, "different error")
+        store_seed.record_launch(store, SLUG, AgentRecord(name, "eng", task, started_at=at), state, "different error")
     original = store.launches(SLUG)
     assert rig.admitter.admit(SLUG, ask()) is None
     [(_, _, report, _)] = rig.ledger.comments

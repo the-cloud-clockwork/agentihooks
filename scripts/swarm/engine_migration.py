@@ -12,6 +12,8 @@ from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError
 
 BUSY = "skipped: live legacy agents"
 NO_ORIGIN = "skipped: no repository origin"
+LAUNCH_JOBS = "launch-jobs"
+COLLECTING = ("acknowledging", "launching")
 
 
 def slugs(redis_store: RedisStore) -> list[str]:
@@ -51,9 +53,7 @@ def repo_origin(redis_store: RedisStore, slug: str) -> str:
 
 def drop_launch_jobs(redis_store: RedisStore, slug: str) -> int:
     """Drops the launch job rows of a swarm with no agents, since every agent they name is gone, and counts them."""
-    from scripts.swarm import launch_job
-
-    key = redis_store.key(slug, launch_job.KEY)
+    key = redis_store.key(slug, LAUNCH_JOBS)
     count = int(redis_store.redis.hlen(key))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     redis_store.redis.delete(key)  # pyright: ignore[reportUnknownMemberType]
     return count  # pyright: ignore[reportUnknownMemberType]
@@ -75,7 +75,6 @@ def drop_stuck_launches(redis_store: RedisStore, slug: str) -> int:
 def drop_collecting(client: Any, key: str) -> int:
     """Deletes the rows of one launches hash still acknowledging or launching and counts them."""
     from scripts.swarm import hash_pages
-    from scripts.swarm.ack_pass import COLLECTING
 
     rows: dict[str, str] = hash_pages.fields(client, key)
     stuck = [name for name, raw in rows.items() if json.loads(raw).get("state") in COLLECTING]

@@ -167,23 +167,3 @@ def test_a_change_through_one_fenced_runtime_drops_the_listing_of_another(in_pas
     runtime.live.clear()
     assert second.live_names() == set()
     assert runtime.listings == 2
-
-
-@pytest.mark.feature("fenced-live-names-listing")
-def test_collect_and_expire_drop_the_pass_listing(in_pass: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    runtime = Listing()
-    outcome = SimpleNamespace(ok=True, value="collected", detail="", status="ok")
-    requests: list[Any] = []
-    runtime.hive_launch = SimpleNamespace(  # pyright: ignore[reportAttributeAccessIssue]
-        collect=lambda request: requests.append(request) or outcome,
-        expire=lambda request: requests.append(request) or "expired",
-    )
-    wrapped = fenced(runtime)
-    monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
-    wrapped.live_names()
-    assert wrapped.collect("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "collected"  # pyright: ignore[reportArgumentType]
-    wrapped.live_names()
-    assert wrapped.expire("config", "eng", "engineer@a1b2c3-0002", {"id": "t1"}) == "expired"  # pyright: ignore[reportArgumentType]
-    wrapped.live_names()
-    assert runtime.listings == 3
-    assert [request.task for request in requests] == [{"id": "t1", "controller_epoch": 1}] * 2

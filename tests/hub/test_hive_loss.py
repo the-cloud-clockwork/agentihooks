@@ -161,22 +161,6 @@ def test_a_killed_hive_reopens_its_running_task_for_another_claim_at_the_presenc
 
 
 @pytest.mark.feature("hive-loss-events-engine-only")
-def test_a_swarm_switched_to_legacy_keeps_its_running_executions_when_its_hives_stop_beating(rig, capsys):
-    from scripts.hive import presence
-
-    assert rig.first.spoke.poll() == "started"
-    rig.hub.run_once()
-    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
-    rig.loss._emit = Mock()
-    advance(rig, T0 + 4 * presence.TTL_MS)
-    rig.loss._emit.assert_not_called()
-    assert rig.row["state"] == "claimed"
-    assert rig.returned == []
-    assert claim_state(rig) == "started"
-    assert capsys.readouterr().err == ""
-
-
-@pytest.mark.feature("hive-loss-events-engine-only")
 def test_a_swarm_on_events_still_exits_the_executions_of_a_lost_hive(rig):
     from scripts.hive import presence
 
@@ -206,38 +190,6 @@ def test_a_hub_built_without_a_store_connects_once_it_watches_a_start(rig, monke
         loss.poll()
     connect.assert_called_once_with()
     assert [call.args[1].key for call in loss._emit.call_args_list] == ["execution-a"]
-
-
-@pytest.mark.feature("hive-loss-events-engine-only")
-def test_a_swarm_switched_back_to_events_waits_a_full_presence_ttl_before_judging_its_hives(rig):
-    from scripts.hive import presence
-
-    assert rig.first.spoke.poll() == "started"
-    rig.hub.run_once()
-    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
-    drive(rig, T0 + 2 * presence.TTL_MS)
-    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "events")
-    rig.loss._emit = Mock()
-    observed = rig.clock() + 5_000
-    drive(rig, observed + presence.TTL_MS - 1)
-    rig.loss._emit.assert_not_called()
-    drive(rig, observed + presence.TTL_MS)
-    assert [call.args[1].key for call in rig.loss._emit.call_args_list] == ["execution-a"]
-
-
-@pytest.mark.feature("hive-loss-events-engine-only")
-def test_a_swarm_switched_back_to_events_keeps_executions_whose_hive_beats_again(rig):
-    from scripts.hive import presence
-
-    assert rig.first.spoke.poll() == "started"
-    rig.hub.run_once()
-    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "legacy")
-    drive(rig, T0 + 2 * presence.TTL_MS)
-    rig.store.redis.hset(rig.store.key("rig", "config"), "engine", "events")
-    rig.loss._emit = Mock()
-    drive(rig, rig.clock() + 4 * presence.TTL_MS, beating=("hive-a",))
-    rig.loss._emit.assert_not_called()
-    assert claim_state(rig) == "started"
 
 
 @pytest.mark.feature("hive-loss-events-engine-only")

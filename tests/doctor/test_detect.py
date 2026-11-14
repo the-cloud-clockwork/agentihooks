@@ -6,6 +6,7 @@ from scripts.doctor import detect
 from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
+from tests.helpers import store_seed
 
 STALE = Finding("stale claim", "watch-eng-1", "no change for 40 minutes", ("task t1",), "30 minutes", 40)
 
@@ -174,8 +175,8 @@ def test_the_startup_reader_judges_hive_agents_from_their_heartbeat_after_the_ac
     waiting = AgentRecord("sw-eng-3", "eng", "t3", started_at=1_000, state="starting")
     local = AgentRecord("sw-eng-4", "eng", "t4", started_at=1_000)
     store.agents = lambda slug: [running, silent, waiting, local] if slug == "sw" else []
-    store.record_launch("sw", waiting, ACKNOWLEDGING)
-    store.record_launch("sw", running, "started")
+    store_seed.record_launch(store, "sw", waiting, ACKNOWLEDGING)
+    store_seed.record_launch(store, "sw", running, "started")
     idle.beat(store.redis, "sw", running.name, idle.WORKING, acked + 1)
     idle.beat(store.redis, "sw", local.name, idle.WORKING, 2_000)
     found = detect.readers(store, None, "sw", acked + 2 * spawns.TICK_MS, environ={})["startup"]()

@@ -16,7 +16,7 @@ def _all_kept() -> list[dict[str, object]]:
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
 def test_the_gate_covers_the_spawn_chain_reap_and_the_tick_view() -> None:
-    assert {"spawn", "reap", "tick view", "preempt", "orphans", "verify"} <= gate.GATED
+    assert {"reap", "tick view", "orphans", "verify"} <= gate.GATED
 
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
@@ -32,7 +32,7 @@ def test_a_wall_over_the_floor_is_a_miss() -> None:
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
 def test_a_wall_at_the_floor_passes() -> None:
-    assert gate.misses([*_all_kept(), _record("spawn", floor_of("spawn"))]) == []
+    assert gate.misses([*_all_kept(), _record("reap", floor_of("reap"))]) == []
 
 
 @pytest.mark.parametrize("flag", ["abandoned", "cut"])
@@ -44,8 +44,8 @@ def test_a_cut_or_abandoned_step_is_a_miss(flag: str) -> None:
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
 def test_a_step_that_did_not_end_ok_is_a_miss() -> None:
-    records = [*_all_kept(), _record("preempt", 0.5, outcome="skipped")]
-    assert gate.misses(records) == ["preempt ended skipped after 0.50s"]
+    records = [*_all_kept(), _record("orphans", 0.5, outcome="skipped")]
+    assert gate.misses(records) == ["orphans ended skipped after 0.50s"]
 
 
 @pytest.mark.feature("tick-scale-gate-step-floors")

@@ -22,8 +22,8 @@ from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore, Item
 from scripts.swarm import capacity, freeze, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
-from scripts.swarm.ledger_events import Mail
-from scripts.swarm.store import RedisStore
+from scripts.swarm.ledger_events import Mail, PullRequest
+from scripts.swarm.store import AgentRecord, RedisStore
 
 KIND = "stall"
 SENDER = "swarm"
@@ -160,6 +160,11 @@ def _woken(watch, task):
     return idle.woke(watch.store.redis, watch.slug, owner) if owner else 0
 
 
+def _owner_since(agent: AgentRecord | None) -> int:
+    """The later of the owner's start and launch, so a resumed owner's grace runs from its resume."""
+    return max(agent.started_at, agent.launched_at) if agent else 0
+
+
 def _stall(watch, task, pull, marks, seen, agent):
     tid, queued = task["id"], _key(watch, QUEUED)
     if pull.queued:
@@ -218,12 +223,19 @@ def _pull_request(watch, mail, task, limit, marks, seen):
     return _reopen(watch, mail, task, case, minutes, limit)
 
 
-def _judged(watch, task, pull, marks, seen, agent):
+def _judged(
+    watch: Watch,
+    task: dict[str, Any],
+    pull: PullRequest,
+    marks: dict[str, Any],
+    seen: dict[str, int],
+    agent: AgentRecord | None,
+) -> tuple[str | None, int]:
     case, since = _stall(watch, task, pull, marks, seen, agent)
     if case is None:
         return None, 0
     if case != "owner":
-        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0, _woken(watch, task))
+        since = max(since, pull.pushed_at or 0, pull.red_at or 0, _owner_since(agent), _woken(watch, task))
     return case, _minutes(watch, since)
 
 
