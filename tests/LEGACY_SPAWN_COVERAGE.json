@@ -7,6 +7,9 @@
         "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin"
       ]
     },
+    "events-smoke-no-legacy-launch": {
+      "retires": "The clause that the tick lane launch is never called patches the legacy spawn function the removal deletes; the removal drops that patch and keeps the no worker spawn and open task assertions."
+    },
     "hive-stop-recovery-handoff": {
       "gap": "The events hub admission claim carries no handoff document text, so a successor primed with a recovery handoff exists only on the legacy spawn; ported by the handoff text follow up."
     },
