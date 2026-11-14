@@ -9,6 +9,8 @@ import pytest
 from tests.hive.test_join_report import passing
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from scripts.swarm.store import AgentRecord, RedisStore
 
 RESTARTED = {"exit_reason": "agent ended with its member's restart", "status": "ended"}
@@ -84,3 +86,78 @@ def test_a_restarted_member_ends_the_reports_its_agents_wrote_before_the_restart
         assert "ended_at" not in after[agent.name]
     live = {report["agent"] for report in join_report.live(store.redis, "worker")}
     assert live == {other.name, unrecorded.name, current.name}
+
+
+@pytest.mark.feature("hive-join-heartbeat-ends-restarted-member-reports")
+@pytest.mark.parametrize(("current", "recorded"), [("", "boot/1"), ("boot/2", ""), ("boot/2", "boot/2")])
+def test_a_report_is_kept_while_either_epoch_is_unknown_or_they_match(
+    store: "RedisStore", monkeypatch: pytest.MonkeyPatch, current: str, recorded: str
+) -> None:
+    from scripts.hive import join_report, registry
+
+    monkeypatch.setattr(registry, "member_name", lambda: "pod-a")
+    monkeypatch.setattr(join_report, "local_epoch", lambda: current)
+    monkeypatch.setattr(join_report, "cheap_checks", lambda *args: {})
+    agent = _running(store, "eng-1")
+    _reported(store, agent, {"member": "pod-a", "epoch": recorded})
+    join_report.heartbeat(store.redis, "worker", 181000)
+    report = _after(store)[agent.name]
+    assert (report["status"], report["heartbeat_at"]) == ("running", 181000)
+    assert "ended_at" not in report
+
+
+@pytest.mark.feature("hive-join-heartbeat-ends-restarted-member-reports")
+def test_a_join_report_records_its_member_and_that_members_epoch(
+    store: "RedisStore", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import join_report, registry
+
+    monkeypatch.setattr(registry, "member_name", lambda: "pod-a")
+    monkeypatch.setattr(join_report, "local_epoch", lambda: "boot/7")
+    agent = _running(store, "eng-1")
+    report = join_report.start(store.redis, "swarm", agent, "session", passing(), {}, 1000)
+    assert (report["member"], report["epoch"]) == ("pod-a", "boot/7")
+    assert join_report.read(store.redis, agent) == report
+
+
+STAT = "1 (ti) ni) S " + " ".join(map(str, range(1, 19))) + " 98765 4096\n"
+
+
+def _proc(root: "Path", stat: str) -> "Path":
+    (root / "boot_id").write_text("boot-a\n")
+    (root / "1").mkdir()
+    (root / "1" / "stat").write_text(stat)
+    return root
+
+
+@pytest.mark.feature("hive-join-heartbeat-ends-restarted-member-reports")
+def test_the_epoch_names_the_boot_and_the_tick_process_one_started_at(tmp_path: "Path") -> None:
+    from scripts.hive import join_report
+
+    root = _proc(tmp_path, STAT)
+    assert join_report.epoch(root / "boot_id", root) == "boot-a/98765"
+
+
+@pytest.mark.feature("hive-join-heartbeat-ends-restarted-member-reports")
+@pytest.mark.parametrize("broken", ["boot", "stat", "short"])
+def test_an_unreadable_epoch_is_empty(tmp_path: "Path", broken: str) -> None:
+    from scripts.hive import join_report
+
+    root = _proc(tmp_path, "1 (tini) S 0 1\n" if broken == "short" else STAT)
+    removed = {"boot": root / "boot_id", "stat": root / "1" / "stat"}.get(broken)
+    if removed is not None:
+        removed.unlink()
+    assert join_report.epoch(root / "boot_id", root) == ""
+
+
+@pytest.mark.feature("hive-join-heartbeat-ends-restarted-member-reports")
+def test_the_local_epoch_reads_this_hosts_boot_id_and_process_one(
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import join_report
+    from scripts.swarm_v2.runtime import process
+
+    root = _proc(tmp_path, STAT)
+    monkeypatch.setattr(process, "BOOT_ID", root / "boot_id")
+    monkeypatch.setattr(process, "PROC", root)
+    assert join_report.local_epoch() == "boot-a/98765"
