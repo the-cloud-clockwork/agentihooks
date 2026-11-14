@@ -6430,7 +6430,8 @@
       "behaviour": "A hive reports an execution exit only on its own exit report subject: every hive member credential is refused by the NATS server when it publishes another hive's exit report subject or the shared execution exited subject, and the hub relays a reported exit onto the shared subject the lifecycle reactor reads only when the execution registry places that execution on the reporting hive, so a hive's own exit still drops its agent and reopens its task.",
       "seam": "scripts.hive.nats_grant.member_claims as enforced by a live NATS server, scripts.hub.exits.handle, and scripts.hive.execution_events.publish driving the hub lifecycle reactor",
       "tests": [
-        "tests/hive/test_nats_grant.py::test_a_member_credential_reports_an_exit_only_on_its_own_subject",
+        "tests/hive/test_nats_grant.py::test_a_member_credential_reports_an_exit_on_its_own_subject",
+        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_report_an_exit_on_another_subject",
         "tests/hive/test_nats_grant.py::test_the_hub_credential_serves_every_hive_exit_subject",
         "tests/hub/test_exits.py::test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub",
         "tests/hub/test_exits.py::test_the_hub_refuses_an_exit_reported_by_another_hive",

@@ -214,11 +214,19 @@ def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer) -> No
 
 @pytest.mark.feature("hive-own-exit-subject")
 @pytest.mark.parametrize("scope", ["unscoped", "scoped"])
-def test_a_member_credential_reports_an_exit_only_on_its_own_subject(signer, scope: str) -> None:
-    shared = ["swarm.rig.execution.exited", "swarm.rig.events.execution.exited"]
+def test_a_member_credential_reports_an_exit_on_its_own_subject(signer, scope: str) -> None:
+    async def act(nc: Any) -> None:
+        await nc.publish("exits.rig.m1", b"{}")
 
-    assert _publish_refusals(signer, _member(signer, scope), "exits.rig.m1", "exits.rig.h2", *shared) == [
-        f'nats: permissions violation for publish to "{subject}"' for subject in ["exits.rig.h2", *shared]
+    assert _violations(signer, _member(signer, scope), act) == []
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+@pytest.mark.parametrize("subject", ["exits.rig.h2", "swarm.rig.execution.exited", "swarm.rig.events.execution.exited"])
+def test_a_member_credential_cannot_report_an_exit_on_another_subject(signer, scope: str, subject: str) -> None:
+    assert _publish_refusals(signer, _member(signer, scope), subject) == [
+        f'nats: permissions violation for publish to "{subject}"'
     ]
 
 
