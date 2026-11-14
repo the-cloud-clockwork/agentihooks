@@ -2226,6 +2226,38 @@
       ]
     },
     {
+      "id": "hub-dead-resume",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-dead-resume-hub",
+      "behaviour": "A dead agent the hub started over the bus is reopened once in its seat with its own conversation through its hive, under the claim, claim generation and seat occupant fences and the resume attempt cap; a successor's work is never resumed by the old agent and a failed or capped resume hands the task to a fresh agent.",
+      "seam": "scripts.hub.lifecycle.Lifecycle.handle on execution.exited and the hive command consumer resume order",
+      "tests": [
+        "tests/hub/test_dead_resume_hub.py::test_a_dead_hub_started_agent_is_resumed_once_through_its_hive",
+        "tests/hub/test_dead_resume_hub.py::test_the_hive_reopens_the_conversation_in_the_same_seat",
+        "tests/hub/test_dead_resume_hub.py::test_the_hive_runs_a_resume_order_off_its_heartbeat",
+        "tests/hub/test_dead_resume_hub.py::test_a_resumed_pane_that_dies_again_orders_the_next_resume",
+        "tests/hub/test_dead_resume_hub.py::test_a_successors_work_is_never_resumed_by_the_old_agent",
+        "tests/hub/test_dead_resume_hub.py::test_the_hive_refuses_a_resume_the_hub_judged_on_another_record",
+        "tests/hub/test_dead_resume_hub.py::test_a_deliberately_ended_hub_agent_is_not_resumed",
+        "tests/hub/test_dead_resume_hub.py::test_an_agent_on_a_lost_hive_is_handed_to_a_fresh_agent",
+        "tests/hub/test_dead_resume_hub.py::test_a_failed_resume_hands_the_task_to_a_fresh_agent",
+        "tests/hub/test_dead_resume_hub.py::test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent"
+      ]
+    },
+    {
+      "id": "hub-conversation-overlays",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-agent-conversation-overlays",
+      "behaviour": "A hive's execution started event carries the conversation id and overlays its placement produced, and the hub claims reactor writes both on the admitted agent record, so a dead hub started agent is resumed into that conversation with its overlays; a start naming neither keeps the recorded values.",
+      "seam": "scripts.hive.spoke.Spoke._spawn started payload and scripts.hub.claims.Claims.handle on execution.started",
+      "tests": [
+        "tests/hive/test_spoke.py::test_the_started_event_carries_the_placed_conversation_and_overlays",
+        "tests/hub/test_claim_lives.py::test_a_started_agent_records_the_conversation_and_overlays_its_hive_placed",
+        "tests/hub/test_claim_lives.py::test_a_start_naming_no_conversation_or_overlays_keeps_the_recorded_ones",
+        "tests/hub/test_dead_resume_hub.py::test_a_hub_admitted_agent_resumes_the_conversation_and_overlays_its_start_recorded"
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",

@@ -223,9 +223,28 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
         "launched_at": 1_500,
         "harness": "claude",
         "account": "slot-a",
+        "conversation_id": "",
+        "overlays": [],
     }
     assert observed[2:] == ["ack"]
     assert real_take(0) is None
+
+
+@pytest.mark.feature("hub-conversation-overlays")
+def test_the_started_event_carries_the_placed_conversation_and_overlays(rig):
+    from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    placed = Placed("pane-a", "codex", "slot-a", conversation_id="thread-a", overlays=["tuner", "brain"])
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    published = []
+    real_publish = rig.bus.events.publish
+    rig.bus.events.publish = lambda subject, event: (published.append(event), real_publish(subject, event))[1]
+
+    assert rig.spoke.poll() == "started"
+
+    [event] = published
+    assert (event.data["conversation_id"], event.data["overlays"]) == ("thread-a", ["tuner", "brain"])
 
 
 @pytest.mark.feature("events-started-working")

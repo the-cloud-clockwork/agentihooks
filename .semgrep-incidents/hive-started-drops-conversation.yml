@@ -1,0 +1,17 @@
+rules:
+  - id: hive-started-drops-conversation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive publishes a claimed execution started event without the conversation id and overlays its placement
+      produced, so the hub claims reactor never records them and a dead hub started agent cannot reopen its own
+      conversation with its overlays. Carry conversation_id and overlays from the placed result in the event data.
+    paths:
+      include:
+        - /scripts/hive/
+        - hive-started-drops-conversation.py
+    patterns:
+      - pattern: |
+          Envelope(..., type="execution.started", ..., data={..., "claim_key": $KEY, ...}, ...)
+      - pattern-not: |
+          Envelope(..., type="execution.started", ..., data={..., "conversation_id": $CONVERSATION, ..., "overlays": $OVERLAYS, ...}, ...)
