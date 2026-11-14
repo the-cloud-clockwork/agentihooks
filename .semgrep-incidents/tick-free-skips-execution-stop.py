@@ -23,7 +23,7 @@ def free_dropping_before_a_stop_of_something_else(
         return ["retrying"]
     # ruleid: tick-free-skips-execution-stop
     dropped = tick._drop(slug, store, ledger, rows, agent, refund=True)
-    tick._stop_hive(slug, agent, "stuck", "")
+    tick._stop_hive(slug, store, agent, "stuck", "")
     return ["freed" + dropped]
 
 
@@ -33,7 +33,7 @@ def free_through_the_stop(
     if not tick.retire_watch.retire_unless_gone(store, runtime, agent, (), now_ms):
         return ["retrying"]
     # ok: tick-free-skips-execution-stop
-    dropped = tick._stop_hive(slug, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, store, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return ["freed" + dropped]
 
 
@@ -42,7 +42,17 @@ def free_then_stop(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, 
         return ["retrying"]
     # ok: tick-free-skips-execution-stop
     dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, agent, refund=True)
-    tick._stop_hive(slug, agent, "idle", dropped)
+    tick.timing.timed(tick._stop_hive, slug, store, agent, "idle", dropped)
+    return ["freed" + dropped]
+
+
+def timed_free_without_stop(
+    slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any
+) -> list[str]:
+    if not tick.retire_watch.retire_unless_gone(store, runtime, agent, (), now_ms):
+        return ["retrying"]
+    # ruleid: tick-free-skips-execution-stop
+    dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, agent, refund=True)
     return ["freed" + dropped]
 
 

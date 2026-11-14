@@ -240,9 +240,9 @@ FREES = [
 
 
 @pytest.mark.feature("events-legacy-free-sends-no-stop")
-@pytest.mark.parametrize(("free", "reason"), FREES)
+@pytest.mark.parametrize("free", [free for free, _ in FREES], ids=[reason for _, reason in FREES])
 def test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., Any], reason: str
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., Any]
 ) -> None:
     store, ledger, rt = env
     assert run(SLUG, "create", "--repo", "/repo") == 0
