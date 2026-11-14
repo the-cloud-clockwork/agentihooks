@@ -5,6 +5,7 @@ import pytest
 
 from hooks import hook_manager
 from hooks.context import operator_mode
+from hooks.context.scheduled_prompts import AUTOMATED
 from hooks.context.swarm_heartbeat import is_operator_prompt
 from scripts.events.redis_state import RedisStateStore
 from scripts.inbox.wake import WAKE_TEXT
@@ -460,7 +461,7 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     hook_manager._operator_mode({"session_id": "s1", "prompt": delivery.marked("continue")}, False)
     assert injected == [
         (
-            (AWAY.format(words=35),),
+            (AUTOMATED + "\n" + AWAY.format(words=35),),
             {"also_log": False, "skip_compression": True, "kind": "alert"},
         )
     ]

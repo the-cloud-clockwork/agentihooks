@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from fnmatch import fnmatchcase
 
-from hooks.context import master_coding
+from hooks.context import master_coding, scheduled_prompts
 from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
@@ -333,9 +333,11 @@ def heard(payload, environ=None, now=None):
     return heard_answer(payload, environ, now)
 
 
-def typed(payload, environ=None, now=None):
-    """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt."""
+def typed(payload: dict, environ: dict | None = None, now: float | None = None) -> bool:
+    """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt, and a prompt the session scheduled for itself never counts."""
     env = os.environ if environ is None else environ
+    if scheduled_prompts.fired(payload.get("session_id") or "", payload.get("prompt")):
+        return False
     if env.get("AGENTIHOOKS_AGENT_NAME") or master_coding.seat(payload.get("session_id")):
         return heard(payload, env, now)
     return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))
