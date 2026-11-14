@@ -2625,6 +2625,21 @@
       ]
     },
     {
+      "id": "render-no-login-credentials",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-render-no-credentials-link",
+      "behaviour": "A rendered Claude profile home never links the login credentials file to the operator login home unless its chain is the master profile, so engineer, ci and planner sessions cannot read or inherit the master claude ai login while the master keeps its interactive login; a worker home that still holds such a link is stale, and the next render replaces it and drops the link from every older home rendered under the same key.",
+      "seam": "render_claude and its freshness check _claude_fresh in scripts.profiles.render",
+      "tests": [
+        "tests/test_profile_render_login.py::test_a_rendered_engineer_home_has_no_credentials_link_to_the_login_home",
+        "tests/test_profile_render_login.py::test_the_next_render_replaces_a_home_holding_a_credentials_link",
+        "tests/test_profile_render_login.py::test_the_master_home_keeps_its_login_credentials_link",
+        "tests/test_profile_render_login.py::test_a_render_drops_the_link_from_an_older_home_a_running_worker_holds",
+        "tests/test_master_claude_login_isolation.py::test_the_master_login_home_never_touches_the_shared_credential_link",
+        "tests/test_profile_render_login.py::test_the_master_is_named_by_its_chain_with_or_without_the_package_prefix"
+      ]
+    },
+    {
       "id": "hook-redis-reuse",
       "origin": "inventory",
       "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
@@ -5619,10 +5634,30 @@
       ]
     },
     {
+      "id": "hive-own-exit-subject",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-exited-own-subject",
+      "behaviour": "A hive reports an execution exit only on its own exit report subject: every hive member credential is refused by the NATS server when it publishes another hive's exit report subject or the shared execution exited subject, and the hub relays a reported exit onto the shared subject the lifecycle reactor reads only when the execution registry places that execution on the reporting hive, so a hive's own exit still drops its agent and reopens its task.",
+      "seam": "scripts.hive.nats_grant.member_claims as enforced by a live NATS server, scripts.hub.exits.handle, and scripts.hive.execution_events.publish driving the hub lifecycle reactor",
+      "tests": [
+        "tests/hive/test_nats_grant.py::test_a_member_credential_reports_an_exit_on_its_own_subject",
+        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_report_an_exit_on_another_subject",
+        "tests/hive/test_nats_grant.py::test_the_hub_credential_serves_every_hive_exit_subject",
+        "tests/hub/test_exits.py::test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub",
+        "tests/hub/test_exits.py::test_the_hub_refuses_an_exit_reported_by_another_hive",
+        "tests/hub/test_exits.py::test_a_hive_on_a_swarm_scoped_bus_reports_its_exit_through_the_hub",
+        "tests/hub/test_exits.py::test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished",
+        "tests/hub/test_exits.py::test_the_hub_refuses_a_malformed_exit_report",
+        "tests/hub/test_exits.py::test_an_exit_report_failing_without_a_message_names_its_error",
+        "tests/hub/test_exits.py::test_the_hub_serves_every_exit_subject_in_its_queue_group",
+        "tests/hub/test_exits.py::test_a_hive_waits_its_exit_timeout_and_marks_the_exit_sent"
+      ]
+    },
+    {
       "id": "hub-only-execution-stop",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-hub-only-stop",
-      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, the logical subject and its scoped wire form under events, while it still publishes execution started and exited, and the hub controller credential publishes the stop on both forms.",
+      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, the logical subject and its scoped wire form under events, while it still publishes execution started, and the hub controller credential publishes the stop on both forms.",
       "seam": "scripts.hive.nats_grant.member_claims and controller_claims as enforced by a live NATS server, and the member grant render the grant parity check reads",
       "rules": [
         "member-grant-publishes-execution-stop"
