@@ -947,10 +947,10 @@
       "id": "swarm-tick-cached-ledger",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dc4",
-      "behaviour": "A tick pass against a real ledger server made slow or stopped runs from the last good ledger view inside the pass deadline without launching, and the next pass that reaches the server claims and launches the ready task.",
+      "behaviour": "A tick pass against a real ledger server made slow or stopped runs from the last good ledger view inside the pass deadline without launching, and the next pass that reaches the server leaves the ready task unlaunched and unclaimed for hub admission.",
       "seam": "scripts.swarm.cli.run_tick with a real ledger server behind a proxy that delays or refuses connections",
       "tests": [
-        "tests/features/test_tick_cached_ledger.py::test_a_tick_holds_launches_while_the_ledger_is_slow_or_stopped_and_claims_before_launching",
+        "tests/features/test_tick_cached_ledger.py::test_a_tick_keeps_its_deadline_while_the_ledger_is_slow_or_stopped_and_never_launches",
         "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
         "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
         "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing",
@@ -2073,7 +2073,24 @@
         "tests/hive/test_resume_order.py::test_a_running_resume_keeps_its_marker_alive",
         "tests/hive/test_resume_order.py::test_a_resume_that_raises_answers_failed_with_an_empty_target",
         "tests/hive/test_resume_order.py::test_a_record_placed_by_runtime_target_is_held_on_its_hive",
+        "tests/hive/test_resume_order.py::test_a_resume_the_runtime_refuses_answers_failed_on_this_hive",
+        "tests/hive/test_resume_order.py::test_a_resume_answers_done_on_this_hive_and_records_the_new_pane",
+        "tests/hive/test_resume_order.py::test_a_resume_that_cannot_record_its_pane_closes_the_new_pane",
         "tests/swarm/test_dead_resume.py::test_the_resume_gate_admits_an_owner_and_refuses_after_a_handoff"
+      ]
+    },
+    {
+      "id": "swarm-dead-resume-cap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-resume-attempt-cap",
+      "behaviour": "An engineer that ends again after each of three resumes is retired with a recovery handoff and its task reopens; a session heartbeat one start grace after a resume resets the count; masters, reboot resumes and resumes during an outage or provider error never count.",
+      "seam": "The tick reaper recovery path through dead agent reopen",
+      "tests": [
+        "tests/swarm/test_dead_resume.py::test_an_engineer_that_dies_after_each_resume_retires_at_the_cap_and_its_task_reopens",
+        "tests/swarm/test_dead_resume.py::test_a_resume_that_comes_up_healthy_resets_the_attempt_count",
+        "tests/swarm/test_dead_resume.py::test_a_master_that_dies_after_each_resume_is_never_capped",
+        "tests/swarm/test_dead_resume.py::test_resumes_during_an_outage_or_a_reboot_do_not_count_toward_the_cap",
+        "tests/swarm/test_dead_resume.py::test_the_cap_records_its_count_key_boundary_and_recovery_handoff_exactly"
       ]
     },
     {
@@ -2732,8 +2749,35 @@
       "tests": [
         "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_two_are_pushed",
         "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_the_other_two_are_pushed",
-        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed",
-        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_backoff"
+        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed"
+      ]
+    },
+    {
+      "id": "inbox-claim-redis-error-requeue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-claim-redis-error-shown",
+      "behaviour": "A Redis or store error in any step of an inbox claim's batch, delivery, the seen check, a close or a return, ends the batch without raising: the items already checked are returned and shown without needing Redis, and only the item in flight goes back to pending, or stays delivered until the next redelivery when its return fails too.",
+      "seam": "scripts.inbox.seen.claim through scripts.inbox.channel._deliver on a Redis or store error mid batch",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_mid_batch_pushes_the_checked_item_and_returns_the_rest_to_pending",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_delivering_the_second_item_still_returns_the_first_for_showing",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_closing_an_item_shown_elsewhere_returns_it_to_pending_and_shows_the_first",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_store_error_closing_an_item_shown_elsewhere_returns_it_to_pending_and_shows_the_first",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_returning_an_unsettled_item_returns_it_to_pending_and_shows_the_first",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_in_flight_item_whose_return_hits_redis_too_stays_delivered_and_the_first_is_still_shown",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_in_flight_item_whose_return_is_refused_as_changed_stays_delivered_and_the_first_is_still_shown"
+      ]
+    },
+    {
+      "id": "inbox-poisoned-id-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-claim-redis-error-shown",
+      "behaviour": "An inbox item left out of the channel's claims after one failed seen check or notification build is claimed and pushed again once one redelivery window plus one wake window has passed since it was left out, and stays left out before that, so an always failing item to an idle channel session still reaches the master escalation of the wake ladder.",
+      "seam": "scripts.inbox.seen.claim and scripts.inbox.seen.leave_out over the channel's poisoned ids across scripts.inbox.channel._deliver passes",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_an_id_poisoned_by_one_seen_check_failure_is_pushed_again_once_its_hold_passes",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_id_poisoned_by_one_notification_failure_is_pushed_again_once_its_hold_passes",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_always_failing_item_to_an_idle_channel_session_is_escalated_to_the_master_at_default_windows"
       ]
     },
     {
@@ -2756,6 +2800,22 @@
       "tests": [
         "tests/inbox/test_confirmation.py::test_a_failed_channel_write_puts_every_unsent_item_back_to_pending",
         "tests/inbox/test_confirmation.py::test_a_cancelled_channel_write_puts_the_item_back_to_pending"
+      ]
+    },
+    {
+      "id": "inbox-channel-push-survives-failed-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-push-loop-alive",
+      "behaviour": "A push pass of the inbox channel that raises is logged with its traceback on stderr, which Claude Code keeps in its MCP server log, and the loop backs off and retries, so later items still reach an idle session; the loop writes a periodic heartbeat line on stderr.",
+      "seam": "The inbox channel push loop in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_channel_server.py::test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed",
+        "tests/inbox/test_channel_server.py::test_a_failed_pass_with_a_broken_stderr_still_retries_and_pushes",
+        "tests/inbox/test_channel_server.py::test_the_push_loop_writes_a_heartbeat_on_stderr",
+        "tests/inbox/test_channel_server.py::test_the_heartbeat_is_due_exactly_one_period_after_the_last",
+        "tests/inbox/test_channel_server.py::test_a_failed_subscription_close_is_logged_and_the_loop_goes_on",
+        "tests/inbox/test_channel_server.py::test_a_failed_connect_is_logged_and_retried",
+        "tests/inbox/test_channel_server.py::test_a_seat_feed_that_fails_to_bind_falls_back_to_the_redis_notify"
       ]
     },
     {
@@ -3217,6 +3277,16 @@
         "tests/swarm_ledger/test_operator_chat.py::test_an_unprompted_agent_line_to_the_operator_is_refused",
         "tests/swarm_ledger/test_operator_chat.py::test_an_agent_line_answering_an_operator_line_is_shown",
         "tests/swarm_ledger/test_operator_chat.py::test_a_notice_lands_in_the_notifications_panel_and_never_in_chat"
+      ]
+    },
+    {
+      "id": "swarm-status-lists-remote-hub-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-hub-agents-visible",
+      "behaviour": "Swarm status lists an unfinished agent the hub admitted onto another hive, whose record names that hive but carries a local backend and no runtime target, while a finished or ended one, an agent on the local hive with no live pane and an agent naming no hive stay out of the table, so a released hub agent never counts as a live task owner.",
+      "seam": "status.status_report and the agentihooks swarm status agent table, through status.live_agents",
+      "tests": [
+        "tests/swarm/test_status_rows.py::test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target"
       ]
     },
     {
@@ -4613,6 +4683,20 @@
         "tests/codex_session/test_serve.py::test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary",
         "tests/codex_session/test_serve.py::test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report",
         "tests/inbox/test_codex_pump.py::test_a_refused_recorded_opening_is_recovered_when_the_pump_starts"
+      ]
+    },
+    {
+      "id": "launch-canary-fails-on-agent-exit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-binding-wait-launcher-exit",
+      "behaviour": "When the launched agent command exits before it reports its profile canary, as when a hive refuses its account slot after the route is reported, the launcher's exit recorder fails the pending binding report with the harness and exit status, so the launch canary wait fails on its next poll instead of at the launch deadline. A validated or missing report is left as it is, and an app server launch, whose pane runs only the viewer, records the viewer's exit without touching the canary, which stays with its server.",
+      "seam": "scripts.session_exit.main run by the init agent launcher after the agent command, read through scripts.profiles.binding.wait",
+      "tests": [
+        "tests/test_canary_wait.py::test_an_agent_that_exits_before_its_canary_fails_the_wait_at_once",
+        "tests/test_canary_wait.py::test_a_viewer_exit_leaves_the_canary_to_its_app_server",
+        "tests/test_canary_wait.py::test_an_exit_after_the_canary_keeps_the_validated_binding",
+        "tests/test_canary_wait.py::test_an_exit_without_a_canary_report_records_only_the_exit",
+        "tests/test_canary_wait.py::test_only_an_app_server_launcher_records_its_exit_as_the_viewer"
       ]
     },
     {

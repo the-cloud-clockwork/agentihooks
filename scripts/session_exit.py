@@ -9,6 +9,7 @@ from pathlib import Path
 
 from hooks.secrets import redact
 from scripts import herdr_host
+from scripts.profiles import binding
 
 
 def path_for(launcher: Path, environ: dict[str, str]) -> Path:
@@ -44,14 +45,25 @@ def record_exit(path: Path, status: int, harness: str, name: str, environ: dict[
     pending.replace(path)
 
 
+def fail_pending_canary(status: int, harness: str, environ: dict[str, str]) -> None:
+    """An agent that exits before its profile canary fails the launch wait now instead of at its deadline."""
+    report = environ.get(binding.REPORT)
+    if report and Path(report).is_file():
+        binding.refuse(Path(report), f"the {harness} agent exited with status {status} before it reported its canary")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("path", type=Path)
     parser.add_argument("status", type=int)
     parser.add_argument("harness")
     parser.add_argument("name")
+    parser.add_argument("--viewer", action="store_true")
     args = parser.parse_args(argv)
-    record_exit(args.path, args.status, args.harness, args.name, dict(os.environ))
+    environ = dict(os.environ)
+    record_exit(args.path, args.status, args.harness, args.name, environ)
+    if not args.viewer:
+        fail_pending_canary(args.status, args.harness, environ)
     return 0
 
 

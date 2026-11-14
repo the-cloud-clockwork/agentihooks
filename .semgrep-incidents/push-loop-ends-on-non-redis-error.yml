@@ -1,0 +1,49 @@
+rules:
+  - id: push-loop-ends-on-non-redis-error
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The inbox channel push loop is the only path that shows mail to an idle Claude session, and nothing restarts
+      it. A handler narrower than Exception lets any other error end the loop for good while the stdio server stays
+      up until the next stdin line, so items stay pending with nothing logged. Catch Exception per pass, log the
+      traceback on stderr, back off and retry.
+    paths:
+      include:
+        - /scripts/inbox/channel.py
+        - push-loop-ends-on-non-redis-error.py
+    patterns:
+      - pattern-inside: |
+          async def $PUSH(...):
+              ...
+      - metavariable-regex:
+          metavariable: $PUSH
+          regex: ^_push
+      - pattern-inside: |
+          while True:
+              ...
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except $ERROR:
+                  ...
+          - pattern: |
+              try:
+                  ...
+              except $ERROR as $EXC:
+                  ...
+          - pattern: |
+              try:
+                  ...
+              except:
+                  ...
+      - pattern-not: |
+          try:
+              ...
+          except Exception:
+              ...
+      - pattern-not: |
+          try:
+              ...
+          except Exception as $EXC:
+              ...
