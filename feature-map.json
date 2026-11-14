@@ -6349,6 +6349,21 @@
         "tests/hive/test_nats_grant.py::test_the_hub_credential_publishes_an_execution_stop_for_a_hive",
         "tests/test_ci_hive_nats_grants.py::test_the_member_grants_render_the_minted_member_claims"
       ]
+    },
+    {
+      "id": "hive-own-stop-consumer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-own-consumer-scoped",
+      "behaviour": "Execution stops travel on a dedicated per swarm stop stream, and a scoped hive member credential may read, fetch and ack only its own stop consumer there, so no hive can pull, ack or forge another hive's stops; the hub creates each consumer and publishes the stops.",
+      "seam": "scripts.hive.nats_grant.member_claims enforced by a live NATS server, and the stops log of the scoped NATS bus that scripts.hive.execution_stop reads and writes",
+      "tests": [
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_fetches_and_acks_the_stops_on_its_own_stop_consumer",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_fetch_on_another_hives_stop_consumer_is_denied",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_ack_on_another_hives_stop_consumer_is_denied",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_cannot_publish_onto_the_stop_stream",
+        "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_names_only_its_own_stop_consumer",
+        "tests/hive/test_stop_consumer_grant.py::test_each_swarm_and_hive_has_its_own_stop_consumer_name"
+      ]
     }
   ],
   "unmapped_rules": [
