@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.x\u01c1Admission\u01c1launched:df70ef72dd7e2c71183ff21285d37ebd791906e71e527a022bc30bdc904444dd": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so cast(None, self.store) yields the same store as cast(Any, self.store) and the mutant changes no output."
+  }
+}

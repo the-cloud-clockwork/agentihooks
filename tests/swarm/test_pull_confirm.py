@@ -13,6 +13,7 @@ from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_tasks
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 URL = "https://github.com/o/r/pull/3"
@@ -20,9 +21,10 @@ MINE = "engineer-a1b2c3-0001"
 
 
 def _started(env: Any, monkeypatch: pytest.MonkeyPatch, pull: cli.PullHead) -> dict[str, Any]:  # noqa: F811
-    _, ledger, _ = env
+    store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     ledger.rows["t1"]["branch"] = MINE
     monkeypatch.setattr(cli, "pull_branch", lambda url: pull)
     return ledger.rows["t1"]

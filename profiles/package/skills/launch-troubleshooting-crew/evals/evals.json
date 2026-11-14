@@ -1,0 +1,35 @@
+[
+  {
+    "query": "the launch path has been broken for two hours and nothing we tried fixed it, launch the troubleshooting crew",
+    "files": [],
+    "expected_behavior": [
+      "runs crew.py plan with the problem and one distinct hypothesis per scout before launching",
+      "runs crew.py scout with the same arguments, which adds five eng troubleshoot scout tasks at opus max and focuses only the crew",
+      "sets the printed thirty minute cron with CronCreate carrying the operator's order verbatim"
+    ]
+  },
+  {
+    "query": "launch the troubleshooting crew with eight scouts and two critics",
+    "files": [],
+    "expected_behavior": [
+      "passes --scouts 8 and --critics 2 and keeps every other default",
+      "checks the plan stage output shows eight scout tasks and two critics before running scout"
+    ]
+  },
+  {
+    "query": "two scouts confirmed the cause, three are still running; start the fixers",
+    "files": [],
+    "expected_behavior": [
+      "does not add fixer tasks while any scout task is open, and keeps scouting",
+      "runs crew.py fix only after every scout task is done, naming each proven cause with --cause and never a hypothesis"
+    ]
+  },
+  {
+    "query": "the fixes merged and the hardening landed, end the troubleshooting crew",
+    "files": [],
+    "expected_behavior": [
+      "runs crew.py restore so the earlier focus and eng lane settings come back",
+      "deletes the thirty minute crew cron"
+    ]
+  }
+]
