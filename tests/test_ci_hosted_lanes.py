@@ -29,6 +29,7 @@ DIRECT = {
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
     "writer-lock.yml": ("Writer lock", "writer-lock"),
     "tick-equivalence.yml": ("Tick equivalence", "tick-equivalence"),
+    "events-smoke.yml": ("Events launch smoke", "events-smoke"),
     "feature-suite.yml": ("Feature suite", "feature-suite"),
     "worker-resources.yml": ("Worker resources", "worker-resources"),
     "startup-stages.yml": ("Startup stages", "startup-stages"),

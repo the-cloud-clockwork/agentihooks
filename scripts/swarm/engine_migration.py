@@ -48,23 +48,31 @@ def repo_origin(redis_store: RedisStore, slug: str) -> str:
     return doctor_origin(redis_store, slug, peer) if peer else own_origin(redis_store, slug)
 
 
-def busy(redis_store: RedisStore, slug: str) -> bool:
-    """Whether the swarm holds agents or launches in flight that only the legacy engine collects."""
+def drop_launch_jobs(redis_store: RedisStore, slug: str) -> None:
+    """Drops the launch job rows of a swarm with no agents, since every agent they name is gone."""
     from scripts.swarm import launch_job
 
-    return bool(redis_store.agents(slug)) or bool(redis_store.redis.hlen(redis_store.key(slug, launch_job.KEY)))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    redis_store.redis.delete(redis_store.key(slug, launch_job.KEY))  # pyright: ignore[reportUnknownMemberType]
+
+
+def stored_on_events(redis_store: RedisStore, slug: str) -> bool:
+    """Whether the engine stored in the swarm's config hash is events; an absent value is the old legacy default."""
+    return str(redis_store.redis.hget(redis_store.key(slug, "config"), "engine")) == EVENTS_ENGINE  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def migrate_one(redis_store: RedisStore, slug: str) -> str:
     """Moves one stored config to the events engine with an origin and names the outcome."""
     config = redis_store.config(slug)
-    if config.engine == EVENTS_ENGINE and config.repo_origin:
+    on_events = stored_on_events(redis_store, slug)
+    if on_events and config.repo_origin:
         return "unchanged"
-    if config.engine != EVENTS_ENGINE and busy(redis_store, slug):
+    if not on_events and redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
         return BUSY
     found = repo_origin(redis_store, slug)
     if not found:
         return NO_ORIGIN
+    if not on_events:
+        drop_launch_jobs(redis_store, slug)
     redis_store.update(slug, engine=EVENTS_ENGINE, repo_origin=found)  # pyright: ignore[reportUnknownMemberType]
     return f"migrated: {found}"
 
