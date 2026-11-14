@@ -5,6 +5,7 @@ import pytest
 from scripts.swarm import commands
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import STARTUP_GRACE_MS, tick
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_tick import FakeRuntime, tasks, workers
 
 
@@ -29,16 +30,17 @@ def test_a_hub_admitted_agent_on_another_hive_outlives_the_local_startup_grace(
     monkeypatch.setattr(commands, "hive_id", lambda: "hub")
     hive_state.indexed(store.redis, hive, True)
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated = seat_agent(store, ledger, "sw", "t1", hive=hive, clock=lambda: 1_000)
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    (agent,) = workers(store)
-    agent = store.start_execution("sw", replace(agent, hive=hive, runtime_target=target), "")
+    agent = replace(seated, runtime_target=target)
+    store.execution_registry.update("sw", agent)
     runtime.live.clear()
     runtime.statuses[agent.name] = "unknown"
     actions = tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
     if kept:
-        assert ledger.rows["t1"]["claimed_by"] == agent.name and runtime.spawned == [("eng", agent.name, "t1")]
+        assert ledger.rows["t1"]["claimed_by"] == agent.name and runtime.spawned == []
         assert [a.state for a in workers(store)] == ["suspect"]
         assert f"suspect {agent.name}: its runtime did not answer" in actions
     else:
         assert any(action.startswith(f"lost {agent.name}") for action in actions)
-        assert runtime.spawned[-1][2] == "t1" and runtime.spawned[-1][1] != agent.name
+        assert runtime.spawned == []

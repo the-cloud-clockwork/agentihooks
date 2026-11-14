@@ -474,15 +474,6 @@
       ]
     },
     {
-      "id": "swarm-tick-claim-after-dependency",
-      "origin": "inventory",
-      "behaviour": "A task whose dependency is still open is not claimed, and the tick pass after that dependency is done claims it and spawns its engineer.",
-      "seam": "the tick claim pass, scripts.swarm.tick.tick over a ledger task carrying depends_on",
-      "tests": [
-        "tests/swarm/test_tick_claims.py::test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done"
-      ]
-    },
-    {
       "id": "swarm-tick-idle-retire",
       "origin": "inventory",
       "behaviour": "A worker whose pane reads idle for IDLE_KILL_TICKS tick passes is retired without a typed nudge and its task is reopened.",
@@ -3682,16 +3673,6 @@
       ]
     },
     {
-      "id": "swarm-legacy-outage-seat-release-successor",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
-      "behaviour": "When an owner's turns still fail after its provider probe passes, it frees its seat one tick after its recovery attempts. The next legacy tick spawn then launches the successor in that seat, carrying a transfer that names the avoided harness and holds a handoff with the pane error. Only the legacy place step launches that successor, and the events hub admission claim carries no handoff text, so this test retires with the legacy launch engine.",
-      "seam": "scripts.swarm.tick.tick outage seat release followed by the legacy place spawn of the successor",
-      "tests": [
-        "tests/swarm/test_outage_seat_release.py::test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts"
-      ]
-    },
-    {
       "id": "claude-settings-additive-merge",
       "origin": "inventory",
       "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
@@ -4179,8 +4160,7 @@
         "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading",
         "tests/hive/test_controller_launch.py::test_placement_before_the_pass_reads_quota_uses_the_runtime_reader",
         "tests/hive/test_controller_launch.py::test_placement_without_a_runtime_reader_reads_the_hive_reports",
-        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set",
-        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_fresh_controller_with_an_empty_quota_cache_places_an_agent"
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set"
       ]
     },
     {
