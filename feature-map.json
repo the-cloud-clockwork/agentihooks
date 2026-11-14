@@ -884,7 +884,8 @@
       "behaviour": "Operator master up that brings back a master the swarm already retired restores its ended execution with its generation and start time, so the record write after the pane opens is accepted, the master holds its seat and swarm handoff resolves it, chosen by flag or by answering the prompt.",
       "seam": "agentihooks swarm master up --last",
       "tests": [
-        "tests/swarm/test_master_launch.py::test_a_master_the_swarm_retired_resumes_into_its_own_execution"
+        "tests/swarm/test_master_launch.py::test_a_master_the_swarm_retired_resumes_into_its_own_execution",
+        "tests/swarm/test_master_launch.py::test_a_history_row_whose_execution_is_gone_stays_the_last_master_as_recorded"
       ]
     },
     {
