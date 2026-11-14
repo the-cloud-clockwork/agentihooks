@@ -6436,6 +6436,9 @@
         "tests/hub/test_reconciler.py::test_a_hub_admitted_agent_its_beating_hive_no_longer_lists_is_settled_once",
         "tests/hub/test_reconciler.py::test_a_hub_admitted_agent_its_hive_still_lists_or_cannot_yet_disown_is_preserved",
         "tests/hub/test_reconciler.py::test_the_join_report_of_a_settled_hub_admitted_agent_ends_on_the_next_heartbeat"
+      ],
+      "rules": [
+        "hub-exit-ignores-unlisted-agent"
       ]
     },
     {
