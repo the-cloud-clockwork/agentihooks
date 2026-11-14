@@ -6067,6 +6067,22 @@
         "tests/test_ci_events_smoke_pr.py::test_the_events_smoke_feeds_the_required_gate_on_selected_pull_requests",
         "tests/test_ci_events_smoke_pr.py::test_the_events_smoke_runs_every_seam_on_a_real_nats_server_and_redis_service"
       ]
+    },
+    {
+      "id": "swarm-events-only-launch",
+      "origin": "task",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only",
+      "behaviour": "Every swarm runs on the events engine: no registered tick step launches an agent, a swarm config built or stored without an engine reads as events, and swarm create stores the events engine, so agents launch only through hub admission and hive spokes.",
+      "seam": "scripts.tick.registry steps, scripts.swarm.store SwarmConfig and RedisStore config, scripts.swarm.cli cmd_create",
+      "tests": [
+        "tests/tick/steps/test_events_only_launch.py::test_no_registered_tick_step_launches_an_agent",
+        "tests/tick/steps/test_events_only_launch.py::test_a_config_built_without_an_engine_runs_on_events",
+        "tests/tick/steps/test_events_only_launch.py::test_a_stored_config_without_an_engine_field_reads_as_events",
+        "tests/swarm/test_cli.py::test_create_stores_the_events_engine"
+      ],
+      "rules": [
+        "tick-launch-path"
+      ]
     }
   ],
   "unmapped_rules": [

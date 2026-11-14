@@ -121,6 +121,13 @@ def test_create_stores_and_reports_automatic_scaling_even_with_pinned_caps(env, 
     assert store.config("sw").scaling == "auto"
 
 
+@pytest.mark.feature("swarm-events-only-launch")
+def test_create_stores_the_events_engine(env):
+    store, _, _ = env
+    assert run("sw", "create", "--repo", "/repo") == 0
+    assert store.redis.hget(store.key("sw", "config"), "engine") == "events"
+
+
 def test_bare_pairs_set_the_caps(env):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
