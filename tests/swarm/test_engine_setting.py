@@ -85,7 +85,7 @@ def test_events_switch_preserves_a_stored_origin_when_the_checkout_is_absent(env
     store, _, _ = env
     store.create(replace(SwarmConfig("sw", "/missing", 1, 1), repo_origin="github.com/team/project"))
 
-    for engine in ("events", "legacy", "events"):
+    for engine in ("events", "events"):
         assert run("sw", "set", f"engine={engine}") == 0
         config = store.config("sw")
         assert (config.repo, config.repo_origin, config.engine) == ("/missing", "github.com/team/project", engine)
@@ -102,4 +102,3 @@ def test_events_switch_refuses_an_unknown_origin_without_changing_the_swarm(env,
         "swarm: events engine requires a checkout with a Git origin or a stored repository origin"
     )
     assert store.redis.hgetall(store.key("sw", "config")) == before
-    assert run("sw", "set", "engine=legacy") == 0

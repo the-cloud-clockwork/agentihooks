@@ -7,6 +7,7 @@ from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import cli
 from scripts.swarm.ledger_events import PullRequest
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -175,7 +176,8 @@ def test_a_merge_wait_observes_a_merge_during_a_slow_runtime_launch(env, monkeyp
 
     store, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, "sw", "t1")
+    store.update("sw", state="running")
     store.update("sw", max_eng=2, gates={"intent": "off"})
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     url = "https://github.com/o/r/pull/9"
