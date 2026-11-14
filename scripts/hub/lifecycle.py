@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from copy import copy
+from typing import cast
 
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
@@ -105,10 +106,15 @@ class Lifecycle:
         if row.get("awaiting") == "merge" or row.get("claim_generation", 0) != event.data["task_generation"]:
             return
         fields = {"state": "done"} if row.get("done") else {"state": "open", "claimed_by": ""}
-        self.ledger.update_task(
-            event.swarm,
-            agent.task,
-            fields,
-            if_state=("claimed", "pr"),
-            if_match={"claimed_by": agent.name, "claim_generation": event.data["task_generation"]},
+        live = cast(
+            dict[str, object],
+            self.ledger.update_task(
+                event.swarm,
+                agent.task,
+                fields,
+                if_state=("claimed", "pr"),
+                if_match={"claimed_by": agent.name, "claim_generation": event.data["task_generation"]},
+            ),
         )
+        if live.get("state") == "open" and agent.seat:
+            cast(RedisStore, self.store).keep_seat(event.swarm, agent.task, agent.seat)

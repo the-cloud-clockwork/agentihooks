@@ -17,10 +17,11 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
       "behaviour": "Every reclaim that reopens a task and hands the leaver's mail for the continuing task to its seat saves that seat for the task, so the next life is admitted into the leaver's seat, where that mail waits, instead of the lowest free seat.",
-      "seam": "The tick drop helper and the stall watchdog reopen, then Admission.admit for the task's next life",
+      "seam": "The tick drop helper, the stall watchdog and the hub lifecycle exit settle reopen, then Admission.admit for the task's next life",
       "tests": [
         "tests/hub/test_seat_continuity.py::test_a_reclaimed_tasks_successor_takes_the_leavers_seat_and_its_mail",
-        "tests/swarm/test_stall_watch.py::test_a_watchdog_reopen_keeps_the_leavers_seat_for_the_next_life"
+        "tests/swarm/test_stall_watch.py::test_a_watchdog_reopen_keeps_the_leavers_seat_for_the_next_life",
+        "tests/hub/test_seat_continuity.py::test_a_hub_exit_keeps_the_leavers_seat_only_when_it_reopens_the_task"
       ]
     },
     {

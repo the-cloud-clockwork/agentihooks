@@ -1,13 +1,18 @@
 """Regression tests: a reclaimed task's successor inherits the leaver's seat and mail, and a lost launch report never pins a later life."""
 
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-from scripts.hub import claims
+from scripts.events import memory
+from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
+from scripts.hub import claims, lifecycle
 from scripts.inbox.store import InboxStore
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick.steps import common
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
@@ -63,4 +68,39 @@ def test_a_reclaimed_tasks_successor_takes_the_leavers_seat_and_its_mail(rig: Si
 
     assert rig.store.handoff_seat(SLUG, "t1") == "eng-2@sw"
     assert [item.text for item in InboxStore(rig.store.redis).inbox("eng-2@sw")] == ["keep the proof"]
-    assert rig.admitter.admit(SLUG, ask(generation=1))["task"]["seat"] == "eng-2@sw"
+    generation = rig.rows["t1"]["claim_generation"]
+    assert rig.admitter.admit(SLUG, ask(generation=generation))["task"]["seat"] == "eng-2@sw"
+
+
+@pytest.mark.feature("swarm-reclaim-keeps-seat")
+@pytest.mark.parametrize(("done", "seat"), [(False, "eng-2"), (True, "")])
+def test_a_hub_exit_keeps_the_leavers_seat_only_when_it_reopens_the_task(done: bool, seat: str) -> None:
+    import fakeredis
+
+    bus = memory.open_bus(BusConfig())
+    agent = AgentRecord(name="engineer", lane="eng", task="task", execution_id="execution", generation=3, seat="eng-2")
+    row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": done}
+
+    def task(slug: str, task_id: str) -> dict[str, object]:
+        return dict(row)
+
+    def update(slug: str, task_id: str, fields: dict[str, object], **guards: object) -> dict[str, object]:
+        row.update(fields)
+        return dict(row)
+
+    def release(store: RedisStore, slug: str, record: AgentRecord) -> None:
+        del store, slug, record
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    store.redis.set(store.key("rig", "claim", agent.task), agent.name)
+    bus.state("spoke-work").create("claim", json.dumps({"state": "started", "claim_revision": 1}).encode())
+    data = {"name": agent.name, "task": "task", "claim_key": "claim", "claim_revision": 1, "task_generation": 7}
+    event = Envelope("exited", "execution.exited", "rig", "execution", "execution", 3, 100, "hive", data)
+    ledger = SimpleNamespace(task=task, update_task=update)
+
+    lifecycle.Lifecycle(cast(Any, bus), store, cast(Any, ledger), release=release).handle(event)
+    bus.close()
+
+    assert store.handoff_seat("rig", "task") == seat
