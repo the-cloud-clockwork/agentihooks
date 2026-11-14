@@ -92,6 +92,28 @@ def assign(
     return added
 
 
+def extend(bao: openbao_kv.OpenBao, path: str, member: str, chosen: tuple[str, ...]) -> list[str]:
+    """Add the chosen swarms member lacks to its listing, creating it, and return the swarms added."""
+    added: list[str] = []
+
+    def change(record: dict[str, Any]) -> dict[str, Any]:
+        added.clear()
+        listed: dict[str, Any] = dict(record.get(FIELD) or {})
+        held = list(listed.get(member) or [])
+        added.extend(swarm for swarm in chosen if swarm not in held)
+        if not added:
+            return {}
+        merged = {**listed, member: [*held, *added]}
+        nats_grant.member_swarms(merged)
+        return {FIELD: merged}
+
+    try:
+        openbao_kv.update(bao, path, change)  # pyright: ignore[reportUnknownMemberType]
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+    return added
+
+
 def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
     dropped: list[str] = []
 

@@ -197,13 +197,20 @@ def _swarm_exports(environ: dict[str, str]) -> str:
         "AGENTIHOOKS_CLAIM_FENCE",
         "AGENTIHOOKS_BUS",
         "AGENTIHOOKS_BUS_URL",
+        "AGENTIHOOKS_BUS_BIND",
+        "AGENTIHOOKS_BUS_SCOPED",
+        "AGENTIHOOKS_BUS_SWARMS",
         "AGENTIHOOKS_SLOT_HIVE",
         "AGENTIHOOKS_SLOT_EXECUTION",
     )
+    from scripts.events.config import CREDENTIALS_ENV, INLINE_CREDENTIALS
     from scripts.swarm.naming import PROOF_RE
 
     scratch = ("AGENTIHOOKS_SWARM_REDIS_URL",) if PROOF_RE.fullmatch(environ["AGENTIHOOKS_SWARM"]) else ()
     exports = {name: environ[name] for name in (*names, *scratch) if environ.get(name)}
+    reference = environ.get(CREDENTIALS_ENV, "")
+    if reference and not reference.startswith(INLINE_CREDENTIALS):
+        exports[CREDENTIALS_ENV] = reference
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
     pin = "unset SWARM_SECRET\nexport AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
