@@ -296,7 +296,7 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     if tick.resume.recovery_pending(store, slug, agent):
         store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
         return []
-    if now_ms - agent.started_at > tick.STARTUP_GRACE_MS:
+    if now_ms - max(agent.started_at, agent.launched_at) > tick.STARTUP_GRACE_MS:
         return tick.timing.timed(tick._lost, slug, store, ledger, runtime, rows, agent, now_ms)
     return []
 
