@@ -14,6 +14,7 @@ CLAIM_BATCH = 5
 SEEN_ON_LEDGER = "already shown through the ledger"
 UNSETTLED = "returned to pending: its seen mark kept changing"
 UNCHECKED = "returned to pending: its seen mark could not be checked"
+CLAIM_FAILED = "returned to pending: its claim hit a Redis error before it finished"
 
 
 def write_ref(slug, event):
@@ -98,7 +99,8 @@ def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: dict[str, 
     """Deliver at most limit oldest pending items across me, my seat and aliases, leaving out the ids in skip.
 
     Close ledger writes already shown; an item whose seen check fails returns to pending and joins skip for one
-    redelivery window. A Redis error returns every item this call delivered to pending before it propagates.
+    redelivery window. A Redis error returns every item this call delivered to pending before it propagates; an item
+    whose return fails too stays delivered until the next redelivery.
     """
     from redis.exceptions import RedisError
 
@@ -140,7 +142,7 @@ def _release(store: InboxStore, me: str, items: list[Item]) -> None:
 
     for item in items:
         with contextlib.suppress(RedisError, InboxError):
-            store.requeue(item.id, me, UNCHECKED)
+            store.requeue(item.id, me, CLAIM_FAILED)
 
 
 def _shown_elsewhere(marks, store, item, me):

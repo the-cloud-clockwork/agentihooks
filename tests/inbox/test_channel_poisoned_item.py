@@ -127,11 +127,42 @@ def test_a_redis_error_mid_batch_returns_every_item_the_claim_delivered_to_pendi
         _pass(inbox, session)
     assert session.shown == []
     assert [inbox.get(item.id).state for item in (first, broken, last)] == ["pending", "pending", "pending"]
-    assert _requeued(inbox, first.id) == ("pending", "bob", seen.UNCHECKED)
-    assert _requeued(inbox, broken.id) == ("pending", "bob", seen.UNCHECKED)
+    assert _requeued(inbox, first.id) == ("pending", "bob", seen.CLAIM_FAILED)
+    assert _requeued(inbox, broken.id) == ("pending", "bob", seen.CLAIM_FAILED)
     monkeypatch.setattr(seen, "_shown_elsewhere", checked)
     _pass(inbox, session)
     assert session.shown == [first.id, broken.id, last.id]
+
+
+@pytest.mark.feature("inbox-claim-redis-error-requeue")
+def test_a_failed_return_keeps_the_original_redis_error_and_still_returns_the_rest_of_the_batch(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from redis.exceptions import RedisError
+
+    _, inbox = channel_backend
+    first, broken, last = _three(inbox)
+    checked = seen._shown_elsewhere  # pyright: ignore[reportPrivateUsage]
+    requeue = inbox.requeue
+    lost = RedisError("connection lost")
+
+    def failing(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
+        if item.id == broken.id:
+            raise lost
+        return checked(marks, store, item, me)
+
+    def flaky_requeue(item_id: str, by: str, reason: str, before: int | None = None) -> Item | None:
+        if item_id == first.id:
+            raise RedisError("requeue lost")
+        return requeue(item_id, by, reason, before)
+
+    monkeypatch.setattr(seen, "_shown_elsewhere", failing)
+    monkeypatch.setattr(inbox, "requeue", flaky_requeue)
+    with pytest.raises(RedisError) as raised:
+        seen.claim(inbox, "bob")
+    assert raised.value is lost
+    assert [inbox.get(item.id).state for item in (first, broken, last)] == ["delivered", "pending", "pending"]
+    assert _requeued(inbox, broken.id) == ("pending", "bob", seen.CLAIM_FAILED)
 
 
 def _clocked_passes(inbox: InboxStore, monkeypatch: pytest.MonkeyPatch) -> tuple[Session, list[int], Any]:

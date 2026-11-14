@@ -2810,7 +2810,8 @@
       "behaviour": "A Redis error in the seen check during an inbox claim returns every item that claim already delivered, the failing one included, to pending before the error propagates, so no item is left delivered and unshown and the next healthy channel pass pushes them all.",
       "seam": "scripts.inbox.seen.claim through scripts.inbox.channel._deliver on a Redis error mid batch",
       "tests": [
-        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_mid_batch_returns_every_item_the_claim_delivered_to_pending_and_a_healthy_pass_pushes_them"
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_mid_batch_returns_every_item_the_claim_delivered_to_pending_and_a_healthy_pass_pushes_them",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_failed_return_keeps_the_original_redis_error_and_still_returns_the_rest_of_the_batch"
       ]
     },
     {
