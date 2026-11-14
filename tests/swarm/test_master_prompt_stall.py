@@ -402,3 +402,29 @@ def test_a_login_limit_recycle_marks_the_slots_the_master_holds(
     runtime.tails[agent.pane_id] = LOGIN_LIMIT
     run(store, runtime, START)
     assert marked == [agent.name]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_login_limit_recycle_closes_the_retire_ask_and_stamps_its_window(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    master_retire.hold(store, "sw", agent, "a handoff was asked", True, START - MINUTE)
+    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert InboxStore(store.redis).get(ask.id).reason == f"done: {master_prompt_stall.LOGIN_RECYCLED}"
+    assert master_retire.reason(store, "sw", agent.name) == ""
+    assert f"Continue as the master of sw; {agent.name}" in store.handoff("sw", MASTER)
+    [row] = [r for r in rows() if r["reason"] == master_prompt_stall.LOGIN_LIMITED]
+    assert row["at"] == START
+    recycle = store.key("sw", master_prompt_stall.LOGIN_RECYCLE_KEY)
+    assert 0 < store.redis.ttl(recycle) <= master_prompt_stall.DAY_S
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_master_whose_pane_tail_cannot_be_read_stays(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = RuntimeError("pane gone")
+    assert run(store, runtime, START) == []
+    assert [a.state for a in store.agents("sw")] != ["finished"]

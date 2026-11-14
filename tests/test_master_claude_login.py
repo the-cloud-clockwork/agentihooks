@@ -1269,6 +1269,44 @@ def test_a_slot_marked_from_the_pane_sends_the_relaunch_to_the_next_slot_even_wh
     assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(2), "spareatexample_com")
 
 
+@pytest.mark.feature("master-login-limit-recovery")
+def test_marking_a_slot_failed_records_that_slot_against_its_own_login_write(
+    ah: Path, rendered: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spare_slot(rendered, monkeypatch)
+    written = (login.home(1) / login.CREDENTIALS).stat().st_mtime + 30
+    os.utime(login.home(2) / login.CREDENTIALS, (written, written))
+    login._write(login.root(2) / login.OWNER, {"holders": {"master@old": os.getpid()}, "epoch": 3})
+    assert login.mark_held_failed("master@old") == [2]
+    assert login._read(login.root(2) / login.FAILED) == {"credentials": written}
+    assert (login.failed(1), login.failed(2)) == (False, True)
+    (login.home(2) / login.CREDENTIALS).unlink()
+    login.mark_failed(2)
+    assert login._read(login.root(2) / login.FAILED) == {"credentials": 0.0}
+    assert login.failed(1) is False
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_move_from_a_refused_slot_checks_each_other_slot_once_and_marks_both(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.routing import native_login
+
+    _spare_slot(rendered, monkeypatch)
+    checked = []
+
+    def check(environ: dict[str, str], account: str) -> dict[str, str]:
+        checked.append(account)
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(native_login, "rejected", lambda *_: False)
+    assert login.move(_environ(rendered), tmp_path, login.home(2)) is None
+    assert checked == ["masteratexample_com"]
+    assert (login.failed(1), login.failed(2)) == (True, True)
+    assert login.holders(login.root(1)) == {}
+
+
 def test_prepare_launch_keeps_incompatible_settings_out_of_every_fallback(ah, rendered, tmp_path, monkeypatch):
     from scripts import master_login_chain as chain
 

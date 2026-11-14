@@ -126,6 +126,8 @@ def test_typed_input_is_the_text_on_the_last_input_line_without_dim_hints(captur
     [
         "Login reached its time limit · Please run /login",
         "  ⎿  Login reached its time limit · Please run /login",
+        "\x1b[1mLogin reached its time limit · Please run /login\x1b[0m",
+        "Login reached its time limit · Please run /login   ",
     ],
 )
 def test_login_limit_reports_the_claude_login_texts(text: str) -> None:
