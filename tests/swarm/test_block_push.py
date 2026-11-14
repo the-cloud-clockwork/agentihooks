@@ -111,13 +111,14 @@ def test_block_records_the_pushed_branch_on_the_task(worktree, monkeypatch):
 
 
 @pytest.fixture
-def hive_worktree(env, monkeypatch, tmp_path):
+def hive_worktree(env, seat, monkeypatch, tmp_path):
     _, ledger, _ = env
     origin, primary, top = _repository(tmp_path, "repo")
     monkeypatch.setattr(publish, "pushed_branches", PUSHED)
     monkeypatch.chdir(primary)
     cli.main(["sw", "create", "--repo", str(tmp_path / "workstation" / "repo")])
-    cli.main(["sw", "start"])
+    seat("t1")
+    seat("t2")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REPO", str(primary))
     return ledger, origin, primary, top
 

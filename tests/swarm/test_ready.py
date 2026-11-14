@@ -2,7 +2,7 @@ import copy
 import json
 import subprocess
 from types import MappingProxyType, SimpleNamespace
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import pytest
 
@@ -17,6 +17,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers.seat import seat_agent
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -79,12 +80,30 @@ class Shell:
         return subprocess.CompletedProcess(argv, code, stdout=out + "\n", stderr=" boom\n" if code else "")
 
 
+def seated(store: RedisStore, ledger: Any, runtime: Any) -> None:
+    """Runs swarm ``sw`` and seats an agent on t1 and t2 through hub admission, so no tick pass or runtime spawn
+    places them; each then stands as its hive leaves a launched agent: its work folder written, its record working
+    in a pane with its started launch life and its name live in ``runtime``."""
+    from dataclasses import replace
+
+    from scripts.swarm_ledger import ledger_workspace
+
+    store.update("sw", state="running")
+    for task_id in ("t1", "t2"):
+        agent = seat_agent(store, ledger, "sw", task_id)
+        ledger_workspace.scaffold("sw", ledger.task("sw", task_id), ledger.state("sw"))
+        live = replace(agent, state="working", pane_id=f"w1:{task_id}")
+        store.put_agent("sw", live)
+        store.record_launch("sw", live, "started")
+        runtime.live.add(agent.name)
+
+
 @pytest.fixture
 def released(env, monkeypatch, tmp_path):
     store, ledger, rt = env
     monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["sw", "create", "--repo", "/repo"])
-    cli.main(["sw", "start"])
+    seated(store, ledger, rt)
     ledger.rows["t1"].update({"state": "pr", "pr_url": URL, "branch": "eng-t1"})
     ledger.pulls[URL] = RUNNING
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
