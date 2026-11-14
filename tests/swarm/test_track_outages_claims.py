@@ -31,11 +31,13 @@ def _authority(agent: Any) -> dict[str, Any]:
 
 def _owner(store: Any) -> tuple[Any, Any, Any]:
     from scripts.swarm.tick import tick
+    from tests.helpers.seat import seat_owner
     from tests.swarm.test_outage_resume import RecoveringRuntime
     from tests.swarm.test_tick import tasks
 
     ledger = tasks(("t1", "eng"))
     runtime = RecoveringRuntime()
+    seat_owner(store, ledger, runtime, "t1", 1_000)
     tick("sw", store, ledger, runtime, 1_000)
     store.update("sw", state="paused")
     agent = next(agent for agent in store.agents("sw") if agent.lane == "eng")
