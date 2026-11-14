@@ -56,6 +56,12 @@ def test_focused_offers_go_out_by_rank_band_then_focus_record_order() -> None:
 
 
 @pytest.mark.feature("swarm-focus")
+def test_a_focused_offer_goes_out_before_an_urgent_doctor_fix_outside_the_focus() -> None:
+    found = doc([task("fix", rank="urgent"), task("hot")], freezes=[focus("tasks/hot", 1)])
+    assert [event.key for event in readiness.offers(snapshot(found, fix="p1"), NOW)] == ["hot", "fix"]
+
+
+@pytest.mark.feature("swarm-focus")
 def test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band() -> None:
     found = doc([task("low", rank="low"), task("first"), task("urgent", rank="urgent"), task("second")])
     assert [event.key for event in readiness.offers(snapshot(found), NOW)] == ["urgent", "first", "second", "low"]

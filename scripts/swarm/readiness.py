@@ -177,14 +177,21 @@ def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, A
 
 
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
+    """Each claimable task's offer, focused tasks first, then by ledger rank band, then by focus record order."""
+    from scripts.swarm import focus_budget
+    from scripts.swarm_ledger import ledger_rank
+
     rows: Any = view.rows
-    return [
-        offer(task, view, now_ms)
+    ready = [
+        (task["lane"], task)
         for task in rows.values()
         if task.get("lane")
         and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
         and claimable(task, task["lane"], view)
     ]
+    ranks = focus_budget.ranks(view.doc)
+    ordered = focus_budget.ordered(ready, ranks, ledger_rank.order, focus_budget.outside(view.doc))
+    return [offer(task, view, now_ms) for _, task in ordered]
 
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:

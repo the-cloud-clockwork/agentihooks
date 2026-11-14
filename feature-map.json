@@ -2376,6 +2376,7 @@
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
         "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
         "tests/swarm/test_events_placement.py::test_focused_offers_go_out_by_rank_band_then_focus_record_order",
+        "tests/swarm/test_events_placement.py::test_a_focused_offer_goes_out_before_an_urgent_doctor_fix_outside_the_focus",
         "tests/swarm/test_events_placement.py::test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band",
         "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus",
         "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat",
