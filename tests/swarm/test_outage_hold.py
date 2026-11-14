@@ -56,6 +56,7 @@ def test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_
     assert store.redis.get(store.key("sw", outage.PANE, NAME)) == "API Error: 529"
 
 
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopped(store):
     ledger, runtime = claimed(store)
     for n in range(IDLE_NUDGE_TICKS - 1):
@@ -69,6 +70,7 @@ def test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopp
     assert idle_ticks(store) == [IDLE_NUDGE_TICKS] and runtime.nudged == [NAME]
 
 
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_cleared_provider_error_lets_the_idle_count_run_again(store):
     ledger, runtime = claimed(store)
     runtime.errors[NAME] = "Connection error."

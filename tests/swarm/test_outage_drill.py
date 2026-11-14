@@ -258,6 +258,7 @@ def probe_recovery(drill, monkeypatch):
     return calls
 
 
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_channel_delivery_after_redis_recovery_is_confirmed_once(drill, monkeypatch):
     from scripts.inbox import cli
 
@@ -280,6 +281,7 @@ def test_channel_delivery_after_redis_recovery_is_confirmed_once(drill, monkeypa
 
 
 @pytest.mark.parametrize("kind", ("redis", "network", "provider"))
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_every_sender_survives_an_outage_and_is_delivered_and_confirmed_once(drill, monkeypatch, kind):
     if kind == "provider":
         probe_recovery(drill, monkeypatch)
