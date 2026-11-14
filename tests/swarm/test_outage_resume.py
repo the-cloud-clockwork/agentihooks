@@ -63,7 +63,7 @@ def three_owners(store: RedisStore) -> tuple[Any, RecoveringRuntime, list[AgentR
     ledger = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng"))
     runtime = RecoveringRuntime()
     for index, task in enumerate(("t1", "t2", "t3")):
-        seated = seat_agent(store, ledger, SLUG, task)
+        seated = seat_agent(store, ledger, SLUG, task, clock=lambda: 1_000)
         launched = launch_seated(
             store, runtime, seated, f"w1:p{index + 1}", 1_000, conversation_id=f"conversation-{index}"
         )

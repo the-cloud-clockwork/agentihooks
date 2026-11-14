@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from scripts.hub import admission
+from scripts.hub import admission, lease
 from scripts.swarm import readiness
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.repository import hierarchy
@@ -41,13 +41,15 @@ def seat_agent(
     task_id: str,
     hive: str = readiness.ROOT,
     launch: dict[str, str] | None = None,
+    clock: lease.Clock = lease.wall_ms,
 ) -> AgentRecord:
     """Seats one agent on an open task of a created swarm and returns its record as the events path leaves it.
 
     The hub ``Admission`` admits the offer for the task's lane and claim generation from ``hive``: it claims the task,
     names the agent, starts its execution in a lane seat, occupies the seat, pends the claim life and marks the ledger
     row claimed by that name. The hive's ``launched`` acknowledgement then writes the launch decision onto the record:
-    ``LAUNCH`` with the lane's ``PROFILES`` entry, each key of ``launch`` overriding its default.
+    ``LAUNCH`` with the lane's ``PROFILES`` entry, each key of ``launch`` overriding its default. ``clock`` is the
+    admission clock, which names the agent and stamps its ``started_at``.
 
     The record is admitted and acknowledged, never run by a hive: its state stays ``starting``, ``pane_id`` stays
     empty, ``launched_at`` stays 0, the claim life stays pending, no runtime lists the agent and no launch row is
@@ -57,7 +59,7 @@ def seat_agent(
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
     source = SimpleNamespace(snapshot=lambda name: view(store, ledger, name))
-    admitter = admission.Admission(store, ledger, source)  # pyright: ignore[reportArgumentType]
+    admitter = admission.Admission(store, ledger, source, clock)  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:
         pytest.fail(f"hub admission refused {task_id}: {admitted}")
@@ -83,8 +85,8 @@ def launch_seated(
     store: RedisStore, runtime: Any, agent: AgentRecord, pane: str, at: int, **fields: Any
 ) -> AgentRecord:
     """Stands in for the hive running ``agent`` of swarm ``sw`` after ``seat_agent``: the record goes ``working`` on
-    ``pane``, started and launched at ``at`` with ``fields`` applied, and the fake ``runtime`` lists it live."""
-    launched = replace(agent, pane_id=pane, state="working", started_at=at, launched_at=at, **fields)
+    ``pane``, launched at ``at`` with ``fields`` applied, and the fake ``runtime`` lists it live."""
+    launched = replace(agent, pane_id=pane, state="working", launched_at=at, **fields)
     store.execution_registry.update(SLUG, launched)
     runtime.live.add(launched.name)
     return launched
