@@ -6006,6 +6006,17 @@
       ]
     },
     {
+      "id": "test-seat-through-admission",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
+      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive, the launch decision lands on the record and the swarm stays paused.",
+      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit and Admission.launched",
+      "tests": [
+        "tests/helpers/test_seat.py::test_seat_claims_and_launches_an_agent_without_start_or_a_tick",
+        "tests/helpers/test_seat.py::test_seat_carries_a_given_hive_and_launch_decision"
+      ]
+    },
+    {
       "id": "events-launch-decision-record",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-record-launch-fields",
