@@ -892,7 +892,8 @@
       "behaviour": "A tick pass whose time left write meets a ledger server error skips that write and still runs its remaining steps, placing claimable tasks.",
       "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
       "tests": [
-        "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running"
+        "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running",
+        "tests/swarm/test_tick_time_left.py::test_under_events_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_reaping"
       ]
     },
     {
@@ -2374,6 +2375,8 @@
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
         "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
+        "tests/swarm/test_events_placement.py::test_focused_offers_go_out_by_rank_band_then_focus_record_order",
+        "tests/swarm/test_events_placement.py::test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band",
         "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus",
         "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat",
         "tests/swarm/test_focus_budget.py::test_focus_record_order_breaks_ties_within_one_rank_band",

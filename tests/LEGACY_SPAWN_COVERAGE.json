@@ -23,9 +23,11 @@
       "covered_by": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
-        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
+        "tests/swarm/test_events_placement.py::test_focused_offers_go_out_by_rank_band_then_focus_record_order",
+        "tests/swarm/test_events_placement.py::test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band"
       ],
-      "gap": "The launch order clauses (urgent focused tasks first, focus record ties, dispatcher band over ledger rank) are proven only on the legacy spawn order; an events offer order test is filed as a follow up."
+      "gap": "The dispatcher band over ledger rank and the demotion of a task whose launch failed order only the legacy spawn; the hub readiness offers hold no dispatcher claim key or demotion list, filed as a follow up."
     },
     "swarm-freeze": {
       "covered_by": [
@@ -121,7 +123,9 @@
       "retires": "The process table rescan clause belongs to the legacy spawn launch; the claim cap rows stay because hub admission calls the same lives check."
     },
     "tick-time-left-server-error": {
-      "gap": "Its only test proves the pass keeps running by a legacy tick spawn; an events engine tick test must assert the skipped time left write and a later step."
+      "covered_by": [
+        "tests/swarm/test_tick_time_left.py::test_under_events_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_reaping"
+      ]
     }
   }
 }
