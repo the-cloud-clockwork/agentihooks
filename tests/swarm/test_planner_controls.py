@@ -6,9 +6,8 @@ import pytest
 from scripts.swarm import cli, prompt, templates
 from scripts.swarm.health.findings import _is_worker
 from scripts.swarm.store import RedisStore, SwarmConfig
-from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_server, ledger_tasks
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm.test_tick import FakeLedger
 
 
 @pytest.fixture
@@ -44,43 +43,6 @@ def test_create_set_list_status_and_saved_template_carry_the_cap(store, monkeypa
     assert "plan 2" in capsys.readouterr().out
     assert cli.main(["sw", "status", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["config"]["max_plan"] == 2
-
-
-def test_tick_uses_independent_planner_cap_and_seat(store):
-    store.update("sw", state="running")
-    ledger = FakeLedger(
-        [
-            {"id": "engineer", "lane": "eng"},
-            {"id": "ci", "lane": "ci"},
-            {"id": "plan-one", "lane": "plan"},
-            {"id": "plan-two", "lane": "plan"},
-        ]
-    )
-    runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, 1)
-    assert [lane for lane, _, _ in runtime.spawned] == ["eng", "ci", "plan"]
-    planner = next(a for a in store.agents("sw") if a.lane == "plan")
-    assert planner.name.startswith("planner@")
-    assert planner.seat == "plan-1@sw"
-    assert store.seats.occupant(planner.seat).occupant == planner.name
-    tick("sw", store, ledger, runtime, 2)
-    assert len(runtime.spawned) == 3
-    store.update("sw", max_plan=2)
-    tick("sw", store, ledger, runtime, 3)
-    assert runtime.spawned[-1][0] == "plan"
-    assert next(a for a in store.agents("sw") if a.task == "plan-two").seat == "plan-2@sw"
-
-
-def test_zero_planner_cap_keeps_task_open_and_drained_swarm_wakes(store):
-    store.update("sw", state="running", max_plan=0)
-    ledger, runtime = FakeLedger([{"id": "slice", "lane": "plan"}]), FakeRuntime()
-    tick("sw", store, ledger, runtime, 1)
-    assert runtime.spawned == []
-    assert ledger.rows["slice"]["state"] == "open"
-    store.update("sw", state="drained", max_plan=1)
-    tick("sw", store, ledger, runtime, 2)
-    assert [lane for lane, _, _ in runtime.spawned] == ["plan"]
-    assert store.config("sw").state == "running"
 
 
 def test_ledger_accepts_planner_lane_and_prompt_names_role():

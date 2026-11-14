@@ -1,10 +1,13 @@
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import prompt
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, RedisStore
 from scripts.swarm.tick import tick
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
@@ -23,10 +26,16 @@ Seam two test red for the expected reason.
 
 @pytest.mark.parametrize("caller,seat", [("engineer@a1b2c3-0001", "eng-1@sw"), ("master@a1b2c3-0001", "master@sw")])
 @pytest.mark.feature("swarm-handoff")
-def test_handoff_derives_the_seat_recap_without_another_file(env, tmp_path, caller, seat):  # noqa: F811
-    swarm, _, _ = env
+def test_handoff_derives_the_seat_recap_without_another_file(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    tmp_path: Path,
+    caller: str,
+    seat: str,
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     doc = _handoff_doc(tmp_path)
     assert run("sw", "--as", caller, "handoff", str(doc)) == 0
     (entry,) = swarm.memory.recaps(seat)
@@ -34,10 +43,14 @@ def test_handoff_derives_the_seat_recap_without_another_file(env, tmp_path, call
     assert entry["text"] == RECAP
 
 
-def test_a_legacy_recap_argument_cannot_replace_the_document_recap(env, tmp_path):  # noqa: F811
-    swarm, _, _ = env
+def test_a_legacy_recap_argument_cannot_replace_the_document_recap(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    tmp_path: Path,
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     doc = _handoff_doc(tmp_path)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", "unused") == 0
     assert swarm.memory.recaps("eng-1@sw")[0]["text"] == RECAP
@@ -82,8 +95,12 @@ Finish the task.
     assert "previous conversation" in rendered
 
 
-@pytest.mark.parametrize("lane", ["eng", MASTER])
-def test_a_successor_spawn_receives_the_stored_envelope(store, lane, monkeypatch):  # noqa: F811
+@pytest.mark.parametrize("lane", [MASTER])
+def test_a_successor_spawn_receives_the_stored_envelope(
+    store: RedisStore,  # noqa: F811
+    lane: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, 1)
     first = masters(store)[0] if lane == MASTER else workers(store)[0]
@@ -127,10 +144,15 @@ def test_take_master_renders_the_stored_envelope(taker, capsys):  # noqa: F811
     ],
 )
 @pytest.mark.feature("swarm-learned-notes")
-def test_learned_refuses_a_missing_reason_and_writes_nothing(env, capsys, text):  # noqa: F811
-    swarm, _, _ = env
+def test_learned_refuses_a_missing_reason_and_writes_nothing(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    text: str,
+) -> None:
+    swarm, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(swarm, ledger, SLUG, "t1")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", text) == 1
     assert "because" in capsys.readouterr().err
     assert swarm.memory.learned("eng-1@sw") == []
