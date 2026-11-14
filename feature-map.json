@@ -6314,6 +6314,17 @@
         "tests/swarm/test_claim_refunds.py::test_three_swarm_retirements_allow_a_fourth_claim",
         "tests/swarm/test_claim_refunds.py::test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim"
       ]
+    },
+    {
+      "id": "render-no-login-credentials",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-render-no-credentials-link",
+      "behaviour": "A rendered Claude profile home never links the login credentials file to the operator login home, so engineer, ci and planner sessions cannot read or inherit the master claude ai login; a home that still holds such a link is stale and the next render replaces it with one that has none.",
+      "seam": "render_claude and its freshness check _claude_fresh in scripts.profiles.render",
+      "tests": [
+        "tests/test_profile_render.py::test_a_rendered_engineer_home_has_no_credentials_link_to_the_login_home",
+        "tests/test_profile_render.py::test_the_next_render_replaces_a_home_holding_a_credentials_link"
+      ]
     }
   ],
   "unmapped_rules": [

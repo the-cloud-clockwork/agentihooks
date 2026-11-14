@@ -11,7 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json"}
+SHARED = {"projects", "sessions", "todos", "plugins", "keybindings.json"}
+LOGIN = ".credentials.json"
 
 
 def _write(path: Path, text: str) -> Path:
@@ -996,6 +997,31 @@ def test_claude_render_redoes_a_home_missing_a_shared_link(world, missing):
     assert fresh != out
     assert (fresh / missing).is_symlink()
     assert (fresh / missing).readlink() == world["home"] / ".claude" / missing
+    assert render.render_claude("rb-role") is None
+
+
+@pytest.mark.feature("render-no-login-credentials")
+def test_a_rendered_engineer_home_has_no_credentials_link_to_the_login_home(world):
+    from scripts.profiles import render
+
+    _write(world["home"] / ".claude" / LOGIN, "fixture")
+    out = render.render_claude("rb-role")
+    assert not (out / LOGIN).is_symlink()
+    assert not (out / LOGIN).exists()
+
+
+@pytest.mark.feature("render-no-login-credentials")
+def test_the_next_render_replaces_a_home_holding_a_credentials_link(world):
+    from scripts.profiles import render
+
+    login = _write(world["home"] / ".claude" / LOGIN, "fixture")
+    out = render.render_claude("rb-role")
+    if not (out / LOGIN).is_symlink():
+        (out / LOGIN).symlink_to(login)
+    assert render.render_claude("rb-role") is not None
+    fresh = render.profile_dir("rb-role") / "claude"
+    assert fresh != out
+    assert not (fresh / LOGIN).is_symlink()
     assert render.render_claude("rb-role") is None
 
 
