@@ -15,11 +15,13 @@ from scripts.events.memory import open_bus
 from scripts.hive import execution_events, execution_stop
 from scripts.hub import claims, lifecycle, reconciler
 from scripts.swarm import launch_check, readiness
+from scripts.swarm import tick as tick_module
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_KILL_TICKS
 from scripts.tick.steps import agents as agent_steps
 from scripts.tick.steps import observe
+from scripts.tick.steps.common import DROP_REFUSED
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
@@ -196,6 +198,40 @@ def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_
     stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
     sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
     assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
+
+
+def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
+    """The stops waiting for the hive that ``agent`` names."""
+    events = bus.for_swarm(SLUG).events
+    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
+    return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize(("dropped", "stops"), [(DROP_REFUSED, 0), ("", 1)])
+def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], dropped: str, stops: int
+) -> None:
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+
+    assert tick_module._stop_hive(SLUG, agent, "idle", dropped) == dropped
+
+    assert len(sent_stops(bus, agent)) == stops
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+def test_a_legacy_agent_retirement_sends_no_stop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+) -> None:
+    store, _, _ = env
+    assert run(SLUG, "create", "--repo", "/repo") == 0
+    agent = seat("t1")
+    assert reconciler.legacy_agents(store, SLUG) == [agent]
+
+    assert reconciler.stop_admitted(SLUG, agent, "idle") == execution_stop.UNKNOWN
+
+    assert sent_stops(bus, agent) == []
 
 
 def handed_off(
