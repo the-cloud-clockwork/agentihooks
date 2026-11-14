@@ -166,6 +166,39 @@ def test_a_failed_return_keeps_the_original_redis_error_and_still_returns_the_re
 
 
 @pytest.mark.feature("inbox-claim-redis-error-requeue")
+def test_a_return_refused_as_changed_keeps_the_original_redis_error_and_still_returns_the_rest_of_the_batch(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from redis.exceptions import RedisError
+
+    from scripts.inbox.store import InboxError
+
+    _, inbox = channel_backend
+    first, broken, last = _three(inbox)
+    checked = seen._shown_elsewhere  # pyright: ignore[reportPrivateUsage]
+    requeue = inbox.requeue
+    lost = RedisError("connection lost")
+
+    def failing(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
+        if item.id == broken.id:
+            raise lost
+        return checked(marks, store, item, me)
+
+    def changed_requeue(item_id: str, by: str, reason: str, before: int | None = None) -> Item | None:
+        if item_id == first.id:
+            raise InboxError(f"message {item_id} changed meanwhile; run the command again")
+        return requeue(item_id, by, reason, before)
+
+    monkeypatch.setattr(seen, "_shown_elsewhere", failing)
+    monkeypatch.setattr(inbox, "requeue", changed_requeue)
+    with pytest.raises(RedisError) as raised:
+        seen.claim(inbox, "bob")
+    assert raised.value is lost
+    assert [inbox.get(item.id).state for item in (first, broken, last)] == ["delivered", "pending", "pending"]
+    assert _requeued(inbox, broken.id) == ("pending", "bob", seen.CLAIM_FAILED)
+
+
+@pytest.mark.feature("inbox-claim-redis-error-requeue")
 def test_a_redis_error_delivering_the_second_item_returns_the_first_to_pending(
     channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:

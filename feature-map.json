@@ -2812,6 +2812,7 @@
       "tests": [
         "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_mid_batch_returns_every_item_the_claim_delivered_to_pending_and_a_healthy_pass_pushes_them",
         "tests/inbox/test_channel_poisoned_item.py::test_a_failed_return_keeps_the_original_redis_error_and_still_returns_the_rest_of_the_batch",
+        "tests/inbox/test_channel_poisoned_item.py::test_a_return_refused_as_changed_keeps_the_original_redis_error_and_still_returns_the_rest_of_the_batch",
         "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_delivering_the_second_item_returns_the_first_to_pending",
         "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_closing_an_item_shown_elsewhere_returns_it_and_the_first_to_pending",
         "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_returning_an_unsettled_item_returns_it_and_the_first_to_pending"
