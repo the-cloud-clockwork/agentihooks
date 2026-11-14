@@ -709,6 +709,17 @@
       ]
     },
     {
+      "id": "hub-admission-claim-continuity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-continuity",
+      "behaviour": "An events admission carries the handoff or recovery handoff its predecessor left as the admitted task's handoff text and attaches the task's open transfer record to the admitted successor and its seat, so the successor's opening prompt continues from the document and its transfer binds; only the legacy place prepare did this, so a successor launched under events started with no handoff document.",
+      "seam": "Admission.admit answer read by the opening prompt priming lines on the hive",
+      "tests": [
+        "tests/hub/test_admission.py::test_an_events_successor_reads_its_predecessors_handoff_and_binds_its_transfer",
+        "tests/hub/test_admission.py::test_an_events_successor_with_no_handoff_left_carries_no_handoff_or_transfer"
+      ]
+    },
+    {
       "id": "hub-offer-logging",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-logging",

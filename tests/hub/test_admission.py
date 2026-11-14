@@ -200,6 +200,38 @@ def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
 
 
+CONTINUITY_DOC = "# Handoff v2\n## Next\nRead the saved proof and push the fix.\n## Read first\nNone\n"
+
+
+@pytest.mark.feature("hub-admission-claim-continuity")
+@pytest.mark.parametrize("reason", ["recycle", "exit"])
+def test_an_events_successor_reads_its_predecessors_handoff_and_binds_its_transfer(
+    rig: SimpleNamespace, reason: str
+) -> None:
+    from scripts.handoff import transfers
+    from scripts.swarm.prompt import priming_lines
+    from scripts.swarm.store import AgentRecord
+
+    old = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", state="finished")
+    transfer = transfers.record(rig.store, SLUG, old, reason, CONTINUITY_DOC, 2)
+    rig.store.put_handoff(SLUG, "t1", CONTINUITY_DOC, seat=old.seat)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    bound = transfers.get(rig.store, SLUG, transfer["id"])
+    assert admitted["task"]["handoff"] == CONTINUITY_DOC
+    assert admitted["task"]["transfer"] == bound
+    assert (bound["successor"], bound["seat"]) == (admitted["name"], "eng-1@sw")
+    assert bound["generation"] == rig.store.seats.occupant("eng-1@sw").generation
+    assert CONTINUITY_DOC in priming_lines(admitted["task"])
+
+
+@pytest.mark.feature("hub-admission-claim-continuity")
+def test_an_events_successor_with_no_handoff_left_carries_no_handoff_or_transfer(rig: SimpleNamespace) -> None:
+    task = rig.admitter.admit(SLUG, ask())["task"]
+    assert ("handoff" in task, task.get("transfer")) == (False, None)
+
+
 @pytest.mark.feature("swarm-tick-successor-fill")
 def test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range(
     rig: SimpleNamespace,
