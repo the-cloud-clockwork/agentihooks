@@ -99,54 +99,64 @@ def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: dict[str, 
     """Deliver at most limit oldest pending items across me, my seat and aliases, leaving out the ids in skip.
 
     Close ledger writes already shown; an item whose seen check fails returns to pending and joins skip for one
-    redelivery window. A Redis error returns every item this call delivered to pending before it propagates; an item
-    whose return fails too stays delivered until the next redelivery.
+    redelivery window plus one wake window, so the wake ladder can escalate it between retries. A Redis or store
+    error ends the batch: the items already checked are returned for showing and the item in flight goes back to
+    pending, or stays delivered until the next redelivery when Redis refuses that too.
     """
     from redis.exceptions import RedisError
 
     skip = {} if skip is None else skip
     now, window = now_ms(), redelivery_ms()
     store.redeliver(now, window)
-    for item_id in [item_id for item_id, at in skip.items() if now - at >= window]:
+    hold = window + _wake_window_ms()
+    for item_id in [item_id for item_id, at in skip.items() if now - at >= hold]:
         del skip[item_id]
     waiting = [item for item in store.pending_mail(me) if item.id not in skip][:limit]
-    delivered: list[Item] = []
+    shown: list[Item] = []
+    flight: list[Item] = []
     try:
-        return _check_batch(store, me, waiting, skip, delivered)
-    except RedisError:
-        _release(store, me, delivered)
-        raise
+        _check_batch(store, me, waiting, skip, shown, flight)
+    except (RedisError, InboxError):
+        _release(store, me, flight)
+    return shown
+
+
+def _wake_window_ms() -> int:
+    from scripts.inbox import wake
+
+    return wake.window_ms(os.environ)
 
 
 def _check_batch(
-    store: InboxStore, me: str, waiting: list[Item], skip: dict[str, int], delivered: list[Item]
-) -> list[Item]:
+    store: InboxStore, me: str, waiting: list[Item], skip: dict[str, int], shown: list[Item], flight: list[Item]
+) -> None:
     from redis.exceptions import RedisError
 
     marks = SeenMarks(store.redis)
-    shown: list[Item] = []
     for item in filter(None, (store.deliver(item.id, me) for item in waiting)):
-        delivered.append(item)
+        flight[:] = [item]
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:
             store.requeue(item.id, me, UNSETTLED)
+            flight.clear()
             continue
         except RedisError:
             raise
         except Exception:
             store.requeue(item.id, me, UNCHECKED)
+            flight.clear()
             leave_out(skip, item.id)
             continue
         if elsewhere:
             store.close(item.id, me, "done", SEEN_ON_LEDGER)
         else:
             shown.append(item)
-    return shown
+        flight.clear()
 
 
 def leave_out(skip: dict[str, int], item_id: str) -> None:
-    """Leave item_id out of the claims that pass skip until one redelivery window from now."""
+    """Leave item_id out of the claims that pass skip for one redelivery window plus one wake window from now."""
     skip[item_id] = now_ms()
 
 
