@@ -199,6 +199,31 @@ def test_an_agent_with_no_signal_at_all_is_not_measured(rig):
     assert rig.minutes() == {ME: (NOW - 1) // MIN}
 
 
+@pytest.mark.feature("quiet-gate-resumed-agent-launch")
+def test_a_resumed_agent_with_old_progress_is_measured_from_its_launch(rig):
+    agent = rig.store.agents(SLUG)[0]
+    rig.store.put_agent(SLUG, AgentRecord(**{**agent.__dict__, "launched_at": NOW - 2 * MIN}))
+    assert rig.minutes() == {ME: 2}
+    assert rig.run() == []
+    assert rig.flags.read(ME) is None
+    assert rig.run(NOW + 28 * MIN) == [f"raised the quiet flag on {ME}: 30 minutes with no progress on task t1"]
+
+
+@pytest.mark.feature("quiet-gate-resumed-agent-launch")
+def test_a_later_progress_signal_still_wins_over_an_older_launch(rig):
+    agent = rig.store.agents(SLUG)[0]
+    rig.store.put_agent(SLUG, AgentRecord(**{**agent.__dict__, "launched_at": NOW - 20 * MIN}))
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 5 * MIN)
+    assert rig.minutes() == {ME: 5}
+
+
+@pytest.mark.feature("quiet-gate-resumed-agent-launch")
+def test_a_never_resumed_agent_is_still_measured_from_its_start(rig):
+    assert rig.store.agents(SLUG)[0].launched_at == 0
+    assert rig.minutes() == {ME: 40}
+    assert rig.run() == [f"raised the quiet flag on {ME}: 40 minutes with no progress on task t1"]
+
+
 def test_the_tick_raises_the_flag_at_thirty_minutes_once_and_clears_it_on_progress(rig):
     assert rig.run(NOW - 11 * MIN) == []
     assert rig.flags.read(ME) is None
