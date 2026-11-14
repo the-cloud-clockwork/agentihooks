@@ -566,7 +566,7 @@ LIGHT_BOOTSTRAP = (
     # A process the mutation run did not start would import mutmut's whole engine for three trampoline names.
     "_mutmut_entry = getattr(getattr(_mutmut_sys.modules.get('__main__'), '__spec__', None), 'name', '')\n"
     # The runner, mutated itself inside a nested gate test, still needs the real module for its stats.
-    "if 'mutmut.__main__' not in _mutmut_sys.modules and _mutmut_entry != 'scripts.ci_mutation.selection':\n"
+    f"if 'mutmut.__main__' not in _mutmut_sys.modules and _mutmut_entry != {__spec__.name!r}:\n"
     "    import types as _mutmut_types\n"
     "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_types.ModuleType('mutmut.__main__')\n"
     f"    exec({LIGHT_MAIN!r}, _mutmut_sys.modules['mutmut.__main__'].__dict__)\n"

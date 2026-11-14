@@ -2381,6 +2381,22 @@ def test_mutation_shards_grade_their_rows_with_the_protected_grader(
     assert names.index(checkout["name"]) < names.index(mutate) < names.index(grade["name"]) < names.index(upload)
 
 
+@pytest.mark.parametrize(
+    ("job", "mutate"),
+    [
+        ("mutation-shard", "Mutate changed Python files"),
+        ("mutation-shard", "Mutate dispatched Python files"),
+        ("mutation-stats", "Mutate the only shard in the statistics job"),
+        ("mutation-plan", "Grade the empty change set"),
+    ],
+)
+def test_mutation_shards_drive_selection_from_the_protected_grader(job: str, mutate: str) -> None:
+    steps = _mutation_workflow()["jobs"][job]["steps"]
+    names = [step.get("name") for step in steps]
+    assert steps[names.index(mutate)]["env"]["MUTATION_GRADER"] == "${{ runner.temp }}/grader"
+    assert names.index("Check out the protected mutation grader") < names.index(mutate)
+
+
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
     plan, mutation = jobs["mutation-plan"], jobs["mutation-shard"]
@@ -2768,7 +2784,10 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "steps.plan.outputs.changed == '0'",
         "steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'",
     )
-    assert empty["env"] == {"BASES": "${{ steps.plan.outputs.bases }}"}
+    assert empty["env"] == {
+        "BASES": "${{ steps.plan.outputs.bases }}",
+        "MUTATION_GRADER": "${{ runner.temp }}/grader",
+    }
     assert empty["run"] == (
         'python -m scripts.ci_mutation --bases "$BASES" --budget 1080\n'
         'grader="$RUNNER_TEMP/grader"\n'
