@@ -1483,6 +1483,7 @@
       "tests": [
         "tests/swarm/test_legacy_spawn_coverage.py::test_every_feature_whose_tests_reach_the_legacy_spawn_is_in_the_coverage_map",
         "tests/swarm/test_legacy_spawn_coverage.py::test_every_coverage_entry_names_mapped_tests_off_the_legacy_spawn_a_retirement_or_a_gap",
+        "tests/swarm/test_legacy_spawn_coverage.py::test_every_listed_legacy_spawn_symbol_still_exists_in_its_module",
         "tests/swarm/test_legacy_spawn_coverage.py::test_the_detector_finds_legacy_spawn_reach_and_clears_the_rest"
       ]
     },

@@ -14,13 +14,22 @@
       "covered_by": [
         "tests/hub/test_admission.py::test_the_hive_launch_decision_reaches_the_record_swarm_status_reads",
         "tests/hub/test_admission.py::test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record"
-      ]
+      ],
+      "retires": "The launch job queue and successor retry relaunch clauses retire with the launch job module; events hives report the decision through the hub launched operation."
     },
     "swarm-claim-lives": {
       "covered_by": [
         "tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution",
         "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
       ]
+    },
+    "swarm-focus": {
+      "covered_by": [
+        "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
+        "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
+      ],
+      "gap": "The launch order clauses (urgent focused tasks first, focus record ties, dispatcher band over ledger rank) are proven only on the legacy spawn order; an events offer order test is filed as a follow up."
     },
     "swarm-freeze": {
       "covered_by": [
@@ -47,6 +56,12 @@
         "tests/swarm/test_launch_check.py::test_not_joined_is_named"
       ]
     },
+    "swarm-master-skips-host-hold": {
+      "covered_by": [
+        "tests/swarm/test_master_fill.py::test_a_full_host_never_holds_the_seat"
+      ],
+      "retires": "The held engineer clause is the legacy spawn host room hold; events admission holds a hive at its max agents instead."
+    },
     "swarm-reclaim": {
       "gap": "The events hub admission claim never resolves a continuation, so a reclaimed task continues from its recorded branch only on the legacy spawn; ported by the continuation resolve follow up."
     },
@@ -62,6 +77,14 @@
         "tests/hub/test_admission.py::test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent",
         "tests/hub/test_admission.py::test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent"
       ]
+    },
+    "swarm-spawn-order-once-per-pass": {
+      "covered_by": [
+        "tests/swarm/test_spawn_order_budget.py::test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds",
+        "tests/swarm/test_spawn_order_budget.py::test_the_freeze_index_is_built_once_per_freeze_list",
+        "tests/tick/steps/test_claim_order.py::test_ready_by_lane_orders_every_lane_from_one_claim_view"
+      ],
+      "retires": "The spawn pass claim order and its replayed ledger timing clauses retire with the legacy spawn pass."
     },
     "swarm-tick-cached-ledger": {
       "covered_by": [
@@ -79,17 +102,27 @@
     "swarm-tick-panic-holds-spawn": {
       "covered_by": [
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
-      ]
+      ],
+      "retires": "The spawn due clause retires with the spawn due marker; the dispatch seat clause stays covered."
     },
     "swarm-tick-spawn": {
       "retires": "The behaviour is the legacy tick spawn step itself; the events engine places through hub offers, spoke takes and hub admission."
+    },
+    "tick-runtime-port-fence": {
+      "covered_by": [
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_fences_its_pass_runtime_and_acts_through_the_fenced_one_after",
+        "tests/tick/test_runtime_port_fence.py::test_a_runtime_port_without_a_fence_refuses_to_fence",
+        "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
+      ],
+      "retires": "The ack pass clauses retire with the legacy launch acknowledgement collection."
     },
     "tick-spawn-metrics-processes": {
       "covered_by": [
         "tests/tick/test_spawn_metrics_ports.py::test_a_failing_claim_cap_writes_its_fail_open_row_through_the_metrics_port",
         "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
         "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port"
-      ]
+      ],
+      "retires": "The process table rescan clause belongs to the legacy spawn launch; the claim cap rows stay because hub admission calls the same lives check."
     },
     "tick-time-left-server-error": {
       "gap": "Its only test proves the pass keeps running by a legacy tick spawn; an events engine tick test must assert the skipped time left write and a later step."
