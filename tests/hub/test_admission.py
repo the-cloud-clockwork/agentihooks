@@ -105,9 +105,10 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     assert json.loads(rig.store.redis.get(held)) == admitted
     assert rig.store.seats.seat_of(name) == "eng-1@sw"
     assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("claimed", name)
-    assert rig.ledger.writes == [
-        (SLUG, "t1", {"state": "claimed", "claimed_by": name}, ("open",), {"claimed_by": "", "claim_generation": 0})
-    ]
+    from scripts.swarm_ledger import ledger_workspace
+
+    claimed = {"state": "claimed", "claimed_by": name, "workspace": str(ledger_workspace.folder(SLUG, "t1"))}
+    assert rig.ledger.writes == [(SLUG, "t1", claimed, ("open",), {"claimed_by": "", "claim_generation": 0})]
     assert admitted["hive"] == "hive-a"
     spawned = admitted["task"]
     assert (spawned["id"], spawned["seat"], spawned["claimed_by"]) == ("t1", "eng-1@sw", name)
@@ -861,4 +862,120 @@ def test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledge
         "overview": "o",
         "phases": [{"id": "p1", "title": "build", "depends_on": []}],
     }
+    json.dumps(admitted)
+
+
+def _github_heads(monkeypatch: pytest.MonkeyPatch, found: dict[str, Any]) -> list[dict[str, str]]:
+    from scripts.swarm import merge_queue
+
+    asked: list[dict[str, str]] = []
+
+    def graphql(query: str, variables: dict[str, str], run: Any = None) -> dict[str, Any]:
+        asked.append(variables)
+        return {"repository": found}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    return asked
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_reclaimed_task_continues_from_its_recorded_branch_read_through_github(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    rig.rows["t1"]["branch"] = "engineer-old"
+    asked = _github_heads(monkeypatch, {"b0": {"target": {"oid": "abc123"}}})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    expected = {
+        "remote_branch": "engineer-old",
+        "remote_head": "abc123",
+        "continue_from": "origin/engineer-old",
+        "fresh_reason": "none",
+    }
+    assert admitted["task"]["reclaim"] == expected
+    assert rig.store.reclaims(SLUG) == {admitted["name"]: expected}
+    assert asked == [{"owner": "acme", "name": "app", "b0": "refs/heads/engineer-old"}]
+    json.dumps(admitted)
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_handed_off_task_carries_its_handoff_and_resolved_envelope(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    rig.rows["t1"]["branch"] = "engineer-old"
+    rig.store.put_handoff(SLUG, "t1", "handoff text", envelope={"reason": "recycle"})
+    _github_heads(monkeypatch, {"b0": {"target": {"oid": "abc123"}}})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"]["handoff"] == "handoff text"
+    assert admitted["task"]["handoff_envelope"] == {
+        "reason": "recycle",
+        "remote_branch": "engineer-old",
+        "remote_head": "abc123",
+        "continue_from": "origin/engineer-old",
+        "fresh_reason": "none",
+    }
+    assert "reclaim" not in admitted["task"]
+    assert rig.store.reclaims(SLUG) == {}
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_the_claim_write_scaffolds_the_workspace_clears_a_protected_branch_and_sets_the_lane_kind(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.swarm_ledger import ledger_workspace
+
+    rig.store.update(SLUG, lanes={"eng": {"kind": "ops"}})
+    rig.rows["t1"]["branch"] = "dev"
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    folder = ledger_workspace.folder(SLUG, "t1")
+    [(_, _, fields, _, _)] = rig.ledger.writes
+    assert fields == {
+        "state": "claimed",
+        "claimed_by": admitted["name"],
+        "workspace": str(folder),
+        "branch": "",
+        "kind": "ops",
+    }
+    assert (folder / "steering.md").read_text(encoding="utf-8").startswith("# t1: title t1")
+    assert (admitted["task"]["workspace"], admitted["task"]["branch"], admitted["task"]["kind"]) == (
+        str(folder),
+        "",
+        "ops",
+    )
+    assert "reclaim" not in admitted["task"]
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_the_claim_write_keeps_a_real_branch_and_a_task_kind(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.store.update(SLUG, repo_origin="github.com/acme/app", lanes={"eng": {"kind": "ops"}})
+    rig.rows["t1"].update(branch="engineer-old", kind="research")
+    _github_heads(monkeypatch, {"b0": None})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    [(_, _, fields, _, _)] = rig.ledger.writes
+    assert set(fields) == {"state", "claimed_by", "workspace"}
+    assert admitted["task"]["reclaim"]["continue_from"] == "fresh"
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_an_admitted_task_carries_its_territory_overlaps_and_its_group(rig: SimpleNamespace) -> None:
+    rig.rows["t1"].update(territory=["scripts/hub"], group_members=["t2", "gone"])
+    rig.rows["t2"].update(state="pr", territory=["scripts/hub/admission.py"], description="the ci task")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"]["overlaps"] == [
+        {"task": "t2", "claimant": "", "areas": ["scripts/hub/admission.py"], "checks": True}
+    ]
+    assert admitted["task"]["group"] == [{"id": "t2", "title": "title t2", "description": "the ci task"}]
     json.dumps(admitted)
