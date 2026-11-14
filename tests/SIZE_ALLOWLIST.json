@@ -274,9 +274,6 @@
   "C901": 25,
   "PLR0912": 27
  },
- "scripts/tick/steps/place.py::_spawn": {
-  "PLR0913": 8
- },
  "tests/swarm/test_drain_watch.py::_drain_swarm": {
   "PLR0913": 9
  }

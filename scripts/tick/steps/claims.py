@@ -53,7 +53,6 @@ class Placed:
     remote_control: dict[str, Any] = field(default_factory=dict)
     desired_route_kind: str | None = None
     conversation_id: str = ""
-    launch_job: dict[str, Any] = field(default_factory=dict)
 
 
 class Ledger(Protocol):

@@ -255,12 +255,25 @@ def test_the_help_states_what_the_check_fails_on(capsys):
     assert "Fail when hive, controller or ledger NATS grants differ from antoncore users." in lines
 
 
-def test_the_member_grants_render_the_minted_member_claims():
+@pytest.mark.feature("hub-only-execution-stop")
+def test_the_member_grants_render_the_minted_member_claims() -> None:
     claims = nats_grant.member_claims(grants.MEMBER_KEY)
     rendered = grants.member_grants(str(ROOT))
     assert claims["sub"] == {"allow": [grants.MEMBER_INBOX]}
-    publish = frozenset({*nats_grant.MEMBER_PUBLISH, "slots.*.*"})
-    assert rendered["publish"] == {"allow": publish, "deny": frozenset()}
+    publish = frozenset({*nats_grant.MEMBER_PUBLISH, "slots.*.*", "exits.*.*"})
+    assert rendered["publish"] == {
+        "allow": publish,
+        "deny": frozenset(
+            {
+                "swarm.*.execution.stop",
+                "swarm.*.execution.stop.>",
+                "swarm.*.events.execution.stop",
+                "swarm.*.events.execution.stop.>",
+                "swarm.*.execution.exited",
+                "swarm.*.events.execution.exited",
+            }
+        ),
+    }
     assert rendered["subscribe"] == {"allow": frozenset({"_INBOX.>"}), "deny": frozenset()}
 
 
@@ -391,7 +404,7 @@ def test_the_controller_grants_render_the_controller_claims():
     assert claims["type"] == "user"
     assert grants.controller_grants(str(ROOT)) == {
         "publish": {"allow": frozenset(nats_grant.CONTROLLER_PUBLISH), "deny": frozenset()},
-        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots", "slots.*.*"}), "deny": frozenset()},
+        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots", "slots.*.*", "exits.*.*"}), "deny": frozenset()},
     }
 
 

@@ -1,6 +1,5 @@
 {
  "scripts/swarm/tick.py": [
-  "def _acknowledging_error",
   "def _running",
   "def tick"
  ],
@@ -231,9 +230,6 @@
   "step recover master: no feature",
   "step recover master: no lane",
   "step recover master: no writes",
-  "step spawn due: no effects",
-  "step spawn due: no feature",
-  "step spawn due: no lane",
   "step spawn hold clear: no effects",
   "step spawn hold clear: no feature",
   "step spawn hold clear: no lane",
@@ -261,16 +257,9 @@
   "step codex hook order: no feature",
   "step codex hook order: no lane",
   "step codex hook order: no writes",
-  "step collect acks: no effects",
-  "step collect acks: no feature",
-  "step collect acks: no lane",
-  "step collect acks: no writes",
   "step lost runner: no effects",
   "step lost runner: no feature",
   "step lost runner: no writes",
-  "step preempt: no effects",
-  "step preempt: no feature",
-  "step preempt: no lane",
   "step quota notice: no effects",
   "step quota notice: no feature",
   "step quota notice: no lane",

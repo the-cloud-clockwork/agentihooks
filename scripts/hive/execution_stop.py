@@ -160,7 +160,7 @@ class Stopper:
         exited = replace(
             found, id=f"exited:{found.id}", type="execution.exited", time=_now(), data=data, cause=found.id
         )
-        execution_events.emit(self.bus, exited)
+        execution_events.report_exit(self.bus, self.hive, exited)
         return STOPPED
 
     def _reap(self, name: str) -> bool:

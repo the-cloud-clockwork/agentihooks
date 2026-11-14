@@ -536,7 +536,10 @@ def on_session_end(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     _hive_join(payload, "end")
+    from hooks.context.scheduled_prompts import forget
     from hooks.lifecycle.guard import session_event
+
+    forget(payload)
 
     session_event()
 
@@ -1167,6 +1170,12 @@ def _operator_words(payload: dict) -> bool:
     except Exception as e:
         log("operator words record failed", {"error": str(e)})
         return False
+
+
+def _scheduled_prompt(payload: dict[str, Any]) -> None:
+    from hooks.context.scheduled_prompts import record
+
+    record(payload)
 
 
 def _operator_mode(payload: dict, typed: bool) -> None:
@@ -1910,6 +1919,7 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
+    _scheduled_prompt(payload)
     _swarm_after_tool(payload)
     _conditions = None
     try:

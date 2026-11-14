@@ -8,6 +8,7 @@ from scripts.gates import log as gate_log
 from scripts.swarm import cli
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm_ledger import ledger_kinds
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 NAME = "engineer@a1b2c3-0001"
@@ -150,7 +151,8 @@ def ops(env, monkeypatch, tmp_path):  # noqa: F811
     ledger.rows["t1"].update(kind="ops", pr_url=URL)
     ledger.pulls[URL] = PullRequest("MERGED", 1, 1, False, head="h1")
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     return store, ledger, read, tmp_path
 

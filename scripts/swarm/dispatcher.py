@@ -50,11 +50,6 @@ LANES = {"engineering": "eng", "ci": "ci"}
 LEVERAGE, QUEUE, GROUPING, PRIORITIES = "leverage-rank", "queue-head", "grouping", "priority-sweep"
 CHAIN = "chain-guard"
 GUARD = -1
-CHAIN_CLAIM = "chain guard claimed task {task} {elapsed} seconds after task {dep} merged on the critical chain"
-CHAIN_CLAIMED = (
-    "The dispatcher's chain guard gave this task the next free {lane} seat {elapsed} seconds after the task before "
-    "it on the critical chain merged."
-)
 SKIPPED = "skipped "
 WINDOW = (None, "high", "urgent")
 UNCOMMENTED = "; the ledger did not take its comment"
@@ -159,6 +154,10 @@ def claim_key(config, doc):
     return lambda task: (_band(task, fixed, guard), position.get(task["id"], len(lined)))
 
 
+def _merged(task, known):
+    return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
+
+
 def guarded(doc: dict, fix: str) -> set[str]:
     graph, known, deferred = hierarchy.project(doc)[0], {t["id"]: t for t in doc["tasks"]}, _deferred(doc)
     depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.claim_gate(t, doc, graph, fix)]})
@@ -168,35 +167,6 @@ def guarded(doc: dict, fix: str) -> set[str]:
         for task_id, length in depth.items()
         if length + 1 >= longest and _merged(known[task_id], known) and task_id not in deferred
     }
-
-
-def _merged(task, known):
-    return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
-
-
-def chain_claimed(
-    slug: str, config: Any, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int
-) -> list[str]:
-    if config.autonomy not in APPLIES or task["id"] not in guarded(doc, freeze.fix_phase(config)):
-        return []
-    return _chain_report(slug, ledger, doc, task, lane, now_ms)
-
-
-def _chain_report(
-    slug: str, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int
-) -> list[str]:
-    known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
-    times = [
-        (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
-    ]
-    if not times:
-        return []
-    merged_at, dep = max(times)
-    elapsed = (now_ms - merged_at) // 1000
-    text = CHAIN_CLAIM.format(task=task["id"], elapsed=elapsed, dep=dep)
-    said = _comment(slug, ledger, task, CHAIN_CLAIMED.format(lane=lane, elapsed=elapsed))
-    action = Action(CHAIN, "apply", text + said, task)
-    return [action.text] + log(slug, [action], now_ms)
 
 
 def _band(task, fixed, guard):

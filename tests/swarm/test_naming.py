@@ -188,15 +188,18 @@ def test_the_gate_turns_red_on_a_planted_name(tmp_path, planted):
 
 def test_a_swarm_without_a_code_gets_one_at_its_next_tick_and_spawns_new_names(store):
     from scripts.swarm.tick import tick
+    from tests.helpers.seat import seat_agent
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     store.redis.hset(store.key("sw", "config"), "code", "")
     store.names.release("sw")
     rt = FakeRuntime()
-    tick("sw", store, FakeLedger([{"id": "t1"}]), rt, 1_000)
+    ledger = FakeLedger([{"id": "t1"}])
+    tick("sw", store, ledger, rt, 1_000)
+    seat_agent(store, ledger, "sw", "t1", clock=lambda: 1_000)
     code = store.config("sw").code
     assert code and code != "a1b2c3"
-    assert [name for _, name, _ in rt.spawned] == [f"engineer@{code}-0001"]
+    assert [agent.name for agent in store.agents("sw") if agent.lane == "eng"] == [f"engineer@{code}-0001"]
     assert [name for name, _ in rt.masters] == [f"master@{code}-0001"]
     assert store.names.entry(f"engineer@{code}-0001")["spawned_at"] == 1_000
 

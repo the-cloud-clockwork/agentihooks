@@ -3,6 +3,7 @@ import json
 import sys
 import unittest.mock
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -12,6 +13,7 @@ import ledger_core as core  # noqa: E402
 
 from scripts.swarm import cli as swarm_cli  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_kinds, workflow_task  # noqa: E402
+from tests.helpers.seat import SLUG, seat_agent  # noqa: E402
 from tests.swarm.test_cli import env, run  # noqa: E402, F401
 from tests.swarm_ledger import test_task_kinds as kinds  # noqa: E402
 
@@ -147,15 +149,22 @@ def test_the_ledger_refuses_done_without_a_passed_workflow_and_a_pass_verdict():
     assert (rejected, state["tasks"][0]["state"]) == ([], "done")
 
 
-def _workflow_task(env, monkeypatch, tmp_path, state=None, verdict=None):  # noqa: F811
-    _, rows, _ = env
+def _workflow_task(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    state: dict[str, Any] | None = None,
+    verdict: dict[str, Any] | None = None,
+) -> Any:
+    store, rows, _ = env
     if state is not None:
         (tmp_path / workflow_task.STATE).write_text(json.dumps(state))
     if verdict is not None:
         (tmp_path / workflow_task.VERDICT).write_text(json.dumps(verdict))
     rows.rows["t1"].update(kind="workflow", workflow="simple-workflow")
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, rows, SLUG, "t1")
+    seat_agent(store, rows, SLUG, "t2")
     rows.rows["t1"]["workspace"] = str(tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     return rows

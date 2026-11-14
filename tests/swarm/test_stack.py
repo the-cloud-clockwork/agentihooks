@@ -13,13 +13,14 @@ from scripts.gates.verdicts import Verdicts
 from scripts.handoff import check as handoff_check
 from scripts.handoff import transfers
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
+from scripts.swarm import cli, dispatcher, stack
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_comments, task_dependencies
+from scripts.swarm_ledger import ledger_comments
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState, Comment
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers import store_seed
 from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 from tests.swarm.test_ready import seated
@@ -296,26 +297,6 @@ def test_park_stacks_on_dev_when_every_open_dependency_is_a_branchless_non_code_
         REMOVE,
     ]
     assert json.loads(capsys.readouterr().out)["stacked_base"] == BASE
-
-
-def test_a_task_parked_on_a_branchless_ops_dependency_waits_then_goes_to_the_next_engineer(parked):
-    store, ledger, rt, _, doc = parked
-    _branchless_ops(ledger)
-    text = doc.read_text()
-    assert park(doc) == 0
-    assert store.handoff("sw", "t1") == text
-    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
-    assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
-    assert not task_dependencies.ready(ledger.rows["t1"], ledger.rows)
-    assert claim_hold.waits(ledger.rows["t1"], ledger.rows) == "it waits on task a"
-    ledger.rows["a"]["state"] = "done"
-    ledger.update_task = type(ledger).update_task.__get__(ledger)
-    before = len(rt.tasks)
-    tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
-    [launched] = [task for task in rt.tasks[before:] if task["id"] == "t1"]
-    assert (launched["parked_on"], launched["stacked_base"], launched["stack_base"]) == (["a"], BASE, [])
-    assert launched["handoff"] == text
-    assert ledger.rows["t1"]["state"] == "claimed" and store.claimant("sw", "t1") != AGENT
 
 
 def test_park_refuses_a_malformed_document(parked, capsys):
@@ -1069,29 +1050,16 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
 
 def test_park_marks_the_next_start_as_after_a_park(parked, capsys):
     store, _, _, _, doc = parked
-    assert store.take_restart("sw", "t1") == ""
+    assert store_seed.take_restart(store, "sw", "t1") == ""
     assert park(doc) == 0
-    assert store.take_restart("sw", "t1") == "park"
+    assert store_seed.take_restart(store, "sw", "t1") == "park"
 
 
 def test_a_refused_park_leaves_no_restart_mark(parked, capsys):
     store, ledger, _, _, doc = parked
     del ledger.rows["t1"]["branch"]
     assert park(doc) == 1
-    assert store.take_restart("sw", "t1") == ""
-
-
-def test_the_life_launched_after_a_park_is_recorded_as_after_the_park(parked):
-    store, ledger, rt, _, doc = parked
-    assert park(doc) == 0
-    agent_steps._reap("sw", store, ledger, rt, ledger.rows, 1)
-    ledger.rows["a"]["state"] = "done"
-    ledger.update_task = type(ledger).update_task.__get__(ledger)
-    tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
-    lives = sorted(
-        (row["agent"] == AGENT, row["state"], row["after"]) for row in store.launches("sw") if row["task"] == "t1"
-    )
-    assert lives == [(False, "started", "park"), (True, "started", "")]
+    assert store_seed.take_restart(store, "sw", "t1") == ""
 
 
 def test_shell_runs_with_captured_text_and_a_timeout(monkeypatch):

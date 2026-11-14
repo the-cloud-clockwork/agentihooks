@@ -357,8 +357,9 @@ def test_worker_smoke_runs_independent_proofs_in_parallel_and_compares_every_inv
     compare = workflow["jobs"]["worker-image-compare"]
     assert compare["needs"] == ["worker-image"]
     assert compare["if"] == "always()"
-    assert compare["steps"][0]["env"]["PROOF_STATUS"] == "${{ needs.worker-image.result }}"
-    assert '[[ "$PROOF_STATUS" == success ]]' in compare["steps"][0]["run"]
+    assert compare["steps"][0]["uses"] == "actions/checkout@v4"
+    assert compare["steps"][1]["env"]["PROOF_STATUS"] == "${{ needs.worker-image.result }}"
+    assert '[[ "$PROOF_STATUS" == success ]]' in compare["steps"][1]["run"]
     assert any(
         'smoke.sh "$RUNNER_TEMP/worker-image-evidence" compare "$GITHUB_SHA"' in step.get("run", "")
         for step in compare["steps"]

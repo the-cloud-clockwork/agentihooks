@@ -13,7 +13,6 @@ from scripts.swarm import (
     failed_panes,
     hash_pages,
     launch_check,
-    launch_job,
     local_slots,
     preempt,
     prerequisite_wait,
@@ -22,7 +21,6 @@ from scripts.swarm import (
 )
 from scripts.swarm import tick as swarm_tick
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.tick.steps import place
 
 SLUG = "sw"
 LAUNCH_CHECKED = True
@@ -33,7 +31,6 @@ GUARDED = (
     swarm_tick.MASTER_WAITING,
     "launch-checks",
     "launch-check-reports",
-    launch_job.KEY,
     preempt.ASKED,
     "prerequisite-waits",
     failed_panes.HELD,
@@ -119,14 +116,6 @@ def test_picked_refuses_a_reply_that_misses_a_named_field() -> None:
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")
-def test_place_holds_spawns_for_another_swarms_waiting_master(store: RedisStore) -> None:
-    store.redis.hset(swarm_tick.MASTER_WAITING, mapping={SLUG: "100", "other": "100", "old": "-999999999"})
-    assert place._held_for_master(SLUG, store, 200) == [
-        "holding spawns: swarm other waits on a session slot for its master"
-    ]
-
-
-@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_launch_check_reads_pending_checks_and_reports_paged(store: RedisStore) -> None:
     launch_check.begin(store, SLUG, _agent("engineer@1-1", "t1"), 10)
     held = _agent("engineer@1-2", "t2")
@@ -136,15 +125,6 @@ def test_launch_check_reads_pending_checks_and_reports_paged(store: RedisStore) 
     assert sorted(found["agent"] for found in launch_check.reports(store, SLUG)) == ["engineer@1-2", "engineer@1-3"]
     assert launch_check.judged(store, SLUG) == {"engineer@1-1", "engineer@1-2"}
     assert [finding.subject.split("/")[0] for finding in launch_check.findings(store, SLUG)] == ["profile"]
-
-
-@pytest.mark.feature("swarm-launch-bounded-reads")
-def test_launch_job_collect_drops_a_job_whose_agent_is_gone(store: RedisStore) -> None:
-    key = store.key(SLUG, launch_job.KEY)
-    store.redis.hset(key, "engineer@1-9", json.dumps({"task": "t9", "placed": {}}))
-    run = SimpleNamespace(store=store, slug=SLUG)
-    assert launch_job.collect(run) == ([], set())
-    assert not store.redis.exists(key)
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")

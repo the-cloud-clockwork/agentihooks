@@ -97,18 +97,6 @@ class FencedRuntime:
         router = getattr(self.runtime, "router", None)
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
-    def begin_placement_pass(self) -> None:
-        if launch := getattr(self.runtime, "hive_launch", None):
-            launch.placement_cache = {}
-            launch.herdr.pass_memo = {}
-        self._local_slots_cache = local_slots.PassCache()
-
-    def end_placement_pass(self) -> None:
-        if launch := getattr(self.runtime, "hive_launch", None):
-            launch.placement_cache = None
-            launch.herdr.pass_memo = None
-        self._local_slots_cache = None
-
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
         return "" if _to_workstation(lane, refused, self._pass_memo()) else refused
@@ -304,24 +292,6 @@ class FencedRuntime:
         if not isinstance(selected, Selection) or selected.hive == hive_id():
             return task
         return {**task, "workstation": False, "hive": selected.hive}
-
-    def collect(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
-        from scripts.swarm.tick import SpawnError
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
-        lease.require_epoch(self.store, self.slug, self.held.epoch)
-        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        outcome = self._changing(self.runtime.hive_launch.collect, request)
-        if not outcome.ok:
-            raise SpawnError(outcome.detail, outcome.status)
-        return outcome.value
-
-    def expire(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
-        lease.require_epoch(self.store, self.slug, self.held.epoch)
-        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        return self._changing(self.runtime.hive_launch.expire, request)
 
 
 def _host_reading(store: RedisStore, machine: str) -> dict[str, Any] | None:

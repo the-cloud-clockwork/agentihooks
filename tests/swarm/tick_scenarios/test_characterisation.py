@@ -8,7 +8,6 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from contextvars import ContextVar
 from dataclasses import asdict, is_dataclass, replace
 from itertools import count
 from pathlib import Path
@@ -247,59 +246,6 @@ def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
     assert record == expected, "GOLDEN_RECORD=" + json.dumps({key: record}, sort_keys=True)
 
 
-@pytest.mark.feature("swarm-tick-dead-remote-budget")
-@pytest.mark.parametrize("entry", ["tick", "run_tick"])
-def test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes(
-    entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from scripts.swarm import fencing
-    from scripts.tick.deadline import Deadline
-
-    elapsed = [0.0]
-    dropping: ContextVar[bool] = ContextVar("dropping", default=False)
-    dropped: list[float] = []
-    reaped: list[float] = []
-    drop, reap, read = tick_module._drop_remote, agent_steps._reap, fencing.read
-
-    def clock() -> float:
-        return elapsed[0]
-
-    def deadline(cls: type[Deadline], seconds: float, *, clock: Callable[[], float] = clock) -> Deadline:
-        return cls(clock() + seconds, clock)
-
-    def archive_read(store: Any, slug: str) -> dict[str, Any]:
-        if dropping.get():
-            elapsed[0] += 3.0
-        return read(store, slug)
-
-    def measured_drop(*args: Any, **kwargs: Any) -> str:
-        started = clock()
-        token = dropping.set(True)
-        try:
-            action: str = drop(*args, **kwargs)
-        finally:
-            dropping.reset(token)
-        dropped.append(clock() - started)
-        return action
-
-    def measured_reap(*args: Any, **kwargs: Any) -> list[str]:
-        started = clock()
-        actions: list[str] = reap(*args, **kwargs)
-        reaped.append(clock() - started)
-        return actions
-
-    monkeypatch.setattr(Deadline, "after", classmethod(deadline))
-    monkeypatch.setattr(fencing, "read", archive_read)
-    monkeypatch.setattr(tick_module, "_drop_remote", measured_drop)
-    monkeypatch.setattr(agent_steps, "_reap", measured_reap)
-    record = replay("hive-roll", entry, monkeypatch, tmp_path)
-    assert len(dropped) == 10
-    assert max(dropped) < 5.0
-    assert len(reaped) == 2
-    assert max(reaped) < 22.0
-    assert any(action.startswith("spawned engineer") for actions in record["actions"][:2] for action in actions)
-
-
 @pytest.mark.feature("swarm-tick-characterisation")
 @pytest.mark.parametrize("entry", ["tick", "run_tick"])
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -472,7 +418,7 @@ def test_running_pass_lists_live_names_once_plus_once_per_launch(
     monkeypatch.setattr(FakeRuntime, "live_names", counted)
     record = replay("running", "run_tick", monkeypatch, tmp_path)
     launches = sum(1 for call in record["runtime_writes"] if call[0] == "spawn")
-    assert (len(listings), launches) == (3, 3), f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}"
+    assert (len(listings), launches) == (2, 1), f"LIVE_NAMES_LISTINGS={len(listings)} LAUNCHES={launches}"
 
 
 def assert_rests(record: dict[str, Any], gap_s: float, lane: str | None) -> set[str]:

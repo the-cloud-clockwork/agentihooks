@@ -1,7 +1,6 @@
 """The start and observation steps run the tick's hand written start and observe calls from the registry."""
 
-from contextlib import contextmanager
-from types import MappingProxyType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -98,20 +97,12 @@ def _observe_fakes(monkeypatch: pytest.MonkeyPatch, store: _Store) -> list[tuple
     monkeypatch.setattr(tick_module, "_recover_master", _fake(seen, "recover", ["recovered"]))
     monkeypatch.setattr(tick_module.freeze, "watched", lambda slug, store, ledger, doc: {**doc, "watched": True})
     monkeypatch.setattr(automated_gc, "run", _fake(seen, "cleanup", ["cleaned"]))
-    monkeypatch.setattr(tick_module, "_spawn", _fake(seen, "spawn", ["spawned"]))
     monkeypatch.setattr(tick_module.exits, "sweep", _fake(seen, "exits", ["exited"]))
     monkeypatch.setattr(tick_module.master_start, "observe", _fake(seen, "start watch", ["watched"]))
     monkeypatch.setattr(tick_module, "_launch_checks", _fake(seen, "launch checks", ["checked"]))
     monkeypatch.setattr(tick_module.resume, "track_outages", _fake(seen, "outages", None))
     monkeypatch.setattr(tick_module, "_verify", _fake(seen, "verify", ["verified"]))
     monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: False)
-
-    @contextmanager
-    def placement(runtime: object) -> Any:
-        seen.append(("placement", (runtime,)))
-        yield
-
-    monkeypatch.setattr(tick_module, "_placement_pass", placement)
     return seen
 
 
@@ -138,7 +129,6 @@ def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> No
         "recover master",
         "ledger state",
         "automated cleanup",
-        "spawn due",
         "exits sweep",
         "master start watch",
         "launch checks",
@@ -146,7 +136,7 @@ def test_the_start_and_observe_steps_sit_in_their_groups_in_legacy_order() -> No
         "verify",
         "lab capacity",
     ]
-    assert len(observe.STEPS) == 16
+    assert len(observe.STEPS) == 15
 
 
 def test_a_running_swarm_loads_its_config_and_skips_the_stopped_branch() -> None:
@@ -223,7 +213,6 @@ def test_the_observe_group_runs_its_calls_with_the_pass_state(monkeypatch: pytes
         "moved",
         "recovered",
         "cleaned",
-        "spawned",
         "exited",
         "watched",
         "checked",
@@ -240,8 +229,6 @@ def test_the_observe_group_runs_its_calls_with_the_pass_state(monkeypatch: pytes
         "fail over",
         "recover",
         "cleanup",
-        "placement",
-        "spawn",
         "exits",
         "start watch",
         "launch checks",
@@ -255,7 +242,6 @@ def test_the_observe_group_runs_its_calls_with_the_pass_state(monkeypatch: pytes
     assert calls["recover"] == ("sw", config, store, "runtime", 7)
     assert calls["cleanup"][:5] == ("sw", store, ledger, "runtime", 7)
     assert calls["cleanup"][5].args == ("sw", store, ledger, rows)
-    assert calls["spawn"] == ("sw", config, store, ledger, "runtime", rows, doc, 7)
     assert calls["exits"][1:3] == ("sw", store)
     assert calls["exits"][0].redis is store.redis
     assert calls["exits"][3]() == rows
@@ -263,55 +249,7 @@ def test_the_observe_group_runs_its_calls_with_the_pass_state(monkeypatch: pytes
     assert calls["launch checks"] == ("sw", store, ledger, "runtime", rows, doc, 7)
     assert calls["outages"] == ("sw", store, "runtime", rows, 7)
     assert calls["verify"] == ("sw", store, ledger, "runtime", rows, 7)
-    assert store.redis.keys["sw:spawn-due"] == 7
-
-
-@pytest.mark.parametrize(
-    ("state", "engine_name", "sleeping", "keys", "spawned", "due"),
-    [
-        ("running", "tick", False, {}, False, 7),
-        ("paused", "tick", False, {"sw:spawn-due": 1}, False, 1),
-        ("running", tick_module.EVENTS_ENGINE, False, {"sw:spawn-due": 1}, False, 1),
-        ("running", "tick", True, {"sw:spawn-due": 1}, False, 1),
-    ],
-)
-def test_the_spawn_due_step_spawns_only_when_due_on_a_running_tick_swarm(
-    monkeypatch: pytest.MonkeyPatch,
-    state: str,
-    engine_name: str,
-    sleeping: bool,
-    keys: dict[str, object],
-    spawned: bool,
-    due: object,
-) -> None:
-    store = _Store(state, dict(keys))
-    seen = _observe_fakes(monkeypatch, store)
-    monkeypatch.setattr(tick_module.lifetime, "sleeping", lambda slug, store, rows: sleeping)
-    pass_state, box = _state(store)
-    box.update(config=SimpleNamespace(state=state, engine=engine_name), doc={}, rows={})
-    step = engine.group_steps("observe")[6]
-    assert step.run(_ctx(pass_state)).writes[0].value == []
-    assert ("spawn" in [name for name, _ in seen]) is spawned
-    assert store.redis.keys.get("sw:spawn-due") == due
-
-
-def test_the_spawn_due_step_passes_a_row_copy_and_refreshes_box_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _Store("running", {"sw:spawn-due": 1})
-    seen = _observe_fakes(monkeypatch, store)
-    rows: Any = MappingProxyType({"t1": {"id": "t1"}})
-    box: dict[str, Any] = {"rows": rows, "doc": {"tasks": []}}
-    config = SimpleNamespace(state="running", engine="tick")
-    step: Any = observe.step_spawn_due
-    actions = step("sw", config, store, _Ledger(), "runtime", 7, box)
-    assert actions == ["spawned"]
-    spawn_calls = [args for name, args in seen if name == "spawn"]
-    assert len(spawn_calls) == 1
-    claimed = spawn_calls[0][5]
-    assert claimed == dict(rows)
-    assert claimed is not None
-    assert claimed is not rows
-    assert box["rows"] == dict(rows)
-    assert box["rows"] is not rows
+    assert store.redis.keys["sw:spawn-due"] == 1
 
 
 def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkeypatch: pytest.MonkeyPatch) -> None:

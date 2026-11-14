@@ -98,6 +98,17 @@ def test_the_recorded_same_code_runs_fit_inside_the_margin_the_workflow_states()
     assert paired.same_code_bound(recorded) <= margin
 
 
+def test_each_load_pair_job_allows_as_long_as_the_hierarchy_job_that_runs_the_same_install() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]
+    load, hierarchy = jobs["load"], jobs["hierarchy"]
+    install = "Install dependencies shared by both revisions"
+    assert [step["run"] for step in load["steps"] if step.get("name") == install] == [
+        step["run"] for step in hierarchy["steps"] if step.get("name") == install
+    ]
+    assert load["runs-on"] == hierarchy["runs-on"]
+    assert load["timeout-minutes"] >= hierarchy["timeout-minutes"]
+
+
 def compare_mode() -> tuple[int, float]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]
     pairs = jobs.get("compare", {}).get("strategy", {}).get("matrix", {}).get("pair", [1, 2])

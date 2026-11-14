@@ -1,0 +1,21 @@
+rules:
+  - id: lease-renewal-skips-finished-agents
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A claim lease renewal refreshes the claim of a swarm agent without reading its state, so a finished agent keeps
+      its claim and its reopened task is never offered again. Leave out agents whose state is finished.
+    patterns:
+      - pattern-inside: |
+          for $AGENT in $STORE.agents(...):
+              ...
+      - pattern: $STORE.refresh(..., $AGENT.name, ...)
+      - pattern-not-inside: |
+          if <... $AGENT.state ...>:
+              ...
+      - pattern-not-inside: |
+          for $AGENT in $STORE.agents(...):
+              ...
+              if <... $AGENT.state ...>:
+                  continue
+              ...

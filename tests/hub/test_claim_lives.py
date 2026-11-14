@@ -7,6 +7,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hub import claims, registry
 from scripts.swarm.store import AgentRecord
+from tests.helpers import store_seed
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
 
@@ -164,7 +165,7 @@ def test_a_projection_that_raises_after_the_write_is_projected_again_on_redelive
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())
-    rig.store.record_launch(SLUG, AgentRecord(admitted["name"], "eng", "t1"), state)
+    store_seed.record_launch(rig.store, SLUG, AgentRecord(admitted["name"], "eng", "t1"), state)
 
     claims.Claims(rig.store).handle(started(admitted))
 
@@ -182,7 +183,7 @@ def test_reset_clears_the_pending_life(rig):
 
 def test_a_refund_racing_a_new_pending_start_cancels_that_start(rig, monkeypatch):
     for _ in range(2):
-        rig.store.count_claim(SLUG, "t1")
+        store_seed.count_claim(rig.store, SLUG, "t1")
     assert rig.store.claim(SLUG, "t1", "engineer@race", 60_000)
     real, pending = rig.store._started_lives, rig.store.key(SLUG, "pending-lives")
 
@@ -237,7 +238,7 @@ def test_a_delayed_start_cannot_spend_a_reset_budget(rig):
 
 def test_a_pending_start_refund_preserves_earlier_lives(rig):
     for _ in range(2):
-        rig.store.count_claim(SLUG, "t1")
+        store_seed.count_claim(rig.store, SLUG, "t1")
     admitted = rig.admitter.admit(SLUG, ask())
     event = started(admitted)
     assert rig.store.refund_held_claim(SLUG, "t1", admitted["name"], rig.store.claim_generation(SLUG, "t1"))
@@ -254,7 +255,7 @@ def test_the_first_pending_start_can_be_refunded(rig):
 
 
 def test_a_reopened_admission_spends_no_life_and_a_counted_start_refunds_normally(rig):
-    rig.store.count_claim(SLUG, "t1")
+    store_seed.count_claim(rig.store, SLUG, "t1")
     reopened = rig.admitter.admit(SLUG, ask())
     assert rig.admitter.reopen(SLUG, ask())
     claims.Claims(rig.store).handle(started(reopened))
@@ -271,7 +272,7 @@ def test_a_legacy_counted_start_drops_a_stale_pending_life_so_its_refund_spends_
     rig.admitter.admit(SLUG, ask())
     rig.store.release(SLUG, "t1", rig.store.claimant(SLUG, "t1"))
     assert rig.store.claim(SLUG, "t1", "engineer@legacy", 60_000)
-    rig.store.count_claim(SLUG, "t1")
+    store_seed.count_claim(rig.store, SLUG, "t1")
 
     assert rig.store.refund_held_claim(SLUG, "t1", "engineer@legacy", rig.store.claim_generation(SLUG, "t1"))
     assert rig.store.claims(SLUG, "t1") == 0

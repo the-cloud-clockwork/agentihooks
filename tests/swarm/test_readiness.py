@@ -268,17 +268,3 @@ def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus)
     queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
     delivery = readiness.take(queue, lambda: None, 0)
     assert delivery.event.key == "a"
-
-
-def test_the_launchable_filter_keeps_no_task_under_the_events_engine() -> None:
-    from scripts.swarm.store import EVENTS_ENGINE
-
-    ready = [task("t1"), task("t2", workstation=True)]
-    assert readiness.launchable("legacy", {}, ready) == ready
-    assert readiness.launchable(EVENTS_ENGINE, {}, ready) == []
-
-
-def test_the_launchable_filter_keeps_only_the_tasks_a_capacity_decision_names() -> None:
-    ready = [task("t1"), task("t2"), task("t3")]
-    assert readiness.launchable("legacy", {"tasks": ["t3", "t1"]}, ready) == [ready[0], ready[2]]
-    assert readiness.launchable("legacy", {"tasks": []}, ready) == []

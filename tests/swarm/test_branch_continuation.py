@@ -1,6 +1,8 @@
+import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -136,12 +138,27 @@ class TestReclaimAfterARetirement(WtBase):
         store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
         store.create(SwarmConfig("sw", str(self.primary), 1, 1))
         ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+        self._seat(store, ledger, runtime, 1_000)
         tick("sw", store, ledger, runtime, now_ms=1_000)
         return store, ledger, runtime, runtime.spawned[-1][1]
+
+    def _seat(self, store: RedisStore, ledger: Any, runtime: Any, at: int) -> None:
+        """Seats an owner on t1 through hub admission on the tick's own hive at ``at`` and logs it in ``runtime`` as
+        the removed tick spawn did: its name in ``spawned`` and the admitted launch task in ``tasks``."""
+        from scripts.hub import admission
+        from scripts.swarm import readiness
+        from tests.helpers.seat import seat_owner
+
+        generation = readiness.generation(ledger.task("sw", "t1"))
+        owner = seat_owner(store, ledger, runtime, "t1", at)
+        admitted = json.loads(store.redis.get(store.key("sw", admission.ADMITTED, "t1", str(generation))))
+        runtime.spawned.append((owner.lane, owner.name, "t1"))
+        runtime.tasks.append(admitted["task"])
 
     def _reclaim(self, store, ledger, runtime, first):
         runtime.live.discard(first)
         tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+        self._seat(store, ledger, runtime, 2_000 + STARTUP_GRACE_MS)
         successor = runtime.spawned[-1][1]
         self.assertNotEqual(successor, first)
         task = {"title": "task", "description": "task", **runtime.tasks[-1]}

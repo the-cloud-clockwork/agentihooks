@@ -14,7 +14,7 @@ from scripts.tick import registry
 from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
+from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, budgets, pass_domains
 
 Get = Callable[[str], Any]
 _IDENTITY_CONFLICT = "stale or changed execution identity"
@@ -304,6 +304,7 @@ def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: An
             + tick._drop(slug, store, ledger, rows, agent, refund=True)
         ]
     if tick.dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+        tick.dead_resume.note_resume(store, slug, agent, now_ms)
         return [f"resumed {agent.name}"]
     if agent not in store.agents(slug):
         return []
@@ -614,7 +615,7 @@ def _transfers(tick: Any, get: Get) -> Any:
     return tick.skip_refused(tick.transfers.observe, get("store"), get("slug"), get("runtime").live_names())
 
 
-LISTED = frozenset({"spawn due"})
+LISTED = budgets.OBSERVED
 ROWS = pass_domains("rows")
 
 STEPS = (

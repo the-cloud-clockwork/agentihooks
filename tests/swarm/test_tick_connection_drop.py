@@ -38,7 +38,7 @@ def test_a_dropped_connection_in_the_exit_sweep_is_retried_once(store, monkeypat
     runtime = FakeRuntime()
     tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert len(calls) == 2
-    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
 
 
 def test_an_exit_sweep_that_keeps_dropping_logs_and_the_tick_still_spawns(store, monkeypatch, capsys):
@@ -47,7 +47,7 @@ def test_an_exit_sweep_that_keeps_dropping_logs_and_the_tick_still_spawns(store,
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert len(calls) == 2
-    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
     assert (
         "scripts.inbox.exits.sweep skipped, its Redis connection dropped or timed out twice: Connection closed by server."
         in capsys.readouterr().err
@@ -61,7 +61,7 @@ def test_a_read_timeout_in_the_exit_sweep_is_retried_once(store, monkeypatch):
     runtime = FakeRuntime()
     tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert len(calls) == 2
-    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
 
 
 def test_an_exit_sweep_that_keeps_timing_out_logs_and_the_tick_still_spawns(store, monkeypatch, capsys):
@@ -70,7 +70,7 @@ def test_an_exit_sweep_that_keeps_timing_out_logs_and_the_tick_still_spawns(stor
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert len(calls) == 2
-    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
     assert (
         "scripts.inbox.exits.sweep skipped, its Redis connection dropped or timed out twice: Timeout reading from socket"
         in capsys.readouterr().err

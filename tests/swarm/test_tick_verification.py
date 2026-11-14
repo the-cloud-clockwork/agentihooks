@@ -1,12 +1,32 @@
 import pytest
 
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
-from tests.swarm.test_tick import FakeRuntime, store, tasks, workers  # noqa: F401
+from tests.helpers.seat import seat_owner
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, tasks, workers  # noqa: F401
+
+
+def seated(
+    store: RedisStore,  # noqa: F811
+    ledger: FakeLedger,
+    runtime: FakeRuntime,
+    *task_ids: str,
+    at: int = 1_000,
+) -> list[AgentRecord]:
+    """Seats a working owner on each of ``task_ids`` through hub admission on the tick's own hive at ``at``, standing
+    where the removed tick spawn left one: live in the fake ``runtime`` and logged in its ``spawned`` launches."""
+    owners = []
+    for task_id in task_ids:
+        owner = seat_owner(store, ledger, runtime, task_id, at)
+        runtime.spawned.append((owner.lane, owner.name, task_id))
+        owners.append(owner)
+    return owners
 
 
 @pytest.mark.parametrize("pr_url", ["", "https://github.com/org/repo/pull/1"])
 def test_a_released_verification_owner_frees_its_seat_without_reclaiming(store, pr_url):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     owner = workers(store)[0]
     ledger.rows["t1"].update(
@@ -20,6 +40,8 @@ def test_a_released_verification_owner_frees_its_seat_without_reclaiming(store, 
     store.release("sw", "t1", owner.name)
     released = dict(ledger.rows["t1"])
     ledger.rows["t2"] = {"id": "t2", "state": "open", "claimed_by": "", "lane": "eng"}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    seated(store, ledger, runtime, "t2", at=2_000)
     for at in (2_000, 3_000):
         tick("sw", store, ledger, runtime, now_ms=at)
         assert ledger.rows["t1"] == released
@@ -37,6 +59,7 @@ def test_a_released_verification_owner_frees_its_seat_without_reclaiming(store, 
 @pytest.mark.parametrize("state", ["open", "claimed", "pr"])
 def test_a_verification_release_at_the_repair_write_frees_the_owner(store, monkeypatch, generation, state):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     owner = workers(store)[0]
     store.put_handoff("sw", "t1", "Retained measurement handoff")
@@ -64,6 +87,7 @@ def test_a_verification_release_at_the_repair_write_frees_the_owner(store, monke
 @pytest.mark.parametrize("awaiting", ["", "reply"])
 def test_active_owner_repair_keeps_its_seat_and_restores_its_claim(store, state, awaiting):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     owner = workers(store)[0]
     ledger.rows["t1"].update(state=state, claimed_by="", awaiting=awaiting)
@@ -80,6 +104,7 @@ def test_active_owner_repair_keeps_its_seat_and_restores_its_claim(store, state,
 @pytest.mark.parametrize("state", ["claimed", "pr"])
 def test_a_verification_task_with_its_owner_keeps_running(store, state):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     owner = workers(store)[0]
     ledger.rows["t1"].update(state=state, awaiting="verify")
@@ -94,6 +119,7 @@ def test_concurrent_verification_releases_report_each_retirement_and_retry_time(
     from scripts.swarm import retire_watch
 
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1", "t2")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first, second = sorted(workers(store), key=lambda agent: agent.name)
     runtime.stuck.add(first.name)

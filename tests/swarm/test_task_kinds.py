@@ -1,6 +1,7 @@
 import pytest
 
 from scripts.swarm import cli, prompt
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research")
@@ -51,6 +52,8 @@ def _start(env, kind):  # noqa: F811
     ledger.rows["t1"]["kind"] = kind
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(store, ledger, "sw", "t1")
+    seat_agent(store, ledger, "sw", "t2")
     return store, ledger
 
 
