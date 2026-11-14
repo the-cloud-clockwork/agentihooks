@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import pytest
 
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from scripts.swarm.store import RedisStore
     from tests.swarm.test_tick import FakeRuntime
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 
@@ -21,7 +22,11 @@ class ClosingLedger(Protocol):
 
 
 @pytest.fixture
-def closing(env, monkeypatch, tmp_path):  # noqa: F811
+def closing(
+    env: tuple[RedisStore, Any, FakeRuntime],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> tuple[RedisStore, Any, FakeRuntime, Path]:
     store, ledger, rt = env
     ledger.calls = []
     ledger.summarize = lambda slug, note, by: ledger.calls.append(("summary", note, by))
@@ -30,6 +35,8 @@ def closing(env, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     return store, ledger, rt, tmp_path
 
 

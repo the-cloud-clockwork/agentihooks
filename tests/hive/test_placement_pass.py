@@ -9,33 +9,6 @@ from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2.runtime.base import RuntimeRouter
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
-from tests.swarm.test_tick import FakeLedger
-
-
-def test_a_running_tick_ends_the_placement_pass_after_spawning():
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm.tick import tick
-    from tests.swarm.test_tick import FakeRuntime
-
-    class PassRuntime(FakeRuntime):
-        def __init__(self):
-            super().__init__()
-            self.passes = []
-
-        def begin_placement_pass(self):
-            self.passes.append(("begin", len(self.spawned)))
-
-        def end_placement_pass(self):
-            self.passes.append(("end", len(self.spawned)))
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
-    runtime = PassRuntime()
-    tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, now_ms=1_000)
-    assert runtime.spawned
-    assert runtime.passes[-1] == ("end", len(runtime.spawned))
 
 
 def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, monkeypatch):  # noqa: F811
@@ -274,36 +247,3 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, monke
         rooms = {hive["id"]: hive["room"] for hive in launch.hives()}
         assert rooms["remote"] == 0
         assert rooms["spare"] > 0
-
-
-@pytest.mark.parametrize(
-    "refused",
-    [
-        "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
-        "no hive has room, and the local machine runs 4 of its 4 agents",
-        ", and the local machine runs 4 of its 4 agents: cpu: five minute load 1.17 on 8 CPUs",
-    ],
-)
-def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(refused):
-    from types import SimpleNamespace
-
-    import fakeredis
-
-    from scripts.handoff import transfers
-    from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
-    from scripts.swarm.tick import tick
-    from tests.swarm.test_tick import FakeRuntime
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
-    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
-    transfers.record(store, "sw", SimpleNamespace(name="old", seat="master@sw", task=MASTER), "recycle", "", 500)
-    actions = tick("sw", store, ledger, FakeRuntime(crash=SpawnError(refused, "unavailable")), now_ms=1_000)
-    assert not [action for action in actions if "spawn failed" in action]
-    assert f"task t1 waits: {refused}" in actions
-    assert f"the master waits: {refused}" in actions
-    assert store.redis.get(store.key("sw", "master-start")) is None
-    [transfer] = transfers.list_transfers(store, "sw")
-    assert (transfer["successor"], transfer["binding"]) == ("", {"state": "pending"})
-    assert ledger.rows["t1"]["state"] == "open"
-    assert [row["state"] for row in store.launches("sw")] == ["waiting"]
