@@ -4,9 +4,9 @@ import pytest
 
 from scripts.swarm import input_wait, timing
 from scripts.swarm import tick as tick_module
+from scripts.swarm.commands import hive_id
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
-from scripts.swarm.commands import hive_id
 from scripts.tick.steps import agents as agent_steps
 from tests.helpers.seat import Launched, seat_launched
 from tests.swarm import test_tick

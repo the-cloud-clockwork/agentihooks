@@ -6,12 +6,13 @@ import pytest
 
 from scripts.swarm import prompt, templates
 from scripts.swarm.store import AUTONOMY, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
-from tests.helpers.seat import seat  # noqa: F401
+from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, home, run, started  # noqa: F401
 from tests.swarm.test_runtime import _spawn_env
 from tests.swarm.test_tick import FakeRuntime
 
 TASK = {"id": "t1", "title": "x", "phase": "p1"}
+_fixture = env, seat
 
 
 def build(autonomy=None, lane="eng", **task):
@@ -129,7 +130,7 @@ def test_only_a_full_master_queues_follow_ups_without_asking():
 
 
 @pytest.mark.parametrize(("level", "awaiting"), [("assist", "approval"), ("delegate", ""), ("manual", "")])
-def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(  # noqa: F811
+def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(
     env: tuple[RedisStore, Any, FakeRuntime], seat: Callable[..., AgentRecord], level: str, awaiting: str
 ) -> None:
     _, ledger, _ = env
