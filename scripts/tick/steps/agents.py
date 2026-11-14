@@ -356,11 +356,14 @@ def _refusal_due(slug: Any, store: Any, rows: Any, agent: Any, observed: Any, no
 
 
 def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     if not tick.retire_watch.retire_unless_gone(
         store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
     ):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     tick.content_refusal.handoff(store, slug, agent, now_ms)
+    tick.timing.timed(stop_admitted, slug, agent, "refused")
     return [
         f"freed {agent.name} after repeated content refusals"
         + tick._drop(slug, store, ledger, rows, agent, refund=True)
@@ -368,6 +371,8 @@ def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
 
 
 def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     account = f"{agent.harness} account {agent.account}"
     if agent.lane == tick.MASTER:
         tick.revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
@@ -377,6 +382,7 @@ def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     tick.revoked_seats.worker_handoff(store, slug, agent, now_ms)
+    tick.timing.timed(stop_admitted, slug, agent, "revoked")
     return [
         f"freed the seat of {agent.name}: {account} was revoked"
         + tick._drop(slug, store, ledger, rows, agent, refund=True)
@@ -537,6 +543,8 @@ def _stuck_on_provider(slug: Any, store: Any, agent: Any, observed: Any, exhaust
 
 
 def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     if not tick.retire_watch.retire_unless_gone(
         store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
     ):
@@ -544,6 +552,7 @@ def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, age
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     tick.resume.free_seat(store, slug, agent, now_ms)
     tick.outage.clear_pane(store, slug, agent.name)
+    tick.timing.timed(stop_admitted, slug, agent, "stuck")
     return [
         f"freed the seat of {agent.name}, stuck on a provider error"
         + tick._drop(slug, store, ledger, rows, agent, refund=True)
