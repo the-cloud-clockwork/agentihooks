@@ -1947,7 +1947,20 @@
       "behaviour": "A tick pass stops launching once its launch budget is spent.",
       "seam": "The spawn pass of scripts.swarm.tick",
       "tests": [
-        "tests/swarm/test_tick_launch_budget.py::test_a_slow_preparation_stops_the_pass_at_the_launch_budget"
+        "tests/swarm/test_tick_launch_budget.py::test_the_urgent_head_spends_the_shared_launch_budget_first",
+        "tests/swarm/test_tick_launch_budget.py::test_recorded_launch_failures_follow_healthy_tasks_only_within_their_band",
+        "tests/swarm/test_tick_launch_budget.py::test_a_slow_preparation_stops_the_pass_at_the_launch_budget",
+        "tests/swarm/test_tick_launch_budget.py::test_a_pass_over_many_agents_with_failing_launches_ends_under_the_tick_deadline",
+        "tests/swarm/test_tick_launch_budget.py::test_a_forgiven_failed_pool_keeps_its_preparation_time_on_the_budget",
+        "tests/swarm/test_tick_launch_budget.py::test_time_before_the_first_launch_never_holds_back_a_filling_pool",
+        "tests/swarm/test_tick_launch_budget.py::test_a_filling_pool_is_priced_at_its_mean_preparation_time",
+        "tests/swarm/test_tick_launch_budget.py::test_preparations_whose_mean_fits_the_rest_of_the_budget_fill_the_pool",
+        "tests/swarm/test_tick_launch_budget.py::test_a_second_pool_fills_on_preparation_time_once_its_first_task_is_priced",
+        "tests/swarm/test_tick_launch_steering.py::test_a_slow_failed_launch_leaves_the_pass_budget_to_the_next_task",
+        "tests/swarm/test_tick_launch_steering.py::test_started_launches_still_spend_the_budget_after_a_failed_one",
+        "tests/swarm/test_tick_launch_steering.py::test_the_forgiven_failure_leaves_the_mean_of_started_launches_alone",
+        "tests/swarm/test_tick_launch_steering.py::test_only_the_first_failed_launch_of_a_pass_is_forgiven",
+        "tests/swarm/test_tick_launch_steering.py::test_a_forgiven_failure_never_dilutes_the_mean_launch_cost"
       ]
     },
     {
@@ -2006,8 +2019,6 @@
       "behaviour": "Every claim the tick makes spends one agent life; a fourth claim is refused and the task blocked for the master.",
       "seam": "The claims gate in scripts.gates.claims on the tick claim path",
       "tests": [
-        "tests/swarm/test_claim_cap.py::test_every_claim_the_tick_makes_counts_one_agent_life",
-        "tests/swarm/test_claim_cap.py::test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master",
         "tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution",
         "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
       ]
@@ -6180,6 +6191,69 @@
       "tests": [
         "tests/hub/test_sweeps_events_path.py::test_a_live_agent_is_never_exited",
         "tests/hub/test_sweeps_events_path.py::test_the_observe_group_keeps_both_sweeps"
+      ]
+    },
+    {
+      "id": "swarm-events-claim-cap",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-claims",
+      "behaviour": "Hub admission applies the claims gate: a third life is admitted, a fourth is refused with one deny row and the task blocked with its count reset so a reopen is admitted again, the refusal names the last handoff and dates only failures within the counted claims, observe and off modes admit and the swarm config alone sets the mode, a crashed cap fails open, and a failed launch spends no life.",
+      "seam": "scripts.hub.admission.Admission.admit and failed through the claims gate in scripts.gates.claims",
+      "tests": [
+        "tests/hub/test_admission_claim_cap.py::test_a_third_life_is_admitted_counted_and_logs_no_gate_row",
+        "tests/hub/test_admission_claim_cap.py::test_a_fourth_claim_logs_one_deny_row_for_the_swarm",
+        "tests/hub/test_admission_claim_cap.py::test_blocking_restarts_the_count_so_a_reopen_is_admitted_again",
+        "tests/hub/test_admission_claim_cap.py::test_without_a_pending_handoff_the_refusal_says_none",
+        "tests/hub/test_admission_claim_cap.py::test_observe_admits_the_fourth_claim_and_logs_the_would_be_deny",
+        "tests/hub/test_admission_claim_cap.py::test_off_skips_the_cap_and_logs_nothing",
+        "tests/hub/test_admission_claim_cap.py::test_admission_ignores_a_mode_in_its_own_environment",
+        "tests/hub/test_admission_claim_cap.py::test_a_crashed_cap_admits_the_claim_and_logs_a_fail_open_row",
+        "tests/hub/test_admission_claim_cap.py::test_a_failed_launch_spends_no_life_and_the_start_after_it_counts_once",
+        "tests/hub/test_admission_claim_cap.py::test_the_refusal_dates_only_failures_within_the_counted_claims"
+      ]
+    },
+    {
+      "id": "swarm-tick-launch-outcomes-legacy",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-claims",
+      "behaviour": "On the legacy tick spawn pass a failed launch reopens its task without spending a life while the rest of the pool starts, steers the pass's later launches off its harness unless it was a capacity wait or named no harness, a reservation refusal reports this pass's account capacity, and a drained pass after a claim cap refusal notes the blocked task.",
+      "seam": "The spawn pass of scripts.swarm.tick",
+      "tests": [
+        "tests/swarm/test_claim_cap.py::test_failed_launches_leave_the_task_open_without_spending_lives",
+        "tests/swarm/test_claim_cap.py::test_without_a_pending_handoff_the_summary_says_none",
+        "tests/swarm/test_tick_launch_pool.py::test_a_failed_launch_in_the_pool_releases_its_task_and_the_rest_start",
+        "tests/swarm/test_tick_launch_pool.py::test_a_task_that_fails_before_its_launch_reopens_and_the_pool_launches_the_rest",
+        "tests/swarm/test_tick_launch_steering.py::test_launches_after_a_failed_launch_steer_off_its_harness",
+        "tests/swarm/test_tick_launch_steering.py::test_a_capacity_wait_never_steers_the_retry",
+        "tests/swarm/test_tick_launch_steering.py::test_a_failure_naming_no_harness_steers_nothing",
+        "tests/swarm/test_tick_capacity_refusals.py::test_reservation_refusal_retains_only_this_pass_capacity",
+        "tests/swarm/test_tick_capacity_refusals.py::test_open_accounts_excluded_by_handoff_do_not_establish_free_capacity",
+        "tests/swarm/test_tick_capacity_refusals.py::test_missing_capacity_and_refusal_harness_stay_unknown",
+        "tests/swarm/test_tick_launch_steering.py::test_a_started_launch_clears_the_harness_its_task_avoided",
+        "tests/swarm/test_tick_launch_steering.py::test_launches_without_a_failure_carry_no_harness_to_avoid"
+      ]
+    },
+    {
+      "id": "swarm-tick-launch-pool-legacy",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-claims",
+      "behaviour": "The legacy tick spawn pass runs its launches in a pool sized by this pass's runtime room and the pool cap, counts launches in flight against the host room, prices each next pool against the spawn budget and records a failed preparation at the pass time.",
+      "seam": "The spawn pass of scripts.swarm.tick",
+      "tests": [
+        "tests/swarm/test_tick_launch_pool.py::test_eight_launches_of_one_pass_run_at_once",
+        "tests/swarm/test_tick_launch_pool.py::test_concurrent_launches_finish_in_the_time_of_the_slowest",
+        "tests/swarm/test_tick_launch_pool.py::test_the_pool_never_runs_more_launches_than_the_runtime_room_or_the_pool",
+        "tests/swarm/test_tick_launch_pool.py::test_a_runtime_without_a_launch_room_launches_one_at_a_time",
+        "tests/swarm/test_tick_launch_pool.py::test_launches_in_flight_count_against_the_host_room",
+        "tests/swarm/test_tick_launch_pool.py::test_the_spawn_stop_counts_no_launch_in_flight_unless_told",
+        "tests/swarm/test_tick_launch_pool.py::test_a_launch_names_the_overlapping_peer_launched_beside_it",
+        "tests/swarm/test_tick_launch_pool.py::test_a_pool_whose_every_launch_failed_spares_the_spawn_budget",
+        "tests/swarm/test_tick_launch_pool.py::test_a_started_pool_spends_the_spawn_budget_for_the_next_one",
+        "tests/swarm/test_tick_launch_pool.py::test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch",
+        "tests/swarm/test_tick_launch_pool.py::test_the_spawn_budget_is_sixty_seconds_and_fits_a_second_launch_in_one_pass",
+        "tests/swarm/test_tick_launch_pool.py::test_a_failed_preparation_is_recorded_at_the_pass_time",
+        "tests/swarm/test_tick_launch_pool.py::test_the_pool_asks_the_runtime_room_for_this_pass_config",
+        "tests/swarm/test_tick_launch_pool.py::test_the_spawn_step_sizes_its_pool_with_this_pass_config"
       ]
     },
     {

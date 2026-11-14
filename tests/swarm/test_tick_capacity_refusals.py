@@ -10,6 +10,7 @@ from tests.swarm.test_tick import store as store
 
 @pytest.mark.parametrize("observed_at", [1_000, 999, None])
 @pytest.mark.parametrize(("planned", "harness"), [({"t1": "codex"}, "claude"), ({"t1": "claude"}, "codex")])
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_reservation_refusal_retains_only_this_pass_capacity(store, observed_at, planned, harness):
     error = reconcile.SpawnError("account reservation is full", "unavailable")
     error.harness = harness
@@ -33,6 +34,7 @@ def test_reservation_refusal_retains_only_this_pass_capacity(store, observed_at,
 
 
 @pytest.mark.parametrize(("reserved", "week_left"), [("interactive master", 90), ("", 10)])
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_open_accounts_excluded_by_handoff_do_not_establish_free_capacity(store, reserved, week_left):
     error = reconcile.SpawnError("account reservation is full", "unavailable")
     error.harness = "claude"
@@ -45,6 +47,7 @@ def test_open_accounts_excluded_by_handoff_do_not_establish_free_capacity(store,
 
 
 @pytest.mark.parametrize("error_type", [reconcile.SpawnError, OSError])
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_missing_capacity_and_refusal_harness_stay_unknown(store, error_type):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error_type("account reservation is full"))
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"observed_at": 1_000}))
