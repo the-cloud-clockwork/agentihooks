@@ -42,6 +42,31 @@ def test_a_workstation_task_is_offered_to_its_lane_queue_pinned_to_the_root_hive
     assert offered["plain"].id == f"ready:{SLUG}:plain:0"
 
 
+def focus(target: str, at: int) -> dict:
+    return {"id": f"focus-{target}", "verb": "focus", "target": target, "by": "operator", "at": at, "reason": ""}
+
+
+@pytest.mark.feature("swarm-focus")
+def test_focused_offers_go_out_by_rank_band_then_focus_record_order() -> None:
+    found = doc(
+        [task("old"), task("hot", rank="urgent"), task("new")],
+        freezes=[focus("tasks/old", 1), focus("tasks/hot", 2), focus("tasks/new", 3)],
+    )
+    assert [event.key for event in readiness.offers(snapshot(found), NOW)] == ["hot", "old", "new"]
+
+
+@pytest.mark.feature("swarm-focus")
+def test_a_focused_offer_goes_out_before_an_urgent_doctor_fix_outside_the_focus() -> None:
+    found = doc([task("fix", rank="urgent"), task("hot")], freezes=[focus("tasks/hot", 1)])
+    assert [event.key for event in readiness.offers(snapshot(found, fix="p1"), NOW)] == ["hot", "fix"]
+
+
+@pytest.mark.feature("swarm-focus")
+def test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band() -> None:
+    found = doc([task("low", rank="low"), task("first"), task("urgent", rank="urgent"), task("second")])
+    assert [event.key for event in readiness.offers(snapshot(found), NOW)] == ["urgent", "first", "second", "low"]
+
+
 def test_an_offer_carries_its_hive_pin_and_needs_and_nothing_for_an_unpinned_task() -> None:
     offered = {event.key: event.data for event in readiness.offers(snapshot(doc(PINNED)), NOW)}
     assert offered == {
