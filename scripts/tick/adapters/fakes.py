@@ -273,48 +273,6 @@ class FakeRuntime:
     def dismiss(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
         return _record(self, "dismiss", (agent,), deadline)
 
-    def place(self, config: "SwarmConfig", lane: str, name: str, task: Mapping[str, Any], *, deadline: Deadline) -> Any:
-        return _record(self, "place", (config, lane, name, task), deadline)
-
-    def has_capacity(self, config: "SwarmConfig", *, deadline: Deadline) -> bool:
-        return _record(self, "has_capacity", (config,), deadline)
-
-    def launch_room(self, config: "SwarmConfig", *, deadline: Deadline) -> int | None:
-        return _record(self, "launch_room", (config,), deadline)
-
-    def reported(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
-        return _record(self, "reported", (agent,), deadline)
-
-    def placement_refusal(self, lane: str, task: Mapping[str, Any], *, deadline: Deadline) -> str:
-        return _record(self, "placement_refusal", (lane, task), deadline)
-
-    def placement(self, *, deadline: Deadline) -> object:
-        return _record(self, "placement", (), deadline)
-
-    def begin_placement(self, *, deadline: Deadline) -> None:
-        _record(self, "begin_placement", (), deadline)
-
-    def end_placement(self, *, deadline: Deadline) -> None:
-        _record(self, "end_placement", (), deadline)
-
-    def reap_name(self, name: str, *, deadline: Deadline) -> bool:
-        return _record(self, "reap_name", (name,), deadline)
-
-    def admits(self, *, deadline: Deadline) -> bool:
-        return _record(self, "admits", (), deadline)
-
-    def admit(self, slug: str, tasks: Sequence[Mapping[str, Any]], now_ms: int, *, deadline: Deadline) -> Any:
-        return _record(self, "admit", (slug, tasks, now_ms), deadline)
-
-    def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None:
-        _record(self, "release_admission", (slug, task_id, reservation), deadline)
-
-    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str:
-        return _record(self, "held_admission", (slug, task_id), deadline)
-
-    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
-        return _record(self, "activate_admission", (slug, task_id, reservation), deadline)
-
     def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any:
         return _record(self, "fence", (held, deployment), deadline)
 

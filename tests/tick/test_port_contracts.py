@@ -139,6 +139,46 @@ def test_unknown_tool_is_refused() -> None:
         getattr(tools.ledger, "undeclared_method")
 
 
+REMOVED_SPAWN_OPERATIONS = (
+    "place",
+    "has_capacity",
+    "launch_room",
+    "reported",
+    "placement_refusal",
+    "placement",
+    "begin_placement",
+    "end_placement",
+    "reap_name",
+    "admits",
+    "admit",
+    "release_admission",
+    "held_admission",
+    "activate_admission",
+)
+
+
+@pytest.mark.parametrize("operation", REMOVED_SPAWN_OPERATIONS)
+def test_the_runtime_port_serves_no_operation_of_the_removed_spawn_step(operation: str) -> None:
+    from scripts.tick.adapters.runtime import RouterRuntime
+
+    providers = fakes.fake_tools()
+    tools = providers.for_effects(frozenset({"runtime"}))
+    with pytest.raises(AttributeError) as error:
+        getattr(tools.runtime, operation)
+    assert str(error.value) == operation
+    assert [hasattr(owner, operation) for owner in (contracts.Runtime, RouterRuntime, providers.runtime)] == [
+        False,
+        False,
+        False,
+    ]
+
+
+def test_the_tick_calls_carry_no_admission_facade() -> None:
+    from scripts.tick.adapters import calls
+
+    assert not hasattr(calls, "AdmissionCalls")
+
+
 def test_restricting_tools_cannot_restore_an_effect() -> None:
     providers = fakes.fake_tools()
     assert isinstance(providers.ledger, fakes.FakeLedger)
