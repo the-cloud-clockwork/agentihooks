@@ -17,7 +17,6 @@ from scripts.swarm import commands
 pytestmark = pytest.mark.unit
 
 URL = "nats://hub.example:4222"
-FEATURE = "hive-root-bus-settings"
 BAO = cast(openbao_kv.OpenBao, "bao")
 
 
@@ -36,7 +35,7 @@ def _from_process(value: object) -> object:
 
 
 def _root_host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hive: str = "root") -> Path:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     monkeypatch.setattr(operator_env, "fill", _filled)
@@ -73,7 +72,7 @@ def _swarms(monkeypatch: pytest.MonkeyPatch, named: list, chosen: tuple[str, ...
     monkeypatch.setattr(member_swarms, "swarms", swarms)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_path):
     signer = _signer()
     path = root_bus.write(tmp_path, signer, "root")
@@ -100,7 +99,7 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_the_root_bus_settings_stay_out_of_the_env_files_every_process_loads(tmp_path):
     (tmp_path / ".env").write_text("")
     root_bus.write(tmp_path, _signer(), "root")
@@ -109,7 +108,7 @@ def test_the_root_bus_settings_stay_out_of_the_env_files_every_process_loads(tmp
     assert operator_env.files(environ) == [tmp_path / ".env"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_a_signer_that_lists_member_swarms_without_root_mints_nothing(tmp_path):
     with pytest.raises(auth.HiveError) as refused:
         root_bus.write(tmp_path, _signer({"other": ("alpha",)}), "root")
@@ -119,7 +118,7 @@ def test_a_signer_that_lists_member_swarms_without_root_mints_nothing(tmp_path):
     assert not (tmp_path / "root-bus").exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_a_scoped_signer_writes_the_root_swarms_into_the_bus_env(tmp_path):
     path = root_bus.write(tmp_path, _signer({"root": ("alpha", "beta")}), "root")
 
@@ -135,7 +134,7 @@ def test_a_scoped_signer_writes_the_root_swarms_into_the_bus_env(tmp_path):
     assert "swarm.alpha.>" in claims["nats"]["sub"]["allow"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_a_credential_past_the_nats_control_line_is_refused_before_writing(tmp_path, monkeypatch):
     limit = root_bus.CONTROL_LINE - root_bus.CONNECT_ROOM
     monkeypatch.setattr(nats_grant, "mint", lambda signer, member: "x" * (limit + 1))
@@ -152,7 +151,7 @@ def test_a_credential_past_the_nats_control_line_is_refused_before_writing(tmp_p
     assert root_bus.write(tmp_path, _signer(), "root").is_file()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_root_bus_writes_into_a_missing_home_and_again_on_a_rerun(tmp_path):
     home = tmp_path / "missing" / "home"
     first = root_bus.write(home, _signer(), "root")
@@ -162,7 +161,7 @@ def test_root_bus_writes_into_a_missing_home_and_again_on_a_rerun(tmp_path):
     assert dotenv_values(second)["AGENTIHOOKS_BUS"] == "nats"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_verify_connects_once_with_the_written_bus_env_and_closes(tmp_path, monkeypatch):
     from scripts.events import nats
 
@@ -188,7 +187,7 @@ def test_verify_connects_once_with_the_written_bus_env_and_closes(tmp_path, monk
     assert config.credentials == (tmp_path / "root-bus" / "bus.creds").read_text()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_verify_turns_a_hub_refusal_into_a_hive_error(tmp_path, monkeypatch):
     from scripts.events import nats
 
@@ -206,7 +205,7 @@ def test_verify_turns_a_hub_refusal_into_a_hive_error(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_remove_deletes_the_root_bus_files(tmp_path):
     path = root_bus.write(tmp_path, _signer(), "root")
 
@@ -216,7 +215,7 @@ def test_remove_deletes_the_root_bus_files(tmp_path):
     assert root_bus.remove(tmp_path) is False
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_the_hive_service_loads_the_root_bus_env_after_the_hive_env():
     text = daemon.unit("/bin/agentihooks")
 
@@ -225,7 +224,7 @@ def test_the_hive_service_loads_the_root_bus_env_after_the_hive_env():
     assert hive < root < text.index("ExecStart=")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_writes_verifies_then_reinstalls_and_restarts_the_service(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_signer", _signer)
@@ -242,7 +241,7 @@ def test_hive_root_bus_writes_verifies_then_reinstalls_and_restarts_the_service(
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_extends_the_root_listing_with_missing_swarms(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     signers = [_signer({"root": ("alpha",)}), _signer({"root": ("alpha", "beta")})]
@@ -265,7 +264,7 @@ def test_hive_root_bus_extends_the_root_listing_with_missing_swarms(tmp_path, mo
     assert dotenv_values(path)["AGENTIHOOKS_BUS_SWARMS"] == "alpha,beta"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_keeps_a_listing_that_covers_every_wanted_swarm(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     extended: list = []
@@ -284,7 +283,7 @@ def test_hive_root_bus_keeps_a_listing_that_covers_every_wanted_swarm(tmp_path, 
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 @pytest.mark.parametrize(("bao", "path"), [(None, "agentihooks/hub/nats"), ("bao", None)])
 def test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list(tmp_path, monkeypatch, capsys, bao, path):
     home = _root_host(monkeypatch, tmp_path)
@@ -302,7 +301,7 @@ def test_hive_root_bus_refuses_an_unlisted_root_it_cannot_list(tmp_path, monkeyp
     assert not (home / "root-bus").exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 @pytest.mark.parametrize("reread", [None, {}, {"other": ("alpha",)}, {"root": ("alpha",)}])
 def test_hive_root_bus_refuses_when_a_fresh_signer_read_still_lacks_a_swarm(tmp_path, monkeypatch, capsys, reread):
     home = _root_host(monkeypatch, tmp_path)
@@ -318,7 +317,7 @@ def test_hive_root_bus_refuses_when_a_fresh_signer_read_still_lacks_a_swarm(tmp_
     assert not (home / "root-bus").exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_without_the_hub_signer(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_signer", lambda: None)
@@ -331,7 +330,7 @@ def test_hive_root_bus_refuses_without_the_hub_signer(tmp_path, monkeypatch, cap
     assert not (home / "root-bus").exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, capsys):
     from scripts.hive import scope
 
@@ -347,7 +346,7 @@ def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, ca
     assert not (home / "root-bus").exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_a_hive_other_than_root(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path, hive="worker-3")
     monkeypatch.setattr(cli, "_signer", _signer)
@@ -360,7 +359,7 @@ def test_hive_root_bus_refuses_a_hive_other_than_root(tmp_path, monkeypatch, cap
     assert not (home / "root-bus").exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_a_home_the_hive_service_does_not_load(tmp_path, monkeypatch, capsys):
     _root_host(monkeypatch, tmp_path)
     elsewhere = tmp_path / "elsewhere"
@@ -375,7 +374,7 @@ def test_hive_root_bus_refuses_a_home_the_hive_service_does_not_load(tmp_path, m
     assert not elsewhere.exists()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_when_the_hive_service_does_not_restart(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_signer", _signer)
@@ -389,7 +388,7 @@ def test_hive_root_bus_refuses_when_the_hive_service_does_not_restart(tmp_path, 
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_when_systemctl_fails(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_signer", _signer)
@@ -409,7 +408,7 @@ def test_hive_root_bus_refuses_when_systemctl_fails(tmp_path, monkeypatch, capsy
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_revoke_root_removes_the_root_bus_files(tmp_path, monkeypatch, capsys):
     home = _root_host(monkeypatch, tmp_path)
     root_bus.write(home, _signer(), "root")
@@ -426,7 +425,7 @@ def test_hive_revoke_root_removes_the_root_bus_files(tmp_path, monkeypatch, caps
     assert capsys.readouterr().out == "revoked root\nrevoked hive-7\n"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_hive_help_names_the_root_bus_command_and_its_swarm_option(monkeypatch, capsys):
     monkeypatch.setenv("COLUMNS", "300")
 
@@ -439,7 +438,7 @@ def test_hive_help_names_the_root_bus_command_and_its_swarm_option(monkeypatch, 
     assert "  --swarm SWARM  swarm to list root for; every swarm if omitted\n" in capsys.readouterr().out
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_a_root_spoke_agent_inherits_the_bus_credential_reference():
     environ = {
         "AGENTIHOOKS_SWARM": "rig",
@@ -458,7 +457,7 @@ def test_a_root_spoke_agent_inherits_the_bus_credential_reference():
     assert result.stdout == "/home/op/.agentihooks/root-bus/bus.creds|1|1|rig,alpha"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_an_inline_bus_credential_never_reaches_the_launcher_script():
     from scripts.events.config import INLINE_CREDENTIALS
 
@@ -481,7 +480,7 @@ def _bao_record(monkeypatch: pytest.MonkeyPatch, record: dict) -> list[dict]:
     return writes
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_extend_adds_only_the_missing_swarms_and_keeps_other_members(monkeypatch):
     record = {"url": "nats://x", "member_swarms": {"root": ["alpha"], "other": ["gamma"]}}
     writes = _bao_record(monkeypatch, record)
@@ -492,7 +491,7 @@ def test_extend_adds_only_the_missing_swarms_and_keeps_other_members(monkeypatch
     assert writes == [{"member_swarms": {"root": ["alpha", "beta", "delta"], "other": ["gamma"]}}]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_extend_lists_an_absent_member_and_writes_nothing_when_covered(monkeypatch):
     record: dict = {"url": "nats://x"}
     writes = _bao_record(monkeypatch, record)
@@ -503,7 +502,7 @@ def test_extend_lists_an_absent_member_and_writes_nothing_when_covered(monkeypat
     assert writes == [{"member_swarms": {"root": ["alpha"]}}, {}]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_extend_turns_an_openbao_failure_into_a_hive_error(monkeypatch):
     def update(bao: str, path: str, change: object) -> int:
         raise openbao_kv.OpenBaoError(403, "permission denied")
@@ -515,7 +514,7 @@ def test_extend_turns_an_openbao_failure_into_a_hive_error(monkeypatch):
     assert str(refused.value) == "OpenBao HTTP 403: permission denied"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-root-bus-settings")
 def test_extend_refuses_an_invalid_swarm_name(monkeypatch):
     _bao_record(monkeypatch, {"member_swarms": {}})
 
