@@ -318,3 +318,31 @@ def test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent(rig: SimpleNames
     assert len(_commands(rig)) == RECOVERY_ATTEMPTS
     assert rig.row["state"] == "open"
     assert len(rig.returned) == 1
+
+
+@pytest.mark.feature("hub-conversation-overlays")
+def test_a_hub_admitted_agent_resumes_the_conversation_and_overlays_its_start_recorded(rig: SimpleNamespace) -> None:
+    from scripts.hub.claims import Claims
+    from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.runtime.base import Outcome, Recovery, Status
+
+    admitted = replace(rig.agent, state="starting", pane_id="", launched_at=0, conversation_id="", overlays=[])
+    rig.store.execution_registry.update("rig", admitted)
+    fields = {"pane_id": "pane", "launched_at": LAUNCHED, "conversation_id": "thread-a", "overlays": ["tuner"]}
+    Claims(rig.store).handle(replace(rig.started, data={**rig.started.data, **fields}))
+    [recorded] = rig.store.agents("rig")
+    assert (recorded.state, recorded.conversation_id, recorded.overlays) == ("working", "thread-a", ["tuner"])
+
+    rig.react.poll()
+    consumer, runtime = _hive(rig, Outcome("recover", Status.OK, "local", Placed("pane-2", "claude", "a")))
+    assert consumer.poll_commands() == 1
+
+    held, mode, _config, _text = runtime.recover.call_args.args
+    assert (held.conversation_id, held.overlays, held.seat, mode) == (
+        "thread-a",
+        ["tuner"],
+        "eng-1@rig",
+        Recovery.RESUME,
+    )
+    [resumed] = rig.store.agents("rig")
+    assert (resumed.pane_id, resumed.conversation_id, resumed.overlays) == ("pane-2", "thread-a", ["tuner"])

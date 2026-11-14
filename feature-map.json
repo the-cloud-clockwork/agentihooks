@@ -2232,6 +2232,18 @@
       ]
     },
     {
+      "id": "hub-conversation-overlays",
+      "origin": "regression",
+      "behaviour": "A hive's execution started event carries the conversation id and overlays its placement produced, and the hub claims reactor writes both on the admitted agent record, so a dead hub started agent is resumed into that conversation with its overlays; a start naming neither keeps the recorded values.",
+      "seam": "scripts.hive.spoke.Spoke._spawn started payload and scripts.hub.claims.Claims.handle on execution.started",
+      "tests": [
+        "tests/hive/test_spoke.py::test_the_started_event_carries_the_placed_conversation_and_overlays",
+        "tests/hub/test_claim_lives.py::test_a_started_agent_records_the_conversation_and_overlays_its_hive_placed",
+        "tests/hub/test_claim_lives.py::test_a_start_naming_no_conversation_or_overlays_keeps_the_recorded_ones",
+        "tests/hub/test_dead_resume_hub.py::test_a_hub_admitted_agent_resumes_the_conversation_and_overlays_its_start_recorded"
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",

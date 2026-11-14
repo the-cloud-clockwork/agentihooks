@@ -275,3 +275,29 @@ def test_a_legacy_counted_start_drops_a_stale_pending_life_so_its_refund_spends_
 
     assert rig.store.refund_held_claim(SLUG, "t1", "engineer@legacy", rig.store.claim_generation(SLUG, "t1"))
     assert rig.store.claims(SLUG, "t1") == 0
+
+
+@pytest.mark.feature("hub-conversation-overlays")
+def test_a_started_agent_records_the_conversation_and_overlays_its_hive_placed(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    [admitted] = rig.store.agents(SLUG)
+    assert (admitted.conversation_id, admitted.overlays) == ("", [])
+
+    claims.Claims(rig.store).handle(
+        replace(event, data={**event.data, "conversation_id": "thread-a", "overlays": ["tuner", "brain"]})
+    )
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.conversation_id, agent.overlays) == ("working", "thread-a", ["tuner", "brain"])
+
+
+@pytest.mark.feature("hub-conversation-overlays")
+def test_a_start_naming_no_conversation_or_overlays_keeps_the_recorded_ones(rig):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    [agent] = rig.store.agents(SLUG)
+    rig.store.execution_registry.update(SLUG, replace(agent, conversation_id="thread-b", overlays=["brain"]))
+
+    claims.Claims(rig.store).handle(replace(event, data={**event.data, "conversation_id": "", "overlays": []}))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.conversation_id, agent.overlays) == ("working", "thread-b", ["brain"])
