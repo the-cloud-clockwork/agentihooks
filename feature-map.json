@@ -675,7 +675,6 @@
         "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin",
         "tests/swarm/test_engine_migration.py::test_a_swarm_without_any_origin_stays_legacy_and_is_reported",
         "tests/swarm/test_engine_migration.py::test_a_doctor_takes_its_own_origin_when_the_watched_swarm_has_none",
-        "tests/swarm/test_engine_migration.py::test_a_swarm_with_legacy_agents_or_launches_in_flight_is_left_for_the_master",
         "tests/swarm/test_engine_migration.py::test_a_swarm_that_cannot_load_is_reported_and_the_rest_still_migrate",
         "tests/swarm/test_engine_migration.py::test_a_new_doctor_starts_on_events_with_the_watched_origin",
         "tests/swarm/test_engine_migration.py::test_a_new_doctor_takes_its_own_origin_when_the_watched_swarm_has_none_or_is_not_stored",
@@ -957,17 +956,6 @@
       ]
     },
     {
-      "id": "swarm-spawn-claim-before-launch",
-      "origin": "inventory",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
-      "behaviour": "The spawn pass launches a lane agent only after the ledger server accepted its claim: claimed_by and state claimed, clearing a stale protected branch so publication and reclaim never read it; a pass running from its last good view claims and launches nothing.",
-      "seam": "scripts.tick.steps.place._prepare called with the pass ledger offline and online",
-      "tests": [
-        "tests/tick/test_place_prepare.py::test_an_offline_pass_neither_claims_nor_launches",
-        "tests/tick/test_place_prepare.py::test_the_claim_write_clears_a_stale_protected_branch_and_keeps_a_real_one"
-      ]
-    },
-    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -1055,7 +1043,6 @@
         "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
         "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
         "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
-        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
         "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
       ]
     },
@@ -1125,8 +1112,6 @@
         "tests/tick/test_step_isolation.py::test_budgets_come_from_the_p95_with_headroom_in_whole_seconds",
         "tests/tick/test_step_isolation.py::test_an_undeclared_step_is_refused",
         "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
-        "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
-        "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
         "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path",
         "tests/tick/test_intervals.py::test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass",
         "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_three_runs_once_in_three_passes",
@@ -1355,19 +1340,7 @@
       "tests": [
         "tests/tick/steps/test_launch_cluster.py::test_tick_reexports_the_moved_launch_name",
         "tests/tick/steps/test_launch_cluster.py::test_the_tick_module_holds_no_launch_definition",
-        "tests/tick/steps/test_launch_cluster.py::test_moved_launch_code_reaches_tick_seams_through_the_tick_module",
         "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane",
-        "tests/tick/steps/test_launch_cluster.py::test_a_started_launch_records_its_claim_launch_spend_and_chain",
-        "tests/tick/steps/test_launch_cluster.py::test_a_held_back_task_follows_its_admission_decision",
-        "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
-        "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal",
-        "tests/tick/steps/test_collect_acks.py::test_collected_acknowledgements_start_finish_fail_or_wait_each_launch",
-        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_no_acknowledgement",
-        "tests/tick/steps/test_place_outcomes.py::test_a_failed_spawn_releases_its_launch_and_reports_the_drop",
-        "tests/tick/steps/test_place_outcomes.py::test_an_unresolved_profile_spawn_also_blocks_its_task",
-        "tests/tick/steps/test_place_outcomes.py::test_a_full_account_reservation_reports_the_accounts_with_room",
-        "tests/tick/steps/test_place_outcomes.py::test_a_pending_launch_waits_for_its_hive_acknowledgement",
-        "tests/tick/steps/test_place_outcomes.py::test_a_refused_launch_waits_for_room_or_fails",
         "tests/tick/steps/test_verify_checks.py::test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_drifted_one",
         "tests/tick/steps/test_verify_checks.py::test_launch_checks_pass_fail_or_wait_each_pending_agent",
         "tests/tick/steps/test_verify_checks.py::test_launch_checks_with_nothing_pending_do_nothing",
@@ -1378,14 +1351,9 @@
         "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_failing_an_enforced_check_hands_over_to_the_hive_failure",
         "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_late_on_a_report_only_check_settles_its_admission",
         "tests/tick/steps/test_launch_outcomes.py::test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent",
-        "tests/tick/steps/test_launch_outcomes.py::test_an_expired_launch_reads_the_hive_answer",
-        "tests/tick/steps/test_launch_outcomes.py::test_a_launch_finished_before_collection_is_recorded_as_started",
         "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first",
         "tests/tick/steps/test_launch_outcomes.py::test_an_acknowledging_launch_is_read_from_the_launch_record",
-        "tests/tick/steps/test_place_waits.py::test_a_room_refused_launch_releases_its_holds_and_waits",
-        "tests/tick/steps/test_place_waits.py::test_a_failed_room_wait_reads_a_spawn_error_as_no_wait",
         "tests/tick/steps/test_place_waits.py::test_a_settled_launch_activates_its_held_reservation",
-        "tests/tick/steps/test_place_waits.py::test_a_full_reservation_read_without_accounts_reports_none",
         "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_that_cannot_retire_retries_next_tick",
         "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_after_its_relaunch_is_spent_is_only_reported",
         "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_that_cannot_retire_retries_next_tick"
@@ -1480,25 +1448,12 @@
       "tests": [
         "tests/tick/test_place.py::test_tick_reexports_the_moved_spawn_name",
         "tests/tick/test_place.py::test_the_tick_module_holds_no_spawn_definition",
-        "tests/tick/test_place.py::test_the_spawn_step_declares_its_ports_feature_and_lane",
-        "tests/tick/test_place.py::test_moved_spawn_code_reaches_tick_seams_through_the_tick_module",
         "tests/tick/test_place.py::test_a_free_seat_comes_from_the_tick_seat_address",
         "tests/tick/test_place.py::test_a_free_seat_looks_no_further_than_one_seat_past_the_taken_ones",
-        "tests/tick/test_place.py::test_the_pass_reclaim_reads_remote_heads_once_and_binds_them",
-        "tests/tick/test_place.py::test_the_pass_reclaim_reuses_heads_the_pass_already_read",
-        "tests/tick/test_place.py::test_a_legacy_launch_is_admitted_with_the_pass_runtime",
-        "tests/tick/test_place.py::test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims",
-        "tests/tick/test_place.py::test_a_spawn_pass_past_its_deadline_stops_and_leaves_every_task_for_the_next_pass",
-        "tests/tick/test_place.py::test_a_spawn_pass_whose_deadline_expires_midway_launches_what_it_prepared_and_leaves_the_rest",
-        "tests/tick/test_place.py::test_a_spawn_pass_inside_its_deadline_prepares_every_task_with_no_stop_notice",
-        "tests/tick/test_place.py::test_the_spawn_step_hands_the_spawn_pass_its_step_deadline",
         "tests/tick/test_spawn_ports.py::test_the_ledger_facade_comments_through_the_port_with_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_pass_ledger_comments_through_the_domain_client_within_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_resource_ledger_adds_the_comment_to_the_task_thread",
         "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect",
-        "tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks",
-        "tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires",
-        "tests/tick/steps/test_spawn.py::test_spawn",
         "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_places_and_reads_capacity_through_the_runtime_port",
         "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_brackets_the_placement_pass_and_reaps_through_the_port",
         "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_reads_the_router_placement_through_the_port",
@@ -1863,15 +1818,6 @@
         "tests/tick/test_source_control.py::test_github_graph_returns_the_whole_body_under_the_named_reader",
         "tests/tick/test_source_control.py::test_github_graph_outside_a_named_reader_counts_as_the_port",
         "tests/tick/test_source_control.py::test_github_command_is_the_one_gh_command_line"
-      ]
-    },
-    {
-      "id": "swarm-tick-launch-budget",
-      "origin": "inventory",
-      "behaviour": "A tick pass stops launching once its launch budget is spent.",
-      "seam": "The spawn pass of scripts.swarm.tick",
-      "tests": [
-        "tests/swarm/test_tick_launch_budget.py::test_a_slow_preparation_stops_the_pass_at_the_launch_budget"
       ]
     },
     {
@@ -2356,12 +2302,7 @@
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
         "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
-        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus",
-        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat",
-        "tests/swarm/test_focus_budget.py::test_focus_record_order_breaks_ties_within_one_rank_band",
-        "tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band",
-        "tests/swarm/test_focus_budget.py::test_an_urgent_dependency_of_a_focus_launches_after_an_unranked_focused_task",
-        "tests/swarm/test_focus_budget.py::test_the_launch_rank_sort_uses_the_dispatcher_band_over_the_ledger_rank"
+        "tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band"
       ]
     },
     {
@@ -2806,9 +2747,7 @@
         "tests/swarm/test_launch_bounded_reads.py::test_fields_reads_every_field_across_pages",
         "tests/swarm/test_launch_bounded_reads.py::test_fields_stops_after_its_page_bound",
         "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set",
-        "tests/swarm/test_launch_bounded_reads.py::test_place_holds_spawns_for_another_swarms_waiting_master",
         "tests/swarm/test_launch_bounded_reads.py::test_launch_check_reads_pending_checks_and_reports_paged",
-        "tests/swarm/test_launch_bounded_reads.py::test_launch_job_collect_drops_a_job_whose_agent_is_gone",
         "tests/swarm/test_launch_bounded_reads.py::test_local_slots_count_and_claim_held_slots_paged",
         "tests/swarm/test_launch_bounded_reads.py::test_preempt_keeps_only_asks_of_live_holders",
         "tests/swarm/test_launch_bounded_reads.py::test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record",
@@ -4430,8 +4369,6 @@
       "seam": "HiveLaunch.complete and HiveLaunch.finished against admission.pending",
       "tests": [
         "tests/hive/test_admission.py::test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it",
-        "tests/hive/test_controller_launch.py::test_a_finished_receipt_releases_its_admission_reservation",
-        "tests/hive/test_controller_launch.py::test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_an_ambiguous_receipt_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation"
@@ -4739,8 +4676,6 @@
         "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_refuses_to_fence_past_its_deadline",
         "tests/tick/test_runtime_port_fence.py::test_fencing_is_a_runtime_write_a_step_must_declare",
         "tests/tick/test_runtime_port_fence.py::test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm",
-        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools",
-        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease",
         "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
       ]
     },
@@ -4917,10 +4852,8 @@
         "tests/tick/test_spawn_metrics_ports.py::test_a_failed_metrics_emit_reports_like_the_outbox",
         "tests/tick/test_spawn_metrics_ports.py::test_the_spool_metrics_appends_each_gate_row_to_the_gate_log",
         "tests/tick/test_spawn_metrics_ports.py::test_the_gate_log_write_needs_the_metrics_effect_and_a_rescan_needs_none",
-        "tests/tick/test_spawn_metrics_ports.py::test_the_spawn_launch_reads_the_process_table_through_the_processes_port",
         "tests/tick/test_spawn_metrics_ports.py::test_the_codex_legacy_admission_reads_the_table_it_is_given",
-        "tests/tick/test_spawn_metrics_ports.py::test_spawn_helpers_outside_a_step_use_the_local_gate_log_and_process_table",
-        "tests/tick/test_spawn_metrics_ports.py::test_the_spawn_step_hands_the_pass_its_metrics_and_processes_ports"
+        "tests/tick/test_spawn_metrics_ports.py::test_spawn_helpers_outside_a_step_use_the_local_gate_log_and_process_table"
       ]
     },
     {
@@ -5028,7 +4961,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -5881,19 +5814,6 @@
         "tests/gates/test_one_push.py::test_a_failed_status_context_on_the_head_lets_the_push_pass",
         "tests/gates/test_one_push.py::test_a_running_suite_with_no_failed_job_still_holds_the_push",
         "tests/gates/test_one_push.py::test_a_conflicting_head_lets_the_push_pass_while_its_suite_runs"
-      ]
-    },
-    {
-      "id": "swarm-agent-record-launch-decision-at-spawn",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t279",
-      "behaviour": "A detached agent launch writes its decided harness, routed account, model, effort and profile onto the agent record when the launch job is queued, and a successor retry rewrites them with its retried decision, so swarm status shows them before the pane starts instead of an empty harness and a dash for the account.",
-      "seam": "HerdrRuntime.spawn detached placement, launch_job.pending and successor_retry.relaunch",
-      "tests": [
-        "tests/swarm/test_launch_job.py::test_an_agent_record_read_right_after_a_detached_spawn_carries_its_harness_and_account",
-        "tests/swarm/test_launch_job.py::test_a_detached_spawn_returns_its_routed_account_model_and_profile",
-        "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
-        "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
       ]
     },
     {
