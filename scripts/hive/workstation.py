@@ -1,6 +1,7 @@
 import itertools
 import os
 from collections.abc import Callable, Iterable, Mapping
+from typing import Any
 
 from scripts.events.envelope import Envelope
 from scripts.hive.spoke import Spoke, SpokeConfig
@@ -36,6 +37,9 @@ class MasterTasks:
         return None
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
+        return None
+
+    def launched(self, event: Envelope, placed: Any) -> None:
         return None
 
 
