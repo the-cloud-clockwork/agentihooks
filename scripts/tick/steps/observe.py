@@ -270,7 +270,9 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
-        dropped = tick._stop_hive(slug, agent, "mismatch", tick._drop(slug, store, ledger, rows, agent, refund=True))
+        dropped = tick._stop_hive(
+            slug, store, agent, "mismatch", tick._drop(slug, store, ledger, rows, agent, refund=True)
+        )
         actions.append(f"retired {agent.name} after mismatched {fields}" + dropped)
     return actions
 

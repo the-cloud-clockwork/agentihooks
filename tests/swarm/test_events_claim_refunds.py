@@ -213,7 +213,7 @@ def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
 
-    assert tick_module._stop_hive(SLUG, agent, "idle", dropped) == dropped
+    assert tick_module._stop_hive(SLUG, env[0], agent, "idle", dropped) == dropped
 
     assert len(sent_stops(bus, agent)) == stops
 
@@ -227,9 +227,33 @@ def test_a_legacy_agent_retirement_sends_no_stop(
     agent = seat("t1")
     assert reconciler.legacy_agents(store, SLUG) == [agent]
 
-    assert reconciler.stop_admitted(SLUG, agent, "idle") == execution_stop.UNKNOWN
+    assert reconciler.stop_admitted(store, SLUG, agent, "idle") == execution_stop.UNKNOWN
 
     assert sent_stops(bus, agent) == []
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+def test_a_stop_the_bus_refused_is_sent_again_on_the_next_reap_pass(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, ledger, rt = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    working = reconciler.open_bus
+
+    def refused(_config: Any) -> Any:
+        raise ConnectionError("bus down")
+
+    monkeypatch.setattr(reconciler, "open_bus", refused)
+    assert reconciler.stop_admitted(store, SLUG, agent, "idle").startswith(execution_stop.FAILED)
+    monkeypatch.setattr(reconciler, "open_bus", working)
+    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
+
+    actions = agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
+
+    assert f"sent the idle stop for {agent.name} again: {execution_stop.SENT}" in actions
+    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == [(agent.execution_id, event.id)]
+    assert reconciler.retry_stops(store, SLUG) == []
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
