@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import dispatcher, profile_choice, runtime, store, tick
+from scripts.swarm import profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
@@ -466,85 +466,10 @@ def test_runtime_refuses_launch_on_unresolved_profile(tmp_path, asked):
         rt.spawn(store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3"), "eng", "a", TASK)
 
 
-def _commenting(ledger):
-    ledger.comments = []
-    ledger.comment = lambda slug, task_id, text, by: ledger.comments.append((slug, task_id, text, by))
-    return ledger
-
-
-def test_tick_blocks_task_with_the_unresolved_reason(swarm):
-    ledger = _commenting(tasks(("t1", "eng")))
-    rt = FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
-    actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
-    assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
-    assert comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
-    assert "blocked t1: profile unresolved: set it" in actions
-
-
 def test_tick_still_reopens_on_an_ordinary_spawn_failure(swarm):
     ledger = tasks(("t1", "eng"))
     tick.tick("sw", swarm, ledger, FakeRuntime(fail=True), now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
-
-
-class PlacingRuntime(FakeRuntime):
-    router = SimpleNamespace(placement=object())
-
-    def placement_refusal(self, lane, task):
-        profile_choice.pick("sw", lane, {}, task)
-        return ""
-
-
-def test_an_unresolved_task_is_skipped_and_the_ready_task_behind_it_launches(swarm, monkeypatch):
-    def classify(slug, task, environ):
-        if task["id"] == "t1":
-            raise profile_choice.ProfileUnresolved("t1 profile unresolved: set it")
-        return profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
-
-    monkeypatch.setattr(profile_choice, "classify", classify)
-    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
-    rt = PlacingRuntime()
-    actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
-    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
-    assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
-    assert comments == [("sw", "t1", "t1 profile unresolved: set it", "swarm")]
-    assert "blocked t1: t1 profile unresolved: set it" in actions
-
-
-class LaterUnresolvedRuntime(PlacingRuntime):
-    def __init__(self):
-        super().__init__()
-        self.checked = []
-
-    def placement_refusal(self, lane, task):
-        self.checked.append(task.get("id"))
-        if task.get("id") == "t1" and self.checked.count("t1") > 1:
-            raise profile_choice.ProfileUnresolved("t1 answered unresolved later")
-        return ""
-
-    def spawn(self, config, lane, name, task):
-        if task["id"] == "t1":
-            raise profile_choice.ProfileUnresolved("t1 answered unresolved later")
-        return super().spawn(config, lane, name, task)
-
-
-def test_a_later_unresolved_answer_blocks_its_task_and_the_rest_still_launch(monkeypatch):
-    import fakeredis
-
-    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
-    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
-    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
-    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
-    rt = LaterUnresolvedRuntime()
-    actions = tick.tick("sw", two, ledger, rt, now_ms=1_000)
-    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
-    assert ledger.rows["t1"]["state"] == "blocked" and two.claimant("sw", "t1") is None
-    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
-    assert comments == [("sw", "t1", "t1 answered unresolved later", "swarm")]
-    assert "blocked t1: t1 answered unresolved later" in actions
 
 
 def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
@@ -598,34 +523,6 @@ def test_runtime_spawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_t
     assert argv[argv.index("--profile") + 1] == "frontend"
     assert placed.profile_decision["source"] == "classifier"
     assert "Go on from seam two" in Path(argv[argv.index("--prompt-file") + 1]).read_text()
-
-
-class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
-    def placement_refusal(self, lane, task):
-        self.checked.append(task.get("id"))
-        if task.get("id") == "t1" and self.checked.count("t1") > 2:
-            profile_choice.transfer({"handoff_envelope": {"launch": {"profile": "x", "harness": "gemini"}}})
-        return ""
-
-    def spawn(self, config, lane, name, task):
-        if task["id"] == "t1":
-            raise tick.SpawnError("unsupported handoff harness: gemini", "unsupported")
-        return super(LaterUnresolvedRuntime, self).spawn(config, lane, name, task)
-
-
-def test_a_failed_launch_whose_placement_check_raises_is_recorded_and_the_rest_still_launch(monkeypatch):
-    import fakeredis
-
-    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
-    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
-    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
-    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
-    rt = UnsupportedHandoffRuntime()
-    tick.tick("sw", two, ledger, rt, now_ms=1_000)
-    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
-    assert "harness: gemini" in two.launch_failure("sw", "t1")
-    assert {row["state"] for row in two.launches("sw") if row["task"] == "t1"} == {"failed"}
 
 
 @pytest.mark.feature("hub-admission-carries-ledger-intent")
