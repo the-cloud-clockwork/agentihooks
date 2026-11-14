@@ -1,0 +1,26 @@
+rules:
+  - id: tick-step-events-early-return
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step returns early for events engine swarms. On 13 November claimed tasks whose agent was gone stayed
+      claimed on rig-grade-swarm because the orphans step returned nothing under the events engine and the hub never
+      took that reopen over. Run the step for both engines, or move its work to the hub in the same change.
+    paths:
+      include:
+        - /scripts/tick/
+        - tick-step-events-early-return.py
+    patterns:
+      - pattern-inside: |
+          def $STEP($TICK, $GET):
+              ...
+      - pattern-either:
+          - pattern: |
+              if $CONFIG.engine == $MODULE.EVENTS_ENGINE:
+                  return $RESULT
+          - pattern: |
+              if $CONFIG.engine == EVENTS_ENGINE:
+                  return $RESULT
+          - pattern: |
+              if $CONFIG.engine == "events":
+                  return $RESULT

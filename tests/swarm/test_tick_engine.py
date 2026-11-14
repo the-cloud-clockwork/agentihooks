@@ -13,17 +13,6 @@ def test_an_events_engine_swarm_leaves_task_spawns_to_hive_pulls(store):  # noqa
     assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
 
 
-def test_an_events_engine_swarm_leaves_claimed_tasks_without_an_agent_to_the_hub(store):  # noqa: F811
-    store.update("sw", engine="events", state="paused")
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0009")
-    assert "task t1 had no agent, reopened" not in actions
-    store.update("sw", engine="legacy")
-    assert "task t1 had no agent, reopened" in tick("sw", store, ledger, runtime, now_ms=2_000)
-
-
 def test_an_events_engine_swarm_still_reaps_a_worker_the_legacy_path_launched(store):  # noqa: F811
     from scripts.swarm.store import AgentRecord
 
