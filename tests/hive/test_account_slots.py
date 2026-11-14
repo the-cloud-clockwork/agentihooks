@@ -165,7 +165,9 @@ def test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the
     bus = open_bus(BusConfig())
     monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
     monkeypatch.setattr(factory, "open_bus", lambda config: bus)
-    monkeypatch.setattr(account_slots, "_reading", lambda hive: reading(cap=cap, sessions=sessions))
+    report = reading(cap=cap, sessions=sessions)
+    report["slots"].insert(0, {"harness": "claude", "account": "other", "cap": 9})
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: report)
     monkeypatch.setattr(bus, "close", lambda: None)
     assert account_slots.room("one", "execution", "claude", "a") is expected
     assert account_slots.room("one", "execution", "claude", "missing") is False
@@ -174,6 +176,23 @@ def test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the
     assert ("execution" in holders) is expected
     assert account_slots.room("one", "execution", "claude", "a") is expected
     bus.close()
+
+
+@pytest.mark.feature("hive-saved-account-slot-preference")
+def test_room_reports_a_failed_slot_request_as_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events import factory
+    from scripts.hive import account_slots
+
+    bus = open_bus(BusConfig())
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+
+    def unreadable(hive: str) -> dict[str, object]:
+        raise TimeoutError("no responders")
+
+    monkeypatch.setattr(account_slots, "_reading", unreadable)
+    with pytest.raises(account_slots.Unavailable, match="^Account slot admission failed$"):
+        account_slots.room("one", "execution", "claude", "a")
 
 
 def test_hive_restart_recovers_the_counter_index_and_releases_dead_agents(rig):
