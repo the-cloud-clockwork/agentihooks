@@ -252,6 +252,7 @@ def test_a_dev_red_block_refunds_the_held_claim_once(
     swarm, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     agent = launched(swarm, rt, seat_agent(swarm, ledger, "sw", "t2"))
+    assert agent.name == "ci@a1b2c3-0001"
     monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 41, "conclusion": "failure"})
     generation, lives = swarm.claim_generation("sw", "t2"), swarm.claims("sw", "t2")
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 0
