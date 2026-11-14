@@ -12,7 +12,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, admission, execution_events, headroom, presence
-from scripts.swarm import readiness
+from scripts.swarm import launch_check, readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
 
@@ -226,7 +226,7 @@ class Spoke:
         self._report_launch(event, launch)
         return "started"
 
-    def _report_launch(self, event: Envelope, launch: dict[str, str] | None) -> None:
+    def _report_launch(self, event: Envelope, launch: dict[str, Any] | None) -> None:
         """Reports the stored launch decision to the hub once the started event is out; a refused or slow report is
         logged and never undoes the start, and a claim stored without one reports nothing."""
         if launch is None:
@@ -242,7 +242,7 @@ class Spoke:
 
     def _spawn(
         self, event: Envelope, key: str, revision: int, heartbeat: presence.Heartbeat
-    ) -> tuple[Envelope, dict[str, str]] | None:
+    ) -> tuple[Envelope, dict[str, Any]] | None:
         claims = self.bus.state("spoke-work")
         try:
             request = self.tasks.request(event)
@@ -301,7 +301,12 @@ class Spoke:
             },
             cause=event.id,
         )
-        launch = {field: getattr(placed, field, "") for field in account_slots.LAUNCH_DECISION}
+        launch: dict[str, Any] = {field: getattr(placed, field, "") for field in account_slots.LAUNCH_DECISION}
+        if hasattr(placed, "overlays"):
+            overlays = list(placed.overlays)
+            declared = launch_check.declared(launch["profile"], overlays)
+            launch["overlays"] = overlays
+            launch["profile_decision"] = {**placed.profile_decision, launch_check.HOST_OVERLAYS: declared}
         claims.update(
             key,
             json.dumps(
