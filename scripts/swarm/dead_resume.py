@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import context_recycle
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
@@ -41,7 +42,36 @@ def _owns(store, slug, agent, ledger):
     )
 
 
-def _reason(store, slug, agent):
+RESUME_ATTEMPTS = 3
+
+
+def _resumes_key(store: RedisStore, slug: str, name: str) -> str:
+    return store.key(slug, "dead-resumes", name)
+
+
+def failed_resumes(store: RedisStore, slug: str, agent: AgentRecord) -> int:
+    """Resumes in a row after which the agent ended again; a heartbeat one start grace after the last resets it."""
+    from scripts.swarm import idle
+    from scripts.swarm.tick import STARTUP_GRACE_MS
+
+    raw = store.redis.get(_resumes_key(store, slug, agent.name))
+    if not raw:
+        return 0
+    record: dict[str, int] = json.loads(raw)
+    beat: dict[str, Any] = idle.heartbeat(store.redis, slug, agent.name) or {}
+    if int(beat.get("at") or 0) > record["at"] + STARTUP_GRACE_MS:
+        return 0
+    return record["count"]
+
+
+def _note_resume(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+    from scripts.swarm import idle
+
+    count = failed_resumes(store, slug, agent) + 1
+    store.redis.set(_resumes_key(store, slug, agent.name), json.dumps({"count": count, "at": at}), ex=idle.BEAT_TTL_S)
+
+
+def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     if store.handoff(slug, agent.task):
         return "a handoff was submitted"
     if not agent.conversation_id:
@@ -50,6 +80,8 @@ def _reason(store, slug, agent):
     limit = store.config(slug).compact_limit or context_recycle.COMPACT_LIMIT
     if used is not None and used >= limit * 1000:
         return "the conversation reached its compact limit"
+    if failed_resumes(store, slug, agent) >= RESUME_ATTEMPTS:
+        return f"it ended again after each of its last {RESUME_ATTEMPTS} resumes"
     return ""
 
 
@@ -104,6 +136,7 @@ def reopen(
                     launch_timings=placed.launch_timings,
                 ),
             )
+            _note_resume(store, slug, agent, at)
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")
             return True
