@@ -2546,8 +2546,8 @@ The local count is the union of:
 Agents on remote hives and in Kubernetes never count. The count leaves out agents on the spawning task in the same
 swarm, so a successor does not count its predecessor. A slot claim is a Redis transaction on the machine's claim
 hash, retried when another claim lands first, so launches in one pass, or in two swarms on the same machine, see
-each other's claims. The agent records and running sessions behind the count are read once per placement pass, so a
-session started by hand during a pass is counted on the next pass.
+each other's claims. The agent records and running sessions behind the count are read again on every claim, so a
+session started by hand is counted by the next claim.
 
 A slot frees once its agent's record reads finished or ended and its session no longer runs, when a failed spawn
 releases its claim, or when a claim whose agent never appeared turns five minutes old.
