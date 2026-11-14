@@ -6598,6 +6598,17 @@
       ]
     },
     {
+      "id": "worker-profile-detached-lifecycle-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-proof-gc-child",
+      "behaviour": "The worker image profiles proof ignores the detached lifecycle gc job that a Codex SessionStart starts for its own home, with that job's descendants, and still fails on any other hook child that outlives registration.",
+      "seam": "tests.swarm_node.profile_probe.codex_session_start and its lifecycle_jobs identity check",
+      "tests": [
+        "tests/test_worker_profile_offline.py::test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration",
+        "tests/test_worker_profile_offline.py::test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job"
+      ]
+    },
+    {
       "id": "hub-only-execution-stop",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-hub-only-stop",
