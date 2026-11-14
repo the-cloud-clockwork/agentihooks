@@ -2794,6 +2794,7 @@
     {
       "id": "inbox-push-poisoned-item",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-push-batch-isolate",
       "behaviour": "An inbox item whose seen check or channel notification always fails is requeued to pending alone, and the other items claimed in the same batch still reach the session in that push pass.",
       "seam": "scripts.inbox.seen.claim and scripts.inbox.channel._deliver over one claimed batch",
       "tests": [
