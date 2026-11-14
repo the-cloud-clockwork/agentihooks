@@ -4579,6 +4579,20 @@
       ]
     },
     {
+      "id": "launch-canary-fails-on-agent-exit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-binding-wait-launcher-exit",
+      "behaviour": "When the launched agent command exits before it reports its profile canary, as when a hive refuses its account slot after the route is reported, the launcher's exit recorder fails the pending binding report with the harness and exit status, so the launch canary wait fails on its next poll instead of at the launch deadline. A validated or missing report is left as it is, and an app server launch, whose pane runs only the viewer, records the viewer's exit without touching the canary, which stays with its server.",
+      "seam": "scripts.session_exit.main run by the init agent launcher after the agent command, read through scripts.profiles.binding.wait",
+      "tests": [
+        "tests/test_canary_wait.py::test_an_agent_that_exits_before_its_canary_fails_the_wait_at_once",
+        "tests/test_canary_wait.py::test_a_viewer_exit_leaves_the_canary_to_its_app_server",
+        "tests/test_canary_wait.py::test_an_exit_after_the_canary_keeps_the_validated_binding",
+        "tests/test_canary_wait.py::test_an_exit_without_a_canary_report_records_only_the_exit",
+        "tests/test_canary_wait.py::test_only_an_app_server_launcher_records_its_exit_as_the_viewer"
+      ]
+    },
+    {
       "id": "codex-server-exit-canary",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-server-exit-canary",
