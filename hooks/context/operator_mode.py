@@ -10,8 +10,10 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from hooks.context.ledger_decision import _bound
+from hooks.context.scheduled_prompts import AUTOMATED
 
 QUIET_EVERY = 2
 QUIET_WORDS = 20
@@ -111,15 +113,17 @@ def reset(payload: dict) -> None:
         operator_expiry.cancel(session_id, state)
 
 
-def notice(payload, typed, now=None):
+def notice(payload: dict[str, Any], typed: bool, now: float | None = None) -> str:
+    """A prompt's context: its switch notice, the typed reply window, the automated notice and the away reminder."""
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
     if typed and not word and not _heard(session_id) and not _away(session_id, None, now):
         return "Operator present in this pane during the quiet window. Answer his message."
+    automated = AUTOMATED if session_id and not typed and _attached(os.environ, session_id) else ""
     if _away(session_id, None, now):
-        return "\n".join(filter(None, (text, _reminder_text(None, session_id))))
-    return text
+        return "\n".join(filter(None, (text, automated, _reminder_text(None, session_id))))
+    return "\n".join(filter(None, (text, automated)))
 
 
 def present(session_id, environ=None, now=None):

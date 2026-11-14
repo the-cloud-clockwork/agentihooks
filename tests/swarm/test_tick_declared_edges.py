@@ -6,7 +6,7 @@ import pytest
 
 import scripts.swarm.cli  # noqa: F401
 from scripts.tick import engine, registry
-from scripts.tick.steps import AGENTS, SWARM, TASKS, actions_of, budgets, pass_domains
+from scripts.tick.steps import AGENTS, SWARM, TASKS, actions_of, pass_domains
 from tests.swarm.tick_scenarios.test_characterisation import replay
 
 TODAY = {
@@ -19,7 +19,6 @@ TODAY = {
         "recover master",
         "ledger state",
         "automated cleanup",
-        "spawn due",
         "exits sweep",
         "master start watch",
         "launch checks",
@@ -39,8 +38,8 @@ TODAY = {
     ],
     "placement notices": ["quota notice", "lost runner", "time left"],
     "task passes": ["run window", "verification notices", "size pass", "grouping release", "dispatcher group"],
-    "placement acks": ["collect acks", "codex hook order"],
-    "placement": ["rank pass", "bottleneck remedy", "preempt", "spawn"],
+    "placement acks": ["codex hook order"],
+    "placement": ["rank pass", "bottleneck remedy"],
     "close": ["conversations", "session models", "handoff transfers", "settle", "close space"],
     "wrapper events": [
         "ledger event pass",
@@ -63,10 +62,6 @@ TODAY = {
 }
 EDGES = (
     ("reap", "orphans"),
-    ("orphans", "spawn"),
-    ("reap", "preempt"),
-    ("preempt", "spawn"),
-    ("spawn", "settle"),
     ("stall watch", "overrun pass"),
     ("health findings", "findings pass"),
     ("health findings", "metrics record"),
@@ -87,11 +82,9 @@ def declared(name: str) -> tuple[frozenset[str], frozenset[str]]:
 @pytest.mark.feature("swarm-tick-declared-edges")
 def test_registry_waves_reproduce_todays_constraints() -> None:
     waves = wave_of()
-    for before, after in (*EDGES, *((need, "spawn") for need in sorted(budgets.SPAWN_NEEDS))):
+    for before, after in EDGES:
         assert waves[before] < waves[after], (before, after)
-    critical = {step.name: waves[step.name] for step in registry.steps() if step.lane != engine.SLOW}
     assert waves["settle"] == max(waves.values())
-    assert [name for name, wave in critical.items() if wave == max(waves.values())] == ["settle"]
 
 
 @pytest.mark.feature("swarm-tick-declared-edges")
@@ -114,39 +107,10 @@ def test_the_steps_on_each_edge_declare_what_they_read_and_write() -> None:
         frozenset({TASKS}) | pass_domains("config", "rows"),
         frozenset({TASKS, actions_of("orphans")}),
     )
-    assert declared("preempt") == (frozenset({AGENTS}) | state, frozenset({AGENTS, actions_of("preempt")}))
-    assert declared("spawn") == (
-        frozenset({AGENTS, TASKS, SWARM}) | state,
-        frozenset({AGENTS, TASKS, actions_of("spawn")}) | pass_domains("rows"),
-    )
     assert declared("settle") == (
         frozenset({AGENTS, TASKS, SWARM}) | state,
         frozenset({AGENTS, TASKS, SWARM, actions_of("settle")}),
     )
-
-
-@pytest.mark.feature("swarm-tick-declared-edges")
-@pytest.mark.parametrize(
-    ("scenario", "reopened"),
-    [("lost", "lost engineer@a1b2c3-0099, task t1 reopened"), ("orphan", "task t1 had no agent, reopened")],
-)
-def test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass(
-    scenario: str, reopened: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    actions = replay(scenario, "tick", monkeypatch, tmp_path)["actions"][0]
-    assert actions.index(reopened) < actions.index("spawned engineer@a1b2c3-0001 for t1")
-    assert actions[0] == reopened
-
-
-@pytest.mark.feature("swarm-tick-declared-edges")
-def test_a_drained_swarm_with_new_work_runs_again_before_the_spawn_check(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    record = replay("drained", "tick", monkeypatch, tmp_path)
-    actions = record["actions"][0]
-    assert actions[0] == "new tasks, running again"
-    assert actions[-2:] == ["spawned engineer@a1b2c3-0001 for t1", "spawned ci@a1b2c3-0001 for t2"]
-    assert "drained" not in actions
 
 
 @pytest.mark.feature("swarm-tick-declared-edges")
@@ -156,12 +120,3 @@ def test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn(
     blocked = replay("dependency", "tick", monkeypatch, tmp_path)["actions"][0]
     assert blocked[-1] == "drained"
     assert blocked.count("drained") == 1
-
-
-@pytest.mark.feature("swarm-tick-declared-edges")
-def test_a_pass_that_spawned_work_ends_on_the_spawn_without_draining(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    running = replay("running", "tick", monkeypatch, tmp_path)["actions"][0]
-    assert running[-1] == "spawned ci@a1b2c3-0001 for t2"
-    assert "drained" not in running

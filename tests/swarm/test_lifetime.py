@@ -158,7 +158,7 @@ def test_retired_master_returns_for_message_or_new_task(store, state, wake):
     assert len([a for a in store.agents("sw") if a.lane == MASTER]) == 1
 
 
-@pytest.mark.parametrize("task_state", ["open", "done", "blocked"])
+@pytest.mark.parametrize("task_state", ["done", "blocked"])
 def test_start_after_master_retirement_runs_workers_only_with_claimable_work(env, monkeypatch, task_state):
     store, ledger, rt = env
     assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0") == 0

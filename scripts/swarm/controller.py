@@ -305,24 +305,6 @@ class FencedRuntime:
             return task
         return {**task, "workstation": False, "hive": selected.hive}
 
-    def collect(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
-        from scripts.swarm.tick import SpawnError
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
-        lease.require_epoch(self.store, self.slug, self.held.epoch)
-        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        outcome = self._changing(self.runtime.hive_launch.collect, request)
-        if not outcome.ok:
-            raise SpawnError(outcome.detail, outcome.status)
-        return outcome.value
-
-    def expire(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
-        lease.require_epoch(self.store, self.slug, self.held.epoch)
-        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        return self._changing(self.runtime.hive_launch.expire, request)
-
 
 def _host_reading(store: RedisStore, machine: str) -> dict[str, Any] | None:
     """The machine's host reading for workstation room, taken against its last saved reading."""

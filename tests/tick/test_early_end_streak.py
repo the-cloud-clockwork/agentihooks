@@ -175,7 +175,7 @@ def test_a_pass_whose_lane_dropped_the_page_relay_still_lists_its_agents_and_end
     [actions] = _passes(swarm, ledger, runtime, 1)
     assert not any(action.startswith("pass ended early") for action in actions)
     wrapper = wrappers[-1]
-    assert not wrapper.seen["spawn"].abandoned
+    assert not wrapper.seen["settle"].abandoned
     assert wrapper.seen["page relay"].rested
     unfinished = [agent.name for agent in swarm.agents("sw") if agent.state != "finished"]
     assert [agent.name for agent in wrapper.box["agents"]] == unfinished

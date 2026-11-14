@@ -9,6 +9,7 @@ from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers import store_seed
 from tests.helpers.seat import seat_owner
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _resuming
@@ -401,12 +402,13 @@ def test_recorded_legacy_recovery_keeps_telemetry_attributed(store, monkeypatch)
 
 
 @pytest.mark.feature("swarm-outage-recovery-hub-admitted")
-def test_a_fresh_conversation_starts_a_new_life(store):
+def test_a_fresh_conversation_starts_a_new_life(store: RedisStore) -> None:
     ledger, runtime, original = prepared_recovery(store)
     original = replace(original, conversation_id="")
     store.put_agent("sw", original)
 
     tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+    seat_owner(store, ledger, runtime, "t1", STARTUP_GRACE_MS + 2)
 
     fresh = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     assert runtime.resumed == []
@@ -596,7 +598,7 @@ def test_a_tick_drop_refunds_the_life_of_a_claim_it_still_holds(store):
 def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
     store.redis.hincrby(store.key("sw", "started-lives"), "t1", -1)
@@ -612,7 +614,7 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
 def test_a_tick_drop_refunds_nothing_when_one_claim_field_moved(store, live):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.rows["t1"].update(live)
 
@@ -650,7 +652,7 @@ def test_a_tick_drop_refunds_nothing_when_the_live_task_is_gone(store):
 def test_a_tick_drop_refunds_nothing_when_the_hub_settles_after_the_live_task_read(store):
     ledger, runtime, agent = prepared_recovery(store)
     rows = {"t1": dict(ledger.rows["t1"])}
-    store.count_claim("sw", "t1")
+    store_seed.count_claim(store, "sw", "t1")
     lives = store.claims("sw", "t1")
     read = ledger.task
 
