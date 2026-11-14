@@ -92,7 +92,7 @@ def test_launch_stages_only_startup_files_and_auth_references(store, server, roo
 
 @pytest.mark.feature("codex-execution-home-default-login-only")
 @pytest.mark.parametrize(
-    ("account", "account_type", "allowed_tokens", "linked"),
+    "case",
     [
         ("default", "chatgpt", frozenset(), True),
         ("token-slug", "", frozenset({"AH_CX_TOKEN_token-slug"}), False),
@@ -100,15 +100,9 @@ def test_launch_stages_only_startup_files_and_auth_references(store, server, roo
     ],
 )
 def test_execution_home_links_the_operator_login_only_for_a_default_login_launch(
-    store: RedisStore,
-    server: Server,
-    root: Path,
-    tmp_path: Path,
-    account: str,
-    account_type: str,
-    allowed_tokens: frozenset[str],
-    linked: bool,
+    store: RedisStore, server: Server, root: Path, tmp_path: Path, case: tuple[str, str, frozenset[str], bool]
 ) -> None:
+    account, account_type, allowed_tokens, linked = case
     profile = Path(server.codex_home)
     login = tmp_path / "login-reference"
     login.touch()
