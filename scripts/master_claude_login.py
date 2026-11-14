@@ -575,18 +575,18 @@ def _number(target: Path) -> int:
     return next(number for number in numbers() if home(number) == target)
 
 
-def move(environ: Mapping[str, str], cwd: Path, failed: Path) -> tuple[Path, str] | None:
-    """Claim the next stored slot whose login passes its check and release the failed one; None keeps the failed slot.
-    Each slot that fails is marked so later launches try it last until its login changes."""
-    skip = {_number(failed)}
-    mark_failed(_number(failed))
+def move(environ: Mapping[str, str], cwd: Path, refused: Path) -> tuple[Path, str] | None:
+    """Claim the next stored slot whose login passes its check and release the refused one; None keeps the refused
+    slot. Each slot that fails is marked so later launches try it last until its login changes."""
+    skip = {_number(refused)}
+    mark_failed(_number(refused))
     for _ in numbers():
         try:
             target, found = prepare(environ, cwd, frozenset(skip))
         except LoginRefused:
             return None
         if checked(target, environ, found):
-            release(failed, environ)
+            release(refused, environ)
             return target, found
         release(target, environ)
         skip.add(_number(target))

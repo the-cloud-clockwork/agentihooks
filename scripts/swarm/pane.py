@@ -15,13 +15,7 @@ class PaneObservation:
 
 
 LOGIN_LINES = 12
-LOGIN_ERRORS = {
-    "claude": (
-        "Login reached its time limit · Please run /login",
-        "Login expired · Please run /login",
-        "OAuth token revoked · Please run /login",
-    ),
-}
+LOGIN_ERRORS = {"claude": ("Login reached its time limit · Please run /login",)}
 LOGIN_LINE = re.compile(r"^[\s●⎿]*(?P<text>.*?)\s*$")
 PROVIDER_ERRORS = {
     "claude": (

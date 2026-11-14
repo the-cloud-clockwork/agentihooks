@@ -3133,7 +3133,7 @@
       "id": "master-login-limit-recovery",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-login-refresh",
-      "behaviour": "A live idle master whose pane shows a Claude login that reached its time limit, expired or was revoked is recycled in its seat on the next tick, whatever the reset gate mode and with no operator item waiting; its relaunch releases a stored master login slot that fails its native check and takes the next stored slot before any browser authorization.",
+      "behaviour": "A live idle master whose pane shows a Claude login that reached its time limit on a whole line is recycled in its seat on the next tick, whatever the reset gate mode and with no operator item waiting; its relaunch releases a stored master login slot that fails its native check and takes the next stored slot before any browser authorization.",
       "seam": "pane.login_limit; master_prompt_stall.run; master_claude_login.prepare_launch and prepare with skipped slots; semgrep incident rule master-login-check-skips-slots",
       "tests": [
         "tests/swarm/test_pane.py::test_login_limit_reports_the_claude_login_texts",
