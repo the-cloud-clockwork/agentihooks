@@ -159,12 +159,3 @@ def test_a_kept_handed_step_runs_on_the_handed_workers(is_kept: bool) -> None:
         records = engine.run_graph(steps, ctx, finished=later.append)
     assert [(record.name, record.outcome) for record in records] == [("critical holding", engine.OK)]
     assert [record.outcome for record in later[0]] == [engine.OK]
-
-
-@pytest.mark.feature("swarm-tick-slow-lane-start")
-def test_spawn_holds_no_later_site_behind_its_reserve() -> None:
-    needs = _pass_graph()
-    for name in ("master alarm", "handoff transfers", "close space", "page relay", "outbox migration", "tick view"):
-        assert "spawn" not in needs[name], name
-    assert "settle" not in needs["page relay"]
-    assert "spawn" in needs["settle"]

@@ -225,6 +225,7 @@ def test_tick_hands_the_close_group_its_freshly_spawned_rows(
 ) -> None:
     from scripts.tick import registry
     from scripts.tick.steps import tasks as task_steps_module
+    from tests.helpers.seat import seat_owner
     from tests.swarm.test_tick import FakeRuntime, tasks
     from tests.swarm.test_tick_groups import _Marker
 
@@ -239,6 +240,7 @@ def test_tick_hands_the_close_group_its_freshly_spawned_rows(
     for step in (*registry.steps(), _Marker("close marker", task_steps_module.CLOSE, close)):
         fresh.register(step)
     monkeypatch.setattr(registry, "registry", fresh)
+    seat_owner(store, ledger, runtime, "t1", 1)
 
     tick_module.tick("sw", store, ledger, runtime, 1)
 

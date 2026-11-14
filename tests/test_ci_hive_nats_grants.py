@@ -260,7 +260,7 @@ def test_the_member_grants_render_the_minted_member_claims() -> None:
     claims = nats_grant.member_claims(grants.MEMBER_KEY)
     rendered = grants.member_grants(str(ROOT))
     assert claims["sub"] == {"allow": [grants.MEMBER_INBOX]}
-    publish = frozenset({*nats_grant.MEMBER_PUBLISH, "slots.*.*"})
+    publish = frozenset({*nats_grant.MEMBER_PUBLISH, "slots.*.*", "exits.*.*"})
     assert rendered["publish"] == {
         "allow": publish,
         "deny": frozenset(
@@ -269,6 +269,8 @@ def test_the_member_grants_render_the_minted_member_claims() -> None:
                 "swarm.*.execution.stop.>",
                 "swarm.*.events.execution.stop",
                 "swarm.*.events.execution.stop.>",
+                "swarm.*.execution.exited",
+                "swarm.*.events.execution.exited",
             }
         ),
     }
@@ -402,7 +404,7 @@ def test_the_controller_grants_render_the_controller_claims():
     assert claims["type"] == "user"
     assert grants.controller_grants(str(ROOT)) == {
         "publish": {"allow": frozenset(nats_grant.CONTROLLER_PUBLISH), "deny": frozenset()},
-        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots", "slots.*.*"}), "deny": frozenset()},
+        "subscribe": {"allow": frozenset({"_INBOX.>", "swarm.*.slots", "slots.*.*", "exits.*.*"}), "deny": frozenset()},
     }
 
 

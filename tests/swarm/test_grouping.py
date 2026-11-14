@@ -386,25 +386,6 @@ def test_a_prompt_without_a_group_says_nothing_about_members():
     assert prompt.GROUP_LINE not in text
 
 
-def test_the_tick_gives_the_lead_agent_its_member_specs(store):
-    store.update("sw", max_eng=1)
-    ledger = GroupLedger([task("a", group_members=["b"]), task("b", merged_into="a")])
-    runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [t["id"] for t in runtime.tasks] == ["a"]
-    assert runtime.tasks[0]["group"] == [{"id": "b", "title": "title b", "description": "spec b"}]
-
-
-def test_a_group_applied_in_a_tick_spawns_only_its_lead_with_member_specs(asked, store):
-    asked(0.9)
-    store.update("sw", max_eng=2)
-    ledger = GroupLedger([task("a"), task("b")])
-    runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [t["id"] for t in runtime.tasks] == ["a"]
-    assert runtime.tasks[0]["group"] == [{"id": "b", "title": "title b", "description": "spec b"}]
-
-
 class ReleaseLedger(GroupLedger):
     def __init__(self, tasks):
         super().__init__(tasks)

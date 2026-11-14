@@ -1,0 +1,26 @@
+rules:
+  - id: presence-counts-scheduled-prompts
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The UserPromptSubmit payload carries no origin field, so a prompt a session cron or wakeup fires reads as the
+      operator typing and opens a reply window in a swarm master. Return False for scheduled_prompts.fired before
+      judging the prompt as typed.
+    paths:
+      include:
+        - /hooks/context/operator_words.py
+        - presence-counts-scheduled-prompts.py
+    patterns:
+      - pattern-inside: |
+          def $TYPED(...):
+              ...
+      - metavariable-regex:
+          metavariable: $TYPED
+          regex: ^typed
+      - pattern-either:
+          - pattern: return is_operator_prompt(...)
+          - pattern: return heard(...)
+      - pattern-not-inside: |
+          if scheduled_prompts.fired(...):
+              return False
+          ...

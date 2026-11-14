@@ -1,13 +1,15 @@
+import json
 import subprocess
 from functools import partial
 
 import pytest
 
 from scripts.handoff import envelope
+from scripts.hub import admission, branch_heads
 from scripts.swarm import continuation, prompt, stack
 from scripts.swarm.store import AgentRecord
-from scripts.swarm.tick import tick
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.helpers.seat import seat_agent
+from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import store as store
 
 REPO = "https://github.com/the-cloud-clockwork/agentihooks"
@@ -63,7 +65,9 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
         output = f"{heads[candidate]}\t{argv[-1]}\n" if candidate in heads else ""
         return subprocess.CompletedProcess(argv, 0 if output else 2, output, "")
 
-    monkeypatch.setattr("scripts.swarm.tick.reclaim", partial(envelope.reclaim, run=run))
+    monkeypatch.setattr(
+        branch_heads, "reclaimer", lambda config: (partial(envelope.reclaim, run=run), stack.origin_key(config.repo))
+    )
     monkeypatch.setattr(stack, "origin_key", _origin)
     if handoff:
         saved = branch if handoff == "recorded" else foreign
@@ -79,10 +83,9 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
                 "fresh_reason": "none",
             },
         )
-    runtime = FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=10_000)
-    launched = runtime.tasks[-1]
-    rendered = prompt.build("sw", "/repo", "eng", runtime.spawned[-1][1], launched)
+    agent = seat_agent(store, ledger, "sw", task, clock=lambda: 10_000)
+    launched = json.loads(store.redis.get(store.key("sw", admission.ADMITTED, task, "0")))["task"]
+    rendered = prompt.build("sw", "/repo", "eng", agent.name, launched)
     return launched, rendered
 
 
