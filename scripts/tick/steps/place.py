@@ -35,7 +35,6 @@ ACKS = "placement acks"
 PLACEMENT = "placement"
 RESUMED = frozenset({"drained resume"})
 CONFIG_DOC = pass_domains("config", "doc")
-TASK_STATE = pass_domains("config", "rows", "doc")
 PLACED = frozenset({AGENTS, TASKS})
 
 
