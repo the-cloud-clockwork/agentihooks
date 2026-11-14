@@ -33,10 +33,10 @@ NOW = 1_000_000
 class KeptBus:
     """The test bus as ``reconciler.open_bus`` hands it out: closing it keeps the shared memory bus open."""
 
-    def __init__(self, bus: Bus) -> None:
+    def __init__(self, bus: Any) -> None:
         self.bus = bus
 
-    def for_swarm(self, slug: str) -> Bus:
+    def for_swarm(self, slug: str) -> Any:
         """The shared bus scoped to ``slug``."""
         return self.bus.for_swarm(slug)
 
