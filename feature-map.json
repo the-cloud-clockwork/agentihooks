@@ -6038,7 +6038,8 @@
         "tests/hub/test_claim_lives.py::test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time",
         "tests/hive/test_spoke.py::test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging",
         "tests/hub/test_claim_lives.py::test_a_late_start_never_revives_a_finished_agent",
-        "tests/hive/test_spoke.py::test_a_spawn_without_a_launch_time_starts_at_the_spoke_clock"
+        "tests/hive/test_spoke.py::test_a_spawn_without_a_launch_time_starts_at_the_spoke_clock",
+        "tests/hub/test_claim_lives.py::test_a_launch_decision_after_the_start_still_reaches_the_working_agent"
       ]
     },
     {

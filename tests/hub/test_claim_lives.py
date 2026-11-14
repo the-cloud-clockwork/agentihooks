@@ -86,6 +86,17 @@ def test_a_late_start_never_revives_a_finished_agent(rig):
     assert (agent.state, agent.pane_id, agent.launched_at) == ("finished", "", 0)
 
 
+@pytest.mark.feature("events-started-working")
+def test_a_launch_decision_after_the_start_still_reaches_the_working_agent(rig):
+    from tests.hub.test_admission import LAUNCH
+
+    claims.Claims(rig.store).handle(started(rig.admitter.admit(SLUG, ask())))
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, agent.harness, agent.model) == ("working", "w1:p3", "codex", "gpt-5")
+
+
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())
