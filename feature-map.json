@@ -2202,6 +2202,17 @@
       ]
     },
     {
+      "id": "swarm-stall-watch-resumed-owner-grace",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-watch-launch-floor",
+      "behaviour": "The stall watch measures a red, green or unmergeable pull request's grace from the later of its owner's start and launch, so a resumed owner keeps its task for the full limit after the resume while a never resumed owner is measured from its start.",
+      "seam": "scripts.swarm.stall_watch.stall_pass through its judged step",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_a_resumed_owner_gets_the_full_limit_from_its_launch",
+        "tests/swarm/test_stall_watch.py::test_a_never_resumed_owner_is_measured_from_its_start"
+      ]
+    },
+    {
       "id": "swarm-resumed-agent-grace",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-start-grace",
