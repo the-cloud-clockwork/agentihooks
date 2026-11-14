@@ -68,3 +68,24 @@ def test_a_master_bare_launch_is_unchanged(profile: str, tmp_path: Path, monkeyp
 
     assert executed == ["/opt/claude"]
     assert "status=bare\n" in report.read_text(encoding="utf-8")
+
+
+@pytest.mark.feature("bare-fallback-worker-refuse")
+def test_a_launch_without_the_fallback_fails_even_on_an_empty_route_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executed: list[str] = []
+    _unroutable(monkeypatch, tmp_path, executed)
+
+    def silent(*args: Any, **kwargs: Any) -> None:
+        raise RoutingError("")
+
+    monkeypatch.setattr("scripts.claude_quota_balancer.select_credential", silent)
+    report = tmp_path / "launcher.route"
+
+    with pytest.raises(SystemExit) as exc:
+        install.cmd_claude(["--agentihooks-report", str(report)])
+
+    assert exc.value.code == 3
+    assert executed == []
+    assert "status=failed\n" in report.read_text(encoding="utf-8")

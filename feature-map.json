@@ -594,7 +594,8 @@
       "seam": "cmd_claude bare fallback and its route report",
       "tests": [
         "tests/test_bare_fallback_refusal.py::test_a_worker_launch_with_no_routed_account_fails_with_a_route_report",
-        "tests/test_bare_fallback_refusal.py::test_a_master_bare_launch_is_unchanged"
+        "tests/test_bare_fallback_refusal.py::test_a_master_bare_launch_is_unchanged",
+        "tests/test_bare_fallback_refusal.py::test_a_launch_without_the_fallback_fails_even_on_an_empty_route_error"
       ]
     },
     {

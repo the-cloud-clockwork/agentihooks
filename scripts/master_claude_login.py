@@ -697,11 +697,13 @@ def _token_lock(environ: Mapping[str, str]):
     return lock
 
 
-def bare_refusal(exc: Exception, environ: Mapping[str, str]) -> str:
-    """Return the route error refusing bare Claude for a non master profile, or empty when bare Claude may start."""
+def bare_refusal(exc: Exception, environ: Mapping[str, str], fallback: bool) -> str | None:
+    """Return the route error for a failed launch, or None when it may fall back to bare Claude as a master."""
     profile = environ.get("AGENTIHOOKS_PROFILE", "")
+    if not fallback:
+        return str(exc)
     if not profile or profile == "master":
-        return ""
+        return None
     return f"{exc}; bare Claude is refused for profile {profile}: it would start with no routed login"
 
 

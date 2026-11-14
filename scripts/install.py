@@ -5373,12 +5373,12 @@ def cmd_claude(extra_args: list[str]) -> None:
             )
         )
     except RoutingError as exc:
-        if not (error := bare_refusal(exc, os.environ) if fallback_bare and not route else str(exc)):
+        if (error := bare_refusal(exc, os.environ, fallback_bare and not route)) is None:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
+            return execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
         print(f"agentihooks: {error}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
