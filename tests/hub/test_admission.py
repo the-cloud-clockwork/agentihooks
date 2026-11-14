@@ -193,6 +193,45 @@ def test_the_hub_answers_a_launched_request_over_the_slot_subject(rig):
     assert (agent.harness, agent.profile, agent.account) == ("codex", "engineer", "work")
 
 
+@pytest.mark.feature("events-launch-check")
+def test_the_first_launch_decision_starts_a_launch_check_the_tick_retires_and_relaunches_on(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: {"task": "t1", "at": 7_000, "relaunch": True}}
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_republished_launch_decision_starts_no_second_launch_check(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.admitter.launched(SLUG, ask(launch=LAUNCH))
+    launch_check.forget(rig.store, SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert launch_check.pending(rig.store, SLUG) == {}
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_refused_launch_decision_starts_no_launch_check(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.drop_agent(SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert launch_check.pending(rig.store, SLUG) == {}
+
+
 def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
     admitted = rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
     assert rig.rows["t2"]["state"] == "pr"
