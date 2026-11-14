@@ -125,7 +125,10 @@ def _launch_slots(cli: Any, get: Get) -> None:
 
 
 def _outage_probes(cli: Any, get: Get) -> None:
-    outage.providers(get("store"), get("slug"), get("runtime"), cli.now_ms())
+    try:
+        outage.providers(get("store"), get("slug"), get("runtime"), cli.now_ms())
+    finally:
+        outage.share(get("store"), get("slug"), cli.now_ms())
 
 
 def _hive_ledger(cli: Any, get: Get) -> None:
