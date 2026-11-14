@@ -335,7 +335,10 @@ def heard(payload, environ=None, now=None):
 
 
 def typed(payload: dict[str, Any], environ: Any = None, now: float | None = None) -> bool:
-    """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt, and a prompt the session scheduled for itself never counts."""
+    """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt.
+
+    A prompt equal to one of the last KEPT the session scheduled with a cron or wakeup tool never counts.
+    """
     env = os.environ if environ is None else environ
     if scheduled_prompts.fired(payload.get("session_id") or "", payload.get("prompt")):
         return False

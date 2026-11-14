@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from hooks.context.ledger_decision import _bound
+from hooks.context.scheduled_prompts import AUTOMATED
 
 QUIET_EVERY = 2
 QUIET_WORDS = 20
@@ -113,9 +114,7 @@ def reset(payload: dict) -> None:
 
 
 def notice(payload: dict[str, Any], typed: bool, now: float | None = None) -> str:
-    """The context a prompt gets: its switch notice, the typed reply window, the automated prompt notice and the away reminder."""
-    from hooks.context.scheduled_prompts import AUTOMATED
-
+    """A prompt's context: its switch notice, the typed reply window, the automated notice and the away reminder."""
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")

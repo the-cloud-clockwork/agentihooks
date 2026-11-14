@@ -10,6 +10,7 @@
         "tests/context/test_scheduled_prompts.py::test_a_session_cron_prompt_in_a_swarm_master_is_automated_never_operator_presence",
         "tests/context/test_scheduled_prompts.py::test_a_cron_prompt_never_switches_presence_on_or_off",
         "tests/context/test_scheduled_prompts.py::test_a_swarm_delivered_nudge_is_told_it_is_automated",
+        "tests/context/test_scheduled_prompts.py::test_the_hourly_safety_nudge_as_sent_to_a_master_pane_is_automated",
         "tests/context/test_scheduled_prompts.py::test_a_typed_operator_message_opens_a_reply_and_is_never_called_automated",
         "tests/context/test_scheduled_prompts.py::test_a_cron_inside_the_quiet_window_is_still_automated",
         "tests/context/test_scheduled_prompts.py::test_a_swarm_worker_starts_off_and_a_cron_keeps_it_off",

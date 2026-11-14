@@ -103,6 +103,33 @@ def test_a_swarm_delivered_nudge_is_told_it_is_automated(
 
 
 @pytest.mark.feature("operator-presence-automated-prompts")
+def test_the_hourly_safety_nudge_as_sent_to_a_master_pane_is_automated(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import safety_nudge
+
+    sent: list[str] = []
+
+    def herdr(argv: list[str]) -> dict[str, str]:
+        if argv[:2] == ["agent", "prompt"]:
+            sent.append(argv[-1])
+        return {}
+
+    messenger = delivery.HerdrMessenger(herdr=herdr)
+    monkeypatch.setattr(messenger, "agent_status", lambda agent: next(iter(delivery.READY)))
+    monkeypatch.setattr(messenger, "typed_input", lambda agent: "")
+    entry = {"seat": "master@demo", "harness": "claude", "pane": "w:p1"}
+    assert safety_nudge.nudge(messenger, entry) == "sent"
+    assert sent == [delivery.marked(safety_nudge.TEXT)]
+    bind(monkeypatch)
+    opened(capsys, "m1")
+    out = prompt(capsys, "m1", sent[0])
+    assert AUTOMATED in out
+    assert PRESENT not in out
+    assert not operator_mode.present("m1", MASTER)
+
+
+@pytest.mark.feature("operator-presence-automated-prompts")
 def test_a_typed_operator_message_opens_a_reply_and_is_never_called_automated(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
