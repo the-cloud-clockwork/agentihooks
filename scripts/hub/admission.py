@@ -353,7 +353,7 @@ class Admission:
         return True
 
     def launched(self, slug: str, request: dict[str, Any]) -> bool:
-        """Writes the launch decision the admitted hive reports onto its agent's record and, on the first decision,
+        """Writes the launch decision the admitted hive reports onto its agent's record and, when the decision is new,
         starts its launch check as the place step does; False when the hive holds no admission for the offer or
         another agent now occupies the admitted seat."""
         from scripts.swarm import launch_check
@@ -369,7 +369,7 @@ class Admission:
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
             return False
-        if not occupant.harness:
+        if any(getattr(occupant, field) != value for field, value in decision.items()):
             launch_check.begin(self.store, slug, occupant, self.clock())
         return True
 

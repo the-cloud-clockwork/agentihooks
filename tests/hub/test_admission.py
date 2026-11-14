@@ -220,6 +220,36 @@ def test_a_republished_launch_decision_starts_no_second_launch_check(rig: Simple
 
 
 @pytest.mark.feature("events-launch-check")
+def test_a_republished_decision_naming_no_harness_starts_no_second_launch_check(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    unnamed = {**LAUNCH, "harness": ""}
+    rig.admitter.launched(SLUG, ask(launch=unnamed))
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: {"task": "t1", "at": 7_000, "relaunch": True}}
+    launch_check.forget(rig.store, SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(launch=unnamed)) is True
+
+    assert launch_check.pending(rig.store, SLUG) == {}
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.admitter.launched(SLUG, ask(launch=LAUNCH))
+
+    [agent] = [agent for agent in rig.store.agents(SLUG) if agent.name in launch_check.pending(rig.store, SLUG)]
+    found = launch_check.misses(rig.store, SLUG, agent, {}, {}, False, [])
+
+    assert agent.name == admitted["name"]
+    assert found == {"hive_join": {"expected": "session join report", "actual": "missing"}}
+    assert not set(found) <= launch_check.REPORT_ONLY
+
+
+@pytest.mark.feature("events-launch-check")
 def test_a_refused_launch_decision_starts_no_launch_check(rig: SimpleNamespace) -> None:
     from scripts.swarm import launch_check
 

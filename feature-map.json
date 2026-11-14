@@ -6031,11 +6031,13 @@
       "id": "events-launch-check",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check",
-      "behaviour": "Under the events engine, where the legacy place step never runs, the hub starts a launch check with relaunch allowed when a hive first reports the launch decision of the agent it admitted, so the observe launch checks step retires and relaunches a worker that never joins its seat or comes up with the wrong profile, base or overlay, as it does for a place step launch; a republished decision starts no second check and a refused report starts none.",
+      "behaviour": "Under the events engine, where the legacy place step never runs, the hub starts a launch check with relaunch allowed when a hive reports a launch decision for the agent it admitted that differs from its record, so a missing hive join report is an enforced miss, so the observe launch checks step retires and relaunches a worker that never joins its seat or comes up with the wrong profile, base or overlay, as it does for a place step launch; a republished decision, even one naming no harness, starts no second check and a refused report starts none.",
       "seam": "Admission.launched starting launch_check.begin for the admitted seat occupant",
       "tests": [
         "tests/hub/test_admission.py::test_the_first_launch_decision_starts_a_launch_check_the_tick_retires_and_relaunches_on",
         "tests/hub/test_admission.py::test_a_republished_launch_decision_starts_no_second_launch_check",
+        "tests/hub/test_admission.py::test_a_republished_decision_naming_no_harness_starts_no_second_launch_check",
+        "tests/hub/test_admission.py::test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join",
         "tests/hub/test_admission.py::test_a_refused_launch_decision_starts_no_launch_check"
       ]
     },
