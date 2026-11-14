@@ -6,8 +6,9 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm import ledger_events, master_retire, outage, pane, provider_probe, status
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_NUDGE_TICKS, tick
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_lifetime import HOUR, idle_master
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, tasks, workers
 from tests.swarm.test_tick import store as store
@@ -30,9 +31,10 @@ def outages(tmp_path, monkeypatch):
     monkeypatch.setattr(outage, "HOME", tmp_path)
 
 
-def claimed(store):
+def claimed(store: RedisStore) -> tuple[FakeLedger, ProviderDown]:
+    """Seats an idle working owner ``NAME`` on t1 through hub admission on the tick's own hive, then pauses."""
     ledger, runtime = tasks(("t1", "eng")), ProviderDown()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert seat_owner(store, ledger, runtime, "t1", 1_000).name == NAME
     store.update("sw", state="paused")
     runtime.statuses[NAME] = "idle"
     return ledger, runtime
@@ -42,7 +44,7 @@ def idle_ticks(store):
     return [a.idle_ticks for a in workers(store)]
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_and_unretired(store):
     ledger, runtime = claimed(store)
     runtime.errors[NAME] = "API Error: 529"
@@ -54,7 +56,7 @@ def test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_
     assert store.redis.get(store.key("sw", outage.PANE, NAME)) == "API Error: 529"
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopped(store):
     ledger, runtime = claimed(store)
     for n in range(IDLE_NUDGE_TICKS - 1):
@@ -68,7 +70,7 @@ def test_an_open_outage_holds_the_idle_count_and_counting_resumes_where_it_stopp
     assert idle_ticks(store) == [IDLE_NUDGE_TICKS] and runtime.nudged == [NAME]
 
 
-@pytest.mark.feature("swarm-legacy-outage-recovery-seeding")
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_cleared_provider_error_lets_the_idle_count_run_again(store):
     ledger, runtime = claimed(store)
     runtime.errors[NAME] = "Connection error."
