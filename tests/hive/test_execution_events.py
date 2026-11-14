@@ -1,9 +1,29 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
+
+
+class _Owners:
+    def get(self, swarm: str, execution: str) -> SimpleNamespace:
+        return SimpleNamespace(hive="hive-a")
+
+
+@pytest.fixture(autouse=True)
+def _hub(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hub import exits
+
+    unserved = open_bus
+
+    def serving(config: BusConfig) -> object:
+        bus = unserved(config)
+        exits.serve(bus, lambda: SimpleNamespace(execution_registry=_Owners()))
+        return bus
+
+    monkeypatch.setitem(globals(), "open_bus", serving)
 
 
 def report(state):
@@ -63,7 +83,7 @@ def test_failed_exit_publication_can_be_retried_after_publisher_restart():
     bus = open_bus(BusConfig())
     try:
         publish(bus, "hive-a", report("working"))
-        with patch.object(bus.events, "publish", side_effect=RuntimeError("offline")):
+        with patch.object(bus, "request", side_effect=RuntimeError("offline")):
             with pytest.raises(RuntimeError, match="offline"):
                 publish(bus, "hive-a", report("exited"))
         publish(bus, "hive-a", report("exited"))

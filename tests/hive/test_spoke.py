@@ -998,9 +998,12 @@ def test_spawned_agent_keeps_the_launch_claim_revision_after_started_publication
 
 
 @pytest.mark.parametrize("state", ["dead", "exited"])
-def test_hive_observations_end_the_same_execution_the_spoke_started(rig, state):
+def test_hive_observations_end_the_same_execution_the_spoke_started(rig: SimpleNamespace, state: str) -> None:
     from scripts.hive.execution_events import publish
+    from scripts.hub import exits
 
+    registry = SimpleNamespace(get=lambda swarm, execution: SimpleNamespace(hive="hive-a"))
+    exits.serve(rig.bus, lambda: SimpleNamespace(execution_registry=registry))
     assert rig.spoke.poll() == "started"
     request = rig.runtime.spawn.call_args.args[0]
     report = {

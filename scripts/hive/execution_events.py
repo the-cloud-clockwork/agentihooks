@@ -2,12 +2,13 @@ import hashlib
 import json
 import logging
 from dataclasses import replace
+from typing import Any
 
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
-from scripts.events.subjects import subject
+from scripts.events.subjects import exit_report, subject
 
 LIVE = frozenset({"working", "running", "idle", "waiting", "blocked"})
 STATE = "hive-executions"
@@ -18,6 +19,11 @@ _LOG = logging.getLogger(__name__)
 
 SENT = b"sent"
 PREFIX = "execution."
+EXIT_TIMEOUT_MS = 5000
+
+
+class ExitRefused(RuntimeError):
+    """The hub refused a hive's exit report."""
 
 
 def identity(swarm: str, name: str, generation: int) -> str:
@@ -31,6 +37,18 @@ def emit(bus: Bus, event: Envelope) -> None:
     if states.get(key) is not None:
         return
     bus.events.publish(subject(event.swarm, "execution", event.type.removeprefix(PREFIX)), event)
+    states.create(key, SENT)
+
+
+def report_exit(bus: Any, hive: str, event: Envelope) -> None:
+    """Report an exit on the hive's own subject; the hub publishes it once it checks the execution runs here."""
+    states = bus.for_swarm(event.swarm).state(STATE)
+    key = hashlib.sha256(event.id.encode()).hexdigest()
+    if states.get(key) is not None:
+        return
+    answer = json.loads(bus.request(exit_report(event.swarm, hive), event.encode(), EXIT_TIMEOUT_MS))
+    if not answer["ok"]:
+        raise ExitRefused(answer["error"])
     states.create(key, SENT)
 
 
@@ -87,7 +105,7 @@ def publish(bus: Bus, hive: str, report: dict) -> None:
             event, id=f"exited:{event.id}", type="execution.exited", time=report["observed_at"], cause=event.id
         )
         if observed in ENDED:
-            emit(bus, exited)
+            report_exit(bus, hive, exited)
         elif bus.for_swarm(record["slug"]).state(STATE).get(hashlib.sha256(exited.id.encode()).hexdigest()) is None:
             emit(bus, event)
 

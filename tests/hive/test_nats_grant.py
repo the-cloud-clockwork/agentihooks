@@ -206,7 +206,7 @@ def _on_wire(logical: str, wire: bool) -> str:
 def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(
     signer: nats_grant.Signer, scope: str, wire: bool, stop: str
 ) -> None:
-    allowed = [_on_wire(f"swarm.rig.execution.{kind}", wire) for kind in ("started", "exited")]
+    allowed = [_on_wire("swarm.rig.execution.started", wire)]
     refused = _on_wire(stop, wire)
 
     assert _publish_refusals(signer, _member(signer, scope), *allowed, refused) == [
@@ -222,6 +222,34 @@ def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer: nats_
     assert _publish_refusals(signer, hub, _on_wire("swarm.rig.execution.stop.h2", wire), "outside.events") == [
         'nats: permissions violation for publish to "outside.events"'
     ]
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+def test_a_member_credential_reports_an_exit_on_its_own_subject(signer: nats_grant.Signer, scope: str) -> None:
+    async def act(nc: Any) -> None:
+        await nc.publish("exits.rig.m1", b"{}")
+
+    assert _violations(signer, _member(signer, scope), act) == []
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+@pytest.mark.parametrize("subject", ["exits.rig.h2", "swarm.rig.execution.exited", "swarm.rig.events.execution.exited"])
+def test_a_member_credential_cannot_report_an_exit_on_another_subject(
+    signer: nats_grant.Signer, scope: str, subject: str
+) -> None:
+    assert _publish_refusals(signer, _member(signer, scope), subject) == [
+        f'nats: permissions violation for publish to "{subject}"'
+    ]
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_the_hub_credential_serves_every_hive_exit_subject() -> None:
+    claims = nats_grant.controller_claims()
+
+    assert "exits.*.*" in claims["sub"]["allow"]
+    assert "swarm.>" in claims["pub"]["allow"]
 
 
 def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
@@ -769,6 +797,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
         "slots.*.m1",
+        "exits.*.m1",
         "$KV.scheduler-m1.>",
         "$JS.API.STREAM.INFO.KV_scheduler-m1",
         "$JS.API.STREAM.MSG.GET.KV_scheduler-m1",
