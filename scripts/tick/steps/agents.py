@@ -103,7 +103,8 @@ def _orphans(slug: Any, store: Any, ledger: Any, rows: Any) -> Any:
             and store.claimant(slug, task_id) is None
             and not tick.awaiting_merge(row)
         ):
-            if tick._reopen(slug, ledger, rows, task_id):
+            expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": row.get("claim_generation", 0)}
+            if tick._reopen(slug, ledger, rows, task_id, expected):
                 actions.append(f"task {task_id} had no agent, reopened")
     return actions
 
@@ -592,8 +593,6 @@ def _failed_panes(tick: Any, get: Get) -> Any:
 
 
 def _orphans_step(tick: Any, get: Get) -> Any:
-    if get("config").engine == tick.EVENTS_ENGINE:
-        return []
     return tick.skip_refused(_orphans, get("slug"), get("store"), get("ledger"), get("rows"))
 
 
@@ -634,6 +633,7 @@ STEPS = (
         frozenset({"reap", "drained resume"}),
         frozenset({TASKS}) | pass_domains("config", "rows"),
         frozenset({TASKS}),
+        feature="swarm-tick-events-orphans",
     ),
     CallStep("conversations", "close", _conversations_step, lane=SLOW),
     CallStep("session models", "close", _session_models_step, lane=SLOW),

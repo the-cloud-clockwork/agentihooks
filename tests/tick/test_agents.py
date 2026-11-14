@@ -118,11 +118,14 @@ def test_the_orphans_step_runs_outside_the_events_engine(monkeypatch: pytest.Mon
     assert seen == [("orphans", ("sw", "store", "ledger", {"t1": {}}))]
 
 
-def test_the_orphans_step_is_quiet_under_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_the_orphans_step_runs_under_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _fakes(monkeypatch)
     step = engine.group_steps("tasks")[0]
-    assert step.run(_ctx(_state(tick_module.EVENTS_ENGINE))) == Result((Write(actions_of("orphans"), "orphans", []),))
-    assert seen == []
+    assert step.run(_ctx(_state(tick_module.EVENTS_ENGINE))) == Result(
+        (Write(actions_of("orphans"), "orphans", ["orphan"]),)
+    )
+    assert seen == [("orphans", ("sw", "store", "ledger", {"t1": {}}))]
 
 
 def test_the_close_group_keeps_sessions_and_transfers_current(monkeypatch: pytest.MonkeyPatch) -> None:

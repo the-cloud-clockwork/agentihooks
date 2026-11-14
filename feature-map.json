@@ -5859,6 +5859,25 @@
         "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
       ]
+    },
+    {
+      "id": "swarm-tick-events-orphans",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-orphan-reopen",
+      "behaviour": "Under the events engine the tick's orphans step still reopens a claimed task whose claimant has no agent record and no claim, because the hub lifecycle and reconciler reopen only tasks whose agent record still exists. The reopen matches the claimant and claim generation the pass read, so a claim taken after that read is kept. A row whose hub admitted agent record or held claim exists stays claimed.",
+      "seam": "the orphans tick step and tick on an events configured store",
+      "tests": [
+        "tests/tick/test_agents.py::test_the_orphans_step_runs_under_the_events_engine",
+        "tests/swarm/test_tick.py::test_a_claimed_task_without_an_agent_is_reopened_under_the_events_engine",
+        "tests/swarm/test_tick.py::test_an_orphan_reopen_keeps_a_claim_a_new_holder_took_after_the_pass_read",
+        "tests/swarm/test_tick.py::test_an_orphan_reopen_keeps_a_claim_whose_generation_moved_after_the_pass_read",
+        "tests/swarm/test_tick.py::test_a_claimed_task_with_no_claimant_field_or_generation_is_reopened",
+        "tests/swarm/test_tick.py::test_an_events_claim_held_by_a_hive_agent_record_stays_claimed",
+        "tests/swarm/test_tick.py::test_an_events_claim_the_hub_holds_before_its_agent_record_stays_claimed"
+      ],
+      "rules": [
+        "tick-step-events-early-return"
+      ]
     }
   ],
   "unmapped_rules": [
