@@ -239,7 +239,7 @@ def _pinned(worn, revision):
     return ["--bundle-revision", revision]
 
 
-def _slot_room(task: dict[str, Any], harness: str, account: str) -> bool:
+def _slot_room(task: dict[str, Any], harness: str, account: str | None) -> bool:
     """Whether a saved account routes the launch: outside a hive slot launch always, on one only while the hub
     account slot holds or takes a worker seat on it for this execution, so a full account never pins a successor."""
     if not (account and task.get("account_slot_hive")):
@@ -867,11 +867,7 @@ class HerdrRuntime:
         route = forced or (
             ["--route", "interactive"]
             if route_kind == "interactive"
-            else (
-                ["--route", saved["account"]]
-                if not repick and _slot_room(task, agent, saved.get("account", ""))
-                else []
-            )
+            else (["--route", saved["account"]] if not repick and _slot_room(task, agent, saved.get("account")) else [])
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
