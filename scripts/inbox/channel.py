@@ -7,6 +7,7 @@ that runs without the channel.
 """
 
 import json
+import math
 import sys
 import time
 import traceback
@@ -184,7 +185,7 @@ async def _push(
 ) -> None:
     import anyio
 
-    pubsub, delay, pushed, beat = None, RETRY_FIRST_S, Pushed(), float("-inf")
+    pubsub, delay, pushed, beat = None, RETRY_FIRST_S, Pushed(), -math.inf
     try:
         _log(f"push loop for {me} waiting for the tools list")
         await ready.wait()
@@ -219,7 +220,7 @@ async def _push(
 
 def _log(text: str) -> None:
     try:
-        print(f"agentihooks inbox channel: {text}", file=sys.stderr, flush=True)
+        print(f"agentihooks inbox channel: {text}", file=sys.stderr)
     except (OSError, ValueError):
         pass
 

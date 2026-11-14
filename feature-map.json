@@ -2806,7 +2806,11 @@
       "tests": [
         "tests/inbox/test_channel_server.py::test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed",
         "tests/inbox/test_channel_server.py::test_a_failed_pass_with_a_broken_stderr_still_retries_and_pushes",
-        "tests/inbox/test_channel_server.py::test_the_push_loop_writes_a_heartbeat_on_stderr"
+        "tests/inbox/test_channel_server.py::test_the_push_loop_writes_a_heartbeat_on_stderr",
+        "tests/inbox/test_channel_server.py::test_the_heartbeat_is_due_exactly_one_period_after_the_last",
+        "tests/inbox/test_channel_server.py::test_a_failed_subscription_close_is_logged_and_the_loop_goes_on",
+        "tests/inbox/test_channel_server.py::test_a_failed_connect_is_logged_and_retried",
+        "tests/inbox/test_channel_server.py::test_a_seat_feed_that_fails_to_bind_falls_back_to_the_redis_notify"
       ]
     },
     {
