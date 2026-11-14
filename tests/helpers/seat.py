@@ -3,14 +3,15 @@ acknowledgement writes its launch decision and the hub reactor on execution star
 no tick pass and no runtime spawn run."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from scripts.events.envelope import Envelope
-from scripts.hub import admission, claims
-from scripts.swarm import readiness
+from scripts.hub import admission, claims, lease
+from scripts.swarm import commands, readiness
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -44,6 +45,7 @@ def seat_agent(
     task_id: str,
     hive: str = readiness.ROOT,
     launch: dict[str, str] | None = None,
+    clock: lease.Clock = lease.wall_ms,
 ) -> AgentRecord:
     """Seats one agent on an open task of a created swarm and returns its record as the events path leaves it.
 
@@ -52,7 +54,8 @@ def seat_agent(
     row claimed by that name. The hive's ``launched`` acknowledgement then writes the launch decision onto the record:
     ``LAUNCH`` with the lane's ``PROFILES`` entry, each key of ``launch`` overriding its default. Last, the hub claim
     lives reactor takes the hive's ``execution.started`` event: the record is ``working`` on pane ``PANE`` launched at
-    ``LAUNCHED_AT``, and the claim life is counted.
+    ``LAUNCHED_AT``, and the claim life is counted. ``clock`` is the admission clock, which names the agent and stamps
+    its ``started_at``.
 
     No runtime lists the agent and no launch row is written. The swarm stays as created, paused included.
     ``ledger`` needs ``task``, ``state`` and ``update_task`` with the ``if_state`` and ``if_match`` guards; a refused
@@ -61,7 +64,7 @@ def seat_agent(
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
     source = SimpleNamespace(snapshot=lambda name: view(store, ledger, name))
-    admitter = admission.Admission(store, ledger, source)  # pyright: ignore[reportArgumentType]
+    admitter = admission.Admission(store, ledger, source, clock)  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:
         pytest.fail(f"hub admission refused {task_id}: {admitted}")
@@ -102,3 +105,16 @@ def seat(env: tuple[RedisStore, Any, Any]) -> Callable[..., AgentRecord]:
         return seat_agent(store, ledger, SLUG, task_id, **options)
 
     return bound
+
+
+def seat_owner(store: RedisStore, ledger: Any, runtime: Any, task_id: str, at: int, **fields: Any) -> AgentRecord:
+    """Seats a working owner on ``task_id`` of swarm ``sw`` as its hive leaves it once the pane runs.
+
+    ``seat_agent`` admits it from the hive the tick runs as, at the test clock ``at``, and counts its claim life. The
+    record then sits on pane ``w1:<task_id>``, launched at ``at`` with ``fields`` applied, and the fake ``runtime``
+    lists it live, so the tick judges a local, execution backed owner of its own hive."""
+    seated = seat_agent(store, ledger, SLUG, task_id, hive=commands.hive_id(), clock=lambda: at)
+    owner = replace(seated, pane_id=f"w1:{task_id}", state="working", launched_at=at, **fields)
+    store.execution_registry.update(SLUG, owner)
+    runtime.live.add(owner.name)
+    return owner

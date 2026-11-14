@@ -281,7 +281,8 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
 def _launch_checks(
     slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, Any], doc: dict[str, Any], now_ms: int
 ) -> list[str]:
-    waiting, actions = launch_check.pending(store, slug), list[str]()
+    pending, actions = launch_check.pending(store, slug), list[str]()
+    waiting = {name: entry for name, entry in pending.items() if entry.get("owner") != launch_check.HUB}
     if not waiting:
         return actions
     agents = [a for a in store.agents(slug) if a.name in waiting]

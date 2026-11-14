@@ -4,6 +4,7 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.swarm import outage, resume
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from tests.swarm.test_outage_resume import MINUTE, rows_of, three_owners
 from tests.swarm.test_tick import FakeRuntime
@@ -23,10 +24,11 @@ def outage_home(tmp_path, monkeypatch):
     monkeypatch.setattr(snapshot, "worktrees", lambda repo, names, *run: {name: str(tmp_path) for name in names})
 
 
-def executing(store, agent, backend="local"):
+def executing(store: RedisStore, agent: AgentRecord, backend: str = "local") -> AgentRecord:
+    """Relaunches ``agent`` on its own seat as a new execution on ``backend``, replacing the one it holds."""
     target = {"pod_namespace": "swarm", "pod_name": "agent"} if backend == "kubernetes" else {}
     fresh = replace(agent, execution_id="", generation=0, runtime_backend=backend, runtime_target=target)
-    return store.start_execution("sw", fresh)
+    return store.start_execution("sw", fresh, agent.execution_id)
 
 
 def stuck_owner(store, monkeypatch):
@@ -84,6 +86,7 @@ def test_an_execution_without_task_authority_owns_its_recovery_only_when_local(s
     assert (owner.name in runtime.nudged) is recovered
 
 
+@pytest.mark.feature("swarm-legacy-outage-seat-release-successor")
 def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts(
     store, monkeypatch
 ):
@@ -112,6 +115,7 @@ def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_o
     assert transfer["handoff"].startswith("## Intent") and runtime.errors[owner.name] in transfer["handoff"]
 
 
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_outage_stays_open(store, monkeypatch):
     ledger, runtime, owner = stuck_owner(store, monkeypatch)
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
