@@ -6021,8 +6021,8 @@
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
-      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive and the launch decision, lane defaults with named overrides, lands on the record. The record stays as the events path leaves it before a hive runs it: state starting, no pane, launched at zero, the claim life pending, no runtime listing and no launch row; the swarm stays paused, and a refused admission fails the test.",
-      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit and Admission.launched",
+      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive and the launch decision, lane defaults with named overrides, lands on the record. The hub reactor on execution started then marks the record working with its pane and launch time and counts the claim life; no runtime listing and no launch row; the swarm stays paused, and a refused admission fails the test.",
+      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit, Admission.launched and Claims.handle",
       "tests": [
         "tests/helpers/test_seat.py::test_seat_claims_and_launches_an_agent_without_start_or_a_tick",
         "tests/helpers/test_seat.py::test_seat_carries_a_given_hive_and_overrides_only_the_named_launch_fields",
