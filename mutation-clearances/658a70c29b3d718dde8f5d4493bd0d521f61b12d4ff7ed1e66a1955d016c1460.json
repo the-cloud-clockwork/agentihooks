@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.x\u01c1Admission\u01c1_claim:42f086d2c63d46011629f63c091f4d2ba45be5e15667ab69a09404549bde0ba7": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so cast(None, ...) yields the same value as the original and the mutant changes no output."
+  }
+}
