@@ -1,6 +1,31 @@
 {
   "features": [
     {
+      "id": "swarm-legacy-failed-launch-panes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-failure",
+      "behaviour": "A legacy tick launch that fails, or whose worker exits before its launch check passes, records its pane on the failed launch row and holds it; the failed panes sweep keeps the pane open for two minutes, then reads its last lines onto the row and closes it, retrying when herdr cannot list or close it, dropping a pane that no longer shows the launch and never touching a live agent's pane. Only the legacy tick spawn holds a failed pane; the events hub admission records the failure and steers the harness but holds no pane, so these tests retire with the legacy launch engine.",
+      "seam": "scripts.swarm.tick.tick spawn failure and launch check exit paths through scripts.swarm.failed_panes.hold and sweep",
+      "tests": [
+        "tests/swarm/test_failed_launch_panes.py::test_a_failed_launch_records_its_pane_and_keeps_it_open_for_two_minutes",
+        "tests/swarm/test_failed_launch_panes.py::test_a_failed_launch_pane_closes_after_two_minutes_with_its_last_lines_kept",
+        "tests/swarm/test_failed_launch_panes.py::test_a_pane_whose_lines_cannot_be_read_still_closes_and_says_so",
+        "tests/swarm/test_failed_launch_panes.py::test_a_pane_that_no_longer_shows_the_launch_is_dropped_untouched",
+        "tests/swarm/test_failed_launch_panes.py::test_a_pane_herdr_refuses_to_close_stays_held_for_the_next_tick",
+        "tests/swarm/test_failed_launch_panes.py::test_a_pane_herdr_cannot_list_stays_held_unread_for_the_next_tick",
+        "tests/swarm/test_failed_launch_panes.py::test_a_live_agent_pane_is_never_read_or_closed",
+        "tests/swarm/test_failed_launch_panes.py::test_a_failed_launch_whose_process_survived_closes_only_once_it_is_gone",
+        "tests/swarm/test_failed_launch_panes.py::test_the_tick_reaps_a_surviving_failed_launch_and_then_closes_its_pane",
+        "tests/swarm/test_failed_launch_panes.py::test_a_spawn_failure_without_a_pane_holds_nothing",
+        "tests/swarm/test_failed_launch_panes.py::test_a_crash_that_is_no_spawn_error_records_no_pane",
+        "tests/swarm/test_failed_launch_panes.py::test_a_launch_waiting_on_quota_holds_no_pane",
+        "tests/swarm/test_failed_launch_panes.py::test_a_started_launch_records_its_pane",
+        "tests/swarm/test_failed_launch_panes.py::test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_then_closed",
+        "tests/swarm/test_failed_launch_panes.py::test_status_lists_failed_launches_with_their_lines",
+        "tests/swarm/test_failed_launch_panes.py::test_a_route_timeout_without_a_pane_report_closes_its_recorded_pane_after_two_minutes"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
