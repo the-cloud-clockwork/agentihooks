@@ -68,6 +68,7 @@ def test_the_hub_refuses_an_exit_reported_by_another_hive(hub) -> None:
 @pytest.mark.feature("hive-own-exit-subject")
 def test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished(hub) -> None:
     event = execution_events.initial(hub, "hive-a", "execution-z", report("exited")["executions"]["execution-a"], 1)
+    assert event is not None
     exited = event.__class__(**{**event.to_dict(), "key": "execution-z", "type": "execution.exited"})
 
     answer = exits.handle(
@@ -97,6 +98,7 @@ def test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished
 )
 def test_the_hub_refuses_a_malformed_exit_report(hub, reported: str, change: dict, error: str) -> None:
     event = execution_events.initial(hub, "hive-a", "execution-a", report("exited")["executions"]["execution-a"], 1)
+    assert event is not None
     data = {**event.to_dict(), "type": "execution.exited", **change}
 
     answer = exits.handle(
