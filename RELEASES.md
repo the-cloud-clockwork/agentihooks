@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.878 · 2026-11-14
+
+### 2026-11-14 · 9cf5fabefd00 · #11145 · @agenticore-app
+
+**Keep rows when the engine migration skips and drop the Doctor's stuck launch rows**
+
+This fixes the engine migration so a refused config update is correctly reported as skipped while preserving all its rows, instead of silently succeeding and losing data. Separately, for idle swarms with no live agents, it now drops only the stuck "acknowledging"/"launching" launch rows (reporting the count), leaving started, failed, waiting, and pending rows intact since those still feed claim caps and live counts. This stops the Doctor's stuck launches from endlessly reporting as unchanged.
+
 ## v2.17.876 · 2026-11-14
 
 ### 2026-11-14 · d8b7eae05db7 · #11138 · @nestorcolt
