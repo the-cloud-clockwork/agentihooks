@@ -17,6 +17,8 @@ redis.call('HSETNX', KEYS[2], ARGV[2], ARGV[3])
 return redis.call('HINCRBY', KEYS[2], ARGV[2], 1)
 """
 
+RESUME_FIELDS = ("conversation_id", "overlays")
+
 
 class Claims:
     def __init__(self, store: RedisStore | None = None):
@@ -38,7 +40,12 @@ class Claims:
             self.store.execution_registry.set_launch(
                 event.swarm,
                 event.key,
-                {"state": "working", "pane_id": data["pane_id"], "launched_at": data.get("launched_at") or event.time},
+                {
+                    "state": "working",
+                    "pane_id": data["pane_id"],
+                    "launched_at": data.get("launched_at") or event.time,
+                    **{field: data[field] for field in RESUME_FIELDS if data.get(field)},
+                },
                 only_from="starting",
             )
         lives = self.store.redis.eval(

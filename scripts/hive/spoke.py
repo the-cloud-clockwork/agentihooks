@@ -298,6 +298,8 @@ class Spoke:
                 "launched_at": placed.launched_at or self.clock(),
                 "harness": placed.harness,
                 "account": placed.account,
+                "conversation_id": getattr(placed, "conversation_id", ""),
+                "overlays": list(getattr(placed, "overlays", ())),
             },
             cause=event.id,
         )
