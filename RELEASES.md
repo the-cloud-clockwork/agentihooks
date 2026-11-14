@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.876 · 2026-11-14
+
+### 2026-11-14 · d8b7eae05db7 · #11138 · @nestorcolt
+
+**Events admission carries the handoff document and transfer attach to a successor**
+
+This change updates the events hub admission claim so it attaches any pending handoff transfer left by a predecessor (from a recycle handoff or a stopping hive's recovery handoff) to the newly admitted successor and seat, mirroring legacy place-prepare behavior, so conversations resume properly across handoffs. If the attach is refused due to a concurrent write, the claim, agent, pending life and ledger row are cleanly released. Reopen and late admission paths now correctly detach the transfer for the next successor, preventing stale or duplicate transfer bindings, with new tests and a semgrep rule guarding against future regressions.
+
 ## v2.17.872 · 2026-11-14
 
 ### 2026-11-14 · 4ff3b4902c47 · #11115 · @nestorcolt
