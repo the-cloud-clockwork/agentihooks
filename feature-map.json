@@ -1363,6 +1363,9 @@
       "seam": "scripts.hub.owned_leases.renew, called by the tick reap step",
       "tests": [
         "tests/hub/test_owned_leases.py::test_a_finished_agent_claim_is_left_to_lapse"
+      ],
+      "rules": [
+        "lease-renewal-skips-finished-agents"
       ]
     },
     {
