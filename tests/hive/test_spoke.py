@@ -523,7 +523,10 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
                 {"id": "task-a", "execution_id": "execution-a", "execution_generation": 7, "claim_generation": 3},
             )
             runtime.spawn.return_value = Outcome(
-                "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a")
+                "spawn",
+                Status.OK,
+                "local",
+                SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=0),
             )
             queue = bus.queue("swarm.rig.ready.eng", config.policy)
             queue.offer(
