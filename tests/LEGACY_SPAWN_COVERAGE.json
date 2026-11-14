@@ -22,6 +22,10 @@
         "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
       ]
     },
+    "swarm-claim-refunds-legacy": {
+      "retires": "Each test counts tick respawns in the fake runtime's spawned list, which only the legacy spawn step fills; t-legacy-events-only deletes them with that step. The quota handoff and preemption refunds stay covered on the events path by tests/hub/test_lifecycle.py::test_exit_refunds_a_started_life_for_a_park_a_quota_handoff_or_an_operator_preemption, and the fourth claim block by tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution.",
+      "gap": "No events test yet refunds a life when the swarm retires an agent for an account mismatch, idling or a stop, nor shows a parked retirement refunds nothing once its agent no longer holds the claim."
+    },
     "swarm-focus": {
       "covered_by": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
