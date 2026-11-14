@@ -258,11 +258,12 @@ class Admission:
             return {}
         config = self.store.config(slug)
         reclaim, origin = branch_heads.reclaimer(config)
+        repo = config.repo_origin or config.repo
         if handoff:
             saved: dict[str, Any] = self.store.handoff_envelope(slug, task_id) or {}
-            resolved = continuation.resolve(config.repo, task, rows, lives, saved, reclaim, origin)
+            resolved = continuation.resolve(repo, task, rows, lives, saved, reclaim, origin)
             return {"handoff": handoff, "handoff_envelope": resolved}
-        found = continuation.resolve(config.repo, task, rows, lives, {}, reclaim, origin)
+        found = continuation.resolve(repo, task, rows, lives, {}, reclaim, origin)
         self.store.put_reclaim(slug, name, found)
         return {"reclaim": found}
 

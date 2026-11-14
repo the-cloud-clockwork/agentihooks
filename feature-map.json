@@ -17,6 +17,9 @@
         "tests/hub/test_admission.py::test_a_work_folder_refusal_releases_the_claim_and_the_agent",
         "tests/hub/test_admission.py::test_a_first_life_with_no_branch_reads_no_branch_heads",
         "tests/hub/test_admission.py::test_a_cleared_protected_branch_continues_from_the_earlier_life_instead",
+        "tests/hub/test_admission.py::test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_continued",
+        "tests/hub/test_admission.py::test_the_seeds_follow_the_most_recently_started_earlier_agent",
+        "tests/hub/test_admission.py::test_a_plan_task_steering_carries_its_phase_evidence",
         "tests/hive/test_lanes.py::test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn"
       ]
     },

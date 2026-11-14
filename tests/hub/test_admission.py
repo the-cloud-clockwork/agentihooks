@@ -41,7 +41,7 @@ def rig():
         snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)])
     )
     admitter = admission.Admission(store, ledger, source, clock=lambda: 7_000)
-    yield SimpleNamespace(store=store, ledger=ledger, rows=rows, admitter=admitter)
+    yield SimpleNamespace(store=store, ledger=ledger, rows=rows, admitter=admitter, found=found)
     store.redis.close()
 
 
@@ -1060,3 +1060,60 @@ def test_a_cleared_protected_branch_continues_from_the_earlier_life_instead(
 
     assert asked == [{"owner": "acme", "name": "app", "b0": "refs/heads/eng-sw-0000"}]
     assert admitted["task"]["reclaim"]["continue_from"] == "origin/eng-sw-0000"
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+@pytest.mark.parametrize("handed_off", [False, True])
+def test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_continued(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, handed_off: bool
+) -> None:
+    from scripts.swarm import stack
+
+    monkeypatch.setattr(stack, "origin_key", lambda repo: pytest.fail("a stored origin needs no checkout"))
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    life = {"task": "t1", "lane": "eng", "name": "eng@sw-0000", "ended_at": 1}
+    rig.store.redis.rpush(rig.store.key(SLUG, "history"), json.dumps(life))
+    rig.rows["t2"].update(branch="eng-sw-0000", pr_url="https://github.com/acme/app/pull/2")
+    if handed_off:
+        rig.store.put_handoff(SLUG, "t1", "handoff text", envelope={"reason": "recycle"})
+    _github_heads(monkeypatch, {"b0": {"target": {"oid": "abc123"}}})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    verdict = admitted["task"]["handoff_envelope" if handed_off else "reclaim"]
+    assert (verdict["continue_from"], verdict["fresh_reason"]) == (
+        "fresh",
+        "no branch is recorded for this task outside another task's pull request",
+    )
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_the_seeds_follow_the_most_recently_started_earlier_agent(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_ledger import ledger_workspace
+
+    for started, hive in ((1, "hive-c"), (5, "hive-b")):
+        named = rig.store.next_name(SLUG, "eng", started)
+        record = AgentRecord(named, "eng", "t1", seat=f"eng-{started + 7}@sw", started_at=started, hive=hive)
+        rig.store.start_execution(SLUG, record, "")
+        copy = {SLUG: {"t1": {"progress.md": f"- step on {hive}\n"}}}
+        rig.store.redis.set(ledger_workspace.files_key(hive), json.dumps(copy))
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-b\n"
+
+
+@pytest.mark.feature("hub-admission-claim-context")
+def test_a_plan_task_steering_carries_its_phase_evidence(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+    from scripts.swarm_ledger import ledger_workspace
+
+    rig.rows["t1"]["kind"] = "plan"
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    steering = admitted["task"][orders.SEEDS]["steering.md"]
+    assert steering == ledger_workspace.steering(rig.rows["t1"], rig.found)
+    assert steering != ledger_workspace.steering(rig.rows["t1"], None)

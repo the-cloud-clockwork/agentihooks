@@ -67,6 +67,14 @@ def test_heads_asks_nothing_for_no_branch(monkeypatch: pytest.MonkeyPatch) -> No
     assert asked == []
 
 
+def test_heads_names_the_owner_from_the_first_path_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _graphql(monkeypatch, {"b0": None})
+
+    branch_heads.heads("github.com/acme/app/extra", ["kept"])
+
+    assert (asked[0][1]["owner"], asked[0][1]["name"]) == ("acme", "app/extra")
+
+
 @pytest.mark.parametrize("answer", [SwarmError("GitHub API failed"), None])
 def test_heads_marks_every_branch_unknown_when_github_is_not_read(monkeypatch: pytest.MonkeyPatch, answer: Any) -> None:
     _graphql(monkeypatch, answer)

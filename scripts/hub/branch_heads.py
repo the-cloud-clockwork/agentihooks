@@ -51,7 +51,7 @@ def reclaimer(config: SwarmConfig) -> tuple[Reclaim, str]:
         return partial(envelope.reclaim, heads=envelope.remote_heads(config.repo)), stack.origin_key(config.repo)
 
     def reclaim(repo: str, lives: list[str], recorded: str, forbidden: Collection[str] = ()) -> dict[str, str]:
-        found = heads(config.repo_origin, envelope.candidates(lives, recorded))
+        found = heads(repo, envelope.candidates(lives, recorded))
         return envelope.reclaim(repo, lives, recorded, forbidden=forbidden, heads=found)
 
     return reclaim, stack.repo_key(config.repo_origin)
