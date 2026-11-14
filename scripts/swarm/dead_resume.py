@@ -43,6 +43,27 @@ def _owns(store, slug, agent, ledger):
 
 
 RESUME_ATTEMPTS = 3
+CAPPED_REASON = f"it ended again after each of its last {RESUME_ATTEMPTS} resumes"
+CAPPED_HANDOFF = """## Intent
+Continue task {task}; {name} ended again after each of its last {attempts} resumes, so the swarm stopped resuming it.
+
+## Done
+unknown: {name} left no handoff document; its task folder records its steps and evidence.
+
+## Stopped at
+{name} ended again after its resume number {attempts}.
+
+## Decisions and promises
+unknown: none recorded outside the task folder and the ledger.
+
+## Next
+Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledger task {task}, then continue the task.
+
+## Read first
+{folder}/progress.md
+
+<!-- handoff complete -->
+"""
 
 
 def _resumes_key(store: RedisStore, slug: str, name: str) -> str:
@@ -71,6 +92,18 @@ def _note_resume(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> N
     store.redis.set(_resumes_key(store, slug, agent.name), json.dumps({"count": count, "at": at}), ex=idle.BEAT_TTL_S)
 
 
+def _hand_off_capped(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+    from scripts.handoff import envelope, transfers
+    from scripts.swarm_ledger.ledger_workspace import folder
+
+    text = CAPPED_HANDOFF.format(
+        task=agent.task, name=agent.name, attempts=RESUME_ATTEMPTS, folder=folder(slug, agent.task)
+    )
+    built = envelope.build(store, slug, agent, "exit", None, at)
+    store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
+    transfers.record(store, slug, agent, "exit", text, at)
+
+
 def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     if store.handoff(slug, agent.task):
         return "a handoff was submitted"
@@ -81,7 +114,7 @@ def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     if used is not None and used >= limit * 1000:
         return "the conversation reached its compact limit"
     if failed_resumes(store, slug, agent) >= RESUME_ATTEMPTS:
-        return f"it ended again after each of its last {RESUME_ATTEMPTS} resumes"
+        return CAPPED_REASON
     return ""
 
 
@@ -140,6 +173,8 @@ def reopen(
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")
             return True
+    if reason == CAPPED_REASON:
+        _hand_off_capped(store, slug, agent, at)
     if notice:
         ledger.notify(slug, notice.format(name=agent.name, reason=reason))
     return False

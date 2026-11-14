@@ -678,6 +678,10 @@ def test_an_engineer_that_dies_after_each_resume_retires_at_the_cap_and_its_task
     )
     assert agent.name not in {a.name for a in store.agents("sw")}
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    handoff = store.handoff("sw", "t1")
+    assert f"{agent.name} ended again after each of its last 3 resumes" in handoff
+    assert handoff.rstrip().endswith("<!-- handoff complete -->")
+    assert (store.handoff_envelope("sw", "t1") or {}).get("agent") == agent.name
 
 
 @pytest.mark.feature("swarm-dead-resume-cap")
