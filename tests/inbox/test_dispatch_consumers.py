@@ -43,7 +43,7 @@ def test_the_claude_channel_pushes_nothing_while_an_owner_holds_the_recipient(st
     item = store.send("alice", "bob", "hi")
     sent = []
 
-    class Stop(Exception):
+    class Stop(BaseException):
         pass
 
     class Write:
