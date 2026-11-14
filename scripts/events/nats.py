@@ -583,6 +583,12 @@ class NatsBus:
             if config.scoped
             else self._legacy_dead
         )
+        self._legacy_stops = self._legacy_events
+        self.stops = (
+            RoutedLog(lambda swarm: self.for_swarm(swarm).stops, lambda: self._logs("stops"), config.queue)
+            if config.scoped
+            else self._legacy_stops
+        )
 
     def for_swarm(self, swarm: str) -> Bus:
         from .nats_scope import NatsScopedBus

@@ -12,7 +12,7 @@ from scripts import openbao_kv
 from scripts.events import nkey, subjects
 from scripts.events.dead import DEAD_STREAM
 from scripts.events.resource_names import legacy_stream_name
-from scripts.hive import auth, buckets
+from scripts.hive import auth, buckets, stop_names
 from scripts.hub import slots
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
-MEMBER_DENY = (f"{subjects.PREFIX}.*.execution.stop.>",)
+MEMBER_DENY = (f"{subjects.PREFIX}.*.execution.stop.>", f"{subjects.PREFIX}.*.{stop_names.FAMILY}.>")
 SCHEDULER_BUCKET = "scheduler"
 SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
@@ -149,6 +149,17 @@ def swarm_publish(swarm: str) -> list[str]:
     ]
 
 
+def stop_publish(swarm: str, member: str) -> list[str]:
+    """The stop stream grants of one member in one swarm: stream info and its own stop consumer only."""
+    stream, consumer = stop_names.stream(swarm), stop_names.consumer(swarm, member)
+    return [
+        f"$JS.API.STREAM.INFO.{stream}",
+        f"$JS.API.CONSUMER.INFO.{stream}.{consumer}",
+        f"$JS.API.CONSUMER.MSG.NEXT.{stream}.{consumer}",
+        f"$JS.ACK.{stream}.{consumer}.>",
+    ]
+
+
 def scheduler_publish(member: str, swarms: tuple[str, ...] | None) -> list[str]:
     bucket = f"{SCHEDULER_BUCKET}-{member}"
     if swarms is None:
@@ -231,6 +242,7 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
         }
     publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
     publish += own
+    publish += [subject for swarm in swarms for subject in stop_publish(swarm, member)]
     return {
         **user_claims(),
         "pub": {"allow": publish, "deny": list(MEMBER_DENY)} if publish else {"deny": [">"]},

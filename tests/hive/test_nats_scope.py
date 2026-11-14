@@ -239,9 +239,10 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
         )
     for stream in ("AGENTIHOOKS_726967_STATE_scheduler-m1", stream_name("rig", "STATE_scheduler-m1")):
         expected.update(f"$JS.API.STREAM.{verb}.{stream}" for verb in ("INFO", "MSG.GET", "CREATE"))
+    expected.update(nats_grant.stop_publish("rig", "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
-    assert claims["pub"]["deny"] == ["swarm.*.execution.stop.>"]
+    assert claims["pub"]["deny"] == ["swarm.*.execution.stop.>", "swarm.*.stop.>"]
     assert set(claims["pub"]["allow"]) == expected
     assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
 

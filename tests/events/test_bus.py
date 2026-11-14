@@ -84,6 +84,7 @@ class _NoWatch:
 class _Bus:
     events = _EventLog()
     dead = _EventLog()
+    stops = _EventLog()
 
     def for_swarm(self, swarm):
         return self

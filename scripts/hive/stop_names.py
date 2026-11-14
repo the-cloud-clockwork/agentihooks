@@ -3,15 +3,14 @@
 import hashlib
 import json
 
-from scripts.events.subjects import consumer_name, stream_name
+from scripts.events.subjects import STOPS, consumer_name, stream_name
 
-RESOURCE = "STOP"
-FAMILY = "stop"
+FAMILY = STOPS.lower()
 
 
 def stream(swarm: str) -> str:
     """The JetStream stream that holds every execution stop of one swarm."""
-    return stream_name(swarm, RESOURCE)
+    return stream_name(swarm, STOPS)
 
 
 def durable(swarm: str, hive: str) -> str:

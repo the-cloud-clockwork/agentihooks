@@ -204,10 +204,10 @@ def test_each_swarm_and_hive_reads_its_stops_through_its_own_durable() -> None:
 def test_the_hub_provisions_the_durable_and_subject_the_owning_hive_binds(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    events = rig.bus.for_swarm(SLUG).events
-    opened = events.consumer
+    stops = rig.bus.for_swarm(SLUG).stops
+    opened = stops.consumer
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(events, "consumer", lambda *args: calls.append(args) or opened(*args))
+    monkeypatch.setattr(stops, "consumer", lambda *args: calls.append(args) or opened(*args))
 
     execution_stop.stop(rig.bus, SLUG, rig.agent, "launch check failed")
     execution_stop.Stopper(rig.bus, SLUG, HIVE, runtime()).poll()
@@ -220,10 +220,10 @@ def test_the_hub_provisions_the_durable_and_subject_the_owning_hive_binds(
 def test_a_hive_waits_the_given_timeout_for_its_stops() -> None:
     bus = Mock()
     bus.for_swarm.return_value = bus
-    bus.events.consumer.return_value.fetch.return_value = []
+    bus.stops.consumer.return_value.fetch.return_value = []
 
     assert execution_stop.Stopper(bus, SLUG, HIVE, runtime()).poll(17) == []
-    bus.events.consumer.return_value.fetch.assert_called_once_with(execution_stop.BATCH, 17)
+    bus.stops.consumer.return_value.fetch.assert_called_once_with(execution_stop.BATCH, 17)
 
 
 @pytest.mark.feature("events-execution-stop")
@@ -306,12 +306,12 @@ def test_a_hive_reads_nothing_and_says_nothing_before_the_hub_creates_its_stop_c
 
     bus = Mock()
     bus.for_swarm.return_value = bus
-    bus.events.consumer.side_effect = NotFoundError()
+    bus.stops.consumer.side_effect = NotFoundError()
     stopper = execution_stop.Stopper(bus, SLUG, HIVE, runtime())
 
     assert stopper.poll() == []
     assert capsys.readouterr().err == ""
-    bus.events.consumer.side_effect = RuntimeError("refused")
+    bus.stops.consumer.side_effect = RuntimeError("refused")
     assert stopper.poll() == []
     assert "failed (RuntimeError: refused)" in capsys.readouterr().err
 

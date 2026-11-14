@@ -765,7 +765,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {"allow": publish, "deny": ["swarm.*.execution.stop.>"]},
+        "pub": {"allow": publish, "deny": ["swarm.*.execution.stop.>", "swarm.*.stop.>"]},
         "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,
