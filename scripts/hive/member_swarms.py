@@ -104,7 +104,7 @@ def extend(bao: openbao_kv.OpenBao, path: str, member: str, chosen: tuple[str, .
         if not added:
             return {}
         merged = {**listed, member: [*held, *added]}
-        nats_grant.member_swarms(merged)
+        nats_grant.member_swarms(merged)  # pyright: ignore[reportUnknownMemberType]
         return {FIELD: merged}
 
     try:
