@@ -457,10 +457,11 @@ def ticking():
 def launched(ticking: tuple) -> tuple:
     """``ticking`` with an agent already launched on task one: seated through hub admission and started at 100 on a
     pane, listed by the runtime and holding its launch row, so no tick spawns it."""
+    from scripts.swarm.commands import hive_id
     from tests.helpers.seat import Launched, seat_agent
 
     store, runtime, ledger = ticking
-    seat_agent(store, ledger, "sw", "one", started=Launched(100, runtime))
+    seat_agent(store, ledger, "sw", "one", hive_id(), started=Launched(100, runtime))
     return ticking
 
 
@@ -823,7 +824,6 @@ def test_finished_agent_on_open_task_closes_its_pane_without_a_pane_finding(laun
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = launched
-    tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(old, state="finished"))
     tick("sw", store, ledger, runtime, 200)
@@ -1171,7 +1171,7 @@ def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(launch
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     old = replace(old, conversation_id="conv", profile_decision={"validation": {"pid": 99}})
-    twin = replace(old, name=f"{old.name}-twin")
+    twin = replace(old, name=f"{old.name}-twin", execution_id="", generation=0, hive="")
     store.put_agent("sw", old)
     store.put_agent("sw", twin)
     runtime.conversation_ids = panes

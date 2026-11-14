@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+from scripts.swarm.commands import hive_id
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 from tests.helpers.seat import Launched, seat_agent
@@ -278,7 +279,7 @@ def test_a_placement_wait_is_logged_in_the_tick_output(store):
 @pytest.mark.parametrize("pr_url, expected", [("", "claimed"), ("https://github.com/o/r/pull/1", "pr")])
 def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger, pr_url, expected):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    owner = seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
+    owner = seat_agent(store, ledger, "sw", "t1", hive_id(), started=Launched(1_000, runtime))
     ledger.rows["t1"].update(pr_url=pr_url, state=expected)
     store.release("sw", "t1", owner.name)
     if lost_ledger:
@@ -296,7 +297,7 @@ def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(stor
 @pytest.mark.parametrize("state", ["claimed", "pr"])
 def test_a_live_owner_recovers_a_missing_claimant_on_an_active_ledger_row(store, state):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    owner = seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
+    owner = seat_agent(store, ledger, "sw", "t1", hive_id(), started=Launched(1_000, runtime))
     ledger.rows["t1"].update(state=state, claimed_by="")
     store.release("sw", "t1", owner.name)
     tick("sw", store, ledger, runtime, now_ms=2_000)
@@ -310,7 +311,7 @@ def test_a_stale_live_agent_cannot_restore_a_lease_over_the_ledger_successor(sto
     from scripts.swarm.store import AgentRecord
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    owner = seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
+    owner = seat_agent(store, ledger, "sw", "t1", hive_id(), started=Launched(1_000, runtime))
     store.release("sw", "t1", owner.name)
     stale = AgentRecord("a-stale-owner", "eng", "t1", pane_id="old-pane", started_at=100)
     store.put_agent("sw", stale)
@@ -346,7 +347,7 @@ def test_a_stale_predecessor_does_not_hold_the_ci_lane_a_successor_owns(store):
 
 def test_ownership_repair_keeps_a_newer_ledger_state_and_claim(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
+    seat_agent(store, ledger, "sw", "t1", hive_id(), started=Launched(1_000, runtime))
     ledger.rows["t1"].update(state="open", claimed_by="")
     update = ledger.update_task
 
@@ -365,7 +366,7 @@ def test_a_finished_predecessor_cannot_hold_reopened_work_when_retirement_is_stu
     from dataclasses import replace
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    owner = seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
+    owner = seat_agent(store, ledger, "sw", "t1", hive_id(), started=Launched(1_000, runtime))
     store.put_agent("sw", replace(owner, state="finished"))
     store.release("sw", "t1", owner.name)
     runtime.stuck.add(owner.name)
