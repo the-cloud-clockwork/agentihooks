@@ -208,7 +208,7 @@ def _swarm_exports(environ: dict[str, str]) -> str:
 
     scratch = ("AGENTIHOOKS_SWARM_REDIS_URL",) if PROOF_RE.fullmatch(environ["AGENTIHOOKS_SWARM"]) else ()
     exports = {name: environ[name] for name in (*names, *scratch) if environ.get(name)}
-    reference = environ.get(CREDENTIALS_ENV, "")
+    reference = environ.get(CREDENTIALS_ENV)
     if reference and not reference.startswith(INLINE_CREDENTIALS):
         exports[CREDENTIALS_ENV] = reference
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"

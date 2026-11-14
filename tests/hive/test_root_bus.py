@@ -59,7 +59,7 @@ def _record(monkeypatch: pytest.MonkeyPatch, signers: list, extended: list, sync
 
     def extend(bao: str, path: str, member: str, chosen: tuple[str, ...]) -> list[str]:
         extended.append((bao, path, member, chosen))
-        return ["beta"]
+        return ["beta", "gamma"]
 
     monkeypatch.setattr(member_swarms, "extend", extend)
 
@@ -257,7 +257,7 @@ def test_hive_root_bus_extends_the_root_listing_with_missing_swarms(tmp_path, mo
     assert extended == [("bao", "agentihooks/hub/nats", "root", ("alpha", "beta"))]
     path = home / "root-bus" / "bus.env"
     assert capsys.readouterr().out.splitlines() == [
-        "listed hive root for beta in the hub signer record",
+        "listed hive root for beta, gamma in the hub signer record",
         "requested a sync of the signer record ns/name",
         f"wrote the NATS bus settings of hive root to {path} and restarted the hive service",
     ]
@@ -270,7 +270,7 @@ def test_hive_root_bus_keeps_a_listing_that_covers_every_wanted_swarm(tmp_path, 
     extended: list = []
     _record(monkeypatch, [_signer({"root": ("alpha", "beta")})], extended, [])
     named: list = []
-    _swarms(monkeypatch, named, ("beta",))
+    _swarms(monkeypatch, named, ("beta", "alpha"))
     _service(monkeypatch, [])
 
     assert cli.main(["root-bus"]) == 0
@@ -464,6 +464,7 @@ def test_an_inline_bus_credential_never_reaches_the_launcher_script():
     environ = {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_BUS_CREDENTIALS": f"{INLINE_CREDENTIALS}\nsecret"}
 
     assert "AGENTIHOOKS_BUS_CREDENTIALS" not in init_agent._swarm_exports(environ)
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in init_agent._swarm_exports({"AGENTIHOOKS_SWARM": "rig"})
 
 
 def _bao_record(monkeypatch: pytest.MonkeyPatch, record: dict) -> list[dict]:

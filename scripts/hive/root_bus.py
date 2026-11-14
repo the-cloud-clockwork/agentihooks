@@ -41,7 +41,7 @@ def verify(path: Path) -> None:
     """Connect to the hub once with the bus env at path, raising HiveError when the hub refuses it."""
     from scripts.events import nats
 
-    values = {key: value or "" for key, value in dotenv_values(path, interpolate=False).items()}
+    values = {key: value for key, value in dotenv_values(path).items() if value is not None}
     try:
         nats.open_bus(BusConfig.from_environ(values)).close()
     except Exception as exc:
