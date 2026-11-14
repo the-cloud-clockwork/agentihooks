@@ -6111,11 +6111,22 @@
       "id": "events-retirement-refunds-claim-life",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
-      "behaviour": "A swarm retirement refunds the claim life of the agent it retires: three retirements for an account mismatch, idling or a swarm stop leave a fourth claim open on the legacy tick spawn, and an agent seated through hub admission whose hive recorded its start and whose life the hub counted gets that life back on a swarm stop, retired and dropped with its task reopened unclaimed.",
-      "seam": "stop_now, and on the legacy spawn the observe verify and agents reap steps, retiring an agent through the held claim refund",
+      "behaviour": "A swarm retirement refunds the claim life of the agent it retires: three retirements for an account mismatch, idling or a swarm stop leave a fourth claim open on the legacy tick spawn, and an agent seated through hub admission whose hive recorded its start and whose life the hub counted gets that life back when the observe verify step retires it for an account mismatch, the agents reap step retires it for idling or a swarm stop retires it, retired and dropped with its task reopened unclaimed.",
+      "seam": "stop_now, the observe verify step and the agents reap step, retiring an agent through the held claim refund",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
         "tests/swarm/test_claim_refunds.py::test_three_swarm_retirements_allow_a_fourth_claim"
+      ]
+    },
+    {
+      "id": "events-retirement-stops-the-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-idle-mismatch-retire",
+      "behaviour": "When the observe verify step retires a hub admitted agent whose hive recorded its start for an account mismatch, or the agents reap step retires it for idling, the hub sends that hive the execution stop for its started execution, naming the retirement reason, so the hive spoke ends the execution through its exited event.",
+      "seam": "observe verify and agents reap retiring an events owned agent through execution_stop.stop",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent"
       ]
     },
     {

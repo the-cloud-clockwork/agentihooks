@@ -15,9 +15,9 @@
     },
     "events-retirement-refunds-claim-life": {
       "covered_by": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent"
-      ],
-      "gap": "An events launched agent with a recorded start is never retired for an account mismatch or idling: the observe verify and agents reap steps judge only hub reconciler legacy agents, and no hub or hive step retires it, so its claim life is never refunded on those retirements; ported by the events idle and mismatch retirement task."
+      ]
     },
     "events-smoke-no-legacy-launch": {
       "retires": "The clause that the tick lane launch is never called patches the legacy spawn function the removal deletes; the removal drops that patch and keeps the no worker spawn and open task assertions."

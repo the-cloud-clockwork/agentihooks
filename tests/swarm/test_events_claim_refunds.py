@@ -12,11 +12,14 @@ from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
-from scripts.hive import execution_events
+from scripts.hive import execution_events, execution_stop
 from scripts.hub import claims, lifecycle, reconciler
 from scripts.swarm import launch_check, readiness
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.tick import IDLE_KILL_TICKS
+from scripts.tick.steps import agents as agent_steps
+from scripts.tick.steps import observe
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env, run
 
@@ -106,6 +109,55 @@ def test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent(
     assert [seated.name for seated in store.agents(SLUG)] == []
     assert store.claims(SLUG, "t1") == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+
+
+def retire(ending: str, env: tuple[RedisStore, Any, Any], agent: AgentRecord) -> None:
+    """Retires ``agent`` the way the swarm does for ``ending``: an account mismatch or idling."""
+    store, ledger, rt = env
+    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
+    if ending == "mismatch":
+        store.put_agent(SLUG, replace(agent, account="old-account"))
+        original = rt.bindings
+        rt.bindings = lambda agents: {
+            name: {**facts, "account": "new-account"} for name, facts in original(agents).items()
+        }
+        observe._verify(SLUG, store, ledger, rt, rows, NOW + 1)
+    else:
+        rt.statuses[agent.name] = "idle"
+        store.put_agent(SLUG, replace(agent, idle_ticks=IDLE_KILL_TICKS - 1))
+        agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
+
+
+@pytest.mark.feature("events-retirement-refunds-claim-life")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    store, ledger, rt = env
+    agent, _ = launched(env, bus, seat)
+
+    retire(ending, env, agent)
+
+    assert agent.name in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert store.claims(SLUG, "t1") == 0
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+) -> None:
+    agent, event = launched(env, bus, seat)
+
+    retire(ending, env, agent)
+
+    events = bus.for_swarm(SLUG).events
+    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
+    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    assert [(stop.type, stop.key, stop.cause) for stop in sent] == [(execution_stop.TYPE, agent.execution_id, event.id)]
+    assert sent[0].data["reason"] == ending
 
 
 def handed_off(
