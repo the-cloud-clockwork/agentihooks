@@ -4,9 +4,11 @@ import pytest
 
 from scripts.swarm import input_wait, timing
 from scripts.swarm import tick as tick_module
+from scripts.swarm.commands import hive_id
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers.seat import Launched, seat_launched
 from tests.swarm import test_tick
 
 pytestmark = pytest.mark.unit
@@ -39,10 +41,13 @@ def test_the_running_filter_keeps_the_lane_agents_that_still_own_their_task() ->
     assert tick_module._running(agents, rows, "ci") == [rows["t4"]]
 
 
-def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
+def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.hub.reconciler import legacy_agents
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated = seat_launched(store, ledger, "sw", "t1", hive_id(), Launched(1_000, runtime))
     tick("sw", store, ledger, runtime, now_ms=1_000)
     capsys.readouterr()
     with timing.tick("sw"):
@@ -59,7 +64,7 @@ def test_a_reap_pass_times_each_live_agent_inside_the_reap_step(store, capsys):
         timing.named(tick_module._observe),
         timing.named(tick_module._watch_agent),
     ]
-    agent = "engineer@a1b2c3-0001"
+    agent = seated.name
     named = {row["step"] for row in inside if row["step"] in pass_wide + per_agent and row.get("agent") == agent}
     assert sorted(named) == sorted(per_agent)
     assert [sorted(row) for row in inside if row["step"] in pass_wide] == [sorted(reap)] * 2
@@ -96,10 +101,13 @@ def watched_steps(capsys, agent):
     return {row["step"] for row in rows if watch["started"] < row["started"] and row["started"] + row["wall_s"] <= end}
 
 
-def test_a_waiting_watch_times_its_input_wait_mark_inside_the_watch_step(store, capsys):
+def test_a_waiting_watch_times_its_input_wait_mark_inside_the_watch_step(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated = seat_launched(store, ledger, "sw", "t1", hive_id(), Launched(1_000, runtime))
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    agent = "engineer@a1b2c3-0001"
+    agent = seated.name
     runtime.statuses[agent] = "waiting"
     capsys.readouterr()
     with timing.tick("sw"):
@@ -129,7 +137,9 @@ def test_a_master_holding_a_task_gets_no_stale_nudge(store, monkeypatch):
     assert sent == []
 
 
-def test_an_idle_watch_times_each_read_inside_the_watch_step(store, capsys):
+def test_an_idle_watch_times_each_read_inside_the_watch_step(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.gates import log as gate_log
     from scripts.hive import scope
     from scripts.swarm import automated_gc, ledger_probe, outage, resume
@@ -137,8 +147,9 @@ def test_an_idle_watch_times_each_read_inside_the_watch_step(store, capsys):
     from scripts.swarm.naming import NameRegistry
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated = seat_launched(store, ledger, "sw", "t1", hive_id(), Launched(1_000, runtime))
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    agent = "engineer@a1b2c3-0001"
+    agent = seated.name
     runtime.statuses[agent] = "idle"
     capsys.readouterr()
     with timing.tick("sw"):
