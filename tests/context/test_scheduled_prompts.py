@@ -266,6 +266,26 @@ def test_session_end_drops_the_record_and_a_clear_keeps_the_agent_record(monkeyp
     scheduled_prompts.forget({"reason": "other"})
 
 
+@pytest.mark.feature("operator-presence-automated-prompts")
+def test_each_owner_keeps_its_record_in_one_named_file_under_the_state_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks import config
+
+    assert (
+        scheduled_prompts._path("Ab@x.y-z_1 /") == config.AGENTIHOOKS_HOME / "scheduled_prompts" / "Ab@x.y-z_1__.json"
+    )
+    monkeypatch.setattr(scheduled_prompts, "_agent", lambda: "agent-7")
+    schedule("Sess", "p")
+    assert json.loads((config.AGENTIHOOKS_HOME / "scheduled_prompts" / "Sess.json").read_text()) == ["p"]
+    assert json.loads((config.AGENTIHOOKS_HOME / "scheduled_prompts" / "agent-7.json").read_text()) == ["p"]
+
+
+@pytest.mark.feature("operator-presence-automated-prompts")
+def test_a_record_creates_every_missing_parent_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(scheduled_prompts, "_path", lambda owner: tmp_path / "a" / "b" / f"{owner}.json")
+    assert scheduled_prompts.record({"session_id": "s", "tool_name": "CronCreate", "tool_input": {"prompt": "x"}})
+    assert scheduled_prompts.fired("s", "x")
+
+
 def run_hook(env: dict[str, str], payload: dict) -> str:
     result = subprocess.run(
         [sys.executable, "-m", "hooks"],
