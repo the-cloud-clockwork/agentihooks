@@ -140,6 +140,27 @@ def test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both(r
     assert (agent.state, agent.pane_id, rig.store.claims(SLUG, "t1")) == ("working", "w1:p3", 1)
 
 
+@pytest.mark.feature("events-started-working")
+def test_a_projection_that_raises_after_the_write_is_projected_again_on_redelivery(rig, monkeypatch):
+    event = started(rig.admitter.admit(SLUG, ask()))
+    project = rig.store.project_agent
+
+    def refused(*args, **kwargs):
+        raise ConnectionError("redis gone")
+
+    monkeypatch.setattr(rig.store, "project_agent", refused)
+    with pytest.raises(ConnectionError):
+        claims.Claims(rig.store).handle(event)
+    monkeypatch.setattr(rig.store, "project_agent", project)
+    [shown] = rig.store.agents(SLUG)
+    assert (shown.state, rig.store.claims(SLUG, "t1")) == ("starting", 0)
+
+    claims.Claims(rig.store).handle(replace(event, id="redelivery"))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.state, agent.pane_id, rig.store.claims(SLUG, "t1")) == ("working", "w1:p3", 1)
+
+
 @pytest.mark.parametrize("state, lives", [("started", 1), ("failed", 1)])
 def test_a_start_the_legacy_tick_already_counted_spends_no_second_life(rig, state, lives):
     admitted = rig.admitter.admit(SLUG, ask())
