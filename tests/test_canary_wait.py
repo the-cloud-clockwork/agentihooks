@@ -270,9 +270,11 @@ def test_an_exit_after_the_canary_keeps_the_validated_binding(tmp_path: Path, mo
 def test_an_exit_without_a_canary_report_records_only_the_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: str
 ) -> None:
-    monkeypatch.setenv(binding.REPORT, str(tmp_path / report) if report else "")
-    assert _agent_exit(tmp_path, monkeypatch, "1", "claude")["exit_status"] == 1
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["exit.json"]
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    monkeypatch.setenv(binding.REPORT, str(launch / report) if report else "")
+    assert _agent_exit(launch, monkeypatch, "1", "claude")["exit_status"] == 1
+    assert sorted(path.name for path in launch.iterdir()) == ["exit.json"]
 
 
 @pytest.mark.feature("launch-canary-fails-on-agent-exit")
