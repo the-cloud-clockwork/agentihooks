@@ -69,6 +69,7 @@ def test_scoped_memory_aggregate_stops_include_legacy_and_owned_logs() -> None:
     assert isinstance(bus, memory.MemoryBus)
     try:
         own, other = bus.for_swarm("rig"), bus.for_swarm("other")
+        assert isinstance(own, memory.MemoryBus)
         consumer = bus.stops.consumer("stops", "swarm.>")
         assert bus.stops.publish("ready", work("rig"))
         assert other.stops.publish("ready", work("other"))
