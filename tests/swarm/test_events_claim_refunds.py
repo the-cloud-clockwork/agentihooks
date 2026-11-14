@@ -163,9 +163,7 @@ def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
 
     retire(ending, env, agent)
 
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
-    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    sent = sent_stops(bus, agent)
     assert [(stop.type, stop.key, stop.cause) for stop in sent] == [(execution_stop.TYPE, agent.execution_id, event.id)]
     assert sent[0].data["reason"] == ending
 
@@ -194,16 +192,16 @@ def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_
 
     assert agent.name in rt.killed
     assert store.claims(SLUG, "t1") == 0
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
-    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    sent = sent_stops(bus, agent)
     assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
 
 
 def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
     """The stops waiting for the hive that ``agent`` names."""
     events = bus.for_swarm(SLUG).events
-    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
+    stops = events.consumer(
+        execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive), execution_stop.POLICY
+    )
     return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
 
 
