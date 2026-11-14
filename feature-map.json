@@ -2798,6 +2798,17 @@
       ]
     },
     {
+      "id": "inbox-channel-push-survives-failed-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-push-loop-alive",
+      "behaviour": "A push pass of the inbox channel that raises is logged with its traceback on stderr, which Claude Code keeps in its MCP server log, and the loop backs off and retries, so later items still reach an idle session; the loop writes a periodic heartbeat line on stderr.",
+      "seam": "The inbox channel push loop in scripts.inbox",
+      "tests": [
+        "tests/inbox/test_channel_server.py::test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed",
+        "tests/inbox/test_channel_server.py::test_the_push_loop_writes_a_heartbeat_on_stderr"
+      ]
+    },
+    {
       "id": "herdr-hive-lifecycle",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-herdr-dead-hive-lifecycle",

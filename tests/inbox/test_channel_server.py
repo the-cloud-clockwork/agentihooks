@@ -254,6 +254,55 @@ def test_items_waiting_before_the_session_opened_arrive_once_it_lists_its_tools(
     assert session(store, scenario)[2] == [first.id, second.id]
 
 
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.2)
+    monkeypatch.setattr(channel, "RETRY_FIRST_S", 0.1, raising=False)
+    real_deliver, calls = channel._deliver, []
+
+    async def failing_once(*args: object) -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise ValueError("planted pass failure")
+        await real_deliver(*args)
+
+    monkeypatch.setattr(channel, "_deliver", failing_once)
+
+    async def scenario(send: object, receive: object) -> tuple[Item, dict[str, object]]:
+        item = store.send("alice", "bob", "after the failure")
+        with anyio.fail_after(5):
+            return item, await receive()
+
+    _, _, (item, pushed) = session(store, scenario)
+    assert pushed["params"]["meta"]["item_id"] == item.id
+    logged = capsys.readouterr().err
+    assert "inbox channel: push pass failed for bob" in logged
+    assert "Traceback" in logged and "ValueError: planted pass failure" in logged
+
+
+@pytest.mark.feature("inbox-channel-push-survives-failed-pass")
+def test_the_push_loop_writes_a_heartbeat_on_stderr(
+    store: FakeStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 0.1)
+    monkeypatch.setattr(channel, "HEARTBEAT_S", 0.2, raising=False)
+
+    async def scenario(send: object, receive: object) -> None:
+        await anyio.sleep(0.7)
+
+    session(store, scenario)
+    beats = [line for line in capsys.readouterr().err.splitlines() if "push loop alive for bob" in line]
+    assert len(beats) >= 2
+
+
 def _close_idle_session(store, monkeypatch, delay=0, wake=True):
     import anyio
 
