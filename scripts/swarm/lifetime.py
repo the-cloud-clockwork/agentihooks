@@ -33,7 +33,7 @@ def retire_idle_master(
         if held_for not in {"", IDLE_LIMIT}:
             continue
         if held_for != IDLE_LIMIT and (
-            now_ms - max(agent.started_at, last_event) <= limit
+            now_ms - max(agent.launched_at or agent.started_at, last_event) <= limit
             or runtime.status(agent) not in {"idle", "done"}
             or inbox.pending_items(seat)
             or inbox.pending_items(agent.name)

@@ -47,6 +47,7 @@ def _eight(store):
     return tasks(*((f"t{n}", "eng") for n in range(1, 9)))
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_eight_launches_of_one_pass_run_at_once(store, monkeypatch):
     import os
 
@@ -61,6 +62,7 @@ def test_eight_launches_of_one_pass_run_at_once(store, monkeypatch):
 
 
 @pytest.mark.wall_clock
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_concurrent_launches_finish_in_the_time_of_the_slowest(store):
     ledger, pooled = _eight(store), PooledRuntime(8, hold=0.5)
     started = time.monotonic()
@@ -70,6 +72,7 @@ def test_concurrent_launches_finish_in_the_time_of_the_slowest(store):
 
 
 @pytest.mark.parametrize("room,peak", [(3, 3), (50, SPAWN_POOL), (0, 1)])
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_the_pool_never_runs_more_launches_than_the_runtime_room_or_the_pool(store, room, peak):
     assert SPAWN_POOL == 8
     store.update("sw", max_eng=10)
@@ -80,6 +83,7 @@ def test_the_pool_never_runs_more_launches_than_the_runtime_room_or_the_pool(sto
     assert len(pooled.spawned) == 10
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_a_runtime_without_a_launch_room_launches_one_at_a_time(store):
     ledger, plain = _eight(store), FakeRuntime()
     running, peak, spawn = [0], [0], plain.spawn
@@ -97,6 +101,7 @@ def test_a_runtime_without_a_launch_room_launches_one_at_a_time(store):
     assert len(plain.spawned) == 8
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_launches_in_flight_count_against_the_host_room(store):
     ledger, pooled = _ledger(), PooledRuntime(8)
     _decide(store, 2)
@@ -105,6 +110,7 @@ def test_launches_in_flight_count_against_the_host_room(store):
     assert _held(2, 2) in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_a_failed_launch_in_the_pool_releases_its_task_and_the_rest_start(store):
     ledger, pooled = _eight(store), PooledRuntime(8)
     spawn = pooled.spawn
@@ -121,6 +127,7 @@ def test_a_failed_launch_in_the_pool_releases_its_task_and_the_rest_start(store)
     assert store.claimant("sw", "t3") is None
 
 
+@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
 def test_a_task_that_fails_before_its_launch_reopens_and_the_pool_launches_the_rest(store, monkeypatch):
     ledger, pooled = _eight(store), PooledRuntime(8)
     attach = tick_module.transfers.attach
@@ -138,6 +145,7 @@ def test_a_task_that_fails_before_its_launch_reopens_and_the_pool_launches_the_r
     assert store.claimant("sw", "t2") is None
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_the_spawn_stop_counts_no_launch_in_flight_unless_told(store):
     _decide(store, 1, granted_at=1_000)
     config = store.config("sw")
@@ -145,6 +153,7 @@ def test_the_spawn_stop_counts_no_launch_in_flight_unless_told(store):
     assert tick_module._spawn_stop("sw", config, store, FakeRuntime(), 1_000, 1).startswith("holding spawns: host")
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_a_launch_names_the_overlapping_peer_launched_beside_it(store):
     from tests.swarm.test_tick import FakeLedger
 
@@ -157,6 +166,7 @@ def test_a_launch_names_the_overlapping_peer_launched_beside_it(store):
     assert sent["t1"]["overlaps"] == []
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_a_pool_whose_every_launch_failed_spares_the_spawn_budget(store, monkeypatch):
     from types import SimpleNamespace
 
@@ -178,6 +188,7 @@ def test_a_pool_whose_every_launch_failed_spares_the_spawn_budget(store, monkeyp
     assert not any("launch budget" in action for action in actions)
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypatch):
     from types import SimpleNamespace
 
@@ -199,6 +210,7 @@ def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypa
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch(store, monkeypatch):
     from types import SimpleNamespace
 
@@ -220,6 +232,7 @@ def test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch(store, monkeypat
     assert "spent this pass's 20 second launch budget, t9 waits a pass" in actions
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_the_spawn_budget_is_sixty_seconds_and_fits_a_second_launch_in_one_pass(store):
     from scripts.swarm.tick import SPAWN_BUDGET_S
 
@@ -285,6 +298,7 @@ def test_the_fenced_runtime_passes_the_launch_room_through(store):
     assert controller.FencedRuntime(store, "sw", held, FakeRuntime(), controller.LOCAL).launch_room(None) == 1
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_a_failed_preparation_is_recorded_at_the_pass_time(store, monkeypatch):
     ledger, pooled = _eight(store), PooledRuntime(8)
     attach, not_launched, seen = tick_module.transfers.attach, tick_module._not_launched, []
@@ -309,11 +323,13 @@ class ConfigRoom(PooledRuntime):
         return config.max_eng if config is not None else 1
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_the_pool_asks_the_runtime_room_for_this_pass_config(store):
     store.update("sw", max_eng=3)
     assert tick_module._launch_room(ConfigRoom(0), store.config("sw")) == 3
 
 
+@pytest.mark.feature("swarm-tick-launch-pool-legacy")
 def test_the_spawn_step_sizes_its_pool_with_this_pass_config(store, monkeypatch):
     ledger, room, seen = _eight(store), tick_module._launch_room, []
 
