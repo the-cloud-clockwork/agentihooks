@@ -8,7 +8,7 @@ import pytest
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_stop, nats_grant, stop_names
-from tests.hive.test_nats_grant import _publish_refusals, _signed
+from tests.hive.test_nats_grant import _publish_refusals, _signed, _violations
 from tests.hive.test_nats_grant import signer as signer
 
 pytestmark = pytest.mark.unit
@@ -99,6 +99,26 @@ def test_a_member_cannot_publish_onto_the_stop_stream(signer: nats_grant.Signer,
     assert _publish_refusals(signer, _member(signer, "m1"), wire) == [
         f'nats: permissions violation for publish to "{wire}"'
     ]
+
+
+@pytest.mark.feature("hive-own-stop-consumer")
+@pytest.mark.parametrize("hive", ["h2", "*", ">"])
+def test_a_member_subscribe_on_a_stop_subject_is_denied(signer: nats_grant.Signer, hive: str) -> None:
+    wire = f"swarm.{SWARM}.stop.execution.stop.{hive}"
+
+    async def act(nc: Any) -> None:
+        await nc.subscribe(wire)
+
+    assert _violations(signer, _member(signer, "m1"), act, refused=True) == [
+        f'nats: permissions violation for subscription to "{wire}"'
+    ]
+
+
+@pytest.mark.feature("hive-own-stop-consumer")
+def test_the_scoped_member_grant_denies_every_stop_subscription() -> None:
+    claims = nats_grant.member_claims("member", (SWARM,), member="m1")
+
+    assert claims["sub"]["deny"] == ["swarm.*.stop.>"]
 
 
 @pytest.mark.feature("hive-own-stop-consumer")

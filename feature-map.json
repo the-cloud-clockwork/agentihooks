@@ -6419,6 +6419,8 @@
         "tests/hive/test_stop_consumer_grant.py::test_a_member_fetch_on_another_hives_stop_consumer_is_denied",
         "tests/hive/test_stop_consumer_grant.py::test_a_member_ack_on_another_hives_stop_consumer_is_denied",
         "tests/hive/test_stop_consumer_grant.py::test_a_member_cannot_publish_onto_the_stop_stream",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_subscribe_on_a_stop_subject_is_denied",
+        "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_denies_every_stop_subscription",
         "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_names_only_its_own_stop_consumer",
         "tests/hive/test_stop_consumer_grant.py::test_each_swarm_and_hive_has_its_own_stop_consumer_name"
       ],

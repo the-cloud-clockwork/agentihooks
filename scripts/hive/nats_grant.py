@@ -64,6 +64,7 @@ MEMBER_DENY = (
     f"{subjects.PREFIX}.*.{stop_names.FAMILY}.>",
     *(f"{subjects.PREFIX}.*.{family}execution.exited" for family in ("", "events.")),
 )
+MEMBER_SUB_DENY = (f"{subjects.PREFIX}.*.{stop_names.FAMILY}.>",)
 SCHEDULER_BUCKET = "scheduler"
 SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
@@ -261,7 +262,10 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
     return {
         **user_claims(),
         "pub": {"allow": publish, "deny": list(MEMBER_DENY)} if publish else {"deny": [">"]},
-        "sub": {"allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"]},
+        "sub": {
+            "allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"],
+            "deny": list(MEMBER_SUB_DENY),
+        },
     }
 
 
