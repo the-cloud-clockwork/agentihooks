@@ -817,7 +817,7 @@ def test_ended_task_closes_its_pane_on_the_same_tick_without_a_pane_finding(laun
     assert old.pane_id in runtime.closed
     assert store.redis.hget(store.key("sw", "live-bindings"), old.name) is None
     assert live_binding.findings(store, "sw") == []
-    assert runtime.tasks[-1].get("launch_assignment") is None
+    assert not any(task.get("launch_assignment") for task in runtime.tasks)
 
 
 def test_finished_agent_on_open_task_closes_its_pane_without_a_pane_finding(launched):
@@ -1306,7 +1306,8 @@ def test_legacy_worker_relaunch_prefers_explicit_task_profile(launched):
     ledger.rows["one"]["profile"] = "qa"
     store.update("sw", lanes={"eng": {"profile": "engineer"}})
     tick("sw", store, ledger, runtime, 100)
-    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    old = replace(next(a for a in store.agents("sw") if a.lane == "eng"), profile="")
+    store.put_agent("sw", old)
     runtime.bindings = lambda agents: {
         a.name: {**live_binding.assignment(a), "hooks": a.name != old.name} for a in agents
     }
