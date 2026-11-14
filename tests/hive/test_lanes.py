@@ -243,7 +243,13 @@ def test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_
     def spawn(request):
         written.update({name: (folder / name).read_text(encoding="utf-8") for name in seeds})
         placed = SimpleNamespace(
-            pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+            pane_id="pane-1",
+            harness="claude",
+            account="slot-a",
+            profile="engineer",
+            model="opus",
+            effort="high",
+            launched_at=0,
         )
         return Outcome("spawn", Status.OK, "local", placed)
 
