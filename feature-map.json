@@ -1356,6 +1356,16 @@
       ]
     },
     {
+      "id": "hub-renewal-skips-finished-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-renew-skips-finished",
+      "behaviour": "The hub claim lease renewal leaves out every agent whose record state is finished, so a finished engineer's claim lapses within one lease and its reopened task becomes claimable again, while a working agent the hub owns still gets the full lease.",
+      "seam": "scripts.hub.owned_leases.renew, called by the tick reap step",
+      "tests": [
+        "tests/hub/test_owned_leases.py::test_a_finished_agent_claim_is_left_to_lapse"
+      ]
+    },
+    {
       "id": "swarm-tick-agents-reap",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h10",
