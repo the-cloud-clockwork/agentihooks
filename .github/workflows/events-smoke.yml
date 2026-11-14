@@ -1,6 +1,8 @@
 name: Events launch smoke
 
 on:
+  push:
+    branches: ['diffcheck/events-smoke-*']
   workflow_call:
   workflow_dispatch:
 
