@@ -6,7 +6,7 @@ import pytest
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
 from tests.helpers.seat import seat_owner
@@ -316,7 +316,8 @@ def test_dead_master_recovers_after_a_peers_binding_mismatch(store, monkeypatch)
     assert "engineer@a1b2c3-0001" in runtime.killed
 
 
-def prepared_recovery(store):
+def prepared_recovery(store: RedisStore) -> tuple[FakeLedger, ResumingRuntime, AgentRecord]:
+    """Seeds an engineer on t1 through ``seeded`` with a known conversation, then drops it from the live set."""
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
     seeded(store, ledger, runtime)
     agent = next(agent for agent in store.agents("sw") if agent.lane == "eng")
