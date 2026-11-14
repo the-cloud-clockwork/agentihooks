@@ -54,6 +54,10 @@ def _reason(store, slug, agent):
 
 
 FRESH_NOTICE = "Starting a fresh agent after {name} ended because {reason}."
+RESUME_TEXT = (
+    "Your pane ended unexpectedly. Continue your task in this conversation and seat. "
+    "Read your task progress and proof and handle your inbox before continuing."
+)
 
 
 def reopen(
@@ -74,8 +78,7 @@ def reopen(
             placed = runtime.resume(
                 config,
                 agent,
-                "Your pane ended unexpectedly. Continue your task in this conversation and seat. "
-                "Read your task progress and proof and handle your inbox before continuing.",
+                RESUME_TEXT,
             )
         except Exception as error:
             reason = f"resume failed: {error}"

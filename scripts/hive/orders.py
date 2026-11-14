@@ -259,6 +259,8 @@ class Consumer:
             return FOREIGN
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))
+        if order.action == "resume":
+            return self.resume(order, agent)
         if order.action == "retire":
             receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
             with self.store.redis.pipeline() as pipe:
@@ -273,6 +275,32 @@ class Consumer:
         if outcome.ok:
             return Ack(DONE, agent.runtime_target)
         return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+
+    def resume(self, order: CommandOrder, agent: AgentRecord) -> Ack:
+        """Reopen a dead agent's own conversation in its seat while its execution record is unchanged and it still
+        holds its claim, then record the new pane; the hub checked the ledger claim, generation and seat first."""
+        from scripts.swarm_v2.runtime.base import Recovery
+
+        if not self._holds(order.slug, agent):
+            return FOREIGN
+        outcome = self.runtime.recover(agent, Recovery.RESUME, self.store.config(order.slug), order.text)
+        if not outcome.ok:
+            return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+        placed = outcome.value
+        if not self._holds(order.slug, agent):
+            self.runtime.terminate(replace(agent, pane_id=placed.pane_id))
+            return FOREIGN
+        launched = placed.launched_at or lease.now_ms(self.store)
+        self.store.put_agent(order.slug, replace(agent, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
+        return Ack(DONE, agent.runtime_target)
+
+    def _holds(self, slug: str, agent: AgentRecord) -> bool:
+        """Whether the execution record is still the one the order named and the agent still holds its task claim."""
+        try:
+            current = self.store.execution_registry.get(slug, agent.execution_id)
+        except SwarmError:
+            return False
+        return current == agent and self.store.claimant(slug, agent.task) == agent.name
 
     def reap_execution(self, order: CommandOrder, agent: AgentRecord) -> Ack:
         receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)

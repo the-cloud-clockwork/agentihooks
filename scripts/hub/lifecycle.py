@@ -1,11 +1,15 @@
 import json
 from collections.abc import Callable
 from copy import copy
+from dataclasses import asdict
+from typing import Any, cast
 
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
 from scripts.hive.launch import release as release_slot
 from scripts.hub.registry import Reactor
+from scripts.swarm import dead_resume
+from scripts.swarm.dead_resume import FRESH_NOTICE, RESUME_TEXT
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
 
@@ -58,7 +62,7 @@ class Lifecycle:
             event.version,
             event.data["task"],
             event.data["name"],
-        ):
+        ) or (value["state"] == "started" and self._resumed(event, agent, claims, key, value, entry.revision)):
             return
         revision = entry.revision
         if value["state"] != "exiting":
@@ -83,6 +87,57 @@ class Lifecycle:
             revision = claims.update(key, json.dumps(value).encode(), revision)
         self._settle(event, agent)
         claims.update(key, json.dumps({**value, "state": "exited"}).encode(), revision)
+
+    def _resumed(
+        self, event: Envelope, agent: AgentRecord, claims: Any, key: str, value: dict[str, Any], revision: int
+    ) -> bool:
+        """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per
+        execution and only while it holds its claim, claim generation and seat; True while that resume is ordered and
+        unanswered or the exit predates it, False when the exit goes on to drop the agent and reopen its task."""
+        from scripts.hive.orders import DONE, CommandOrder, Orders
+        from scripts.swarm.resume import RECOVERY_ATTEMPTS
+
+        hive = agent.hive or agent.runtime_target.get("host_id")
+        if not hive or event.data.get("reason") == "lost":
+            return False
+        orders, pending = Orders(cast(Any, self.store).redis), value.get("resume")
+        if pending and pending["launched_at"] == agent.launched_at:
+            ack = orders.command(hive, CommandOrder(**pending["order"]))
+            if ack is not None and ack.status != DONE:
+                self.ledger.notify(
+                    event.swarm, FRESH_NOTICE.format(name=agent.name, reason=f"resume failed: {ack.failure}")
+                )
+            return ack is None
+        if pending and event.time < agent.launched_at:
+            return True
+        attempts = value.get("resumes", 0)
+        if attempts >= RECOVERY_ATTEMPTS or not self._owned(event, agent):
+            return False
+        order = CommandOrder(
+            f"resume:{agent.execution_id}:{agent.generation}:{attempts + 1}",
+            "resume",
+            event.swarm,
+            agent.name,
+            agent.execution_id,
+            agent.generation,
+            RESUME_TEXT,
+        )
+        resume = {"order": asdict(order), "launched_at": agent.launched_at}
+        claims.update(key, json.dumps({**value, "resumes": attempts + 1, "resume": resume}).encode(), revision)
+        orders.command(hive, order)
+        return True
+
+    def _owned(self, event: Envelope, agent: AgentRecord) -> bool:
+        """Whether the dead agent may reopen: the swarm runs, its task row still names it at the exit's claim
+        generation, it holds its seat and claim, and no handoff or compact limit sends the task to a fresh agent."""
+        store = cast(RedisStore, self.store)
+        row = self.ledger.task(event.swarm, agent.task) or {}
+        return (
+            store.config(event.swarm).state not in {"stopped", "stopping"}
+            and row.get("claim_generation", 0) == event.data["task_generation"]
+            and not dead_resume._reason(store, event.swarm, agent)
+            and dead_resume._owns(store, event.swarm, agent, self.ledger)
+        )
 
     def _refund(self, slug: str, agent: AgentRecord) -> None:
         from scripts.swarm import tick
