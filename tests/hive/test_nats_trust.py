@@ -79,6 +79,7 @@ def _signer(records: dict) -> nats_grant.Signer:
         record["system_credentials"],
         record["url"],
         nkey.from_seed(record["operator_seed"]).public,
+        {"h1": ("rig",)},
     )
 
 
