@@ -964,7 +964,10 @@
       "seam": "scripts.tick.steps.place._prepare called with the pass ledger offline and online",
       "tests": [
         "tests/tick/test_place_prepare.py::test_an_offline_pass_neither_claims_nor_launches",
-        "tests/tick/test_place_prepare.py::test_the_claim_write_clears_a_stale_protected_branch_and_keeps_a_real_one"
+        "tests/tick/test_place_prepare.py::test_the_claim_write_clears_a_stale_protected_branch_and_keeps_a_real_one",
+        "tests/hub/test_admission.py::test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed",
+        "tests/hub/test_admission.py::test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent",
+        "tests/hub/test_admission.py::test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent"
       ]
     },
     {
@@ -1943,7 +1946,9 @@
       "seam": "The claims gate in scripts.gates.claims on the tick claim path",
       "tests": [
         "tests/swarm/test_claim_cap.py::test_every_claim_the_tick_makes_counts_one_agent_life",
-        "tests/swarm/test_claim_cap.py::test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master"
+        "tests/swarm/test_claim_cap.py::test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master",
+        "tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution",
+        "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
       ]
     },
     {

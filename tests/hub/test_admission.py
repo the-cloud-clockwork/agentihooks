@@ -49,6 +49,7 @@ def ask(**fields):
     return {"hive": "hive-a", "task": "t1", "lane": "eng", "generation": 0, **fields}
 
 
+@pytest.mark.feature("swarm-claim-lives")
 @pytest.mark.parametrize("lives", [3, 4])
 def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives, capsys):
     from scripts.gates.claims import refusal
@@ -73,6 +74,7 @@ def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(
     )
 
 
+@pytest.mark.feature("swarm-claim-lives")
 @pytest.mark.parametrize("lives, mode", [(2, "enforce"), (3, "observe"), (3, "off")])
 def test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes(rig, lives, mode):
     rig.store.update(SLUG, gates={"claims": mode})
@@ -86,6 +88,7 @@ def test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes(ri
     assert rig.store.claims(SLUG, "t1") == lives
 
 
+@pytest.mark.feature("swarm-spawn-claim-before-launch")
 def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed(rig):
     admitted = rig.admitter.admit(SLUG, ask())
 
@@ -278,6 +281,7 @@ def test_an_offer_the_ledger_no_longer_backs_is_withdrawn_without_a_claim(rig, f
     assert rig.ledger.writes == []
 
 
+@pytest.mark.feature("swarm-spawn-claim-before-launch")
 def test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent(rig):
     rig.ledger.update_task = lambda *args, **kwargs: {**rig.rows["t1"], "state": "claimed", "claimed_by": "other"}
     assert rig.admitter.admit(SLUG, ask()) is None
@@ -285,6 +289,7 @@ def test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent(rig):
     assert rig.store.agents(SLUG) == []
 
 
+@pytest.mark.feature("swarm-spawn-claim-before-launch")
 def test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent(rig):
     def down(*args, **kwargs):
         raise ConnectionError("ledger down")
