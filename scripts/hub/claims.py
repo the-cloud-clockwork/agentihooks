@@ -45,8 +45,9 @@ class Claims:
         )
         if lives:
             self.store.clear_failed_harness(event.swarm, task)
-            if self.store.claimant(event.swarm, task) == event.data["name"]:
-                cast(Any, self.store).redis.hdel(self.store.key(event.swarm, "launch-assignments"), task)
+            store = cast(Any, self.store)
+            if store.claimant(event.swarm, task) == event.data["name"]:
+                store.redis.hdel(store.key(event.swarm, "launch-assignments"), task)
             print(
                 f"hub: claim life swarm={event.swarm} task={task} execution={event.key} lives={lives}",
                 file=sys.stderr,
