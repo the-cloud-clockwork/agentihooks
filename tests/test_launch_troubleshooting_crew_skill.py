@@ -382,6 +382,9 @@ def test_later_stages_keep_the_launch_overrides(crew: ModuleType, capsys: pytest
 def test_harden_adds_the_lock_task(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
     scouted(crew, capsys, "--fixers", "1")
     fixed(crew, capsys)
+    dry = Ledger()
+    run(crew, dry, "harden", "demo", "--dry-run", capsys=capsys)
+    assert dry.calls == [] and json.loads(crew.state_path("demo").read_text())["harden_task"] == ""
     ledger = Ledger()
     assert run(crew, ledger, "harden", "demo", capsys=capsys) == {"crew": CID, "harden": f"{CID}-harden"}
     text = (
