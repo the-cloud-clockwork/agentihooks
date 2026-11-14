@@ -193,6 +193,79 @@ def test_the_hub_answers_a_launched_request_over_the_slot_subject(rig):
     assert (agent.harness, agent.profile, agent.account) == ("codex", "engineer", "work")
 
 
+@pytest.mark.feature("events-launch-check")
+def test_the_first_launch_decision_starts_a_launch_check_the_tick_retires_and_relaunches_on(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: {"task": "t1", "at": 7_000, "relaunch": True}}
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_republished_launch_decision_starts_no_second_launch_check(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.admitter.launched(SLUG, ask(launch=LAUNCH))
+    launch_check.forget(rig.store, SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert launch_check.pending(rig.store, SLUG) == {}
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_republished_decision_naming_no_harness_starts_no_second_launch_check(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    unnamed = {**LAUNCH, "harness": ""}
+    rig.admitter.launched(SLUG, ask(launch=unnamed))
+    assert launch_check.pending(rig.store, SLUG) == {admitted["name"]: {"task": "t1", "at": 7_000, "relaunch": True}}
+    launch_check.forget(rig.store, SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(launch=unnamed)) is True
+
+    assert launch_check.pending(rig.store, SLUG) == {}
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands, launch_check
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.admitter.launched(SLUG, ask(launch=LAUNCH))
+
+    [agent] = [agent for agent in rig.store.agents(SLUG) if agent.name in launch_check.pending(rig.store, SLUG)]
+    found = launch_check.misses(rig.store, SLUG, agent, {}, {}, False, [])
+
+    assert agent.name == admitted["name"]
+    assert found == {"hive_join": {"expected": "session join report", "actual": "missing"}}
+    assert not set(found) <= launch_check.REPORT_ONLY
+
+
+@pytest.mark.feature("events-launch-check")
+def test_a_refused_launch_decision_starts_no_launch_check(rig: SimpleNamespace) -> None:
+    from scripts.swarm import launch_check
+
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.drop_agent(SLUG, admitted["name"])
+
+    assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is False
+
+    assert launch_check.pending(rig.store, SLUG) == {}
+
+
 def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
     admitted = rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
     assert rig.rows["t2"]["state"] == "pr"
@@ -202,6 +275,41 @@ def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
 def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     rig.store.put_handoff(SLUG, "t1", "carry on", seat="eng-3@sw")
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
+
+
+@pytest.mark.feature("hub-admission-relaunch-assignment")
+def test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names(rig: SimpleNamespace) -> None:
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "a1"}
+    rig.store.put_handoff(SLUG, "t1", "carry on", seat="eng-2@sw")
+    rig.store.redis.hset(rig.store.key(SLUG, "launch-assignments"), "t1", json.dumps({**saved, "seat": "eng-3@sw"}))
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"]["seat"] == "eng-3@sw"
+    assert admitted["task"]["launch_assignment"] == {**saved, "seat": "eng-3@sw"}
+
+
+@pytest.mark.feature("hub-admission-relaunch-assignment")
+def test_a_reported_launch_clears_the_saved_launch_assignment_so_the_next_life_takes_its_handoff_seat(
+    rig: SimpleNamespace,
+) -> None:
+    rig.store.redis.hset(rig.store.key(SLUG, "launch-assignments"), "t1", json.dumps({"seat": "eng-3@sw"}))
+    rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert rig.store.redis.hget(rig.store.key(SLUG, "launch-assignments"), "t1") is None
+
+
+@pytest.mark.feature("hub-admission-relaunch-assignment")
+def test_a_refused_launch_report_keeps_the_saved_launch_assignment(rig: SimpleNamespace) -> None:
+    saved = json.dumps({"seat": "eng-3@sw"})
+    rig.store.redis.hset(rig.store.key(SLUG, "launch-assignments"), "t1", saved)
+    rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.launched(SLUG, ask(hive="hive-b", launch=LAUNCH)) is False
+
+    assert rig.store.redis.hget(rig.store.key(SLUG, "launch-assignments"), "t1") == saved
 
 
 CONTINUITY_DOC = "# Handoff v2\n## Next\nRead the saved proof and push the fix.\n## Read first\nNone\n"

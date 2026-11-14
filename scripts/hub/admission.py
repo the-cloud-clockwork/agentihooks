@@ -200,7 +200,9 @@ class Admission:
         if not self.store.claim(slug, task_id, name, tick.LEASE_MS):
             return None
         taken = {agent.seat for agent in self.store.agents(slug)}
-        seat = tick._free_seat(slug, lane, taken, self.store.handoff_seat(slug, task_id))
+        saved = cast(Any, self.store).redis.hget(self.store.key(slug, "launch-assignments"), task_id)
+        preferred = cast(str, json.loads(saved)["seat"] if saved else self.store.handoff_seat(slug, task_id))
+        seat = tick._free_seat(slug, lane, taken, preferred)
         record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
         previous = self.store.execution_occupants(slug).get(seat)
         try:
@@ -353,8 +355,11 @@ class Admission:
         return True
 
     def launched(self, slug: str, request: dict[str, Any]) -> bool:
-        """Writes the launch decision the admitted hive reports onto its agent's record; False when the hive holds no
-        admission for the offer or another agent now occupies the admitted seat."""
+        """Writes the launch decision the admitted hive reports onto its agent's record and, when the decision is new,
+        starts its launch check as the place step does; False when the hive holds no admission for the offer or
+        another agent now occupies the admitted seat."""
+        from scripts.swarm import launch_check
+
         held = self.store.redis.get(self._key(slug, request))
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
@@ -364,7 +369,12 @@ class Admission:
             return False
         launch = request["launch"]
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
-        return self.store.execution_registry.set_launch(slug, occupant.execution_id, decision)
+        if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
+            return False
+        cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
+        if any(getattr(occupant, field) != value for field, value in decision.items()):
+            launch_check.begin(self.store, slug, occupant, self.clock())
+        return True
 
 
 OPERATIONS = ("admit", "reopen", "failed", "launched")
