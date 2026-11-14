@@ -1,0 +1,98 @@
+{
+  "features": {
+    "engine-config-migration": {
+      "covered_by": [
+        "tests/swarm/test_engine_migration.py::test_every_stored_legacy_config_moves_to_events_with_an_origin_the_doctor_included",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_takes_the_origin_of_its_peer_and_a_watched_swarm_keeps_its_own",
+        "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin"
+      ]
+    },
+    "hive-stop-recovery-handoff": {
+      "gap": "The events hub admission claim carries no handoff document text, so a successor primed with a recovery handoff exists only on the legacy spawn; ported by the handoff text follow up."
+    },
+    "swarm-agent-record-launch-decision-at-spawn": {
+      "covered_by": [
+        "tests/hub/test_admission.py::test_the_hive_launch_decision_reaches_the_record_swarm_status_reads",
+        "tests/hub/test_admission.py::test_a_launch_decision_from_a_hive_without_the_admission_changes_no_record"
+      ]
+    },
+    "swarm-claim-lives": {
+      "covered_by": [
+        "tests/hub/test_admission.py::test_events_admission_blocks_spent_claim_lives_before_creating_an_execution",
+        "tests/hub/test_admission.py::test_events_admission_preserves_the_third_life_and_nonblocking_gate_modes"
+      ]
+    },
+    "swarm-freeze": {
+      "covered_by": [
+        "tests/swarm/test_freeze.py::test_a_task_under_a_frozen_node_or_matching_a_frozen_selector_is_held",
+        "tests/swarm/test_freeze.py::test_a_claimed_task_under_a_new_freeze_keeps_its_agent"
+      ]
+    },
+    "swarm-handoff-binding": {
+      "covered_by": [
+        "tests/handoff/test_transfers.py::test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start"
+      ]
+    },
+    "swarm-launch-bounded-reads": {
+      "covered_by": [
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_reads_every_field_across_pages",
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_stops_after_its_page_bound",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set"
+      ]
+    },
+    "swarm-launch-check": {
+      "covered_by": [
+        "tests/swarm/test_launch_check.py::test_a_clean_launch_passes",
+        "tests/swarm/test_launch_check.py::test_master_failure_is_posted_to_the_operator_chat_and_relaunched",
+        "tests/swarm/test_launch_check.py::test_not_joined_is_named"
+      ]
+    },
+    "swarm-reclaim": {
+      "gap": "The events hub admission claim never resolves a continuation, so a reclaimed task continues from its recorded branch only on the legacy spawn; ported by the continuation resolve follow up."
+    },
+    "swarm-restore-decision": {
+      "covered_by": [
+        "tests/swarm/test_restore_decisions.py::test_retry_resume_and_explicit_fresh_are_separate_choices",
+        "tests/swarm/test_handoff_commands.py::test_a_worker_cannot_decide_another_seats_restore"
+      ]
+    },
+    "swarm-spawn-claim-before-launch": {
+      "covered_by": [
+        "tests/hub/test_admission.py::test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed",
+        "tests/hub/test_admission.py::test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent",
+        "tests/hub/test_admission.py::test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent"
+      ]
+    },
+    "swarm-tick-cached-ledger": {
+      "covered_by": [
+        "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
+        "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
+        "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing"
+      ]
+    },
+    "swarm-tick-launch-budget": {
+      "retires": "The launch budget bounds the legacy spawn pass; events launches run on hive lane spokes outside the tick pass."
+    },
+    "swarm-tick-launch-cluster": {
+      "retires": "The behaviour is the legacy launch cluster the spawn step drives; events launches happen on the hive lane spoke."
+    },
+    "swarm-tick-panic-holds-spawn": {
+      "covered_by": [
+        "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
+    },
+    "swarm-tick-spawn": {
+      "retires": "The behaviour is the legacy tick spawn step itself; the events engine places through hub offers, spoke takes and hub admission."
+    },
+    "tick-spawn-metrics-processes": {
+      "covered_by": [
+        "tests/tick/test_spawn_metrics_ports.py::test_a_failing_claim_cap_writes_its_fail_open_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port"
+      ]
+    },
+    "tick-time-left-server-error": {
+      "gap": "Its only test proves the pass keeps running by a legacy tick spawn; an events engine tick test must assert the skipped time left write and a later step."
+    }
+  }
+}

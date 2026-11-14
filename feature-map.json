@@ -1472,6 +1472,18 @@
       ]
     },
     {
+      "id": "legacy-spawn-events-coverage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-spawn-coverage",
+      "behaviour": "Every feature whose mapped tests reach the legacy tick spawn, the launch job module or hive launch collect and expire is listed in the legacy spawn coverage map, and each entry names feature mapped tests that reach none of them, says the feature retires with the legacy spawn, or names its events engine gap, so removing the legacy spawn never drops a feature's coverage unseen.",
+      "seam": "tests/LEGACY_SPAWN_COVERAGE.json read against feature-map.json by the legacy spawn reach detector",
+      "tests": [
+        "tests/swarm/test_legacy_spawn_coverage.py::test_every_feature_whose_tests_reach_the_legacy_spawn_is_in_the_coverage_map",
+        "tests/swarm/test_legacy_spawn_coverage.py::test_every_coverage_entry_names_mapped_tests_off_the_legacy_spawn_a_retirement_or_a_gap",
+        "tests/swarm/test_legacy_spawn_coverage.py::test_the_detector_finds_legacy_spawn_reach_and_clears_the_rest"
+      ]
+    },
+    {
       "id": "swarm-tick-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",
