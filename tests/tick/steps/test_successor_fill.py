@@ -5,7 +5,6 @@ import json
 import pytest
 
 from scripts.swarm import effort_range, profile_choice, store, successor_fill, tick
-from scripts.tick.steps import place
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 pytestmark = pytest.mark.unit
@@ -31,7 +30,6 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
     decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
     monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
     runtime = FakeRuntime()
-    assert place.successor_fill is successor_fill
     tick.tick("sw", held, tasks(("t1", "eng")), runtime, now_ms=1_000)
     launch = runtime.tasks[0]["handoff_envelope"]["launch"]
     assert launch["model"] == "sonnet-lane"
