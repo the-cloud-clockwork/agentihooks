@@ -42,7 +42,7 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379/0
       AGENTIHOOKS_SWARM_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -74,13 +74,13 @@ jobs:
       - name: Set up Python
         id: python
         if: steps.key.outputs.hit != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Set up uv
         if: steps.key.outputs.hit != 'true'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -134,7 +134,7 @@ jobs:
       matrix:
         pair: [1, 2, 3, 4, 5]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -151,12 +151,12 @@ jobs:
 
       - name: Set up Python
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -227,15 +227,15 @@ jobs:
     env:
       SAME_CODE_MARGIN: '1.4'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: compare-pair-*
           path: load-evidence

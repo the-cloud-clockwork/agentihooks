@@ -18,12 +18,12 @@ jobs:
     env:
       SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Restore the runtime images saved on dev
         id: runtime-images
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
         with:
@@ -41,12 +41,12 @@ jobs:
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Restore the swarm smoke layers
         id: layers
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/swarm-smoke-layers
           key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'pyproject.toml', 'README.md', 'docker/swarm/requirements.lock', 'docker/swarm-node/versions.lock', 'docker/swarm-node/requirements.lock', 'scripts/swarm_v2/worker_image.py') }}
           restore-keys: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: '0.12.23'
           enable-cache: true
@@ -74,7 +74,7 @@ jobs:
           wait "$nats" || status=$?
           wait "$build" || status=$?
           exit "$status"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           python-version: '3.12'
@@ -105,7 +105,7 @@ jobs:
           mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"
       - name: Save the swarm smoke layers
         if: steps.layers.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/swarm-smoke-layers
           key: ${{ steps.layers.outputs.cache-primary-key }}
@@ -120,7 +120,7 @@ jobs:
             public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine
       - name: Save the runtime images for later runs
         if: steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/swarm-smoke-runtime-images
           key: swarm-smoke-runtime-images-v1

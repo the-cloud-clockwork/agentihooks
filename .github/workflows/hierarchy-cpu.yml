@@ -31,7 +31,7 @@ jobs:
       matrix:
         pair: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: checkout-head
         continue-on-error: true
         with:
@@ -40,7 +40,7 @@ jobs:
           filter: tree:0
       - name: Retry the head checkout once if the partial clone could not fetch a commit from the promisor remote
         if: steps.checkout-head.outcome == 'failure'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: head
           fetch-depth: 0
@@ -54,14 +54,14 @@ jobs:
           [[ -n "$BASE" ]] || BASE="$BEFORE"
           [[ -n "$BASE" ]] || BASE=$(git -C head merge-base HEAD origin/dev)
           echo "sha=$BASE" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.base.outputs.sha }}
           path: base
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: '0.12.23'
           enable-cache: false
@@ -134,17 +134,17 @@ jobs:
       matrix:
         pair: [1, 2, 3, 4, 5]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: head
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
           path: base
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: '0.12.23'
           enable-cache: false
@@ -224,15 +224,15 @@ jobs:
       SAME_CODE_MARGIN: '1.25'
       HIERARCHY_SAME_CODE_MARGIN: '1.3'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: load-pair-*
           path: load-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: hierarchy-pair-*
           path: hierarchy-evidence

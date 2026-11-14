@@ -23,7 +23,7 @@ jobs:
       tick: ${{ steps.tick.outputs.due }}
       events: ${{ steps.events.outputs.due }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
@@ -145,15 +145,15 @@ jobs:
         run: |
           docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger pgvector/pgvector:0.8.0-pg16
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: '0.12.23'
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
