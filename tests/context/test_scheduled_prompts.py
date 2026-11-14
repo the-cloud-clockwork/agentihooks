@@ -190,7 +190,9 @@ def test_a_cron_prompt_is_never_recorded_as_the_operator_words(monkeypatch: pyte
 
 
 @pytest.mark.feature("operator-presence-automated-prompts")
-def test_only_scheduler_tools_with_a_prompt_are_recorded_and_the_newest_are_kept() -> None:
+def test_only_scheduler_tools_with_a_prompt_are_recorded_and_the_newest_are_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     assert not scheduled_prompts.record({"session_id": "s", "tool_name": "Bash", "tool_input": {"prompt": "x"}})
     assert not scheduled_prompts.record({"session_id": "s", "tool_name": "CronCreate", "tool_input": {"prompt": " "}})
     assert not scheduled_prompts.record({"tool_name": "CronCreate", "tool_input": {"prompt": "x"}})
@@ -202,6 +204,7 @@ def test_only_scheduler_tools_with_a_prompt_are_recorded_and_the_newest_are_kept
     assert not scheduled_prompts.fired("s", "p0")
     assert scheduled_prompts.fired("s", "p1")
     assert scheduled_prompts.fired("s", f"p{scheduled_prompts.KEPT}")
+    monkeypatch.setattr(scheduled_prompts, "_agent", lambda: "agent-2")
     assert not scheduled_prompts.fired("other", "p1")
     assert not scheduled_prompts.fired("", "p1")
     assert not scheduled_prompts.fired("s", "")
@@ -230,6 +233,37 @@ def test_an_unwritable_record_home_records_nothing_and_never_raises(
     assert not scheduled_prompts.record(payload)
     hook_manager._scheduled_prompt(payload)
     assert not scheduled_prompts.fired("s", "x")
+
+
+@pytest.mark.feature("operator-presence-automated-prompts")
+def test_a_cleared_session_in_the_same_agent_still_finds_its_crons(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scheduled_prompts, "_agent", lambda: "agent-7")
+    bind(monkeypatch)
+    schedule("before", NUDGE)
+    hook_manager.on_session_end({"session_id": "before", "reason": "clear"})
+    opened(capsys, "after")
+    out = prompt(capsys, "after", NUDGE)
+    assert AUTOMATED in out
+    assert PRESENT not in out
+    monkeypatch.setattr(scheduled_prompts, "_agent", lambda: "agent-8")
+    assert not scheduled_prompts.fired("after", NUDGE)
+
+
+@pytest.mark.feature("operator-presence-automated-prompts")
+def test_session_end_drops_the_record_and_a_clear_keeps_the_agent_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduled_prompts, "_agent", lambda: "agent-7")
+    schedule("s", "p")
+    scheduled_prompts.forget({"session_id": "s", "reason": "clear"})
+    assert not scheduled_prompts._path("s").exists()
+    assert scheduled_prompts.fired("t", "p")
+    schedule("t", "p")
+    scheduled_prompts.forget({"session_id": "t", "reason": "prompt_input_exit"})
+    assert not scheduled_prompts._path("t").exists()
+    assert not scheduled_prompts._path("agent-7").exists()
+    assert not scheduled_prompts.fired("t", "p")
+    scheduled_prompts.forget({"reason": "other"})
 
 
 def run_hook(env: dict[str, str], payload: dict) -> str:

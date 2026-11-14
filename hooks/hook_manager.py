@@ -536,7 +536,10 @@ def on_session_end(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     _hive_join(payload, "end")
+    from hooks.context.scheduled_prompts import forget
     from hooks.lifecycle.guard import session_event
+
+    forget(payload)
 
     session_event()
 

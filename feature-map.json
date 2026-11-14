@@ -4,7 +4,7 @@
       "id": "operator-presence-automated-prompts",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-presence-cron-prompts",
-      "behaviour": "A prompt a session scheduled for itself with CronCreate or ScheduleWakeup is never the operator's words: it opens no reply window, never switches operator on or off and is not recorded as his words. Every untyped prompt in a swarm or ledger bound session, cron, wakeup, nudge or swarm delivery, is told it is automated and to write nothing to the operator; a typed operator prompt opens the reply window, operator on opens the session and operator off closes it; a standalone session keeps the operator present.",
+      "behaviour": "A prompt a session scheduled for itself with CronCreate or ScheduleWakeup is never the operator's words: it opens no reply window, never switches operator on or off and is not recorded as his words; the record is kept per session and per agent process, so a cleared session still finds its crons, and it is dropped at session end. Every untyped prompt in a swarm or ledger bound session, cron, wakeup, nudge or swarm delivery, is told it is automated and to write nothing to the operator; a typed operator prompt opens the reply window, operator on opens the session and operator off closes it; a standalone session keeps the operator present.",
       "seam": "operator_words.typed and operator_mode.notice on UserPromptSubmit, scheduled_prompts.record on PostToolUse",
       "tests": [
         "tests/context/test_scheduled_prompts.py::test_a_session_cron_prompt_in_a_swarm_master_is_automated_never_operator_presence",
@@ -19,6 +19,8 @@
         "tests/context/test_scheduled_prompts.py::test_only_scheduler_tools_with_a_prompt_are_recorded_and_the_newest_are_kept",
         "tests/context/test_scheduled_prompts.py::test_an_unreadable_record_counts_no_prompt_as_scheduled",
         "tests/context/test_scheduled_prompts.py::test_an_unwritable_record_home_records_nothing_and_never_raises",
+        "tests/context/test_scheduled_prompts.py::test_a_cleared_session_in_the_same_agent_still_finds_its_crons",
+        "tests/context/test_scheduled_prompts.py::test_session_end_drops_the_record_and_a_clear_keeps_the_agent_record",
         "tests/context/test_scheduled_prompts.py::test_smoke_the_hook_entry_point_marks_a_cron_prompt_automated_and_a_typed_one_present"
       ]
     },
