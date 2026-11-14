@@ -439,7 +439,7 @@ def test_the_hub_finds_the_hive_of_a_record_placed_by_runtime_target(rig: Simple
     from scripts.swarm.store import AgentRecord
 
     name = rig.store.next_name("rig", "eng")
-    record = AgentRecord(name, "eng", "other", state="working", runtime_target={"host_id": HIVE})
+    record = AgentRecord(name, "eng", "other", seat="eng-2@rig", state="working", runtime_target={"host_id": HIVE})
     placed = rig.store.start_execution("rig", record)
     deliberate_exit.record(rig.store, "rig", placed.name, NOW)
     exited = replace(rig.started, type="execution.exited", key=placed.execution_id, version=placed.generation)
