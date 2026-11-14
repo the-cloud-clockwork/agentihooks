@@ -9,7 +9,7 @@ from scripts.events.envelope import Envelope
 from scripts.hive.launch import release as release_slot
 from scripts.hive.orders import DONE, CommandOrder, Orders
 from scripts.hub.registry import Reactor
-from scripts.swarm import dead_resume
+from scripts.swarm import dead_resume, deliberate_exit
 from scripts.swarm.dead_resume import FRESH_NOTICE, RESUME_TEXT
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.resume import RECOVERY_ATTEMPTS
@@ -101,12 +101,17 @@ class Lifecycle:
         """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per
         execution and only while it holds its claim, claim generation and seat; True while that resume is ordered and
         unanswered or the exit predates it, False when the exit goes on to drop the agent and reopen its task."""
+        from scripts.hub.hive_loss import REASON as HIVE_LOST
+
         target: dict[str, Any] = cast(Any, agent).runtime_target
         data: dict[str, Any] = cast(Any, event).data
+        store = cast(RedisStore, self.store)
         hive: str = agent.hive or target.get("host_id") or ""
-        if not hive or data.get("reason") == "lost":
+        if not hive or data.get("reason") in {"lost", HIVE_LOST}:
             return False
-        orders, pending = Orders(cast(Any, self.store).redis), value.get("resume")
+        if deliberate_exit.take(store, event.swarm, agent.name):
+            return False
+        orders, pending = Orders(cast(Any, store).redis), value.get("resume")
         if pending and (pending["launched_at"], pending["pane_id"]) == (agent.launched_at, agent.pane_id):
             ack = orders.command(hive, CommandOrder(**pending["order"]))
             if ack is not None and ack.status != DONE:
@@ -126,6 +131,8 @@ class Lifecycle:
             agent.execution_id,
             agent.generation,
             RESUME_TEXT,
+            agent.launched_at,
+            agent.pane_id,
         )
         resume = {"order": asdict(order), "launched_at": agent.launched_at, "pane_id": agent.pane_id}
         claims.update(key, json.dumps({**value, "resumes": attempts + 1, "resume": resume}).encode(), revision)

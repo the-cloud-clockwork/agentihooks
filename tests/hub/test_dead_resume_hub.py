@@ -1,6 +1,6 @@
 import json
 from collections.abc import Iterator
-from dataclasses import asdict
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -11,6 +11,7 @@ pytestmark = pytest.mark.unit
 
 HIVE = "hive"
 NOW = 1_000_000
+LAUNCHED = 900_000
 
 
 @pytest.fixture
@@ -32,30 +33,25 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     monkeypatch.setattr(bus, "close", lambda: None)
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    agent = AgentRecord(
-        name="engineer",
-        lane="eng",
-        task="task",
-        execution_id="execution",
-        generation=3,
-        seat="eng-1@rig",
+    store.create(SwarmConfig("rig", "/repo", max_eng=1, max_ci=0, engine="events", repo_origin="/hive/repo"))
+    name = store.next_name("rig", "eng")
+    assert store.claim("rig", "task", name, 600_000)
+    admitted = store.start_execution(
+        "rig", AgentRecord(name, "eng", "task", seat="eng-1@rig", state="starting", started_at=LAUNCHED, hive=HIVE)
+    )
+    store.seats.occupy(admitted.seat, name, LAUNCHED)
+    agent = replace(
+        admitted,
         state="working",
-        account="a",
         harness="claude",
         profile="engineer",
-        conversation_id="conversation",
-        hive=HIVE,
-        runtime_target={"host_id": HIVE},
-        started_at=900_000,
-        launched_at=900_000,
+        account="a",
         pane_id="pane",
+        launched_at=LAUNCHED,
+        conversation_id="conversation",
     )
-    store.create(SwarmConfig("rig", "/repo", max_eng=1, max_ci=0, engine="events"))
-    store.redis.hset(store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
-    store.redis.hset(store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
-    store.redis.set(store.key("rig", "claim", agent.task), agent.name)
-    store.seats.occupy(agent.seat, agent.name, agent.started_at)
-    row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
+    store.put_agent("rig", agent)
+    row = {"id": "task", "state": "claimed", "claimed_by": name, "claim_generation": 7, "done": False}
     ledger: Any = SimpleNamespace(task=lambda *_: dict(row), writes=[], notices=[])
 
     def update(*args: Any, **kwargs: Any) -> None:
@@ -71,12 +67,12 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
         type="execution.started",
         swarm="rig",
         entity="execution",
-        key="execution",
-        version=3,
-        time=900_000,
+        key=agent.execution_id,
+        version=agent.generation,
+        time=LAUNCHED,
         author=HIVE,
         data={
-            "name": "engineer",
+            "name": name,
             "task": "task",
             "hive": HIVE,
             "claim_key": "claim",
@@ -89,13 +85,8 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
 
     def report(pane_state: str = "exited") -> None:
         store.redis.sadd(registry.INDEX, HIVE)
-        body = {
-            "observed_at": clock(),
-            "pane_ids": [],
-            "executions": {
-                "execution": {"slug": "rig", "name": "engineer", "generation": 3, "pane": {"state": pane_state}}
-            },
-        }
+        record = {"slug": "rig", "name": name, "generation": agent.generation, "pane": {"state": pane_state}}
+        body = {"observed_at": clock(), "pane_ids": [], "executions": {agent.execution_id: record}}
         store.redis.set(reports.key(HIVE), json.dumps(body))
 
     report()
@@ -104,11 +95,13 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
         bus=bus,
         store=store,
         agent=agent,
+        started=started,
         row=row,
         ledger=ledger,
         returned=returned,
         clock=clock,
         report=report,
+        life=life,
         react=react,
     )
     store.redis.close()
@@ -133,14 +126,17 @@ def _hive(rig: SimpleNamespace, outcome: Any) -> tuple[Any, Mock]:
     runtime = Mock()
     runtime.recover.return_value = outcome
     runtime.terminate.return_value = SimpleNamespace(ok=True)
-    return Consumer(rig.store.redis, HIVE, runtime), runtime
+    consumer = Consumer(rig.store.redis, HIVE, runtime)
+    consumer.offbeat = consumer.run_resume
+    return consumer, runtime
 
 
 def _resumed(launched_at: int = 1_150_000) -> Any:
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
-    return Outcome("recover", Status.OK, "local", Placed("pane-2", "claude", "a", launched_at=launched_at))
+    placed = Placed("pane-2", "claude", "a", launched_at=launched_at, overlays=["tuner"])
+    return Outcome("recover", Status.OK, "local", placed)
 
 
 @pytest.mark.feature("hub-dead-resume")
@@ -153,14 +149,15 @@ def test_a_dead_hub_started_agent_is_resumed_once_through_its_hive(rig: SimpleNa
     assert (order.action, order.slug, order.name, order.execution_id, order.generation) == (
         "resume",
         "rig",
-        "engineer",
-        "execution",
-        3,
+        rig.agent.name,
+        rig.agent.execution_id,
+        rig.agent.generation,
     )
+    assert (order.launched_at, order.pane_id) == (LAUNCHED, "pane")
     assert rig.ledger.writes == rig.returned == []
-    assert rig.row["claimed_by"] == "engineer"
-    assert rig.store.claimant("rig", "task") == "engineer"
-    assert [agent.name for agent in rig.store.agents("rig")] == ["engineer"]
+    assert rig.row["claimed_by"] == rig.agent.name
+    assert rig.store.claimant("rig", "task") == rig.agent.name
+    assert [agent.name for agent in rig.store.agents("rig")] == [rig.agent.name]
     _next_pass(rig)
     assert len(_commands(rig)) == 1
     assert rig.ledger.writes == rig.returned == []
@@ -175,16 +172,22 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig: SimpleNamespace
     [order] = _commands(rig)
     consumer, runtime = _hive(rig, _resumed())
     assert consumer.poll_commands() == 1
-    agent, mode, _config, text = runtime.recover.call_args.args
+    agent, mode, config, text = runtime.recover.call_args.args
     assert (agent.name, agent.conversation_id, agent.seat, mode) == (
-        "engineer",
+        rig.agent.name,
         "conversation",
         "eng-1@rig",
         Recovery.RESUME,
     )
+    assert config.repo == "/hive/repo"
     assert "Continue your task in this conversation and seat" in text
     [resumed] = rig.store.agents("rig")
-    assert (resumed.pane_id, resumed.launched_at, resumed.seat) == ("pane-2", 1_150_000, "eng-1@rig")
+    assert (resumed.pane_id, resumed.launched_at, resumed.seat, resumed.overlays) == (
+        "pane-2",
+        1_150_000,
+        "eng-1@rig",
+        ["tuner"],
+    )
     assert cast(Any, Orders(rig.store.redis).command(HIVE, order)).status == DONE
     _next_pass(rig, "working")
     assert len(_commands(rig)) == 1
@@ -192,12 +195,28 @@ def test_the_hive_reopens_the_conversation_in_the_same_seat(rig: SimpleNamespace
 
 
 @pytest.mark.feature("hub-dead-resume")
+def test_the_hive_runs_a_resume_order_off_its_heartbeat(rig: SimpleNamespace) -> None:
+    from scripts.hive.orders import Orders
+
+    rig.react.poll()
+    [order] = _commands(rig)
+    consumer, runtime = _hive(rig, _resumed())
+    consumer.offbeat = Mock()
+    assert consumer.poll_commands() == 1
+    consumer.offbeat.assert_called_once_with(order)
+    runtime.recover.assert_not_called()
+    assert Orders(rig.store.redis).command(HIVE, order) is None
+    assert _commands(rig) == []
+
+
+@pytest.mark.feature("hub-dead-resume")
 def test_a_resumed_pane_that_dies_again_orders_the_next_resume(rig: SimpleNamespace) -> None:
     rig.react.poll()
-    consumer, _runtime = _hive(rig, _resumed(launched_at=rig.agent.launched_at))
+    consumer, _runtime = _hive(rig, _resumed(launched_at=LAUNCHED))
     consumer.poll_commands()
     _next_pass(rig)
-    assert [order.id for order in _commands(rig)] == ["resume:execution:3:1", "resume:execution:3:2"]
+    prefix = f"resume:{rig.agent.execution_id}:{rig.agent.generation}"
+    assert [order.id for order in _commands(rig)] == [f"{prefix}:1", f"{prefix}:2"]
     assert rig.ledger.writes == rig.returned == []
     assert [agent.pane_id for agent in rig.store.agents("rig")] == ["pane-2"]
 
@@ -224,18 +243,48 @@ def test_a_successors_work_is_never_resumed_by_the_old_agent(
 
 
 @pytest.mark.feature("hub-dead-resume")
-def test_the_hive_refuses_a_resume_once_a_successor_holds_the_claim(rig: SimpleNamespace) -> None:
+@pytest.mark.parametrize("change", ["claim", "relaunch"])
+def test_the_hive_refuses_a_resume_the_hub_judged_on_another_record(rig: SimpleNamespace, change: str) -> None:
     from scripts.hive.orders import FOREIGN, Orders
 
     rig.react.poll()
     [order] = _commands(rig)
-    rig.store.redis.set(rig.store.key("rig", "claim", "task"), "successor")
+    if change == "claim":
+        rig.store.redis.set(rig.store.key("rig", "claim", "task"), "successor")
+    else:
+        rig.store.put_agent("rig", replace(rig.agent, pane_id="pane-3", launched_at=LAUNCHED + 1))
     consumer, runtime = _hive(rig, _resumed())
     consumer.poll_commands()
     runtime.recover.assert_not_called()
     assert Orders(rig.store.redis).command(HIVE, order) == FOREIGN
-    [agent] = rig.store.agents("rig")
-    assert agent.pane_id == "pane"
+
+
+@pytest.mark.feature("hub-dead-resume")
+def test_a_deliberately_ended_hub_agent_is_not_resumed(rig: SimpleNamespace) -> None:
+    from scripts.swarm import deliberate_exit
+
+    deliberate_exit.record(rig.store, "rig", rig.agent.name, NOW)
+    rig.react.poll()
+    assert _commands(rig) == []
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
+    assert not deliberate_exit.recorded(rig.store, "rig", rig.agent.name)
+
+
+@pytest.mark.feature("hub-dead-resume")
+@pytest.mark.parametrize("reason", ["lost", "hive-lost"])
+def test_an_agent_on_a_lost_hive_is_handed_to_a_fresh_agent(rig: SimpleNamespace, reason: str) -> None:
+    exited = replace(
+        rig.started,
+        id=f"{reason}:started",
+        type="execution.exited",
+        time=NOW,
+        data={**rig.started.data, "reason": reason},
+    )
+    rig.life.handle(exited)
+    assert _commands(rig) == []
+    assert rig.row["state"] == "open"
+    assert len(rig.returned) == 1
 
 
 @pytest.mark.feature("hub-dead-resume")
@@ -247,7 +296,9 @@ def test_a_failed_resume_hands_the_task_to_a_fresh_agent(rig: SimpleNamespace) -
     consumer.poll_commands()
     _next_pass(rig)
     assert len(_commands(rig)) == 1
-    assert rig.ledger.notices == ["Starting a fresh agent after engineer ended because resume failed: no conversation."]
+    assert rig.ledger.notices == [
+        f"Starting a fresh agent after {rig.agent.name} ended because resume failed: no conversation."
+    ]
     assert rig.row["state"] == "open"
     assert rig.row["claimed_by"] == ""
     assert len(rig.returned) == 1

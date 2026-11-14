@@ -2209,9 +2209,12 @@
       "tests": [
         "tests/hub/test_dead_resume_hub.py::test_a_dead_hub_started_agent_is_resumed_once_through_its_hive",
         "tests/hub/test_dead_resume_hub.py::test_the_hive_reopens_the_conversation_in_the_same_seat",
+        "tests/hub/test_dead_resume_hub.py::test_the_hive_runs_a_resume_order_off_its_heartbeat",
         "tests/hub/test_dead_resume_hub.py::test_a_resumed_pane_that_dies_again_orders_the_next_resume",
         "tests/hub/test_dead_resume_hub.py::test_a_successors_work_is_never_resumed_by_the_old_agent",
-        "tests/hub/test_dead_resume_hub.py::test_the_hive_refuses_a_resume_once_a_successor_holds_the_claim",
+        "tests/hub/test_dead_resume_hub.py::test_the_hive_refuses_a_resume_the_hub_judged_on_another_record",
+        "tests/hub/test_dead_resume_hub.py::test_a_deliberately_ended_hub_agent_is_not_resumed",
+        "tests/hub/test_dead_resume_hub.py::test_an_agent_on_a_lost_hive_is_handed_to_a_fresh_agent",
         "tests/hub/test_dead_resume_hub.py::test_a_failed_resume_hands_the_task_to_a_fresh_agent",
         "tests/hub/test_dead_resume_hub.py::test_the_resume_attempt_cap_hands_the_task_to_a_fresh_agent"
       ]
