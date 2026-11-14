@@ -85,7 +85,7 @@ class State:
 
 def crew_id(now: float) -> str:
     """Name a crew from the UTC minute it launched."""
-    return "crew-" + time.strftime("%m%d%H%M", time.gmtime(now))
+    return "crew-" + time.strftime("%m%d%H%M%S", time.gmtime(now))
 
 
 def scout_ids(cid: str, count: int, start: int = 0) -> list[str]:

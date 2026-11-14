@@ -38,11 +38,11 @@ script quotes his standing order for this skill.
 2. **Scout.** Run the same line with `scout` instead of `plan`. It saves the earlier focus and eng lane
    settings, sets the eng lane to the scout model and effort, adds one eng lane troubleshoot task per scout
    (an engineer in scouting mode: no code), focuses only the crew with focus only, which drops every other
-   focus without deleting anything, records the order verbatim as a canon seat note and asks every agent working on another task to hand
-   off at its next stop, so its task waits for the restore. While any crew task is not done, the focus holds every other open task in every
-   lane back from a claim. Then set the
-   printed `cron` with CronCreate (recurring, every thirty minutes, the printed prompt verbatim). Done when
-   the scout tasks are focused and the cron is set.
+   focus without deleting anything, records the order verbatim as a canon seat note and asks every agent
+   working on another task to hand off at its next stop, so its task waits for the restore. While any crew
+   task is not done, the swarm's focus claim gate holds every other open task back from a claim. Then set
+   the printed `cron` with CronCreate (recurring, every thirty minutes, the printed prompt verbatim). Done
+   when the scout tasks are focused and the cron is set.
 
 3. **Judge the proofs.** Read each scout task's proof as it closes. A claim counts only when its evidence
    confirms it; a hypothesis is never a cause. While causes remain unproven, run `scout` again with new hypotheses: it adds
