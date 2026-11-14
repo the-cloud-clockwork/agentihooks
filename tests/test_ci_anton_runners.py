@@ -136,6 +136,8 @@ if (WORKFLOWS / "ci-minutes.yml").exists():
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 if (WORKFLOWS / "hive-join.yml").exists():
     MOVED[("hive-join.yml", "smoke")] = QUEUED
+if (WORKFLOWS / "events-smoke.yml").exists():
+    MOVED[("events-smoke.yml", "smoke")] = QUEUED
 
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
 

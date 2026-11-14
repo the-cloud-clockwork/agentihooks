@@ -58,6 +58,8 @@ CALLED = {
 }
 if (_WORKFLOWS / "hive-join.yml").is_file():
     CALLED["hive-join.yml"] = "called hive join smoke must not hold the caller lane"
+if (_WORKFLOWS / "events-smoke.yml").is_file():
+    CALLED["events-smoke.yml"] = "called events launch smoke must not hold the caller lane"
 
 EXCLUDED = {
     "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
