@@ -1285,6 +1285,9 @@ def test_marking_a_slot_failed_records_that_slot_against_its_own_login_write(
     login.mark_failed(2)
     assert login._read(login.root(2) / login.FAILED) == {"credentials": 0.0}
     assert login.failed(1) is False
+    assert login.spare() is True
+    login.mark_failed(1)
+    assert login.spare() is False
 
 
 @pytest.mark.feature("master-login-limit-recovery")

@@ -14,6 +14,7 @@ from scripts.inbox import wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity, idle, master_retire, master_stall
+from scripts.swarm.delivery import READY
 from scripts.swarm.health.findings import MINUTE_MS
 from scripts.swarm.pane import interrupted_prompt, login_limit
 from scripts.swarm.store import MASTER, AgentRecord
@@ -31,6 +32,12 @@ RECYCLED = "the swarm recycled the master after fifteen minutes on the prompt"
 LOGIN_LIMITED = "showed a Claude login that reached its time limit"
 LOGIN_RECYCLE_KEY = "master-login-recycle"
 LOGIN_RECYCLED = "the swarm recycled the master on a Claude login limit"
+LOGIN_ALERT_KEY = "master-login-alert"
+LOGIN_ALERT_SOURCE = "master-login"
+LOGIN_ALERT = (
+    "The master hit the Claude login limit again and no stored master login is left that passes its check; "
+    "log in one master login slot again so the master can run."
+)
 LOGIN_RECOVERY = """## Intent
 Continue as the master of {slug}; {name} {limited} and the swarm recycled it so the relaunch takes another stored login.
 
@@ -113,9 +120,9 @@ def _prompted(store: Any, slug: str, master: AgentRecord, now_ms: int) -> bool:
 
 
 def login_limited(slug: str, store: Any, runtime: Any, master: AgentRecord, now_ms: int) -> str:
-    """The Claude login error an idle live master pane shows, or empty while the operator is at the pane."""
+    """The Claude login error a live master pane that ended its turn shows, or empty while the operator is at the pane."""
     observed = runtime.observe(master)
-    if observed.state != "idle" or observed.typed or _prompted(store, slug, master, now_ms):
+    if observed.state not in READY or observed.typed or _prompted(store, slug, master, now_ms):
         return ""
     try:
         tail = runtime.pane_tail(master.pane_id, TAIL_LINES)
@@ -131,8 +138,19 @@ def _recycle_login(slug: str, store: Any, ledger: Any, master: AgentRecord, key:
     text = LOGIN_RECOVERY.format(slug=slug, name=master.name, limited=LOGIN_LIMITED)
     master_stall.recycle(slug, store, ledger, master, text, now_ms, master_stall.STALLED)
     store.redis.delete(key)
-    store.redis.set(store.key(slug, LOGIN_RECYCLE_KEY), now_ms, ex=DAY_S)
-    return [f"recycled master {master.name} in its seat: {LOGIN_LIMITED}"]
+    stamp = store.key(slug, LOGIN_RECYCLE_KEY)
+    repeat = store.redis.get(stamp) is not None
+    store.redis.set(stamp, now_ms, ex=DAY_S)
+    return [f"recycled master {master.name} in its seat: {LOGIN_LIMITED}", *_alert_spent(slug, store, ledger, repeat)]
+
+
+def _alert_spent(slug: str, store: Any, ledger: Any, repeat: bool) -> list[str]:
+    if not repeat or master_claude_login.spare():
+        return []
+    if not store.redis.set(store.key(slug, LOGIN_ALERT_KEY), 1, nx=True, ex=DAY_S):
+        return []
+    ledger.raise_alert(slug, LOGIN_ALERT_SOURCE, LOGIN_ALERT)
+    return [f"raised the master login alert: {LOGIN_ALERT}"]
 
 
 def run(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: int) -> list[str]:

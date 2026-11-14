@@ -579,6 +579,11 @@ def mark_held_failed(name: str) -> list[int]:
     return held
 
 
+def spare() -> bool:
+    """Whether a local slot holds a stored login that has not failed its check since that login was last written."""
+    return any(_private(home(number)) is not None and not failed(number) for number in numbers())
+
+
 def _number(target: Path) -> int:
     return next(number for number in numbers() if home(number) == target)
 

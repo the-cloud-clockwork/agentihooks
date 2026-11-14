@@ -159,3 +159,33 @@ def test_login_limit_ignores_an_old_error_far_above_the_latest_lines() -> None:
 
     recovered = "● Login reached its time limit · Please run /login\n" + "● working on the ledger\n" * 20 + "❯ \n"
     assert login_limit("claude", recovered) == ""
+
+
+FOOTER = [
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    *[f"  status line {n}: dev, opus, 42 percent" for n in range(14)],
+]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_login_limit_reads_the_last_reply_above_the_input_box_whatever_the_footer() -> None:
+    from scripts.swarm.pane import login_limit
+
+    error = "Login reached its time limit · Please run /login"
+    pane = "\n".join([ECHO, "", f"  ⎿  {error}", "", RULE, "❯ ", RULE, *FOOTER])
+    assert login_limit("claude", pane) == error
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        ["● The old master showed this error:", "    Login reached its time limit · Please run /login"],
+        ["● Login reached its time limit · Please run /login", "", "● Logged in again and back on the ledger"],
+    ],
+    ids=["indented-quote", "later-reply"],
+)
+def test_login_limit_ignores_a_quote_or_an_earlier_reply(reply: list[str]) -> None:
+    from scripts.swarm.pane import login_limit
+
+    assert login_limit("claude", "\n".join([ECHO, "", *reply, "", RULE, "❯ ", RULE, *FOOTER])) == ""

@@ -69,8 +69,17 @@ def operator_says(store, at, slug="sw", text="are you there"):
     return inbox.get(item.id)
 
 
-def run(store, runtime, at, slug="sw"):
-    return master_prompt_stall.run(slug, store.config(slug), store, FakeLedger([]), runtime, at)
+class AlertLedger(FakeLedger):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.alerts: list[tuple[str, str, str]] = []
+
+    def raise_alert(self, slug: str, source: str, text: str, item: str | None = None) -> None:
+        self.alerts.append((slug, source, text))
+
+
+def run(store, runtime, at, slug="sw", ledger=None):
+    return master_prompt_stall.run(slug, store.config(slug), store, ledger or AlertLedger(), runtime, at)
 
 
 def rows(slug="sw"):
@@ -321,8 +330,11 @@ LOGIN_LIMIT = "● Login reached its time limit · Please run /login\n\n──�
 
 @pytest.mark.feature("master-login-limit-recovery")
 @pytest.mark.parametrize("enforce", [True, False], ids=["reset-enforced", "reset-log-only"])
-def test_a_master_on_a_login_limit_is_recycled_at_once_without_operator_items(store: RedisStore, enforce: bool) -> None:
-    agent, runtime = master(store, INTERRUPTED, enforce=enforce)
+@pytest.mark.parametrize("pane", [INTERRUPTED, PaneObservation("done")], ids=["idle", "done"])
+def test_a_master_on_a_login_limit_is_recycled_at_once_without_operator_items(
+    store: RedisStore, enforce: bool, pane: PaneObservation
+) -> None:
+    agent, runtime = master(store, pane, enforce=enforce)
     runtime.tails[agent.pane_id] = LOGIN_LIMIT
     assert run(store, runtime, START) == [
         f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
@@ -385,9 +397,40 @@ def test_a_relaunched_master_on_a_login_limit_waits_out_the_recycle_window(store
     runtime.panes[successor.name] = INTERRUPTED
     window = master_prompt_stall.RESET_MINUTES * MINUTE
     assert run(store, runtime, START + window - 1) == []
-    assert run(store, runtime, START + window) == [
+    ledger = AlertLedger()
+    assert run(store, runtime, START + window, ledger=ledger) == [
+        f"recycled master {successor.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}",
+        f"raised the master login alert: {master_prompt_stall.LOGIN_ALERT}",
+    ]
+    assert ledger.alerts == [("sw", master_prompt_stall.LOGIN_ALERT_SOURCE, master_prompt_stall.LOGIN_ALERT)]
+    third, _ = master(store, INTERRUPTED)
+    runtime.live.add(third.name)
+    runtime.panes[third.name] = INTERRUPTED
+    assert run(store, runtime, START + 2 * window, ledger=ledger) == [
+        f"recycled master {third.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    assert len(ledger.alerts) == 1
+    assert 0 < store.redis.ttl(store.key("sw", master_prompt_stall.LOGIN_ALERT_KEY)) <= master_prompt_stall.DAY_S
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_repeat_login_recycle_raises_no_alert_while_a_stored_slot_is_spare(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_claude_login
+
+    monkeypatch.setattr(master_claude_login, "spare", lambda: True)
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    ledger = AlertLedger()
+    run(store, runtime, START, ledger=ledger)
+    successor, _ = master(store, INTERRUPTED)
+    runtime.live.add(successor.name)
+    runtime.panes[successor.name] = INTERRUPTED
+    assert run(store, runtime, START + master_prompt_stall.RESET_MINUTES * MINUTE, ledger=ledger) == [
         f"recycled master {successor.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
     ]
+    assert ledger.alerts == []
 
 
 @pytest.mark.feature("master-login-limit-recovery")

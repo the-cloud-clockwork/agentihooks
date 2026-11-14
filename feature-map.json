@@ -3221,7 +3221,10 @@
         "tests/swarm/test_master_prompt_stall.py::test_a_login_limit_recycle_closes_the_retire_ask_and_stamps_its_window",
         "tests/swarm/test_master_prompt_stall.py::test_a_master_whose_pane_tail_cannot_be_read_stays",
         "tests/test_master_claude_login.py::test_marking_a_slot_failed_records_that_slot_against_its_own_login_write",
-        "tests/test_master_claude_login.py::test_a_move_from_a_refused_slot_checks_each_other_slot_once_and_marks_both"
+        "tests/test_master_claude_login.py::test_a_move_from_a_refused_slot_checks_each_other_slot_once_and_marks_both",
+        "tests/swarm/test_pane.py::test_login_limit_reads_the_last_reply_above_the_input_box_whatever_the_footer",
+        "tests/swarm/test_pane.py::test_login_limit_ignores_a_quote_or_an_earlier_reply",
+        "tests/swarm/test_master_prompt_stall.py::test_a_repeat_login_recycle_raises_no_alert_while_a_stored_slot_is_spare"
       ]
     },
     {
