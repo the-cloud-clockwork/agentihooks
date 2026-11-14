@@ -200,8 +200,8 @@ class Admission:
         if not self.store.claim(slug, task_id, name, tick.LEASE_MS):
             return None
         taken = {agent.seat for agent in self.store.agents(slug)}
-        saved = self.store.redis.hget(self.store.key(slug, "launch-assignments"), task_id)
-        preferred = json.loads(saved)["seat"] if saved else self.store.handoff_seat(slug, task_id)
+        saved = cast(str | None, self.store.redis.hget(self.store.key(slug, "launch-assignments"), task_id))
+        preferred = cast(str, json.loads(saved)["seat"] if saved else self.store.handoff_seat(slug, task_id))
         seat = tick._free_seat(slug, lane, taken, preferred)
         record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
         previous = self.store.execution_occupants(slug).get(seat)
