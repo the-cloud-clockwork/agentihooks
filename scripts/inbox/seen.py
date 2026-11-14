@@ -3,6 +3,7 @@
 Whichever path shows a write first marks it; the others skip it, so each write reaches each agent once.
 """
 
+import contextlib
 import os
 
 from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, InboxStore, Item, now_ms, owner_key, prefix, redelivery_ms
@@ -93,15 +94,19 @@ def first_showing(marks, name, slug, events):
         return list(events)
 
 
-def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: set[str] | None = None) -> list[Item]:
+def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: dict[str, int] | None = None) -> list[Item]:
     """Deliver at most limit oldest pending items across me, my seat and aliases, leaving out the ids in skip.
 
-    Close ledger writes already shown; an item whose seen check fails returns to pending and joins skip.
+    Close ledger writes already shown; an item whose seen check fails returns to pending and joins skip for one
+    redelivery window. A Redis error returns every item this call delivered to pending before it propagates.
     """
     from redis.exceptions import RedisError
 
-    skip = set() if skip is None else skip
-    store.redeliver(now_ms(), redelivery_ms())
+    skip = {} if skip is None else skip
+    now, window = now_ms(), redelivery_ms()
+    store.redeliver(now, window)
+    for item_id in [item_id for item_id, at in skip.items() if now - at >= window]:
+        del skip[item_id]
     marks = SeenMarks(store.redis)
     shown: list[Item] = []
     waiting = [item for item in store.pending_mail(me) if item.id not in skip][:limit]
@@ -112,16 +117,30 @@ def claim(store: InboxStore, me: str, limit: int = CLAIM_BATCH, skip: set[str] |
             store.requeue(item.id, me, UNSETTLED)
             continue
         except RedisError:
+            _release(store, me, [*shown, item])
             raise
         except Exception:
             store.requeue(item.id, me, UNCHECKED)
-            skip.add(item.id)
+            leave_out(skip, item.id)
             continue
         if elsewhere:
             store.close(item.id, me, "done", SEEN_ON_LEDGER)
         else:
             shown.append(item)
     return shown
+
+
+def leave_out(skip: dict[str, int], item_id: str) -> None:
+    """Leave item_id out of the claims that pass skip until one redelivery window from now."""
+    skip[item_id] = now_ms()
+
+
+def _release(store: InboxStore, me: str, items: list[Item]) -> None:
+    from redis.exceptions import RedisError
+
+    for item in items:
+        with contextlib.suppress(RedisError, InboxError):
+            store.requeue(item.id, me, UNCHECKED)
 
 
 def _shown_elsewhere(marks, store, item, me):

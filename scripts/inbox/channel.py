@@ -15,7 +15,7 @@ from typing import Any
 
 from scripts.inbox.bus import FeedError, feed_for
 from scripts.inbox.cli import check_answer, identity
-from scripts.inbox.seen import CLAIM_BATCH, claim
+from scripts.inbox.seen import CLAIM_BATCH, claim, leave_out
 from scripts.inbox.store import NOTIFY, InboxError, InboxStore, connect
 
 NAME = "inbox"
@@ -34,7 +34,7 @@ HELD = ("pending", "delivered")
 class Pushed:
     shown: set[str] = field(default_factory=set)
     held: set[str] = field(default_factory=set)
-    poisoned: set[str] = field(default_factory=set)
+    poisoned: dict[str, int] = field(default_factory=dict)
 
 
 def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
@@ -154,7 +154,7 @@ async def _deliver(store: InboxStore, me: str, write: Any, pushed: Pushed) -> No
             note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
         except Exception:
             store.requeue(item.id, me, UNSHOWN)
-            pushed.poisoned.add(item.id)
+            leave_out(pushed.poisoned, item.id)
             continue
         try:
             await write.send(SessionMessage(types.JSONRPCMessage(note)))
