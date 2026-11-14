@@ -1388,3 +1388,23 @@ def test_spoke_passes_hive_slot_ownership_to_the_launch_boundary(rig):
     request = rig.runtime.spawn.call_args.args[0]
     assert request.task["account_slot_hive"] == "hive-a"
     assert request.task["execution_id"] == "execution-a"
+
+
+@pytest.mark.feature("events-launch-placement")
+def test_a_launch_report_carries_the_placed_overlays_and_the_host_overlays_the_hive_declared(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import launch_check
+
+    monkeypatch.setattr(launch_check, "declared", lambda profile, overlays: [profile, *overlays])
+    placed = rig.runtime.spawn.return_value.value
+    placed.profile, placed.overlays = "engineer", ("frontend",)
+    placed.profile_decision = {"validation": {"state": "pending"}}
+
+    assert rig.spoke.poll() == "started"
+
+    [(_, reported)] = [call.args for call in rig.tasks.launched.call_args_list]
+    assert (reported.overlays, reported.profile_decision) == (
+        ["frontend"],
+        {"validation": {"state": "pending"}, launch_check.HOST_OVERLAYS: ["engineer", "frontend"]},
+    )

@@ -3,6 +3,7 @@ import socket
 import subprocess
 import threading
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -169,6 +170,57 @@ def test_a_member_credential_cannot_change_a_stream(signer, verb):
 
     assert _violations(signer, nats_grant.mint(signer, "m1"), act, refused=True) == [
         f'nats: permissions violation for publish to "{subject.lower()}"'
+    ]
+
+
+def _signed(signer: nats_grant.Signer, name: str, claims: dict) -> str:
+    user = nkey.create(nkey.USER)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, name, claims), user.seed)
+
+
+def _publish_refusals(signer: nats_grant.Signer, credentials: str, *published: str) -> list[str]:
+    async def act(nc: Any) -> None:
+        for subject in published:
+            await nc.publish(subject, b"{}")
+
+    return _violations(signer, credentials, act, refused=True)
+
+
+def _member(signer: nats_grant.Signer, scope: str) -> str:
+    if scope == "unscoped":
+        return nats_grant.mint(signer, "m1")
+    return _signed(signer, "hive-m1", nats_grant.member_claims("UMEMBER", ("rig",), member="m1"))
+
+
+def _on_wire(logical: str, wire: bool) -> str:
+    from scripts.events.scope import scoped_subject
+
+    return scoped_subject("rig", "events", logical) if wire else logical
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+@pytest.mark.parametrize(("scope", "wire"), [("unscoped", False), ("scoped", False), ("scoped", True)])
+@pytest.mark.parametrize(
+    "stop", ["swarm.rig.execution.stop.h2", "swarm.rig.execution.stop.m1", "swarm.rig.execution.stop"]
+)
+def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(
+    signer: nats_grant.Signer, scope: str, wire: bool, stop: str
+) -> None:
+    allowed = [_on_wire(f"swarm.rig.execution.{kind}", wire) for kind in ("started", "exited")]
+    refused = _on_wire(stop, wire)
+
+    assert _publish_refusals(signer, _member(signer, scope), *allowed, refused) == [
+        f'nats: permissions violation for publish to "{refused}"'
+    ]
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+@pytest.mark.parametrize("wire", [False, True])
+def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer: nats_grant.Signer, wire: bool) -> None:
+    hub = _signed(signer, "hub", nats_grant.controller_claims())
+
+    assert _publish_refusals(signer, hub, _on_wire("swarm.rig.execution.stop.h2", wire), "outside.events") == [
+        'nats: permissions violation for publish to "outside.events"'
     ]
 
 
@@ -725,7 +777,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {"allow": publish},
+        "pub": {"allow": publish, "deny": list(nats_grant.MEMBER_DENY)},
         "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,
