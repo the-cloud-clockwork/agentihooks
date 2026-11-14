@@ -233,8 +233,13 @@ def test_a_legacy_agent_retirement_sends_no_stop(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-def test_a_stop_the_bus_refused_is_sent_again_on_the_next_reap_pass(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("dropped", [True, False])
+def test_a_stop_the_bus_refused_is_sent_again_only_once_its_agent_was_dropped(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    monkeypatch: pytest.MonkeyPatch,
+    dropped: bool,
 ) -> None:
     store, ledger, rt = env
     agent, event = launched(env, bus, seat)
@@ -247,12 +252,16 @@ def test_a_stop_the_bus_refused_is_sent_again_on_the_next_reap_pass(
     monkeypatch.setattr(reconciler, "open_bus", refused)
     assert reconciler.stop_admitted(store, SLUG, agent, "idle").startswith(execution_stop.FAILED)
     monkeypatch.setattr(reconciler, "open_bus", working)
+    if dropped:
+        assert store.drop_agent(SLUG, agent.name)
     rows = {row["id"]: row for row in ledger.tasks(SLUG)}
 
     actions = agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
 
-    assert f"sent the idle stop for {agent.name} again: {execution_stop.SENT}" in actions
-    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == [(agent.execution_id, event.id)]
+    resent = f"sent the idle stop for {agent.name} again: {execution_stop.SENT}"
+    assert (resent in actions) is dropped
+    expected = [(agent.execution_id, event.id)] if dropped else []
+    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == expected
     assert reconciler.retry_stops(store, SLUG) == []
 
 
