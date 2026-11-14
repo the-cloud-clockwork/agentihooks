@@ -2,7 +2,6 @@
 
 import functools
 import json
-import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -26,9 +25,9 @@ def _relay(bus: Any, store: Any, reported: str, data: bytes) -> bool:
     except SwarmError:
         return False
     if agent.hive != hive:
-        refusal = f"hive {hive!r} reported an exit for execution {event.key!r}, which runs on hive {agent.hive!r}"
-        print(f"hub: refused an exit in swarm {swarm}: {refusal}", file=sys.stderr)
-        raise PermissionError(refusal)
+        raise PermissionError(
+            f"hive {hive!r} reported an exit for execution {event.key!r}, which runs on hive {agent.hive!r}"
+        )
     return bus.for_swarm(swarm).events.publish(subject(swarm, "execution", "exited"), event)
 
 

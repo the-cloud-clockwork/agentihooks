@@ -1,12 +1,15 @@
+import hashlib
 import json
 from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events
 from scripts.hub import exits
@@ -128,3 +131,47 @@ def test_the_hub_refuses_a_malformed_exit_report(hub: Any, reported: str, change
 
     assert json.loads(answer) == {"ok": False, "error": error}
     assert shared(hub) == []
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_an_exit_report_failing_without_a_message_names_its_error(hub: Any) -> None:
+    def unreachable() -> Any:
+        raise RuntimeError
+
+    answer = exits.handle(hub, unreachable, "exits.rig.hive-a", b"{}")
+
+    assert json.loads(answer) == {"ok": False, "error": "RuntimeError"}
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_the_hub_serves_every_exit_subject_in_its_queue_group() -> None:
+    bus = Mock()
+
+    exits.serve(bus, lambda: None)
+
+    [served] = bus.serve.call_args_list
+    assert served.args[:2] == ("exits.*.*", "hub-exits")
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_a_hive_waits_its_exit_timeout_and_marks_the_exit_sent() -> None:
+    bus = Mock()
+    bus.for_swarm.return_value.state.return_value.get.return_value = None
+    bus.request.return_value = b'{"ok": true, "result": true}'
+    event = Envelope(
+        id="exited:e",
+        type="execution.exited",
+        swarm="rig",
+        entity="execution",
+        key="e",
+        version=1,
+        time=1,
+        author="hive-a",
+        data={},
+    )
+
+    execution_events.report_exit(bus, "hive-a", event)
+
+    bus.request.assert_called_once_with("exits.rig.hive-a", event.encode(), execution_events.EXIT_TIMEOUT_MS)
+    states = bus.for_swarm.return_value.state.return_value
+    states.create.assert_called_once_with(hashlib.sha256(b"exited:e").hexdigest(), execution_events.SENT)
