@@ -203,7 +203,9 @@ async def _push(
                 delay = RETRY_FIRST_S
             except Exception:
                 _log(f"push pass failed for {me}; retrying in {delay:g}s\n{traceback.format_exc()}")
-                pubsub = _dropped(pubsub)
+                if pubsub is not None:
+                    _close(pubsub)
+                    pubsub = None
                 await anyio.sleep(delay)
                 delay = min(delay * 2, RETRY_MAX_S)
     finally:
@@ -220,14 +222,11 @@ def _log(text: str) -> None:
         pass
 
 
-def _dropped(pubsub: Any) -> None:
-    if pubsub is None:
-        return None
+def _close(pubsub: Any) -> None:
     try:
         pubsub.close()
     except Exception:
         _log(f"closing the inbox subscription failed\n{traceback.format_exc()}")
-    return None
 
 
 def _feed(store: "InboxStore", me: str) -> SeatFeed | None:
