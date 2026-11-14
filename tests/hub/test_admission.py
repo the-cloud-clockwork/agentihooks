@@ -204,6 +204,18 @@ def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
 
 
+@pytest.mark.feature("hub-admission-relaunch-assignment")
+def test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names(rig: SimpleNamespace) -> None:
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "a1"}
+    rig.store.put_handoff(SLUG, "t1", "carry on", seat="eng-2@sw")
+    rig.store.redis.hset(rig.store.key(SLUG, "launch-assignments"), "t1", json.dumps({**saved, "seat": "eng-3@sw"}))
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"]["seat"] == "eng-3@sw"
+    assert admitted["task"]["launch_assignment"] == {**saved, "seat": "eng-3@sw"}
+
+
 CONTINUITY_DOC = "# Handoff v2\n## Next\nRead the saved proof and push the fix.\n## Read first\nNone\n"
 
 
