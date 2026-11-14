@@ -278,9 +278,9 @@ def test_each_owner_keeps_its_record_in_one_named_file_under_the_state_home(monk
         scheduled_prompts._path("Ab@x.y-z_1 /") == config.AGENTIHOOKS_HOME / "scheduled_prompts" / "Ab@x.y-z_1__.json"
     )
     monkeypatch.setattr(scheduled_prompts, "_agent", lambda: "agent-7")
-    schedule("Sess", "p")
-    assert json.loads((config.AGENTIHOOKS_HOME / "scheduled_prompts" / "Sess.json").read_text()) == ["p"]
-    assert json.loads((config.AGENTIHOOKS_HOME / "scheduled_prompts" / "agent-7.json").read_text()) == ["p"]
+    schedule("Sess", " p \n q ")
+    assert json.loads((config.AGENTIHOOKS_HOME / "scheduled_prompts" / "Sess.json").read_text()) == ["p q"]
+    assert json.loads((config.AGENTIHOOKS_HOME / "scheduled_prompts" / "agent-7.json").read_text()) == ["p q"]
 
 
 @pytest.mark.feature("operator-presence-automated-prompts")
