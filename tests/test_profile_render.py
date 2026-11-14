@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json"}
+SHARED = {"projects", "sessions", "todos", "plugins", "keybindings.json"}
 
 
 def _write(path: Path, text: str) -> Path:

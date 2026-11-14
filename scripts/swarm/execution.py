@@ -298,9 +298,11 @@ class ExecutionRegistry:
         if shown is not None:
             self.store.project_agent(slug, *shown, listed_only=True)
 
-    def set_launch(self, slug: str, execution_id: str, decision: dict[str, str]) -> bool:
+    def set_launch(self, slug: str, execution_id: str, decision: dict[str, Any], only_from: str = "") -> bool:
         """Writes a hive's launch decision onto its execution inside the fence; False when the execution no longer
-        heads its seat or its agent left the live list, so a dropped agent never reappears."""
+        heads its seat, its agent left the live list, or ``only_from`` names a state the execution has left for one the
+        decision would change, so a dropped agent never reappears and a late start never revives a finished one, while
+        a redelivered decision already on the execution projects it again."""
         with _writes(slug):
             listed = self.store.listed(slug)
 
@@ -311,6 +313,8 @@ class ExecutionRegistry:
                     return None
                 current = _record(raw)
                 updated = replace(current, **decision)
+                if only_from and current.state != only_from and updated != current:
+                    return None
                 doc["executions"][execution_id] = asdict(updated)
                 return updated, current
 

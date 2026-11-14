@@ -14,7 +14,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import commands, reboot, resume, snapshot
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord
-from tests.swarm.test_dead_resume import ResumingRuntime
+from tests.swarm.test_dead_resume import ResumingRuntime, seeded
 from tests.swarm.test_tick import tasks
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ def store(monkeypatch):
 @pytest.fixture
 def swarm(store):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     for agent in store.agents("sw"):
         store.put_agent(
             "sw",

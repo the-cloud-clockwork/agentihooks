@@ -1,10 +1,13 @@
 # ruff: noqa: F811
+from collections.abc import Callable
+
 import pytest
 
 from scripts.swarm import cli
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import RedisStore
-from tests.swarm.test_cli import env, run  # noqa: F401
+from scripts.swarm.store import AgentRecord, RedisStore
+from tests.helpers.seat import seat  # noqa: F401
+from tests.swarm.test_cli import env, run, started  # noqa: F401
 from tests.swarm.test_promotion_watch import GREEN, SLUG, Ledger, gh, refresh, store  # noqa: F401
 
 REOPEN = {"state": "open", "claimed_by": ""}
@@ -12,11 +15,11 @@ REOPEN = {"state": "open", "claimed_by": ""}
 
 @pytest.mark.feature("done-clears-awaiting")
 def test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(
-    env: tuple, monkeypatch: pytest.MonkeyPatch
+    env: tuple, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    started(env, seat)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     url = "https://github.com/o/r/pull/9"
     ledger.rows["t1"].update(state="pr", awaiting="approval", pr_url=url)
@@ -27,13 +30,15 @@ def test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(
 
 
 @pytest.mark.feature("done-clears-awaiting")
-def test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members(
+    env: tuple, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _, ledger, _ = env
     ledger.rows["t1"]["group_members"] = ["t3"]
     member = {"lane": "eng", "title": "member", "description": "spec", "claimed_by": "", "merged_into": "t1"}
     ledger.rows["t3"] = {"id": "t3", "state": "pr", "awaiting": "verify", **member}
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    started(env, seat)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     ledger.rows["t1"]["pr_url"] = "https://github.com/o/r/pull/9"
     assert run("sw", "done", "--finding", "one pull request") == 0
@@ -41,10 +46,12 @@ def test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members(env: tuple, m
 
 
 @pytest.mark.feature("done-clears-awaiting")
-def test_the_tick_reopens_a_done_task_without_a_stale_wait(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_tick_reopens_a_done_task_without_a_stale_wait(
+    env: tuple, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
     swarm, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    started(env, seat)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     url = "https://github.com/o/r/pull/9"
     ledger.rows["t1"].update(state="pr", awaiting="fix", pr_url=url)

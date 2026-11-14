@@ -181,6 +181,85 @@ def test_a_member_credential_cannot_change_a_stream(signer, verb):
     ]
 
 
+def _signed(signer: nats_grant.Signer, name: str, claims: dict) -> str:
+    user = nkey.create(nkey.USER)
+    return nkey.creds(nkey.encode_jwt(signer.account, user.public, name, claims), user.seed)
+
+
+def _publish_refusals(signer: nats_grant.Signer, credentials: str, *published: str) -> list[str]:
+    async def act(nc: Any) -> None:
+        for subject in published:
+            await nc.publish(subject, b"{}")
+
+    return _violations(signer, credentials, act, refused=True)
+
+
+def _member(signer: nats_grant.Signer, scope: str) -> str:
+    if scope == "unscoped":
+        return nats_grant.mint(signer, "m1")
+    return _signed(signer, "hive-m1", nats_grant.member_claims("UMEMBER", ("rig",), member="m1"))
+
+
+def _on_wire(logical: str, wire: bool) -> str:
+    from scripts.events.scope import scoped_subject
+
+    return scoped_subject("rig", "events", logical) if wire else logical
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+@pytest.mark.parametrize(("scope", "wire"), [("unscoped", False), ("scoped", False), ("scoped", True)])
+@pytest.mark.parametrize(
+    "stop", ["swarm.rig.execution.stop.h2", "swarm.rig.execution.stop.m1", "swarm.rig.execution.stop"]
+)
+def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(
+    signer: nats_grant.Signer, scope: str, wire: bool, stop: str
+) -> None:
+    allowed = [_on_wire("swarm.rig.execution.started", wire)]
+    refused = _on_wire(stop, wire)
+
+    assert _publish_refusals(signer, _member(signer, scope), *allowed, refused) == [
+        f'nats: permissions violation for publish to "{refused}"'
+    ]
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+@pytest.mark.parametrize("wire", [False, True])
+def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer: nats_grant.Signer, wire: bool) -> None:
+    hub = _signed(signer, "hub", nats_grant.controller_claims())
+
+    assert _publish_refusals(signer, hub, _on_wire("swarm.rig.execution.stop.h2", wire), "outside.events") == [
+        'nats: permissions violation for publish to "outside.events"'
+    ]
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+def test_a_member_credential_reports_an_exit_on_its_own_subject(signer: nats_grant.Signer, scope: str) -> None:
+    async def act(nc: Any) -> None:
+        await nc.publish("exits.rig.m1", b"{}")
+
+    assert _violations(signer, _member(signer, scope), act) == []
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
+@pytest.mark.parametrize("subject", ["exits.rig.h2", "swarm.rig.execution.exited", "swarm.rig.events.execution.exited"])
+def test_a_member_credential_cannot_report_an_exit_on_another_subject(
+    signer: nats_grant.Signer, scope: str, subject: str
+) -> None:
+    assert _publish_refusals(signer, _member(signer, scope), subject) == [
+        f'nats: permissions violation for publish to "{subject}"'
+    ]
+
+
+@pytest.mark.feature("hive-own-exit-subject")
+def test_the_hub_credential_serves_every_hive_exit_subject() -> None:
+    claims = nats_grant.controller_claims()
+
+    assert "exits.*.*" in claims["sub"]["allow"]
+    assert "swarm.>" in claims["pub"]["allow"]
+
+
 def _refused(signer: nats_grant.Signer, credentials: str) -> list[str]:
     import asyncio
 
@@ -756,6 +835,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
         "slots.*.m1",
+        "exits.*.m1",
         "$KV.scheduler-m1.>",
         "$JS.API.STREAM.INFO.KV_scheduler-m1",
         "$JS.API.STREAM.MSG.GET.KV_scheduler-m1",
@@ -764,7 +844,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {"allow": publish},
+        "pub": {"allow": publish, "deny": list(nats_grant.MEMBER_DENY)},
         "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,

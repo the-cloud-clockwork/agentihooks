@@ -45,7 +45,6 @@ def test_a_redis_timeout_in_the_conversations_step_lets_the_pass_finish(store, m
     finally:
         timing.ON_FAILURE.reset(token)
     assert runtime.reads == 1
-    assert [task for _, _, task in runtime.spawned] == ["t1"]
     assert observed == ["sw"]
     assert len(models) == 1
     assert closed == ["sw"]

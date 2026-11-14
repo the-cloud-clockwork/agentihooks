@@ -32,13 +32,15 @@ def written_at(slug, task_id):
         return 0
 
 
-def last_signal(redis, slug, agent):
+def last_signal(redis: Any, slug: str, agent: Any) -> int:
+    """Latest progress signal of an agent: its outcome, progress file, start, launch or the end of its last wait."""
     from scripts.swarm import idle
 
     return max(
         Progress(redis, slug).read(agent.name).outcome_at,
         written_at(slug, agent.task),
         agent.started_at,
+        agent.launched_at,
         idle.waited(redis, slug, agent.name),
     )
 
