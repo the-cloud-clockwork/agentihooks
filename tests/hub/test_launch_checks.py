@@ -17,7 +17,7 @@ from tests.hub.test_admission import LAUNCH, SLUG, ask
 from tests.hub.test_admission import rig as rig
 from tests.hub.test_claim_lives import started
 
-SKEWED = -600_000
+SKEWED = 1
 
 
 @pytest.fixture(autouse=True)
@@ -73,11 +73,11 @@ def test_a_skewed_slow_spawn_is_timed_on_the_hub_clock_from_its_started_record(r
     spawned(bus, admitted)
     checks = checker(rig, bus)
 
-    assert checks.check(SLUG, 200_000) == []
-    assert checks.check(SLUG, 259_999) == []
+    assert checks.check(SLUG, 800_000) == []
+    assert checks.check(SLUG, 859_999) == []
     assert stops(bus) == []
 
-    [action] = checks.check(SLUG, 260_000)
+    [action] = checks.check(SLUG, 860_000)
 
     assert action.startswith(f"stop sent for {admitted['name']} because its launch check failed on hive_join")
     [stop] = stops(bus)
@@ -88,7 +88,7 @@ def test_a_skewed_slow_spawn_is_timed_on_the_hub_clock_from_its_started_record(r
     )
     report = launch_check.report(rig.store, SLUG, "t1")
     assert (report["state"], report["elapsed_ms"]) == ("failed", 60_000)
-    assert launch_check.pending(rig.store, SLUG)[admitted["name"]][STOPPING] == 260_000
+    assert launch_check.pending(rig.store, SLUG)[admitted["name"]][STOPPING] == 860_000
 
 
 @pytest.mark.feature("events-launch-check-timing")
