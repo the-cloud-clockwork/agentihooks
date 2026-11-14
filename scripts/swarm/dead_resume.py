@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import context_recycle
 from scripts.swarm import outage
@@ -125,7 +125,8 @@ def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
 def resumable(store: RedisStore, slug: str, agent: AgentRecord, ledger: Any) -> bool:
     """Whether a dead agent may reopen its own conversation: no handoff or compact limit sends its task to a fresh
     agent, and it still holds its record, seat, task row and claim."""
-    return not _reason(store, slug, agent) and bool(cast(Any, _owns)(store, slug, agent, ledger))
+    owns: Any = _owns
+    return not _reason(store, slug, agent) and bool(owns(store, slug, agent, ledger))
 
 
 FRESH_NOTICE = "Starting a fresh agent after {name} ended because {reason}."

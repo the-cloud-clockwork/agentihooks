@@ -62,7 +62,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
         row.update(args[2])
 
     ledger.update_task = update
-    ledger.notify = lambda slug, text: ledger.notices.append(text)
+    ledger.notify = lambda slug, text: ledger.notices.append(text if slug == "rig" else f"{slug}: {text}")
     returned = []
     life = lifecycle.Lifecycle(bus, store, ledger, release=lambda *args: returned.append(args))
     started = Envelope(
