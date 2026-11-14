@@ -28,6 +28,7 @@ REASON = HELD + "{prompt} with operator items waiting for {minutes} minutes"
 RESUMED = "the master left the prompt"
 RECYCLED = "the swarm recycled the master after fifteen minutes on the prompt"
 LOGIN_LIMITED = "showed a Claude login that reached its time limit"
+LOGIN_RECYCLE_KEY = "master-login-recycle"
 LOGIN_RECYCLED = "the swarm recycled the master on a Claude login limit"
 LOGIN_RECOVERY = """## Intent
 Continue as the master of {slug}; {name} {limited} and the swarm recycled it so the relaunch takes another stored login.
@@ -100,6 +101,11 @@ def _clear(store, slug, master, key):
         master_retire.forget(store, slug, master.name, RESUMED)
 
 
+def _recycled_lately(store: Any, slug: str, now_ms: int) -> bool:
+    last = store.redis.get(store.key(slug, LOGIN_RECYCLE_KEY))
+    return last is not None and now_ms - int(last) < RESET_MINUTES * MINUTE_MS
+
+
 def _prompted(store: Any, slug: str, master: AgentRecord, now_ms: int) -> bool:
     last = idle.last_prompt(store.redis, slug, master.name)
     return last is not None and now_ms - last < wake.quiet_ms(os.environ)
@@ -123,6 +129,7 @@ def _recycle_login(slug: str, store: Any, ledger: Any, master: AgentRecord, key:
     text = LOGIN_RECOVERY.format(slug=slug, name=master.name, limited=LOGIN_LIMITED)
     master_stall.recycle(slug, store, ledger, master, text, now_ms, master_stall.STALLED)
     store.redis.delete(key)
+    store.redis.set(store.key(slug, LOGIN_RECYCLE_KEY), now_ms, ex=DAY_S)
     return [f"recycled master {master.name} in its seat: {LOGIN_LIMITED}"]
 
 
@@ -132,7 +139,7 @@ def run(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: i
         return []
     key = store.key(slug, "master-prompt-stall", master.name)
     live = master.name in runtime.live_names()
-    if live and login_limited(slug, store, runtime, master, now_ms):
+    if live and not _recycled_lately(store, slug, now_ms) and login_limited(slug, store, runtime, master, now_ms):
         return _recycle_login(slug, store, ledger, master, key, now_ms)
     prompt = _prompt(runtime, master) if live and _operator_waiting(store, slug, master) else ""
     if not prompt:

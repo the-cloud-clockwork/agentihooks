@@ -3144,7 +3144,8 @@
         "tests/swarm/test_master_prompt_stall.py::test_a_dead_master_pane_on_a_login_limit_is_left_to_master_down",
         "tests/test_master_claude_login.py::test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_check",
         "tests/test_master_claude_login.py::test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works",
-        "tests/swarm/test_master_prompt_stall.py::test_a_master_on_a_login_limit_holds_while_the_operator_is_at_its_pane"
+        "tests/swarm/test_master_prompt_stall.py::test_a_master_on_a_login_limit_holds_while_the_operator_is_at_its_pane",
+        "tests/swarm/test_master_prompt_stall.py::test_a_relaunched_master_on_a_login_limit_waits_out_the_recycle_window"
       ]
     },
     {

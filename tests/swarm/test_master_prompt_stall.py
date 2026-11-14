@@ -371,3 +371,20 @@ def test_a_master_on_a_login_limit_holds_while_the_operator_is_at_its_pane(store
     ]
     [row] = [r for r in rows() if r["reason"] == master_prompt_stall.LOGIN_LIMITED]
     assert (row["gate"], row["tool"], row["agent"]) == ("reset", "recycle", agent.name)
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_a_relaunched_master_on_a_login_limit_waits_out_the_recycle_window(store: RedisStore) -> None:
+    agent, runtime = master(store, INTERRUPTED)
+    runtime.tails[agent.pane_id] = LOGIN_LIMIT
+    assert run(store, runtime, START) == [
+        f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
+    successor, _ = master(store, INTERRUPTED)
+    runtime.live.add(successor.name)
+    runtime.panes[successor.name] = INTERRUPTED
+    window = master_prompt_stall.RESET_MINUTES * MINUTE
+    assert run(store, runtime, START + window - 1) == []
+    assert run(store, runtime, START + window) == [
+        f"recycled master {successor.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"
+    ]
