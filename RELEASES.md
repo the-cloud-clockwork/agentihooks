@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.870 · 2026-11-14
+
+### 2026-11-13 · a4fd1fdf2d4b · #11120 · @agenticore-app
+
+**Start lane spokes on the root hive outside a distributed deployment**
+
+`scripts.hive.lanes.serve` previously skipped starting the `lane-spokes` thread whenever `workstation.runs_engine` was true, which silently included the workstation root hive in non distributed deployments, leaving it with no eng, ci, or plan spoke and no presence beat, so pinned workstation offers had no taker. This change starts lane spokes on every hive with a NATS bus instead, keeping the memory bus refusal, and moves `fill_operator_env` before `lanes.serve` in `hive run` so operator env bus settings reach the spokes. A draining hive still polls no spoke but now beats presence on every events swarm, fixing hive loss detection.
+
 ## v2.17.869 · 2026-11-13
 
 ### 2026-11-13 · 0dc82496228c · #11108 · @agenticore-app
