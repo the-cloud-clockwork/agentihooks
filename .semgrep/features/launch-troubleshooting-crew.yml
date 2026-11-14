@@ -1,0 +1,20 @@
+rules:
+  - id: feature-launch-troubleshooting-crew
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-14, the troubleshooting crew stops all other work without deleting anything: it moves the
+      focus onto the crew and restores the earlier focus afterwards. A crew command never deletes, removes, closes,
+      bins, stops, retires or lifts anything on the ledger or the swarm.
+    patterns:
+      - pattern-either:
+          - pattern: '[..., $VERB, ...]'
+          - pattern: swarm($SLUG, $VERB, ...)
+          - pattern: ledger($SLUG, $WHO, $VERB, ...)
+      - metavariable-regex:
+          metavariable: $VERB
+          regex: ^["'](delete|remove|close|bin|purge|stop|shutdown|retire|lift|--lift)["']$
+    paths:
+      include:
+        - /profiles/package/skills/launch-troubleshooting-crew/scripts/
+        - '*.test.py'
