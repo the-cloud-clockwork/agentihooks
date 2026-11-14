@@ -13,10 +13,13 @@ problem statement, one hypothesis per scout and your judgement of the scouts' pr
 python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/launch-troubleshooting-crew/scripts/crew.py STAGE SLUG [options]
 ```
 
+A Codex master runs the same script under `"${CODEX_HOME:-$HOME/.codex}"/skills/`.
+
 Every stage takes `--dry-run`, which prints each command and writes nothing. Overrides: `--scouts N`,
 `--fixers N`, `--critics N`, `--scouts-model M`, `--scouts-effort E` (fixers and critics likewise) and
 `--no-harden`. Defaults are the operator's order: scouts 5 opus max, fixers 5 opus xhigh, critics 3 fable
-xhigh, hardening on. Pass the operator's words with `--quote` when he asked for the crew; otherwise the
+xhigh, hardening on. Later stages keep the layout saved at launch; flags given on a later call override it
+for that call. Pass the operator's words with `--quote` when he asked for the crew; otherwise the
 script quotes his standing order for this skill.
 
 ## When
@@ -35,7 +38,8 @@ script quotes his standing order for this skill.
 2. **Scout.** Run the same line with `scout` instead of `plan`. It saves the earlier focus and eng lane
    settings, sets the eng lane to the scout model and effort, adds one eng lane troubleshoot task per scout
    (an engineer in scouting mode: no code), focuses only the crew with focus only, which drops every other
-   focus without deleting anything, and records the order verbatim as a canon seat note. Then set the
+   focus without deleting anything, and records the order verbatim as a canon seat note. While any crew task is not done, the focus holds every other open task in every
+   lane back from a claim. Then set the
    printed `cron` with CronCreate (recurring, every thirty minutes, the printed prompt verbatim). Done when
    the scout tasks are focused and the cron is set.
 
@@ -43,7 +47,8 @@ script quotes his standing order for this skill.
    confirms it; a hypothesis is never a cause. While causes remain unproven, run `scout` again with new hypotheses: it adds
    scouts to the running crew and keeps the focus and lane saved at the first launch. Keep scouting until
    every cause is proven. Done when every
-   scout task is done and you can state each proven cause in one sentence.
+   scout task is done and you can state each proven cause in one sentence; run the fix stage in the same
+   turn, so no gap opens in which other work claims seats.
 
 4. **Fix.** Run `crew.py fix SLUG --cause "<proven cause>" ...`. It refuses while any scout task is open,
    then sets the eng lane to the fixer model and effort, adds the fixer tasks with every cause and focuses

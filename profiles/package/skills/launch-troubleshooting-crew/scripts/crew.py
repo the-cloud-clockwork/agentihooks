@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, astuple, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +42,7 @@ HARDENING = ("feature map tests", "Semgrep rules", "unit tests", "smoke tests", 
 CRON = "*/30 * * * *"
 EFFORT_RANK = ("low", "medium", "high", "xhigh", "max")
 STATE_NAME = "troubleshooting-crew.json"
+ROLES = ("scouts", "fixers", "critics")
 
 Runner = Callable[[list[str]], str]
 
@@ -78,6 +79,7 @@ class State:
     fixer_tasks: list[str] = field(default_factory=list)
     harden_task: str = ""
     causes: list[str] = field(default_factory=list)
+    launched: bool = False
 
 
 def crew_id(now: float) -> str:
@@ -142,7 +144,9 @@ def scout_task(slug: str, who: str, task: str, problem: str, hypothesis: str) ->
         "task",
         "add",
         task,
-        f"Troubleshooting crew scout: {hypothesis}"[:200],
+        f"Troubleshooting crew {task}: {hypothesis}"[:200],
+        "--not-duplicate",
+        "one scout of the troubleshooting crew, each with its own hypothesis",
         "--lane",
         "eng",
         "--kind",
@@ -173,7 +177,9 @@ def fixer_task(slug: str, who: str, task: str, causes: Sequence[str], peers: Seq
         "task",
         "add",
         task,
-        "Troubleshooting crew fixer",
+        f"Troubleshooting crew {task}",
+        "--not-duplicate",
+        "one fixer of the troubleshooting crew working with its peers",
         "--lane",
         "eng",
         "--kind",
@@ -188,7 +194,7 @@ def fixer_task(slug: str, who: str, task: str, causes: Sequence[str], peers: Seq
 def harden_task(slug: str, who: str, task: str, causes: Sequence[str]) -> list[str]:
     """Add the hardening task that locks the fixed behaviour."""
     description = (
-        "Lock the fixed behaviour once the old fallback is removed and the tick and controller work: "
+        "Lock the fixed behaviour once the fixes are merged and proven live: "
         + ", ".join(HARDENING)
         + ". Causes fixed: "
         + "; ".join(causes)
@@ -199,7 +205,9 @@ def harden_task(slug: str, who: str, task: str, causes: Sequence[str]) -> list[s
         "task",
         "add",
         task,
-        "Troubleshooting crew hardening",
+        f"Troubleshooting crew {task}",
+        "--not-duplicate",
+        "the hardening task of one troubleshooting crew",
         "--lane",
         "eng",
         "--kind",
@@ -211,18 +219,25 @@ def harden_task(slug: str, who: str, task: str, causes: Sequence[str]) -> list[s
     )
 
 
-def canon_note(slug: str) -> list[str]:
-    """Record the crew order verbatim as a canon seat note."""
+def layout(crew: Crew) -> str:
+    """This run's crew layout in plain words."""
+    stages = (("scouts", crew.scouts), ("fixers", crew.fixers), ("critics", crew.critics))
+    return ", ".join(f"{role} {stage.count} at {stage.model} {stage.effort}" for role, stage in stages)
+
+
+def canon_note(slug: str, crew: Crew) -> list[str]:
+    """Record the crew order verbatim and this run's layout as a canon seat note."""
     text = (
-        f'Troubleshooting crew order of the operator, verbatim: "{ORDER}" Follow it until the crew ends because the '
-        "operator made this crew the only priority while it runs"
+        f'Troubleshooting crew order of the operator, verbatim: "{ORDER}" This run\'s layout: {layout(crew)}. '
+        "Follow it until the crew ends because the operator made this crew the only priority while it runs"
     )
     return swarm(slug, "learned", text, "--maturity", "canon")
 
 
-def cron(slug: str) -> dict[str, Any]:
-    """The session cron the master sets: the verbatim intent every thirty minutes."""
-    return {"cron": CRON, "recurring": True, "prompt": f"Troubleshooting crew on {slug}, the operator's order: {ORDER}"}
+def cron(slug: str, crew: Crew) -> dict[str, Any]:
+    """The session cron the master sets: the verbatim intent every thirty minutes and this run's layout."""
+    prompt = f"Troubleshooting crew on {slug}, the operator's order: {ORDER} This run's layout: {layout(crew)}."
+    return {"cron": CRON, "recurring": True, "prompt": prompt}
 
 
 def critic_agents(crew: Crew, state: State) -> list[dict[str, Any]]:
@@ -240,16 +255,15 @@ def critic_agents(crew: Crew, state: State) -> list[dict[str, Any]]:
 
 
 def restore_commands(slug: str, state: State, quote: str) -> list[list[str]]:
-    """Unfocus the crew, focus the earlier targets in their order and put the eng lane back."""
+    """Put the eng lane back, unfocus the crew and focus the earlier targets in their order."""
+    keys = {"agent": "eng-agent", "model": "eng-model", "effort": "eng-effort", "effort_max": "effort-max"}
+    settings = [f"{keys[key]}={value}" for key, value in state.earlier_lane.items() if key in keys]
+    commands = [swarm(slug, "set", *settings)] if settings else []
     crew_tasks = [*state.scout_tasks, *state.fixer_tasks, *([state.harden_task] if state.harden_task else [])]
     reason = "troubleshooting crew ended"
-    commands = [swarm(slug, "unfreeze", f"tasks/{t}", "--reason", reason, "--quote", quote) for t in crew_tasks]
+    commands += [swarm(slug, "unfreeze", f"tasks/{t}", "--reason", reason, "--quote", quote) for t in crew_tasks]
     for target in state.earlier_focus:
         commands.append(swarm(slug, "focus", target, "--bottom", "--reason", reason, "--quote", quote))
-    lane = state.earlier_lane
-    if lane:
-        settings = [f"eng-model={lane['model']}", f"eng-effort={lane['effort']}", f"effort-max={lane['effort_max']}"]
-        commands.append(swarm(slug, "set", *settings))
     return commands
 
 
@@ -265,7 +279,7 @@ def plan(slug: str, crew: Crew, problem: str, hypotheses: Sequence[str], now: fl
     ]
     if crew.harden:
         stages.append({"stage": "harden", "task": f"{cid}-harden", "locks": list(HARDENING)})
-    return {"slug": slug, "crew": cid, "problem": problem, "stages": stages, "cron": cron(slug)}
+    return {"slug": slug, "crew": cid, "problem": problem, "stages": stages, "cron": cron(slug, crew)}
 
 
 def state_path(slug: str) -> Path:
@@ -302,8 +316,10 @@ def earlier(slug: str, runner: Runner) -> tuple[list[str], dict[str, str]]:
     rows = json.loads(runner(["agentihooks", "ledger", "--slug", slug, "get", "freezes"]) or "[]")
     focus = [row["target"] for row in rows if row.get("verb") == "focus"]
     config = json.loads(runner(swarm(slug, "status", "--json")))["config"]
-    eng = config["lanes"]["eng"]
-    return focus, {"model": eng["model"], "effort": eng["effort"], "effort_max": config["effort_max"]}
+    eng = (config.get("lanes") or {}).get("eng") or {}
+    lane = {"agent": eng.get("agent"), "model": eng.get("model"), "effort": eng.get("effort")}
+    lane["effort_max"] = config.get("effort_max")
+    return focus, {key: value for key, value in lane.items() if value}
 
 
 def task_done(slug: str, task: str, runner: Runner) -> bool:
@@ -312,12 +328,16 @@ def task_done(slug: str, task: str, runner: Runner) -> bool:
     return bool(row.get("done")) or row.get("state") == "done"
 
 
-def execute(commands: Sequence[list[str]], runner: Runner, dry: bool) -> None:
-    """Print each command; run it unless this is a dry run."""
+def execute(
+    commands: Sequence[list[str]], runner: Runner, dry: bool, landed: Callable[[list[str]], None] | None = None
+) -> None:
+    """Print each command; unless this is a dry run, run it and report it to ``landed`` once it succeeded."""
     for command in commands:
         print(json.dumps(command))
         if not dry:
             runner(command)
+            if landed:
+                landed(command)
 
 
 def launched(args: argparse.Namespace, crew: Crew, runner: Runner) -> State | None:
@@ -331,27 +351,40 @@ def launched(args: argparse.Namespace, crew: Crew, runner: Runner) -> State | No
 
 
 def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
-    """Launch the crew, or add scouts to the running one, keeping the focus and lane saved at its first launch."""
+    """Launch the crew, finish a launch that failed partway, or add scouts to the running crew.
+
+    The earlier focus and lane are saved before any write, and each scout is recorded only once its add landed.
+    """
     state = launched(args, crew, runner) or State(crew_id(args.now), args.problem, asdict(crew))
-    first = not state.scout_tasks
-    scouts = scout_ids(state.crew_id, crew.scouts.count, len(state.scout_tasks))
-    hypotheses = hypotheses_for(len(scouts), args.hypothesis)
+    first = not state.launched
+    scouts = scout_ids(state.crew_id, crew.scouts.count, 0 if first else len(state.scout_tasks))
+    hypotheses = dict(zip(scouts, hypotheses_for(len(scouts), args.hypothesis)))
     commands = lane_commands(args.slug, crew.scouts)
-    commands += [scout_task(args.slug, args.who, t, args.problem, h) for t, h in zip(scouts, hypotheses)]
+    commands += [
+        scout_task(args.slug, args.who, t, args.problem, h) for t, h in hypotheses.items() if t not in state.scout_tasks
+    ]
     commands += focus_commands(args.slug, scouts, args.quote, only=first)
     if first:
-        commands.append(canon_note(args.slug))
-    state.scout_tasks = [*state.scout_tasks, *scouts]
+        commands.append(canon_note(args.slug, crew))
+
+    def landed(command: list[str]) -> None:
+        if command[6:8] == ["task", "add"]:
+            state.scout_tasks = [*state.scout_tasks, command[8]]
+            save_state(args.slug, state)
+
     if not args.dry_run:
         save_state(args.slug, state)
-    execute(commands, runner, args.dry_run)
+    execute(commands, runner, args.dry_run, landed)
+    if not args.dry_run:
+        state.launched = True
+        save_state(args.slug, state)
     restore = f"python3 {Path(__file__).resolve()} restore {args.slug}"
     focus = state.earlier_focus
     return {
         "crew": state.crew_id,
         "scouts": scouts,
         "earlier_focus": focus,
-        "cron": cron(args.slug),
+        "cron": cron(args.slug, crew),
         "restore": restore,
     }
 
@@ -376,8 +409,10 @@ def stage_fix(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str,
 
 
 def stage_critics(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
-    """Print the critic sub agents for the master to launch."""
+    """Print the critic sub agents for the master to launch, once the fixers exist."""
     state = load_state(args.slug)
+    if not state.fixer_tasks:
+        sys.exit("no fixer tasks yet: run the fix stage once every cause is proven")
     return {"crew": state.crew_id, "critics": critic_agents(crew, state)}
 
 
@@ -386,6 +421,8 @@ def stage_harden(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[s
     state = load_state(args.slug)
     if not state.crew.get("harden", True):
         sys.exit("this crew was launched with --no-harden")
+    if not state.fixer_tasks:
+        sys.exit("no fixer tasks yet: harden after the fixes")
     task = f"{state.crew_id}-harden"
     commands = [harden_task(args.slug, args.who, task, state.causes)]
     commands += focus_commands(args.slug, [task], args.quote, only=False)
@@ -397,10 +434,13 @@ def stage_harden(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[s
 
 
 def stage_restore(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
-    """Put the earlier focus and eng lane back."""
+    """Put the earlier focus and eng lane back, then set the crew state aside so the next scout starts a new crew."""
     state = load_state(args.slug)
     commands = restore_commands(args.slug, state, args.quote)
     execute(commands, runner, args.dry_run)
+    if not args.dry_run:
+        path = state_path(args.slug)
+        path.rename(path.with_name(f"troubleshooting-crew-{state.crew_id}.json"))
     return {"crew": state.crew_id, "restored_focus": state.earlier_focus, "restored_lane": state.earlier_lane}
 
 
@@ -431,24 +471,24 @@ def parser() -> argparse.ArgumentParser:
     parse.add_argument("--as", dest="who", default=os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
     parse.add_argument("--dry-run", action="store_true")
     parse.add_argument("--no-harden", action="store_true")
-    defaults = Crew()
-    for role in ("scouts", "fixers", "critics"):
-        stage: Stage = getattr(defaults, role)
-        parse.add_argument(f"--{role}", type=int, default=stage.count)
-        parse.add_argument(f"--{role}-model", default=stage.model)
-        parse.add_argument(f"--{role}-effort", choices=EFFORT_RANK, default=stage.effort)
+    for role in ROLES:
+        parse.add_argument(f"--{role}", type=int)
+        parse.add_argument(f"--{role}-model")
+        parse.add_argument(f"--{role}-effort", choices=EFFORT_RANK)
     return parse
 
 
-def crew_from(args: argparse.Namespace) -> Crew:
-    """The crew layout the call asked for."""
-    stages = {
-        role: Stage(getattr(args, role), getattr(args, f"{role}_model"), getattr(args, f"{role}_effort"))
-        for role in ("scouts", "fixers", "critics")
-    }
+def crew_from(args: argparse.Namespace, saved: dict[str, Any] | None = None) -> Crew:
+    """The crew layout: the running crew's saved layout or the operator's default, with the call's flags on top."""
+    base = Crew() if saved is None else Crew(**{r: Stage(**saved[r]) for r in ROLES}, harden=saved["harden"])
+    stages = {}
+    for role in ROLES:
+        stage: Stage = getattr(base, role)
+        given = (getattr(args, role), getattr(args, f"{role}_model"), getattr(args, f"{role}_effort"))
+        stages[role] = Stage(*(new if new is not None else old for new, old in zip(given, astuple(stage))))
     if any(stage.count < 1 for stage in stages.values()):
         sys.exit("every crew stage needs at least one agent")
-    return Crew(**stages, harden=not args.no_harden)
+    return Crew(**stages, harden=base.harden and not args.no_harden)
 
 
 def main(argv: Sequence[str] | None = None, runner: Runner = run, now: float | None = None) -> int:
@@ -459,7 +499,9 @@ def main(argv: Sequence[str] | None = None, runner: Runner = run, now: float | N
         sys.exit("state the problem with --problem")
     if args.stage in ("scout", "fix", "harden") and not args.who and not args.dry_run:
         sys.exit("name this session with --as or AGENTIHOOKS_AGENT_NAME")
-    print(json.dumps(STAGES[args.stage](args, crew_from(args), runner), indent=2))
+    path = state_path(args.slug)
+    saved = json.loads(path.read_text())["crew"] if args.stage != "plan" and path.exists() else None
+    print(json.dumps(STAGES[args.stage](args, crew_from(args, saved), runner), indent=2))
     return 0
 
 

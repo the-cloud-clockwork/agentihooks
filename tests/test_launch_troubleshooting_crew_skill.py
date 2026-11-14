@@ -92,7 +92,8 @@ def test_plan_is_the_operators_default_layout_and_runs_nothing(crew: ModuleType,
     assert plan["cron"] == {
         "cron": "*/30 * * * *",
         "recurring": True,
-        "prompt": f"Troubleshooting crew on demo, the operator's order: {crew.ORDER}",
+        "prompt": f"Troubleshooting crew on demo, the operator's order: {crew.ORDER} This run's layout: scouts 5 at "
+        "opus max, fixers 5 at opus xhigh, critics 3 at fable xhigh.",
     }
 
 
@@ -159,6 +160,48 @@ def test_a_second_scout_adds_scouts_and_keeps_the_earlier_focus_and_lane(
     assert saved["earlier_lane"] == {"model": "sonnet", "effort": "high", "effort_max": "xhigh"}
 
 
+@pytest.mark.feature("launch-troubleshooting-crew")
+def test_a_rerun_after_a_failed_launch_adds_only_the_missing_scouts(
+    crew: ModuleType, capsys: pytest.CaptureFixture
+) -> None:
+    broken = Ledger()
+    real = broken.__call__
+
+    def refuse_third(command: list[str]) -> str:
+        if f"{CID}-scout-3" in command and "add" in command:
+            raise SystemExit("server refused")
+        return real(command)
+
+    with pytest.raises(SystemExit, match="server refused"):
+        crew.main(["scout", "demo", "--problem", "p"], runner=refuse_third, now=NOW)
+    capsys.readouterr()
+    saved = json.loads(crew.state_path("demo").read_text())
+    assert (saved["scout_tasks"], saved["launched"]) == ([f"{CID}-scout-1", f"{CID}-scout-2"], False)
+    ledger = Ledger()
+    run(crew, ledger, "scout", "demo", "--problem", "p", capsys=capsys)
+    writes = ledger.writes()
+    assert [c[8] for c in writes if "add" in c] == [f"{CID}-scout-{n}" for n in (3, 4, 5)]
+    focus = [c for c in writes if c[3] == "focus"]
+    assert [c[4] for c in focus] == [f"tasks/{CID}-scout-{n}" for n in range(1, 6)] and focus[0][5] == "--only"
+    assert writes[-1][3] == "learned"
+    saved = json.loads(crew.state_path("demo").read_text())
+    assert saved["scout_tasks"] == [f"{CID}-scout-{n}" for n in range(1, 6)] and saved["launched"] is True
+    assert saved["earlier_focus"] == ["phases/p1", "tasks/t2"]
+
+
+@pytest.mark.feature("launch-troubleshooting-crew")
+def test_a_scout_after_a_restore_starts_a_new_crew(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
+    run(crew, Ledger(), "scout", "demo", "--problem", "p", capsys=capsys)
+    run(crew, Ledger(), "restore", "demo", capsys=capsys)
+    assert not crew.state_path("demo").exists()
+    assert crew.state_path("demo").with_name(f"troubleshooting-crew-{CID}.json").exists()
+    ledger = Ledger()
+    result = run(crew, ledger, "scout", "demo", "--problem", "q", capsys=capsys)
+    assert any(c[-2:] == ["get", "freezes"] for c in ledger.calls)
+    assert result["scouts"][0] == f"{CID}-scout-1"
+    assert [c for c in ledger.writes() if c[3] == "focus"][0][5] == "--only"
+
+
 def test_scout_at_an_effort_below_max_keeps_the_effort_ceiling(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
     ledger = Ledger()
     run(crew, ledger, "scout", "demo", "--problem", "p", "--scouts-effort", "xhigh", capsys=capsys)
@@ -206,15 +249,18 @@ def test_fixers_are_added_for_the_proven_causes_and_focused(crew: ModuleType, ca
 
 @pytest.mark.feature("launch-troubleshooting-crew")
 def test_restore_brings_back_the_earlier_focus_and_lane(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
-    run(crew, Ledger(), "scout", "demo", "--problem", "p", capsys=capsys)
+    run(crew, Ledger(), "scout", "demo", "--problem", "p", "--fixers", "1", capsys=capsys)
+    done = Ledger(done={f"{CID}-scout-{n}" for n in range(1, 6)})
+    run(crew, done, "fix", "demo", "--cause", "c", capsys=capsys)
     run(crew, Ledger(), "harden", "demo", capsys=capsys)
     ledger = Ledger()
     run(crew, ledger, "restore", "demo", "--quote", "crew is over", capsys=capsys)
     writes = ledger.writes()
     unfrozen = [c[4] for c in writes if c[3] == "unfreeze"]
-    assert unfrozen == [f"tasks/{CID}-scout-{n}" for n in range(1, 6)] + [f"tasks/{CID}-harden"]
+    scouts = [f"tasks/{CID}-scout-{n}" for n in range(1, 6)]
+    assert unfrozen == [*scouts, f"tasks/{CID}-fix-1", f"tasks/{CID}-harden"]
     assert [c[4] for c in writes if c[3] == "focus"] == ["phases/p1", "tasks/t2"]
-    assert writes[-1] == [
+    assert writes[0] == [
         "agentihooks",
         "swarm",
         "demo",
@@ -236,3 +282,22 @@ def test_harden_refuses_a_crew_launched_without_hardening(crew: ModuleType, caps
     with pytest.raises(SystemExit, match="--no-harden"):
         crew.main(["harden", "demo"], runner=ledger, now=NOW)
     assert ledger.calls == []
+
+
+@pytest.mark.feature("launch-troubleshooting-crew")
+def test_later_stages_keep_the_launch_overrides(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
+    run(crew, Ledger(), "scout", "demo", "--problem", "p", "--fixers", "2", "--critics", "1", capsys=capsys)
+    with pytest.raises(SystemExit, match="no fixer tasks yet"):
+        crew.main(["critics", "demo"], runner=Ledger(), now=NOW)
+    with pytest.raises(SystemExit, match="no fixer tasks yet"):
+        crew.main(["harden", "demo"], runner=Ledger(), now=NOW)
+    done = Ledger(done={f"{CID}-scout-{n}" for n in range(1, 6)})
+    fixed = run(crew, done, "fix", "demo", "--cause", "c", capsys=capsys)
+    assert fixed["fixers"] == [f"{CID}-fix-1", f"{CID}-fix-2"]
+    titles = [c[9] for c in done.writes() if "add" in c]
+    assert titles == [f"Troubleshooting crew {CID}-fix-1", f"Troubleshooting crew {CID}-fix-2"]
+    assert all("--not-duplicate" in c for c in done.writes() if "add" in c)
+    critics = run(crew, Ledger(), "critics", "demo", capsys=capsys)["critics"]
+    assert [c["name"] for c in critics] == ["critic-1"]
+    widened = run(crew, Ledger(), "critics", "demo", "--critics", "2", "--critics-model", "opus", capsys=capsys)
+    assert [(c["name"], c["model"]) for c in widened["critics"]] == [("critic-1", "opus"), ("critic-2", "opus")]
