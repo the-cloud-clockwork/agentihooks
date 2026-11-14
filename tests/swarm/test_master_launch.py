@@ -213,6 +213,7 @@ def test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it(
     [record] = masters(store)
     assert (record.name, record.pane_id, record.state) == (name, "w2:m9", "working")
     assert (record.execution_id, record.started_at) == (started.execution_id, 5)
+    assert record.launched_at > ENDED
     assert store.seats.occupant("master@sw").occupant == name
     assert cli._me(store, Namespace(slug="sw", name=name)).name == name
 

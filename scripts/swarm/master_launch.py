@@ -133,7 +133,7 @@ def _resume(store, slug, runtime, at, previous):
         profile=placed.profile or agent.profile,
         model=placed.model or agent.model,
         effort=placed.effort or agent.effort,
-        started_at=at,
+        launched_at=at,
         idle_ticks=0,
     )
     store.put_agent(slug, record)
