@@ -416,34 +416,6 @@ def test_tick_waits_when_admission_keeps_conflicting(monkeypatch):
     assert ledger.rows["t01"]["state"] == "open"
 
 
-def test_a_passed_launch_check_activates_the_task_reservation(monkeypatch):
-    from scripts.swarm import launch_check
-    from scripts.swarm import tick as tick_module
-    from scripts.swarm.store import AgentRecord
-
-    data, store, gate, ledger, runtime = tick_fixture()
-    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    agent = next(a for a in store.agents("sw") if a.task == "t01")
-    for name, value in {
-        "pending": lambda s, slug: {agent.name: {"relaunch": False}},
-        "misses": lambda *args: {},
-        "joined_at": lambda a, doc: 5_000,
-        "session_started_at": lambda a: 1_000,
-        "record": lambda *args: None,
-        "forget": lambda *args: None,
-        "clear_relaunched": lambda *args: None,
-    }.items():
-        monkeypatch.setattr(launch_check, name, value)
-    actions = tick_module._launch_checks("sw", store, ledger, runtime, ledger.rows, {}, data["clock_ms"] + 1)
-    assert actions == [f"{agent.name} passed its launch check in 4 seconds"]
-    assert sorted(gate.pending("sw", data["clock_ms"] + 1)) == ["t02", "t03"]
-    assert gate.pending_execution_admission_total("sw")["activated"] == 1
-    other = AgentRecord("engineer@x-1", "eng", "t09")
-    tick_module._settle_admission("sw", runtime, other)
-    tick_module._settle_admission("sw", FakeRuntime(), agent)
-    assert gate.pending_execution_admission_total("sw")["activated"] == 1
-
-
 def test_a_runtime_without_admission_spawns_as_before():
     data = inputs()
     store = fresh_store()

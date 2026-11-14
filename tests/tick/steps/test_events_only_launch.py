@@ -2,7 +2,7 @@
 
 import pytest
 
-from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig
+from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import registry
 
 pytestmark = pytest.mark.unit
@@ -28,4 +28,21 @@ def test_a_stored_config_without_an_engine_field_reads_as_events() -> None:
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     store.redis.hdel(store.key("sw", "config"), "engine")
+    assert store.config("sw").engine == EVENTS_ENGINE
+
+
+@pytest.mark.feature("swarm-events-only-launch")
+def test_a_config_naming_the_legacy_engine_is_refused() -> None:
+    with pytest.raises(SwarmError) as refused:
+        SwarmConfig("sw", "/repo", 1, 1, engine="legacy")
+    assert str(refused.value) == "engine must be events"
+
+
+@pytest.mark.feature("swarm-events-only-launch")
+def test_a_stored_legacy_engine_reads_as_events() -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    store.redis.hset(store.key("sw", "config"), "engine", "legacy")
     assert store.config("sw").engine == EVENTS_ENGINE

@@ -8,9 +8,6 @@ def test_an_events_engine_swarm_leaves_task_spawns_to_hive_pulls(store):  # noqa
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == []
     assert [row["state"] for row in ledger.rows.values()] == ["open", "open"]
-    store.update("sw", engine="legacy")
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
 
 
 def test_an_events_engine_swarm_still_reaps_a_worker_the_legacy_path_launched(store):  # noqa: F811

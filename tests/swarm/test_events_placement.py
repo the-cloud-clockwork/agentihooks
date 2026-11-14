@@ -296,11 +296,6 @@ def test_under_events_the_tick_launches_no_workstation_task(store: RedisStore) -
     assert ledger.rows["t2"]["state"] == "open"
 
 
-def test_only_engines_other_than_events_have_the_tick_launch() -> None:
-    assert readiness.tick_launches("legacy")
-    assert not readiness.tick_launches(EVENTS_ENGINE)
-
-
 @pytest.mark.feature("workstation-events-route")
 def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

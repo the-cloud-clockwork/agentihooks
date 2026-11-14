@@ -91,7 +91,7 @@ def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **e
     } | extra
 
 
-def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
+def _tick(log: list[Any]) -> SimpleNamespace:
     def skip_refused(function: Any, *args: Any) -> list[str]:
         log.append((function, *args))
         return [f"ran {function if isinstance(function, str) else function.__name__}"]
@@ -112,7 +112,6 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         _current_owner="owner",
         ready_in_order="ready in order",
         claim_view="claim view",
-        readiness=SimpleNamespace(tick_launches=lambda engine_name: log.append(("places", engine_name)) or places),
         preempt=SimpleNamespace(probe=_probe, Seats=_Seats, run="preempt"),
         bottleneck_remedy=bottleneck_remedy,
         panic=panic,
@@ -213,7 +212,7 @@ def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: 
 def test_preempt_waits_for_a_running_tick_engine(
     calm: list[Any], monkeypatch: pytest.MonkeyPatch, state: str, engine_name: str
 ) -> None:
-    found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm, state, engine_name), monkeypatch)
+    found = _run(place.PLACEMENT, _tick(calm), _pass(calm, state, engine_name), monkeypatch)
     assert found == ["ran rank_writes", "ran bottleneck remedy"]
     assert "preempt" not in [entry[0] for entry in calm if isinstance(entry, tuple)]
 
@@ -224,7 +223,6 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
     found = _run(place.PLACEMENT, _tick(log), _pass(log), monkeypatch)
     assert found == ["ran rank_writes", "ran bottleneck remedy"]
-    assert log[-1] == ("places", "tick")
 
 
 def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,47 +245,3 @@ SPAWN_CLUSTER = (
     "_hold",
     "spawn_holds",
 )
-
-
-@pytest.mark.feature("swarm-tick-spawn")
-@pytest.mark.parametrize("name", SPAWN_CLUSTER)
-def test_tick_reexports_the_moved_spawn_name(name: str) -> None:
-    from scripts.swarm import tick
-
-    moved = getattr(place, name)
-    assert moved.__module__ == "scripts.tick.steps.place"
-    assert getattr(tick, name) is moved
-
-
-@pytest.mark.feature("swarm-tick-spawn")
-def test_the_tick_module_holds_no_spawn_definition() -> None:
-    from pathlib import Path
-
-    from scripts.swarm import tick
-
-    text = Path(str(tick.__file__)).read_text(encoding="utf-8")
-    defined = [
-        name
-        for name in SPAWN_CLUSTER
-        if any(f"\n{kind} {name}{end}" in text for kind in ("def", "class") for end in "(:")
-    ]
-    assert defined == []
-
-
-@pytest.mark.feature("swarm-tick-spawn")
-def test_a_free_seat_comes_from_the_tick_seat_address(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.swarm import tick
-
-    monkeypatch.setattr(tick, "seat_address", lambda slug, label: f"{label}@{slug}")
-    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "") == "eng-2@sw"
-    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "eng-1@sw") == "eng-2@sw"
-    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "eng-7@sw") == "eng-7@sw"
-
-
-@pytest.mark.feature("swarm-tick-spawn")
-def test_a_free_seat_looks_no_further_than_one_seat_past_the_taken_ones(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.swarm import tick
-
-    monkeypatch.setattr(tick, "seat_address", lambda slug, label: "x" if label in ("eng-1", "eng-2") else label)
-    with pytest.raises(StopIteration):
-        place._free_seat("sw", "eng", {"x"}, "")

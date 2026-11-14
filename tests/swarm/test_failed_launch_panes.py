@@ -12,7 +12,7 @@ from scripts.swarm import runtime as runtime_module
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import EXITED_BEFORE_LIFE, SpawnError, tick
+from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 LAUNCH_CHECKED = True
@@ -77,169 +77,6 @@ def _failed_row(store):
     return next(row for row in store.launches("sw") if row["state"] == "failed")
 
 
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_failed_launch_records_its_pane_and_keeps_it_open_for_two_minutes(store):
-    ledger, runtime = _failed_once(store)
-    tick("sw", store, ledger, runtime, now_ms=DUE - 1)
-    assert failed_panes.CLOSE_AFTER_MS == 120_000
-    assert _failed_row(store)["pane_id"] == "w1:p9"
-    assert runtime.panes_closed == [] and runtime.read == []
-    assert failed_panes.held(store, "sw") == {
-        "w1:p9": {"agent": _failed_row(store)["agent"], "task": "t1", "failed_at": FAILED_AT, "reason": ""}
-    }
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_failed_launch_pane_closes_after_two_minutes_with_its_last_lines_kept(store):
-    ledger, runtime = _failed_once(store)
-    actions = tick("sw", store, ledger, runtime, now_ms=DUE)
-    assert runtime.read == [("w1:p9", failed_panes.TAIL_LINES)]
-    assert failed_panes.TAIL_LINES == 20
-    assert runtime.panes_closed == ["w1:p9"]
-    row = _failed_row(store)
-    assert row["pane_lines"] == ["$ agentihooks codex --route default", "Codex account default not found", "", "$"]
-    assert row["error"] == "Codex account default not found"
-    assert runtime.asked == [("w1:p9", row["agent"])]
-    assert failed_panes.held(store, "sw") == {}
-    assert f"closed pane w1:p9 of the failed launch of {row['agent']} for t1" in actions
-    tick("sw", store, ledger, runtime, now_ms=FAILED_AT + 3 * failed_panes.CLOSE_AFTER_MS)
-    assert runtime.panes_closed == ["w1:p9"]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_pane_whose_lines_cannot_be_read_still_closes_and_says_so(store):
-    _, runtime = _failed_once(store)
-    runtime.screens.clear()
-    failed_panes.sweep("sw", store, runtime, DUE)
-    assert runtime.panes_closed == ["w1:p9"]
-    assert _failed_row(store)["pane_lines"] == ["its lines could not be read: pane w1:p9 not found"]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_pane_that_no_longer_shows_the_launch_is_dropped_untouched(store):
-    _, runtime = _failed_once(store)
-    runtime.owned.clear()
-    actions = failed_panes.sweep("sw", store, runtime, DUE)
-    agent = _failed_row(store)["agent"]
-    assert actions == [f"dropped pane w1:p9: herdr no longer shows the failed launch of {agent} there"]
-    assert runtime.panes_closed == [] and runtime.read == [] and failed_panes.held(store, "sw") == {}
-    assert "pane_lines" not in _failed_row(store)
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_pane_herdr_refuses_to_close_stays_held_for_the_next_tick(store):
-    _, runtime = _failed_once(store)
-    runtime.close_error = "server down"
-    agent = _failed_row(store)["agent"]
-    actions = failed_panes.sweep("sw", store, runtime, DUE)
-    assert actions == [f"could not close pane w1:p9 of the failed launch of {agent}, retrying next tick: server down"]
-    assert list(failed_panes.held(store, "sw")) == ["w1:p9"]
-    runtime.close_error = None
-    failed_panes.sweep("sw", store, runtime, DUE + 60_000)
-    assert runtime.panes_closed == ["w1:p9"] and failed_panes.held(store, "sw") == {}
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_pane_herdr_cannot_list_stays_held_unread_for_the_next_tick(store):
-    _, runtime = _failed_once(store)
-    runtime.list_error = "server down"
-    agent = _failed_row(store)["agent"]
-    actions = failed_panes.sweep("sw", store, runtime, DUE)
-    assert actions == [f"could not read pane w1:p9 of the failed launch of {agent}, retrying next tick: server down"]
-    assert list(failed_panes.held(store, "sw")) == ["w1:p9"]
-    assert runtime.read == [] and runtime.panes_closed == [] and "pane_lines" not in _failed_row(store)
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_live_agent_pane_is_never_read_or_closed(store):
-    _, runtime = _failed_once(store)
-    live = AgentRecord("engineer@a1b2c3-0009", "eng", "t2", started_at=FAILED_AT, pane_id="w1:p9", state="working")
-    store.put_agent("sw", live)
-    runtime.live.add(live.name)
-    actions = failed_panes.sweep("sw", store, runtime, DUE)
-    assert runtime.panes_closed == [] and runtime.read == []
-    assert failed_panes.held(store, "sw") == {}
-    assert actions == ["kept pane w1:p9: engineer@a1b2c3-0009 holds it now"]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_failed_launch_whose_process_survived_closes_only_once_it_is_gone(store):
-    _, runtime = _failed_once(store)
-    agent = _failed_row(store)["agent"]
-    runtime.live.add(agent)
-    assert failed_panes.sweep("sw", store, runtime, DUE) == []
-    assert runtime.panes_closed == [] and list(failed_panes.held(store, "sw")) == ["w1:p9"]
-    runtime.live.discard(agent)
-    failed_panes.sweep("sw", store, runtime, DUE + 60_000)
-    assert runtime.panes_closed == ["w1:p9"]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_the_tick_reaps_a_surviving_failed_launch_and_then_closes_its_pane(store):
-    ledger, runtime = _failed_once(store)
-    agent = _failed_row(store)["agent"]
-    runtime.live.add(agent)
-    actions = tick("sw", store, ledger, runtime, now_ms=DUE)
-    assert runtime.reaped == [agent]
-    assert actions.index(f"reaped stray {agent}") < actions.index(
-        f"closed pane w1:p9 of the failed launch of {agent} for t1"
-    )
-    assert runtime.panes_closed == ["w1:p9"]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_spawn_failure_without_a_pane_holds_nothing(store):
-    runtime = PaneRuntime(crash=SpawnError("init-agent exit 2"))
-    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
-    assert failed_panes.held(store, "sw") == {}
-    assert _failed_row(store)["pane_id"] == ""
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_crash_that_is_no_spawn_error_records_no_pane(store):
-    runtime = PaneRuntime(crash=OSError("worktree timer"))
-    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
-    assert failed_panes.held(store, "sw") == {}
-    assert _failed_row(store)["pane_id"] == ""
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_launch_waiting_on_quota_holds_no_pane(store):
-    runtime = PaneRuntime(crash=SpawnError("no seats", "unavailable", pane_id="w1:p9"))
-    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
-    assert failed_panes.held(store, "sw") == {}
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_started_launch_records_its_pane(store):
-    runtime = PaneRuntime()
-    tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=FAILED_AT)
-    started = [row for row in store.launches("sw") if row["state"] == "started"]
-    assert [row["pane_id"] for row in started] == ["w1:p1"]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_worker_that_exits_before_its_launch_check_passes_has_its_pane_held_then_closed(store):
-    ledger, runtime = tasks(("t1", "eng")), PaneRuntime({"w1:p1": "Error: model not available\n$ "})
-    tick("sw", store, ledger, runtime, now_ms=FAILED_AT)
-    agent = next(a for a in store.agents("sw") if a.task == "t1")
-    runtime.live.discard(agent.name)
-    store.update("sw", state="paused")
-    failed = FAILED_AT + launch_check.DEADLINE_MS
-    tick("sw", store, ledger, runtime, now_ms=failed)
-    assert "w1:p1" not in runtime.closed and runtime.closed.count("") == 1
-    assert failed_panes.held(store, "sw")["w1:p1"]["reason"] == EXITED_BEFORE_LIFE
-    tick("sw", store, ledger, runtime, now_ms=failed + failed_panes.CLOSE_AFTER_MS)
-    assert runtime.panes_closed == ["w1:p1"]
-    row = next(r for r in store.launches("sw") if r["agent"] == agent.name)
-    assert row["pane_lines"] == ["Error: model not available", "$"]
-    assert failed_panes.status_lines(store, "sw") == [
-        f"failed launch  {agent.name}  t1  pane w1:p1 closed: {EXITED_BEFORE_LIFE}",
-        "  | Error: model not available",
-        "  | $",
-    ]
-
-
 @pytest.mark.parametrize(
     ("agent", "live"),
     [
@@ -282,14 +119,6 @@ def test_lines_without_a_reason_keep_an_empty_error(store):
     store.record_launch("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1"), "started")
     store.note_launch_pane("sw", "engineer@a1b2c3-0001", ["x"])
     assert [(r["error"], r["pane_lines"]) for r in store.launches("sw")] == [("", ["x"])]
-
-
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_status_lists_failed_launches_with_their_lines(store):
-    ledger, runtime = _failed_once(store)
-    tick("sw", store, ledger, runtime, now_ms=DUE)
-    rows = failed_panes.report(store, "sw")
-    assert [(r["task"], r["pane_id"], r["pane_lines"][-1]) for r in rows] == [("t1", "w1:p9", "$")]
 
 
 def _launch_fails(tmp_path, stdout, returncode=0, run_error=None, stderr="Codex account default not found\n"):
@@ -354,28 +183,6 @@ def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatc
         "ambiguous",
         "init-agent timed out for engineer@a1b2c3-0001",
     )
-
-
-@pytest.mark.parametrize("stdout", ["", "status=started\nroute_status=pending\n"])
-@pytest.mark.feature("swarm-legacy-failed-launch-panes")
-def test_a_route_timeout_without_a_pane_report_closes_its_recorded_pane_after_two_minutes(
-    store, tmp_path, monkeypatch, stdout
-):
-    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
-    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_route", 5_000)
-    error = _launch_fails(tmp_path, stdout, returncode=3, stderr="the harness did not report its route within 90s\n")
-    assert str(error) == "the harness did not report its route within 90s"
-    runtime = PaneRuntime({"w1:p9": SCREEN}, crash=error)
-    ledger = tasks(("t1", "eng"))
-    tick("sw", store, ledger, runtime, now_ms=FAILED_AT)
-    assert _failed_row(store)["pane_id"] == "w1:p9"
-    runtime.crash = None
-    store.update("sw", state="paused")
-    tick("sw", store, ledger, runtime, now_ms=DUE - 1)
-    assert runtime.panes_closed == []
-    tick("sw", store, ledger, runtime, now_ms=DUE)
-    assert runtime.panes_closed == ["w1:p9"]
-    assert failed_panes.held(store, "sw") == {}
 
 
 def test_a_timed_out_launch_never_adopts_a_pane_opened_before_it(tmp_path, monkeypatch):

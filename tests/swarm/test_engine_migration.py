@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,11 +13,19 @@ pytestmark = pytest.mark.unit
 ORIGIN = "github.com/the-cloud-clockwork/agentihooks"
 
 
+class LegacyStore(RedisStore):
+    """A store whose created configs keep the legacy engine field written before events became the only engine."""
+
+    def create(self, config: SwarmConfig) -> None:
+        super().create(config)
+        self.redis.hset(self.key(config.slug, "config"), "engine", "legacy")
+
+
 @pytest.fixture
 def store() -> RedisStore:
     import fakeredis
 
-    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    return LegacyStore(fakeredis.FakeRedis(decode_responses=True))
 
 
 @pytest.fixture
@@ -29,7 +38,10 @@ def checkout(tmp_path: Path) -> Path:
 
 
 def configs(store: RedisStore) -> dict[str, tuple[str, str]]:
-    return {slug: (store.config(slug).engine, store.config(slug).repo_origin) for slug in engine_migration.slugs(store)}
+    return {
+        slug: (str(store.redis.hget(store.key(slug, "config"), "engine")), store.config(slug).repo_origin)
+        for slug in engine_migration.slugs(store)
+    }
 
 
 @pytest.mark.feature("engine-config-migration")
@@ -38,7 +50,8 @@ def test_every_stored_legacy_config_moves_to_events_with_an_origin_the_doctor_in
 ) -> None:
     store.create(SwarmConfig("watch", str(checkout), 1, 1))
     store.create(SwarmConfig("watch-doctor", "/missing", 1, 0, template="doctor"))
-    store.create(replace(SwarmConfig("pinned", "/missing", 1, 1), engine="events", repo_origin="github.com/team/other"))
+    store.create(replace(SwarmConfig("pinned", "/missing", 1, 1), repo_origin="github.com/team/other"))
+    store.update("pinned", engine="events")
     store.create(replace(SwarmConfig("stored", "/missing", 1, 1), repo_origin="github.com/team/stored"))
 
     assert engine_migration.migrate(store) == {
@@ -124,7 +137,9 @@ def test_a_swarm_with_legacy_agents_in_flight_is_left_for_the_master_with_its_la
         "agents": ("legacy", "github.com/team/project"),
         "idle": ("events", "github.com/team/project"),
     }
-    assert store.redis.hgetall(store.key("agents", engine_migration.LAUNCH_JOBS)) == {"engineer@2": json.dumps({"task": "t2"})}
+    assert store.redis.hgetall(store.key("agents", engine_migration.LAUNCH_JOBS)) == {
+        "engineer@2": json.dumps({"task": "t2"})
+    }
 
 
 @pytest.mark.feature("engine-config-migration")
@@ -152,7 +167,9 @@ def test_a_swarm_without_an_origin_keeps_its_launch_jobs_when_skipped(store: Red
     store.redis.hset(store.key("orphan", engine_migration.LAUNCH_JOBS), "engineer@4", json.dumps({"task": "t4"}))
 
     assert engine_migration.migrate(store) == {"orphan": "skipped: no repository origin"}
-    assert store.redis.hgetall(store.key("orphan", engine_migration.LAUNCH_JOBS)) == {"engineer@4": json.dumps({"task": "t4"})}
+    assert store.redis.hgetall(store.key("orphan", engine_migration.LAUNCH_JOBS)) == {
+        "engineer@4": json.dumps({"task": "t4"})
+    }
 
 
 @pytest.mark.feature("engine-config-migration")
@@ -169,7 +186,9 @@ def test_a_swarm_whose_config_update_is_refused_keeps_its_launch_jobs_and_launch
     monkeypatch.setattr(store, "update", refuse)
 
     assert engine_migration.migrate(store) == {"refused": "skipped: scaling must be one of fixed"}
-    assert store.redis.hgetall(store.key("refused", engine_migration.LAUNCH_JOBS)) == {"engineer@5": json.dumps({"task": "t5"})}
+    assert store.redis.hgetall(store.key("refused", engine_migration.LAUNCH_JOBS)) == {
+        "engineer@5": json.dumps({"task": "t5"})
+    }
     assert list(store.redis.hgetall(store.key("refused", "launches"))) == ["engineer@6"]
 
 

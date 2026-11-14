@@ -173,6 +173,7 @@ def test_an_engine_switch_exits_no_running_execution(smoke: Smoke) -> None:
     assert hive.spoke.poll(TAKE_MS) == "started"
     event = started(smoke)
     smoke.store.create(SwarmConfig("legacy-busy", smoke.store.config(SLUG).repo, 1, 1))
+    smoke.store.redis.hset(smoke.store.key("legacy-busy", "config"), "engine", "legacy")
     record = AgentRecord(
         smoke.store.next_name("legacy-busy", "eng"), "eng", "t9", seat="eng-1@legacy-busy", started_at=1
     )
@@ -182,8 +183,8 @@ def test_an_engine_switch_exits_no_running_execution(smoke: Smoke) -> None:
     outcomes = engine_migration.migrate(smoke.store)
 
     assert outcomes == {SLUG: "unchanged", "legacy-busy": engine_migration.BUSY}
-    assert smoke.store.config("legacy-busy").engine == "legacy"
-    smoke.store.update(SLUG, engine="legacy")
+    assert smoke.store.redis.hget(smoke.store.key("legacy-busy", "config"), "engine") == "legacy"
+    smoke.store.redis.hset(smoke.store.key(SLUG, "config"), "engine", "legacy")
     lose_hive(smoke, event, None)
 
     assert exits(smoke) == []
