@@ -97,7 +97,13 @@ def test_restore_reopens_an_agent_in_its_own_conversation_and_forces_one_without
     ((name, conversation, _),) = rt.resumed
     assert (name, conversation) == ("sw-eng-1", ID)
     eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
-    assert (eng.state, eng.pane_id, eng.seat, eng.task, eng.started_at) == ("working", "w2:p9", "eng-1@sw", "t1", 1_000)
+    assert (eng.state, eng.pane_id, eng.seat, eng.task, eng.launched_at) == (
+        "working",
+        "w2:p9",
+        "eng-1@sw",
+        "t1",
+        1_000,
+    )
     assert store.claimant("sw", "t1") == "sw-eng-1"
     assert next(a for a in store.agents("sw") if a.lane == MASTER).state == "awaiting-decision"
     assert store.config("sw").state == "paused"

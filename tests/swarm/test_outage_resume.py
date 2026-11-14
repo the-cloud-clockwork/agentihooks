@@ -432,7 +432,7 @@ def test_one_recovery_pass_completes_working_nudged_and_reopened_owners(store, t
     assert [recovery_state(store, agent.name) for agent in agents] == ["done", "done", "done"]
     assert [config.slug for config in runtime.resume_configs] == ["sw"]
     reopened = next(agent for agent in owners(store) if agent.name == dead.name)
-    assert (reopened.pane_id, reopened.started_at, reopened.idle_ticks) == ("recovered:pane", 9 * MINUTE, 0)
+    assert (reopened.pane_id, reopened.launched_at, reopened.idle_ticks) == ("recovered:pane", 9 * MINUTE, 0)
     assert (reopened.model, reopened.account, reopened.profile_decision) == ("sonnet", dead.account, decision)
     assert dead.effort and reopened.effort == dead.effort
     assert reopened.model_source == "probe"
@@ -519,7 +519,7 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     assert runtime.spawn_configs[-1] == "sw"
     assert runtime.tasks[-1]["seat"] == dead.seat
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
-    assert (restarted.pane_id, restarted.conversation_id, restarted.started_at, restarted.idle_ticks) == (
+    assert (restarted.pane_id, restarted.conversation_id, restarted.launched_at, restarted.idle_ticks) == (
         f"w1:p{launches + 1}",
         conversation,
         9 * MINUTE,
