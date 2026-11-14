@@ -59,6 +59,7 @@ MEMBER_PUBLISH = (
     *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets.NAMES),
     *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets.NAMES),
 )
+MEMBER_DENY = (f"{subjects.PREFIX}.*.execution.stop.>",)
 SCHEDULER_BUCKET = "scheduler"
 SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
@@ -225,14 +226,14 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
     if swarms is None:
         return {
             **user_claims(),
-            "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}", *own]},
+            "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}", *own], "deny": list(MEMBER_DENY)},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
     publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
     publish += own
     return {
         **user_claims(),
-        "pub": {"allow": publish} if publish else {"deny": [">"]},
+        "pub": {"allow": publish, "deny": list(MEMBER_DENY)} if publish else {"deny": [">"]},
         "sub": {"allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"]},
     }
 
