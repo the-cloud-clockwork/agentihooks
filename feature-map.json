@@ -4826,6 +4826,17 @@
       ]
     },
     {
+      "id": "codex-server-exit-canary",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-server-exit-canary",
+      "behaviour": "When the supervised Codex app server exits after its launch returns and before the session validates its profile canary, the pending profile report fails at once with the server exit status, so init-agent reports the failure instead of waiting out the launch deadline. An exit after a validated canary leaves the report unchanged.",
+      "seam": "scripts.codex_session.serve.main server exit and the profile binding report init-agent waits on",
+      "tests": [
+        "tests/codex_session/test_serve.py::test_an_app_server_exit_after_launch_fails_the_pending_canary_at_once",
+        "tests/codex_session/test_serve.py::test_an_app_server_exit_after_a_validated_canary_keeps_the_report"
+      ]
+    },
+    {
       "id": "codex-execution-home-default-login-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-auth-link-default-only",
@@ -5850,10 +5861,30 @@
       ]
     },
     {
+      "id": "hive-own-exit-subject",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-exited-own-subject",
+      "behaviour": "A hive reports an execution exit only on its own exit report subject: every hive member credential is refused by the NATS server when it publishes another hive's exit report subject or the shared execution exited subject, and the hub relays a reported exit onto the shared subject the lifecycle reactor reads only when the execution registry places that execution on the reporting hive, so a hive's own exit still drops its agent and reopens its task.",
+      "seam": "scripts.hive.nats_grant.member_claims as enforced by a live NATS server, scripts.hub.exits.handle, and scripts.hive.execution_events.publish driving the hub lifecycle reactor",
+      "tests": [
+        "tests/hive/test_nats_grant.py::test_a_member_credential_reports_an_exit_on_its_own_subject",
+        "tests/hive/test_nats_grant.py::test_a_member_credential_cannot_report_an_exit_on_another_subject",
+        "tests/hive/test_nats_grant.py::test_the_hub_credential_serves_every_hive_exit_subject",
+        "tests/hub/test_exits.py::test_a_hive_exit_reaches_the_lifecycle_subject_through_the_hub",
+        "tests/hub/test_exits.py::test_the_hub_refuses_an_exit_reported_by_another_hive",
+        "tests/hub/test_exits.py::test_a_hive_on_a_swarm_scoped_bus_reports_its_exit_through_the_hub",
+        "tests/hub/test_exits.py::test_an_exit_for_an_execution_the_hub_no_longer_holds_is_settled_unpublished",
+        "tests/hub/test_exits.py::test_the_hub_refuses_a_malformed_exit_report",
+        "tests/hub/test_exits.py::test_an_exit_report_failing_without_a_message_names_its_error",
+        "tests/hub/test_exits.py::test_the_hub_serves_every_exit_subject_in_its_queue_group",
+        "tests/hub/test_exits.py::test_a_hive_waits_its_exit_timeout_and_marks_the_exit_sent"
+      ]
+    },
+    {
       "id": "hub-only-execution-stop",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-hub-only-stop",
-      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, the logical subject and its scoped wire form under events, while it still publishes execution started and exited, and the hub controller credential publishes the stop on both forms.",
+      "behaviour": "Only the hub may publish an execution stop for a hive: every hive member credential, unscoped or scoped to its swarms, is refused by the NATS server when it publishes any hive's execution stop subject, the logical subject and its scoped wire form under events, while it still publishes execution started, and the hub controller credential publishes the stop on both forms.",
       "seam": "scripts.hive.nats_grant.member_claims and controller_claims as enforced by a live NATS server, and the member grant render the grant parity check reads",
       "rules": [
         "member-grant-publishes-execution-stop"
@@ -6806,6 +6837,32 @@
       "tests": [
         "tests/test_worker_profile_offline.py::test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration",
         "tests/test_worker_profile_offline.py::test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job"
+      ]
+    },
+    {
+      "id": "operator-presence-automated-prompts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-presence-cron-prompts",
+      "behaviour": "A prompt a session scheduled for itself with CronCreate or ScheduleWakeup is never the operator's words: it opens no reply window, never switches operator on or off and is not recorded as his words; the record is kept per session and per agent process, so a cleared session still finds its crons, and it is dropped at session end. Every untyped prompt in a swarm or ledger bound session, cron, wakeup, nudge or swarm delivery, is told it is automated and to write nothing to the operator; a typed operator prompt opens the reply window, operator on opens the session and operator off closes it; a standalone session keeps the operator present.",
+      "seam": "operator_words.typed and operator_mode.notice on UserPromptSubmit, scheduled_prompts.record on PostToolUse",
+      "tests": [
+        "tests/context/test_scheduled_prompts.py::test_a_session_cron_prompt_in_a_swarm_master_is_automated_never_operator_presence",
+        "tests/context/test_scheduled_prompts.py::test_a_cron_prompt_never_switches_presence_on_or_off",
+        "tests/context/test_scheduled_prompts.py::test_a_swarm_delivered_nudge_is_told_it_is_automated",
+        "tests/context/test_scheduled_prompts.py::test_the_hourly_safety_nudge_as_sent_to_a_master_pane_is_automated",
+        "tests/context/test_scheduled_prompts.py::test_a_typed_operator_message_opens_a_reply_and_is_never_called_automated",
+        "tests/context/test_scheduled_prompts.py::test_a_cron_inside_the_quiet_window_is_still_automated",
+        "tests/context/test_scheduled_prompts.py::test_a_swarm_worker_starts_off_and_a_cron_keeps_it_off",
+        "tests/context/test_scheduled_prompts.py::test_a_standalone_session_keeps_the_operator_present_and_gets_no_automated_notice",
+        "tests/context/test_scheduled_prompts.py::test_a_cron_prompt_is_never_recorded_as_the_operator_words",
+        "tests/context/test_scheduled_prompts.py::test_only_scheduler_tools_with_a_prompt_are_recorded_and_the_newest_are_kept",
+        "tests/context/test_scheduled_prompts.py::test_an_unreadable_record_counts_no_prompt_as_scheduled",
+        "tests/context/test_scheduled_prompts.py::test_an_unwritable_record_home_records_nothing_and_never_raises",
+        "tests/context/test_scheduled_prompts.py::test_a_cleared_session_in_the_same_agent_still_finds_its_crons",
+        "tests/context/test_scheduled_prompts.py::test_session_end_drops_the_record_and_a_clear_keeps_the_agent_record",
+        "tests/context/test_scheduled_prompts.py::test_each_owner_keeps_its_record_in_one_named_file_under_the_state_home",
+        "tests/context/test_scheduled_prompts.py::test_a_record_creates_every_missing_parent_folder",
+        "tests/context/test_scheduled_prompts.py::test_smoke_the_hook_entry_point_marks_a_cron_prompt_automated_and_a_typed_one_present"
       ]
     }
   ],
