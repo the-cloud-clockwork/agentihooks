@@ -21,7 +21,7 @@ changed list applies without restarting `hive serve`:
 
 | Signer record | Credential | `hive.env` |
 |---|---|---|
-| No `member_swarms` field | None. The endpoint answers 403 `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential`, checked before it rotates the member's Redis password; `hive root-bus` refuses with the same text and writes no bus settings | Unchanged |
+| No `member_swarms` field | None. The endpoint answers 403 `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential`, checked before it rotates the member's Redis password; `hive root-bus` refuses with the same text and writes no bus settings | Unchanged; no `AGENTIHOOKS_BUS_SCOPED` line is written |
 | `member_swarms` maps the member id to a list of swarms | Publish and subscribe only under each listed swarm's prefix | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` maps the member id to an empty list | Publish denied on `>`; subscribe only on the member's own `_INBOX.<user>.>` | `AGENTIHOOKS_BUS_SCOPED=1` |
 | `member_swarms` present, member id absent | None. The endpoint answers 403 `the hub record lists no member swarms for hive member <id>; it mints no unscoped bus credential`, checked before it rotates the member's Redis password | Unchanged |

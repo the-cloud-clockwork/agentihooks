@@ -680,7 +680,7 @@ def test_a_hub_record_without_member_swarms_refuses_the_create_before_minting(wo
     assert str(refused.value) == member_swarms.unscoped(SIGNER)
     assert world.bao.records[SIGNER] == {"url": "nats://hub"}
     assert world.run.named("kubectl", "-n") == []
-    assert auth.members(world.tools.redis) == []
+    assert auth.members(world.tools.redis) == {}
 
 
 def test_the_dry_run_names_the_listing_and_writes_no_hub_record(world):
