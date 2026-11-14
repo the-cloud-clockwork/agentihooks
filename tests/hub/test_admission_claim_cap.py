@@ -111,7 +111,8 @@ def test_a_failed_launch_spends_no_life_and_the_start_after_it_counts_once(rig: 
     assert rig.admitter.failed(SLUG, ask(harness="", reason="herdr down"))
     assert (rig.store.claims(SLUG, "t1"), rig.store.launch_failure(SLUG, "t1")) == (0, "herdr down")
     claims.Claims(rig.store).handle(started(admitted))
-    assert rig.store.claims(SLUG, "t1") == 1
+    assert (rig.store.claims(SLUG, "t1"), rig.store.claims(SLUG, "t2")) == (1, 0)
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("claimed", admitted["name"])
 
 
 @pytest.mark.feature("swarm-events-claim-cap")
@@ -123,7 +124,9 @@ def test_a_failed_launch_spends_no_life_and_the_start_after_it_counts_once(rig: 
         (1_792_440_001_000, "2026-10-19 20:00:01 UTC: no space left on device"),
     ],
 )
-def test_the_refusal_dates_only_failures_within_the_counted_claims(rig: Any, failure_at: int, expected: str) -> None:
+def test_the_refusal_dates_only_failures_within_the_counted_claims(
+    rig: Any, failure_at: int, expected: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     store = rig.store
     for name, at in (
         ("previous", 1_792_008_000_000),
@@ -150,5 +153,8 @@ def test_the_refusal_dates_only_failures_within_the_counted_claims(rig: Any, fai
     assert rig.admitter.admit(SLUG, ask()) is None
     [(_, _, report, _)] = rig.ledger.comments
     assert f"Last launch failure: {expected}. Change its scope" in report
+    assert f"hub: events claim cap swarm={SLUG} task=t1 hive=hive-a: blocked t1: {report}" in (
+        capsys.readouterr().err.splitlines()
+    )
     assert rig.rows["t1"]["state"] == "blocked"
     assert all(row in store.launches(SLUG) for row in original)
