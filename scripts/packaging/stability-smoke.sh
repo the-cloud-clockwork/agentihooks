@@ -106,6 +106,7 @@ for agent in "${placed[@]}"; do
     'import os; from hooks.context import hive_join; hive_join.run({"session_id": os.environ["AGENTIHOOKS_AGENT_NAME"]}, "start")'
 done
 "${hub[@]}" -e SLUG="$slug" swarm python - <<'PY'
+import json
 import os
 
 from scripts.hive import join_report
@@ -114,7 +115,9 @@ from scripts.swarm.store import connect
 store, slug = connect(), os.environ["SLUG"]
 for agent in store.agents(slug):
     report = join_report.read(store.redis, agent)
-    store.record_launch(slug, agent, "started" if report else "failed", "" if report else "no hive join report")
+    row = {"agent": agent.name, "task": agent.task, "at": agent.started_at, "state": "started" if report else "failed"}
+    row |= {"error": "" if report else "no hive join report", "pane_id": agent.pane_id, "after": "", "head": ""}
+    store.redis.hset(store.key(slug, "launches"), agent.name, json.dumps(row))
     print(f"launch {'started' if report else 'failed'} for {agent.name}: " + (join_report.summary(report) if report else "no hive join report"))
 PY
 

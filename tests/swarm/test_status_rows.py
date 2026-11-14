@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm import status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from tests.helpers import store_seed
 
 MIDNIGHT = 1_791_244_800_000
 HOUR = 3_600_000
@@ -242,7 +243,7 @@ def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
 def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, monkeypatch):
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", started_at=10, pane_id="w1:p9")
-    store.record_launch("sw", agent, "failed", "account not found")
+    store_seed.record_launch(store, "sw", agent, "failed", "account not found")
     store.note_launch_pane("sw", agent.name, ["account not found", "$"])
     monkeypatch.setattr(status, "page_quota", lambda: {})
     report = status.status_report(store, "sw", {"tasks": []})

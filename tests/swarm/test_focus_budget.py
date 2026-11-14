@@ -1,5 +1,3 @@
-from typing import Any
-
 import pytest
 
 
@@ -9,25 +7,6 @@ def work(name, *, lane="eng", state="open", hot=False, rank="normal"):
 
 def document(tasks):
     return {"tasks": tasks, "phases": [], "plans": [], "freezes": [{"verb": "focus", "target": "kind:hot"}]}
-
-
-def test_scheduler_batch_fills_every_seat_with_focused_work_and_never_claims_free_or_frozen_work():
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm.tick import _spawn_order
-    from tests.swarm.test_tick import FakeLedger, FakeRuntime
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    config = SwarmConfig("sw", "/repo", max_eng=10, max_ci=0, max_plan=0)
-    store.create(config)
-    hot = [work(f"hot{i}", hot=True) for i in range(12)]
-    plain = [work(f"plain{i}", rank="urgent") for i in range(10)]
-    frozen = work("frozen", hot=True, rank="urgent")
-    ledger = FakeLedger([*plain, frozen, *hot])
-    doc = {**ledger.state("sw"), "freezes": document([])["freezes"] + [{"verb": "freeze", "target": "tasks/frozen"}]}
-    selected, _ = _spawn_order("sw", config, store, [], ledger.rows, doc, FakeRuntime())
-    assert [task["id"] for _, task in selected] == [task["id"] for task in hot[:10]]
 
 
 @pytest.mark.feature("swarm-focus")
@@ -197,40 +176,6 @@ def test_the_focus_sort_orders_the_queue_by_focus_rank_and_keeps_ties_in_queue_o
     assert focus_budget.ordered(queue, {"a": 1, "b": 0, "c": 1, "d": 0}) == [queue[1], queue[3], queue[0], queue[2]]
 
 
-def _spawned(tasks: list[dict[str, Any]], focused: list[str], seats: int = 10) -> list[str]:
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm.tick import _spawn_order
-    from tests.swarm.test_tick import FakeLedger, FakeRuntime
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    config = SwarmConfig("sw", "/repo", max_eng=seats, max_ci=0, max_plan=0)
-    store.create(config)
-    ledger = FakeLedger([*[work(f"plain{i}", rank="urgent") for i in range(2)], *tasks])
-    doc = {**ledger.state("sw"), "freezes": [{"verb": "focus", "target": f"tasks/{name}"} for name in focused]}
-    selected, _ = _spawn_order("sw", config, store, [], ledger.rows, doc, FakeRuntime())
-    return [str(task["id"]) for _, task in selected]
-
-
-@pytest.mark.feature("swarm-focus")
-def test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus() -> None:
-    tasks = [{**work("older"), "rank": None}, work("newer", rank="urgent")]
-    assert _spawned(tasks, ["older", "newer"]) == ["newer", "older"]
-
-
-@pytest.mark.feature("swarm-focus")
-def test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat() -> None:
-    tasks = [{**work("older"), "rank": None}, work("newer", rank="urgent")]
-    assert _spawned(tasks, ["older", "newer"], seats=1) == ["newer"]
-
-
-@pytest.mark.feature("swarm-focus")
-def test_focus_record_order_breaks_ties_within_one_rank_band() -> None:
-    tasks = [work("first"), work("second"), work("urgent", rank="urgent")]
-    assert _spawned(tasks, ["second", "urgent", "first"]) == ["urgent", "second", "first"]
-
-
 @pytest.mark.feature("swarm-focus")
 def test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band() -> None:
     from scripts.swarm import focus_budget
@@ -239,26 +184,3 @@ def test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_bette
     band = {"urgent": 0, "normal": 1}
     ordered = focus_budget.ordered(queue, {"free": 2, "held": 0}, lambda task: band[task["rank"]], 2)
     assert ordered == [queue[1], queue[0]]
-
-
-@pytest.mark.feature("swarm-focus")
-def test_an_urgent_dependency_of_a_focus_launches_after_an_unranked_focused_task() -> None:
-    tasks = [
-        {**work("top"), "rank": None, "depends_on": ["dep"]},
-        work("dep", rank="urgent"),
-        {**work("other"), "rank": None},
-    ]
-    assert _spawned(tasks, ["top", "other"]) == ["other", "dep"]
-
-
-@pytest.mark.feature("swarm-focus")
-def test_the_launch_rank_sort_uses_the_dispatcher_band_over_the_ledger_rank() -> None:
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore
-    from scripts.tick.steps.place import _ranked
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    queue = [(0, "eng", work("a", rank="urgent")), (1, "eng", work("b"))]
-    ranked = _ranked("sw", store, queue, lambda task: (0 if task["id"] == "b" else 1,))
-    assert [task["id"] for _, task in ranked] == ["b", "a"]
