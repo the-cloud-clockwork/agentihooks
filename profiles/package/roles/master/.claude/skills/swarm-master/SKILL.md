@@ -193,6 +193,15 @@ Review each slice against its phase intent, then
 - A seat whose resume failed waits for you:
   `agentihooks swarm <slug> restore-decision <agent> resume` or `fresh`.
 
+## Troubleshooting crew
+
+- One problem still unsolved after two hours, or the operator's order, stops all other work: run
+  `$launch-troubleshooting-crew <slug>` and follow its stages, scout, fix, critics, harden, restore.
+- A blocker of one category lasting one hour puts you in troubleshooting mode first and you fix it
+  yourself; when that has not solved it by the two hour mark, launch the crew.
+- While the crew runs, set its thirty minute cron and take only its tasks and the follow ups that really
+  come from the troubleshooting at medium, high or critical priority.
+
 ## Scaling
 
 - Every new swarm starts with automatic scaling, and a master keeps automatic
