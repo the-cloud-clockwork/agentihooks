@@ -275,7 +275,7 @@ def test_a_push_pass_that_raises_is_logged_and_a_later_item_is_still_pushed(
     monkeypatch.setattr(channel, "RETRY_FIRST_S", 0.1, raising=False)
     real_deliver, calls = channel._deliver, []
 
-    async def failing_once(*args: object) -> None:
+    async def failing_once(*args: Any) -> None:
         calls.append(len(calls))
         if len(calls) == 1:
             raise ValueError("planted pass failure")
@@ -315,7 +315,7 @@ def test_a_failed_pass_with_a_broken_stderr_still_retries_and_pushes(
     monkeypatch.setattr(channel.sys, "stderr", BrokenStderr())
     real_deliver, calls = channel._deliver, []
 
-    async def failing_once(*args: object) -> None:
+    async def failing_once(*args: Any) -> None:
         calls.append(len(calls))
         if len(calls) == 1:
             raise ValueError("planted pass failure")
@@ -371,7 +371,7 @@ def test_a_failed_subscription_close_is_logged_and_the_loop_goes_on(
         monkeypatch.setattr(FakePubSub, "close", real_close)
         raise OSError("subscription gone")
 
-    async def failing_once(*args: object) -> None:
+    async def failing_once(*args: Any) -> None:
         calls.append(len(calls))
         if len(calls) == 1:
             monkeypatch.setattr(FakePubSub, "close", refuse_close)
