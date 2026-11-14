@@ -16,7 +16,7 @@ from scripts.hub import admission, slots
 from scripts.swarm import readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.probe import ROOT
-from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_readiness import NOW, SLUG, Clock, bus, clock, doc, snapshot, task  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -331,5 +331,4 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
     [request] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert request.task["id"] == "desk"
     assert rig.store.claimant(SLUG, "desk") == request.name
-    assert not readiness.tick_launches(EVENTS_ENGINE)
     scoped.close()

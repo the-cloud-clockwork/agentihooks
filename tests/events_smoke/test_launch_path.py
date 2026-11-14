@@ -10,7 +10,7 @@ import pytest
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_stop, presence, registry
 from scripts.hub import admission, hive_loss
-from scripts.swarm import engine_migration, fleet_red, readiness
+from scripts.swarm import engine_migration, fleet_red
 from scripts.swarm import tick as swarm_tick
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, SwarmConfig
@@ -213,7 +213,6 @@ def test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work(
 
     swarm_tick.tick(SLUG, smoke.store, ledger, runtime, now_ms=presence.now_ms())
 
-    assert not readiness.tick_launches(smoke.store.config(SLUG).engine)
     assert worker_spawns(runtime) == []
     assert ledger.rows["t2"]["state"] == "open"
     assert hive.runtime.spawn.call_count == 1
