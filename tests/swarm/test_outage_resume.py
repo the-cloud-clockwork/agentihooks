@@ -661,7 +661,7 @@ def test_an_owner_whose_task_is_in_review_is_recovered(store):
 def test_an_outage_ending_at_the_owner_start_counts_toward_recovery(store):
     ledger, runtime, _ = three_owners(store)
     first = owners(store)[0]
-    store.put_agent("sw", replace(first, started_at=0))
+    store.put_agent("sw", replace(first, started_at=0, launched_at=0))
     outage.observe("sw", "provider", ["provider unavailable"], 0)
     outage.observe("sw", "provider", [], 0)
     resume.track_outages("sw", store, runtime, rows_of(ledger), MINUTE)
