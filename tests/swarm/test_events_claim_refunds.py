@@ -160,6 +160,35 @@ def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
     assert sent[0].data["reason"] == ending
 
 
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize(
+    ("free", "reason"),
+    [
+        (agent_steps._free_refused, "refused"),
+        (agent_steps._free_revoked, "revoked"),
+        (agent_steps._free_stuck, "stuck"),
+    ],
+)
+def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_the_agent(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    free: Callable[..., list[str]],
+    reason: str,
+) -> None:
+    store, ledger, rt = env
+    agent, event = launched(env, bus, seat)
+
+    free(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
+
+    assert agent.name in rt.killed
+    assert store.claims(SLUG, "t1") == 0
+    events = bus.for_swarm(SLUG).events
+    stops = events.consumer(execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive))
+    sent = [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
+    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
+
+
 def handed_off(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], cause: str
 ) -> tuple[AgentRecord, Envelope]:
