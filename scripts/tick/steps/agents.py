@@ -357,6 +357,8 @@ def _refusal_due(slug: Any, store: Any, rows: Any, agent: Any, observed: Any, no
 
 
 def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     if not tick.retire_watch.retire_unless_gone(
         store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
     ):
@@ -367,6 +369,8 @@ def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
 
 
 def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     account = f"{agent.harness} account {agent.account}"
     if agent.lane == tick.MASTER:
         tick.revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
@@ -532,6 +536,8 @@ def _stuck_on_provider(slug: Any, store: Any, agent: Any, observed: Any, exhaust
 
 
 def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
+    from scripts.hub.reconciler import stop_admitted
+
     if not tick.retire_watch.retire_unless_gone(
         store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
     ):
