@@ -39,6 +39,17 @@ def test_a_redelivered_start_of_a_counted_life_keeps_a_later_saved_assignment(ri
     assert rig.store.redis.hget(rig.store.key(SLUG, ASSIGNMENTS), "t1") == '{"seat": "eng-2@sw"}'
 
 
+@pytest.mark.feature("hub-started-clears-launch-assignment")
+def test_a_late_start_of_a_released_life_keeps_the_assignment_saved_for_the_next_life(rig: SimpleNamespace) -> None:
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.store.release(SLUG, "t1", admitted["name"])
+    rig.store.redis.hset(rig.store.key(SLUG, ASSIGNMENTS), "t1", '{"seat": "eng-2@sw"}')
+
+    claims.Claims(rig.store).handle(started(admitted))
+
+    assert rig.store.redis.hget(rig.store.key(SLUG, ASSIGNMENTS), "t1") == '{"seat": "eng-2@sw"}'
+
+
 @pytest.mark.feature("swarm-reclaim-keeps-seat")
 def test_a_reclaimed_tasks_successor_takes_the_leavers_seat_and_its_mail(rig: SimpleNamespace) -> None:
     rig.store.put_agent(SLUG, AgentRecord("engineer@neighbour", "eng", "t9", seat="eng-1@sw"))

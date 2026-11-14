@@ -251,8 +251,7 @@ def _reopen(watch, mail, task, case, minutes, limit):
     if owner:
         watch.store.release(watch.slug, tid, owner)
     if agent is not None:
-        watch.store.drop_agent(watch.slug, owner)
-        if agent.seat:
+        if watch.store.drop_agent(watch.slug, owner) is not False and agent.seat:
             watch.store.keep_seat(watch.slug, tid, agent.seat)
         exits.settle(InboxStore(watch.store.redis), owner, agent.seat, STOPPED)
     ready.forget(watch.store, watch.slug, tid)
