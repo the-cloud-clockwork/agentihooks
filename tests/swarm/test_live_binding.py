@@ -459,10 +459,10 @@ def launched(ticking: tuple[RedisStore, FakeRuntime, FakeLedger]) -> tuple[Redis
     """``ticking`` with an agent already launched on task one: seated through hub admission and started at 100 on a
     pane, listed by the runtime and holding its launch row, so no tick spawns it."""
     from scripts.swarm.commands import hive_id
-    from tests.helpers.seat import Launched, seat_agent
+    from tests.helpers.seat import Launched, seat_launched
 
     store, runtime, ledger = ticking
-    seat_agent(store, ledger, "sw", "one", hive_id(), started=Launched(100, runtime))
+    seat_launched(store, ledger, "sw", "one", hive_id(), Launched(100, runtime))
     return ticking
 
 

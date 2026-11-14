@@ -49,7 +49,7 @@ def test_progress_needs_both_lines_and_a_worker(started, capsys):
 def test_status_findings_flag_a_claim_quiet_past_the_limit(started, monkeypatch):
     store, ledger = started
     [agent] = [a for a in store.agents("sw") if a.name == ME]
-    store.put_agent("sw", AgentRecord(**{**agent.__dict__, "started_at": MIN}))
+    store.put_agent("sw", AgentRecord(**{**agent.__dict__, "started_at": MIN, "launched_at": MIN}))
     os.utime(ledger_workspace.folder("sw", "t1") / "progress.md", (0, 0))
     monkeypatch.setattr(status, "now_ms", lambda: 45 * MIN)
     tasks = [{"id": "t1", "state": "claimed", "claimed_by": ME}]

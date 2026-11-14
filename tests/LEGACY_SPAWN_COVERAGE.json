@@ -58,9 +58,6 @@
       "retires": "The tick judged launch checks of workers the legacy spawn started, with their one relaunch, retire with it.",
       "gap": "Workers the hub admits get no launch check and no single relaunch; ported by the ledger follow up on hub admitted worker launch checks, raised by task t-leo-spawn-tick."
     },
-    "swarm-legacy-outage-recovery-seeding": {
-      "gap": "Agents seated through hub admission are reaped as foreign to their hive with their claim dropped, and outage resume rewrites the start time an execution forbids, so the outage hold, drill and dead resume tests still seed their engineer through the legacy tick spawn; task t-events-outage-recovery moves them to the events path."
-    },
     "swarm-master-skips-host-hold": {
       "covered_by": [
         "tests/swarm/test_master_fill.py::test_a_full_host_never_holds_the_seat"
