@@ -1777,8 +1777,13 @@ plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIV
 runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
 `hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
 why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
-creating them. Outside distributed mode `agentihooks swarm spoke` refuses and `agentihooks hive run` starts no
-spoke, because the workstation then runs the swarm engine itself. The bus settings a hive needs arrive with its
+creating them. Outside distributed mode `agentihooks swarm spoke` refuses, because the workstation then runs the
+swarm engine itself, but `agentihooks hive run` still starts the eng, ci and plan spokes: under the `events` engine
+the tick launches no workstation task and offers each one pinned to the root hive, so the root hive's lane spokes
+are its only taker, and only a spoke poll beats the hive's presence. `hive run` loads the operator env files before
+the spokes read their bus settings, and a draining hive polls no spoke but keeps beating presence on every `events`
+swarm, so the hub never judges its running agents lost. Only a memory bus refuses the lane spokes, on every hive.
+The bus settings a hive needs arrive with its
 invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus).
 
 ## Workstation fallback
