@@ -866,6 +866,18 @@
       ]
     },
     {
+      "id": "operator-master-up-resume-keeps-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-seat",
+      "behaviour": "Operator master up that brings back the last master keeps that master's execution identity and start time, records its new pane, holds the master seat, counts its idle time and its place as the last master from the resume, and leaves it an agent of the swarm that swarm handoff resolves.",
+      "seam": "agentihooks swarm master up --last",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it",
+        "tests/swarm/test_master_launch.py::test_a_master_resumed_after_a_later_master_ended_is_the_last_master",
+        "tests/swarm/test_lifetime.py::test_a_master_resumed_inside_the_idle_limit_stays"
+      ]
+    },
+    {
       "id": "operator-dead-starting-front-door",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
