@@ -163,7 +163,7 @@ def test_the_hub_answers_unknown_for_an_execution_no_hive_started(rig: SimpleNam
 
 
 @pytest.mark.feature("events-execution-stop")
-def test_a_failed_reap_emits_no_exit_and_is_retried(rig: SimpleNamespace) -> None:
+def test_a_failed_reap_emits_no_exit_and_is_retried(rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     hive = runtime()
     hive.reap.return_value = outcome(Status.REFUSED)
     stopper = execution_stop.Stopper(rig.bus, SLUG, HIVE, hive)
@@ -171,6 +171,7 @@ def test_a_failed_reap_emits_no_exit_and_is_retried(rig: SimpleNamespace) -> Non
 
     assert stopper.poll() == [execution_stop.FAILED]
     assert exits(rig.bus) == []
+    assert f"stop for {rig.agent.name} in swarm {SLUG} could not reap it" in capsys.readouterr().err
     hive.reap.return_value = outcome()
     assert stopper.poll() == [execution_stop.STOPPED]
     assert len(exits(rig.bus)) == 1

@@ -203,7 +203,13 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
     runtime = Mock()
     placed = SimpleNamespace(
-        pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+        pane_id="pane-1",
+        harness="claude",
+        account="slot-a",
+        profile="engineer",
+        model="opus",
+        effort="high",
+        launched_at=0,
     )
     runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
     store = configs({"rig": "events"})
@@ -268,7 +274,10 @@ def test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it(
     hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(pinned)
     runtime = Mock()
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a")
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a", launched_at=0),
     )
 
     polled = lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, hive, ("eng",), 0, {})
@@ -318,6 +327,7 @@ def test_the_lane_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch)
     outcomes = iter([["empty"], ["started", "held"], []])
     seen = []
     monkeypatch.setattr(lanes, "run_once", lambda *args: seen.append(args) or next(outcomes))
+    monkeypatch.setattr(lanes, "stop_once", lambda *args: [])
     waits = []
 
     lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(3))

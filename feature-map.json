@@ -6108,7 +6108,8 @@
         "tests/hub/test_claim_lives.py::test_a_launch_decision_after_the_start_still_reaches_the_working_agent",
         "tests/hub/test_claim_lives.py::test_a_start_with_an_empty_launch_time_takes_the_event_time",
         "tests/hub/test_claim_lives.py::test_a_rebuilt_start_without_a_pane_counts_the_life_and_leaves_the_agent_starting",
-        "tests/hub/test_claim_lives.py::test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both"
+        "tests/hub/test_claim_lives.py::test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both",
+        "tests/swarm/test_execution_archive.py::test_set_launch_from_a_state_writes_only_while_the_run_is_still_in_it"
       ]
     },
     {

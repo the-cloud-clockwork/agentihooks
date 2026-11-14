@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import Any, cast
+from typing import Any
 
 from scripts.events.envelope import Envelope
 from scripts.hub.registry import Reactor
@@ -26,7 +26,7 @@ class Claims:
         return Reactor("claim-lives", "swarm.*.execution.started", self.handle, singleton=True)
 
     def handle(self, event: Envelope) -> None:
-        data = cast(dict[str, Any], event.data)
+        data: dict[str, Any] = event.data
         if event.type != "execution.started" or event.entity != "execution" or not data.get("claim_key"):
             return
         self.store = self.store or connect()
