@@ -1299,10 +1299,10 @@ def test_legacy_master_relaunch_uses_its_declared_profile(ticking, monkeypatch, 
     assert saved["effort"] == "high"
 
 
-def test_legacy_worker_relaunch_prefers_explicit_task_profile(ticking):
+def test_legacy_worker_relaunch_prefers_explicit_task_profile(launched):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
+    store, runtime, ledger = launched
     ledger.rows["one"]["profile"] = "qa"
     store.update("sw", lanes={"eng": {"profile": "engineer"}})
     tick("sw", store, ledger, runtime, 100)
