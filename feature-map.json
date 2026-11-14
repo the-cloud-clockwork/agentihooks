@@ -587,6 +587,17 @@
       ]
     },
     {
+      "id": "bare-fallback-worker-refuse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bare-fallback-worker-refuse",
+      "behaviour": "When no account routes, the bare Claude fallback refuses any non master profile with a failed route report naming the refusal and never starts Claude; a master or a launch with no profile still starts bare Claude with a bare route report.",
+      "seam": "cmd_claude bare fallback and its route report",
+      "tests": [
+        "tests/test_bare_fallback_refusal.py::test_a_worker_launch_with_no_routed_account_fails_with_a_route_report",
+        "tests/test_bare_fallback_refusal.py::test_a_master_bare_launch_is_unchanged"
+      ]
+    },
+    {
       "id": "master-login-launch-folder-trust",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-folder-trust",
