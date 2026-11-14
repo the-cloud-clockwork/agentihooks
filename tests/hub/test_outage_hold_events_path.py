@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -32,7 +33,8 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
     from scripts.swarm.store import EVENTS_ENGINE, AgentRecord, RedisStore, SwarmConfig
 
     monkeypatch.setattr(commands, "hive_id", lambda: HIVE)
-    monkeypatch.setattr(outage, "HOME", tmp_path)
+    (tmp_path / "hub").mkdir()
+    monkeypatch.setattr(outage, "HOME", tmp_path / "hub")
     clock = Mock(return_value=NOW)
     bus: Any = memory.open_bus(BusConfig())
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
@@ -111,6 +113,7 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
         exited=exited,
         clock=clock,
         react=reconciler.Reconciler(bus, store=store, lifecycle=life, clock=clock),
+        tick_home=tmp_path / "tick",
     )
     bus.close()
     redis.close()
@@ -121,19 +124,35 @@ def _lose_hive(rig: SimpleNamespace) -> None:
     rig.bus.state("hive-presence").create(HIVE, json.dumps({"expires_ms": 0}).encode())
 
 
-def _open_outage(kind: str) -> None:
-    """Open a swarm outage of ``kind``."""
+@contextmanager
+def _on_tick(rig: SimpleNamespace) -> Iterator[None]:
+    """Run the block with the tick's own outage home, which the hub never reads."""
     from scripts.swarm import outage
 
-    outage.observe(SLUG, kind, [f"{kind} health probe failed"], NOW - 1_000)
+    hub, outage.HOME = outage.HOME, rig.tick_home
+    try:
+        yield
+    finally:
+        outage.HOME = hub
 
 
-def _close_outages(at_ms: int) -> None:
-    """Close every open swarm outage at ``at_ms``."""
+def _open_outage(rig: SimpleNamespace, kind: str) -> None:
+    """Open a swarm outage of ``kind`` in the tick's home and share it as the outage probes step does."""
     from scripts.swarm import outage
 
-    for record in outage.open_records(SLUG):
-        outage.observe(SLUG, record["kind"], [], at_ms)
+    with _on_tick(rig):
+        outage.observe(SLUG, kind, [f"{kind} health probe failed"], NOW - 1_000)
+        outage.share(rig.store, SLUG)
+
+
+def _close_outages(rig: SimpleNamespace, at_ms: int) -> None:
+    """Close every open swarm outage of the tick at ``at_ms`` and share the result."""
+    from scripts.swarm import outage
+
+    with _on_tick(rig):
+        for record in outage.open_records(SLUG):
+            outage.observe(SLUG, record["kind"], [], at_ms)
+        outage.share(rig.store, SLUG)
 
 
 def _kept(rig: SimpleNamespace) -> None:
@@ -168,7 +187,10 @@ def test_the_engineer_is_hub_owned_on_a_nats_bus(rig: SimpleNamespace) -> None:
 @pytest.mark.feature("events-outage-hold-hub-agents")
 @pytest.mark.parametrize("kind", ["redis", "ledger", "provider"])
 def test_an_open_outage_holds_a_hub_agent_whose_hive_is_lost(rig: SimpleNamespace, kind: str) -> None:
-    _open_outage(kind)
+    from scripts.swarm import outage
+
+    _open_outage(rig, kind)
+    assert outage.open_records(SLUG) == []
     _lose_hive(rig)
     rig.react.poll()
     _kept(rig)
@@ -176,7 +198,7 @@ def test_an_open_outage_holds_a_hub_agent_whose_hive_is_lost(rig: SimpleNamespac
 
 @pytest.mark.feature("events-outage-hold-hub-agents")
 def test_an_open_outage_holds_the_exit_the_spoke_published(rig: SimpleNamespace) -> None:
-    _open_outage("redis")
+    _open_outage(rig, "redis")
     rig.life.handle(rig.exited)
     _kept(rig)
     assert json.loads(rig.bus.for_swarm(SLUG).state("spoke-work").get("claim").value)["state"] == "started"
@@ -186,9 +208,10 @@ def test_an_open_outage_holds_the_exit_the_spoke_published(rig: SimpleNamespace)
 def test_a_pending_outage_resume_holds_the_exit_after_the_outage_closed(rig: SimpleNamespace) -> None:
     from scripts.swarm import resume
 
-    _open_outage("provider")
-    resume.track_outages(SLUG, rig.store, _runtime(rig, []), {"task": dict(rig.row)}, NOW)
-    _close_outages(NOW + 1_000)
+    _open_outage(rig, "provider")
+    with _on_tick(rig):
+        resume.track_outages(SLUG, rig.store, _runtime(rig, []), {"task": dict(rig.row)}, NOW)
+    _close_outages(rig, NOW + 1_000)
     assert resume.recovery_pending(rig.store, SLUG, rig.agent)
     rig.life.handle(rig.exited)
     _kept(rig)
@@ -200,12 +223,14 @@ def test_after_recovery_the_held_hub_agent_gets_the_resume_prompt(rig: SimpleNam
 
     nudged: list[str] = []
     runtime = _runtime(rig, nudged)
-    _open_outage("redis")
+    _open_outage(rig, "redis")
     _lose_hive(rig)
     rig.react.poll()
-    resume.track_outages(SLUG, rig.store, runtime, {"task": dict(rig.row)}, NOW)
-    _close_outages(NOW + 1_000)
-    actions = resume.recover_outages(SLUG, rig.store, rig.ledger, runtime, {"task": dict(rig.row)}, NOW + 2_000)
+    with _on_tick(rig):
+        resume.track_outages(SLUG, rig.store, runtime, {"task": dict(rig.row)}, NOW)
+    _close_outages(rig, NOW + 1_000)
+    with _on_tick(rig):
+        actions = resume.recover_outages(SLUG, rig.store, rig.ledger, runtime, {"task": dict(rig.row)}, NOW + 2_000)
     assert actions == [f"outage resume for {rig.agent.name}"]
     assert len(nudged) == 1
     assert nudged[0].startswith("Service is back after the outage.")
@@ -214,10 +239,49 @@ def test_after_recovery_the_held_hub_agent_gets_the_resume_prompt(rig: SimpleNam
 
 @pytest.mark.feature("events-outage-hold-hub-agents")
 def test_once_no_outage_holds_it_the_exit_retires_and_reclaims(rig: SimpleNamespace) -> None:
-    _open_outage("ledger")
-    _close_outages(NOW - 500)
+    _open_outage(rig, "ledger")
+    _close_outages(rig, NOW - 500)
     _lose_hive(rig)
     rig.react.poll()
     assert rig.store.agents(SLUG) == []
     assert (rig.row["state"], rig.row["claimed_by"]) == ("open", "")
     assert len(rig.returned) == 1
+
+
+def _retired(rig: SimpleNamespace) -> None:
+    """Assert the exit dropped the engineer and returned its slot."""
+    assert rig.store.agents(SLUG) == []
+    assert len(rig.returned) == 1
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_an_open_outage_never_pins_an_agent_whose_task_is_done(rig: SimpleNamespace) -> None:
+    rig.row.update(done=True)
+    _open_outage(rig, "provider")
+    rig.life.handle(rig.exited)
+    _retired(rig)
+    assert rig.row["state"] == "done"
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_an_open_outage_never_pins_a_deliberate_exit(rig: SimpleNamespace) -> None:
+    from scripts.swarm import deliberate_exit
+
+    deliberate_exit.record(rig.store, SLUG, rig.agent.name, NOW)
+    _open_outage(rig, "redis")
+    rig.life.handle(rig.exited)
+    _retired(rig)
+    assert (rig.row["state"], rig.row["claimed_by"]) == ("open", "")
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_the_outage_probes_step_shares_the_tick_outages(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import outage
+    from scripts.tick.steps import host
+
+    monkeypatch.setattr(outage, "providers", lambda *_args: None)
+    with _on_tick(rig):
+        outage.observe(SLUG, "ledger", ["Ledger health probe failed"], NOW)
+        values = {"store": rig.store, "slug": SLUG, "runtime": None}
+        host._outage_probes(SimpleNamespace(now_ms=lambda: NOW), values.__getitem__)
+    assert [record["kind"] for record in outage.shared_open(rig.store, SLUG)] == ["ledger"]
