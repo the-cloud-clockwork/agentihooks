@@ -199,56 +199,6 @@ def test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent(
 
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
-def test_an_expired_launch_reads_the_hive_answer() -> None:
-    agent = AgentRecord("engineer@1-1", "eng", "t1", seat="eng-1")
-    error = RuntimeError("lost")
-    asked: list[tuple[Any, ...]] = []
-
-    def runtime(kept: Any) -> SimpleNamespace:
-        def expire(*args: Any) -> Any:
-            asked.append(args)
-            if isinstance(kept, Exception):
-                raise kept
-            return kept
-
-        return SimpleNamespace(expire=expire)
-
-    config: Any = "config"
-    assert observe._expire_launch(config, runtime(False), agent, error) is error
-    expired = observe._expire_launch(config, runtime(True), agent, error)
-    assert isinstance(expired, tick.SpawnError) and str(expired) == tick.ACK_EXPIRED
-    raised = observe._expire_launch(config, runtime(ValueError("down")), agent, error)
-    assert isinstance(raised, RuntimeError) and str(raised) == "expiring the launch raised ValueError('down')"
-    assert asked == [("config", "eng", "engineer@1-1", {"id": "t1", "seat": "eng-1", tick.ACK_LATER: True})] * 3
-
-
-@pytest.mark.feature("swarm-tick-launch-cluster")
-@pytest.mark.parametrize(("restart", "after"), [("restart", "restart"), (None, "master-after")])
-def test_a_launch_finished_before_collection_is_recorded_as_started(
-    monkeypatch: pytest.MonkeyPatch, restart: str | None, after: str
-) -> None:
-    calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(tick, "_release_hive_launch", lambda *args: calls.append(("release", args)))
-    monkeypatch.setattr(
-        tick, "_master_set", lambda doc, task: calls.append(("master_set", doc, task)) or "master-after"
-    )
-    store = _store(calls, {"take_restart": restart})
-    agent, doc = AgentRecord("engineer@1-1", "eng", "t1", harness="claude"), {"doc": 1}
-    said = observe._finished_launch("sw", store, doc, agent)
-    assert said == "engineer@1-1 finished t1 before the tick collected its hive acknowledgement"
-    assert calls == [
-        ("release", ("sw", store, agent)),
-        ("count_claim", ("sw", "t1"), {}),
-        ("count_spawn", ("sw", "claude"), {}),
-        ("take_restart", ("sw", "t1"), {}),
-        *([] if restart else [("master_set", doc, "t1")]),
-        ("record_launch", ("sw", agent, "started"), {"after": after}),
-        ("key", ("sw", "launch-assignments"), {}),
-        ("redis.hdel", ("sw:launch-assignments", "t1"), {}),
-    ]
-
-
-@pytest.mark.feature("swarm-tick-launch-cluster")
 @pytest.mark.parametrize(
     ("lane", "live", "retired", "held"),
     [

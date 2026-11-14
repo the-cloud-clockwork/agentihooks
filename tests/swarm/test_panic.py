@@ -168,7 +168,7 @@ def test_a_failed_tick_step_counts_an_error(store, counted, monkeypatch):
     with spawn_stall.watch(store, SLUG, None, lambda: 5_000, None):
         failed = timing.ON_FAILURE.get()
         assert failed is not None
-        failed("scripts.swarm.tick._spawn", RuntimeError("boom"))
+        failed("step", RuntimeError("boom"))
     assert panic.errors_by_category(store, 0) == {"RuntimeError": 1}
     assert counted == [(panic.METRIC, 1, {"swarm": SLUG, "category": "RuntimeError"})]
 

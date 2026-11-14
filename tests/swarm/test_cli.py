@@ -889,25 +889,6 @@ def test_tick_reports_its_cost_even_when_a_lock_skips_work(env, capsys):
     assert all(rows[1][key] >= 0 for key in ("wall_s", "own_cpu_s", "reaped_child_cpu_s"))
 
 
-def test_tick_reports_spawn_intent_and_store_stages(env, capsys):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    store.update("sw", state="running")
-    capsys.readouterr()
-    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert any(action.startswith("spawned engineer") for action in actions)
-    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
-    finished = {row["step"] for row in rows if row["phase"] == "finished"}
-    assert {
-        "scripts.tick.steps.place._spawn",
-        "scripts.gates.intent.Check.run",
-        "scripts.swarm.store.RedisStore.agents",
-    } <= finished
-    assert rows[0]["step"] == rows[-1]["step"] == "run_tick"
-    assert rows[-1]["outcome"] == "success"
-    assert all(row["slug"] == "sw" for row in rows)
-
-
 def test_the_tick_hands_the_intent_check_the_named_pull_request_view(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")

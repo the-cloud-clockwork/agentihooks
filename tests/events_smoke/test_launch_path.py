@@ -202,13 +202,6 @@ def test_an_engine_switch_exits_no_running_execution(smoke: Smoke) -> None:
 def test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work(
     smoke: Smoke, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    legacy: list[tuple[Any, ...]] = []
-
-    def launched(*args: Any) -> list[str]:
-        legacy.append(args)
-        return []
-
-    monkeypatch.setattr(swarm_tick, "_spawn", launched)
     hive = smoke.spoke("hive-a", "eng")
     smoke.offer("t1")
     assert hive.spoke.poll(TAKE_MS) == "started"
@@ -216,12 +209,10 @@ def test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work(
     ledger = FakeLedger([dict(row) for row in smoke.ledger.rows.values()])
     runtime = FakeRuntime()
     offline(monkeypatch)
-    smoke.store.redis.set(smoke.store.key(SLUG, swarm_tick.SPAWN_DUE), 1)
 
     swarm_tick.tick(SLUG, smoke.store, ledger, runtime, now_ms=presence.now_ms())
 
     assert not readiness.tick_launches(smoke.store.config(SLUG).engine)
-    assert legacy == []
     assert worker_spawns(runtime) == []
     assert ledger.rows["t2"]["state"] == "open"
     assert hive.runtime.spawn.call_count == 1
