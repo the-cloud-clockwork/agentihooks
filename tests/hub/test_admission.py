@@ -235,8 +235,12 @@ def test_a_republished_decision_naming_no_harness_starts_no_second_launch_check(
 
 
 @pytest.mark.feature("events-launch-check")
-def test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join(rig: SimpleNamespace) -> None:
-    from scripts.swarm import launch_check
+def test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands, launch_check
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
 
     admitted = rig.admitter.admit(SLUG, ask())
     rig.admitter.launched(SLUG, ask(launch=LAUNCH))
