@@ -274,6 +274,8 @@ def test_a_placement_wait_is_logged_in_the_tick_output(store):
     assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
 
 
+@pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])
+@pytest.mark.parametrize("pr_url, expected", [("", "claimed"), ("https://github.com/o/r/pull/1", "pr")])
 def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger, pr_url, expected):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     owner = seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
@@ -291,6 +293,7 @@ def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(stor
     assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
 
 
+@pytest.mark.parametrize("state", ["claimed", "pr"])
 def test_a_live_owner_recovers_a_missing_claimant_on_an_active_ledger_row(store, state):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     owner = seat_agent(store, ledger, "sw", "t1", started=Launched(1_000, runtime))
