@@ -226,14 +226,16 @@ def test_status_keeps_remote_agents_outside_the_local_process_table(store, monke
 
 
 @pytest.mark.feature("swarm-status-lists-remote-hub-agents")
-def test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target(store, monkeypatch):
+def test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import commands
     from scripts.swarm.runtime import HerdrRuntime
 
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     monkeypatch.setattr(commands, "hive_id", lambda: "root")
     monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
-    names = []
+    names: list[str] = []
     for seat, hive in enumerate(("06db8fa06259f56a", "root", ""), 1):
         name = store.next_name("sw", "eng", 1_000)
         store.start_execution("sw", AgentRecord(name, "eng", f"t{seat}", seat=f"eng-{seat}@sw", hive=hive))
