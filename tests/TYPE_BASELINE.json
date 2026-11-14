@@ -682,7 +682,7 @@
   "scripts/swarm/staged_compatibility.py": 55,
   "scripts/swarm/stages.py": 571,
   "scripts/swarm/stale_nudge.py": 27,
-  "scripts/swarm/stall_watch.py": 731,
+  "scripts/swarm/stall_watch.py": 703,
   "scripts/swarm/status.py": 297,
   "scripts/swarm/store.py": 741,
   "scripts/swarm/successor_retry.py": 29,
