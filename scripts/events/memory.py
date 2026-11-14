@@ -3,13 +3,14 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
+from typing import cast
 
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
 from .scope import RoutedLog, ScopedLog, ScopedQueue, queue_lane
-from .subjects import PREFIX, in_swarm
+from .subjects import PREFIX, STOPS, in_swarm
 from .subjects import subject as event_subject
 
 Clock = Callable[[], int]
@@ -289,11 +290,15 @@ class MemoryBus:
         raw_events = MemoryEventLog(self._runtime, config, self.dead)
         self._legacy_events = raw_events
         self.events = ScopedLog(raw_events, swarm, "events") if swarm is not None else raw_events
+        raw_stops = MemoryEventLog(self._runtime, config, cast(EventLog, self.dead))
+        self._legacy_stops = raw_stops
+        self.stops = ScopedLog(cast(EventLog, raw_stops), swarm, STOPS.lower()) if swarm is not None else raw_stops
         if config.scoped:
             self.events = RoutedLog(
                 lambda owner: self.for_swarm(owner).events, lambda: self._logs("events"), config.queue
             )
             self.dead = RoutedLog(lambda owner: self.for_swarm(owner).dead, lambda: self._logs("dead"), config.queue)
+            self.stops = RoutedLog(lambda owner: self.for_swarm(owner).stops, lambda: self._logs("stops"), config.queue)
         self._queues: dict[str, MemoryWorkQueue | ScopedQueue] = {}
         self._buckets: dict[str, MemoryStateStore] = {}
 

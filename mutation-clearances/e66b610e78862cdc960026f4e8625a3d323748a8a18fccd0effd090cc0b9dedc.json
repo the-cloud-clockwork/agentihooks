@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.xǁMemoryBusǁ__init__:142d3ab407f21707f9f82b23d328d163ff9d4272d958e7bd2830df4d9827814c": {
+    "reader": "standards_reader",
+    "reason": "cast(None, raw_stops) returns raw_stops unchanged at runtime, so the ScopedLog wrapper is identical and no output changes."
+  }
+}
