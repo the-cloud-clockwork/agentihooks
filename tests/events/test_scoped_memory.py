@@ -63,6 +63,23 @@ def test_scoped_memory_aggregate_events_and_dead_include_legacy_and_owned_logs()
         bus.close()
 
 
+@pytest.mark.feature("hive-own-stop-consumer")
+def test_scoped_memory_aggregate_stops_include_legacy_and_owned_logs() -> None:
+    bus = memory.open_bus(BusConfig(scoped=True))
+    assert isinstance(bus, memory.MemoryBus)
+    try:
+        own, other = bus.for_swarm("rig"), bus.for_swarm("other")
+        assert isinstance(own, memory.MemoryBus)
+        consumer = bus.stops.consumer("stops", "swarm.>")
+        assert bus.stops.publish("ready", work("rig"))
+        assert other.stops.publish("ready", work("other"))
+        assert bus._legacy_stops.publish("swarm.old.ready", work("old"))
+        assert {entry.event.swarm for entry in consumer.fetch(3, 100)} == {"rig", "other", "old"}
+        assert own._legacy_stops.entries[0][0] == "swarm.rig.stop.ready"
+    finally:
+        bus.close()
+
+
 def test_scoped_memory_queue_root_routing_and_immutable_views():
     from scripts.events.memory import MemoryBus
 

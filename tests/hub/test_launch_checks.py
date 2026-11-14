@@ -54,7 +54,7 @@ def joined(rig: SimpleNamespace) -> None:
 def stops(bus: Any) -> list[Envelope]:
     subject = execution_stop.stop_subject(SLUG, "hive-a")
     durable = execution_stop.durable(SLUG, "hive-a")
-    found = bus.for_swarm(SLUG).events.consumer(durable, subject, execution_stop.POLICY).fetch(10, 0)
+    found = bus.for_swarm(SLUG).stops.consumer(durable, subject, execution_stop.POLICY).fetch(10, 0)
     return [delivery.event for delivery in found]
 
 

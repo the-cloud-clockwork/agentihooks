@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -179,6 +180,18 @@ def test_hub_fans_in_scoped_event_streams_with_existing_reactor_filters(hub):
     assert hub.events.publish(subject("other", "execution", "started"), event("other", "second"))
     deliveries = consumer.fetch(10, 1000)
     assert {delivery.event.swarm for delivery in deliveries} == {"rig", "other"}
+    for delivery in deliveries:
+        delivery.ack()
+
+
+@pytest.mark.feature("hive-own-stop-consumer")
+def test_hub_fans_in_scoped_stop_streams_and_the_legacy_events_stream(hub: Any) -> None:
+    consumer = hub.stops.consumer("aggregate-stops", "swarm.*.execution.stop.*")
+    assert hub.stops.publish(subject("rig", "execution", "stop", "h1"), event())
+    assert hub.stops.publish(subject("other", "execution", "stop", "h2"), event("other", "second"))
+    assert hub._legacy_stops.publish(subject("old", "execution", "stop", "h3"), event("old", "third"))
+    deliveries = consumer.fetch(10, 1000)
+    assert {delivery.event.swarm for delivery in deliveries} == {"rig", "other", "old"}
     for delivery in deliveries:
         delivery.ack()
 

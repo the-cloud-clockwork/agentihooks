@@ -269,6 +269,7 @@ def test_the_member_grants_render_the_minted_member_claims() -> None:
                 "swarm.*.execution.stop.>",
                 "swarm.*.events.execution.stop",
                 "swarm.*.events.execution.stop.>",
+                "swarm.*.stop.>",
                 "swarm.*.execution.exited",
                 "swarm.*.events.execution.exited",
             }

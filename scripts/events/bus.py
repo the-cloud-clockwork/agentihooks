@@ -74,6 +74,7 @@ class StateStore(Protocol):
 class Bus(Protocol):
     events: EventLog
     dead: EventLog
+    stops: EventLog
 
     def queue(self, name: str, policy: QueuePolicy) -> WorkQueue: ...
 

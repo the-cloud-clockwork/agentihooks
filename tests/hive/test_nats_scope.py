@@ -239,11 +239,15 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
         )
     for stream in ("AGENTIHOOKS_726967_STATE_scheduler-m1", stream_name("rig", "STATE_scheduler-m1")):
         expected.update(f"$JS.API.STREAM.{verb}.{stream}" for verb in ("INFO", "MSG.GET", "CREATE"))
+    expected.update(nats_grant.stop_publish("rig", "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert set(claims) == {"type", "version", "pub", "sub", "subs", "data", "payload"}
     assert claims["pub"]["deny"] == list(nats_grant.MEMBER_DENY)
     assert set(claims["pub"]["allow"]) == expected
-    assert claims["sub"] == {"allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"]}
+    assert claims["sub"] == {
+        "allow": ["swarm.rig.>", f"_INBOX.{user.public}.>"],
+        "deny": list(nats_grant.MEMBER_SUB_DENY),
+    }
 
 
 def test_empty_membership_carries_an_explicit_publish_deny(signer):
@@ -251,7 +255,7 @@ def test_empty_membership_carries_an_explicit_publish_deny(signer):
     jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
     claims = nkey.claims(jwt)["nats"]
     assert claims["pub"] == {"deny": [">"]}
-    assert claims["sub"] == {"allow": [f"_INBOX.{user.public}.>"]}
+    assert claims["sub"] == {"allow": [f"_INBOX.{user.public}.>"], "deny": list(nats_grant.MEMBER_SUB_DENY)}
 
 
 @pytest.mark.parametrize("memberships", [{}, {"another": ("rig",)}])

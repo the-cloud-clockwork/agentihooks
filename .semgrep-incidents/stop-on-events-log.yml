@@ -1,0 +1,31 @@
+rules:
+  - id: stop-on-events-log
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An execution stop is read or published on the swarm events log. Every hive member may fetch and ack any consumer
+      of the events stream, so a stop consumer there lets one hive pull and ack another hive's stops and suppress
+      them. Stops travel only on the stops log, the dedicated per swarm stop stream where a member credential reaches
+      its own stop consumer alone.
+    paths:
+      include:
+        - /scripts/
+        - stop-on-events-log.py
+    pattern-either:
+      - pattern: $BUS.events.consumer(..., stop_subject(...), ...)
+      - pattern: $BUS.events.consumer(..., execution_stop.stop_subject(...), ...)
+      - pattern: $BUS.events.consumer(durable(...), ...)
+      - pattern: $BUS.events.consumer(stop_names.durable(...), ...)
+      - pattern: $BUS.events.publish(stop_subject(...), ...)
+      - pattern: $BUS.events.publish(execution_stop.stop_subject(...), ...)
+      - patterns:
+          - pattern-inside: |
+              $LOG = $BUS.events
+              ...
+          - pattern-either:
+              - pattern: $LOG.consumer(..., stop_subject(...), ...)
+              - pattern: $LOG.consumer(..., execution_stop.stop_subject(...), ...)
+              - pattern: $LOG.consumer(durable(...), ...)
+              - pattern: $LOG.consumer(stop_names.durable(...), ...)
+              - pattern: $LOG.publish(stop_subject(...), ...)
+              - pattern: $LOG.publish(execution_stop.stop_subject(...), ...)
