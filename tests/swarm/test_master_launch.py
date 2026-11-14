@@ -881,7 +881,13 @@ def test_a_resumed_master_without_launch_facts_keeps_its_own(up):
         "low",
         "boss",
     )
-    assert (record.started_at, record.idle_ticks, record.task, record.seat) == (AT, 0, MASTER, "master@sw")
+    assert (record.started_at, record.launched_at, record.idle_ticks, record.task, record.seat) == (
+        10,
+        AT,
+        0,
+        MASTER,
+        "master@sw",
+    )
     assert store.seats.history("master@sw")[-1]["at"] == AT
     assert rt.configs == ["sw"]
     text = rt.resumed[0][4]
