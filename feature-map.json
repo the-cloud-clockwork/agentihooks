@@ -664,7 +664,7 @@
       "id": "engine-config-migration",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-engine-config-migration",
-      "behaviour": "python -m scripts.swarm.engine_migration moves every stored swarm config to the events engine with a repository origin: a stored origin is kept, a Doctor otherwise takes the origin of the stored swarm it watches and then its own; a legacy swarm with agents or launch jobs in flight, a swarm with no origin and a swarm that fails to load are reported as skipped while the rest migrate; a second run changes nothing. doctor start creates the Doctor on the events engine with the watched origin, else its own.",
+      "behaviour": "python -m scripts.swarm.engine_migration moves every stored swarm config to the events engine with a repository origin: a stored origin is kept, a Doctor otherwise takes the origin of the stored swarm it watches and then its own; a stored legacy engine is migrated by its stored value even when the config reads events; a legacy swarm with no agents and an origin drops its launch job rows, whose agents are gone, and migrates; a legacy swarm with agents in flight, a swarm with no origin, which keeps its launch job rows, and a swarm that fails to load are reported as skipped while the rest migrate; a second run changes nothing. doctor start creates the Doctor on the events engine with the watched origin, else its own.",
       "seam": "scripts.swarm.engine_migration.migrate, start_on_events and main, scripts.doctor.cli.cmd_start",
       "tests": [
         "tests/swarm/test_engine_migration.py::test_every_stored_legacy_config_moves_to_events_with_an_origin_the_doctor_included",
@@ -672,6 +672,10 @@
         "tests/swarm/test_engine_migration.py::test_a_doctor_keeps_a_stored_origin",
         "tests/swarm/test_engine_migration.py::test_a_swarm_without_any_origin_stays_legacy_and_is_reported",
         "tests/swarm/test_engine_migration.py::test_a_doctor_takes_its_own_origin_when_the_watched_swarm_has_none",
+        "tests/swarm/test_engine_migration.py::test_a_swarm_with_legacy_agents_in_flight_is_left_for_the_master_with_its_launch_jobs",
+        "tests/swarm/test_engine_migration.py::test_a_swarm_with_only_launch_jobs_whose_agents_are_gone_drops_them_and_migrates",
+        "tests/swarm/test_engine_migration.py::test_a_swarm_without_an_origin_keeps_its_launch_jobs_when_skipped",
+        "tests/swarm/test_engine_migration.py::test_a_stored_legacy_engine_with_an_origin_is_migrated_even_when_the_config_reads_events",
         "tests/swarm/test_engine_migration.py::test_a_swarm_that_cannot_load_is_reported_and_the_rest_still_migrate",
         "tests/swarm/test_engine_migration.py::test_a_new_doctor_starts_on_events_with_the_watched_origin",
         "tests/swarm/test_engine_migration.py::test_a_new_doctor_takes_its_own_origin_when_the_watched_swarm_has_none_or_is_not_stored",
@@ -702,6 +706,21 @@
       "tests": [
         "tests/hub/test_admission.py::test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledger_read",
         "tests/swarm/test_profile_choice.py::test_the_carried_ledger_intent_of_a_ledger_without_overview_or_phases_is_empty"
+      ]
+    },
+    {
+      "id": "hub-admission-claim-continuity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-continuity",
+      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened or late admission detaches the transfer for the next successor without a second row, and a refused attach releases the claim, the agent and the ledger row.",
+      "seam": "Admission.admit and Admission.reopen against the stored handoff transfers",
+      "tests": [
+        "tests/hub/test_admission.py::test_an_events_successor_attaches_the_transfer_its_predecessor_left",
+        "tests/hub/test_admission.py::test_an_events_successor_with_no_transfer_left_carries_none",
+        "tests/hub/test_admission.py::test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor",
+        "tests/hub/test_admission.py::test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was",
+        "tests/hub/test_admission.py::test_a_late_events_admission_hands_its_transfer_back",
+        "tests/hub/test_admission.py::test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_row"
       ]
     },
     {

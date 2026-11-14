@@ -13,6 +13,7 @@ from typing import Any, cast
 from packaging.version import InvalidVersion, Version
 
 from scripts import updater
+from scripts.handoff import transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import lease
@@ -220,6 +221,11 @@ class Admission:
             profile_choice.LEDGER_INTENT: profile_choice.carried(doc, task),
         }
         avoid = self.store.failed_harness(slug, task_id)
+        try:
+            task["transfer"] = transfers.attach(self.store, slug, record)
+        except Exception:
+            self._release(slug, task_id, name)
+            raise
         admitted = {
             "hive": request["hive"],
             "name": name,
@@ -261,18 +267,22 @@ class Admission:
         held = self.store.redis.get(key)
         if not held or json.loads(held)["hive"] != request["hive"]:
             return False
-        name = json.loads(held)["name"]
-        self.store.cancel_pending_life(slug, request["task"])
-        self._unclaim(slug, request["task"], name)
+        self._release(slug, request["task"], json.loads(held)["name"])
+        self.store.redis.delete(key)
+        return True
+
+    def _release(self, slug: str, task_id: str, name: str) -> None:
+        """Returns a claimed task to open: its pending life, its transfer, its claim and agent, then its ledger row."""
+        self.store.cancel_pending_life(slug, task_id)
+        transfers.detach(self.store, slug, SimpleNamespace(name=name))
+        self._unclaim(slug, task_id, name)
         self.ledger.update_task(
             slug,
-            request["task"],
+            task_id,
             {"state": "open", "claimed_by": ""},
             if_state=("claimed", "pr"),
             if_match={"claimed_by": name},
         )
-        self.store.redis.delete(key)
-        return True
 
     def failed(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)
