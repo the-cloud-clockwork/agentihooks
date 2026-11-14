@@ -106,21 +106,93 @@ def test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behi
     assert {inbox.get(item.id).state for item in poisoned} == {"pending"}
 
 
-@pytest.mark.feature("inbox-push-poisoned-item")
-def test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_backoff(
+@pytest.mark.feature("inbox-claim-redis-error-requeue")
+def test_a_redis_error_mid_batch_returns_every_item_the_claim_delivered_to_pending_and_a_healthy_pass_pushes_them(
     channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from redis.exceptions import RedisError
 
     _, inbox = channel_backend
-    item = inbox.send("alice", "bob", "during an outage", ref="sw:1:c1")
+    first, broken, last = _three(inbox)
+    checked = seen._shown_elsewhere  # pyright: ignore[reportPrivateUsage]
 
     def failing(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
-        raise RedisError("connection lost")
+        if item.id == broken.id:
+            raise RedisError("connection lost")
+        return checked(marks, store, item, me)
 
     monkeypatch.setattr(seen, "_shown_elsewhere", failing)
-    left_out: set[str] = set()
+    session = Session()
     with pytest.raises(RedisError):
-        seen.claim(inbox, "bob", seen.CLAIM_BATCH, left_out)
-    assert left_out == set()
-    assert inbox.get(item.id).state == "delivered"
+        _pass(inbox, session)
+    assert session.shown == []
+    assert [inbox.get(item.id).state for item in (first, broken, last)] == ["pending", "pending", "pending"]
+    assert _requeued(inbox, first.id) == ("pending", "bob", seen.UNCHECKED)
+    assert _requeued(inbox, broken.id) == ("pending", "bob", seen.UNCHECKED)
+    monkeypatch.setattr(seen, "_shown_elsewhere", checked)
+    _pass(inbox, session)
+    assert session.shown == [first.id, broken.id, last.id]
+
+
+def _clocked_passes(inbox: InboxStore, monkeypatch: pytest.MonkeyPatch) -> tuple[Session, list[int], Any]:
+    import anyio
+
+    clock = [seen.now_ms()]
+    monkeypatch.setattr(seen, "now_ms", lambda: clock[0])
+    session, pushed = Session(), channel.Pushed()
+
+    def deliver() -> None:
+        anyio.run(channel._deliver, inbox, "bob", session, pushed)  # pyright: ignore[reportPrivateUsage]
+
+    return session, clock, deliver
+
+
+@pytest.mark.feature("inbox-poisoned-id-expiry")
+def test_an_id_poisoned_by_one_seen_check_failure_is_pushed_again_after_one_redelivery_window(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, inbox = channel_backend
+    item = inbox.send("alice", "bob", "once flaky", ref="sw:1:f1")
+    checked = seen._shown_elsewhere  # pyright: ignore[reportPrivateUsage]
+    failures = [ValueError("transient")]
+
+    def flaky(marks: Any, store: InboxStore, claimed: Item, me: str) -> bool:
+        if failures:
+            raise failures.pop()
+        return checked(marks, store, claimed, me)
+
+    monkeypatch.setattr(seen, "_shown_elsewhere", flaky)
+    session, clock, deliver = _clocked_passes(inbox, monkeypatch)
+    deliver()
+    clock[0] += seen.redelivery_ms() - 1
+    deliver()
+    assert session.shown == []
+    assert inbox.get(item.id).state == "pending"
+    clock[0] += 1
+    deliver()
+    assert session.shown == [item.id]
+
+
+@pytest.mark.feature("inbox-poisoned-id-expiry")
+def test_an_id_poisoned_by_one_notification_failure_is_pushed_again_after_one_redelivery_window(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, inbox = channel_backend
+    item = inbox.send("alice", "bob", "once unbuildable", ref="sw:1:u1")
+    built = channel.event
+    failures = [TypeError("transient")]
+
+    def flaky(claimed: Item) -> dict[str, Any]:
+        if failures:
+            raise failures.pop()
+        return built(claimed)
+
+    monkeypatch.setattr(channel, "event", flaky)
+    session, clock, deliver = _clocked_passes(inbox, monkeypatch)
+    deliver()
+    clock[0] += seen.redelivery_ms() - 1
+    deliver()
+    assert session.shown == []
+    clock[0] += 1
+    deliver()
+    assert session.shown == [item.id]

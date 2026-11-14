@@ -2800,8 +2800,28 @@
       "tests": [
         "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_seen_check_always_fails_is_requeued_alone_and_the_other_two_are_pushed",
         "tests/inbox/test_channel_poisoned_item.py::test_an_item_whose_notification_always_fails_to_build_is_requeued_alone_and_the_other_two_are_pushed",
-        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed",
-        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_in_the_seen_check_leaves_the_claim_for_the_push_loop_backoff"
+        "tests/inbox/test_channel_poisoned_item.py::test_a_full_batch_of_poisoned_items_is_never_claimed_again_and_the_item_behind_it_is_pushed"
+      ]
+    },
+    {
+      "id": "inbox-claim-redis-error-requeue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-claim-redis-error-shown",
+      "behaviour": "A Redis error in the seen check during an inbox claim returns every item that claim already delivered, the failing one included, to pending before the error propagates, so no item is left delivered and unshown and the next healthy channel pass pushes them all.",
+      "seam": "scripts.inbox.seen.claim through scripts.inbox.channel._deliver on a Redis error mid batch",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_a_redis_error_mid_batch_returns_every_item_the_claim_delivered_to_pending_and_a_healthy_pass_pushes_them"
+      ]
+    },
+    {
+      "id": "inbox-poisoned-id-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-inbox-claim-redis-error-shown",
+      "behaviour": "An inbox item left out of the channel's claims after one failed seen check or notification build is claimed and pushed again once one redelivery window has passed since it was left out, and stays left out before that.",
+      "seam": "scripts.inbox.seen.claim and scripts.inbox.seen.leave_out over the channel's poisoned ids across scripts.inbox.channel._deliver passes",
+      "tests": [
+        "tests/inbox/test_channel_poisoned_item.py::test_an_id_poisoned_by_one_seen_check_failure_is_pushed_again_after_one_redelivery_window",
+        "tests/inbox/test_channel_poisoned_item.py::test_an_id_poisoned_by_one_notification_failure_is_pushed_again_after_one_redelivery_window"
       ]
     },
     {
