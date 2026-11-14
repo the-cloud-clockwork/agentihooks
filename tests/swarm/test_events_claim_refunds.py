@@ -131,21 +131,20 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
 
 
 @pytest.mark.feature("events-parked-retirement-after-release-refunds-nothing")
-@pytest.mark.parametrize(("released", "lives"), [(True, 1), (False, 0)])
+@pytest.mark.parametrize("released, lives", [(True, 1), (False, 0)])
 def test_an_events_exit_of_a_quota_handoff_refunds_nothing_once_its_claim_was_released(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], released: bool, lives: int
 ) -> None:
     store, ledger, _ = env
     agent, event = launched(env, bus, seat)
     store.put_handoff(SLUG, "t1", "continue here", seat=agent.seat, envelope={"reason": "quota"})
-    if released:
-        assert store.release(SLUG, "t1", agent.name)
+    assert (released and store.release(SLUG, "t1", agent.name)) == released
     bus.for_swarm(SLUG).state("spoke-work").create(
         "claim", json.dumps({"state": "started", "claim_revision": 1}).encode()
     )
     react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, _agent: None)
 
-    react.handle(replace(event, id="exit", type="execution.exited"))
+    react.handle(replace(event, id=f"exited:{agent.execution_id}", type="execution.exited"))
 
     assert [seated.name for seated in store.agents(SLUG)] == []
     assert store.claims(SLUG, "t1") == lives
