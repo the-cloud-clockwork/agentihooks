@@ -27,9 +27,16 @@ def crew(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
 
 
 class Ledger:
-    def __init__(self, done: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        done: set[str] | None = None,
+        agents: list[dict[str, str]] | None = None,
+        gone: tuple[set[str], type[Exception]] | None = None,
+    ) -> None:
         self.calls: list[list[str]] = []
         self.done = done or set()
+        self.agents = agents or []
+        self.gone = gone
 
     def __call__(self, command: list[str]) -> str:
         self.calls.append(command)
@@ -39,8 +46,10 @@ class Ledger:
             return json.dumps(rows)
         if command[-2:] == ["status", "--json"]:
             lanes = {"eng": {"model": "sonnet", "effort": "high"}}
-            return json.dumps({"config": {"lanes": lanes, "effort_max": "xhigh"}})
+            return json.dumps({"config": {"lanes": lanes, "effort_max": "xhigh"}, "agents": self.agents})
         if command[-2] == "get":
+            if self.gone and command[-1] in self.gone[0]:
+                raise self.gone[1](f"{command[-1]} does not exist")
             task = command[-1].removeprefix("tasks/")
             return json.dumps({"id": task, "state": "done" if task in self.done else "claimed"})
         return "{}"
@@ -269,6 +278,35 @@ def test_restore_brings_back_the_earlier_focus_and_lane(crew: ModuleType, capsys
         "eng-effort=high",
         "effort-max=xhigh",
     ]
+
+
+@pytest.mark.feature("launch-troubleshooting-crew")
+def test_launch_asks_agents_on_other_tasks_to_hand_off(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
+    agents = [
+        {"name": "engineer@1", "lane": "eng", "task": "t5"},
+        {"name": "cicd@2", "lane": "ci", "task": "t6"},
+        {"name": "master@3", "lane": "master", "task": ""},
+        {"name": "engineer@4", "lane": "eng", "task": ""},
+    ]
+    ledger = Ledger(agents=agents)
+    run(crew, ledger, "scout", "demo", "--problem", "p", capsys=capsys)
+    sends = [c for c in ledger.writes() if c[1:3] == ["msg", "send"]]
+    assert [c[3] for c in sends] == ["engineer@1", "cicd@2"]
+    assert all("handoff" in c[4] and "stopped all other work" in c[4] for c in sends)
+    stopped = [{"name": "engineer@1", "task": "t5"}, {"name": "cicd@2", "task": "t6"}]
+    assert json.loads(crew.state_path("demo").read_text())["stopped_agents"] == stopped
+    result = run(crew, Ledger(), "restore", "demo", capsys=capsys)
+    assert result["stopped_agents"] == stopped
+
+
+@pytest.mark.feature("launch-troubleshooting-crew")
+def test_restore_skips_focus_targets_done_or_gone(crew: ModuleType, capsys: pytest.CaptureFixture) -> None:
+    run(crew, Ledger(), "scout", "demo", "--problem", "p", capsys=capsys)
+    ledger = Ledger(done={"t2"}, gone=({"phases/p1"}, crew.CommandFailed))
+    result = run(crew, ledger, "restore", "demo", capsys=capsys)
+    assert (result["restored_focus"], result["skipped_focus"]) == ([], ["phases/p1", "tasks/t2"])
+    assert not any(c[3] == "focus" for c in ledger.writes())
+    assert not crew.state_path("demo").exists()
 
 
 def test_later_stages_refuse_without_a_launched_crew(crew: ModuleType) -> None:

@@ -38,7 +38,8 @@ script quotes his standing order for this skill.
 2. **Scout.** Run the same line with `scout` instead of `plan`. It saves the earlier focus and eng lane
    settings, sets the eng lane to the scout model and effort, adds one eng lane troubleshoot task per scout
    (an engineer in scouting mode: no code), focuses only the crew with focus only, which drops every other
-   focus without deleting anything, and records the order verbatim as a canon seat note. While any crew task is not done, the focus holds every other open task in every
+   focus without deleting anything, records the order verbatim as a canon seat note and asks every agent working on another task to hand
+   off at its next stop, so its task waits for the restore. While any crew task is not done, the focus holds every other open task in every
    lane back from a claim. Then set the
    printed `cron` with CronCreate (recurring, every thirty minutes, the printed prompt verbatim). Done when
    the scout tasks are focused and the cron is set.
@@ -62,7 +63,8 @@ script quotes his standing order for this skill.
    a crew launched with `--no-harden` skips this step. Done when the hardening task is merged.
 
 7. **Restore.** Run `crew.py restore SLUG`. It unfocuses the crew tasks, focuses the earlier targets in their
-   order and puts the eng lane model, effort and effort ceiling back. Delete the cron. Done when the swarm
+   order, skipping any that are done or gone, puts the eng lane back and names the agents the launch
+   stopped. Delete the cron. Done when the swarm
    status shows the earlier focus again.
 
 Only follow ups that really come from the troubleshooting, at medium, high or critical priority, join the

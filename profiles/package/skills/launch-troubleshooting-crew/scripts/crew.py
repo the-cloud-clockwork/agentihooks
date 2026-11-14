@@ -80,6 +80,7 @@ class State:
     harden_task: str = ""
     causes: list[str] = field(default_factory=list)
     launched: bool = False
+    stopped_agents: list[dict[str, str]] = field(default_factory=list)
 
 
 def crew_id(now: float) -> str:
@@ -304,22 +305,38 @@ def save_state(slug: str, state: State) -> None:
 
 
 def run(command: list[str]) -> str:
-    """Run one agentihooks command and return its output, stopping on a failure."""
+    """Run one agentihooks command and return its output, raising CommandFailed on a failure."""
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode:
-        sys.exit(f"{' '.join(command[:4])} failed: {(result.stderr or result.stdout).strip()}")
+        raise CommandFailed(f"{' '.join(command[:4])} failed: {(result.stderr or result.stdout).strip()}")
     return result.stdout
 
 
-def earlier(slug: str, runner: Runner) -> tuple[list[str], dict[str, str]]:
-    """The focus targets in their order and the eng lane settings before the crew."""
+class CommandFailed(Exception):
+    """An agentihooks command the crew ran exited with an error."""
+
+
+def alive(slug: str, target: str, runner: Runner) -> bool:
+    """Whether a focus target still exists on the ledger and is not done."""
+    try:
+        row = json.loads(runner(["agentihooks", "ledger", "--slug", slug, "get", target]) or "{}")
+    except CommandFailed:
+        return False
+    return bool(row) and not row.get("done") and row.get("state") != "done"
+
+
+def earlier(slug: str, runner: Runner) -> tuple[list[str], dict[str, str], list[dict[str, str]]]:
+    """The focus targets in their order, the eng lane settings and the working agents before the crew."""
     rows = json.loads(runner(["agentihooks", "ledger", "--slug", slug, "get", "freezes"]) or "[]")
     focus = [row["target"] for row in rows if row.get("verb") == "focus"]
-    config = json.loads(runner(swarm(slug, "status", "--json")))["config"]
+    status = json.loads(runner(swarm(slug, "status", "--json")))
+    config = status["config"]
     eng = (config.get("lanes") or {}).get("eng") or {}
     lane = {"agent": eng.get("agent"), "model": eng.get("model"), "effort": eng.get("effort")}
     lane["effort_max"] = config.get("effort_max")
-    return focus, {key: value for key, value in lane.items() if value}
+    agents = status.get("agents") or []
+    working = [{"name": a["name"], "task": a["task"]} for a in agents if a.get("task") and a.get("lane") != "master"]
+    return focus, {key: value for key, value in lane.items() if value}, working
 
 
 def task_done(slug: str, task: str, runner: Runner) -> bool:
@@ -341,13 +358,22 @@ def execute(
 
 
 def launched(args: argparse.Namespace, crew: Crew, runner: Runner) -> State | None:
-    """The running crew's state, or a new state holding the focus and eng lane from before the crew."""
+    """The running crew's state, or a new state holding the focus, eng lane and working agents from before it."""
     if state_path(args.slug).exists():
         return load_state(args.slug)
     if args.dry_run:
         return None
-    focus, lane = earlier(args.slug, runner)
-    return State(crew_id(args.now), args.problem, asdict(crew), focus, lane)
+    focus, lane, working = earlier(args.slug, runner)
+    return State(crew_id(args.now), args.problem, asdict(crew), focus, lane, stopped_agents=working)
+
+
+def stop_commands(slug: str, state: State) -> list[list[str]]:
+    """Ask every agent working on other tasks to hand off at its next stop, so its task waits for the restore."""
+    text = (
+        f"The operator's troubleshooting crew {state.crew_id} stopped all other work on {slug}. At your next stop "
+        f"write your Handoff v2 and run agentihooks swarm {slug} handoff with it, then stop."
+    )
+    return [["agentihooks", "msg", "send", agent["name"], text] for agent in state.stopped_agents]
 
 
 def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
@@ -366,6 +392,7 @@ def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[st
     commands += focus_commands(args.slug, scouts, args.quote, only=first)
     if first:
         commands.append(canon_note(args.slug, crew))
+        commands += stop_commands(args.slug, state)
 
     def landed(command: list[str]) -> None:
         if command[6:8] == ["task", "add"]:
@@ -434,14 +461,16 @@ def stage_harden(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[s
 
 
 def stage_restore(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
-    """Put the earlier focus and eng lane back, then set the crew state aside so the next scout starts a new crew."""
+    """Put the eng lane and the earlier focus back, skipping targets done or gone since, then set the state aside."""
     state = load_state(args.slug)
-    commands = restore_commands(args.slug, state, args.quote)
-    execute(commands, runner, args.dry_run)
+    gone = [target for target in state.earlier_focus if not alive(args.slug, target, runner)]
+    state.earlier_focus = [target for target in state.earlier_focus if target not in gone]
+    execute(restore_commands(args.slug, state, args.quote), runner, args.dry_run)
     if not args.dry_run:
         path = state_path(args.slug)
         path.rename(path.with_name(f"troubleshooting-crew-{state.crew_id}.json"))
-    return {"crew": state.crew_id, "restored_focus": state.earlier_focus, "restored_lane": state.earlier_lane}
+    restored = {"restored_focus": state.earlier_focus, "skipped_focus": gone, "restored_lane": state.earlier_lane}
+    return {"crew": state.crew_id, **restored, "stopped_agents": state.stopped_agents}
 
 
 def stage_plan(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
@@ -501,7 +530,11 @@ def main(argv: Sequence[str] | None = None, runner: Runner = run, now: float | N
         sys.exit("name this session with --as or AGENTIHOOKS_AGENT_NAME")
     path = state_path(args.slug)
     saved = json.loads(path.read_text())["crew"] if args.stage != "plan" and path.exists() else None
-    print(json.dumps(STAGES[args.stage](args, crew_from(args, saved), runner), indent=2))
+    try:
+        result = STAGES[args.stage](args, crew_from(args, saved), runner)
+    except CommandFailed as failed:
+        sys.exit(str(failed))
+    print(json.dumps(result, indent=2))
     return 0
 
 
