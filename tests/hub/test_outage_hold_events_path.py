@@ -315,6 +315,18 @@ def test_a_fresh_share_of_an_open_outage_is_read_without_a_stale_log(
 
 
 @pytest.mark.feature("events-outage-hold-hub-agents")
+def test_a_stale_share_names_every_open_outage_it_still_holds(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import outage
+
+    _open_outage(rig, "redis")
+    _open_outage(rig, "ledger")
+    assert len(outage.shared_open(rig.store, SLUG, NOW + outage.SHARED_STALE_MS + 1)) == 2
+    assert f"is stale since {NOW}, still holding redis, ledger\n" in capsys.readouterr().err
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
 def test_an_open_outage_never_pins_an_agent_whose_row_reads_done(rig: SimpleNamespace) -> None:
     rig.row.update(state="done")
     _open_outage(rig, "provider")
