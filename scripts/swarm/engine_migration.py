@@ -66,7 +66,7 @@ def migrate_one(redis_store: RedisStore, slug: str) -> str:
     on_events = stored_engine(redis_store, slug) == EVENTS_ENGINE
     if on_events and config.repo_origin:
         return "unchanged"
-    if not on_events and redis_store.agents(slug):
+    if not on_events and redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
         return BUSY
     if not on_events:
         drop_launch_jobs(redis_store, slug)
