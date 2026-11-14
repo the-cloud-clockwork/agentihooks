@@ -233,6 +233,22 @@ def test_lost_agent_cannot_reopen_a_successors_claim(store, monkeypatch):
     assert all(current.name != agent.name for current in store.agents("sw"))
 
 
+@pytest.mark.feature("hub-dead-resume")
+def test_the_resume_gate_admits_an_owner_and_refuses_after_a_handoff(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import dead_resume
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    seeded(store, ledger, runtime)
+    agent = replace(next(a for a in store.agents("sw") if a.lane == "eng"), conversation_id="conversation")
+    store.put_agent("sw", agent)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+    assert dead_resume.resumable(store, "sw", agent, ledger) is True
+    monkeypatch.setattr(store, "handoff", lambda slug, task: "handed off")
+    assert dead_resume.resumable(store, "sw", agent, ledger) is False
+
+
 def test_resumed_agent_keeps_the_runtime_model_and_route(store, monkeypatch):
     from scripts.swarm import dead_resume
 

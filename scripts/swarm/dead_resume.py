@@ -26,7 +26,7 @@ def skip_binding(agent: AgentRecord, facts: dict, live: set[str]) -> bool:
     )
 
 
-def _owns(store, slug, agent, ledger):
+def _owns(store: RedisStore, slug: str, agent: AgentRecord, ledger: Any) -> bool:
     from scripts.swarm.tick import LEASE_MS
 
     if agent not in store.agents(slug):
@@ -122,7 +122,17 @@ def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     return ""
 
 
+def resumable(store: RedisStore, slug: str, agent: AgentRecord, ledger: Any) -> bool:
+    """Whether a dead agent may reopen its own conversation: no handoff or compact limit sends its task to a fresh
+    agent, and it still holds its record, seat, task row and claim."""
+    return not _reason(store, slug, agent) and _owns(store, slug, agent, ledger)
+
+
 FRESH_NOTICE = "Starting a fresh agent after {name} ended because {reason}."
+RESUME_TEXT = (
+    "Your pane ended unexpectedly. Continue your task in this conversation and seat. "
+    "Read your task progress and proof and handle your inbox before continuing."
+)
 
 
 def reopen(
@@ -143,8 +153,7 @@ def reopen(
             placed = runtime.resume(
                 config,
                 agent,
-                "Your pane ended unexpectedly. Continue your task in this conversation and seat. "
-                "Read your task progress and proof and handle your inbox before continuing.",
+                RESUME_TEXT,
             )
         except Exception as error:
             reason = f"resume failed: {error}"
