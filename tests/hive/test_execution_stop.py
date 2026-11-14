@@ -1,6 +1,7 @@
 """The hub stops an execution it admitted through the hive spoke that started it."""
 
 import json
+import time
 from collections.abc import Iterator
 from dataclasses import asdict, replace
 from types import SimpleNamespace
@@ -103,6 +104,7 @@ def end_claim(rig: SimpleNamespace, state: str) -> None:
 @pytest.mark.feature("events-execution-stop")
 def test_a_stop_reaps_the_execution_on_its_hive_and_ends_it_through_the_exited_lifecycle(rig: SimpleNamespace) -> None:
     hive = runtime()
+    before = time.time_ns() // 1_000_000
 
     assert execution_stop.stop(rig.bus, SLUG, rig.agent, "launch check failed") == execution_stop.SENT
     assert execution_stop.Stopper(rig.bus, SLUG, HIVE, hive).poll() == [execution_stop.STOPPED]
@@ -117,6 +119,7 @@ def test_a_stop_reaps_the_execution_on_its_hive_and_ends_it_through_the_exited_l
         rig.started.id,
     )
     assert (exited.data["reason"], exited.data["stop_reason"]) == (execution_stop.REASON, "launch check failed")
+    assert exited.time >= before
     rig.react.handle(exited)
     assert (rig.row["state"], rig.row["claimed_by"]) == ("open", "")
     assert rig.store.execution_registry.get(SLUG, rig.agent.execution_id).state == "ended"
@@ -187,6 +190,55 @@ def test_the_hub_answers_unknown_for_an_execution_no_hive_started(rig: SimpleNam
     stranger = AgentRecord(name="ghost", lane="eng", task="task", execution_id="other", generation=1)
 
     assert execution_stop.stop(rig.bus, SLUG, stranger, "late") == execution_stop.UNKNOWN
+
+
+@pytest.mark.feature("events-execution-stop")
+def test_each_swarm_and_hive_reads_its_stops_through_its_own_durable() -> None:
+    names = {execution_stop.durable(swarm, hive) for swarm in ("rig", "other") for hive in ("hive-a", "hive-b")}
+
+    assert len(names) == 4
+    assert execution_stop.durable("rig", "hive-a") == execution_stop.durable("rig", "hive-a")
+
+
+@pytest.mark.feature("events-execution-stop")
+def test_the_hub_provisions_the_durable_and_subject_the_owning_hive_binds(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events = rig.bus.for_swarm(SLUG).events
+    opened = events.consumer
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(events, "consumer", lambda *args: calls.append(args) or opened(*args))
+
+    execution_stop.stop(rig.bus, SLUG, rig.agent, "launch check failed")
+    execution_stop.Stopper(rig.bus, SLUG, HIVE, runtime()).poll()
+
+    wanted = (execution_stop.durable(SLUG, HIVE), execution_stop.stop_subject(SLUG, HIVE), execution_stop.POLICY)
+    assert calls == [wanted, wanted]
+
+
+@pytest.mark.feature("events-execution-stop")
+def test_a_hive_waits_the_given_timeout_for_its_stops() -> None:
+    bus = Mock()
+    bus.for_swarm.return_value = bus
+    bus.events.consumer.return_value.fetch.return_value = []
+
+    assert execution_stop.Stopper(bus, SLUG, HIVE, runtime()).poll(17) == []
+    bus.events.consumer.return_value.fetch.assert_called_once_with(execution_stop.BATCH, 17)
+
+
+@pytest.mark.feature("events-execution-stop")
+def test_a_stop_names_the_hub_as_author_and_the_started_event_as_cause(rig: SimpleNamespace) -> None:
+    stop = execution_stop.request(rig.started, "launch check failed")
+
+    assert (stop.id, stop.type, stop.author, stop.cause, stop.key, stop.version) == (
+        f"stop:{rig.started.id}",
+        execution_stop.TYPE,
+        "hub",
+        rig.started.id,
+        rig.agent.execution_id,
+        rig.agent.generation,
+    )
+    assert stop.data == {"name": rig.agent.name, "hive": HIVE, "reason": "launch check failed"}
 
 
 @pytest.mark.feature("events-execution-stop")
