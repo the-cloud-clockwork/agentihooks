@@ -6162,8 +6162,8 @@
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
-      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive and the launch decision, lane defaults with named overrides, lands on the record. The record stays as the events path leaves it before a hive runs it: state starting, no pane, launched at zero, the claim life pending, no runtime listing and no launch row; the swarm stays paused, and a refused admission fails the test.",
-      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit and Admission.launched",
+      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive and the launch decision, lane defaults with named overrides, lands on the record. The hub reactor on execution started then marks the record working with its pane and launch time and counts the claim life; no runtime listing and no launch row; the swarm stays paused, and a refused admission fails the test.",
+      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit, Admission.launched and Claims.handle",
       "tests": [
         "tests/helpers/test_seat.py::test_seat_claims_and_launches_an_agent_without_start_or_a_tick",
         "tests/helpers/test_seat.py::test_seat_carries_a_given_hive_and_overrides_only_the_named_launch_fields",
@@ -6190,6 +6190,26 @@
         "tests/swarm/test_execution_archive.py::test_set_launch_writes_the_decision_onto_the_live_head_and_its_projection",
         "tests/swarm/test_execution_archive.py::test_set_launch_never_shows_an_agent_dropped_during_the_write",
         "tests/swarm/test_execution_archive.py::test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head"
+      ]
+    },
+    {
+      "id": "events-started-working",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-started-working",
+      "behaviour": "A hive lane spoke puts the pane and the launch time of the agent it spawned on the execution started event, taking its own clock when the placement carries no launch time, and the hub claim lives reactor on that event, before it counts the life, moves the admitted agent from starting to working with that pane and launch time; a started event without a launch time takes the event time, a rebuilt start without a pane counts the life and leaves the agent starting, a write that raises counts no life so redelivery retries both, and a late start never revives an agent that already left starting.",
+      "seam": "Spoke._spawn building the execution started envelope, and Claims.handle through ExecutionRegistry.set_launch",
+      "tests": [
+        "tests/hub/test_claim_lives.py::test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time",
+        "tests/hub/test_claim_lives.py::test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time",
+        "tests/hive/test_spoke.py::test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging",
+        "tests/hub/test_claim_lives.py::test_a_late_start_never_revives_a_finished_agent",
+        "tests/hive/test_spoke.py::test_a_spawn_without_a_launch_time_starts_at_the_spoke_clock",
+        "tests/hub/test_claim_lives.py::test_a_launch_decision_after_the_start_still_reaches_the_working_agent",
+        "tests/hub/test_claim_lives.py::test_a_start_with_an_empty_launch_time_takes_the_event_time",
+        "tests/hub/test_claim_lives.py::test_a_rebuilt_start_without_a_pane_counts_the_life_and_leaves_the_agent_starting",
+        "tests/hub/test_claim_lives.py::test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both",
+        "tests/swarm/test_execution_archive.py::test_set_launch_from_a_state_writes_only_while_the_run_is_still_in_it",
+        "tests/hub/test_claim_lives.py::test_a_projection_that_raises_after_the_write_is_projected_again_on_redelivery"
       ]
     },
     {
