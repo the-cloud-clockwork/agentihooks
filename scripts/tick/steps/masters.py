@@ -200,7 +200,7 @@ def _master_down(slug: Any, config: Any, store: Any, ledger: Any, runtime: Any, 
     live = runtime.live_names()
     masters = [a for a in store.agents(slug) if a.lane == tick.MASTER and a.state != "finished"]
     if config.state == "stopping" or any(
-        m.name in live or now_ms - m.started_at <= tick.STARTUP_GRACE_MS for m in masters
+        m.name in live or now_ms - max(m.started_at, m.launched_at) <= tick.STARTUP_GRACE_MS for m in masters
     ):
         return []
     inbox, seat = tick.InboxStore(store.redis), tick.seat_address(slug, tick.MASTER)

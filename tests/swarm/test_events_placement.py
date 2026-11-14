@@ -354,7 +354,13 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
         Status.OK,
         "local",
         SimpleNamespace(
-            pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+            pane_id="pane-1",
+            harness="claude",
+            account="slot-a",
+            profile="engineer",
+            model="opus",
+            effort="high",
+            launched_at=0,
         ),
     )
 

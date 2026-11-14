@@ -144,7 +144,7 @@ class Smoke:
         self.opened.append(bus)
         runtime = Mock()
         runtime.spawn.side_effect = lambda request: Outcome(
-            "spawn", Status.OK, "local", SimpleNamespace(pane_id=f"{hive}:{request.name}", **LAUNCH)
+            "spawn", Status.OK, "local", SimpleNamespace(pane_id=f"{hive}:{request.name}", launched_at=0, **LAUNCH)
         )
         tasks = lanes.LaneTasks(bus, hive, self.store.config)
         config = SpokeConfig(self.store.config(SLUG), lane, hive, POLICY)

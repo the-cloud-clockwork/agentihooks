@@ -26,7 +26,7 @@ CACHE_TEXT = "Cache warm check on swarm {slug}: reply in one line and keep your 
 
 
 def last_activity(beat: dict | None, agent: AgentRecord) -> int:
-    return max(int((beat or {}).get("at") or 0), agent.started_at or 0)
+    return max(int((beat or {}).get("at") or 0), agent.started_at or 0, agent.launched_at)
 
 
 def stale(beat: dict | None, last_ms: int, wait: dict | None, provider_error: str, now_ms: int) -> bool:

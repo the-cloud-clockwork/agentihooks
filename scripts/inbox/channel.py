@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from scripts.inbox.bus import FeedError, SeatFeed, feed_for
 from scripts.inbox.cli import check_answer, identity
 from scripts.inbox.seen import CLAIM_BATCH, claim
-from scripts.inbox.store import NOTIFY, InboxError, connect
+from scripts.inbox.store import NOTIFY, InboxError, InboxStore, connect
 
 if TYPE_CHECKING:
     import anyio
@@ -44,6 +44,7 @@ HELD = ("pending", "delivered")
 class Pushed:
     shown: set[str] = field(default_factory=set)
     held: set[str] = field(default_factory=set)
+    poisoned: set[str] = field(default_factory=set)
 
 
 def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
@@ -150,15 +151,21 @@ async def _recheck(store, me, pubsub):
         raise error
 
 
-async def _deliver(store, me, write, pushed):
+async def _deliver(store: InboxStore, me: str, write: Any, pushed: Pushed) -> None:
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
     pushed.held.intersection_update([item_id for item_id in pushed.held if _held(store, item_id)])
     room = UNCONFIRMED_MAX - len(pushed.held)
-    items = [item for item in claim(store, me, min(room, CLAIM_BATCH)) if item.id not in pushed.shown]
+    claimed = claim(store, me, min(room, CLAIM_BATCH), pushed.poisoned)
+    items = [item for item in claimed if item.id not in pushed.shown]
     for index, item in enumerate(items):
-        note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
+        try:
+            note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
+        except Exception:
+            store.requeue(item.id, me, UNSHOWN)
+            pushed.poisoned.add(item.id)
+            continue
         try:
             await write.send(SessionMessage(types.JSONRPCMessage(note)))
         except BaseException:
