@@ -41,6 +41,7 @@ from scripts.swarm import (
     tick_master,
     timing,
 )
+from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.health import (
     activity,
     checks,
@@ -301,7 +302,7 @@ def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord
         for a in agents
         if a.runtime_backend != "local"
         or reports.host(a)
-        or (a.hive and a.hive != here and a.state != "finished")
+        or (a.hive and a.hive != here and a.state not in TERMINAL_STATES)
         or a.name in names
     ]
 

@@ -15,7 +15,7 @@ def live_agents(agents: list[Any], runtime: Any) -> list[Any]:
         for a in agents
         if a.runtime_backend != "local"
         or reports.host(a)
-        or (a.hive and a.hive != here and a.state != "finished")
+        or (a.hive and a.hive != here and a.state not in TERMINAL_STATES)
         or a.name in names
     ]
 
