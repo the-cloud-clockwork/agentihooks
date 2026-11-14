@@ -454,7 +454,7 @@ def ticking():
 
 
 @pytest.fixture
-def launched(ticking: tuple) -> tuple:
+def launched(ticking: tuple[RedisStore, object, object]) -> tuple[RedisStore, object, object]:
     """``ticking`` with an agent already launched on task one: seated through hub admission and started at 100 on a
     pane, listed by the runtime and holding its launch row, so no tick spawns it."""
     from scripts.swarm.commands import hive_id
@@ -806,11 +806,10 @@ def test_relaunch_never_reclassifies_the_assigned_profile(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("fields", [{"state": "done"}, {"state": "blocked"}, {"state": "handoff"}, {"done": True}])
-def test_ended_task_closes_its_pane_on_the_same_tick_without_a_pane_finding(ticking, fields):
+def test_ended_task_closes_its_pane_on_the_same_tick_without_a_pane_finding(launched, fields):
     from scripts.swarm.tick import tick
 
-    store, runtime, ledger = ticking
-    tick("sw", store, ledger, runtime, 100)
+    store, runtime, ledger = launched
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     ledger.rows["one"].update(fields)
     tick("sw", store, ledger, runtime, 200)

@@ -373,6 +373,7 @@ def test_a_finished_predecessor_cannot_hold_reopened_work_when_retirement_is_stu
     ledger.rows["t1"].update(state="open", claimed_by="")
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert len(runtime.spawned) == 1
+    assert runtime.spawned[0][1] != owner.name
     assert ledger.rows["t1"]["claimed_by"] != owner.name
 
 
@@ -400,7 +401,7 @@ def test_an_open_row_with_a_dead_claimant_can_be_claimed_from_its_exact_snapshot
 
 def test_ownership_repair_keeps_a_successor_claim_created_at_the_write_boundary(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    seat_agent(store, ledger, "sw", "t1", hive_id(), started=Launched(1_000, runtime))
     ledger.rows["t1"].update(state="open", claimed_by="")
     update = ledger.update_task
 
