@@ -3401,6 +3401,16 @@
       ]
     },
     {
+      "id": "swarm-status-lists-remote-hub-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-hub-agents-visible",
+      "behaviour": "Swarm status lists an agent the hub admitted onto another hive, whose record names that hive but carries a local backend and no runtime target, while an agent on the local hive with no live pane and an agent naming no hive stay out of the table.",
+      "seam": "status.status_report and the agentihooks swarm status agent table, through status.live_agents",
+      "tests": [
+        "tests/swarm/test_status_rows.py::test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target"
+      ]
+    },
+    {
       "id": "artifact-storage",
       "origin": "inventory",
       "behaviour": "Markdown, JSON and SVG artifacts are stored once by content hash, SVG without scripts; any other file or an oversize file is refused.",
@@ -5350,7 +5360,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
