@@ -1,14 +1,16 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import fencing, idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
-from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
 
@@ -55,16 +57,27 @@ def outage_home(tmp_path, monkeypatch):
     monkeypatch.setattr(outage, "HOME", tmp_path)
 
 
-def three_owners(store):
+def three_owners(store: RedisStore) -> tuple[Any, RecoveringRuntime, list[AgentRecord]]:
+    """Seats idle working owners on t1 to t3 through hub admission, each launched in its own live runtime pane."""
     store.update("sw", max_eng=3)
     ledger = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng"))
     runtime = RecoveringRuntime()
-    tick("sw", store, ledger, runtime, 1_000)
+    for index, task in enumerate(("t1", "t2", "t3")):
+        seated = seat_agent(store, ledger, SLUG, task)
+        launched = replace(
+            seated,
+            pane_id=f"w1:p{index + 1}",
+            state="working",
+            started_at=1_000,
+            launched_at=1_000,
+            conversation_id=f"conversation-{index}",
+            profile="engineer",
+        )
+        store.execution_registry.update("sw", launched)
+        runtime.live.add(launched.name)
+        runtime.statuses[launched.name] = "idle"
     store.update("sw", state="paused")
     agents = [agent for agent in store.agents("sw") if agent.lane == "eng"]
-    for index, agent in enumerate(agents):
-        store.put_agent("sw", replace(agent, conversation_id=f"conversation-{index}", profile="engineer"))
-        runtime.statuses[agent.name] = "idle"
     return ledger, runtime, agents
 
 
