@@ -86,6 +86,17 @@ def test_an_offer_the_hub_withdraws_spawns_nothing(hub):
     configs.assert_not_called()
 
 
+@pytest.mark.feature("hub-admission-hive-max-agents")
+def test_an_offer_the_hub_holds_at_max_agents_raises_held_and_spawns_nothing(hub: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    hub.hub.admitted = {"held": "2 of 2 agents on the hive"}
+    configs = Mock()
+    with pytest.raises(admission.Held, match="2 of 2 agents on the hive"):
+        lanes.LaneTasks(hub.bus, "hive-a", configs).request(offer())
+    configs.assert_not_called()
+
+
 def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(lane="plan"))
     assert hub.hub.seen == [

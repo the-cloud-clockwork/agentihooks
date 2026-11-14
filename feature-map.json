@@ -1,6 +1,24 @@
 {
   "features": [
     {
+      "id": "hub-admission-hive-max-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-max-agents",
+      "behaviour": "The hub answers an events admission request from a hive whose live worker executions across every swarm, workers naming no hive counted for the root, already reach its registry max agents with a held answer, before any claim, execution, seat or ledger write; the spoke keeps the offer queued with a delayed nak so a hive below its cap takes it, and a hive below its cap or with none set is still admitted.",
+      "seam": "Admission.admit for a hive spoke request, LaneTasks.request and Spoke.poll",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_at_its_max_agents",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents",
+        "tests/hub/test_admission.py::test_only_the_root_hive_counts_workers_that_name_no_hive",
+        "tests/hub/test_admission.py::test_two_hub_pods_on_one_store_never_admit_a_hive_past_its_max_agents",
+        "tests/hive/test_lanes.py::test_an_offer_the_hub_holds_at_max_agents_raises_held_and_spawns_nothing",
+        "tests/hive/test_spoke.py::test_an_offer_held_at_max_agents_stays_queued_and_a_hive_below_its_cap_takes_it"
+      ],
+      "rules": [
+        "admission-skips-hive-max-agents"
+      ]
+    },
+    {
       "id": "controller-done-clears-awaiting",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",

@@ -205,6 +205,10 @@ class Spoke:
             raise
         try:
             spawned = self._spawn(event, key, revision, heartbeat)
+        except admission.Held:
+            self._clear_pending(pending_revision)
+            delivery.nak(self.config.policy.ack_wait_ms)
+            return admission.HELD
         except Exception:
             current = json.loads(claims.get(key).value)
             if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:

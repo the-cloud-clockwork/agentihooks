@@ -3,15 +3,21 @@ or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
 import sys
+import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from packaging.version import InvalidVersion, Version
 
 from scripts import updater
 from scripts.hive import account_slots
+from scripts.hive import admission as hive_admission
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window, successor_fill
+from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, connect
 
@@ -19,6 +25,8 @@ ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
+TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
+BUSY = "another admission for the hive is in progress"
 
 
 def release_key(text: str) -> Version | None:
@@ -95,7 +103,12 @@ class Admission:
                 f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
             )
             return None
-        admitted = self._claim(slug, request, view.rows, view.doc)
+        with self._turn(request["hive"]) as busy:
+            if full := busy or self._full(request["hive"]):
+                refused(slug, request, full)
+                held: dict[str, str] = {hive_admission.HELD: full}
+                return held
+            admitted = self._claim(slug, request, view.rows, view.doc)
         if admitted is None:
             refused(slug, request, "another holder took the claim")
             return None
@@ -134,6 +147,45 @@ class Admission:
         if not readiness.placeable(row, hive, readiness.declared(self.store, hive)):
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
+
+    @contextmanager
+    def _turn(self, hive: str) -> Iterator[str]:
+        """Holds the hive's admission key in Redis, shared by every hub pod, while its cap is counted and the task
+        claimed; yields BUSY when another admission for the hive keeps it past the wait."""
+        from scripts.hive import registry
+
+        key, token = f"{registry.key(hive)}:admitting", uuid.uuid4().hex
+        for _ in range(TURN_TRIES):
+            if self.store.redis.set(key, token, nx=True, px=TURN_MS):
+                break
+            time.sleep(TURN_WAIT_S)
+        else:
+            yield BUSY
+            return
+        try:
+            yield ""
+        finally:
+            if self.store.redis.get(key) == token:
+                self.store.redis.delete(key)
+
+    def _full(self, hive: str) -> str:
+        """The hive's live worker executions across every swarm against its registry max agents; empty below the cap
+        or when none is set."""
+        from scripts.hive import registry
+
+        record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        cap = record.get("max_agents")
+        if cap is None:
+            return ""
+        slugs = cast(list[str], self.store.slugs())  # pragma: no mutate
+        hosts = {hive, ""} if hive == readiness.ROOT else {hive}
+        live = sum(
+            1
+            for slug in slugs
+            for agent in self.store.execution_registry.agents(slug)
+            if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
+        )
+        return f"{live} of {cap} agents on the hive" if live >= cap else ""
 
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
