@@ -192,29 +192,41 @@ def _member(signer: nats_grant.Signer, scope: str) -> str:
     return _signed(signer, "hive-m1", nats_grant.member_claims("UMEMBER", ("rig",), member="m1"))
 
 
-@pytest.mark.feature("hub-only-execution-stop")
-@pytest.mark.parametrize("scope", ["unscoped", "scoped"])
-@pytest.mark.parametrize("hive", ["h2", "m1"])
-def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(signer, scope: str, hive: str) -> None:
-    stop = f"swarm.rig.execution.stop.{hive}"
+def _on_wire(logical: str, wire: bool) -> str:
+    from scripts.events.scope import scoped_subject
 
-    assert _publish_refusals(signer, _member(signer, scope), "swarm.rig.execution.started", stop) == [
-        f'nats: permissions violation for publish to "{stop}"'
+    return scoped_subject("rig", "events", logical) if wire else logical
+
+
+@pytest.mark.feature("hub-only-execution-stop")
+@pytest.mark.parametrize(("scope", "wire"), [("unscoped", False), ("scoped", False), ("scoped", True)])
+@pytest.mark.parametrize(
+    "stop", ["swarm.rig.execution.stop.h2", "swarm.rig.execution.stop.m1", "swarm.rig.execution.stop"]
+)
+def test_a_member_credential_cannot_publish_an_execution_stop_for_any_hive(
+    signer: nats_grant.Signer, scope: str, wire: bool, stop: str
+) -> None:
+    allowed = [_on_wire("swarm.rig.execution.started", wire)]
+    refused = _on_wire(stop, wire)
+
+    assert _publish_refusals(signer, _member(signer, scope), *allowed, refused) == [
+        f'nats: permissions violation for publish to "{refused}"'
     ]
 
 
 @pytest.mark.feature("hub-only-execution-stop")
-def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer) -> None:
+@pytest.mark.parametrize("wire", [False, True])
+def test_the_hub_credential_publishes_an_execution_stop_for_a_hive(signer: nats_grant.Signer, wire: bool) -> None:
     hub = _signed(signer, "hub", nats_grant.controller_claims())
 
-    assert _publish_refusals(signer, hub, "swarm.rig.execution.stop.h2", "outside.events") == [
+    assert _publish_refusals(signer, hub, _on_wire("swarm.rig.execution.stop.h2", wire), "outside.events") == [
         'nats: permissions violation for publish to "outside.events"'
     ]
 
 
 @pytest.mark.feature("hive-own-exit-subject")
 @pytest.mark.parametrize("scope", ["unscoped", "scoped"])
-def test_a_member_credential_reports_an_exit_on_its_own_subject(signer, scope: str) -> None:
+def test_a_member_credential_reports_an_exit_on_its_own_subject(signer: nats_grant.Signer, scope: str) -> None:
     async def act(nc: Any) -> None:
         await nc.publish("exits.rig.m1", b"{}")
 
@@ -224,7 +236,9 @@ def test_a_member_credential_reports_an_exit_on_its_own_subject(signer, scope: s
 @pytest.mark.feature("hive-own-exit-subject")
 @pytest.mark.parametrize("scope", ["unscoped", "scoped"])
 @pytest.mark.parametrize("subject", ["exits.rig.h2", "swarm.rig.execution.exited", "swarm.rig.events.execution.exited"])
-def test_a_member_credential_cannot_report_an_exit_on_another_subject(signer, scope: str, subject: str) -> None:
+def test_a_member_credential_cannot_report_an_exit_on_another_subject(
+    signer: nats_grant.Signer, scope: str, subject: str
+) -> None:
     assert _publish_refusals(signer, _member(signer, scope), subject) == [
         f'nats: permissions violation for publish to "{subject}"'
     ]
@@ -792,10 +806,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     assert claims["nats"] == {
         "type": "user",
         "version": 2,
-        "pub": {
-            "allow": publish,
-            "deny": ["swarm.*.execution.stop.>", "swarm.*.execution.exited", "swarm.*.events.execution.exited"],
-        },
+        "pub": {"allow": publish, "deny": list(nats_grant.MEMBER_DENY)},
         "sub": {"allow": [f"_INBOX.{user.public}.>"]},
         "subs": -1,
         "data": -1,

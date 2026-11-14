@@ -1,5 +1,6 @@
 import json
 import sys
+from typing import Any
 
 from scripts.events.envelope import Envelope
 from scripts.hub.registry import Reactor
@@ -25,13 +26,21 @@ class Claims:
         return Reactor("claim-lives", "swarm.*.execution.started", self.handle, singleton=True)
 
     def handle(self, event: Envelope) -> None:
-        if event.type != "execution.started" or event.entity != "execution" or not event.data.get("claim_key"):
+        data: dict[str, Any] = event.data
+        if event.type != "execution.started" or event.entity != "execution" or not data.get("claim_key"):
             return
         self.store = self.store or connect()
-        task = event.data["task"]
-        legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), event.data["name"])
+        task: str = data["task"]
+        legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), data["name"])
         if legacy and json.loads(legacy)["state"] == "started":
             return
+        if data.get("pane_id"):
+            self.store.execution_registry.set_launch(
+                event.swarm,
+                event.key,
+                {"state": "working", "pane_id": data["pane_id"], "launched_at": data.get("launched_at") or event.time},
+                only_from="starting",
+            )
         lives = self.store.redis.eval(
             _COUNT,
             3,

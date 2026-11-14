@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
+from hooks import _async
 from hooks.proc import processes
 from hooks.secrets import redact
 from scripts.swarm_v2 import supervision_processes, worker_home
@@ -84,18 +85,34 @@ def reaper(flag: int) -> None:
         raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
 
 
-def hook_descendants(existing: dict) -> dict:
+def lifecycle_jobs(table: dict, home: Path) -> set[int]:
+    """Return the detached lifecycle gc jobs this session home started, with their descendants."""
+    jobs = str(home / ".agentihooks" / "logs" / "async-job-")
+    roots = {
+        pid
+        for pid, item in table.items()
+        if len(item.argv) == 6
+        and item.argv[1:3] == ("-c", _async._WORKER)
+        and item.argv[3].startswith(jobs)
+        and item.argv[5] == "lifecycle-gc"
+    }
+    return roots.union(*(supervision_processes.descendants(pid, table) for pid in roots))
+
+
+def hook_descendants(existing: dict, home: Path) -> dict:
+    table = processes()
+    detached = lifecycle_jobs(table, home)
     return {
         pid: item
-        for pid, item in supervision_processes.descendants(os.getpid(), processes()).items()
-        if existing.get(pid) != item.start_time
+        for pid, item in supervision_processes.descendants(os.getpid(), table).items()
+        if existing.get(pid) != item.start_time and pid not in detached
     }
 
 
-def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS) -> list[str]:
+def surviving_hook_children(existing: dict, home: Path, seconds: float = HOOK_CHILD_SECONDS) -> list[str]:
     deadline = time.monotonic() + seconds
     while True:
-        new = hook_descendants(existing)
+        new = hook_descendants(existing, home)
         survivors = {pid: item for pid, item in new.items() if item.state != "Z"}
         if not survivors or time.monotonic() >= deadline:
             break
@@ -107,7 +124,7 @@ def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS)
             with suppress(ChildProcessError):
                 os.waitpid(pid, os.WNOHANG)
         time.sleep(POLL_HOOK_SECONDS)
-        new = hook_descendants(existing)
+        new = hook_descendants(existing, home)
     return sorted(f"{pid} {' '.join(item.argv) or item.comm}" for pid, item in survivors.items())
 
 
@@ -159,7 +176,7 @@ def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
             registered_at = registered_at or awaited_registration(home, session)
         except BaseException as error:
             failure = error
-        survivors = surviving_hook_children(existing)
+        survivors = surviving_hook_children(existing, home)
     finally:
         reaper(0)
     if survivors:
