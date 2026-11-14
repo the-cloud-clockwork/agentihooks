@@ -2,14 +2,7 @@ from scripts.handoff import transfers
 from scripts.swarm import tick
 
 
-class NoContinuity:
-    def _claim(self, slug: str, seat: str, row: dict) -> dict:
-        # ruleid: admission-claim-skips-continuity
-        task = tick.primed(self.store, slug, seat, row)
-        return task
-
-
-class HandoffOnly:
+class NoTransfer:
     def _claim(self, slug: str, seat: str, row: dict) -> dict:
         handoff = self.store.handoff(slug, row["id"])
         # ruleid: admission-claim-skips-continuity
@@ -17,18 +10,18 @@ class HandoffOnly:
         return task
 
 
-class TransferOnly:
-    def _claim(self, slug: str, seat: str, row: dict, record: object) -> dict:
+class TransferElsewhere:
+    def _claim(self, slug: str, seat: str, row: dict) -> dict:
         # ruleid: admission-claim-skips-continuity
-        task = tick.primed(self.store, slug, seat, row)
-        task["transfer"] = transfers.attach(self.store, slug, record)
-        return task
+        return tick.primed(self.store, slug, seat, row)
+
+    def reopen(self, slug: str, record: object) -> object:
+        return transfers.attach(self.store, slug, record)
 
 
-class Continuity:
+class Attached:
     def _claim(self, slug: str, seat: str, row: dict, record: object) -> dict:
-        handoff = self.store.handoff(slug, row["id"])
         # ok: admission-claim-skips-continuity
-        task = tick.primed(self.store, slug, seat, {**row, "handoff": handoff})
+        task = tick.primed(self.store, slug, seat, row)
         task["transfer"] = transfers.attach(self.store, slug, record)
         return task
