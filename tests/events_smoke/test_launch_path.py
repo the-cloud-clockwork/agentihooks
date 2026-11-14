@@ -13,17 +13,19 @@ from scripts.hub import admission, hive_loss
 from scripts.swarm import engine_migration, fleet_red, readiness
 from scripts.swarm import tick as swarm_tick
 from scripts.swarm.execution import TERMINAL_STATES
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, SwarmConfig
+from scripts.tick.adapters.github import GitHubSourceControl
 from tests.events_smoke.conftest import LAUNCH, SLUG, Smoke
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 TAKE_MS = 5_000
+HELD_TAKE_MS = 15_000
 ANSWER_BOUND_S = admission.ANSWER_MS / 1000 / 4
 
 
 def started(smoke: Smoke) -> Envelope:
     """The one execution started event the spoke published for the smoke swarm."""
-    found = smoke.bus.events.consumer("smoke-audit", f"swarm.{SLUG}.execution.started").fetch(1, 2_000)
+    found = smoke.bus.for_swarm(SLUG).events.consumer("smoke-audit", f"swarm.{SLUG}.execution.started").fetch(1, 2_000)
     assert len(found) == 1
     return found[0].event
 
@@ -31,6 +33,20 @@ def started(smoke: Smoke) -> Envelope:
 def worker_spawns(runtime: FakeRuntime) -> list[tuple[str, str, str]]:
     """The launches a tick pass made for any lane but the master."""
     return [spawn for spawn in runtime.spawned if spawn[0] != MASTER]
+
+
+def watched(smoke: Smoke, event: Envelope, monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """The exits a hub hive loss pass emits for the started execution while its hive stops beating for four TTLs."""
+    clock = Mock(return_value=presence.now_ms())
+    loss = hive_loss.HiveLoss(smoke.bus, clock, smoke.store)
+    emitted = Mock()
+    monkeypatch.setattr(loss, "_emit", emitted)
+    loss.handle(event)
+    end = clock() + 4 * presence.TTL_MS
+    while clock() < end:
+        clock.return_value = clock() + presence.BEAT_SECONDS * 1000 // 3
+        loss.poll()
+    return emitted
 
 
 @pytest.mark.wall_clock
@@ -45,6 +61,7 @@ def test_a_pull_request_task_is_admitted_well_under_the_hive_wait_with_no_live_g
         raise AssertionError(f"admission listed {repo} on GitHub")
 
     monkeypatch.setattr(fleet_red, "read", live)
+    monkeypatch.setattr(GitHubSourceControl, "open_changes", lambda self, **kwargs: live(self.repository))
     answered: list[float] = []
     admit = smoke.admitter.admit
 
@@ -97,6 +114,7 @@ def test_the_admitted_agent_record_carries_the_harness_account_model_and_effort_
 @pytest.mark.feature("events-smoke-orphan-reopen")
 def test_a_claimed_task_with_no_live_agent_is_reopened_by_the_tick_on_the_events_engine(smoke: Smoke) -> None:
     smoke.store.update(SLUG, state="paused")
+    assert smoke.store.config(SLUG).engine == EVENTS_ENGINE
     ledger = FakeLedger([{"id": "t9", "lane": "eng"}])
     ledger.rows["t9"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
 
@@ -122,7 +140,7 @@ def test_a_hive_at_its_max_agents_takes_no_admission_and_a_hive_below_it_takes_t
 
     assert smoke.store.claimant(SLUG, "t2") is None
     assert smoke.ledger.rows["t2"]["state"] == "open"
-    assert below.spoke.poll(TAKE_MS) == "started"
+    assert below.spoke.poll(HELD_TAKE_MS) == "started"
     hosts = {agent.task: agent.hive for agent in smoke.store.agents(SLUG)}
     assert hosts == {"t1": "hive-a", "t2": "hive-b"}
     assert full.runtime.spawn.call_count == 1
@@ -146,19 +164,13 @@ def test_an_engine_switch_exits_no_running_execution(smoke: Smoke, monkeypatch: 
 
     assert outcomes == {SLUG: "unchanged", "legacy-busy": engine_migration.BUSY}
     assert smoke.store.config("legacy-busy").engine == "legacy"
-    clock = Mock(return_value=presence.now_ms())
-    loss = hive_loss.HiveLoss(smoke.bus, clock, smoke.store)
-    emitted = Mock()
-    monkeypatch.setattr(loss, "_emit", emitted)
-    loss.handle(event)
+    control = watched(smoke, event, monkeypatch)
+    assert [call.args[1].data["reason"] for call in control.call_args_list] == [hive_loss.REASON]
     smoke.store.update(SLUG, engine="legacy")
-    end = clock() + 4 * presence.TTL_MS
-    while clock() < end:
-        clock.return_value = clock() + presence.BEAT_SECONDS * 1000 // 3
-        loss.poll()
+    emitted = watched(smoke, event, monkeypatch)
 
     emitted.assert_not_called()
-    claim = smoke.bus.state("spoke-work").get(event.data["claim_key"])
+    claim = smoke.bus.for_swarm(SLUG).state("spoke-work").get(event.data["claim_key"])
     assert claim is not None
     assert json.loads(claim.value)["state"] == "started"
     for slug, agents in before.items():

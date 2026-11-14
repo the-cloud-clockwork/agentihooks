@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+from urllib.parse import urlparse
 
 import pytest
 import redis
@@ -36,7 +37,8 @@ FOLDER = Path(__file__).resolve().parent
 SLUG = "smoke"
 ORIGIN = "https://github.com/o/r"
 PULL = f"{ORIGIN}/pull/1"
-POLICY = QueuePolicy(ack_wait_ms=1_000)
+LOCAL = ("127.0.0.1", "localhost")
+POLICY = QueuePolicy(ack_wait_ms=10_000)
 LAUNCH = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
 
 
@@ -57,7 +59,7 @@ def reading() -> dict[str, int]:
 
 def connect(url: str, provision: bool = True) -> Any:
     """A bus connection to the smoke's nats-server; the hub's provisions the streams and buckets."""
-    return nats.open_bus(BusConfig(backend="nats", url=url, provision=provision))
+    return nats.open_bus(BusConfig(backend="nats", url=url, provision=provision, scoped=True))
 
 
 def unread() -> Any:
@@ -134,7 +136,7 @@ class Smoke:
         """Publishes the ready offer readiness would publish for an open row."""
         row = self.ledger.rows[task_id]
         generation = readiness.generation(row)
-        queue = self.bus.queue(readiness.queue_name(SLUG, row["lane"]), POLICY)
+        queue = self.bus.for_swarm(SLUG).queue(readiness.queue_name(SLUG, row["lane"]), POLICY)
         queue.offer(
             Envelope(
                 f"ready:{SLUG}:{task_id}:{generation}",
@@ -155,6 +157,7 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
     """A hub serving admissions for a running scratch swarm on the events engine over a real NATS and Redis."""
     url = os.environ.get(REDIS, "")
     assert url, f"{REDIS} must name the Redis service"
+    assert urlparse(url).hostname in LOCAL, f"{REDIS} must name a Redis on this runner; the smoke flushes it"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "agentihooks"))
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
