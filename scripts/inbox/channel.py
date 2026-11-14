@@ -12,7 +12,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.bus import FeedError, SeatFeed, feed_for
 from scripts.inbox.cli import check_answer, identity
@@ -21,8 +21,6 @@ from scripts.inbox.store import NOTIFY, InboxError, connect
 
 if TYPE_CHECKING:
     import anyio
-    from anyio.streams.memory import MemoryObjectSendStream
-    from mcp.shared.message import SessionMessage
 
     from scripts.inbox.store import InboxStore
 
@@ -180,7 +178,7 @@ def _held(store, item_id):
 async def _push(
     store: "InboxStore",
     me: str,
-    write: "MemoryObjectSendStream[SessionMessage]",
+    write: Any,
     ready: "anyio.Event",
     feed: SeatFeed | None = None,
 ) -> None:
