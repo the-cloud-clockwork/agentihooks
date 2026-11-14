@@ -1,16 +1,20 @@
 import hashlib
 import json
+import subprocess
+import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
+from scripts.scheduler.process_interval import Interval
 from scripts.swarm import launch_check, lease, overlays, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
-from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+from scripts.swarm_v2.runtime.base import Outcome, Recovery, SpawnRequest, Status
 from scripts.swarm_v2.runtime.process import launch_target
 
 if TYPE_CHECKING:
@@ -19,6 +23,10 @@ if TYPE_CHECKING:
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 RECEIPT_SECONDS = 86400
+RESUME_RUN_SECONDS = 120
+RESUME_RENEW_SECONDS = 30
+RESUME_RUNS = 3
+RESUME_DEADLINE_MS = 1_800_000
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,23 @@ class CommandOrder:
     execution_id: str = ""
     generation: int = 0
     text: str = ""
+    launched_at: int = 0
+    pane_id: str = ""
+
+    def encode(self) -> str:
+        """The order as JSON, leaving out the judged launch and pane while unset so a hive on an older release still
+        parses every order that carries neither."""
+        fields = asdict(self)
+        for name in ("launched_at", "pane_id"):
+            if not fields[name]:
+                del fields[name]
+        return json.dumps(fields)
+
+
+def answer(redis: Any, receipt: str, ack: "Ack") -> None:
+    """Store a command order's acknowledgement unless one is already stored, so a late answer never overwrites it."""
+    redis.hsetnx(receipt, "ack", ack.encode())
+    redis.expire(receipt, RECEIPT_SECONDS)
 
 
 DONE, FAILED = "done", "failed"
@@ -149,7 +174,7 @@ class Orders:
                 pipe.multi()
                 pipe.hset(receipt, mapping=SENT)
                 pipe.expire(receipt, RECEIPT_SECONDS)
-                pipe.xadd(self.commands(hive), {"order": json.dumps(asdict(order))})
+                pipe.xadd(self.commands(hive), {"order": order.encode()})
                 pipe.execute()
             except WatchError:
                 return None
@@ -177,6 +202,7 @@ class Consumer:
         self.store = RedisStore(redis)
         self.orders = Orders(redis)
         self.hive, self.runtime, self.pod = hive, runtime, pod
+        self.offbeat: Callable[[CommandOrder], None] = self._spawn_resume
 
     @classmethod
     def local(cls, redis: "Redis", hive: str) -> "Consumer":
@@ -225,6 +251,10 @@ class Consumer:
                 self.store.redis.xdel(stream, item)
                 continue
             receipt = self.orders.command_receipt(self.hive, order.id)
+            redis: Any = self.orders.redis
+            if order.action == "resume" and not redis.hexists(receipt, "ack"):
+                self._start_resume(order, receipt)
+                continue
             with self.store.redis.pipeline() as pipe:
                 if not self.store.redis.hexists(receipt, "ack"):
                     try:
@@ -236,6 +266,18 @@ class Consumer:
                 pipe.xdel(stream, item)
                 pipe.execute()
         return len(entries)
+
+    def _start_resume(self, order: CommandOrder, receipt: str) -> None:
+        """Start a process for an unanswered resume order unless one holds its running marker; after RESUME_RUNS
+        starts that never answered, answer it failed so the hub hands the task to a fresh agent."""
+        redis: Any = self.orders.redis
+        if not redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
+            return
+        if redis.hincrby(receipt, "runs", 1) > RESUME_RUNS:
+            answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, "resume never answered"))
+            return
+        redis.expire(receipt, RECEIPT_SECONDS)
+        self.offbeat(order)
 
     def sync_workspaces(self, ttl: int) -> None:
         hosted = [
@@ -255,6 +297,8 @@ class Consumer:
             return FOREIGN
         if order.action == "reap_execution":
             return self.reap_execution(order, agent)
+        if order.action == "resume":
+            return self.resume(order, agent)
         if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
             return FOREIGN
         if order.action == "name":
@@ -273,6 +317,75 @@ class Consumer:
         if outcome.ok:
             return Ack(DONE, agent.runtime_target)
         return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+
+    def resume(self, order: CommandOrder, agent: AgentRecord) -> Ack:
+        """Reopen a dead agent's own conversation in its seat while its execution still carries the launch and pane the
+        hub judged and it still holds its task claim, then record the new pane; the hub checked the ledger claim,
+        generation and seat first."""
+        runtime: Any = self.runtime
+        store: Any = self.store
+        held = self._holding(order)
+        if held is None:
+            return FOREIGN
+        reaped = runtime.reap(held.name)
+        if not reaped.ok:
+            return Ack(FAILED, {"host_id": self.hive}, reaped.detail or reaped.status.value)
+        config = store.config(order.slug)
+        if config.repo_origin:
+            config = replace(config, repo=config.repo_origin)
+        outcome = runtime.recover(held, Recovery.RESUME, config, order.text)
+        if not outcome.ok:
+            return Ack(FAILED, {"host_id": self.hive}, outcome.detail or outcome.status.value)
+        placed = outcome.value
+        current: Any = self._holding(order)
+        if current is None:
+            runtime.terminate(replace(held, pane_id=placed.pane_id))
+            return FOREIGN
+        launched = placed.launched_at or lease.now_ms(store)
+        try:
+            store.put_agent(order.slug, replace(current, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
+        except Exception:
+            runtime.terminate(replace(held, pane_id=placed.pane_id))
+            raise
+        return Ack(DONE, {"host_id": self.hive})
+
+    def run_resume(self, order: CommandOrder) -> None:
+        """Answer one resume order off the hive heartbeat, renewing its running marker while it works so no second
+        process starts it, and store the first acknowledgement only."""
+        receipt = self.orders.command_receipt(self.hive, order.id)
+        redis: Any = self.orders.redis
+        renewal = Interval(lambda: redis.expire(f"{receipt}:running", RESUME_RUN_SECONDS), every=RESUME_RENEW_SECONDS)
+        renewal.start()
+        try:
+            ack = self.command(order)
+        except Exception as exc:
+            ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
+        finally:
+            renewal.close()
+        answer(redis, receipt, ack)
+
+    def _spawn_resume(self, order: CommandOrder) -> None:
+        """Run a resume order in its own process so a slow herdr resume never holds the heartbeat."""
+        subprocess.Popen(
+            [sys.executable, "-m", "scripts.hive.resume_order", self.hive, order.encode()],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+        )
+
+    def _holding(self, order: CommandOrder) -> AgentRecord | None:
+        """The order's execution record while it runs on this hive with the generation, launch and pane the hub judged
+        and its agent still holds its task claim, else None."""
+        try:
+            current = self.store.execution_registry.get(order.slug, order.execution_id)
+        except SwarmError:
+            return None
+        store: Any = self.store
+        record: Any = current
+        target: dict[str, Any] = record.runtime_target
+        judged = (order.name, order.generation, order.launched_at, order.pane_id, self.hive)
+        host = target.get("host_id") or current.hive
+        found = (current.name, current.generation, current.launched_at, current.pane_id, host)
+        return current if found == judged and store.claimant(order.slug, current.task) == order.name else None
 
     def reap_execution(self, order: CommandOrder, agent: AgentRecord) -> Ack:
         receipt = self.orders.launch_receipt(self.hive, order.slug, order.execution_id, order.generation)
