@@ -1385,6 +1385,16 @@ def test_a_claimed_task_with_no_claimant_field_or_generation_is_reopened(store: 
 
 
 @pytest.mark.feature("swarm-tick-events-orphans")
+def test_an_orphan_on_a_later_claim_generation_is_reopened(store: RedisStore) -> None:
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009", claim_generation=3)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert "task t1 had no agent, reopened" in actions
+
+
+@pytest.mark.feature("swarm-tick-events-orphans")
 def test_an_events_claim_held_by_a_hive_agent_record_stays_claimed(store: RedisStore) -> None:
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused", engine=EVENTS_ENGINE)
