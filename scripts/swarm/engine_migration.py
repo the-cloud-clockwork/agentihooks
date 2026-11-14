@@ -4,12 +4,13 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from scripts.doctor.priming import TEMPLATE, doctor_slug  # pyright: ignore[reportUnknownVariableType]
 from scripts.swarm import store
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError
 
-BUSY = "skipped: live legacy agents or launches"
+BUSY = "skipped: live legacy agents"
 NO_ORIGIN = "skipped: no repository origin"
 
 
@@ -48,11 +49,14 @@ def repo_origin(redis_store: RedisStore, slug: str) -> str:
     return doctor_origin(redis_store, slug, peer) if peer else own_origin(redis_store, slug)
 
 
-def drop_launch_jobs(redis_store: RedisStore, slug: str) -> None:
-    """Drops the launch job rows of a swarm with no agents, since every agent they name is gone."""
+def drop_launch_jobs(redis_store: RedisStore, slug: str) -> int:
+    """Drops the launch job rows of a swarm with no agents, since every agent they name is gone, and counts them."""
     from scripts.swarm import launch_job
 
-    redis_store.redis.delete(redis_store.key(slug, launch_job.KEY))  # pyright: ignore[reportUnknownMemberType]
+    key = redis_store.key(slug, launch_job.KEY)
+    count = int(redis_store.redis.hlen(key))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    redis_store.redis.delete(key)  # pyright: ignore[reportUnknownMemberType]
+    return count  # pyright: ignore[reportUnknownMemberType]
 
 
 def stored_on_events(redis_store: RedisStore, slug: str) -> bool:
@@ -60,21 +64,44 @@ def stored_on_events(redis_store: RedisStore, slug: str) -> bool:
     return str(redis_store.redis.hget(redis_store.key(slug, "config"), "engine")) == EVENTS_ENGINE  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
+def drop_stuck_launches(redis_store: RedisStore, slug: str) -> int:
+    """Drops the launch job rows and the launch rows awaiting acknowledgement of a swarm with no agents; history stays."""
+    if redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
+        return 0
+    jobs = drop_launch_jobs(redis_store, slug)
+    return jobs + drop_collecting(redis_store.redis, redis_store.key(slug, "launches"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+
+def drop_collecting(client: Any, key: str) -> int:
+    """Deletes the rows of one launches hash still acknowledging or launching and counts them."""
+    from scripts.swarm import hash_pages
+    from scripts.swarm.ack_pass import COLLECTING
+
+    rows: dict[str, str] = hash_pages.fields(client, key)
+    stuck = [name for name, raw in rows.items() if json.loads(raw).get("state") in COLLECTING]
+    if stuck:
+        client.hdel(key, *stuck)
+    return len(stuck)
+
+
+def dropped(outcome: str, count: int) -> str:
+    """The outcome, naming the stuck launches it dropped when there were any."""
+    return f"{outcome}: dropped {count} stuck launches" if count else outcome
+
+
 def migrate_one(redis_store: RedisStore, slug: str) -> str:
     """Moves one stored config to the events engine with an origin and names the outcome."""
     config = redis_store.config(slug)
     on_events = stored_on_events(redis_store, slug)
     if on_events and config.repo_origin:
-        return "unchanged"
+        return dropped("unchanged", drop_stuck_launches(redis_store, slug))
     if not on_events and redis_store.agents(slug):  # pyright: ignore[reportUnknownMemberType]
         return BUSY
     found = repo_origin(redis_store, slug)
     if not found:
         return NO_ORIGIN
-    if not on_events:
-        drop_launch_jobs(redis_store, slug)
     redis_store.update(slug, engine=EVENTS_ENGINE, repo_origin=found)  # pyright: ignore[reportUnknownMemberType]
-    return f"migrated: {found}"
+    return dropped(f"migrated: {found}", drop_stuck_launches(redis_store, slug))
 
 
 def migrate(redis_store: RedisStore) -> dict[str, str]:
