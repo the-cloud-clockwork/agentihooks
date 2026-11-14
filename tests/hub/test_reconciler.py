@@ -814,6 +814,8 @@ def test_a_hub_admitted_agent_its_beating_hive_no_longer_lists_is_settled_once(
         ([], 900_001, -1, 0, {}),
         ([], 900_001, -1, 2, {}),
         ([], 850_000, 0, 0, {"started_at": 800_000, "launched_at": 0}),
+        ([], 920_000, 0, 0, {"launched_at": 950_000}),
+        ([], 920_000, 0, 0, {"started_at": 950_000, "launched_at": 0}),
         (["engineer@other"], 800_000, -1, 0, {}),
     ],
 )
