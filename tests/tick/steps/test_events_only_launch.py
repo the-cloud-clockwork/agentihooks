@@ -46,3 +46,15 @@ def test_a_stored_legacy_engine_reads_as_events() -> None:
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     store.redis.hset(store.key("sw", "config"), "engine", "legacy")
     assert store.config("sw").engine == EVENTS_ENGINE
+
+
+@pytest.mark.feature("swarm-events-only-launch")
+def test_the_hub_reads_a_swarm_stored_with_the_legacy_engine_as_events() -> None:
+    import fakeredis
+
+    from scripts.hub import reconciler
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    store.redis.hset(store.key("sw", "config"), "engine", "legacy")
+    assert reconciler.event_slugs(store) == ["sw"]

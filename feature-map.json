@@ -6349,14 +6349,15 @@
       "id": "swarm-events-only-launch",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only",
-      "behaviour": "Every swarm runs on the events engine: no registered tick step launches an agent, a swarm config built without an engine reads as events, a config naming any other engine is refused, a stored config reads as events whatever engine it stored, and swarm create stores the events engine, so agents launch only through hub admission and hive spokes.",
-      "seam": "scripts.tick.registry steps, scripts.swarm.store SwarmConfig and RedisStore config, scripts.swarm.cli cmd_create",
+      "behaviour": "Every swarm runs on the events engine: no registered tick step launches an agent, a swarm config built without an engine reads as events, a config naming any other engine is refused, the store and the hub read every stored swarm as events whatever engine it stored, and swarm create stores the events engine, so agents launch only through hub admission and hive spokes.",
+      "seam": "scripts.tick.registry steps, scripts.swarm.store SwarmConfig and RedisStore config, scripts.hub.reconciler event_slugs, scripts.swarm.cli cmd_create",
       "tests": [
         "tests/tick/steps/test_events_only_launch.py::test_no_registered_tick_step_launches_an_agent",
         "tests/tick/steps/test_events_only_launch.py::test_a_config_built_without_an_engine_runs_on_events",
         "tests/tick/steps/test_events_only_launch.py::test_a_stored_config_without_an_engine_field_reads_as_events",
         "tests/tick/steps/test_events_only_launch.py::test_a_config_naming_the_legacy_engine_is_refused",
         "tests/tick/steps/test_events_only_launch.py::test_a_stored_legacy_engine_reads_as_events",
+        "tests/tick/steps/test_events_only_launch.py::test_the_hub_reads_a_swarm_stored_with_the_legacy_engine_as_events",
         "tests/swarm/test_cli.py::test_create_stores_the_events_engine"
       ],
       "rules": [
