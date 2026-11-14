@@ -6185,8 +6185,8 @@
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
-      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive and the launch decision, lane defaults with named overrides, lands on the record. The record stays as the events path leaves it before a hive runs it: state starting, no pane, launched at zero, the claim life pending, no runtime listing and no launch row; the swarm stays paused, and a refused admission fails the test.",
-      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit and Admission.launched",
+      "behaviour": "A test seats an agent on an open task of a created swarm through hub admission, admit then the launched acknowledgement, with no swarm start, no tick pass and no runtime spawn: the task is claimed by the agent name, its execution starts in its lane seat on the given hive and the launch decision, lane defaults with named overrides, lands on the record. The hub reactor on execution started then marks the record working with its pane and launch time and counts the claim life; no runtime listing and no launch row; the swarm stays paused, and a refused admission fails the test.",
+      "seam": "tests.helpers.seat.seat_agent and its seat fixture, driving Admission.admit, Admission.launched and Claims.handle",
       "tests": [
         "tests/helpers/test_seat.py::test_seat_claims_and_launches_an_agent_without_start_or_a_tick",
         "tests/helpers/test_seat.py::test_seat_carries_a_given_hive_and_overrides_only_the_named_launch_fields",
@@ -6216,6 +6216,26 @@
       ]
     },
     {
+      "id": "events-started-working",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-started-working",
+      "behaviour": "A hive lane spoke puts the pane and the launch time of the agent it spawned on the execution started event, taking its own clock when the placement carries no launch time, and the hub claim lives reactor on that event, before it counts the life, moves the admitted agent from starting to working with that pane and launch time; a started event without a launch time takes the event time, a rebuilt start without a pane counts the life and leaves the agent starting, a write that raises counts no life so redelivery retries both, and a late start never revives an agent that already left starting.",
+      "seam": "Spoke._spawn building the execution started envelope, and Claims.handle through ExecutionRegistry.set_launch",
+      "tests": [
+        "tests/hub/test_claim_lives.py::test_an_admitted_then_started_agent_is_working_with_its_pane_and_launch_time",
+        "tests/hub/test_claim_lives.py::test_a_start_from_a_spoke_without_a_launch_time_takes_the_event_time",
+        "tests/hive/test_spoke.py::test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknowledging",
+        "tests/hub/test_claim_lives.py::test_a_late_start_never_revives_a_finished_agent",
+        "tests/hive/test_spoke.py::test_a_spawn_without_a_launch_time_starts_at_the_spoke_clock",
+        "tests/hub/test_claim_lives.py::test_a_launch_decision_after_the_start_still_reaches_the_working_agent",
+        "tests/hub/test_claim_lives.py::test_a_start_with_an_empty_launch_time_takes_the_event_time",
+        "tests/hub/test_claim_lives.py::test_a_rebuilt_start_without_a_pane_counts_the_life_and_leaves_the_agent_starting",
+        "tests/hub/test_claim_lives.py::test_a_working_write_that_raises_counts_no_life_so_redelivery_retries_both",
+        "tests/swarm/test_execution_archive.py::test_set_launch_from_a_state_writes_only_while_the_run_is_still_in_it",
+        "tests/hub/test_claim_lives.py::test_a_projection_that_raises_after_the_write_is_projected_again_on_redelivery"
+      ]
+    },
+    {
       "id": "events-launch-check",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check",
@@ -6227,6 +6247,27 @@
         "tests/hub/test_admission.py::test_a_republished_decision_naming_no_harness_starts_no_second_launch_check",
         "tests/hub/test_admission.py::test_a_launch_check_the_hub_starts_misses_a_hive_agent_that_never_reported_its_join",
         "tests/hub/test_admission.py::test_a_refused_launch_decision_starts_no_launch_check"
+      ]
+    },
+    {
+      "id": "events-retirement-refunds-claim-life",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
+      "behaviour": "An agent seated through hub admission whose hive recorded its start and whose claim life the hub counted gets that life back when the swarm stops: it is retired and dropped, and its task reopens unclaimed.",
+      "seam": "stop_now retiring an events launched agent through the held claim refund",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent"
+      ]
+    },
+    {
+      "id": "events-parked-retirement-after-release-refunds-nothing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
+      "behaviour": "The hub lifecycle exit of an events launched agent whose life ended in a parked retirement, a quota handoff or a park on an open dependency, refunds nothing once the agent no longer holds its claim, and refunds the one counted life while it still holds it; either way the agent is dropped.",
+      "seam": "Lifecycle.handle on execution.exited refunding a parked retirement through the held claim refund",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_refunds_nothing_once_its_claim_was_released",
+        "tests/swarm/test_events_claim_refunds.py::test_an_events_parked_retirement_still_holding_its_claim_refunds_its_life"
       ]
     },
     {
@@ -6527,6 +6568,50 @@
         "tests/swarm/test_claim_refunds.py::test_three_failed_lives_still_block_the_fourth_claim",
         "tests/swarm/test_claim_refunds.py::test_three_swarm_retirements_allow_a_fourth_claim",
         "tests/swarm/test_claim_refunds.py::test_a_parked_retirement_refunds_nothing_once_the_agent_no_longer_holds_its_claim"
+      ]
+    },
+    {
+      "id": "launch-troubleshooting-crew",
+      "origin": "operator",
+      "operator_words": "i want to create an agentihooks built-in skill launch-troubleshooting-crew and exacly will be that, when we face for lets say 2 hours max a problem that cannot solve we stop all work and launch that skill so the master gets a bruteforce crew that we can modify adhoc on skill calls with more agents if we want but de default was the same layour the same order of what I asked last night",
+      "ordered_at": "2026-11-14",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-troubleshooting-crew-skill",
+      "behaviour": "The launch troubleshooting crew skill script plans the operator's crew, five scouts at opus max, five fixers at opus xhigh, three critics at fable xhigh and a hardening stage, each count, model and effort overridable; the scout stage saves the earlier focus and eng lane settings, sets the eng lane, adds eng troubleshoot scout tasks, focuses only the crew without deleting anything and records the order as a canon seat note and asks every agent working on another task to hand off at its next stop; fixers are added only once every scout task is done and a proven cause is named; restore brings back the eng lane and the earlier focus, skipping targets done or gone, and names the agents it stopped.",
+      "seam": "scripts.swarm.troubleshooting_crew main with an injected runner standing in for the agentihooks ledger, swarm and msg commands, reached by the skill entry point",
+      "tests": [
+        "tests/test_launch_troubleshooting_crew_skill.py::test_plan_is_the_operators_default_layout_and_runs_nothing",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_every_stage_count_model_and_effort_is_overridable",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_scout_stops_other_work_sets_the_lane_and_records_the_order",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_second_scout_adds_scouts_and_keeps_the_earlier_focus_and_lane",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_rerun_after_a_failed_launch_adds_only_the_missing_scouts",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_launch_asks_agents_on_other_tasks_to_hand_off",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_fixers_wait_until_every_scout_is_done",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_fixers_are_added_for_the_proven_causes_and_focused",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_later_stages_keep_the_launch_overrides",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_restore_brings_back_the_earlier_focus_and_lane",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_restore_skips_focus_targets_done_or_gone",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_scout_after_a_restore_starts_a_new_crew"
+      ],
+      "semgrep_rule": "feature-launch-troubleshooting-crew",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.swarm.troubleshooting_crew",
+        "plan",
+        "rig-grade-swarm",
+        "--problem",
+        "live check of the default crew plan"
+      ]
+    },
+    {
+      "id": "worker-profile-detached-lifecycle-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-proof-gc-child",
+      "behaviour": "The worker image profiles proof ignores the detached lifecycle gc job that a Codex SessionStart starts for its own home, with that job's descendants, and still fails on any other hook child that outlives registration.",
+      "seam": "tests.swarm_node.profile_probe.codex_session_start and its lifecycle_jobs identity check",
+      "tests": [
+        "tests/test_worker_profile_offline.py::test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration",
+        "tests/test_worker_profile_offline.py::test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job"
       ]
     }
   ],

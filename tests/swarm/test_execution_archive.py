@@ -359,6 +359,21 @@ def test_set_launch_never_shows_an_agent_dropped_during_the_write(store, monkeyp
     assert not store.redis.hexists(store.key("fixture", "agents"), current.name)
 
 
+@pytest.mark.feature("events-started-working")
+def test_set_launch_from_a_state_writes_only_while_the_run_is_still_in_it(store):
+    working = started(store, "eng-1@fixture")
+    agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-2@fixture", state="starting")
+    starting = store.start_execution("fixture", agent)
+    write = {"state": "working", "pane_id": "w1:p3", "launched_at": 6_500}
+
+    assert store.execution_registry.set_launch("fixture", working.execution_id, write, only_from="starting") is False
+    assert store.execution_registry.set_launch("fixture", starting.execution_id, write, only_from="starting") is True
+
+    assert store.execution("fixture", working.execution_id).pane_id == ""
+    written = store.execution("fixture", starting.execution_id)
+    assert (written.state, written.pane_id, written.launched_at) == ("working", "w1:p3", 6_500)
+
+
 @pytest.mark.feature("events-launch-decision-record")
 @pytest.mark.parametrize("which", ["replaced", "dropped", "unknown", "earlier", "unlisted"])
 def test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head(store, which):

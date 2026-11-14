@@ -203,7 +203,13 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
     runtime = Mock()
     placed = SimpleNamespace(
-        pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+        pane_id="pane-1",
+        harness="claude",
+        account="slot-a",
+        profile="engineer",
+        model="opus",
+        effort="high",
+        launched_at=0,
     )
     runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
     store = configs({"rig": "events"})
@@ -237,7 +243,13 @@ def test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_
     def spawn(request):
         written.update({name: (folder / name).read_text(encoding="utf-8") for name in seeds})
         placed = SimpleNamespace(
-            pane_id="pane-1", harness="claude", account="slot-a", profile="engineer", model="opus", effort="high"
+            pane_id="pane-1",
+            harness="claude",
+            account="slot-a",
+            profile="engineer",
+            model="opus",
+            effort="high",
+            launched_at=0,
         )
         return Outcome("spawn", Status.OK, "local", placed)
 
@@ -268,7 +280,10 @@ def test_only_the_root_hive_lane_spoke_takes_an_offer_pinned_to_it(
     hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(pinned)
     runtime = Mock()
     runtime.spawn.return_value = Outcome(
-        "spawn", Status.OK, "local", SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a")
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-1", harness="claude", account="slot-a", launched_at=0),
     )
 
     polled = lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, hive, ("eng",), 0, {})
