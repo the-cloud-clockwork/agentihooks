@@ -78,7 +78,7 @@ def test_a_member_fetch_on_another_hives_stop_consumer_is_denied(signer: nats_gr
     foreign = f"{verb}.{stop_names.stream(SWARM)}.{stop_names.consumer(SWARM, 'h2')}"
 
     assert _publish_refusals(signer, _member(signer, "m1"), foreign) == [
-        f'nats: permissions violation for publish to "{foreign}"'
+        f'nats: permissions violation for publish to "{foreign.lower()}"'
     ]
 
 
@@ -87,7 +87,7 @@ def test_a_member_ack_on_another_hives_stop_consumer_is_denied(signer: nats_gran
     foreign = f"$JS.ACK.{stop_names.stream(SWARM)}.{stop_names.consumer(SWARM, 'h2')}.1.1.1.1.0"
 
     assert _publish_refusals(signer, _member(signer, "m1"), foreign) == [
-        f'nats: permissions violation for publish to "{foreign}"'
+        f'nats: permissions violation for publish to "{foreign.lower()}"'
     ]
 
 
