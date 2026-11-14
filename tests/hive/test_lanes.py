@@ -318,6 +318,7 @@ def test_the_lane_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch)
     outcomes = iter([["empty"], ["started", "held"], []])
     seen = []
     monkeypatch.setattr(lanes, "run_once", lambda *args: seen.append(args) or next(outcomes))
+    monkeypatch.setattr(lanes, "stop_once", lambda *args: [])
     waits = []
 
     lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(3))
