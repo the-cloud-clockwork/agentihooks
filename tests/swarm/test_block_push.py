@@ -1,11 +1,16 @@
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import cli, publish, stack
+from scripts.swarm.store import AgentRecord, RedisStore
+from tests.helpers.seat import seat
 from tests.swarm.test_cli import env
 
-_fixture = env
+_fixture = env, seat
 AGENT = "engineer@a1b2c3-0001"
 BRANCH = "engineer-a1b2c3-0001"
 PUSHED = publish.pushed_branches
@@ -32,13 +37,19 @@ def _repository(tmp_path, name):
 
 
 @pytest.fixture
-def worktree(env, monkeypatch, tmp_path):
+def worktree(
+    env: tuple[RedisStore, Any, Any],
+    seat: Callable[..., AgentRecord],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> tuple[Any, Path, Path, Path]:
     _, ledger, _ = env
     origin, primary, top = _repository(tmp_path, "repo")
     monkeypatch.setattr(publish, "pushed_branches", PUSHED)
     monkeypatch.chdir(primary)
     cli.main(["sw", "create", "--repo", str(primary)])
-    cli.main(["sw", "start"])
+    seat("t1")
+    seat("t2")
     return ledger, origin, primary, top
 
 
@@ -100,13 +111,14 @@ def test_block_records_the_pushed_branch_on_the_task(worktree, monkeypatch):
 
 
 @pytest.fixture
-def hive_worktree(env, monkeypatch, tmp_path):
+def hive_worktree(env, seat, monkeypatch, tmp_path):
     _, ledger, _ = env
     origin, primary, top = _repository(tmp_path, "repo")
     monkeypatch.setattr(publish, "pushed_branches", PUSHED)
     monkeypatch.chdir(primary)
     cli.main(["sw", "create", "--repo", str(tmp_path / "workstation" / "repo")])
-    cli.main(["sw", "start"])
+    seat("t1")
+    seat("t2")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REPO", str(primary))
     return ledger, origin, primary, top
 
