@@ -712,12 +712,15 @@
       "id": "hub-admission-claim-continuity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-continuity",
-      "behaviour": "An events admission carries the handoff or recovery handoff its predecessor left as the admitted task's handoff text and attaches the task's open transfer record to the admitted successor and its seat, so the successor's opening prompt continues from the document and its transfer binds; only the legacy place prepare did this, so a successor launched under events started with no handoff document. A launch the hive reopens marks its attached transfer absent and leaves a retry row that the next admitted successor attaches.",
-      "seam": "Admission.admit answer read by the opening prompt priming lines on the hive",
+      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened or late admission detaches the transfer for the next successor without a second row, and a refused attach releases the claim, the agent and the ledger row.",
+      "seam": "Admission.admit and Admission.reopen against the stored handoff transfers",
       "tests": [
-        "tests/hub/test_admission.py::test_an_events_successor_reads_its_predecessors_handoff_and_binds_its_transfer",
-        "tests/hub/test_admission.py::test_an_events_successor_with_no_handoff_left_carries_no_handoff_or_transfer",
-        "tests/hub/test_admission.py::test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor"
+        "tests/hub/test_admission.py::test_an_events_successor_attaches_the_transfer_its_predecessor_left",
+        "tests/hub/test_admission.py::test_an_events_successor_with_no_transfer_left_carries_none",
+        "tests/hub/test_admission.py::test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor",
+        "tests/hub/test_admission.py::test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was",
+        "tests/hub/test_admission.py::test_a_late_events_admission_hands_its_transfer_back",
+        "tests/hub/test_admission.py::test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_row"
       ]
     },
     {

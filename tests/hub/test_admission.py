@@ -203,59 +203,108 @@ def test_a_task_returns_to_the_seat_its_handoff_names(rig):
 CONTINUITY_DOC = "# Handoff v2\n## Next\nRead the saved proof and push the fix.\n## Read first\nNone\n"
 
 
-@pytest.mark.feature("hub-admission-claim-continuity")
-@pytest.mark.parametrize("recovery", [False, True])
-def test_an_events_successor_reads_its_predecessors_handoff_and_binds_its_transfer(
-    rig: SimpleNamespace, recovery: bool
-) -> None:
+def left_transfer(rig: SimpleNamespace, text: str = CONTINUITY_DOC) -> dict[str, Any]:
+    """The open transfer a finished predecessor of t1 left on seat eng-1 with its stored handoff."""
     from scripts.handoff import transfers
-    from scripts.hive.remove import RECOVERY
-    from scripts.swarm.prompt import priming_lines
     from scripts.swarm.store import AgentRecord
 
     old = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", state="finished")
+    rig.store.put_handoff(SLUG, "t1", text, seat=old.seat)
+    return transfers.record(rig.store, SLUG, old, "recycle", text, 2)
+
+
+@pytest.mark.feature("hub-admission-claim-continuity")
+@pytest.mark.parametrize("recovery", [False, True])
+def test_an_events_successor_attaches_the_transfer_its_predecessor_left(rig: SimpleNamespace, recovery: bool) -> None:
+    from scripts.handoff import transfers
+    from scripts.hive.remove import RECOVERY
+
     text = (
-        RECOVERY.format(name=old.name, task="t1", hive="hive-b", wait=30, folder="/work/t1", pushed="")
+        RECOVERY.format(name="sw-eng-1", task="t1", hive="hive-b", wait=30, folder="/work/t1", pushed="")
         if recovery
         else CONTINUITY_DOC
     )
-    transfer = transfers.record(rig.store, SLUG, old, "recycle", text, 2)
-    rig.store.put_handoff(SLUG, "t1", text, seat=old.seat)
+    transfer = left_transfer(rig, text)
 
     admitted = rig.admitter.admit(SLUG, ask())
 
     bound = transfers.get(rig.store, SLUG, transfer["id"])
-    assert admitted["task"]["handoff"] == text
     assert admitted["task"]["transfer"] == bound
-    assert (bound["successor"], bound["seat"]) == (admitted["name"], "eng-1@sw")
+    assert (bound["successor"], bound["seat"], bound["handoff"]) == (admitted["name"], "eng-1@sw", text)
     assert bound["generation"] == rig.store.seats.occupant("eng-1@sw").generation
-    assert text in priming_lines(admitted["task"])
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
-def test_an_events_successor_with_no_handoff_left_carries_no_handoff_or_transfer(rig: SimpleNamespace) -> None:
-    task = rig.admitter.admit(SLUG, ask())["task"]
-    assert ("handoff" in task, task.get("transfer")) == (False, None)
+def test_an_events_successor_with_no_transfer_left_carries_none(rig: SimpleNamespace) -> None:
+    assert rig.admitter.admit(SLUG, ask())["task"]["transfer"] is None
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
 def test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor(rig: SimpleNamespace) -> None:
     from scripts.handoff import transfers
-    from scripts.swarm.store import AgentRecord
 
-    old = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", state="finished")
-    first = transfers.record(rig.store, SLUG, old, "recycle", CONTINUITY_DOC, 2)
-    rig.store.put_handoff(SLUG, "t1", CONTINUITY_DOC, seat=old.seat)
-    lost = rig.admitter.admit(SLUG, ask())["name"]
+    transfer = left_transfer(rig)
+    rig.admitter.admit(SLUG, ask())
     assert rig.admitter.reopen(SLUG, ask()) is True
+    detached = transfers.get(rig.store, SLUG, transfer["id"])
 
     admitted = rig.admitter.admit(SLUG, ask(generation=rig.rows["t1"]["claim_generation"]))
 
-    failed = transfers.get(rig.store, SLUG, first["id"])
-    assert (failed["successor"], failed["binding"]["state"], failed["binding"]["session"]) == (lost, "absent", lost)
-    retry = admitted["task"]["transfer"]
-    assert (retry["retry_of"], retry["successor"], retry["handoff"]) == (first["id"], admitted["name"], CONTINUITY_DOC)
-    assert retry == transfers.get(rig.store, SLUG, retry["id"])
+    assert (detached["successor"], detached["binding"]) == ("", {"state": "pending"})
+    assert [row["id"] for row in transfers.list_transfers(rig.store, SLUG)] == [transfer["id"]]
+    assert admitted["task"]["transfer"]["id"] == transfer["id"]
+    assert transfers.get(rig.store, SLUG, transfer["id"])["successor"] == admitted["name"]
+
+
+@pytest.mark.feature("hub-admission-claim-continuity")
+def test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was(rig: SimpleNamespace) -> None:
+    from scripts.handoff import transfers
+
+    left_transfer(rig)
+    rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.reopen(SLUG, ask()) is True
+    once = transfers.list_transfers(rig.store, SLUG)
+
+    assert rig.admitter.reopen(SLUG, ask()) is False
+
+    assert transfers.list_transfers(rig.store, SLUG) == once
+    assert [row["successor"] for row in once] == [""]
+
+
+@pytest.mark.feature("hub-admission-claim-continuity")
+def test_a_late_events_admission_hands_its_transfer_back(rig: SimpleNamespace) -> None:
+    from scripts.handoff import transfers
+
+    transfer = left_transfer(rig)
+    rig.admitter.clock = late_clock(5)
+
+    with pytest.raises(admission.LateAdmission):
+        rig.admitter.admit(SLUG, ask())
+
+    assert transfers.get(rig.store, SLUG, transfer["id"])["successor"] == ""
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-claim-continuity")
+def test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_row(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.handoff import transfers
+    from scripts.swarm.store import SwarmError
+
+    def refuse(store: object, slug: str, agent: object) -> None:
+        raise SwarmError("The transfer changed; retry the command")
+
+    left_transfer(rig)
+    monkeypatch.setattr(transfers, "attach", refuse)
+
+    with pytest.raises(SwarmError, match="^The transfer changed"):
+        rig.admitter.admit(SLUG, ask())
+
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
+    assert rig.store.redis.get(rig.admitter._key(SLUG, ask())) is None
 
 
 @pytest.mark.feature("swarm-tick-successor-fill")

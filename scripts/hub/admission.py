@@ -212,8 +212,7 @@ class Admission:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
-        handoff = self.store.handoff(slug, task_id)
-        primed = tick.primed(self.store, slug, seat, {**row, **live, **({"handoff": handoff} if handoff else {})})
+        primed = tick.primed(self.store, slug, seat, {**row, **live})
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
@@ -222,7 +221,11 @@ class Admission:
             profile_choice.LEDGER_INTENT: profile_choice.carried(doc, task),
         }
         avoid = self.store.failed_harness(slug, task_id)
-        task["transfer"] = transfers.attach(self.store, slug, record)
+        try:
+            task["transfer"] = transfers.attach(self.store, slug, record)
+        except Exception:
+            self._release(slug, task_id, name)
+            raise
         admitted = {
             "hive": request["hive"],
             "name": name,
@@ -264,19 +267,22 @@ class Admission:
         held = self.store.redis.get(key)
         if not held or json.loads(held)["hive"] != request["hive"]:
             return False
-        name = json.loads(held)["name"]
-        self.store.cancel_pending_life(slug, request["task"])
-        transfers.failed(self.store, slug, SimpleNamespace(name=name))
-        self._unclaim(slug, request["task"], name)
+        self._release(slug, request["task"], json.loads(held)["name"])
+        self.store.redis.delete(key)
+        return True
+
+    def _release(self, slug: str, task_id: str, name: str) -> None:
+        """Returns a claimed task to open: its pending life, its transfer, its claim and agent, then its ledger row."""
+        self.store.cancel_pending_life(slug, task_id)
+        transfers.detach(self.store, slug, SimpleNamespace(name=name))
+        self._unclaim(slug, task_id, name)
         self.ledger.update_task(
             slug,
-            request["task"],
+            task_id,
             {"state": "open", "claimed_by": ""},
             if_state=("claimed", "pr"),
             if_match={"claimed_by": name},
         )
-        self.store.redis.delete(key)
-        return True
 
     def failed(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)
