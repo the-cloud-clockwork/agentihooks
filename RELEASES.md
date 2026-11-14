@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.883 · 2026-11-14
+
+### 2026-11-14 · ad199ea068e3 · #11174 · @agenticore-app
+
+**Move claim cap tests to hub admission and map legacy spawn launch tests**
+
+This change retires ten legacy tick-spawn tests for claim caps, launch budget, pool, steering, and capacity, replacing them with equivalent coverage in the new hub admission test suite so removing the legacy spawn step won't silently break untracked assertions. Tests without an events counterpart are kept in place and remapped under explicit retiring coverage entries per prior agreement, and the swarm-claim-lives coverage entry is dropped since no remaining test reaches the legacy spawn path. This keeps the coverage map consistent and prevents unannounced regressions as the legacy spawn code is phased out.
+
 ## v2.17.882 · 2026-11-14
 
 ### 2026-11-14 · 808f873261ab · #11160 · @agenticore-app
