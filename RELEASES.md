@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.882 · 2026-11-14
+
+### 2026-11-14 · 808f873261ab · #11160 · @agenticore-app
+
+**Seat test agents through hub admission instead of swarm start**
+
+This change replaces the heavyweight `swarm start` flow in test setup with a direct `seat_agent` helper that drives agent admission and launch acknowledgement straight through the `Admission` API, skipping tick passes and runtime spawning. The `test_block_gate` and `test_block_push` fixtures now use this seam, with new tests confirming the seated agent record's contract. This makes test setup faster and more deterministic while still exercising the real admission path, reducing flakiness and runtime overhead without changing any existing assertions.
+
 ## v2.17.880 · 2026-11-14
 
 ### 2026-11-14 · fbfbbb52f00c · #11139 · @nestorcolt
