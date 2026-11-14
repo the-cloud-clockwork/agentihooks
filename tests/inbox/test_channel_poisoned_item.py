@@ -211,6 +211,37 @@ def test_a_redis_error_closing_an_item_shown_elsewhere_returns_it_and_the_first_
     assert _requeued(inbox, broken.id) == ("pending", "bob", seen.CLAIM_FAILED)
 
 
+@pytest.mark.feature("inbox-claim-redis-error-requeue")
+def test_a_redis_error_returning_an_unsettled_item_returns_it_and_the_first_to_pending(
+    channel_backend: tuple[Any, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from redis.exceptions import RedisError
+
+    from scripts.inbox.store import InboxError
+
+    _, inbox = channel_backend
+    first, broken, last = _three(inbox)
+    checked = seen._shown_elsewhere  # pyright: ignore[reportPrivateUsage]
+    requeue = inbox.requeue
+
+    def unsettled(marks: Any, store: InboxStore, item: Item, me: str) -> bool:
+        if item.id == broken.id:
+            raise InboxError("the delivery owner of bob changed meanwhile")
+        return checked(marks, store, item, me)
+
+    def flaky_requeue(item_id: str, by: str, reason: str, before: int | None = None) -> Item | None:
+        if reason == seen.UNSETTLED:
+            raise RedisError("connection lost")
+        return requeue(item_id, by, reason, before)
+
+    monkeypatch.setattr(seen, "_shown_elsewhere", unsettled)
+    monkeypatch.setattr(inbox, "requeue", flaky_requeue)
+    with pytest.raises(RedisError):
+        seen.claim(inbox, "bob")
+    assert [inbox.get(item.id).state for item in (first, broken, last)] == ["pending", "pending", "pending"]
+    assert _requeued(inbox, broken.id) == ("pending", "bob", seen.CLAIM_FAILED)
+
+
 def _clocked_passes(inbox: InboxStore, monkeypatch: pytest.MonkeyPatch) -> tuple[Session, list[int], Any]:
     import anyio
 
