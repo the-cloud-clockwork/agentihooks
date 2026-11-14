@@ -6,11 +6,13 @@ import pytest
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
 from scripts.tick.steps import agents as agent_steps
+from tests.helpers.seat import seat_owner
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _resuming
-from tests.swarm.test_tick import FakeRuntime, tasks
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, tasks
 
 
 @pytest.fixture
@@ -41,11 +43,18 @@ class ResumingRuntime(FakeRuntime):
         return Placed("reopened:pane", agent.harness, profile=agent.profile)
 
 
+def seeded(store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
+    """Seats a working engineer on t1 through hub admission on the tick's own hive at 1, then ticks once at 1 so the
+    master step seats the master."""
+    seat_owner(store, ledger, runtime, "t1", 1)
+    tick_module.tick("sw", store, ledger, runtime, 1)
+
+
 @pytest.mark.parametrize("lane", ["master", "eng"])
 @pytest.mark.feature("swarm-dead-resume")
 def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypatch, lane):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     original = next(agent for agent in store.agents("sw") if agent.lane == lane)
     original = replace(original, conversation_id="original-conversation", profile="engineer", idle_ticks=4)
     store.put_agent("sw", original)
@@ -117,7 +126,7 @@ def test_dead_resume_records_why_a_fresh_agent_is_needed(store, monkeypatch, lan
     from scripts.swarm.tick import SpawnError
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == lane)
     agent = replace(agent, conversation_id="old-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -144,11 +153,12 @@ def test_dead_resume_records_why_a_fresh_agent_is_needed(store, monkeypatch, lan
 
 
 @pytest.mark.parametrize("lane", ["master", "eng"])
+@pytest.mark.feature("swarm-outage-recovery-hub-admitted")
 def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, monkeypatch, lane):
     from scripts.swarm.live_binding import assignment
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == lane)
     agent = replace(agent, conversation_id="old-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -171,7 +181,7 @@ def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, 
 @pytest.mark.feature("swarm-dead-resume")
 def test_lost_agent_cannot_reopen_a_successors_claim(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     agent = replace(agent, conversation_id="old-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -199,7 +209,7 @@ def test_resumed_agent_keeps_the_runtime_model_and_route(store, monkeypatch):
     from scripts.swarm import dead_resume
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == "master")
     agent = store.start_execution(
         "sw",
@@ -259,7 +269,7 @@ def test_dead_master_recovers_after_a_peers_binding_mismatch(store, monkeypatch)
     from scripts.swarm.live_binding import assignment
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     master = next(agent for agent in store.agents("sw") if agent.lane == "master")
     master = replace(master, conversation_id="master-conversation", profile="engineer")
     store.put_agent("sw", master)
@@ -282,7 +292,7 @@ def test_dead_master_recovers_after_a_peers_binding_mismatch(store, monkeypatch)
 
 def prepared_recovery(store):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(agent for agent in store.agents("sw") if agent.lane == "eng")
     agent = replace(agent, conversation_id="original-conversation", profile="engineer")
     store.put_agent("sw", agent)
@@ -619,7 +629,7 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     from scripts.swarm import deliberate_exit
 
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
-    tick_module.tick("sw", store, ledger, runtime, 1)
+    seeded(store, ledger, runtime)
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     store.put_agent("sw", replace(agent, conversation_id="original-conversation", profile="engineer"))
     monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)

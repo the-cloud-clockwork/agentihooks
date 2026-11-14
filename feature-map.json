@@ -2155,6 +2155,19 @@
       ]
     },
     {
+      "id": "swarm-outage-recovery-hub-admitted",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
+      "behaviour": "An owner seated through hub admission on the tick's own hive keeps its claim through an outage hold, frees its seat once a provider error outlasts the hold window, resumes after an outage drill without a new claim, and a dead owner reopens on its own seat.",
+      "seam": "The tick reaper and outage recovery passes judging an execution backed owner",
+      "tests": [
+        "tests/swarm/test_outage_hold.py::test_an_agent_at_a_provider_error_for_twenty_ticks_keeps_its_claim_unnudged_and_unretired",
+        "tests/swarm/test_outage_seat_release.py::test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_outage_stays_open",
+        "tests/swarm/test_outage_drill.py::test_outage_stalled_owners_resume_within_three_ticks_without_a_new_claim",
+        "tests/swarm/test_dead_resume.py::test_confirmed_dead_process_reaches_resume_before_binding_retirement"
+      ]
+    },
+    {
       "id": "swarm-reboot-recovery",
       "origin": "inventory",
       "behaviour": "After a reboot each recorded local agent resumes in its own conversation, seat and account, and one that cannot reopen awaits a decision.",
