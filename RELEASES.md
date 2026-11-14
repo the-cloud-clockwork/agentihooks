@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.872 · 2026-11-14
+
+### 2026-11-14 · 4ff3b4902c47 · #11115 · @nestorcolt
+
+**Reopen claimed tasks with no live agent under the events engine**
+
+This change fixes a long-standing gap where, under the events engine, tasks claimed by agents that no longer exist (no agent record, no claim) stayed stuck forever, since the hub was supposed to reclaim them but never did. The `orphans` tick step now actually runs `_orphans` instead of returning early, with a guarded reopen that respects claimant and claim generation so it can't clobber a claim taken after the check was read. Covered by new regression tests, a Semgrep rule catching the old early return, and updated feature docs; effects-port routing is deliberately left for a separate PR.
+
 ## v2.17.870 · 2026-11-14
 
 ### 2026-11-13 · a4fd1fdf2d4b · #11120 · @agenticore-app
