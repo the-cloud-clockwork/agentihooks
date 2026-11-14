@@ -195,6 +195,18 @@
       ]
     },
     {
+      "id": "ci-local-action-checkout-first",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43587437500-0",
+      "behaviour": "Every workflow step that runs a repository local action under always() follows a checkout or action fetch that no earlier failing step can skip, so the evidence upload of a job whose gate fails still finds its action.",
+      "seam": "the step order of every job in the GitHub workflows",
+      "tests": [
+        "tests/test_workflow_local_action_checkout.py::test_every_always_run_local_action_follows_a_checkout_no_failure_can_skip",
+        "tests/test_workflow_local_action_checkout.py::test_a_gate_step_before_checkout_is_flagged",
+        "tests/test_workflow_local_action_checkout.py::test_checkout_first_or_always_provided_actions_pass"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
