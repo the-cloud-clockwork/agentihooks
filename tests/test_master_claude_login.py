@@ -1249,6 +1249,7 @@ def test_launch_keeps_the_failed_slot_for_the_browser_when_no_other_slot_works(
     assert browsed == [login.home(1)]
     assert login.holders(login.root(1)) == {}
     assert login.holders(login.root(2)) == {}
+    assert login.failed(2) is True
 
 
 @pytest.mark.feature("master-login-limit-recovery")
