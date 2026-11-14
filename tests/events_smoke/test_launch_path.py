@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.events.envelope import Envelope
-from scripts.hive import presence, registry
+from scripts.hive import execution_stop, presence, registry
 from scripts.hub import admission, hive_loss
 from scripts.swarm import engine_migration, fleet_red, readiness
 from scripts.swarm import tick as swarm_tick
@@ -226,3 +226,23 @@ def test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work(
     assert ledger.rows["t2"]["state"] == "open"
     assert hive.runtime.spawn.call_count == 1
     assert hive.runtime.spawn.call_args.args[0].name == agent.name
+
+
+@pytest.mark.feature("events-smoke-execution-stop")
+def test_the_hub_stops_a_seated_execution_and_its_hive_reaps_it_and_publishes_the_exit(smoke: Smoke) -> None:
+    hive = smoke.spoke("hive-a", "eng")
+    smoke.offer("t1")
+    assert hive.spoke.poll(TAKE_MS) == "started"
+    [agent] = smoke.store.agents(SLUG)
+    event = started(smoke)
+    stopper = execution_stop.Stopper(hive.spoke.bus, SLUG, "hive-a", hive.runtime)
+
+    assert execution_stop.stop(smoke.bus, SLUG, agent, "launch check failed") == execution_stop.SENT
+    assert stopper.poll(TAKE_MS) == [execution_stop.STOPPED]
+
+    hive.runtime.reap.assert_called_once_with(agent.name)
+    [exited] = exits(smoke)
+    assert (exited.event.id, exited.event.cause) == (f"exited:{event.id}", event.id)
+    assert exited.event.data["claim_key"] == event.data["claim_key"]
+    assert execution_stop.stop(smoke.bus, SLUG, agent, "again") == execution_stop.ENDED
+    assert stopper.poll(1_000) == []
