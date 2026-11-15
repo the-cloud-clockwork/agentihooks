@@ -229,7 +229,7 @@ def test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read
 
 
 @pytest.mark.feature("lab-sandbox-read-only-trees")
-def test_a_unit_with_network_and_read_only_trees_is_cannot_run_without_bwrap(
+def test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))

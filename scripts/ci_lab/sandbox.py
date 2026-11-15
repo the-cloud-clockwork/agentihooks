@@ -104,7 +104,7 @@ def _bwrap(net: bool, readonly: Sequence[Path]) -> str | None:
         return None
     path = shutil.which("bwrap")
     if path is None:
-        unit = "a unit with read only trees" if net else "a unit without network"
+        unit = "a unit with read only trees" if readonly else "a unit without network"
         raise CannotRun(f"bwrap is not installed, so {unit} cannot run")
     return path
 
@@ -112,7 +112,7 @@ def _bwrap(net: bool, readonly: Sequence[Path]) -> str | None:
 class Sandbox:
     """Runs units from cwd, each in a private directory under root with a port range and the whitelisted environment.
 
-    Each readonly tree, an absolute path, is bound read only inside bubblewrap, so a unit given one always runs there.
+    Each readonly tree must be an absolute path; it is bound read only inside bubblewrap, where a unit given one runs.
     """
 
     def __init__(
