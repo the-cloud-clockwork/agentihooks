@@ -67,11 +67,106 @@ def decide(root, changed, durations=None, limit=3):
         ["tests/browser_coverage.py"],
         ["tests/node_capture.cjs"],
         ["tests/conftest.py"],
-        ["tests/swarm/conftest.py", "tests/test_sample.py"],
+        ["conftest.py"],
+        ["scripts/pkg/conftest.py"],
+        ["tests/swarm/conftest.py", "tests/conftest.py"],
     ],
 )
 def test_a_change_to_the_test_harness_runs_the_full_suite(repo, changed):
     assert decide(repo, changed) == ("full", [])
+
+
+def test_a_nested_conftest_selects_the_tests_beneath_it(repo: Path) -> None:
+    write(
+        repo,
+        {
+            "tests/pkg/conftest.py": "import os\n",
+            "tests/pkg/test_near.py": "import os\n",
+            "tests/pkg/deep/test_far.py": "import os\n",
+            "tests/pkg/helper.py": "import os\n",
+            "tests/other/test_beside.py": "import os\n",
+        },
+    )
+    scope, legs = decide(repo, ["tests/pkg/conftest.py"])
+    assert scope == "selected"
+    assert sorted(path for leg in legs for path in leg) == ["tests/pkg/deep/test_far.py", "tests/pkg/test_near.py"]
+
+
+def test_a_nested_module_beside_a_conftest_selects_only_the_tests_that_import_it(repo: Path) -> None:
+    write(
+        repo,
+        {
+            "tests/pkg/conftest.py": "import os\n",
+            "tests/pkg/helper.py": "import os\n",
+            "tests/pkg/test_near.py": "from tests.pkg import helper\n",
+            "tests/pkg/test_far.py": "import os\n",
+        },
+    )
+    assert decide(repo, ["tests/pkg/helper.py"]) == ("selected", [["tests/pkg/test_near.py"]])
+
+
+PYPROJECT = """\
+[build-system]
+requires = ["setuptools>=80"]
+
+[project]
+name = "sample"
+version = "1.0"
+dependencies = ["pyyaml>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+markers = ["unit"]
+
+[tool.ruff]
+line-length = 120
+"""
+PYPROJECT_SELECTED = "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_build.py\n"
+PYPROJECT_FULL = "scope=full\nlegs=[]\ncount=0\n"
+
+
+def commit_pyproject(repo: Path, text: str, message: str) -> None:
+    write(repo, {"pyproject.toml": text, "tests/test_build.py": "BUILD = 'pyproject.toml'\n"})
+    git(repo, "add", "pyproject.toml", "tests/test_build.py")
+    git(repo, "commit", "-m", message)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "written"),
+    [
+        ('version = "1.0"', 'version = "1.1"', PYPROJECT_SELECTED),
+        ("line-length = 120", "line-length = 100", PYPROJECT_SELECTED),
+        ('"pyyaml>=6"', '"pyyaml>=7"', PYPROJECT_FULL),
+        ('"pytest>=8"', '"pytest>=9"', PYPROJECT_FULL),
+        ('"setuptools>=80"', '"setuptools>=81"', PYPROJECT_FULL),
+        ('markers = ["unit"]', 'markers = ["unit", "slow"]', PYPROJECT_FULL),
+    ],
+)
+def test_a_pyproject_change_runs_the_full_suite_only_when_it_reaches_tests(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, old: str, new: str, written: str
+) -> None:
+    commit_pyproject(repo, PYPROJECT, "pyproject")
+    commit_pyproject(repo, PYPROJECT.replace(old, new), "change")
+    assert run_main(repo, monkeypatch, tmp_path, "pull_request") == written
+
+
+def test_a_new_pyproject_runs_the_full_suite(repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    commit_pyproject(repo, PYPROJECT, "pyproject")
+    assert run_main(repo, monkeypatch, tmp_path, "pull_request") == PYPROJECT_FULL
+
+
+def test_a_pyproject_compares_the_pull_request_against_its_merge_base(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commit_pyproject(repo, PYPROJECT, "pyproject")
+    git(repo, "switch", "-c", "change")
+    commit_pyproject(repo, PYPROJECT.replace('version = "1.0"', 'version = "1.1"'), "version")
+    git(repo, "switch", "dev")
+    commit_pyproject(repo, PYPROJECT.replace('"pyyaml>=6"', '"pyyaml>=7"'), "dependency on dev")
+    git(repo, "switch", "change")
+    assert run_main(repo, monkeypatch, tmp_path, "pull_request", base="dev") == PYPROJECT_SELECTED
 
 
 def test_a_source_change_selects_the_tests_that_import_it(repo):
