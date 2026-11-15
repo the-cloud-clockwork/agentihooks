@@ -214,6 +214,25 @@ def test_a_claimed_task_charges_lab_wait_only_before_its_claim():
     assert seconds_of(found) == {("lab_wait", ""): 600.0, ("seat_wait", ""): 6600.0, ("build", ""): 3600.0}
 
 
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples():
+    samples = [lab(at(8, 30), 1800.0), lab(at(8, 35), 60.0)]
+    assert stages.lab_spans(samples, NOW, 20) == [stages.Span("lab_wait", at(8, 30), at(8, 35))]
+    done = ledger("task done", at(8), "tasks/t0")
+    claim = [agent("claim", "t1", at(9)), agent("spawn", "t1", at(9), "e1", "claude")]
+    claimed = [{**TASK, "state": "claimed", "lane": "ci"}]
+    joined = ledger("joined", at(9), by="e1")
+    found = stages.report(rows(ledger_events=[done, joined], agent_events=claim, lab_capacity=samples), claimed, NOW)
+    assert seconds_of(found) == {("seat_wait", ""): 3600.0, ("build", ""): 3600.0}
+    tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "phase": "fix", "depends_on": ["t0"]}]
+    ready = stages.claimable({"tasks": tasks, "phases": [{"id": "fix"}]}, "fix")
+    found = stages.report(rows(ledger_events=[done], lab_capacity=samples), tasks, NOW, ready=ready)
+    assert seconds_of(found) == {("seat_wait", ""): 7200.0}
+    bare = {name: kept for name, kept in rows(ledger_events=[done]).items() if name != "lab_capacity"}
+    waiting = [tasks[0], {"id": "t3", "state": "open", "depends_on": ["t0"]}]
+    assert seconds_of(stages.report(bare, waiting, NOW)) == {("seat_wait", ""): 7200.0}
+
+
 def test_an_open_ready_task_waits_for_its_claim_until_now():
     tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
     found = stages.report(rows(ledger_events=[ledger("task done", at(8), "tasks/t0")]), tasks, NOW)

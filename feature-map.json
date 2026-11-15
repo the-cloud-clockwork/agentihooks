@@ -6346,6 +6346,7 @@
         "tests/swarm/test_urgent_hold.py::test_an_urgent_eng_task_the_lab_holds_names_the_lab_and_raises_no_finding",
         "tests/swarm/test_stages.py::test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait",
         "tests/swarm/test_stages.py::test_a_claimed_task_charges_lab_wait_only_before_its_claim",
+        "tests/swarm/test_stages.py::test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples",
         "tests/swarm/test_stage_detector.py::test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below",
         "tests/swarm/test_stage_detector.py::test_record_updates_the_lab_wait_finding_from_the_stored_reading_on_every_pass",
         "tests/swarm/test_bottleneck_remedy.py::test_a_lab_wait_finding_proposes_one_ci_task_for_lab_capacity"

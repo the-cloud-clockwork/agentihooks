@@ -112,6 +112,7 @@ def test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below(st
     assert finding.id == "bottleneck-stage/lab_wait"
     assert finding.summary == "lab wait at 35 minutes behind on pull request grading, over its 20 threshold"
     assert "eng claims are held: the lab is 35 minutes behind on pull request grading" in finding.evidence
+    assert standing.read(store.redis, "scratch")["lab_wait"]["episodes"] == [f"lab_wait:{NOW}"]
     stage_detector.lab_finding(store, "scratch", lab(40 * 60, NOW + 60_000), 20, NOW + 60_000)
     row = standing.read(store.redis, "scratch")["lab_wait"]
     assert (row["value"], row["threshold"], row["fired"]) == (40, 20, 1)
