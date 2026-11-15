@@ -1,7 +1,7 @@
 import json
 import sys
 from collections.abc import Callable
-from dataclasses import asdict, replace
+from dataclasses import replace
 from typing import Any
 
 from scripts.events.bus import Bus
@@ -18,7 +18,6 @@ INTERVAL_MS = 300_000
 BUCKET = "hub-reconciler"
 CLAIMS = "spoke-work"
 COMPLETED = "completed"
-PENDING_STOPS = "pending-stops"
 
 
 def _start(bus: Bus, slug: str, agent: AgentRecord) -> Envelope | None:
@@ -65,7 +64,7 @@ def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[Ag
 def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
     """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
     answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
-    refused the stop, which then waits in the swarm's pending stops for ``retry_stops``."""
+    refused the stop."""
     config = BusConfig.from_environ()
     if config.backend == "memory":
         return execution_stop.UNKNOWN
@@ -78,31 +77,7 @@ def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str
     except Exception as exc:
         outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
     print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
-    pending = store.key(slug, PENDING_STOPS)
-    if outcome.startswith(execution_stop.FAILED):
-        store.redis.hset(pending, agent.name, json.dumps({"agent": asdict(agent), "reason": reason}))
-    else:
-        store.redis.hdel(pending, agent.name)
     return outcome
-
-
-def retry_stops(store: Any, slug: str) -> list[str]:
-    """Sends again every stop the bus refused in ``slug`` for an agent the swarm has since dropped, answering one
-    action per stop it sent again; a refused stop for an agent still seated is discarded, since the next judgement of
-    that agent decides afresh."""
-    if BusConfig.from_environ().backend == "memory":
-        return []
-    pending = store.key(slug, PENDING_STOPS)
-    seated = {agent.name for agent in store.agents(slug)}
-    actions: list[str] = []
-    for name, raw in store.redis.hgetall(pending).items():
-        if name in seated:
-            store.redis.hdel(pending, name)
-            continue
-        held = json.loads(raw)
-        outcome = stop_admitted(store, slug, AgentRecord(**held["agent"]), held["reason"])
-        actions.append(f"sent the {held['reason']} stop for {name} again: {outcome}")
-    return actions
 
 
 def event_slugs(store: RedisStore) -> list[str]:

@@ -35,9 +35,8 @@ def _reap(
     Past ``deadline`` no further agent is judged: the rest are left for the next pass, named in one closing action.
     """
     from scripts.hub import owned_leases
-    from scripts.hub.reconciler import admitted_agents, legacy_agents, retry_stops
+    from scripts.hub.reconciler import admitted_agents, legacy_agents
 
-    retried = tick.timing.timed(retry_stops, store, slug)
     live, rows = tick.timing.timed(tick._live_names, runtime), dict(rows)
 
     judging = tick._Reaping(slug, store, ledger, runtime, rows, live, now_ms)
@@ -70,7 +69,7 @@ def _reap(
 
     with tick.ledger_probe.read_once():
         found = dict(pair for pairs in tick.pool.fan_out(one, by_task.values()) for pair in pairs)
-    actions = retried + [action for index in sorted(found) for action in found[index]]
+    actions = [action for index in sorted(found) for action in found[index]]
     left = len(agents) - len(found)
     if left:
         actions.append(f"reap stopped at the pass deadline, {left} of {len(agents)} agents left for the next pass")

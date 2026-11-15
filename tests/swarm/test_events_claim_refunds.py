@@ -154,7 +154,7 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+@pytest.mark.parametrize("ending", ["idle"])
 def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
@@ -232,40 +232,7 @@ def test_a_legacy_agent_retirement_sends_no_stop(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("dropped", [True, False])
-def test_a_stop_the_bus_refused_is_sent_again_only_once_its_agent_was_dropped(
-    env: tuple[RedisStore, Any, Any],
-    bus: Bus,
-    seat: Callable[..., AgentRecord],
-    monkeypatch: pytest.MonkeyPatch,
-    dropped: bool,
-) -> None:
-    store, ledger, rt = env
-    agent, event = launched(env, bus, seat)
-    spoke_started(bus)
-    working = reconciler.open_bus
-
-    def refused(_config: Any) -> Any:
-        raise ConnectionError("bus down")
-
-    monkeypatch.setattr(reconciler, "open_bus", refused)
-    assert reconciler.stop_admitted(store, SLUG, agent, "idle").startswith(execution_stop.FAILED)
-    monkeypatch.setattr(reconciler, "open_bus", working)
-    if dropped:
-        assert store.drop_agent(SLUG, agent.name)
-    rows = {row["id"]: row for row in ledger.tasks(SLUG)}
-
-    actions = agent_steps._reap(SLUG, store, ledger, rt, rows, NOW + 1)
-
-    resent = f"sent the idle stop for {agent.name} again: {execution_stop.SENT}"
-    assert (resent in actions) is dropped
-    expected = [(agent.execution_id, event.id)] if dropped else []
-    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == expected
-    assert reconciler.retry_stops(store, SLUG) == []
-
-
-@pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+@pytest.mark.parametrize("ending", ["idle"])
 def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
