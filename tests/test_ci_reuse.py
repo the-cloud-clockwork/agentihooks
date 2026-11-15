@@ -289,6 +289,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
             (list, list),
             (ci_reuse.selection_diagnostic, list),
             (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+            (ci_reuse.selection_diagnostic, ci_reuse.collected_stats),
         )
         for form in forms
         for summary in (False, True)

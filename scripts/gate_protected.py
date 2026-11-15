@@ -131,6 +131,7 @@ def _aggregator_problems(
                     (list, list),
                     (ci_reuse.selection_diagnostic, list),
                     (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+                    (ci_reuse.selection_diagnostic, ci_reuse.collected_stats),
                 )
                 for form in (
                     {},

@@ -93,6 +93,9 @@ TEST_ONLY_SONAR = (
 FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
 """
 
+COLLECTED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and (."mutation-plan".outputs.forwarded == "true" or ."mutation-plan".outputs.collected == "true") and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
@@ -259,6 +262,12 @@ fi
 def forwarded_stats(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     return [{**aggregation, "run": FORWARDED_STATS + aggregation["run"]}, *rest]
+
+
+def collected_stats(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Accept a skipped stats job when the plan job forwarded the report or collected the stats itself."""
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": COLLECTED_STATS + aggregation["run"]}, *rest]
 
 
 def reuse_job() -> dict[str, Any]:
