@@ -157,6 +157,21 @@ def test_the_pass_spool_opens_once_and_appends_every_batch(monkeypatch: pytest.M
     assert appended == [([("rows", [{"a": 1}])], first), ([], first)]
 
 
+def test_the_pass_spool_stays_closed_without_a_metrics_sink(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(path: object, sink: object) -> None:
+        pytest.fail("a pass without a metrics sink opened the spool")
+
+    def unset(environ: object) -> None:
+        return None
+
+    monkeypatch.setattr(metrics_outbox, "Outbox", refuse)
+    monkeypatch.setattr(metrics_outbox, "settings", unset)
+    first: Callable[..., None] = print
+    spool = cli._PassSpool()  # pyright: ignore[reportPrivateUsage]
+    spool.append_many([("rows", [{"a": 1}])], first)
+    spool.append_many([], first)
+
+
 def _recorder(name: str) -> Callable[..., tuple[object, ...]]:
     def build(*args: object, **kwargs: object) -> tuple[object, ...]:
         return name, args, tuple(sorted(kwargs.items()))
