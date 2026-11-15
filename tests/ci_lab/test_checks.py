@@ -5,10 +5,11 @@ from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
-from scripts.ci_lab.checks import Checks, Output, PostRefused, Transition
+import requests
 
 from scripts import github_app
 from scripts.ci_lab import checks
+from scripts.ci_lab.checks import Checks, Output, PostRefused, Transition
 from scripts.ci_lab.units import Unit
 
 HEAD = "a" * 40
@@ -43,7 +44,7 @@ def answer(
 def lab(monkeypatch: pytest.MonkeyPatch, *answers: Mock) -> tuple[Checks, Mock, Mock]:
     """Return a poster for example/repo whose requests answer in order, with its request and sleep mocks."""
     request = Mock(side_effect=list(answers))
-    monkeypatch.setattr(checks.requests, "request", request)
+    monkeypatch.setattr(requests, "request", request)
     sleep = Mock()
     return Checks("example/repo", Token(), sleep=sleep, clock=lambda: 1000.0), request, sleep
 
@@ -60,9 +61,9 @@ def test_the_lab_token_request_carries_only_checks_write(monkeypatch: pytest.Mon
         "repositories": [{"full_name": "example/repo"}],
     }
     mint = Mock(return_value=answer(201, granted))
-    monkeypatch.setattr(github_app.requests, "post", mint)
+    monkeypatch.setattr(requests, "post", mint)
     request = Mock(return_value=answer(201, {"id": 7}))
-    monkeypatch.setattr(checks.requests, "request", request)
+    monkeypatch.setattr(requests, "request", request)
     assert Checks("example/repo").post(HEAD, "lint", "queued", None, OUTPUT, False) == 7
     assert mint.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": {"checks": "write"}}
     assert request.call_args.kwargs["headers"]["Authorization"] == "Bearer lab-token"
