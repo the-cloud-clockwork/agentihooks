@@ -218,15 +218,20 @@ def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-def test_an_idle_retirement_whose_drop_the_store_refused_sends_no_stop(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
+def test_a_retirement_whose_drop_the_store_refused_sends_no_stop(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
 ) -> None:
     store, _, _ = env
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
     monkeypatch.setattr(store, "drop_agent", lambda *_args, **_kwargs: False)
 
-    retire("idle", env, agent)
+    retire(ending, env, agent)
 
     assert sent_stops(bus, agent) == []
 
