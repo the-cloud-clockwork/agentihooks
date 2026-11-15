@@ -577,6 +577,16 @@
       ]
     },
     {
+      "id": "merge-pass-batched-pull-request-prefetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-pass-batch-reads",
+      "behaviour": "The merge pass reads every pull request it needs for tasks in pull request or claimed state through one batched call before deciding any task, so the number of GitHub reads a pass makes no longer grows with the number of tasks under review.",
+      "seam": "ready.merge_pass prefetching through github_reads.Batched from Pass.many, then every per task read served from that result",
+      "tests": [
+        "tests/swarm/test_ready.py::test_merge_pass_reads_every_pull_request_in_one_batch_not_per_task"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",

@@ -9,7 +9,7 @@ reopen the task for the next engineer, who continues from the stored handoff.
 import json
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,7 @@ from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import (
     claim_order,
     done_gate,
+    github_reads,
     idle,
     linked_issues,
     merge_queue,
@@ -205,6 +206,7 @@ class Pass:
 
 
 def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
+    run = _prefetched(run, rows)
     actions: list[str] = []
     closed: set[str] = set()
     for task_id, row in rows.items():
@@ -224,6 +226,17 @@ def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
             continue
         actions += _advance(run, rows, row, found, closed)
     return actions + _dependents(run, rows, closed)
+
+
+def _prefetched(run: Pass, rows: Mapping[str, dict[str, Any]]) -> Pass:
+    """``run``, its github reader serving every pull request the pass needs from one batched read of ``run.many``,
+    or ``run`` unchanged when it declares no batched reader or no task needs one."""
+    if run.many is None:
+        return run
+    urls = [row["pr_url"] for row in rows.values() if row.get("pr_url") and row.get("state") in ("pr", "claimed")]
+    if not urls:
+        return run
+    return replace(run, github=github_reads.Batched(run.many, urls, run.github))
 
 
 def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str]) -> list[str]:

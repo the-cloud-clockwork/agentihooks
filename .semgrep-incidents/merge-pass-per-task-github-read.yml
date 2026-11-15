@@ -1,0 +1,20 @@
+rules:
+  - id: merge-pass-per-task-github-read
+    languages: [python]
+    severity: ERROR
+    message: >-
+      merge_pass read a GitHub pull request once per task in a plain loop over the tasks in pull request state,
+      so a pass with nineteen such tasks never finished inside its tick budget. Prefetch every pull request the
+      pass needs in one batched read before deciding any task.
+    paths:
+      include:
+        - /scripts/swarm/ready.py
+        - merge-pass-per-task-github-read.py
+    patterns:
+      - pattern: |
+          def merge_pass($RUN, $ROWS):
+              ...
+      - pattern-not: |
+          def merge_pass($RUN, $ROWS):
+              $RUN = _prefetched($RUN, $ROWS)
+              ...

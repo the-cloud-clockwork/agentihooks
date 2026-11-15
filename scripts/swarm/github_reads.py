@@ -15,7 +15,7 @@ import re
 import subprocess
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -264,3 +264,19 @@ def counts(since: float, until: float) -> dict[str, int]:
         except (ValueError, KeyError, TypeError):
             continue
     return dict(tally)
+
+
+class Batched:
+    """A single url github reader serving every url in ``urls`` from one call to ``read``, and any other url alone
+    through ``fallback``."""
+
+    def __init__(
+        self, read: Callable[[list[str]], Mapping[str, Any]], urls: list[str], fallback: Callable[[str], Any]
+    ) -> None:
+        """Read the distinct ``urls`` in one batch through ``read``, kept to answer later calls."""
+        self._fallback = fallback
+        self._found: dict[str, Any] = dict(read(list(dict.fromkeys(urls))))
+
+    def __call__(self, url: str) -> Any:
+        """The batched read of ``url``, or ``fallback(url)`` when it was not among the urls read."""
+        return self._found[url] if url in self._found else self._fallback(url)

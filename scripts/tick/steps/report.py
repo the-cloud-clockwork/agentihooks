@@ -90,9 +90,14 @@ def _waits_end(cli: Any, get: Get) -> Any:
 def _merge_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
         ready.merge_pass,  # pyright: ignore[reportUnknownMemberType]
-        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), _reread(get), cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
+        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), _reread(get), cli.now_ms(), many=_pulls(get)),  # pyright: ignore[reportUnknownMemberType]
         get("rows"),
     )
+
+
+def _pulls(get: Get) -> Callable[[list[str]], dict[str, Any]]:
+    cache = get("store").redis
+    return lambda urls: ledger_events.views(urls, cache=cache)
 
 
 def _stall_watch(cli: Any, get: Get) -> Any:
