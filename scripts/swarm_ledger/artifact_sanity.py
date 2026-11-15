@@ -6,7 +6,11 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser
 
 SHELL = Path(__file__).resolve().parent / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
@@ -183,12 +187,12 @@ def ledger_doc(files: list[Path]) -> dict:
     return {"title": "Artifact sanity", "artifacts": rows, "_meta": {"rev": 1}}
 
 
-def page_html() -> str:
+def page_html(pages: Path | None = None) -> str:
     values = {"PAGE": "0" * 12, "SLUG": "artifact-sanity", "PORT": "9", "TITLE": "Artifact sanity"}
     return re.sub(r"__LEDGER_(PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], SHELL.read_text())
 
 
-def assets() -> dict[str, Path]:
+def assets(pages: Path | None = None) -> dict[str, Path]:
     if str(SHELL.parent) not in sys.path:
         sys.path.insert(0, str(SHELL.parent))
     from scripts.swarm_ledger import ledger_core
@@ -209,7 +213,7 @@ def _events(route, doc):
     route.fulfill(body=f"id: c0\nevent: snapshot\ndata: {data}\n\n", content_type="text/event-stream")
 
 
-def run(browser, files: list[Path]) -> dict[str, list[str]]:
+def run(browser: "Browser", files: list[Path], pages: Path | None = None) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
     doc, served = ledger_doc(files), assets()
     tab = browser.new_page(viewport=VIEWPORT)

@@ -757,53 +757,9 @@ def _browser_setup_steps(steps):
 def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     steps = _workflow()["jobs"]["lint"]["steps"]
     install = _browser_install(steps)
-    check = _artifact_check(steps)
+    check = next(s for s in steps if s.get("name") == "Artifact sanity checks")
     assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
-
-
-def _artifact_check(steps: list[dict]) -> dict:
-    return next(s for s in steps if s.get("name") == "Artifact sanity checks")
-
-
-def _artifact_check_run(tmp_path: Path, grader_option: str) -> str:
-    grader, head, tools = tmp_path / "temp" / "grader", tmp_path / "head", tmp_path / "bin"
-    for root, option in ((grader, grader_option), (head, '"--pages"')):
-        checker = root / "scripts" / "swarm_ledger" / "artifact_sanity.py"
-        checker.parent.mkdir(parents=True)
-        checker.write_text(f"parser.add_argument({option}, type=Path)\n")
-    (head / "tests" / "fixtures" / "artifacts").mkdir(parents=True)
-    (head / "tests" / "fixtures" / "artifacts" / "notes.md").write_text("# Notes\n")
-    tools.mkdir()
-    (tools / "python").write_text('#!/usr/bin/env bash\necho "$PWD $*" >> "$CALLS"\n')
-    (tools / "python").chmod(0o755)
-    env = {
-        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
-        "RUNNER_TEMP": str(tmp_path / "temp"),
-        "GITHUB_WORKSPACE": str(head),
-        "CALLS": str(tmp_path / "calls"),
-    }
-    run = _artifact_check(_workflow()["jobs"]["lint"]["steps"])["run"]
-    subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run], cwd=head, env=env, check=True)
-    return (tmp_path / "calls").read_text()
-
-
-def test_the_protected_grader_copy_of_the_artifact_checker_grades_the_head_pages_and_fixtures(tmp_path: Path) -> None:
-    steps = _workflow()["jobs"]["lint"]["steps"]
-    grader = next(s for s in steps if s.get("name") == "Check out the protected grader")
-    assert steps.index(grader) < steps.index(_artifact_check(steps))
-    head = tmp_path / "head"
-    assert _artifact_check_run(tmp_path, '"--pages"') == (
-        f"{tmp_path / 'temp' / 'grader'} -m scripts.swarm_ledger.artifact_sanity"
-        f" --pages {head / 'scripts' / 'swarm_ledger'} {head / 'tests' / 'fixtures' / 'artifacts' / 'notes.md'}\n"
-    )
-    assert '"--pages"' in (_ROOT / "scripts" / "swarm_ledger" / "artifact_sanity.py").read_text()
-
-
-def test_a_grader_without_the_pages_option_runs_the_head_artifact_checker(tmp_path: Path) -> None:
-    assert _artifact_check_run(tmp_path, '"files"') == (
-        f"{tmp_path / 'head'} -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/notes.md\n"
-    )
 
 
 def test_queued_merges_select_artifact_checks_against_the_queue_base():

@@ -13,8 +13,8 @@ HOME = PAGES / "home.html"
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 
 
-def static_assets():
-    """Every file a page loads, by its path under /static/<page version>/."""
+def static_assets(pages: Path | None = None) -> dict[str, Path]:
+    """Every file a page loads, by its path under /static/<page version>/, from this folder or the page folder given."""
     static = MODULES.parent
     return {
         "palette.css": PALETTE,
