@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -334,24 +335,25 @@ def _lab_gate(replaces: str = "test.yml/lint", reason: str = "why", owner: str =
     return {"reason": reason, "owner": owner, "replaces": replaces}
 
 
-def test_an_authoritative_flag_without_a_declared_lab_gate_is_red() -> None:
-    workflows = {"test.yml": _gate_workflow()}
-    lab = {"authoritative": ["lint", "unit"]}
-    assert ci_wiring.check(workflows, {"lab_gates": {"lab/lint": _lab_gate()}}, _TODAY, lab) == [
-        "lab.authoritative names unit, but .github/gate-wiring.json declares no lab/unit lab gate."
-    ]
-    declared = {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}
-    assert ci_wiring.check(workflows, {"lab_gates": declared}, _TODAY, lab) == []
+def _main_with_lab(root: Path, workflow: dict[Any, Any], config: dict[str, Any], lab: dict[str, Any]) -> int:
+    _write(root, {"test.yml": workflow}, config)
+    (root / "delivery.yaml").write_text(yaml.safe_dump({"lab": lab}))
+    return ci_wiring.main(["--root", str(root)])
 
 
-def test_a_planted_undeclared_flag_is_red_through_main(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    _write(tmp_path, {"test.yml": _gate_workflow()}, {"lab_gates": {"lab/unit": _lab_gate("test.yml/unit")}})
-    (tmp_path / "delivery.yaml").write_text(yaml.safe_dump({"lab": {"authoritative": ["lint"]}}))
-    assert ci_wiring.main(["--root", str(tmp_path)]) == 1
+def test_a_planted_undeclared_flag_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/unit": _lab_gate("test.yml/unit")}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, {"authoritative": ["lint", "unit"]}) == 1
     assert capsys.readouterr().out == (
         "1 workflows, 3 jobs, 1 wiring problems\n"
         "::error::lab.authoritative names lint, but .github/gate-wiring.json declares no lab/lint lab gate.\n"
     )
+
+
+def test_every_declared_authoritative_flag_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, {"authoritative": ["lint", "unit"]}) == 0
+    assert capsys.readouterr().out == "1 workflows, 3 jobs, 0 wiring problems\n"
 
 
 @pytest.mark.parametrize("field", ["reason", "owner", "replaces"])
@@ -375,15 +377,37 @@ def test_a_lab_gate_replacing_no_workflow_job_is_red() -> None:
     ]
 
 
-def test_the_lab_gate_required_flag_lifts_only_the_pull_request_trigger() -> None:
+@pytest.mark.parametrize(
+    ("gate_required", "dropped", "code", "out"),
+    [
+        (True, ("pull_request",), 0, "1 workflows, 3 jobs, 0 wiring problems\n"),
+        (
+            False,
+            ("pull_request",),
+            1,
+            "1 workflows, 3 jobs, 1 wiring problems\n"
+            "::error::test.yml holds Gate — Required but does not run on pull_request.\n",
+        ),
+        (
+            True,
+            ("pull_request", "merge_group"),
+            1,
+            "1 workflows, 3 jobs, 1 wiring problems\n"
+            "::error::test.yml holds Gate — Required but does not run on merge_group.\n",
+        ),
+    ],
+)
+def test_the_lab_gate_required_flag_lifts_only_the_pull_request_trigger(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    gate_required: bool,
+    dropped: tuple[str, ...],
+    code: int,
+    out: str,
+) -> None:
     workflow = _gate_workflow()
-    del workflow[True]["pull_request"]
-    lab = {"authoritative": [], "gate_required": True}
-    assert ci_wiring.check({"test.yml": workflow}, {}, _TODAY, lab) == []
-    assert ci_wiring.check({"test.yml": workflow}, {}, _TODAY, {**lab, "gate_required": False}) == [
-        "test.yml holds Gate — Required but does not run on pull_request."
-    ]
-    del workflow[True]["merge_group"]
-    assert ci_wiring.check({"test.yml": workflow}, {}, _TODAY, lab) == [
-        "test.yml holds Gate — Required but does not run on merge_group."
-    ]
+    for event in dropped:
+        del workflow[True][event]
+    lab = {"authoritative": [], "gate_required": gate_required}
+    assert _main_with_lab(tmp_path, workflow, {}, lab) == code
+    assert capsys.readouterr().out == out
