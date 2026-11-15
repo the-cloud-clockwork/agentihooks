@@ -11,7 +11,7 @@ import pytest
 from scripts import herdr_host
 from scripts.handoff import resolve
 from scripts.quick import guard, handoff, launch, layout, paths, registry, room, tick
-from tests.quick.test_room_tick_launch import FakeHerdr, _swarm
+from tests.quick.test_room_tick_launch import SIGNED_OUT_SCREEN, FakeHerdr, _swarm
 
 pytestmark = pytest.mark.unit
 
@@ -420,7 +420,7 @@ def test_run_round_forces_a_signed_out_engineer_with_its_own_environ_and_herdr(
     swarm = _swarm(tmp_path)
     environ = {"AGENTIHOOKS_HOME": str(tmp_path / "home")}
     paths.register(environ, swarm.quick_id, tmp_path)
-    herdr = FakeHerdr(screen="Not logged in · Run /login")
+    herdr = FakeHerdr(screen=SIGNED_OUT_SCREEN)
     calls: list[tuple[Path, str, dict[str, str], object]] = []
 
     def fake_force(folder: Path, seat: str, base: dict[str, str], *, bare: object) -> str:
@@ -432,6 +432,13 @@ def test_run_round_forces_a_signed_out_engineer_with_its_own_environ_and_herdr(
     rows = tick.run_round(environ)
     assert {"folder": str(tmp_path), "seat": "eng-1", "outcome": "signed-out-started"} in rows
     assert calls == [(tmp_path, "eng-1", environ, herdr.bare)]
+
+
+def test_the_footer_is_every_line_below_the_last_input_rule_and_nothing_without_one() -> None:
+    rule = "─" * 12
+    assert tick._footer(f"out\n{rule}\n❯ typed\n{rule}\nstatus one\nstatus two") == "status one\nstatus two"
+    assert tick._footer(f"{rule}\n{rule}\n") == ""
+    assert tick._footer("no box at all\nNot logged in · Run /login") == ""
 
 
 def test_run_round_accumulates_rows_across_every_registered_quick_swarm(

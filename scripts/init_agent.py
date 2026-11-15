@@ -293,6 +293,7 @@ EFFORT_DEFAULT = "medium"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
 STARTED_ROUTES = ("routed", "bare", "direct")
+ROUTED_ONLY_HELP = "Start the agent only on a routed account: never bare, and fail the launch when routing fails"
 PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
 CODEX_READY_S = 120.0
 CANARY_TIMEOUT_S = {"claude": 120.0, "codex": 90.0}
@@ -901,6 +902,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--workspace", default="", help="herdr: workspace label to place the session in (crew)")
     parser.add_argument("--pane", default="", help="herdr: run in this existing pane instead of opening one")
+    parser.add_argument("--routed-only", action="store_true", help=ROUTED_ONLY_HELP)
     parser.add_argument(
         "--agent",
         choices=agent_choice.AGENTS,
@@ -1099,20 +1101,18 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
         raise ValueError("explicit authentication refused by the sign ins gate")
 
 
-def _routed_only(args: argparse.Namespace, environ: dict[str, str]) -> bool:
-    """A handoff must land on another account and a quick seat on a routed one, so neither falls back to bare Claude."""
-    from scripts.quick.member import SEAT_ENV
-
-    return bool(args.handoff or environ.get(SEAT_ENV))
+def _routed_only(args: argparse.Namespace) -> bool:
+    """A handoff must land on another account and a --routed-only launch on a routed one; neither starts bare."""
+    return bool(args.handoff or args.routed_only)
 
 
-def _unrouted(args: argparse.Namespace, environ: dict[str, str], route: dict[str, str]) -> tuple[str, str] | None:
+def _unrouted(args: argparse.Namespace, route: dict[str, str]) -> tuple[str, str] | None:
     """The report line and error of a launch that had to be routed and was not; None when the launch stands."""
-    if route.get("status") == "routed" or not _routed_only(args, environ):
+    if route.get("status") == "routed" or not _routed_only(args):
         return None
     if args.handoff:
         return "handoff=failed", "handoff failed; the new session was not routed to another account"
-    return "quick_seat=failed", "the quick seat's agent was not routed to an account; the seat stays pending"
+    return "routed_only=failed", "the agent was not routed to an account, so the launch failed"
 
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
@@ -1159,7 +1159,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             AgentSpec(
                 agent=agent,
                 exclude=exclude,
-                fallback_bare=not _routed_only(args, active_env),
+                fallback_bare=not _routed_only(args),
                 resume=args.resume,
                 profile=args.profile,
                 channel=channel,
@@ -1287,7 +1287,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env, launch)}")
-    refused = _unrouted(args, active_env, route)
+    refused = _unrouted(args, route)
     if refused:
         print("\n".join([*report, refused[0]]))
         print(f"agentihooks init-agent: {refused[1]}", file=sys.stderr)

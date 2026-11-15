@@ -6,6 +6,7 @@ import shlex
 import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -620,29 +621,77 @@ def _quick_seat(
 
 
 def test_a_quick_seat_never_falls_back_to_bare_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--dry-run"]) == 0
-    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    routed = ["--routed-only", "--dry-run"]
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=routed) == 0
+    [launcher] = (tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")
     assert "--agentihooks-fallback-bare" not in launcher.read_text()
+    launcher.unlink()
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--dry-run"]) == 0
+    [inherited] = (tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")
+    assert "--agentihooks-fallback-bare" in inherited.read_text()
+    option = next(a for a in init_agent._parser()._actions if "--routed-only" in a.option_strings)
+    assert (option.default, option.help) == (False, init_agent.ROUTED_ONLY_HELP)
 
 
 def test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], status: str
 ) -> None:
-    rc = _quick_seat(monkeypatch, tmp_path, _routed(status))
+    rc = _quick_seat(monkeypatch, tmp_path, _routed(status), extra=["--routed-only"])
     captured = capsys.readouterr()
     assert rc == 3
-    assert "quick_seat=failed" in captured.out
+    assert "routed_only=failed" in captured.out
     assert captured.err.endswith(
-        "agentihooks init-agent: the quick seat's agent was not routed to an account; the seat stays pending\n"
+        "agentihooks init-agent: the agent was not routed to an account, so the launch failed\n"
     )
 
 
 def test_a_routed_quick_seat_starts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta")) == 0
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--routed-only"]) == 0
     out = capsys.readouterr().out
-    assert "route_status=routed" in out and "quick_seat=failed" not in out
+    assert "route_status=routed" in out and "routed_only=failed" not in out
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.quick import launch, paths, registry
+
+    folder = tmp_path / "quick"
+    seats = (
+        registry.Seat(1, "master", "w1:p1", "claude", "quick-abc-master"),
+        registry.Seat(2, "eng-1", "w1:p2", "claude", "quick-abc-eng-1", state=registry.PENDING),
+    )
+    registry.save(folder, registry.Swarm("quick-abc", str(tmp_path), seats))
+    paths.create(folder, ["master", "eng-1"])
+    launched: list[str] = []
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
+    placed = SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id="w1:p2")
+    monkeypatch.setattr(init_agent.herdr_host, "existing_pane", lambda pane, environ: placed)
+
+    def run(pane: str, launcher: Path, environ: dict[str, str], env: dict[str, str] | None = None) -> None:
+        assert not [name for name in environ if name.startswith("AH_CC_TOKEN_")]
+        launched.append(launcher.read_text())
+        launcher.with_suffix(".started").touch()
+        launcher.with_suffix(".route").write_text("status=failed\nerror=no non-empty AH_CC_TOKEN_* variables found\n")
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        return init_agent.main([*argv, "--start-timeout", "0.5", "--route-timeout", "0.5"], environ)
+
+    monkeypatch.setattr(init_agent.herdr_host, "run", run)
+    env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime")}
+    outcome = launch.relaunch(folder, "eng-1", env, bare=lambda pane: True, start=start, sleep=lambda s: None)
+    loaded = registry.load(folder)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert outcome == "failed-3" and seat is not None and seat.state == registry.PENDING
+    assert len(launched) == 1 and "--agentihooks-fallback-bare" not in launched[0]
 
 
 def test_agenti_writes_the_route_report_and_honours_exclusions(monkeypatch, tmp_path):

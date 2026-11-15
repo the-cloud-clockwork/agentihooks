@@ -72,9 +72,10 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   `quick up`), because a quick swarm has no Redis for the agentihooks scheduler. It nudges idle engineers whose
   plan has open stages, tells an idle seat of room lines it has not been told about and relaunches a pending seat
   whose pane sits at a bare shell. An engineer whose agent exited, leaving its pane at a bare shell, is started
-  again in that pane with its seed; the master never is. An engineer whose agent shows Claude's signed-out notice
-  (`Not logged in · Run /login` or `Login reached its time limit`) is ended with its pane kept and started again;
-  `agentihooks quick relaunch --force <seat> --folder <folder>` does the same for one seat, never the master. It
+  again in that pane with its seed; the master never is. An engineer whose idle agent shows Claude's signed-out
+  notice (`Not logged in · Run /login`) below its input box, with its seat ready or pending, is ended with its pane
+  kept and its seat held launching, then started again; `agentihooks quick relaunch --force <seat> --folder
+  <folder>` does the same for one seat, never the master. It
   never types into a pane at a bare shell, where herdr
   can still report the exited agent idle and the shell would run the text as a command, nor into a busy pane or
   one holding typed text. It never nudges the master and retries a prompt herdr did not take on the next round.

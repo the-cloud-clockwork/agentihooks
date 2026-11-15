@@ -1,5 +1,6 @@
 """Launch a quick seat's agent into its own herdr pane, first at quick up and again after each handoff."""
 
+import contextlib
 import subprocess
 import sys
 import time
@@ -19,10 +20,10 @@ Start = Callable[[list[str], dict[str, str]], int]
 
 
 def argv(swarm: registry.Swarm, seat: registry.Seat, prompt_file: Path) -> list[str]:
-    """The init-agent arguments that open the seat's agent in its own herdr pane."""
+    """The init-agent arguments that open the seat's agent in its own herdr pane, only on a routed account."""
     return [
         *("--host", "herdr", "--pane", seat.pane_id, "--name", seat.name, "--agent", seat.harness),
-        *("--dir", swarm.directory, "--prompt-file", str(prompt_file)),
+        *("--dir", swarm.directory, "--prompt-file", str(prompt_file), "--routed-only"),
     ]
 
 
@@ -129,9 +130,10 @@ def relaunch(
 
 
 def end_agent(name: str) -> None:
-    """End the agent session called ``name`` and keep its herdr pane for the successor."""
+    """End the agent session called ``name`` and keep its herdr pane; whether it ended shows as the pane going bare."""
     command = [sys.executable, "-m", "scripts.terminate_agent", name, "--type", "any", "--keep-pane"]
-    subprocess.run(command, capture_output=True, check=False, timeout=END_TIMEOUT_S)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(command, capture_output=True, check=False, timeout=END_TIMEOUT_S)
 
 
 def force(
@@ -146,7 +148,8 @@ def force(
 ) -> str:
     """End an engineer's live but unusable agent with its pane kept, then start its successor; the outcome.
 
-    The successor waits up to WAIT_BARE_S for the pane to return to a bare shell. The master is the operator's own
+    The seat reads launching while its agent is ended, so no tick starts a successor the end could reach; the
+    successor then waits up to WAIT_BARE_S for the pane to return to a bare shell. The master is the operator's own
     session and a seat being launched already has a successor coming, so neither is ended.
     """
     swarm = registry.load(folder)
@@ -155,7 +158,10 @@ def force(
         return "no-seat"
     if seat.seat == MASTER:
         return "master"
-    if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.PENDING) is None:
+    if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.LAUNCHING) is None:
         return "launching"
-    end(seat.name)
+    try:
+        end(seat.name)
+    finally:
+        registry.set_state(folder, seat_name, registry.PENDING)
     return relaunch(folder, seat_name, base, bare=bare, start=start, wait_s=WAIT_BARE_S, sleep=sleep)

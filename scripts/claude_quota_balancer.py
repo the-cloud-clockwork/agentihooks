@@ -889,9 +889,10 @@ def select_launch_credential(
 ) -> RouteDecision:
     """A swarm or hive slot launch keeps the session cap; an operator launch overflows like the master.
 
-    Both route over the operator's token block too, which the shell of a reused herdr pane may never have loaded.
+    Both also route over the operator's token block for any token the caller lacks, as the shell of a reused herdr
+    pane may never have loaded it; a token the caller holds keeps its own value.
     """
-    environ = {**environ, **operator_env.block_tokens()}
+    environ = {**operator_env.block_tokens(), **environ}
     options: dict[str, Any] = {
         "include_fable": include_fable,
         "claude_bin": claude_bin,

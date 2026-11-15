@@ -13,12 +13,13 @@ from typing import Any, Protocol
 from scripts import herdr_host
 from scripts.quick import paths, registry, room, seeds
 from scripts.quick.layout import MASTER
+from scripts.swarm.pane import INPUT_RULE
 
 NUDGE = "Quick swarm nudge: continue the next open stage of your plan, or tell the master what blocks you."
 ROOM = "Quick swarm room: {count} message(s) for you; read them with `agentihooks quick room`."
 NUDGE_EVERY_S = 600
 READY_STATES = ("idle", "done")
-SIGNED_OUT = re.compile(r"Not logged in · Run /login|Login reached its time limit")
+SIGNED_OUT = re.compile(r"Not logged in · Run /login")
 Relaunch = Callable[[Path, str], str]
 Row = dict[str, Any]
 
@@ -146,17 +147,34 @@ def _ready_seat(folder: Path, seat: registry.Seat, herdr: Herdr, now: float) -> 
     return "nudged" if _nudge(folder, seat, herdr, now) else "idle"
 
 
+def _footer(text: str) -> str:
+    """The lines below the agent's input box, where the harness shows its status line; empty without a box."""
+    lines = text.splitlines()
+    rules = [index for index, line in enumerate(lines) if INPUT_RULE.match(line)]
+    return "\n".join(lines[rules[-1] + 1 :]) if rules else ""
+
+
+def _forced(folder: Path, seat: registry.Seat, herdr: Herdr, force: Relaunch, shell: bool | None) -> str:
+    """Start again an engineer whose idle agent shows Claude's signed-out notice below its input box; empty if not."""
+    if seat.seat == MASTER or shell is not False or _busy(seat, herdr):
+        return ""
+    if not SIGNED_OUT.search(_footer(herdr.screen(seat.pane_id))):
+        return ""
+    return f"signed-out-{force(folder, seat.seat)}"
+
+
 def _outcome(folder: Path, seat: registry.Seat, herdr: Herdr, relaunch: Relaunch, now: float, force: Relaunch) -> str:
     if seat.state == registry.PENDING:
-        return f"relaunched-{relaunch(folder, seat.seat)}" if herdr.bare(seat.pane_id) else "pending"
+        shell = herdr.bare(seat.pane_id)
+        if shell:
+            return f"relaunched-{relaunch(folder, seat.seat)}"
+        return _forced(folder, seat, herdr, force, shell) or "pending"
     if seat.state != registry.READY:
         return seat.state
     exited = seat.seat != MASTER and herdr.bare(seat.pane_id)
     if exited and registry.take(folder, seat.seat, registry.READY, registry.PENDING):
         return f"revived-{relaunch(folder, seat.seat)}"
-    if seat.seat != MASTER and exited is False and SIGNED_OUT.search(herdr.screen(seat.pane_id)):
-        return f"signed-out-{force(folder, seat.seat)}"
-    return _ready_seat(folder, seat, herdr, now)
+    return _forced(folder, seat, herdr, force, exited) or _ready_seat(folder, seat, herdr, now)
 
 
 def round_for(folder: Path, herdr: Herdr, relaunch: Relaunch, now: float, force: Relaunch) -> list[Row]:
