@@ -1,5 +1,7 @@
 import io
 import json
+import re
+import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -116,6 +118,21 @@ def test_a_put_after_the_index_is_lost_keeps_the_first_verdict(
     assert verdicts.get("static", unit) == first
 
 
+def test_a_put_after_the_objects_are_lost_rewrites_them_and_the_index(
+    tmp_path: Path, client: fakeredis.FakeRedis
+) -> None:
+    verdicts = store.Store(client, objects.LocalObjects(tmp_path))
+    unit = key("test", "lost")
+    later = store.Verdict(kind="test", key=unit, passed=False, flaky=False, seconds=5.0)
+    verdicts.put(store.Verdict(kind="test", key=unit, passed=True, flaky=False, seconds=1.0), {}, b"one\n")
+    shutil.rmtree(tmp_path / "lab")
+
+    assert verdicts.put(later, {"failed": ["t"]}, b"two\n") is True
+
+    assert verdicts.get("test", unit) == later
+    assert verdicts.objects.read(f"lab/test/{hexdigest(unit)}/log.txt") == b"two\n"
+
+
 def test_get_after_a_redis_flush_plus_reindex_returns_the_verdict(
     verdicts: store.Store, client: fakeredis.FakeRedis
 ) -> None:
@@ -177,8 +194,9 @@ def test_put_refuses_a_key_of_another_kind_or_shape(verdicts: store.Store) -> No
 
     with pytest.raises(ValueError, match=f"^not a test unit key: {other}$"):
         verdicts.put(store.Verdict(kind="test", key=other, passed=True, flaky=False, seconds=0.0), {}, b"")
-    with pytest.raises(ValueError, match="^not a test unit key: test-v1-abc$"):
-        verdicts.put(store.Verdict(kind="test", key="test-v1-abc", passed=True, flaky=False, seconds=0.0), {}, b"")
+    for bad in ("test-v1-abc", key("test", "a") + "x", "test-v1-" + "g" * 64, "test-" + hexdigest(key("test", "a"))):
+        with pytest.raises(ValueError, match=f"^not a test unit key: {bad}$"):
+            verdicts.put(store.Verdict(kind="test", key=bad, passed=True, flaky=False, seconds=0.0), {}, b"")
     assert verdicts.objects.keys("lab/") == []
 
 
@@ -193,6 +211,9 @@ def test_the_layout_follows_the_module_table() -> None:
     assert objects.is_report(f"lab/stats/{hexdigest(unit)}/report.json") is True
     assert objects.is_report(f"lab/stats/{hexdigest(unit)}/log.txt") is False
     assert objects.is_report("lab/grades/1234/report.json") is False
+    assert objects.is_report(f"lab/stats/{hexdigest(unit)}/report.jsonx") is False
+    assert objects.is_report(f"lab/stats/{hexdigest(unit)}/reportxjson") is False
+    assert objects.is_report("lab/stats/" + "g" * 64 + "/report.json") is False
 
 
 def test_local_objects_write_once_and_leave_no_staging_file(tmp_path: Path) -> None:
@@ -240,7 +261,7 @@ def test_uploads_mint_presigned_put_urls_for_a_jobs_report_and_log() -> None:
     assert query["X-Amz-Expires"] == ["600"]
     assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
     assert query["X-Amz-SignedHeaders"] == ["host"]
-    assert len(query["X-Amz-Signature"][0]) == 64
+    assert re.fullmatch("[0-9a-f]{64}", query["X-Amz-Signature"][0])
 
 
 def test_uploads_expire_after_fifteen_minutes_by_default() -> None:

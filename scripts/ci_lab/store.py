@@ -56,7 +56,8 @@ class Store:
         document = {"report": dict(report), "verdict": asdict(verdict)}
         written = self.objects.write_once(report_path, _json(document).encode())
         stored = verdict if written else _stored(self.objects.read(report_path))
-        return self._index(stored) and written
+        self._index(stored, replace=written)
+        return written
 
     def disable(self, kind: str) -> None:
         """Stop reuse of a kind: every get of it misses until enable."""
@@ -69,7 +70,8 @@ class Store:
     def reindex(self) -> int:
         """Rebuild the index from the stored report objects; return how many entries it added."""
         reports = [path for path in self.objects.keys(ROOT) if is_report(path)]
-        return sum(self._index(_stored(self.objects.read(path))) for path in reports)
+        return sum(self._index(_stored(self.objects.read(path)), replace=False) for path in reports)
 
-    def _index(self, verdict: Verdict) -> bool:
-        return bool(self.client.set(f"{INDEX}{verdict.kind}:{verdict.key}", _json(asdict(verdict)), nx=True))
+    def _index(self, verdict: Verdict, *, replace: bool) -> bool:
+        key = f"{INDEX}{verdict.kind}:{verdict.key}"
+        return bool(self.client.set(key, _json(asdict(verdict)), nx=not replace))
