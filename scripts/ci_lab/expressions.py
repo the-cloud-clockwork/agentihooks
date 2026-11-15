@@ -19,7 +19,7 @@ EMBEDDED = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
 WRAPPED = re.compile(r"\s*\$\{\{(.*)\}\}\s*", re.DOTALL)
 STATUS = {"always()": True, "cancelled()": False, "failure()": False, "success()": True}
 LITERALS: dict[str, Value] = {"false": False, "null": "", "true": True}
-OPERATORS = frozenset({"!", "!=", "&&", "(", ")", "==", "||"})
+NAME = re.compile(r"[A-Za-z_][\w.-]*")
 NUMBER = re.compile(r"\s*-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?\s*")
 
 
@@ -51,7 +51,7 @@ def _primary(tokens: deque[str], context: Mapping[str, str]) -> Value:
         return STATUS[token]
     if token in LITERALS:
         return LITERALS[token]
-    if not token or token in OPERATORS or token.endswith("()"):
+    if not NAME.fullmatch(token):
         raise ValueError(f"expected a value, found {token!r}")
     if token not in context:
         raise ValueError(f"no value for {token!r} in the context")
