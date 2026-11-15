@@ -63,7 +63,7 @@ def resources_of(paths: list[str]) -> dict[str, set[str]]:
 
 
 def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -> tuple[Unit, ...]:
-    """Key one stats unit per test file with the identity the stats cache stores for its unmeasured record."""
+    """Key one stats unit per test file by the stats cache identity of its static closure, known before a run."""
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
