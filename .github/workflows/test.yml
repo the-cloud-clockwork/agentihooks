@@ -360,7 +360,6 @@ jobs:
       queued: ${{ steps.republished.outputs.queued }}
       base: ${{ steps.base-run.outputs.sha }}
       source: ${{ steps.unit-source.outputs.source }}
-      queue_legs: ${{ steps.unit-source.outputs.queue_legs }}
       scope: ${{ steps.select.outputs.scope }}
       legs: ${{ steps.select.outputs.legs }}
       count: ${{ steps.select.outputs.count }}
@@ -1117,6 +1116,7 @@ jobs:
       run: ${{ steps.plan.outputs.run }}
       commit: ${{ steps.plan.outputs.commit }}
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
+      queue_legs: ${{ steps.queue-legs.outputs.queue_legs }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1269,6 +1269,17 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
+
+      - name: Map each push leg onto a queue shard
+        id: queue-legs
+        if: needs.select.outputs.source != ''
+        env:
+          GH_TOKEN: ${{ steps.unit-token.outputs.token }}
+        run: |
+          shards=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$UNIT_SOURCE/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name | test("^durations-3\\.12-[0-9]+$")) | .name' | wc -l)
+          legs=$(jq -nc --argjson shards "$shards" '[range(1; 21) | {key: tostring, value: ((. - 1) % $shards + 1)}] | from_entries')
+          echo "queue_legs=$legs" >> "$GITHUB_OUTPUT"
 
       - name: Restore the queue split inputs
         if: needs.select.outputs.source != ''
@@ -1556,7 +1567,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-durations
-          name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.select.outputs.queue_legs)[format('{0}', matrix.shard)] }}
+          name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1573,7 +1584,7 @@ jobs:
         with: *unit-restore-queue-shard-durations
 
       - name: Restore queue shard flakes
-        if: needs.split.outputs.source != '' && fromJSON(needs.select.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
+        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
         id: restore-queue-shard-flakes
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1600,7 +1611,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-coverage
-          name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.select.outputs.queue_legs)[format('{0}', matrix.shard)] }}
+          name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1617,7 +1628,7 @@ jobs:
         with: *unit-restore-queue-shard-coverage
 
       - name: Empty the test reports of a leg above the queue's shard count
-        if: needs.split.outputs.source != '' && fromJSON(needs.select.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
+        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
         run: |
           echo '{}' > durations.json
           rm -f elapsed.json

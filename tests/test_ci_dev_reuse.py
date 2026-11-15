@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+import subprocess
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -185,7 +186,7 @@ def test_cli_publishes_empty_source_on_mismatch(tmp_path: Path, monkeypatch: pyt
     output = tmp_path / "outputs"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_dev_reuse.main(["--head", "d" * 40, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
-    assert output.read_text() == "source=\nqueue_legs=\n"
+    assert output.read_text() == "source=\n"
 
 
 def test_cli_publishes_passed_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,8 +195,7 @@ def test_cli_publishes_passed_source(tmp_path: Path, monkeypatch: pytest.MonkeyP
     output.write_text("existing=kept\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
-    legs = json.dumps({str(leg): leg for leg in range(1, 21)}, separators=(",", ":"))
-    assert output.read_text() == f"existing=kept\nsource=123\nqueue_legs={legs}\n"
+    assert output.read_text() == "existing=kept\nsource=123\n"
 
 
 @pytest.mark.parametrize("shards", [12, 16, 19])
@@ -204,15 +204,20 @@ def test_a_queue_run_with_fewer_shards_feeds_the_dev_push(tmp_path: Path, shards
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
 
 
-def test_cli_maps_every_push_leg_onto_a_sixteen_shard_queue_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    evidence(tmp_path, shards=16)
-    output = tmp_path / "outputs"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
-    legs = {**{str(leg): leg for leg in range(1, 17)}, "17": 1, "18": 2, "19": 3, "20": 4}
-    assert output.read_text() == f"source=123\nqueue_legs={json.dumps(legs, separators=(',', ':'))}\n"
+@pytest.mark.parametrize("shards", [12, 16, 20])
+def test_split_maps_every_push_leg_onto_a_queue_shard(shards: int) -> None:
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(step for step in jobs["split"]["steps"] if step.get("id") == "queue-legs")
+    assert step["if"] == "needs.select.outputs.source != ''"
+    assert jobs["split"]["outputs"]["queue_legs"] == "${{ steps.queue-legs.outputs.queue_legs }}"
+    legs = re.search(r"jq -nc --argjson shards \"\$shards\" '([^']+)'", step["run"])
+    assert legs is not None
+    mapped = subprocess.run(
+        ["jq", "-nc", "--argjson", "shards", str(shards), legs[1]], capture_output=True, text=True, check=True
+    )
+    assert json.loads(mapped.stdout) == {str(leg): (leg - 1) % shards + 1 for leg in range(1, 21)}
 
 
 def test_a_queue_run_with_a_missing_middle_shard_never_feeds_the_dev_push(tmp_path: Path) -> None:
@@ -276,7 +281,7 @@ def test_workflow_preserves_downstream_artifacts() -> None:
     unit = jobs["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     assert steps["Run tests"]["if"] == "needs.split.outputs.source == ''"
-    mapped = "${{ fromJSON(needs.select.outputs.queue_legs)[format('{0}', matrix.shard)] }}"
+    mapped = "${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}"
     for kind in ("durations", "flakes", "coverage"):
         restored = steps[f"Restore queue shard {kind}"]
         assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
@@ -284,7 +289,7 @@ def test_workflow_preserves_downstream_artifacts() -> None:
         assert restored["with"]["name"] == f"{kind}-${{{{ matrix.python-version }}}}-{leg}"
     emptied = steps["Empty the test reports of a leg above the queue's shard count"]
     assert emptied["run"].split("\n")[:2] == ["echo '{}' > durations.json", "rm -f elapsed.json"]
-    assert jobs["select"]["outputs"]["queue_legs"] == "${{ steps.unit-source.outputs.queue_legs }}"
+    assert "queue_legs" not in jobs["select"]["outputs"]
     producer = "durations" if "durations" in jobs else "select"
     assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"
     assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"

@@ -1581,7 +1581,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     ]
     names = [step["name"] for step in between]
     assert names in ([], restores, [*restores, "Empty the test reports of a leg above the queue's shard count"])
-    own = "fromJSON(needs.select.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
+    own = "fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
     for step in between:
         expected = "needs.split.outputs.source != ''"
         if step["name"] == "Restore queue shard coverage":

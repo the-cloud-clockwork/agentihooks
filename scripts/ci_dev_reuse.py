@@ -60,11 +60,6 @@ def shard_count(folder: Path) -> int:
     return shards
 
 
-def queue_legs(shards: int) -> dict[str, int]:
-    """The queue leg each of the twenty push legs restores; legs above the queue's count borrow its coverage."""
-    return {str(leg): (leg - 1) % shards + 1 for leg in range(1, PUSH_LEGS + 1)}
-
-
 def _complete(evidence: Path, run: dict[str, Any]) -> bool:
     folder = evidence / str(run["id"])
     artifacts = ci_reuse._lines(folder / "artifacts.jsonl")
@@ -124,12 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     source = select_source(args.evidence, args.head, args.repository)
     if destination := os.environ.get("GITHUB_OUTPUT"):
         with Path(destination).open("a") as output:
-            legs = (
-                json.dumps(queue_legs(shard_count(args.evidence / str(source))), separators=(",", ":"))
-                if source
-                else ""
-            )
-            output.write(f"source={source or ''}\nqueue_legs={legs}\n")
+            output.write(f"source={source or ''}\n")
     return 0
 
 
