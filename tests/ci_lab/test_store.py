@@ -1,19 +1,23 @@
+from __future__ import annotations
+
 import dataclasses
 import io
 import json
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import botocore.session
-import fakeredis
 import pytest
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from scripts.ci_lab import digests, lease_api, objects, store
+
+if TYPE_CHECKING:
+    import fakeredis
 
 BUCKET = "lab-bucket"
 
@@ -49,6 +53,8 @@ def hexdigest(unit_key: str) -> str:
 
 @pytest.fixture
 def client() -> fakeredis.FakeRedis:
+    import fakeredis
+
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
