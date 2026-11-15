@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ def test_flake():
 OPENS = """from pathlib import Path
 
 from hooks.plant import one
+from scripts.plant import two
 
 
 def test_listed():
@@ -37,7 +39,7 @@ def test_listed():
 
 def test_unlisted():
     assert Path("data/unlisted.txt").read_text() == "unlisted"
-    assert one() == 1
+    assert one() + two() == 3
 """
 
 
@@ -107,6 +109,8 @@ def test_a_green_batch_stores_durations_coverage_and_files_opened_outside_its_ma
         "data/unlisted.txt": "unlisted",
         "hooks/__init__.py": "",
         "hooks/plant.py": "def one():\n    return 1\n",
+        "scripts/__init__.py": "",
+        "scripts/plant.py": "def two():\n    return 2\n",
     }
     tree = _tree(tmp_path / "tree", files)
     lab = _lab(tmp_path, _manifest({listed: ["data/listed.txt"], unlisted: []}), {})
@@ -119,8 +123,29 @@ def test_a_green_batch_stores_durations_coverage_and_files_opened_outside_its_ma
     assert all(seconds >= 0 for seconds in verdict.durations.values())
     data = coverage.CoverageData(str(verdict.coverage))
     data.read()
-    assert any(path.endswith("hooks/plant.py") for path in data.measured_files())
+    measured = {Path(path).as_posix() for path in data.measured_files()}
+    assert {"hooks/plant.py", "scripts/plant.py"} <= {"/".join(path.split("/")[-2:]) for path in measured}
+    assert any(context.startswith(unlisted) for context in data.measured_contexts())
     assert not lab.flakes.exists()
+
+
+def test_the_environment_puts_the_venv_first_and_the_outputs_under_the_attempt_folder(tmp_path: Path) -> None:
+    tree, venv, folder = tmp_path / "tree", tmp_path / "venv", tmp_path / "attempt"
+
+    given = run_tests._environment(tree, venv, folder, {"PATH": "/usr/bin", "KEPT": "1"})
+    default = run_tests._environment(tree, venv, folder, {})
+
+    assert given == {
+        "KEPT": "1",
+        "PATH": f"{venv / 'bin'}:/usr/bin",
+        "PYTHONPATH": str(folder / "site"),
+        "CI_RESULTS": str(folder / "results"),
+        "CI_FLAKES": str(folder / "flakes.jsonl"),
+        "COVERAGE_FILE": str(folder / ".coverage"),
+        "CI_LAB_TREE": str(tree),
+        "CI_LAB_OPENED": str(folder / "opened"),
+    }
+    assert default["PATH"] == f"{venv / 'bin'}:{os.defpath}"
 
 
 def test_a_flake_with_no_failed_test_writes_one_row_per_batch_test(tmp_path: Path) -> None:
@@ -151,7 +176,8 @@ def test_a_flake_row_keeps_the_first_attempts_errors_and_counts_two_attempts(tmp
 
 
 def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Path) -> None:
-    shared = ("pyproject.toml", ".test_durations", ".github/x.yml", ".git/HEAD", ".pytest_cache/v", "pkg/m.pyc")
+    skipped = (".git/HEAD", ".venv/x", ".playwright/x", "node_modules/x", ".pytest_cache/v")
+    shared = ("pyproject.toml", "uv.lock", ".test_durations", ".github/x.yml", *skipped, "pkg/m.pyc")
     for path in ("data/a.txt", "data/b.txt", *shared):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text("")

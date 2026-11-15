@@ -80,8 +80,8 @@ class Verdict:
 
 
 def _nodes(batch: Sequence[str]) -> list[str]:
-    """Return the pytest node ids of a batch's manifest tests, in batch order without repeats."""
-    return list(dict.fromkeys(dep_manifest.node(test) for test in batch))
+    """Return the pytest node ids of a batch's manifest tests, in batch order."""
+    return [dep_manifest.node(test) for test in batch]
 
 
 def _shared(path: str) -> bool:

@@ -46,10 +46,13 @@ def test_a_worker_records_each_read_under_the_tree_once_relative_to_it(
 ) -> None:
     monkeypatch.setenv(open_capture.WORKER, "gw0")
     tree = tmp_path / "tree"
+    tree.mkdir()
+    monkeypatch.chdir(tree)
     log = io.StringIO()
     capture = open_capture.Capture(str(tree), log)
     frame = sys._getframe()
     events = [
+        ("open", ("relative.txt", "r", 0)),
         ("open", (str(tree / "a.txt"), "r", 0)),
         ("open", (str(tree / "a.txt"), "rb", 0)),
         ("open", (tree / "b.txt", "rb", 0)),
@@ -67,7 +70,7 @@ def test_a_worker_records_each_read_under_the_tree_once_relative_to_it(
     for event, args in events:
         capture.audit(event, args, frame)
 
-    assert log.getvalue() == "a.txt\nb.txt\nc.txt\nd.txt\n"
+    assert log.getvalue() == "relative.txt\na.txt\nb.txt\nc.txt\nd.txt\n"
 
 
 def test_a_read_by_the_import_system_or_outside_a_worker_is_not_recorded(

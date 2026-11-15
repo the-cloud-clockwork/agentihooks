@@ -46,10 +46,10 @@ def _read(path: object, mode: object) -> str | None:
 
 
 class Capture:
-    """Appends each file under root that a pytest worker reads, once, to the log as a path relative to root."""
+    """Appends each file under the absolute root that a pytest worker reads, once, to the log relative to root."""
 
     def __init__(self, root: str, log: TextIO) -> None:
-        self.root = os.path.join(os.path.abspath(root), "")
+        self.root = os.path.join(root, "")
         self.log = log
         self.seen: set[str] = set()
 
