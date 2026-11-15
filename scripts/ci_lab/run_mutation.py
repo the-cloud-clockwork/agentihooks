@@ -14,10 +14,11 @@ import sys
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import asdict, dataclass
 from functools import partial
+from gc import freeze
 from os import _exit, environ, fork, wait, waitstatus_to_exitcode
 from pathlib import Path
 from time import monotonic, process_time
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -93,17 +94,21 @@ def run_items(session: pytest.Session, items: Sequence[pytest.Item]) -> int:
 
 
 class Recorder:
-    """A pytest plugin that credits each trampolined function a test reaches to that test and sums its seconds."""
+    """Credits each trampolined function a test reaches to that test and sums the test's seconds."""
 
     def __init__(self) -> None:
         self.tests: dict[str, set[str]] = {}
         self.durations: dict[str, float] = {}
 
-    def pytest_runtest_logstart(self) -> None:
+    def plugin(self) -> SimpleNamespace:
+        """Return the pytest plugin that starts each test afresh and records each of its reports."""
+        return SimpleNamespace(pytest_runtest_logstart=self.start, pytest_runtest_logreport=self.record)
+
+    def start(self) -> None:
         """Forget the hits of the test before."""
         HITS.clear()
 
-    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+    def record(self, report: pytest.TestReport) -> None:
         """Credit every function hit so far to the reported test and add the phase's seconds to it."""
         self.durations[report.nodeid] = self.durations.get(report.nodeid, 0.0) + report.duration
         for function in list(HITS):
@@ -111,7 +116,7 @@ class Recorder:
 
 
 class WarmLoop:
-    """A pytest plugin that replaces the test loop: it forks one child per mutant over the tests collected once."""
+    """Replaces pytest's test loop: it forks one child per mutant over the tests collected once."""
 
     def __init__(self, members: Sequence[str], tests: Sequence[str], memory: KillMemory, lanes: int) -> None:
         self.members = members
@@ -122,12 +127,17 @@ class WarmLoop:
         self.collection = 0.0
         self.rows: list[Row] = []
 
-    def pytest_runtestloop(self, session: pytest.Session) -> bool | None:
+    def plugin(self) -> SimpleNamespace:
+        """Return the pytest plugin whose test loop is run."""
+        return SimpleNamespace(pytest_runtestloop=self.run)
+
+    def run(self, session: pytest.Session) -> bool | None:
         """Grade every member, at most lanes children at a time; a failed collection is left to pytest's loop."""
         self.collection = monotonic() - self.started
         if session.testsfailed:
             return None
         items = {item.nodeid: item for item in session.items}
+        freeze()
         pending = list(self.members)
         running: dict[int, tuple[str, float]] = {}
         while pending or running:
@@ -169,7 +179,7 @@ def collect(options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
     recorder = Recorder()
     environ[SWITCH] = STATS
     started = process_time()
-    status = pytest.main([*options, *chosen], plugins=[recorder])
+    status = pytest.main([*options, *chosen], plugins=[recorder.plugin()])
     tests = {function: sorted(names) for function, names in recorder.tests.items()}
     cpu = process_time() - started
     return [{"status": int(status), "tests": tests, "durations": recorder.durations, "cpu": cpu}]
@@ -190,7 +200,7 @@ def mutants(
     ordered = sorted(tests, key=tests.__getitem__)
     loop = WarmLoop(unit.members, ordered, memory, lanes(len(unit.members), sum(tests.values()), budget, cap))
     environ[SWITCH] = CLEAN
-    status = pytest.main([*options, *ordered], plugins=[loop, memory])
+    status = pytest.main([*options, *ordered], plugins=[loop.plugin(), memory])
     if status:
         raise SystemExit(int(status))
     return loop.rows, loop.collection

@@ -128,17 +128,23 @@ def test_items_run_in_order_and_stop_at_the_first_failure(
     assert calls == expected
 
 
+def test_the_recorder_plugin_starts_each_test_afresh_and_records_its_reports() -> None:
+    recorder = Recorder()
+    plugin = recorder.plugin()
+    assert (plugin.pytest_runtest_logstart, plugin.pytest_runtest_logreport) == (recorder.start, recorder.record)
+
+
 def test_the_recorder_credits_each_hit_function_to_its_test_and_sums_its_phase_seconds() -> None:
     recorder = Recorder()
     run_mutation.HITS.add("scripts.sample.x_stale")
-    recorder.pytest_runtest_logstart()
+    recorder.start()
     assert run_mutation.HITS == set()
     run_mutation.HITS.add("scripts.sample.x_fee")
-    recorder.pytest_runtest_logreport(report("tests/test_a.py::test_one", 0.25))
-    recorder.pytest_runtest_logreport(report("tests/test_a.py::test_one", 0.5))
-    recorder.pytest_runtest_logstart()
+    recorder.record(report("tests/test_a.py::test_one", 0.25))
+    recorder.record(report("tests/test_a.py::test_one", 0.5))
+    recorder.start()
     run_mutation.HITS.add("scripts.sample.x_rate")
-    recorder.pytest_runtest_logreport(report("tests/test_a.py::test_two", 1.0))
+    recorder.record(report("tests/test_a.py::test_two", 1.0))
     run_mutation.HITS.clear()
     assert recorder.tests == {
         "scripts.sample.x_fee": {"tests/test_a.py::test_one"},
@@ -216,10 +222,13 @@ def test_the_loop_forks_each_mutant_at_most_lanes_at_a_time_and_rows_its_status_
             alive.remove(pid)
         return pid, status
 
+    frozen: list[int] = []
     monkeypatch.setattr(loop, "fork", fork)
     monkeypatch.setattr(run_mutation, "wait", reaped)
+    monkeypatch.setattr(run_mutation, "freeze", lambda: frozen.append(len(forked)))
     session = SimpleNamespace(testsfailed=0, items=[SimpleNamespace(nodeid="t")])
-    assert loop.pytest_runtestloop(as_session(session)) is True
+    assert loop.plugin().pytest_runtestloop(as_session(session)) is True
+    assert frozen == [0]
     assert forked == [("m1", 1), ("m2", 2), ("m3", 2)]
     assert loop.collection == 4.0
     assert loop.rows == [Row("m1", "killed", 1.0), Row("m2", "survived", 1.5), Row("m3", "killed", 2.5)]
@@ -229,7 +238,8 @@ def test_a_failed_collection_forks_nothing_and_leaves_the_session_to_pytest(monk
     monkeypatch.setattr(run_mutation, "monotonic", clock(2.0, 5.0))
     loop = WarmLoop(["m1"], ["t"], KillMemory(Path("unused")), 1)
     monkeypatch.setattr(loop, "fork", lambda *args: pytest.fail("forked after a failed collection"))
-    assert loop.pytest_runtestloop(as_session(SimpleNamespace(testsfailed=1, items=[]))) is None
+    monkeypatch.setattr(run_mutation, "freeze", lambda: pytest.fail("froze after a failed collection"))
+    assert loop.run(as_session(SimpleNamespace(testsfailed=1, items=[]))) is None
     assert loop.collection == 3.0
     assert loop.rows == []
 
@@ -252,8 +262,9 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
 
     def main(args: list[str], plugins: list[Any]) -> int:
         sessions.append((args, plugins, run_mutation.environ[run_mutation.SWITCH]))
-        plugins[0].rows = [Row("m1", "killed", 0.5)]
-        plugins[0].collection = 2.0
+        loop = plugins[0].pytest_runtestloop.__self__
+        loop.rows = [Row("m1", "killed", 0.5)]
+        loop.collection = 2.0
         return status
 
     monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=main))
@@ -266,7 +277,7 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
         return
     assert run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4) == ([Row("m1", "killed", 0.5)], 2.0)
     [(args, plugins, switch)] = sessions
-    loop = plugins[0]
+    loop = plugins[0].pytest_runtestloop.__self__
     assert args == [*OPTIONS, "tests/test_a.py::fast", "tests/test_a.py::slow"]
     assert plugins[1] is memory
     assert switch == ""
@@ -457,10 +468,9 @@ def test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does(c
     assert statuses(corpus_run["graded"]["rows"]) == reference
 
 
+@pytest.mark.parametrize("corpus_run", ["kill"], indirect=True)
 @pytest.mark.feature("lab-warm-mutant-runner")
 def test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence(corpus_run: dict[str, Any]) -> None:
-    if corpus_run["mode"] != "kill":
-        pytest.skip("the plant needs mutants the corpus kills")
     reference = corpus_run["reference"]
     planted = statuses(corpus_run["untrampolined"]["rows"])
     assert set(reference.values()) == {"killed"}
@@ -469,10 +479,14 @@ def test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence(c
 
 
 @pytest.mark.wall_clock
+@pytest.mark.parametrize("corpus_run", ["survive"], indirect=True)
 @pytest.mark.feature("lab-warm-mutant-runner")
 def test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection(corpus_run: dict[str, Any]) -> None:
     graded = corpus_run["graded"]
-    per_mutant = statistics.median(row["seconds"] for row in graded["rows"])
-    ratio = per_mutant / graded["collection_seconds"]
-    warnings.warn(f"lab warm runner {corpus_run['mode']}: fixed cost per mutant over collection is {ratio:.4f}")
+    seconds = [row["seconds"] for row in graded["rows"]]
+    ratio = statistics.median(seconds) / graded["collection_seconds"]
+    warnings.warn(
+        f"lab warm runner fixed cost ratio {ratio:.4f}: mutant seconds {seconds}, "
+        f"collection seconds {graded['collection_seconds']:.4f}"
+    )
     assert ratio <= FIXED_COST_RATIO
