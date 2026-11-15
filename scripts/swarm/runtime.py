@@ -1250,7 +1250,8 @@ class HerdrRuntime:
                 if validated and validated != session.process.pid and facts[agent.name].get("process") is not False:
                     facts[agent.name]["rebound"] = session.process.pid
             elif validated:
-                facts[agent.name] = {"process": False}
+                if not self._listed_elsewhere(agent.name):
+                    facts[agent.name] = {"process": False}
                 self._binding_pids[agent.name] = None
         return facts
 
