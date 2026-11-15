@@ -61,7 +61,7 @@ def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[Ag
     return [agent for agent in store.agents(slug) if agent.name not in kept]
 
 
-def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
+def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
     """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
     answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
     refused the stop."""

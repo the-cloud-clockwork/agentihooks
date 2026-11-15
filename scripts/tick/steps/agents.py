@@ -364,7 +364,7 @@ def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     tick.content_refusal.handoff(store, slug, agent, now_ms)
-    dropped = tick._stop_hive(slug, store, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, agent, "refused", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return [f"freed {agent.name} after repeated content refusals" + dropped]
 
 
@@ -378,7 +378,7 @@ def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     ):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     tick.revoked_seats.worker_handoff(store, slug, agent, now_ms)
-    dropped = tick._stop_hive(slug, store, agent, "revoked", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, agent, "revoked", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return [f"freed the seat of {agent.name}: {account} was revoked" + dropped]
 
 
@@ -468,14 +468,14 @@ def _watch_idle(
     )
     if tick.timing.timed(tick.resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
-    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, store, runtime, idle, "idle"):
+    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, runtime, idle, "idle"):
         why = (
             f"; outage recovery could not proceed: {tick.timing.timed(tick.resume.recovery_blocker, store, slug, agent)}"
             if pending
             else ""
         )
         dropped = tick.timing.timed(tick._drop, slug, store, ledger, rows, idle, refund=True)
-        tick.timing.timed(tick._stop_hive, slug, store, idle, "idle", dropped)
+        tick.timing.timed(tick._stop_hive, slug, idle, "idle", dropped)
         return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
 
@@ -539,7 +539,7 @@ def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, age
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     tick.resume.free_seat(store, slug, agent, now_ms)
     tick.outage.clear_pane(store, slug, agent.name)
-    dropped = tick._stop_hive(slug, store, agent, "stuck", tick._drop(slug, store, ledger, rows, agent, refund=True))
+    dropped = tick._stop_hive(slug, agent, "stuck", tick._drop(slug, store, ledger, rows, agent, refund=True))
     return [f"freed the seat of {agent.name}, stuck on a provider error" + dropped]
 
 

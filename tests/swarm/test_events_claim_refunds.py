@@ -212,7 +212,7 @@ def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
 
-    assert tick_module._stop_hive(SLUG, env[0], agent, "idle", dropped) == dropped
+    assert tick_module._stop_hive(SLUG, agent, "idle", dropped) == dropped
 
     assert len(sent_stops(bus, agent)) == stops
 
@@ -226,9 +226,63 @@ def test_a_legacy_agent_retirement_sends_no_stop(
     agent = seat("t1")
     assert reconciler.legacy_agents(store, SLUG) == [agent]
 
-    assert reconciler.stop_admitted(store, SLUG, agent, "idle") == execution_stop.UNKNOWN
+    assert reconciler.stop_admitted(SLUG, agent, "idle") == execution_stop.UNKNOWN
 
     assert sent_stops(bus, agent) == []
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+def test_the_hub_stop_opens_no_bus_on_the_memory_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected(_config: Any) -> Any:
+        raise AssertionError("the memory bus records no start, so no bus is opened")
+
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
+    monkeypatch.setattr(reconciler, "open_bus", unexpected)
+
+    assert reconciler.stop_admitted(SLUG, AgentRecord(name="a1", lane="eng", task="t1"), "idle") == (
+        execution_stop.UNKNOWN
+    )
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("refused", [False, True])
+def test_the_hub_stop_reports_its_answer_on_stderr_and_closes_the_bus_it_opened(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refused: bool
+) -> None:
+    config = SimpleNamespace(backend="nats")
+    opened: list[Any] = []
+    closed: list[bool] = []
+
+    def open_for(given: Any) -> Any:
+        opened.append(given)
+        if refused:
+            raise ConnectionError("bus down")
+        return SimpleNamespace(close=lambda: closed.append(True))
+
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: config)
+    monkeypatch.setattr(reconciler, "open_bus", open_for)
+    monkeypatch.setattr(reconciler.execution_stop, "stop", lambda _bus, _slug, _agent, _reason: execution_stop.SENT)
+    agent = AgentRecord(name="a1", lane="eng", task="t1")
+
+    outcome = reconciler.stop_admitted(SLUG, agent, "idle")
+
+    expected = f"{execution_stop.FAILED} (ConnectionError: bus down)" if refused else execution_stop.SENT
+    assert (outcome, opened, closed) == (expected, [config], [] if refused else [True])
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", f"hub execution stop for a1 in swarm {SLUG} after idle: {expected}\n")
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+def test_a_reachable_agent_is_retired_through_its_runtime_with_its_task_scratch_homes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retired: list[tuple[str, dict[str, Any]]] = []
+    runtime = SimpleNamespace(retire=lambda agent, **kwargs: retired.append((agent.name, kwargs)) or True)
+    monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
+
+    assert tick_module._retire_or_stop(SLUG, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle")
+
+    assert retired == [("a1", {"homes": [f"{SLUG}/t1"]})]
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
