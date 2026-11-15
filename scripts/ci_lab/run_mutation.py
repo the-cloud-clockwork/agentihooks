@@ -188,7 +188,7 @@ def collect(options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
 def stats(root: Path, cache: Path, file_batch: Sequence[str], options: Sequence[str]) -> list[dict[str, Any]]:
     """Return the stats records of file_batch from the cache keyed by root's content, collecting misses here."""
     records = collect_cached_stats(root, cache, {}, list(file_batch), list(options), partial(collect, options))  # pyright: ignore[reportUnknownVariableType]
-    return cast("list[dict[str, Any]]", records)
+    return cast(list[dict[str, Any]], records)
 
 
 def mutants(

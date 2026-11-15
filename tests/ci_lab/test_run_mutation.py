@@ -210,7 +210,8 @@ def test_the_loop_forks_each_mutant_at_most_lanes_at_a_time_and_rows_its_status_
     forked: list[tuple[str, int]] = []
     finished = iter([(999, 0), (101, 256), (102, 0), (103, 256)])
 
-    def fork(session: pytest.Session, items: Mapping[str, pytest.Item], name: str) -> int:
+    def fork(forked_session: pytest.Session, items: Mapping[str, pytest.Item], name: str) -> int:
+        assert forked_session is session
         pid = 101 + len(forked)
         alive.append(pid)
         forked.append((name, len(alive)))
@@ -240,6 +241,7 @@ def test_a_failed_collection_forks_nothing_and_leaves_the_session_to_pytest(monk
     loop = WarmLoop(["m1"], ["t"], KillMemory(Path("unused")), 1)
     monkeypatch.setattr(loop, "fork", lambda *args: pytest.fail("forked after a failed collection"))
     monkeypatch.setattr(run_mutation, "freeze", lambda: pytest.fail("froze after a failed collection"))
+    assert loop.collection == 0.0
     assert loop.run(as_session(SimpleNamespace(testsfailed=1, items=[]))) is None
     assert loop.collection == 3.0
     assert loop.rows == []
@@ -270,7 +272,7 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
 
     monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=main))
     unit = Unit("mutant", "key", ("m1", "m2", "m3"))
-    tests = {"tests/test_a.py::slow": 30.0, "tests/test_a.py::fast": 10.0}
+    tests = {"tests/test_a.py::a_slow_one": 30.0, "tests/test_a.py::b_fast_one": 10.0}
     if status:
         with pytest.raises(SystemExit) as stopped:
             run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4)
@@ -279,12 +281,12 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
     assert run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4) == ([Row("m1", "killed", 0.5)], 2.0)
     [(args, plugins, switch)] = sessions
     loop = plugins[0].pytest_runtestloop.__self__
-    assert args == [*OPTIONS, "tests/test_a.py::fast", "tests/test_a.py::slow"]
+    assert args == [*OPTIONS, "tests/test_a.py::b_fast_one", "tests/test_a.py::a_slow_one"]
     assert plugins[1] is memory
     assert switch == ""
     assert (loop.members, loop.tests, loop.memory, loop.lanes) == (
         ("m1", "m2", "m3"),
-        ["tests/test_a.py::fast", "tests/test_a.py::slow"],
+        ["tests/test_a.py::b_fast_one", "tests/test_a.py::a_slow_one"],
         memory,
         2,
     )
