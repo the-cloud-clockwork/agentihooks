@@ -39,7 +39,8 @@ def hung(since: int, now: int) -> Misses:
 
 def live(store: Any, agent: AgentRecord) -> bool:
     """True while the live report of the hive that took ``agent`` names it, so the agent runs with no started record."""
-    report = reports.Reports(store.redis).read(agent.hive)
+    reader: Any = reports.Reports(store.redis)
+    report: dict[str, Any] | None = reader.read(agent.hive)
     return report is not None and agent.name in report["names"]
 
 
