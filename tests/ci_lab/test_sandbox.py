@@ -14,7 +14,7 @@ import pytest
 from scripts.ci_lab import sandbox
 
 BWRAP = ["--dev-bind", "/", "/", "--unshare-net", "--die-with-parent", "--"]
-SHOW_ENV = "import json, os; print(json.dumps(dict(os.environ)))"
+SHOW_ENV = "import json, os; print(json.dumps({'cwd': os.getcwd(), 'env': dict(os.environ)}))"
 NETWORK = """
 import os, socket
 first = int(os.environ["CI_LAB_PORT_FIRST"])
@@ -152,9 +152,10 @@ def test_the_unit_sees_only_the_whitelist_and_its_private_environment(
     directory = outcome.log.parent
     assert (outcome.code, outcome.log.name, directory.parent) == (0, "log.txt", root)
     seen = json.loads(outcome.log.read_text())
-    assert "CI_LAB_HOST_SECRET" not in seen
+    assert seen["cwd"] == str(root.resolve())
+    assert "CI_LAB_HOST_SECRET" not in seen["env"]
     expected = sandbox.environment(directory, sandbox.PortRange(first=20000, last=20099), {"KEEP": "1"})
-    assert seen == expected
+    assert seen["env"] == expected
     for name in ("home", "tmp", "runtime"):
         assert stat.S_IMODE((directory / name).stat().st_mode) == 0o700
 
