@@ -6873,9 +6873,10 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
       "behaviour": "Static gate discovery records each gate step's env values and if condition as the workflow writes them and the command prints both on the gate's JSON line; the lab executor resolves the ${{ }} expressions in that env from its context, gives the env to the sandboxed step without letting it replace the tree variables, and skips a step whose if condition is false without running it, reporting it skipped and green as CI does.",
-      "seam": "scripts.ci_lab.static_gates discover and main, the StaticGate env and condition, and scripts.ci_lab.run_static run with Settings.context and Result.skipped",
+      "seam": "scripts.ci_lab.static_gates discover and main, the StaticGate env and condition, scripts.ci_lab.run_static run with Settings.context and Result.skipped, and scripts.ci_lab.expressions holds and interpolate",
       "tests": [
         "tests/ci_lab/test_static_gates.py::test_a_gate_carries_its_step_env_and_if_condition",
+        "tests/ci_lab/test_static_gates.py::test_yaml_booleans_in_step_env_and_if_read_as_github_writes_them",
         "tests/ci_lab/test_static_gates.py::test_the_command_prints_each_gate_step_env_and_if_condition",
         "tests/ci_lab/test_static_gates.py::test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read",
         "tests/ci_lab/test_run_static.py::test_a_step_whose_if_is_false_is_skipped_green_without_running",

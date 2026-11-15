@@ -63,7 +63,8 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
     head only as data. The caller passes a gate discovered from the grader tree's workflow, never the head's. A step
     whose if condition is false under settings.context is skipped without running, as CI skips it. The step's env,
     its ${{ }} expressions read from settings.context, joins the whitelist; neither can replace the tree variables,
-    and the run folders stay under settings.root.
+    and the run folders stay under settings.root. A condition or env expression outside the subset that
+    scripts.ci_lab.expressions reads raises ValueError before the step runs.
     """
     folder = _folder(settings.root, base_tree, grader_tree)
     if not expressions.holds(gate.condition, settings.context):

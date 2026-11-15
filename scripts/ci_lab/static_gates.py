@@ -77,6 +77,11 @@ def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(sorted(tools)), tuple(sorted(modules))
 
 
+def _text(value: object) -> str:
+    """The text GitHub reads for a YAML scalar in a step's env or if: booleans in lower case."""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
 def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> StaticGate | None:
     if "run" not in step:
         return None
@@ -89,8 +94,8 @@ def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> Sta
     entry = registry.get(name)
     paths = WHOLE_TREE if entry is None else tuple(entry["paths"])
     base_paths = WHOLE_TREE if entry is None else tuple(entry.get("base_paths", ()))
-    env = tuple((str(key), str(value)) for key, value in step.get("env", {}).items())
-    return StaticGate(name, job, title, tools, modules, run, paths, base_paths, env, str(step.get("if", "")))
+    env = tuple((str(key), _text(value)) for key, value in step.get("env", {}).items())
+    return StaticGate(name, job, title, tools, modules, run, paths, base_paths, env, _text(step.get("if", "")))
 
 
 def _job_steps(job: str, body: Mapping[str, Any], reusable: Mapping[str, Any]) -> list[tuple[str, Any]]:

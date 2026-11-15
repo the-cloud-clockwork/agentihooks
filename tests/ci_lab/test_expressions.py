@@ -79,6 +79,7 @@ def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:
     text = "swarm-${{ inputs.base }}-${{ true }}-${{ false }}-${{ steps.missing.outputs.sha }}-${{github.event_name}}"
     assert expressions.interpolate(text, CONTEXT) == "swarm-origin/dev-true-false--pull_request"
     assert expressions.interpolate(".semgrep", CONTEXT) == ".semgrep"
+    assert expressions.interpolate("${{\n  inputs.base\n}}", CONTEXT) == "origin/dev"
 
 
 @pytest.mark.parametrize(
@@ -90,6 +91,7 @@ def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:
         ("${{ cancelled() }}", False),
         ("  ${{ steps.self-plant.outputs.changed == 'true' }}\n", True),
         ("${{ steps.missing.outputs.changed == 'true' }}", False),
+        ("${{\n  !cancelled() &&\n  steps.self-plant.outputs.changed == 'true'\n}}", True),
         ("github.event_name == 'push'", False),
         ("steps.missing.outputs.sha", False),
         ("inputs.base", True),

@@ -409,6 +409,13 @@ def test_a_gate_carries_its_step_env_and_if_condition() -> None:
 
 
 @pytest.mark.feature("lab-static-step-env")
+def test_yaml_booleans_in_step_env_and_if_read_as_github_writes_them() -> None:
+    flagged = {"name": "Flagged gate", "if": True, "env": {"FLAG": False}, "run": "python -m scripts.flagged"}
+    gates = static_gates.discover(_edited(WORKFLOW, "type-gate", [flagged]), REGISTRY, REUSABLE)
+    assert [(gate.env, gate.condition) for gate in gates if gate.job == "type-gate"] == [((("FLAG", "false"),), "true")]
+
+
+@pytest.mark.feature("lab-static-step-env")
 def test_the_command_prints_each_gate_step_env_and_if_condition(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -429,7 +436,7 @@ def test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read(
     gates = {gate.name: gate for gate in static_gates.discover(workflow, registry, ci_wiring.load(ROOT))}
     assert ("RULES", ".semgrep") in gates["semgrep/scan/own-rules-hold-on-their-fixtures-and-the-code"].env
     assert ("BASE", "${{ inputs.base }}") in gates["semgrep/scan/rule-exceptions-only-shrink"].env
-    assert gates["lint/lint-check"].condition == "${{ !cancelled() }}"
+    assert "!cancelled()" in gates["lint/lint-check"].condition
 
 
 def test_the_command_adds_each_gate_closure_digest_at_the_grader_tree(

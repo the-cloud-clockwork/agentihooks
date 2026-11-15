@@ -182,3 +182,13 @@ def test_the_step_reads_its_env_with_expressions_resolved_from_the_context(
     lines = result.log.read_text().splitlines()
     assert lines[:4] == ["origin/dev", ".semgrep", "step", str(head)]
     assert settings.root in Path(lines[4]).parents
+
+
+def test_a_condition_outside_the_expression_subset_is_refused_before_the_step_runs(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    gate = _step("true\n", condition="${{ contains(github.ref, 'dev') }}")
+    with pytest.raises(ValueError) as refused:
+        run_static.run(gate, *_folders(tmp_path), settings)
+    assert str(refused.value) == "cannot read \", 'dev')\""
+    assert not (tmp_path / "bwrap.args").exists()
