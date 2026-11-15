@@ -365,6 +365,31 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
 
 
+def _push_paths(preflight, paths):
+    filtered = copy.deepcopy(preflight)
+    if paths is None:
+        filtered[True]["push"].pop("paths", None)
+    else:
+        filtered[True]["push"]["paths"] = paths
+    return filtered
+
+
+@pytest.mark.parametrize("dev_filtered", [False, True])
+@pytest.mark.parametrize(
+    ("paths", "verdict"), [(None, 0), ([".github/workflows/**"], 0), (["docs/**"], 1), ([".github/**"], 1)]
+)
+def test_the_branch_lane_preflight_may_run_only_for_workflow_changes(repo, capsys, dev_filtered, paths, verdict):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    base = _push_paths(preflight, [".github/workflows/**"] if dev_filtered else None)
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": base}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": _push_paths(preflight, paths)}, {}, "filter")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == verdict
+    refused = "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
+    assert refused is bool(verdict)
+
+
 _SPARSE = "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
 _SHALLOW_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 _FULL_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
@@ -1953,6 +1978,29 @@ def test_a_dev_carrying_the_dev_parent_form_refuses_any_other_selection(repo, ca
         "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
         in capsys.readouterr().out.splitlines()
     )
+
+
+_LEDGER_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
+
+
+def _pull_request_paths(workflow, paths):
+    if paths is None:
+        workflow[True]["pull_request"].pop("paths", None)
+    else:
+        workflow[True]["pull_request"]["paths"] = paths
+    return workflow
+
+
+@pytest.mark.parametrize("dev_filtered", [False, True])
+@pytest.mark.parametrize(
+    ("paths", "verdict"),
+    [(None, 0), (_LEDGER_PATHS, 0), (_LEDGER_PATHS[:2], 1), (["scripts/**"], 1), ([*_LEDGER_PATHS, "docs/**"], 1)],
+)
+def test_the_equivalence_grading_may_run_only_for_ledger_changes(repo, capsys, dev_filtered, paths, verdict):
+    base = _pull_request_paths(_equivalence(), _LEDGER_PATHS if dev_filtered else None)
+    assert _grade_equivalence(repo, base, _pull_request_paths(_equivalence(), paths)) == verdict
+    refused = "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+    assert (refused in capsys.readouterr().out.splitlines()) is bool(verdict)
 
 
 def _full_history(steps):
