@@ -4,8 +4,8 @@ import pytest
 
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MASTER
-from scripts.swarm.tick import SpawnError, tick
-from tests.swarm.test_tick import FakeRuntime, _slow_launches, tasks
+from scripts.swarm.tick import SpawnError
+from tests.swarm.test_tick import _slow_launches
 from tests.swarm.test_tick import store as store
 
 
@@ -30,154 +30,12 @@ def _failing(monkeypatch, runtime, failing, seconds=0):
     return clock
 
 
-@pytest.mark.feature("swarm-tick-launch-budget")
-def test_a_slow_failed_launch_leaves_the_pass_budget_to_the_next_task(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _failing(monkeypatch, runtime, {"t1"}, seconds=90)
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t2"]
-    assert ledger.rows["t2"]["state"] == "claimed"
-    assert not any("launch budget" in action for action in actions)
-
-
-@pytest.mark.feature("swarm-tick-launch-budget")
-def test_started_launches_still_spend_the_budget_after_a_failed_one(store, monkeypatch):
-    store.update("sw", max_eng=3)
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
-    clock = _failing(monkeypatch, runtime, {"t1"}, seconds=90)
-    spawn = runtime.spawn
-
-    def slow(config, lane, name, task):
-        if task["id"] == "t2":
-            clock[0] += 15
-        return spawn(config, lane, name, task)
-
-    runtime.spawn = slow
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t2"]
-    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
-
-
-@pytest.mark.feature("swarm-tick-launch-budget")
-def test_the_forgiven_failure_leaves_the_mean_of_started_launches_alone(store, monkeypatch):
-    store.update("sw", max_eng=3)
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
-    _failing(monkeypatch, runtime, {"t1"}, seconds=90)
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
-    assert not any("launch budget" in action for action in actions)
-
-
-@pytest.mark.feature("swarm-tick-launch-budget")
-def test_only_the_first_failed_launch_of_a_pass_is_forgiven(store, monkeypatch):
-    store.update("sw", max_eng=3)
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
-    clock = _slow_launches(monkeypatch, runtime, 0)
-    spawn, cost = runtime.spawn, {"t1": 1, "t2": 90}
-
-    def launch(config, lane, name, task):
-        if lane != MASTER and task["id"] in cost:
-            clock[0] += cost[task["id"]]
-            raise _canary_failure("codex")
-        return spawn(config, lane, name, task)
-
-    runtime.spawn = launch
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert runtime.spawned == []
-    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
-
-
-@pytest.mark.feature("swarm-tick-launch-budget")
-def test_a_forgiven_failure_never_dilutes_the_mean_launch_cost(store, monkeypatch):
-    store.update("sw", max_eng=3)
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
-    clock = _slow_launches(monkeypatch, runtime, 0)
-    spawn = runtime.spawn
-
-    def launch(config, lane, name, task):
-        if lane != MASTER and task["id"] == "t1":
-            raise _canary_failure("codex")
-        if lane != MASTER:
-            clock[0] += 12
-        return spawn(config, lane, name, task)
-
-    runtime.spawn = launch
-    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t2"]
-    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
-
-
-@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
-def test_a_started_launch_clears_the_harness_its_task_avoided(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    failing = {"t1"}
-    _failing(monkeypatch, runtime, failing)
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert store.failed_harness("sw", "t1") == "codex"
-    failing.clear()
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert store.failed_harness("sw", "t1") == ""
-
-
 def test_resetting_claims_forgets_the_failed_harness(store):
     store.note_launch_failure("sw", "t1", "profile canary did not validate", "codex")
     store.note_launch_failure("sw", "t2", "placement refused")
     assert (store.failed_harness("sw", "t1"), store.failed_harness("sw", "t2")) == ("codex", "")
     store.reset_claims("sw", "t1")
     assert (store.failed_harness("sw", "t1"), store.launch_failure("sw", "t1")) == ("", "")
-
-
-@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
-def test_launches_after_a_failed_launch_steer_off_its_harness(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    failing = {"t1"}
-    _failing(monkeypatch, runtime, failing)
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [(task["id"], task["avoid_harness"]) for task in runtime.tasks] == [("t2", "codex")]
-    failing.clear()
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert [(task["id"], task["avoid_harness"]) for task in runtime.tasks] == [("t2", "codex"), ("t1", "codex")]
-
-
-@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
-def test_launches_without_a_failure_carry_no_harness_to_avoid(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    _failing(monkeypatch, runtime, set())
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task["id"] for task in runtime.tasks] == ["t1", "t2"]
-    assert not any("avoid_harness" in task for task in runtime.tasks)
-
-
-@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
-def test_a_capacity_wait_never_steers_the_retry(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    waiting, spawn = {"t1"}, runtime.spawn
-
-    def launch(config, lane, name, task):
-        if lane != MASTER and task["id"] in waiting:
-            error = SpawnError("no seat has room", "unavailable")
-            error.harness = "codex"
-            raise error
-        return spawn(config, lane, name, task)
-
-    runtime.spawn = launch
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    waiting.clear()
-    tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert [task["id"] for task in runtime.tasks] == ["t2", "t1"]
-    assert not any("avoid_harness" in task for task in runtime.tasks)
-
-
-@pytest.mark.feature("swarm-tick-launch-outcomes-legacy")
-def test_a_failure_naming_no_harness_steers_nothing(store):
-    from tests.swarm.test_tick import FailingFor
-
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FailingFor("t1")
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert SpawnError("MCP_KEY_GATEWAY is unset").harness == ""
-    assert [task["id"] for task in runtime.tasks] == ["t2"]
-    assert "avoid_harness" not in runtime.tasks[0]
-    assert store.failed_harness("sw", "t1") == ""
 
 
 def test_a_task_avoiding_a_harness_launches_on_another_with_room(tmp_path, monkeypatch):

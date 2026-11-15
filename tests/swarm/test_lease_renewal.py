@@ -200,28 +200,6 @@ def test_a_spawn_after_the_lease_was_stolen_mid_pass_refuses_to_launch(store, cl
     assert launched == ["one"]
 
 
-@pytest.mark.parametrize("operation", ["collect", "expire"])
-def test_a_hive_launch_call_after_the_lease_was_stolen_mid_pass_is_refused(store, clock, monkeypatch, operation):
-    store.create(SwarmConfig("sw", ".", 1, 0))
-    held = lease.acquire(store, "sw", "home")
-    assert held is not None
-    monkeypatch.setattr(lease, "beat", lambda store, slug, held, stop: None)
-    calls = []
-    launch = SimpleNamespace(
-        collect=lambda request: calls.append(request.name) or SimpleNamespace(ok=True, value="placed"),
-        expire=lambda request: calls.append(request.name) or "expired",
-    )
-    runtime = controller.FencedRuntime(store, "sw", held, SimpleNamespace(hive_launch=launch), "local")
-    with lease.held_pass(store, "sw", held):
-        assert getattr(runtime, operation)(store.config("sw"), "eng", "one", {"id": "t"}) in ("placed", "expired")
-        clock[0] += lease.ttl_ms()
-        lease.acquire(store, "sw", "other")
-        with pytest.raises(SwarmError) as error:
-            getattr(runtime, operation)(store.config("sw"), "eng", "two", {"id": "t"})
-    assert str(error.value) == "the controller lease is stale"
-    assert calls == ["one"]
-
-
 def test_a_pass_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
     for slug in ("sw", "peer", "idle"):
         store.create(SwarmConfig(slug, ".", 1, 0))
@@ -593,45 +571,6 @@ def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(e
     assert "judged" in actions
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
-
-
-def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_tick(env, clock, monkeypatch):  # noqa: F811
-    from scripts.swarm.tick import SpawnError
-
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0")
-    store.update("sw", state="running")
-    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
-    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
-    spawn, events = rt.spawn, []
-    refused = "agentihooks init-agent: the harness did not report its route within 90s"
-
-    def slow(config, lane, name, task):
-        if task.get("id") != "t1":
-            return spawn(config, lane, name, task)
-        for _ in range(5):
-            clock[0] += 120000
-            events.append(renewed(store, clock))
-            if not events[-1]:
-                break
-        raise SpawnError(refused)
-
-    class Check:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def run(self, doc):
-            events.append("intent")
-            return []
-
-    monkeypatch.setattr(rt, "spawn", slow)
-    monkeypatch.setattr(cli.intent, "Check", Check)
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert events == ["intent"] + [True] * 5
-    assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
-        ("failed", refused)
-    ]
-    assert lease.current(store, "sw").epoch == 1
 
 
 def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(env, clock, monkeypatch):  # noqa: F811

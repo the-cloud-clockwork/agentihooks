@@ -73,6 +73,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the legacy tick does. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
+| `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
 
 ### Bus settings
 

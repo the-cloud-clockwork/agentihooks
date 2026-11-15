@@ -5,6 +5,7 @@ import pytest
 
 from hooks import hook_manager
 from hooks.context import operator_mode
+from hooks.context.scheduled_prompts import AUTOMATED
 from hooks.context.swarm_heartbeat import is_operator_prompt
 from scripts.events.redis_state import RedisStateStore
 from scripts.inbox.wake import WAKE_TEXT
@@ -460,7 +461,7 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     hook_manager._operator_mode({"session_id": "s1", "prompt": delivery.marked("continue")}, False)
     assert injected == [
         (
-            (AWAY.format(words=35),),
+            (AUTOMATED + "\n" + AWAY.format(words=35),),
             {"also_log": False, "skip_compression": True, "kind": "alert"},
         )
     ]
@@ -667,7 +668,8 @@ def test_master_presence_notice_uses_supplied_clock_after_automated_prompt(monke
     operator_mode.observe("pane", "Explain the work", True, now=100)
     assert operator_mode.present("pane", SWARM, now=279.99)
     assert (
-        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280) == REMINDER
+        operator_mode.notice({"session_id": "pane", "prompt": delivery.marked("continue")}, False, now=280)
+        == AUTOMATED + "\n" + REMINDER
     )
 
 
@@ -702,10 +704,13 @@ def test_explicit_presence_keeps_reminders_off_past_the_supplied_clock(monkeypat
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == (
         "Operator on: the operator is present in this pane until he types operator off or the session restarts."
     )
-    assert operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == ""
+    assert (
+        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == AUTOMATED
+    )
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", ""]
     assert (
-        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=100 + WINDOW) == ""
+        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=100 + WINDOW)
+        == AUTOMATED
     )
     assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", ""]
 

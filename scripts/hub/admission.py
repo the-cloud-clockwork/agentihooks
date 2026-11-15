@@ -77,10 +77,12 @@ class Admission:
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
-            if admitted["hive"] == request["hive"]:
+            live = admitted["name"] in self.store.listed(slug)
+            if live and admitted["hive"] == request["hive"]:
                 return admitted
-            refused(slug, request, f"already admitted to hive {admitted['hive']}")
-            return None
+            if live:
+                refused(slug, request, f"already admitted to hive {admitted['hive']}")
+                return None
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             refused(slug, request, "claims are stopped")
             return None
@@ -192,7 +194,7 @@ class Admission:
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
     ) -> dict[str, Any] | None:
         from scripts.hive import orders
-        from scripts.swarm import profile_choice, tick
+        from scripts.swarm import launch_check, profile_choice, tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -243,6 +245,7 @@ class Admission:
             "task": {**task, **identity, **({"avoid_harness": avoid} if avoid else {})},
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
+        launch_check.begin(self.store, slug, agent, now, owner=launch_check.HUB)
         return admitted
 
     def _stack_base(self, slug: str, task: dict, rows: dict) -> list[dict]:
@@ -340,6 +343,14 @@ class Admission:
             if_match={"claimed_by": name},
         )
 
+    def free(self, slug: str, agent: AgentRecord) -> None:
+        """Returns the claimed task of an admitted agent whose hive never started it to open, releasing its hive slot,
+        claim and seat."""
+        from scripts.hive.launch import release
+
+        release(self.store, slug, agent)
+        self._release(slug, agent.task, agent.name)
+
     def failed(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)
         held = self.store.redis.get(key)
@@ -355,11 +366,10 @@ class Admission:
         return True
 
     def launched(self, slug: str, request: dict[str, Any]) -> bool:
-        """Writes the launch decision the admitted hive reports onto its agent's record and, when the decision is new,
-        starts its launch check as the place step does; False when the hive holds no admission for the offer or
-        another agent now occupies the admitted seat."""
-        from scripts.swarm import launch_check
-
+        """Writes the launch decision the admitted hive reports onto its agent's record, with the overlays and profile
+        decision the hive placed; the hub launch check admission started stays as it is, so a late report never
+        restarts a judged check. False when the hive holds no admission for the offer or another agent now occupies
+        the admitted seat."""
         held = self.store.redis.get(self._key(slug, request))
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
@@ -369,11 +379,10 @@ class Admission:
             return False
         launch = request["launch"]
         decision = {field: launch[field] for field in account_slots.LAUNCH_DECISION}
-        if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
+        placed = {field: launch[field] for field in account_slots.LAUNCH_PLACEMENT if field in launch}
+        if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
             return False
         cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
-        if any(getattr(occupant, field) != value for field, value in decision.items()):
-            launch_check.begin(self.store, slug, occupant, self.clock())
         return True
 
 

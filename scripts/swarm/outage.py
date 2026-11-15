@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import fcntl
 import json
+import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.records import _write
@@ -24,6 +25,8 @@ PANE_SINCE = "provider-error-since"
 HOLD_LIMIT_MS = 30 * 60 * 1000
 PAST_SPANS = 50
 HELD = {"idle with claim": "idle during outage", "stale claim": "stale during outage"}
+SHARED = "open-outages"
+SHARED_STALE_MS = 600_000
 
 
 def home() -> Path:
@@ -70,6 +73,43 @@ def open_records(slug: str) -> list[dict]:
     return [record for record in read(slug).values() if record["ended_at"] is None]
 
 
+def share(store: RedisStore, slug: str, now_ms: int) -> None:
+    """Publish the outage records of ``slug`` to Redis with their publish time, for a hub on another host.
+
+    The share never expires: a tick that stops publishing leaves its last state standing, open outages included.
+    """
+    redis: Any = cast(Any, store).redis
+    redis.set(store.key(slug, SHARED), json.dumps({"at": now_ms, "records": read(slug)}))
+
+
+def unshare(store: RedisStore, slug: str) -> None:
+    """Remove the published outage records of a stopped swarm."""
+    redis: Any = cast(Any, store).redis
+    redis.delete(store.key(slug, SHARED))
+
+
+def shared(store: RedisStore, slug: str, now_ms: int) -> dict[str, Any]:
+    """The outage records of ``slug`` the tick last published, logging a stale share that still holds an outage."""
+    redis: Any = cast(Any, store).redis
+    raw: str | None = redis.get(store.key(slug, SHARED))
+    if not raw:
+        return {}
+    published: dict[str, Any] = json.loads(raw)
+    records: dict[str, Any] = published["records"]
+    still_open = [kind for kind, record in records.items() if record["ended_at"] is None]
+    if still_open and now_ms - published["at"] > SHARED_STALE_MS:
+        print(
+            f"outage share of {slug} is stale since {published['at']}, still holding {', '.join(still_open)}",
+            file=sys.stderr,
+        )
+    return records
+
+
+def shared_open(store: RedisStore, slug: str, now_ms: int) -> list[dict[str, Any]]:
+    """The open outage records of ``slug`` the tick last published to Redis."""
+    return [record for record in shared(store, slug, now_ms).values() if record["ended_at"] is None]
+
+
 def lines(slug: str) -> list[str]:
     return [
         f"outage {record['kind']} since {record['started_at']}: {' ; '.join(record['evidence'])}"
@@ -103,9 +143,14 @@ def held(store: RedisStore, slug: str, name: str | None) -> str:
 
 
 def paused_ms(slug: str, since_ms: int, now_ms: int) -> int:
+    return paused_in(read(slug), since_ms, now_ms)
+
+
+def paused_in(records: dict[str, Any], since_ms: int, now_ms: int) -> int:
+    """The outage time of ``records`` between ``since_ms`` and ``now_ms``, overlapping spans counted once."""
     spans = sorted(
         (max(started_at, since_ms), now_ms if ended_at is None else min(ended_at, now_ms))
-        for record in read(slug).values()
+        for record in records.values()
         for started_at, ended_at in [*record.get("past", []), [record["started_at"], record["ended_at"]]]
     )
     total, reach = 0, since_ms

@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -14,7 +14,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events, execution_stop
 from scripts.hub import claims, lifecycle, reconciler
-from scripts.swarm import launch_check, readiness
+from scripts.swarm import idle, launch_check, readiness
 from scripts.swarm import tick as tick_module
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
@@ -289,8 +289,6 @@ def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
 def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], hold: str
 ) -> None:
-    from scripts.swarm import idle
-
     store, _, rt = env
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
@@ -305,6 +303,44 @@ def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retire
     assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
     assert store.claims(SLUG, "t1") == 1
     assert sent_stops(bus, agent) == []
+
+
+@pytest.mark.feature("events-retirement-refunds-claim-life")
+@pytest.mark.parametrize(
+    ("lane", "state", "live", "acknowledging", "ended", "watched"),
+    [
+        ("eng", "working", True, False, False, True),
+        ("eng", "starting", True, False, False, True),
+        ("master", "working", True, False, False, True),
+        ("eng", "working", False, False, False, False),
+        ("eng", "awaiting-decision", True, False, False, False),
+        ("eng", "retiring", True, False, False, False),
+        ("master", "starting", True, False, False, False),
+        ("eng", "working", True, True, False, False),
+        ("eng", "working", True, False, True, False),
+    ],
+)
+def test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and_settled(
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+    state: str,
+    live: bool,
+    acknowledging: bool,
+    ended: bool,
+    watched: bool,
+) -> None:
+    tick = agent_steps.tick
+    agent = AgentRecord(name="a1", lane=tick.MASTER if lane == "master" else lane, task="t1", state=state)
+    monkeypatch.setattr(tick, "_acknowledging", lambda *_args: acknowledging)
+    monkeypatch.setattr(tick, "_ended", lambda *_args: ended)
+    monkeypatch.setattr(tick, "_watch_agent", lambda *args: [f"watched {args[-2].name}"])
+    judging = SimpleNamespace(
+        slug=SLUG, store=None, ledger=None, runtime=None, rows={}, live={"a1"} if live else set(), now_ms=NOW
+    )
+
+    actions = agent_steps._reap_admitted(cast(Any, judging), agent)
+
+    assert actions == (["watched a1"] if watched else [])
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")

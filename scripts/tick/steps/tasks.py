@@ -515,10 +515,10 @@ DRAINED_RESUME_NEEDS = frozenset(
         "stopped branch",
         "master move fail over",
         "recover master",
-        "spawn due",
         "master start watch",
         "master wake",
     }
+    | budgets.OBSERVED
 )
 RESUMED = frozenset({"drained resume"})
 LISTED = frozenset({"ledger state"})
@@ -526,9 +526,7 @@ DOC = pass_domains("doc")
 CONFIG_DOC = pass_domains("config", "doc")
 
 STEPS = (
-    CallStep(
-        "sleeping", DRAINED, held(_sleeping), frozenset({"spawn due"}), pass_domains("rows"), pass_domains("sleeping")
-    ),
+    CallStep("sleeping", DRAINED, held(_sleeping), budgets.OBSERVED, pass_domains("rows"), pass_domains("sleeping")),
     CallStep(
         "drained resume",
         DRAINED,
@@ -548,7 +546,7 @@ STEPS = (
         REOPENS,
         held(_fleet_red_notice),
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
-        needs=frozenset({"spawn"}),
+        needs=budgets.SPAWN_NEEDS,
         reads=pass_domains("rows"),
         lane=SLOW,
     ),
@@ -563,7 +561,7 @@ STEPS = (
         "settle",
         CLOSE,
         held(_settle),
-        frozenset({"spawn"}),
+        budgets.SPAWN_NEEDS,
         frozenset({AGENTS, TASKS, SWARM}) | pass_domains("config", "rows", "doc"),
         frozenset({AGENTS, TASKS, SWARM}),
     ),

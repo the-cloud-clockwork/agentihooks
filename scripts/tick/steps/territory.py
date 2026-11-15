@@ -34,11 +34,6 @@ def _refund_parked(slug: Any, store: Any, rows: Any, agent: Any) -> Any:
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
 
 
-def _master_set(doc: Any, task_id: Any) -> Any:
-    by = doc.get("_meta", {}).get("stamps", {}).get(f"tasks/{task_id}/state", {}).get("by")
-    return "master" if tick.lane_of(by) == tick.MASTER else ""
-
-
 def _overlaps(mine: Any, theirs: Any) -> Any:
     return bool(tick._shared(mine, theirs))
 

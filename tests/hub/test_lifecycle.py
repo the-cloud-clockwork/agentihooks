@@ -8,9 +8,10 @@ from scripts.events import memory
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_events
-from scripts.hub import lifecycle, registry, runner
+from scripts.hub import exits, lifecycle, registry, runner
 from scripts.routing import reservation
 from scripts.swarm.store import AgentRecord, RedisStore
+from tests.helpers import store_seed
 
 
 @pytest.fixture
@@ -160,7 +161,7 @@ def test_exit_refunds_a_started_life_for_a_park_a_quota_handoff_or_an_operator_p
     if victim:
         rig.store.redis.hset(rig.store.key("rig", preempt.VICTIMS), "engineer", "1")
     for _ in range(2):
-        rig.store.count_claim("rig", "task")
+        store_seed.count_claim(rig.store, "rig", "task")
 
     rig.react.handle(rig.event)
     rig.react.handle(replace(rig.event, id="redelivery"))
@@ -322,6 +323,8 @@ def test_the_hive_publisher_drives_the_lifecycle_reactor_with_the_admitted_ident
     started = replace(rig.event, id="started", type="execution.started")
     execution_events.started(rig.bus, started)
     hub = runner.HubRunner(rig.bus, registry.Registry([rig.react.reactor()]), "hub")
+    owner = SimpleNamespace(get=lambda swarm, execution: replace(rig.agent, hive="hive"))
+    exits.serve(rig.bus, lambda: SimpleNamespace(execution_registry=owner))
     report = {
         "observed_at": 200,
         "executions": {"execution": {"slug": "rig", "name": "engineer", "generation": 3, "pane": {"state": "exited"}}},

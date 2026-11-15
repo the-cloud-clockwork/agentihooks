@@ -1,0 +1,13 @@
+rules:
+  - id: stall-grace-from-start-alone
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A resumed owner keeps its original started_at and records the resume as launched_at, so a stall grace floored
+      at started_at alone judges a resumed owner from its first start and reopens its task on the first tick after the
+      resume. Floor the grace at the later of started_at and launched_at.
+    paths:
+      include:
+        - /scripts/swarm/stall_watch.py
+        - stall-grace-from-start-alone.py
+    pattern: $A.started_at if $A else $Z

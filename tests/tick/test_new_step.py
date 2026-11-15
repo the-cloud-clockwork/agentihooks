@@ -175,7 +175,7 @@ def test_the_registry_loads_every_listed_step_module() -> None:
     catalogue = import_module("scripts.tick.catalogue")
     assert sorted(steps.MODULES) == [name for name in catalogue.step_modules() if not name.endswith(".budgets")]
     names = {step.name for step in import_module("scripts.tick.registry").steps()}
-    assert {"inbox relay", "snapshot job", "spawn"} <= names
+    assert {"inbox relay", "snapshot job", "settle"} <= names
 
 
 def test_a_second_step_appends_to_the_existing_module(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,8 +203,8 @@ def test_the_scaffold_refuses_an_existing_name(tree: Path) -> None:
         scaffold(tree, STEP)
     assert str(refused.value) == "probe widgets already has step, budget row, test, index row, feature entry"
     assert (tree / "scripts/tick/steps/budgets.py").read_text() == before
-    with pytest.raises(SystemExit, match="spawn already has"):
-        scaffold(tree, "spawn")
+    with pytest.raises(SystemExit, match="settle already has"):
+        scaffold(tree, "settle")
 
 
 def test_the_scaffold_writes_its_test_expectations_and_the_index_in_their_canonical_form(tree: Path) -> None:

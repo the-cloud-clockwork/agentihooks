@@ -5,6 +5,7 @@ import pytest
 
 from scripts.doctor import spawn_read, spawns
 from tests.doctor.recorded import load
+from tests.helpers import store_seed
 
 
 def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
@@ -18,7 +19,7 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     store.create(SwarmConfig(slug, "/repo", 1, 0))
     for harness, count in fixture["spawns"].items():
         for _ in range(count):
-            store.count_spawn(slug, harness)
+            store_seed.count_spawn(store, slug, harness)
     agent = AgentRecord("agent", "eng", "dt2", account="a", harness="codex", placement="overflow")
     store.put_agent(slug, agent)
     before = store.export(slug)

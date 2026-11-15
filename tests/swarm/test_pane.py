@@ -118,3 +118,75 @@ def claude(*box):
 )
 def test_typed_input_is_the_text_on_the_last_input_line_without_dim_hints(capture, typed):
     assert typed_input(capture) == typed
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Login reached its time limit · Please run /login",
+        "  ⎿  Login reached its time limit · Please run /login",
+        "\x1b[1mLogin reached its time limit · Please run /login\x1b[0m",
+        "Login reached its time limit · Please run /login   ",
+    ],
+)
+def test_login_limit_reports_the_claude_login_texts(text: str) -> None:
+    from scripts.swarm.pane import login_limit
+
+    assert login_limit("claude", f"● {text}\n\n" + RULE + "\n❯ \n" + RULE + "\n") != ""
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize(
+    ("harness", "text"),
+    [
+        ("claude", "API Error: 529 overloaded"),
+        ("claude", "● Done, the login code is merged\n❯ \n"),
+        ("claude", "● The old master said Login reached its time limit · Please run /login at four\n❯ \n"),
+        ("claude", "● master@a-1 showed a Claude login that reached its time limit\n❯ \n"),
+        ("codex", "Login reached its time limit · Please run /login"),
+    ],
+)
+def test_login_limit_ignores_other_text_and_harnesses(harness: str, text: str) -> None:
+    from scripts.swarm.pane import login_limit
+
+    assert login_limit(harness, text) == ""
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_login_limit_ignores_an_old_error_far_above_the_latest_lines() -> None:
+    from scripts.swarm.pane import login_limit
+
+    recovered = "● Login reached its time limit · Please run /login\n" + "● working on the ledger\n" * 20 + "❯ \n"
+    assert login_limit("claude", recovered) == ""
+
+
+FOOTER = [
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    "  ● opus · high effort",
+    *[f"  status line {n}: dev, opus, 42 percent" for n in range(14)],
+]
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+def test_login_limit_reads_the_last_reply_above_the_input_box_whatever_the_footer() -> None:
+    from scripts.swarm.pane import login_limit
+
+    error = "Login reached its time limit · Please run /login"
+    pane = "\n".join([ECHO, "", f"  ⎿  {error}", "", RULE, "❯ ", RULE, *FOOTER])
+    assert login_limit("claude", pane) == error
+
+
+@pytest.mark.feature("master-login-limit-recovery")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        ["● The old master showed this error:", "    Login reached its time limit · Please run /login"],
+        ["● Login reached its time limit · Please run /login", "", "● Logged in again and back on the ledger"],
+    ],
+    ids=["indented-quote", "later-reply"],
+)
+def test_login_limit_ignores_a_quote_or_an_earlier_reply(reply: list[str]) -> None:
+    from scripts.swarm.pane import login_limit
+
+    assert login_limit("claude", "\n".join([ECHO, "", *reply, "", RULE, "❯ ", RULE, *FOOTER])) == ""

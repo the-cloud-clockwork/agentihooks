@@ -3,6 +3,7 @@ import pytest
 from scripts.swarm import cli
 from scripts.swarm.health import findings
 from scripts.swarm.store import SwarmError
+from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 
@@ -58,6 +59,8 @@ def test_block_records_the_state_change_before_its_note(env):  # noqa: F811
     ledger.comment = lambda *a, **k: order.append(("note", a[0])) or comment(*a, **k)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    seat_agent(store, ledger, "sw", "t1")
+    seat_agent(store, ledger, "sw", "t2")
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token only the operator can create") == 0
     assert order[-2:] == ["state", ("note", "sw")]
 

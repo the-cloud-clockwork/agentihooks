@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from tests.helpers import store_seed
+
 pytestmark = pytest.mark.unit
 
 HIVE = "remote"
@@ -540,7 +542,7 @@ def test_a_gone_hive_worker_refunds_its_parked_life_and_forgets_its_retire_reque
     report.update(pane_ids=[], process_namespace="theirs")
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
     remote.store.claim("fixture", "task", remote.agent.name, 60000)
-    remote.store.count_claim("fixture", "task")
+    store_seed.count_claim(remote.store, "fixture", "task")
     requests = master_retire._key(remote.store, "fixture")
     remote.redis.hset(requests, remote.agent.name, json.dumps({"at": 0, "item": "missing"}))
     rows = {"task": {"state": "parked", "parked_on": ["dep"]}, "dep": {"state": "claimed"}}

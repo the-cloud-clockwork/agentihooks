@@ -18,7 +18,6 @@ MOVED = (
     "_stack_base",
     "_stacked_dep",
     "_refund_parked",
-    "_master_set",
     "_overlaps",
     "_shared",
     "_sharing",
@@ -87,16 +86,6 @@ def test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere() -> N
     }
     elsewhere = {"task": "d1", "branch": "b1", "repo": "https://example.test/other.git"}
     assert territory._stacked_dep("d1", row, "repo", lambda repo: "local") == elsewhere
-
-
-@pytest.mark.feature("swarm-tick-territory")
-def test_master_set_reads_the_state_stamp_author_lane() -> None:
-    def doc(by: str) -> dict[str, Any]:
-        return {"_meta": {"stamps": {"tasks/t1/state": {"by": by}}}}
-
-    assert territory._master_set(doc("master@323133-6160"), "t1") == "master"
-    assert territory._master_set(doc("engineer@323133-6160"), "t1") == ""
-    assert territory._master_set({}, "t1") == ""
 
 
 @pytest.mark.feature("swarm-tick-territory")

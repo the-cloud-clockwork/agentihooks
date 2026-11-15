@@ -2546,8 +2546,8 @@ The local count is the union of:
 Agents on remote hives and in Kubernetes never count. The count leaves out agents on the spawning task in the same
 swarm, so a successor does not count its predecessor. A slot claim is a Redis transaction on the machine's claim
 hash, retried when another claim lands first, so launches in one pass, or in two swarms on the same machine, see
-each other's claims. The agent records and running sessions behind the count are read once per placement pass, so a
-session started by hand during a pass is counted on the next pass.
+each other's claims. The agent records and running sessions behind the count are read again on every claim, so a
+session started by hand is counted by the next claim.
 
 A slot frees once its agent's record reads finished or ended and its session no longer runs, when a failed spawn
 releases its claim, or when a claim whose agent never appeared turns five minutes old.
@@ -2757,7 +2757,9 @@ swarm when none is given. From then on the hive endpoint rereads the record on
 each refresh and refuses a member it does not list before rotating its Redis
 password, and `hive invite` lists each new member and marks its invite
 `AGENTIHOOKS_BUS_SCOPED=1`. `hive join` with such an invite refuses an unscoped
-bus credential. Before the backfill, invites and refreshes stay unscoped. The
+bus credential. Before the backfill the hub mints no member bus credential:
+refreshes, joins and `hive root-bus` refuse, and `hive invite` and `hive create`
+refuse before minting a member, naming `agentihooks hive scope`. The
 join refusal guards a scoped member against a downgrade; the hub refusal is the
 enforcement, since anyone holding the invite file can edit its marker.
 

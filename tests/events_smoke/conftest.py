@@ -24,7 +24,7 @@ from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hive import buckets, lanes
 from scripts.hive.spoke import Spoke, SpokeConfig
-from scripts.hub import admission, slots
+from scripts.hub import admission, exits, slots
 from scripts.swarm import readiness
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig
 from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -204,6 +204,7 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
         try:
             buckets.provision(bus)
             slots.serve(bus, admitter=admitter)
+            exits.serve(bus, lambda: store)
             yield Smoke(nats_url, bus, store, ledger, admitter, opened, gh_log)
         finally:
             for each in reversed(opened):

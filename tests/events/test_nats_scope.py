@@ -58,6 +58,7 @@ def test_scope_provisions_dedupe_and_buckets_then_reuses_owned_resources(monkeyp
     assert [call.kwargs for call in root._js.add_stream.await_args_list] == [
         {"name": stream_name("rig", "EVENTS"), "subjects": ["swarm.rig.events.>"], "duplicate_window": 12.345},
         {"name": stream_name("rig", "DEAD"), "subjects": ["swarm.rig.dead.>"], "duplicate_window": 12.345},
+        {"name": stream_name("rig", "STOP"), "subjects": ["swarm.rig.stop.>"], "duplicate_window": 12.345},
     ]
     assert [call.args for call in store.call_args_list] == [(root, "rig", bucket) for bucket in SCOPED_STATE_BUCKETS]
     assert view.state("custom") is view.state("custom")

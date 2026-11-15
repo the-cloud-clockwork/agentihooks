@@ -1,0 +1,21 @@
+rules:
+  - id: status-live-agents-ignores-hive
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Swarm status keeps an agent only when this filter finds it running. Hub admission writes the agent record with
+      its hive set and no runtime target, so a filter that reads only the backend, the runtime target host and the
+      local panes drops every live agent the hub placed on another hive from the status table. Keep an agent whose
+      hive names a hive other than the local one.
+    paths:
+      include:
+        - /scripts/swarm/status.py
+        - status-live-agents-ignores-hive.py
+    patterns:
+      - pattern-inside: |
+          def live_agents(...):
+              ...
+      - pattern: |
+          [$A for $A in $AGENTS if <... reports.host($A) ...>]
+      - pattern-not: |
+          [$A for $A in $AGENTS if <... $A.hive ...>]

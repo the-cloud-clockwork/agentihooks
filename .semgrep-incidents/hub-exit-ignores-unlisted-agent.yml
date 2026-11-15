@@ -1,0 +1,28 @@
+rules:
+  - id: hub-exit-ignores-unlisted-agent
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub judge of a hive report reads its pane ids but never asks whether the report still names the agent. A hub
+      admitted agent has no host target, so the report holds no execution record or pane id for it, and an agent
+      whose hive pod died is never settled. Also count an agent the beating hive no longer names with
+      reports.unlisted in the same function.
+    paths:
+      include:
+        - /scripts/hub/
+        - hub-exit-ignores-unlisted-agent.py
+    patterns:
+      - pattern-inside: |
+          def $JUDGE(...):
+              ...
+      - pattern: $REPORT.get("pane_ids")
+      - pattern-not-inside: |
+          def $JUDGE(...):
+              ...
+              return <... reports.unlisted(...) ...>
+              ...
+      - pattern-not-inside: |
+          def $JUDGE(...):
+              ...
+              $GONE = <... reports.unlisted(...) ...>
+              ...

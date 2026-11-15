@@ -1,8 +1,9 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from scripts.swarm import resume, snapshot
+from scripts.swarm import naming, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_tick import FakeRuntime
@@ -96,10 +97,37 @@ def test_restore_reopens_an_agent_in_its_own_conversation_and_forces_one_without
     ((name, conversation, _),) = rt.resumed
     assert (name, conversation) == ("sw-eng-1", ID)
     eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
-    assert (eng.state, eng.pane_id, eng.seat, eng.task, eng.started_at) == ("working", "w2:p9", "eng-1@sw", "t1", 1_000)
+    assert (eng.state, eng.pane_id, eng.seat, eng.task, eng.launched_at) == (
+        "working",
+        "w2:p9",
+        "eng-1@sw",
+        "t1",
+        1_000,
+    )
     assert store.claimant("sw", "t1") == "sw-eng-1"
     assert next(a for a in store.agents("sw") if a.lane == MASTER).state == "awaiting-decision"
     assert store.config("sw").state == "paused"
+
+
+@pytest.mark.feature("swarm-resume-keeps-execution-identity")
+def test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resume_as_launch(
+    store: RedisStore, tmp_path: Path
+) -> None:
+    store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
+    name = store.next_name("sw", "eng", 5)
+    started = store.start_execution(
+        "sw", agent(name=name, pane_id="w1:p1", seat="eng-1@sw", started_at=5, state="working"), ""
+    )
+    store.claim("sw", "t1", name, 600_000)
+    (tmp_path / "wt").mkdir()
+    listing = f"worktree {tmp_path / 'wt'}\nbranch refs/heads/{naming.plain(name)}\n"
+    snapshot.take(store, "sw", 99, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, listing, ""))
+    store.redis.flushall()
+    outcomes = restore(store, ResumingRuntime())
+    assert [(o.name, o.outcome, o.reason) for o in outcomes] == [(name, "resumed", "own conversation reopened")]
+    [eng] = store.agents("sw")
+    assert (eng.execution_id, eng.generation, eng.started_at) == (started.execution_id, started.generation, 5)
+    assert (eng.state, eng.pane_id, eng.launched_at) == ("working", "w2:p9", 1_000)
 
 
 def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder_and_the_ledger(store, tmp_path):

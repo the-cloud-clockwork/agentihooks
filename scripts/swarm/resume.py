@@ -153,7 +153,7 @@ def _attempt(
                 effort=placed.effort or agent.effort,
                 model_source=placed.model_source,
                 model_confidence=placed.model_confidence,
-                started_at=context.at,
+                launched_at=context.at,
                 idle_ticks=0,
                 state="working",
             )
@@ -301,9 +301,10 @@ def track_outages(slug: str, store: RedisStore, runtime: "Runtime", rows: dict, 
                 store.redis.hdel(key, agent.name)
             continue
         heartbeat = idle.heartbeat(store.redis, slug, agent.name)
-        last_work = max(agent.started_at, (heartbeat or {}).get("at", 0))
+        started = max(agent.started_at, agent.launched_at)
+        last_work = max(started, (heartbeat or {}).get("at", 0))
         if previous.get("state") == "pending":
-            last_work = agent.started_at
+            last_work = started
         episodes = sorted(
             [record["kind"], record["started_at"]]
             for record in records.values()
@@ -462,7 +463,7 @@ def _recover_process(store, slug, agent, task, context, text):
                     replace(
                         agent,
                         pane_id=placed.pane_id,
-                        started_at=context.at,
+                        launched_at=context.at,
                         idle_ticks=0,
                         account=placed.account or agent.account,
                         model=placed.model or agent.model,
@@ -498,7 +499,7 @@ def _restart_from_handoff(store, slug, agent, task, context):
     store.put_agent(
         slug,
         replace(
-            placed_record(agent, placed), conversation_id=placed.conversation_id, started_at=context.at, idle_ticks=0
+            placed_record(agent, placed), conversation_id=placed.conversation_id, launched_at=context.at, idle_ticks=0
         ),
     )
     return ""

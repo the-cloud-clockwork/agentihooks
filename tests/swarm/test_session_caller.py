@@ -1,12 +1,17 @@
 import json
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from hooks.context import account_sessions, broadcast
 from scripts.inbox.store import InboxStore
 from scripts.swarm.resume import Outcome
-from tests.swarm.test_cli import env, run  # noqa: F401
+from scripts.swarm.store import AgentRecord, RedisStore
+from tests.helpers.seat import seat  # noqa: F401
+from tests.swarm.test_cli import env, run, started  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
+from tests.swarm.test_tick import FakeRuntime
 
 
 @pytest.fixture
@@ -36,10 +41,15 @@ def test_reopen_is_signed_by_the_registered_session(env, session):  # noqa: F811
     assert reopened == [("sw", "master@a1b2c3-0001")]
 
 
-def test_send_message_comes_from_the_registered_session(env, session, capsys):  # noqa: F811
+def test_send_message_comes_from_the_registered_session(
+    env: tuple[RedisStore, Any, FakeRuntime],  # noqa: F811
+    seat: Callable[..., AgentRecord],  # noqa: F811
+    session: Callable[[str], Any],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    started(env, seat)
     session("engineer@a1b2c3-0001")
     capsys.readouterr()
     assert run("sw", "send-message", "pause new work") == 0

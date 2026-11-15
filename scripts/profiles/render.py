@@ -28,7 +28,8 @@ from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
 SHARED_DIRS = ("projects", "sessions", "todos")
-SHARED = (*SHARED_DIRS, "plugins", ".credentials.json", "keybindings.json")
+SHARED = (*SHARED_DIRS, "plugins", "keybindings.json")
+LOGIN_CREDENTIALS = ".credentials.json"
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
@@ -435,13 +436,28 @@ def has_codex_rollout(name: str, overlays: Sequence[str], conversation_id: str) 
     return homes.has_codex_rollout(rendered_root(), home_key(name, overlays), conversation_id)
 
 
-def _claude_fresh(root: Path, stamp: dict[str, Any], required: set[str]) -> bool:
+def _is_master(dirs: list[tuple[str, Path]]) -> bool:
+    return any(n.removeprefix("package:") == "master" for n, _ in dirs)
+
+
+def _drop_login_links(key: str) -> None:
+    """Remove the login credentials link from every Claude home rendered under this key."""
+    root = rendered_root()
+    found = [root / key] + sorted((root / homes.HOMES / key).glob("*"))
+    for home in found:
+        link = home / "claude" / LOGIN_CREDENTIALS
+        if link.is_symlink():
+            link.unlink()
+
+
+def _claude_fresh(root: Path, stamp: dict[str, Any], required: set[str], master: bool) -> bool:
     out = root / "claude"
     mounts = connectors.path(root.name, "claude", root.parent)
     claude_json = _read_json(out / ".claude.json") or {}
     return (
         _read_json(out / STAMP) == stamp
         and all((out / item).is_symlink() for item in SHARED)
+        and (out / LOGIN_CREDENTIALS).is_symlink() is master
         and not (out / "rules").exists()
         and sources.path(root.name, "claude", root.parent).is_file()
         and (out / binding.FILE).is_file()
@@ -463,7 +479,8 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     connectors.require_environment(declared)
     required = {server for server, spec in declared.items() if spec.get("enabled_tools") is not None}
     prior = profile_dir(name, overlays)
-    if not force and prior is not None and _claude_fresh(prior, current, required) and bundle_copy.reuse(prior):
+    master = _is_master(dirs)
+    if not force and prior is not None and _claude_fresh(prior, current, required, master) and bundle_copy.reuse(prior):
         return None
     kept = _home_plugins(prior, current["enabled_plugins"])
     root = homes.fresh(rendered_root(), key, current)
@@ -488,7 +505,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     shared = claude_home(_global_env())
     for item in SHARED_DIRS:
         (shared / item).mkdir(parents=True, exist_ok=True)
-    for item in SHARED:
+    for item in (*SHARED, LOGIN_CREDENTIALS) if master else SHARED:
         (out / item).symlink_to(shared / item)
     # Claude Code refuses plan file writes that resolve through a symlink.
     (out / "plans").mkdir()
@@ -496,6 +513,8 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
         _i.save_json(out / STAMP, current)
     binding.write(out, name, "claude")
     homes.promote(rendered_root(), key, root)
+    if not master:
+        _drop_login_links(key)
     return out
 
 

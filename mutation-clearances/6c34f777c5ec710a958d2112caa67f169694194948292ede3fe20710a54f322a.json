@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.xǁMemoryBusǁ__init__:926dc9afb53799c9e877a6dfc92353f7b29e18fe97c54f888dfed8d0120477b2": {
+    "reader": "standards_reader",
+    "reason": "cast(None, self.dead) returns self.dead unchanged at runtime, so the constructed MemoryEventLog is identical and no output changes."
+  }
+}

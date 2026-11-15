@@ -239,17 +239,22 @@ def _pinned(worn, revision):
     return ["--bundle-revision", revision]
 
 
+def _slot_room(task: dict[str, Any], harness: str, account: str | None) -> bool:
+    """Whether a saved account routes the launch: outside a hive slot launch always, on one only while the hub
+    account slot holds or takes a worker seat on it for this execution, so a full account never pins a successor."""
+    if not (account and task.get("account_slot_hive")):
+        return bool(account)
+    from scripts.hive import account_slots
+
+    try:
+        return account_slots.room(task["account_slot_hive"], task["execution_id"], harness, account)
+    except account_slots.Unavailable as exc:
+        raise SpawnError(str(exc), "unavailable") from exc
+
+
 def _predecessor(task):
     conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
     return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
-
-
-def _decided(placed: Placed, route: list[str], picked: model_pick.ModelPick, profile: str) -> Placed:
-    """Carry the launch decision onto a detached placement so its agent record shows it before the pane starts."""
-    if not placed.launch_job:
-        return placed
-    account = route[1] if route[:1] == ["--route"] else placed.account
-    return replace(placed, account=account, model=picked.model or "", effort=picked.effort or "", profile=profile)
 
 
 def _command(action, agent, text="", nonce=""):
@@ -858,14 +863,15 @@ class HerdrRuntime:
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = bool(forced)
+        repick = route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer))
         route = forced or (
             ["--route", "interactive"]
             if route_kind == "interactive"
-            else (["--route", saved["account"]] if saved.get("account") else [])
+            else (["--route", saved["account"]] if not repick and _slot_room(task, agent, saved.get("account")) else [])
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer)):
+        if repick:
             account, routed = self._route_account(agent, saved, task["id"], lane, admitted)
             route = ["--route", routed.name]
         with self._seat_returned_on_failure(account, lane, agent):
@@ -889,7 +895,7 @@ class HerdrRuntime:
                     *mode,
                 ],
             )
-        placed = placed if placed.launch_job else codex.complete(config, name, placed, self._terminate)
+        placed = codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
         placed = replace(
             placed,
@@ -913,7 +919,7 @@ class HerdrRuntime:
             if front and agent == "claude" and not task.get("route_kind")
             else "",
         )
-        return _decided(placed, route, picked, profile)
+        return placed
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
@@ -1009,23 +1015,6 @@ class HerdrRuntime:
         passed = argv[argv.index("--") + 1 :] if "--" in argv else []
         ordered = lane == MASTER or (task.get("handoff_envelope") or {}).get("reason") == "quota"
         ordered = ordered or passed[:2] in (["--route", "interactive"], ["--route", "master-login"])
-        if task.get("detached_launch") and not ordered and not task.get("admitted_execution_id"):
-            from scripts.swarm import launch_job
-
-            agent = argv[argv.index("--agent") + 1]
-            job = launch_job.start(
-                self.home,
-                config,
-                lane,
-                name,
-                {
-                    "task_id": task["id"],
-                    "argv": argv,
-                    "predecessor": _predecessor(task),
-                    "controller_epoch": task.get("controller_epoch"),
-                },
-            )
-            return Placed("", agent, launch_job=job)
         return timing.call(
             self._launch,
             config,

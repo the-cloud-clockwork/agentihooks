@@ -1,0 +1,25 @@
+rules:
+  - id: resume-rewrites-execution-start
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A restored, reopened or restarted agent keeps its execution, and started_at is part of that execution's identity,
+      so writing a new started_at onto it makes put_agent refuse the record after the pane already opened. Record the
+      resume or restart time as launched_at instead.
+    paths:
+      include:
+        - /scripts/swarm/resume.py
+        - resume-rewrites-execution-start.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              def $F(...):
+                  ...
+                  $RT.resume(...)
+                  ...
+          - pattern-inside: |
+              def $F(...):
+                  ...
+                  $RT.spawn(...)
+                  ...
+      - pattern: replace(..., started_at=$AT, ...)

@@ -1,0 +1,16 @@
+rules:
+  - id: hub-launch-check-without-owner
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A launch check the hub starts must name the hub as its owner. The tick launch checks step judges every check
+      without an owner and retires its worker through the local runtime, which cannot reach an execution a hive
+      started for the hub, so the tick drops the record while the hive process runs on. Pass
+      owner=launch_check.HUB so only the hub launch checks reactor judges it.
+    paths:
+      include:
+        - /scripts/hub/
+        - hub-launch-check-without-owner.py
+    patterns:
+      - pattern: launch_check.begin(...)
+      - pattern-not: launch_check.begin(..., owner=$OWNER, ...)

@@ -14,6 +14,7 @@ from scripts.events import memory
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_events, execution_stop, lanes
+from scripts.hub import exits as hub_exits
 from scripts.hub import lifecycle
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -44,7 +45,14 @@ def rig() -> Iterator[SimpleNamespace]:
     now = [0]
     bus: Any = memory.open_bus(BusConfig(), clock=lambda: now[0])
     agent = AgentRecord(
-        name="engineer", lane="eng", task="task", execution_id="execution", generation=3, seat="eng-1", account="a"
+        name="engineer",
+        lane="eng",
+        task="task",
+        execution_id="execution",
+        generation=3,
+        seat="eng-1",
+        account="a",
+        hive=HIVE,
     )
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
 
@@ -57,6 +65,7 @@ def rig() -> Iterator[SimpleNamespace]:
     store.redis.hset(store.key(SLUG, "executions"), agent.execution_id, json.dumps(asdict(agent)))
     store.redis.hset(store.key(SLUG, "agents"), agent.name, json.dumps(asdict(agent)))
     store.redis.set(store.key(SLUG, "claim", agent.task), agent.name)
+    hub_exits.serve(bus, lambda: store)
     started = Envelope(
         id="started:claim",
         type="execution.started",
@@ -205,10 +214,10 @@ def test_each_swarm_and_hive_reads_its_stops_through_its_own_durable() -> None:
 def test_the_hub_provisions_the_durable_and_subject_the_owning_hive_binds(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    events = rig.bus.for_swarm(SLUG).events
-    opened = events.consumer
+    stops = rig.bus.for_swarm(SLUG).stops
+    opened = stops.consumer
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(events, "consumer", lambda *args: calls.append(args) or opened(*args))
+    monkeypatch.setattr(stops, "consumer", lambda *args: calls.append(args) or opened(*args))
 
     execution_stop.stop(rig.bus, SLUG, rig.agent, "launch check failed")
     execution_stop.Stopper(rig.bus, SLUG, HIVE, runtime()).poll()
@@ -221,13 +230,13 @@ def test_the_hub_provisions_the_durable_and_subject_the_owning_hive_binds(
 def test_a_hive_waits_the_given_timeout_for_its_stops() -> None:
     bus = Mock()
     bus.for_swarm.return_value = bus
-    bus.events.consumer.return_value.fetch.return_value = []
+    bus.stops.consumer.return_value.fetch.return_value = []
 
     stopper = execution_stop.Stopper(bus, SLUG, HIVE, runtime())
 
     assert stopper.poll(17) == []
     assert stopper.poll() == []
-    fetched = [call.args for call in bus.events.consumer.return_value.fetch.call_args_list]
+    fetched = [call.args for call in bus.stops.consumer.return_value.fetch.call_args_list]
     assert fetched == [(execution_stop.BATCH, 17), (execution_stop.BATCH, 0)]
 
 
@@ -345,12 +354,12 @@ def test_a_hive_reads_nothing_and_says_nothing_before_the_hub_creates_its_stop_c
 
     bus = Mock()
     bus.for_swarm.return_value = bus
-    bus.events.consumer.side_effect = NotFoundError()
+    bus.stops.consumer.side_effect = NotFoundError()
     stopper = execution_stop.Stopper(bus, SLUG, HIVE, runtime())
 
     assert stopper.poll() == []
     assert capsys.readouterr().err == ""
-    bus.events.consumer.side_effect = RuntimeError("refused")
+    bus.stops.consumer.side_effect = RuntimeError("refused")
     assert stopper.poll() == []
     assert "failed (RuntimeError: refused)" in capsys.readouterr().err
 

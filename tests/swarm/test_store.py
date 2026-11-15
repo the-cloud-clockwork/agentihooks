@@ -6,6 +6,7 @@ import pytest
 
 from scripts.swarm import fencing
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from tests.helpers import store_seed
 
 
 @pytest.fixture
@@ -325,8 +326,8 @@ def test_lease_repair_preserves_its_generation_and_expiry_until_reacquired(store
 def test_claims_count_agent_lives_per_task_until_reset(store):
     store.create(config())
     assert store.claims("smoke", "t1") == 0
-    assert [store.count_claim("smoke", "t1") for _ in range(3)] == [1, 2, 3]
-    store.count_claim("smoke", "t2")
+    assert [store_seed.count_claim(store, "smoke", "t1") for _ in range(3)] == [1, 2, 3]
+    store_seed.count_claim(store, "smoke", "t2")
     store.note_launch_failure("smoke", "t1", "herdr down")
     store.note_launch_failure("smoke", "t2", "canary timeout")
     assert (store.launch_failure("smoke", "t1"), store.launch_failure("smoke", "t3")) == ("herdr down", "")
@@ -338,7 +339,7 @@ def test_claims_count_agent_lives_per_task_until_reset(store):
 def test_legacy_claim_counts_do_not_prove_started_lives(store):
     store.redis.hset(store.key("smoke", "claims"), "t1", 5)
     assert store.claims("smoke", "t1") == 0
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     assert store.claims("smoke", "t1") == 1
     assert store.redis.hget(store.key("smoke", "claims"), "t1") == "5"
 
@@ -359,8 +360,8 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     store.drop_agent("smoke", started.name)
     assert store.claims("smoke", "t1") == 1
     assert [(row["agent"], row["state"]) for row in store.launches("smoke")] == [("started", "started")]
-    store.count_claim("smoke", "t1")
-    store.record_launch("smoke", AgentRecord("next", "eng", "t1"), "started")
+    store_seed.count_claim(store, "smoke", "t1")
+    store_seed.record_launch(store, "smoke", AgentRecord("next", "eng", "t1"), "started")
     assert store.claims("smoke", "t1") == 2
     store.reset_claims("smoke", "t1")
     assert store.claims("smoke", "t1") == 0
@@ -373,8 +374,8 @@ def test_counting_a_first_life_decodes_only_rows_that_name_the_task(
     from scripts.swarm import store as store_module
 
     validated = {"validation": {"state": "validated"}}
-    store.record_launch("smoke", AgentRecord("mine", "eng", "t1", started_at=1), "started")
-    store.record_launch("smoke", AgentRecord("near", "eng", "t10", started_at=2), "started")
+    store_seed.record_launch(store, "smoke", AgentRecord("mine", "eng", "t1", started_at=1), "started")
+    store_seed.record_launch(store, "smoke", AgentRecord("near", "eng", "t10", started_at=2), "started")
     for index, task in enumerate(["t1", "t10", "t2", "t2"]):
         row = {"name": f"old-{index}", "task": task, "started_at": index, "profile_decision": validated}
         store.redis.rpush(store.key("smoke", "history"), json.dumps(row))
@@ -387,7 +388,7 @@ def test_counting_a_first_life_decodes_only_rows_that_name_the_task(
     monkeypatch.setattr(store_module.json, "loads", loads)
 
     assert store.claims("smoke", "t1") == 2
-    assert store.count_claim("smoke", "t1") == 3
+    assert store_seed.count_claim(store, "smoke", "t1") == 3
     stored = [
         *store.redis.hvals(store.key("smoke", "launches")),
         *store.redis.lrange(store.key("smoke", "history"), 0, -1),
@@ -400,7 +401,7 @@ def test_counting_a_first_life_decodes_only_rows_that_name_the_task(
 @pytest.mark.feature("started-lives-task-rows-only")
 def test_a_launch_row_reused_by_another_task_still_shadows_the_name_history(store: RedisStore) -> None:
     validated = {"validation": {"state": "validated"}}
-    store.record_launch("smoke", AgentRecord("reused", "eng", "t2", started_at=5), "started")
+    store_seed.record_launch(store, "smoke", AgentRecord("reused", "eng", "t2", started_at=5), "started")
     row = {"name": "reused", "task": "t1", "started_at": 1, "profile_decision": validated}
     store.redis.rpush(store.key("smoke", "history"), json.dumps(row))
 
@@ -414,8 +415,8 @@ def test_the_store_offers_no_unconditional_claim_refund(store):
 
 
 def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
-    store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
-    store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
+    store_seed.record_launch(store, "smoke", AgentRecord("first", "eng", "t1"), "started")
+    store_seed.record_launch(store, "smoke", AgentRecord("second", "eng", "t1"), "started")
     store.claim("smoke", "t1", "second", 60_000)
     generation = store.claim_generation("smoke", "t1")
 
@@ -429,7 +430,7 @@ def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generat
 
 def test_a_held_claim_refunds_one_life_however_many_paths_ask(store):
     for _ in range(3):
-        store.count_claim("smoke", "t1")
+        store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
 
@@ -440,7 +441,7 @@ def test_a_held_claim_refunds_one_life_however_many_paths_ask(store):
 
 
 def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.redis.set(store.key("smoke", "claim", "t1"), "agent")
 
     assert store.refund_held_claim("smoke", "t1", "agent", 1) is False
@@ -449,7 +450,7 @@ def test_a_held_claim_refund_reads_a_missing_generation_as_zero(store):
 
 
 def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     store.release("smoke", "t1", "agent")
@@ -459,7 +460,7 @@ def test_a_held_claim_refund_refuses_after_the_hub_released_the_claim(store):
 
 
 def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store):
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     store.release("smoke", "t1", "agent")
@@ -471,8 +472,8 @@ def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store
 
 def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_generation(store):
     for _ in range(3):
-        store.count_claim("smoke", "t1")
-    store.count_claim("smoke", "t2")
+        store_seed.count_claim(store, "smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t2")
     store.claim("smoke", "t1", "agent", 60_000)
     store.claim("smoke", "t2", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
@@ -500,7 +501,7 @@ def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_g
 def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
     store, monkeypatch, moved_key, move, lives
 ):
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     started = store._started_lives
@@ -520,7 +521,7 @@ def test_a_held_claim_refund_refuses_when_a_watched_key_moves_during_the_watch(
 def test_a_held_claim_refund_refuses_while_a_claim_guard_is_set(store, guard):
     from scripts.swarm import fencing
 
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     seed = {} if guard == "claims" else []
@@ -540,7 +541,7 @@ def test_a_held_claim_refund_refuses_when_no_started_life_is_left(store):
 
 
 def test_a_held_claim_refund_retries_after_another_task_moved_the_lives_hash(store, monkeypatch):
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     started, calls = store._started_lives, []
@@ -558,7 +559,7 @@ def test_a_held_claim_refund_retries_after_another_task_moved_the_lives_hash(sto
 
 
 def test_a_held_claim_refund_gives_up_after_three_watch_conflicts(store, monkeypatch):
-    store.count_claim("smoke", "t1")
+    store_seed.count_claim(store, "smoke", "t1")
     store.claim("smoke", "t1", "agent", 60_000)
     generation = store.claim_generation("smoke", "t1")
     started, calls = store._started_lives, []
@@ -583,7 +584,7 @@ def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     store.redis.rpush(
         history, json.dumps({"name": "last", "task": "t2", "started_at": 3, "profile_decision": validated})
     )
-    store.record_launch("smoke", AgentRecord("waiting", "eng", "t3", started_at=4), "pending")
+    store_seed.record_launch(store, "smoke", AgentRecord("waiting", "eng", "t3", started_at=4), "pending")
     assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
         {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
         {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
