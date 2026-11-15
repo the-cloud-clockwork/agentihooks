@@ -1,10 +1,10 @@
 """Test units from the dependency manifest: a content fingerprint per test and file sized test batches.
 
 A test's fingerprint covers the hashes of the units it executed, every repository file it opened, its own test
-module and every test module that module imports, and a part every test shares: the dependency pins, the test support modules, every Python file outside the
-measured trees, and the pytest invocation, which replaces the manifest's invalidation by workflow files. A broad
-test, whose closure escaped the tracer or that opened files outside the manifest, is keyed on every file under the
-measured trees and the test trees instead of its own units.
+module and every test tree module that module imports, and a part every test shares: the dependency pins, the test
+support modules, every Python file outside the measured trees, and the pytest invocation, which replaces the
+manifest's invalidation by workflow files. A broad test, whose closure escaped the tracer or that opened files
+outside the manifest, is keyed on every file under the measured trees and the test trees instead of its own units.
 """
 
 import hashlib
