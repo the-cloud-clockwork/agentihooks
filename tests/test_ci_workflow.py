@@ -2100,6 +2100,14 @@ def test_the_pull_request_tests_run_is_the_only_mutation_source() -> None:
     assert not (_ROOT / ".github/workflows/mutation-preflight.yml").exists()
     named = [path.name for path in workflows if re.search("mutation.preflight", path.read_text(), re.IGNORECASE)]
     assert named == []
+    for path in workflows:
+        events = yaml.safe_load(path.read_text()).get(True) or {}
+        if isinstance(events, (str, list)):
+            events = dict.fromkeys([events] if isinstance(events, str) else events)
+        push = events.get("push") if "push" in events else {"branches": []}
+        branches = push.get("branches", ["*"]) if isinstance(push, dict) else ["*"]
+        if "scripts.ci_mutation" in path.read_text():
+            assert all(branch == "dev" or branch.startswith("diffcheck/") for branch in branches), path.name
     refine = {step.get("name"): step for step in _mutation_workflow()["jobs"]["mutation-refine"]["steps"]}
     assert not [name for name in refine if "preflight" in str(name)]
     assert "Waiting for an earlier preflight" not in (_ROOT / ".github/workflows/test.yml").read_text()
