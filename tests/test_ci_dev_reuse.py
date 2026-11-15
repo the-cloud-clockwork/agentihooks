@@ -269,9 +269,15 @@ def test_workflow_preserves_downstream_artifacts():
     unit = jobs["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     assert steps["Run tests"]["if"] == "needs.split.outputs.source == ''"
+    mapped = "${{ fromJSON(needs.select.outputs.queue_legs)[format('{0}', matrix.shard)] }}"
     for kind in ("durations", "flakes", "coverage"):
         restored = steps[f"Restore queue shard {kind}"]
         assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
+        leg = "${{ matrix.shard }}" if kind == "flakes" else mapped
+        assert restored["with"]["name"] == f"{kind}-${{{{ matrix.python-version }}}}-{leg}"
+    emptied = steps["Empty the test reports of a leg above the queue's shard count"]
+    assert emptied["run"].split("\n")[:2] == ["echo '{}' > durations.json", "rm -f elapsed.json"]
+    assert jobs["select"]["outputs"]["queue_legs"] == "${{ steps.unit-source.outputs.queue_legs }}"
     producer = "durations" if "durations" in jobs else "select"
     assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"
     assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"

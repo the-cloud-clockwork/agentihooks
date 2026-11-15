@@ -1573,19 +1573,23 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         for step in job["steps"][run_index + 1 : upload_index]
         if not step["name"].endswith((", wait before attempt 2", ", attempt 2"))
     ]
-    assert [step["name"] for step in between] in (
-        [],
-        [
-            "Mint the token that restores queue unit artifacts",
-            "Restore queue shard durations",
-            "Restore queue shard flakes",
-            "Restore queue shard coverage",
-        ],
-    )
+    restores = [
+        "Mint the token that restores queue unit artifacts",
+        "Restore queue shard durations",
+        "Restore queue shard flakes",
+        "Restore queue shard coverage",
+    ]
+    names = [step["name"] for step in between]
+    assert names in ([], restores, [*restores, "Empty the test reports of a leg above the queue's shard count"])
+    own = "fromJSON(needs.select.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
     for step in between:
         expected = "needs.split.outputs.source != ''"
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
+        if step["name"] == "Restore queue shard flakes" and len(names) == 5:
+            expected += f" && {own}"
+        if step["name"].startswith("Empty the test reports"):
+            expected += f" && {own.replace(' == ', ' != ')}"
         assert step["if"] == expected
     assert upload.get("if") in (None, "${{ !cancelled() && hashFiles('durations.json') != '' }}")
     assert upload["uses"] == "./.github/actions/retry-upload" or upload["uses"].startswith("actions/upload-artifact@")

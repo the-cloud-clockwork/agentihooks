@@ -360,6 +360,7 @@ jobs:
       queued: ${{ steps.republished.outputs.queued }}
       base: ${{ steps.base-run.outputs.sha }}
       source: ${{ steps.unit-source.outputs.source }}
+      queue_legs: ${{ steps.unit-source.outputs.queue_legs }}
       scope: ${{ steps.select.outputs.scope }}
       legs: ${{ steps.select.outputs.legs }}
       count: ${{ steps.select.outputs.count }}
@@ -1555,7 +1556,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-durations
-          name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
+          name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.select.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1572,7 +1573,7 @@ jobs:
         with: *unit-restore-queue-shard-durations
 
       - name: Restore queue shard flakes
-        if: needs.split.outputs.source != ''
+        if: needs.split.outputs.source != '' && fromJSON(needs.select.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
         id: restore-queue-shard-flakes
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1599,7 +1600,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-coverage
-          name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
+          name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.select.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1614,6 +1615,12 @@ jobs:
         if: steps.restore-queue-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *unit-restore-queue-shard-coverage
+
+      - name: Empty the test reports of a leg above the queue's shard count
+        if: needs.split.outputs.source != '' && fromJSON(needs.select.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
+        run: |
+          echo '{}' > durations.json
+          rm -f elapsed.json
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
