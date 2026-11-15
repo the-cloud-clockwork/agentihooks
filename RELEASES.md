@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.903 · 2026-11-15
+
+### 2026-11-15 · 87f6b2199e9b · #11296 · @agenticore-app
+
+**Resend a refused hive stop on each reap pass until the hive takes it**
+
+This fixes a bug where a hive stop refused by the bus after the store drops an agent was silently lost, leaving the execution running forever on its hive. Now a refused stop is recorded under the swarm's pending-stops hash and retried at the start of each agents reap pass until the hive accepts it or the execution ends; entries for executions the swarm still seats are discarded since the regular tick handles those. The change also tightens which call sites pass the store, reducing surviving mutants in review.
+
 ## v2.17.902 · 2026-11-15
 
 ### 2026-11-15 · b430b887b620 · #11293 · @nestorcolt
