@@ -47,6 +47,7 @@ MANIFEST: dict[str, Any] = {
     "lines": {},
 }
 EVERY_TEST = set(MANIFEST["tests"])
+FIRST, SECOND, RUN, SPAWN, ONE = MANIFEST["tests"]
 
 
 def _git(root: Path, *args: str) -> None:
@@ -106,31 +107,36 @@ def test_lockfile_removal_rekeys_every_test(repository: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "content"),
+    ("path", "content", "expected"),
     [
-        ("scripts/alpha.py", ALPHA.replace("return 1", "return 10").encode()),
-        ("scripts/alpha.py", ALPHA.replace("return 1", "return '\xff'").encode("latin-1")),
-        ("scripts/alpha.py", ALPHA + "\n\ndef third():\n    return 3\n"),
-        ("scripts/alpha.py", "LIMIT = 2\n\n\n" + ALPHA),
-        ("scripts/data.json", '{"changed": true}\n'),
-        ("hooks/beta.py", None),
-        ("hooks/gamma.py", "def other():\n    return 4\n"),
-        ("tests/test_alpha.py", FILES["tests/test_alpha.py"] + "\n\ndef test_third():\n    pass\n"),
-        ("tests/conftest.py", "import os\n"),
-        ("tests/helpers.py", "VALUE = 2\n"),
-        ("tests/fixtures/sample.txt", "changed\n"),
-        ("docs/guide.md", "changed\n"),
-        ("tool.py", "TOOL = 2\n"),
-        (".github/helper.py", "HELPER = 1\n"),
-        ("uv.lock", "version = 2\n"),
+        ("scripts/alpha.py", ALPHA.replace("return 1", "return 10").encode(), {FIRST, SPAWN}),
+        ("scripts/alpha.py", ALPHA.replace("return 1", "return '\xff'").encode("latin-1"), {FIRST, SPAWN}),
+        ("scripts/alpha.py", ALPHA + "\n\ndef third():\n    return 3\n", {SPAWN}),
+        ("scripts/alpha.py", "LIMIT = 2\n\n\n" + ALPHA, {FIRST, SECOND, SPAWN}),
+        ("scripts/data.json", '{"changed": true}\n', {RUN, SPAWN}),
+        ("hooks/beta.py", None, {RUN, ONE, SPAWN}),
+        ("hooks/gamma.py", "def other():\n    return 4\n", {SPAWN}),
+        (
+            "tests/test_alpha.py",
+            FILES["tests/test_alpha.py"] + "\n\ndef test_third():\n    pass\n",
+            {FIRST, SECOND, SPAWN},
+        ),
+        ("tests/conftest.py", "import os\n", EVERY_TEST),
+        ("tests/helpers.py", "VALUE = 2\n", EVERY_TEST),
+        ("tests/fixtures/sample.txt", "changed\n", {SPAWN}),
+        ("docs/guide.md", "changed\n", set()),
+        ("tool.py", "TOOL = 2\n", EVERY_TEST),
+        (".github/helper.py", "HELPER = 1\n", EVERY_TEST),
+        ("uv.lock", "version = 2\n", EVERY_TEST),
     ],
 )
 def test_rekeyed_tests_match_the_manifest_invalidation(
-    repository: Path, path: str, content: str | bytes | None
+    repository: Path, path: str, content: str | bytes | None, expected: set[str]
 ) -> None:
     planted = content.encode() if isinstance(content, str) else content
     rekeyed = _plant(repository, path, planted)
-    assert rekeyed == dep_manifest.invalidated(MANIFEST, dep_manifest.changes(repository, "HEAD^", "HEAD"))[0]
+    assert rekeyed == expected
+    assert dep_manifest.invalidated(MANIFEST, dep_manifest.changes(repository, "HEAD^", "HEAD"))[0] == expected
 
 
 def test_workflow_change_rekeys_nothing_while_the_invocation_rekeys_every_test(repository: Path) -> None:
@@ -204,6 +210,7 @@ def test_each_file_under_the_budget_is_one_batch() -> None:
         ([6.0, 6.0, 6.0, 1.0], 10.0, [("a", "d"), ("b",), ("c",)]),
         ([3.0, 3.0, 2.0, 2.0, 2.0], 6.0, [("a", "e"), ("b",), ("c", "d")]),
         ([30.0, 30.0, 1.0], 10.0, [("a",), ("b",), ("c",)]),
+        ([1.0, 5.0, 5.0], 5.0, [("b",), ("c",), ("a",)]),
     ],
 )
 def test_an_over_budget_file_splits_into_the_fewest_balanced_parts(

@@ -103,7 +103,7 @@ def _parts(tests: list[str], seconds: Mapping[str, float], target: float) -> lis
             loads[lightest] += seconds[test]
         if max(loads) <= target:
             return [tuple(part) for part in parts]
-    return [(test,) for test in tests]
+    return [(test,) for test in ordered]
 
 
 def batches(manifest: Mapping[str, Any], durations: Mapping[str, float], target: float) -> list[tuple[str, ...]]:
