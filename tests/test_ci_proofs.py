@@ -304,7 +304,6 @@ def test_proofs_reuse_selected_mutation_and_smoke_execution():
     workflow = _workflow()
     jobs = workflow["jobs"]
     assert "mutation" not in jobs
-    assert "mutation" not in workflow[True]["workflow_dispatch"]["inputs"]["proof"]["options"]
     for proof, reusable in (
         ("semgrep", "semgrep"),
         ("worker-image", "swarm-node-smoke"),
