@@ -11,7 +11,8 @@ __all__ = ["Load", "document", "predicted_wait", "utilisation"]
 
 @dataclass(frozen=True)
 class Load:
-    """Queue and slot state at one instant: pending estimates and running counts per class."""
+    """Queue and slot state at one instant: pending estimates and running counts per class, and the seconds until
+    each running unit frees its slot."""
 
     pending: Mapping[str, Sequence[float]]
     running: Mapping[str, int]
@@ -19,6 +20,7 @@ class Load:
     slots_busy: int
     budget_fraction: float = 1.0
     shed: tuple[str, ...] = ()
+    frees_in: Sequence[float] = ()
 
     @property
     def slots_free(self) -> int:
@@ -26,7 +28,7 @@ class Load:
         return max(self.slots_total - self.slots_busy, 0)
 
 
-def predicted_wait(estimates: Sequence[float], free_slots: int) -> float | None:
+def predicted_wait(estimates: Sequence[float], free_slots: int, frees_in: Sequence[float] = ()) -> float | None:
     """Seconds until the pending estimates drain across the free slots; None when no slot is free."""
     work = fsum(estimates)
     if not work:
@@ -50,7 +52,7 @@ def document(load: Load) -> dict[str, object]:
         name: {
             "pending": len(load.pending.get(name, ())),
             "running": load.running.get(name, 0),
-            "predicted_wait_s": predicted_wait(load.pending.get(name, ()), free),
+            "predicted_wait_s": predicted_wait(load.pending.get(name, ()), free, load.frees_in),
         }
         for name in CLASSES
     }
