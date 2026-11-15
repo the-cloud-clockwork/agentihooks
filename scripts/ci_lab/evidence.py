@@ -66,7 +66,7 @@ def record(objects: Objects, evidence: GradeEvidence) -> None:
         "inputs": asdict(evidence.inputs),
         "units": [asdict(unit) for unit in evidence.units],
     }
-    objects.write_once(grade_path(evidence.run), json.dumps(document, sort_keys=True).encode())
+    objects.write_once(grade_path(evidence.run), json.dumps(document).encode())
     objects.write_once(head_prefix(evidence.inputs.head) + evidence.run, b"")
 
 

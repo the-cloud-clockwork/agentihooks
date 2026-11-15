@@ -1,3 +1,4 @@
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -146,6 +147,25 @@ def test_ci_lab_show_orders_numeric_runs_by_value_and_prints_an_empty_grade(
 
     captured = capsys.readouterr()
     assert (code, captured.out, captured.err) == (0, f"grade 9\n{block}\ngrade 10\n{block}", "")
+
+
+@pytest.mark.parametrize(
+    ("command", "argv", "error"),
+    [
+        (evidence.main, ["--grade", "run-2"], "python -m scripts.ci_lab evidence: error: {} --objects"),
+        (evidence.ci, [], "agentihooks ci: error: {} group"),
+        (evidence.ci, ["lab"], "agentihooks ci lab: error: {} command"),
+        (evidence.ci, ["lab", "show", HEAD], "agentihooks ci lab show: error: {} --objects"),
+    ],
+)
+def test_a_missing_argument_exits_two_naming_it(
+    command: Callable[[Sequence[str]], int], argv: list[str], error: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exited:
+        command(argv)
+
+    last = capsys.readouterr().err.splitlines()[-1]
+    assert (exited.value.code, last) == (2, error.format("the following arguments are required:"))
 
 
 @pytest.mark.parametrize(
