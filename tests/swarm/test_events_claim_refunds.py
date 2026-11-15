@@ -570,3 +570,15 @@ def test_a_pass_stops_sending_again_at_the_first_stop_the_bus_still_refuses(
     assert still == ["x1", "x2"]
     assert taken == [f"sent the idle stop for a{n} again: {execution_stop.UNKNOWN}" for n in (1, 2)]
     assert pending_stops(store) == {}
+
+
+@pytest.mark.feature("events-refused-stop-resent")
+def test_a_refused_stop_for_an_agent_with_no_execution_is_not_kept(
+    env: tuple[RedisStore, Any, Any], bus: Bus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _, _ = env
+    monkeypatch.setattr(execution_stop, "stop", refused_stop)
+
+    assert reconciler.stop_admitted(store, SLUG, AgentRecord(name="a1", lane="eng", task="t1"), "idle") == REFUSED
+
+    assert pending_stops(store) == {}

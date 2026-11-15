@@ -65,7 +65,8 @@ def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[Ag
 def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
     """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
     answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
-    refused the stop, which then waits in the swarm's pending stops for ``retry_stops``."""
+    refused the stop, which then waits in the swarm's pending stops for ``retry_stops`` unless the agent has no
+    execution for a stop to reach."""
     config = BusConfig.from_environ()
     if config.backend == "memory":
         return execution_stop.UNKNOWN
@@ -79,7 +80,7 @@ def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str
         outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
     print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
     pending = store.key(slug, PENDING_STOPS)
-    if outcome.startswith(execution_stop.FAILED):
+    if outcome.startswith(execution_stop.FAILED) and agent.execution_id:
         store.redis.hset(pending, agent.execution_id, json.dumps({"agent": asdict(agent), "reason": reason}))
     else:
         store.redis.hdel(pending, agent.execution_id)
