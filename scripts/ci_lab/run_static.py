@@ -3,7 +3,7 @@
 import os
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
@@ -17,27 +17,31 @@ SUMMARY = "GITHUB_STEP_SUMMARY"
 
 @dataclass(frozen=True)
 class Settings:
-    """Where gate runs keep their folders, the venv whose bin leads PATH, the ports, whitelist and time limit."""
+    """Where gate runs keep their folders, the venv whose bin leads PATH, the ports, whitelist and time limit, and the
+    context values, such as inputs.base, that the steps' if conditions and env expressions read."""
 
     root: Path
     venv: Path
     ports: PortAllocator
     whitelist: Mapping[str, str]
     timeout: float
+    context: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class Result:
-    """A gate's verdict over one head: the exit code, None on timeout, its combined log and its step summary."""
+    """A gate's verdict over one head: the exit code, None on timeout or skip, its combined log, its step summary and
+    whether its if condition skipped it."""
 
     gate: str
     code: int | None
     log: Path
     report: Path
+    skipped: bool = False
 
     @property
     def green(self) -> bool:
-        """True when the step exited zero."""
+        """True when the step exited zero or its if condition skipped it, as CI passes a skipped step."""
         return self.code == 0
 
 

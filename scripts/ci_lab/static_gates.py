@@ -39,7 +39,8 @@ WORD = re.compile(r"[a-z0-9]+")
 
 @dataclass(frozen=True)
 class StaticGate:
-    """One gate step of a static job, with the repository modules it runs and the input paths that key it."""
+    """One gate step of a static job: the repository modules it runs, the input paths that key it, and its env values
+    and if condition as the workflow writes them, an empty condition when the step has none."""
 
     name: str
     job: str
@@ -49,6 +50,8 @@ class StaticGate:
     run: str
     paths: tuple[str, ...]
     base_paths: tuple[str, ...]
+    env: tuple[tuple[str, str], ...] = ()
+    condition: str = ""
 
 
 def _module(value: str) -> str | None:
