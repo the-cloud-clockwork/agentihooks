@@ -235,9 +235,9 @@ def _mutation_stage_entries(
 
 def grade(
     base_workflows: dict[str, dict[str, Any]],
-    base_config: dict[str, Any],
+    base_config: ci_wiring.Wiring,
     head_workflows: dict[str, dict[str, Any]],
-    head_config: dict[str, Any],
+    head_config: ci_wiring.Wiring,
     policy: object = None,
 ) -> list[str]:
     from scripts import ci_gate_queue

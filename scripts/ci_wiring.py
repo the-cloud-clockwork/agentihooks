@@ -2,7 +2,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import yaml
 
@@ -13,6 +13,8 @@ FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
 FIELDS = ("reason", "owner")
+Declarations = dict[str, dict[str, Any]]
+Wiring = TypedDict("Wiring", {"not_gates": Declarations, "outside_gate": Declarations}, total=False)
 EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
@@ -113,7 +115,7 @@ def _declaration_problems(declared: dict[str, dict[str, Any]]) -> list[str]:
     ]
 
 
-def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any]) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], config: Wiring) -> list[str]:
     from scripts import ci_gate_queue
 
     try:
