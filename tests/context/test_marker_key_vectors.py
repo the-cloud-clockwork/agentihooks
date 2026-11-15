@@ -61,7 +61,7 @@ def test_vector_check_uses_its_own_repository_from_another_folder(tmp_path, monk
     assert capsys.readouterr().out == "Marker key vectors match kernel dev.\n"
 
 
-def test_vector_check_is_on_the_required_tests_path():
+def test_vector_check_is_on_the_required_tests_path() -> None:
     import yaml
 
     root = VECTORS_FILE.parents[2]
@@ -78,12 +78,9 @@ def test_vector_check_is_on_the_required_tests_path():
         "path": ".marker-kernel",
         "persist-credentials": False,
     }
-    command = next(
-        step
-        for step in steps
-        if step.get("run")
-        == "python -m scripts.ci_marker_vectors .marker-kernel/tests/fixtures/marker-idempotency-vectors.json"
-    )
+    command = next(step for step in steps if step.get("name") == "Refuse marker key vector drift from kernel dev")
+    assert 'vectors="$GITHUB_WORKSPACE/.marker-kernel/tests/fixtures/marker-idempotency-vectors.json"' in command["run"]
+    assert 'python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"' in command["run"]
     assert command["if"] == "${{ !cancelled() }}"
     assert steps.index(checkout) < steps.index(command)
     assert "schedule" not in workflow["on" if "on" in workflow else True]
