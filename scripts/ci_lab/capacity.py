@@ -1,18 +1,18 @@
 """Capacity document served at GET /capacity, computed from a load snapshot."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import fsum
 
 from scripts.ci_lab.delivery import CLASSES
 
-__all__ = ["Load", "document", "predicted_wait", "utilisation"]
+__all__ = ["Load", "document", "hit_ratio", "predicted_wait", "utilisation"]
 
 
 @dataclass(frozen=True)
 class Load:
-    """Queue and slot state at one instant: pending estimates and running counts per class, and the seconds until
-    each running unit frees its slot."""
+    """Queue and slot state at one instant: pending estimates, running counts and verdict cache use per class, and the
+    seconds until each running unit frees its slot."""
 
     pending: Mapping[str, Sequence[float]]
     running: Mapping[str, int]
@@ -20,6 +20,8 @@ class Load:
     slots_busy: int
     budget_fraction: float = 1.0
     shed: tuple[str, ...] = ()
+    cache_hits: Mapping[str, int] = field(default_factory=dict[str, int])
+    cache_misses: Mapping[str, int] = field(default_factory=dict[str, int])
     frees_in: Sequence[float] = ()
 
     @property
@@ -48,6 +50,14 @@ def utilisation(load: Load) -> float:
     return min(load.slots_busy / load.slots_total, 1.0)
 
 
+def hit_ratio(hits: int, misses: int) -> float | None:
+    """Verdict cache hits over lookups; None when there were no lookups."""
+    lookups = hits + misses
+    if lookups <= 0:
+        return None
+    return hits / lookups
+
+
 def document(load: Load) -> dict[str, object]:
     """The JSON body of GET /capacity for one load snapshot."""
     free = load.slots_free
@@ -56,6 +66,7 @@ def document(load: Load) -> dict[str, object]:
             "pending": len(load.pending.get(name, ())),
             "running": load.running.get(name, 0),
             "predicted_wait_s": predicted_wait(load.pending.get(name, ()), free, load.frees_in),
+            "verdict_cache_hit_ratio": hit_ratio(load.cache_hits.get(name, 0), load.cache_misses.get(name, 0)),
         }
         for name in CLASSES
     }
