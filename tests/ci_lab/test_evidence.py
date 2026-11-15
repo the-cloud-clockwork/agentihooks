@@ -1,0 +1,134 @@
+from pathlib import Path
+
+import pytest
+
+from scripts.ci_lab import __main__ as lab_cli
+from scripts.ci_lab import evidence, objects
+from scripts.ci_lab.digests import GradeInputs
+from scripts.cli_delegates import delegated_cli
+
+HEAD = "a" * 40
+BASE = "b" * 40
+GRADER = "c" * 40
+STATIC = f"static-v1-{'1' * 64}"
+FIRST_TEST = f"test-v1-{'2' * 64}"
+SECOND_TEST = f"test-v1-{'3' * 64}"
+
+PULL_REQUEST_BLOCK = f"""grade run-2
+repository the-cloud-clockwork/agentihooks
+head {HEAD}
+base {BASE}
+tier pull_request
+grader {GRADER}
+kinds static:1 test:2
+unit static {STATIC} run run-2
+  report lab/static/{"1" * 64}/report.json
+  log lab/static/{"1" * 64}/log.txt
+unit test {FIRST_TEST} run run-1
+  report lab/test/{"2" * 64}/report.json
+  log lab/test/{"2" * 64}/log.txt
+unit test {SECOND_TEST} run run-2
+  report lab/test/{"3" * 64}/report.json
+  log lab/test/{"3" * 64}/log.txt
+"""
+
+QUEUE_BLOCK = f"""grade run-3
+repository the-cloud-clockwork/agentihooks
+head {HEAD}
+base {BASE}
+tier queue
+grader {GRADER}
+kinds test:1
+unit test {FIRST_TEST} run run-1
+  report lab/test/{"2" * 64}/report.json
+  log lab/test/{"2" * 64}/log.txt
+"""
+
+
+def stored(blobs: objects.Objects, kind: str, key: str, names: tuple[str, ...] = ("report", "log")) -> None:
+    for name in names:
+        blobs.write_once(objects.unit_path(kind, key, name), b"{}")
+
+
+def grade(run: str, tier: str, units: tuple[evidence.GradeUnit, ...]) -> evidence.GradeEvidence:
+    inputs = GradeInputs(repository="the-cloud-clockwork/agentihooks", head=HEAD, base=BASE, tier=tier, grader=GRADER)
+    return evidence.GradeEvidence(run=run, inputs=inputs, units=units)
+
+
+@pytest.fixture
+def blobs(tmp_path: Path) -> objects.Objects:
+    store = objects.LocalObjects(tmp_path)
+    for kind, key in (("static", STATIC), ("test", FIRST_TEST), ("test", SECOND_TEST)):
+        stored(store, kind, key)
+    units = (
+        evidence.GradeUnit(kind="test", key=SECOND_TEST, run="run-2"),
+        evidence.GradeUnit(kind="static", key=STATIC, run="run-2"),
+        evidence.GradeUnit(kind="test", key=FIRST_TEST, run="run-1"),
+    )
+    evidence.record(store, grade("run-3", "queue", (evidence.GradeUnit(kind="test", key=FIRST_TEST, run="run-1"),)))
+    evidence.record(store, grade("run-2", "pull_request", units))
+    return store
+
+
+def test_evidence_by_grade_prints_the_golden_block(
+    blobs: objects.Objects, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = lab_cli.main(["evidence", "--grade", "run-2", "--objects", str(tmp_path)], {})
+
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (0, PULL_REQUEST_BLOCK, "")
+
+
+def test_ci_lab_show_prints_every_grade_of_the_head_in_run_order(
+    blobs: objects.Objects, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = ["ci", "lab", "show", HEAD, "--objects", str(tmp_path)]
+    command = delegated_cli(argv)
+
+    assert command is not None
+    code = command(argv[1:])
+
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (0, f"{PULL_REQUEST_BLOCK}\n{QUEUE_BLOCK}", "")
+
+
+def test_a_second_record_of_a_run_keeps_the_first_evidence(
+    blobs: objects.Objects, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    evidence.record(blobs, grade("run-2", "promotion", ()))
+
+    code = evidence.main(["--grade", "run-2", "--objects", str(tmp_path)])
+
+    assert (code, capsys.readouterr().out) == (0, PULL_REQUEST_BLOCK)
+
+
+def test_an_unknown_grade_exits_non_zero_naming_its_path(
+    blobs: objects.Objects, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = evidence.main(["--grade", "run-9", "--objects", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (1, "", "missing lab/grades/run-9/grade.json\n")
+
+
+def test_a_head_without_a_grade_exits_non_zero_naming_its_path(
+    blobs: objects.Objects, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = evidence.ci(["lab", "show", BASE, "--objects", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (1, "", f"missing lab/heads/{BASE}/\n")
+
+
+def test_a_missing_unit_object_is_marked_and_exits_non_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = objects.LocalObjects(tmp_path)
+    stored(store, "test", FIRST_TEST, names=("report",))
+    evidence.record(store, grade("run-3", "queue", (evidence.GradeUnit(kind="test", key=FIRST_TEST, run="run-1"),)))
+    log = f"lab/test/{'2' * 64}/log.txt"
+
+    code = evidence.main(["--grade", "run-3", "--objects", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == QUEUE_BLOCK.replace(f"  log {log}\n", f"  log {log} missing\n")
+    assert captured.err == f"missing {log}\n"
