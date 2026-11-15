@@ -214,4 +214,6 @@ class Lifecycle:
             or {}
         )
         if live.get("state") == "open" and agent.seat:
-            cast(RedisStore, self.store).keep_seat(event.swarm, agent.task, agent.seat)
+            held: Any = self.store
+            store: RedisStore = held
+            store.keep_seat(event.swarm, agent.task, agent.seat)
