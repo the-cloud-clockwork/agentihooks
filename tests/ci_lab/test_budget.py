@@ -81,7 +81,8 @@ def test_a_charge_adds_slots_times_seconds_as_core_minutes_to_the_days_counter(
     first = ledger.charge(4, 90.0)
     second = ledger.charge(2, 15.0)
 
-    assert first == budget.Status(pytest.approx(1 - 6 / 1440), ())
+    assert first.fraction == pytest.approx(1 - 6 / 1440)
+    assert first.shed == ()
     assert ledger.spent() == pytest.approx(6.5)
     assert second == ledger.status()
     assert float(client.get("agentihooks-ci:budget:2026-11-15")) == pytest.approx(6.5)
