@@ -7,7 +7,7 @@ import inspect
 import os
 import sys
 from types import FrameType
-from typing import Any, TextIO, cast
+from typing import Any, BinaryIO
 
 __all__ = ["OPENED", "TREE", "WORKER", "Capture", "install", "loading"]
 
@@ -35,12 +35,10 @@ def loading(frame: FrameType | None) -> bool:
 def _read(path: object, mode: object) -> str | None:
     """Return the absolute path an open event reads, None for a write, a file descriptor or a path the process cannot
     resolve."""
-    if isinstance(path, os.PathLike):
-        path = os.fspath(cast("os.PathLike[str]", path))
-    if not isinstance(path, (str, bytes)) or (isinstance(mode, str) and WRITES & set(mode)):
+    if not isinstance(path, (str, bytes, os.PathLike)) or (isinstance(mode, str) and WRITES & set(mode)):
         return None
     try:
-        return os.path.abspath(os.fsdecode(path))
+        return os.path.abspath(os.fsdecode(path))  # pyright: ignore[reportUnknownArgumentType]
     except OSError:
         return None
 
@@ -48,7 +46,7 @@ def _read(path: object, mode: object) -> str | None:
 class Capture:
     """Appends each file under the absolute root that a pytest worker reads, once, to the log relative to root."""
 
-    def __init__(self, root: str, log: TextIO) -> None:
+    def __init__(self, root: str, log: BinaryIO) -> None:
         self.root = os.path.join(root, "")
         self.log = log
         self.seen: set[str] = set()
@@ -61,7 +59,7 @@ class Capture:
         if path is None or not path.startswith(self.root) or path in self.seen or loading(frame):
             return
         self.seen.add(path)
-        self.log.write(f"{path[len(self.root) :]}\n")
+        self.log.write(os.fsencode(path[len(self.root) :]) + b"\n")
         self.log.flush()
 
 
@@ -73,7 +71,7 @@ def install() -> None:
     root, folder = os.environ.get(TREE), os.environ.get(OPENED)
     if not root or not folder:
         return
-    capture = Capture(root, open(os.path.join(folder, f"{os.getpid()}.txt"), "a", encoding="utf-8"))
+    capture = Capture(root, open(os.path.join(folder, f"{os.getpid()}.txt"), "ab"))
 
     def audit(event: str, args: tuple[Any, ...]) -> None:
         if event == "open":

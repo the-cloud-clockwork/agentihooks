@@ -119,7 +119,8 @@ def _attempt(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab)
 
 def _opened(attempt: Attempt) -> set[str]:
     """Return the tree files the attempt's pytest workers read, relative to the tree."""
-    return {path for log in (attempt.folder / "opened").glob("*.txt") for path in log.read_text().splitlines()}
+    logs = (attempt.folder / "opened").glob("*.txt")
+    return {os.fsdecode(path) for log in logs for path in log.read_bytes().splitlines()}
 
 
 def _durations(attempt: Attempt) -> dict[str, float]:

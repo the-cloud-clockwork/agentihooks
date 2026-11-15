@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 import shutil
@@ -26,6 +27,18 @@ def test_flake():
     if not mark.exists():
         mark.write_text("seen")
         assert False, "first attempt fails"
+"""
+BROKEN = """import os
+from pathlib import Path
+
+mark = Path(os.environ["FLAKE_MARK"])
+if not mark.exists():
+    mark.write_text("seen")
+    raise RuntimeError("first collection fails")
+
+
+def test_collected():
+    assert True
 """
 OPENS = """from pathlib import Path
 
@@ -121,11 +134,35 @@ def test_a_green_batch_stores_durations_coverage_and_files_opened_outside_its_ma
     assert (verdict.broad, verdict.outside) == (True, ("data/unlisted.txt",))
     assert set(verdict.durations) == {listed, unlisted}
     assert all(seconds >= 0 for seconds in verdict.durations.values())
+    assert (verdict.log.parent.parent, verdict.coverage.parent.parent) == (lab.root, lab.root)
     data = coverage.CoverageData(str(verdict.coverage))
     data.read()
-    measured = {Path(path).as_posix() for path in data.measured_files()}
-    assert {"hooks/plant.py", "scripts/plant.py"} <= {"/".join(path.split("/")[-2:]) for path in measured}
+    assert {"hooks/plant.py", "scripts/plant.py"} <= {"/".join(path.split("/")[-2:]) for path in data.measured_files()}
     assert any(context.startswith(unlisted) for context in data.measured_contexts())
+    assert not lab.flakes.exists()
+
+
+def test_a_batch_whose_first_collection_fails_is_flaky_with_a_row_per_batch_test(tmp_path: Path) -> None:
+    test = "tests/test_broken.py::test_collected"
+    tree = _tree(tmp_path / "tree", {"tests/test_broken.py": BROKEN})
+    lab = _lab(tmp_path, _manifest({test: []}), {"FLAKE_MARK": str(tmp_path / "mark")})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (verdict.outcome, verdict.flaky, verdict.attempts) == ("passed", True, 2)
+    [row] = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
+    assert (row["test"], row["outcome"], row["attempts"], row["tracebacks"]) == (test, "flaky", 2, [])
+    assert row["errors"][0].startswith("pytest exited with code ")
+
+
+def test_a_batch_the_timeout_kills_is_red_on_both_attempts_without_durations(tmp_path: Path) -> None:
+    test = "tests/test_plant.py::test_one_is_two"
+    tree = _tree(tmp_path / "tree", {"tests/test_plant.py": "def test_one_is_two():\n    assert 1 == 2\n"})
+    lab = dataclasses.replace(_lab(tmp_path, _manifest({test: []}), {}), timeout=0.05)
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (verdict.outcome, verdict.flaky, verdict.attempts, verdict.durations) == ("failed", False, 2, {})
     assert not lab.flakes.exists()
 
 
@@ -155,11 +192,8 @@ def test_a_flake_with_no_failed_test_writes_one_row_per_batch_test(tmp_path: Pat
 
     rows = run_tests.flake_rows(first, ("tests/test_a.py::test_x@group", "tests/test_a.py::test_y"))
 
-    assert [(row["test"], row["outcome"], row["attempts"]) for row in rows] == [
-        ("tests/test_a.py::test_x", "flaky", 2),
-        ("tests/test_a.py::test_y", "flaky", 2),
-    ]
-    assert rows[0]["errors"] == ["pytest exited with code 2"]
+    row = {"errors": ["pytest exited with code 2"], "tracebacks": [], "attempts": 2, "outcome": "flaky"}
+    assert rows == [{"test": "tests/test_a.py::test_x", **row}, {"test": "tests/test_a.py::test_y", **row}]
 
 
 def test_a_flake_row_keeps_the_first_attempts_errors_and_counts_two_attempts(tmp_path: Path) -> None:

@@ -49,7 +49,7 @@ def test_a_worker_records_each_read_under_the_tree_once_relative_to_it(
     tree = tmp_path / "tree"
     tree.mkdir()
     monkeypatch.chdir(tree)
-    log = io.StringIO()
+    log = io.BytesIO()
     capture = open_capture.Capture(str(tree), log)
     frame = sys._getframe()
     events = [
@@ -58,6 +58,7 @@ def test_a_worker_records_each_read_under_the_tree_once_relative_to_it(
         (str(tree / "a.txt"), "rb", 0),
         (tree / "b.txt", "rb", 0),
         (os.fsencode(tree / "c.txt"), "r", 0),
+        (os.fsencode(tree) + b"/\xff.txt", "r", 0),
         (str(tree / "d.txt"), None, 0),
         (str(tree / "w.txt"), "w", 0),
         (str(tree / "x.txt"), "x", 0),
@@ -70,13 +71,13 @@ def test_a_worker_records_each_read_under_the_tree_once_relative_to_it(
     for args in events:
         capture.audit(args, frame)
 
-    assert log.getvalue() == "relative.txt\na.txt\nb.txt\nc.txt\nd.txt\n"
+    assert log.getvalue() == b"relative.txt\na.txt\nb.txt\nc.txt\n\xff.txt\nd.txt\n"
 
 
 def test_a_read_by_the_import_system_or_outside_a_worker_is_not_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    log = io.StringIO()
+    log = io.BytesIO()
     capture = open_capture.Capture(str(tmp_path), log)
 
     def read() -> bool:
@@ -87,10 +88,10 @@ def test_a_read_by_the_import_system_or_outside_a_worker_is_not_recorded(
     capture.audit((str(tmp_path / "a.txt"), "r", 0), sys._getframe())
     monkeypatch.setenv(open_capture.WORKER, "gw1")
     _from((IMPORT,), read)
-    assert log.getvalue() == ""
+    assert log.getvalue() == b""
     _from((TEST,), read)
 
-    assert log.getvalue() == "b.txt\n"
+    assert log.getvalue() == b"b.txt\n"
 
 
 def test_install_hooks_a_capture_that_writes_this_process_log_in_the_folder(
@@ -108,7 +109,7 @@ def test_install_hooks_a_capture_that_writes_this_process_log_in_the_folder(
     hooks[0]("open", (str(tmp_path / "tree" / "data.json"), "r", 0))
 
     assert len(hooks) == 1
-    assert (tmp_path / f"{os.getpid()}.txt").read_text() == "data.json\n"
+    assert (tmp_path / f"{os.getpid()}.txt").read_bytes() == b"data.json\n"
 
 
 def test_an_installed_capture_survives_the_audit_event_its_own_frame_lookup_raises(tmp_path: Path) -> None:
@@ -142,11 +143,11 @@ def test_a_relative_read_after_the_working_folder_is_gone_is_not_recorded(
     gone.mkdir()
     monkeypatch.chdir(gone)
     gone.rmdir()
-    log = io.StringIO()
+    log = io.BytesIO()
 
     open_capture.Capture(str(tmp_path), log).audit(("data.txt", "r", 0), sys._getframe())
 
-    assert log.getvalue() == ""
+    assert log.getvalue() == b""
 
 
 @pytest.mark.parametrize("missing", ["CI_LAB_TREE", "CI_LAB_OPENED"])
