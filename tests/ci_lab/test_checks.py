@@ -25,7 +25,7 @@ GATES = ("lint", "x", "shadow/lint", "-shadow/lint", "lab-shadow/lint", "lab/lin
 LIMITED = "API rate limit exceeded for installation ID 456."
 SECONDARY = "You have exceeded a secondary rate limit."
 FORWARD = "moves forward only"
-CONCLUDED = "carries a conclusion exactly when it is completed"
+CONCLUDED = "^A check run carries a conclusion exactly when it is completed$"
 
 
 class Token:
@@ -213,20 +213,29 @@ def test_an_output_over_the_github_limit_lists_the_lines_that_end_exactly_at_it(
 
 
 def test_a_batch_posts_only_the_last_transition_of_each_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}), answer(201, {"id": 2}), answer(200, {"id": 2}))
+    created = [answer(201, {"id": run}) for run in (1, 2, 3)]
+    poster, request, _ = lab(monkeypatch, *created, answer(200, {"id": 2}))
     assert poster.batch(
         [
             Transition(HEAD, "lint", "queued", None, OUTPUT, False),
             Transition(HEAD, "lint", "queued", None, OUTPUT, True),
+            Transition(HEAD, "format", "queued", None, OUTPUT, False),
             Transition(HEAD, "lint", "in_progress", None, OUTPUT, False),
             Transition(HEAD, "lint", "completed", "success", OUTPUT, False),
         ]
-    ) == [1, 2]
+    ) == [1, 2, 3]
     assert poster.batch([Transition(HEAD, "lint", "in_progress", None, OUTPUT, True)]) == [2]
-    sent = [(call.args, call.kwargs["json"]["status"]) for call in request.call_args_list]
-    assert sent == [(("POST", URL), "completed"), (("POST", URL), "queued"), (("PATCH", f"{URL}/2"), "in_progress")]
-    assert request.call_args_list[0].kwargs["json"]["name"] == "lab/lint"
-    assert request.call_args_list[1].kwargs["json"]["name"] == "lab-shadow/lint"
+    first, shadow, other, advanced = request.call_args_list
+    assert [call.args for call in (first, shadow, other)] == [("POST", URL)] * 3
+    assert [call.kwargs["json"]["name"] for call in (first, shadow, other)] == [
+        "lab/lint",
+        "lab-shadow/lint",
+        "lab/format",
+    ]
+    assert [call.kwargs["json"]["status"] for call in (first, shadow, other)] == ["completed", "queued", "queued"]
+    assert {call.kwargs["json"]["head_sha"] for call in (first, shadow, other)} == {HEAD}
+    assert advanced.args == ("PATCH", f"{URL}/2")
+    assert advanced.kwargs["json"]["status"] == "in_progress"
 
 
 @pytest.mark.parametrize(
@@ -252,7 +261,12 @@ def test_a_batch_refuses_a_move_back_from_a_status_already_posted(monkeypatch: p
     poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}))
     poster.post(HEAD, "lint", "in_progress", None, OUTPUT, False)
     with pytest.raises(ValueError, match=FORWARD):
-        poster.batch([Transition(HEAD, "lint", "queued", None, OUTPUT, False)])
+        poster.batch(
+            [
+                Transition(HEAD, "lint", "queued", None, OUTPUT, True),
+                Transition(HEAD, "lint", "queued", None, OUTPUT, False),
+            ]
+        )
     assert request.call_count == 1
 
 
@@ -297,10 +311,22 @@ def test_a_refusal_outside_a_rate_limit_raises_without_waiting(monkeypatch: pyte
 def test_the_backoff_stops_after_four_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     limited = answer(403, text=SECONDARY)
     poster, request, sleep = lab(monkeypatch, *[limited] * 5)
-    with pytest.raises(PostRefused):
+    with pytest.raises(PostRefused) as error:
         poster.post(HEAD, "lint", "queued", None, OUTPUT, False)
+    assert str(error.value) == "POST check-runs answered 403"
     assert sleep.call_count == 4
     assert request.call_count == 5
+    assert all(call == request.call_args_list[0] for call in request.call_args_list)
+    assert request.call_args_list[-1].args == ("POST", URL)
+    assert request.call_args_list[-1].kwargs["json"]["name"] == "lab/lint"
+
+
+def test_the_backoff_waits_out_the_last_second_of_its_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    almost = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1898.5"})
+    poster, request, sleep = lab(monkeypatch, almost, almost, answer(201, {"id": 7}))
+    assert poster.post(HEAD, "lint", "queued", None, OUTPUT, False) == 7
+    assert [call.args for call in sleep.call_args_list] == [(899.5,), (0.5,)]
+    assert request.call_count == 3
 
 
 def test_the_backoff_never_waits_past_fifteen_minutes_for_one_request(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -133,7 +133,7 @@ def _wait(response: requests.Response, slept: float, now: float) -> float | None
     reset = response.headers.get("x-ratelimit-reset")
     if reset is None or "secondary" in response.text.lower():
         return min(left, SECONDARY_WAIT)
-    return min(left, MAX_WAIT, max(1.0, float(reset) - now + 1))
+    return min(left, max(1.0, float(reset) - now + 1))
 
 
 def _json(response: requests.Response, method: str, path: str) -> dict[str, Any]:
