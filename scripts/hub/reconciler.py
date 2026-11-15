@@ -1,7 +1,7 @@
 import json
 import sys
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any
 
 from scripts.events.bus import Bus
@@ -18,6 +18,7 @@ INTERVAL_MS = 300_000
 BUCKET = "hub-reconciler"
 CLAIMS = "spoke-work"
 COMPLETED = "completed"
+PENDING_STOPS = "pending-stops"
 
 
 def _start(bus: Bus, slug: str, agent: AgentRecord) -> Envelope | None:
@@ -78,6 +79,48 @@ def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
         outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
     print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
     return outcome
+
+
+def stop_dropped(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
+    """Sends the execution stop for ``agent``, which the swarm dropped, through ``stop_admitted`` and answers it; a
+    stop the bus refused waits in the swarm's pending stops for ``retry_stops`` unless the agent has no execution for
+    a stop to reach."""
+    outcome = stop_admitted(slug, agent, reason)
+    if outcome.startswith(execution_stop.FAILED) and agent.execution_id:
+        held = json.dumps({"agent": asdict(agent), "reason": reason})
+        store.redis.hset(store.key(slug, PENDING_STOPS), agent.execution_id, held)
+    return outcome
+
+
+def retry_stops(store: Any, slug: str) -> list[str]:
+    """Sends again the stops the bus refused in ``slug`` through ``_resend`` and answers one action per stop sent
+    again; reads nothing on the memory bus, where no stop is ever refused."""
+    if BusConfig.from_environ().backend == "memory":
+        return []
+    pending = store.key(slug, PENDING_STOPS)
+    held = store.redis.hgetall(pending)
+    return _resend(store, slug, pending, held) if held else []
+
+
+def _resend(store: Any, slug: str, pending: str, held: dict[str, str]) -> list[str]:
+    """Sends again each stop in ``held``, the swarm's pending stops under ``pending`` by execution, whose execution
+    the swarm has since dropped; a refused stop for an execution the swarm still seats is discarded, since the next
+    judgement of that agent sends afresh. A stop the bus takes, or one for an execution that already ended, leaves the
+    pending stops; the first stop the bus refuses again ends the pass and leaves the rest for the next one."""
+    seated = {agent.execution_id for agent in store.agents(slug)}
+    actions: list[str] = []
+    for execution, raw in held.items():
+        if execution in seated:
+            store.redis.hdel(pending, execution)
+            continue
+        stop = json.loads(raw)
+        agent = AgentRecord(**stop["agent"])
+        outcome = stop_dropped(store, slug, agent, stop["reason"])
+        actions.append(f"sent the {stop['reason']} stop for {agent.name} again: {outcome}")
+        if outcome.startswith(execution_stop.FAILED):
+            break
+        store.redis.hdel(pending, execution)
+    return actions
 
 
 def event_slugs(store: RedisStore) -> list[str]:
