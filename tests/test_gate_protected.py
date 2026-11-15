@@ -415,7 +415,6 @@ def test_the_branch_lane_preflight_refuses_any_other_trigger_filter(
     }[fault]
     assert _grade_preflight(repo, preflight, head) == 1
     assert "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
-    assert "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
 
 
 _SPARSE = "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
