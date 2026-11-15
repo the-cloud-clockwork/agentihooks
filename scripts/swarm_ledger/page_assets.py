@@ -15,12 +15,15 @@ TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})"
 
 def static_assets(pages: Path | None = None) -> dict[str, Path]:
     """Every file a page loads, by its path under /static/<page version>/, from this folder or the page folder given."""
-    static = MODULES.parent
+    palette, tooltips, modules = (PALETTE, TOOLTIPS, MODULES)
+    if pages is not None:
+        palette, tooltips, modules = (pages / path.relative_to(PAGES) for path in (PALETTE, TOOLTIPS, MODULES))
+    static = modules.parent
     return {
-        "palette.css": PALETTE,
-        "tooltips.js": TOOLTIPS,
+        "palette.css": palette,
+        "tooltips.js": tooltips,
         **{f"css/{p.name}": p for p in sorted((static / "css").glob("*.css"))},
-        **{f"js/{p.name}": p for p in sorted(MODULES.glob("*.js"))},
+        **{f"js/{p.name}": p for p in sorted(modules.glob("*.js"))},
         **{f"home/{p.name}": p for p in sorted((static / "home").glob("*.js"))},
     }
 

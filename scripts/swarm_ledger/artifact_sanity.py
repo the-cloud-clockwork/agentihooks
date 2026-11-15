@@ -185,8 +185,10 @@ def ledger_doc(files: list[Path]) -> dict:
 
 
 def page_html(pages: Path | None = None) -> str:
+    """The ledger page shell from this folder or the page folder given, filled with the sanity values."""
+    shell = SHELL if pages is None else pages / SHELL.name
     values = {"PAGE": "0" * 12, "SLUG": "artifact-sanity", "PORT": "9", "TITLE": "Artifact sanity"}
-    return re.sub(r"__LEDGER_(PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], SHELL.read_text())
+    return re.sub(r"__LEDGER_(PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], shell.read_text())
 
 
 def assets(pages: Path | None = None) -> dict[str, Path]:
@@ -194,7 +196,7 @@ def assets(pages: Path | None = None) -> dict[str, Path]:
         sys.path.insert(0, str(SHELL.parent))
     from scripts.swarm_ledger import ledger_core
 
-    return ledger_core.static_assets()
+    return ledger_core.static_assets(pages)
 
 
 def _asset(route, served):
@@ -212,7 +214,7 @@ def _events(route, doc):
 
 def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
-    doc, served = ledger_doc(files), assets()
+    doc, served = ledger_doc(files), assets(pages)
     tab = browser.new_page(viewport=VIEWPORT)
     try:
         tab.route(
@@ -222,7 +224,7 @@ def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str,
                 content_type=TYPES[Path(route.request.url).suffix],
             ),
         )
-        html = page_html()
+        html = page_html(pages)
         tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
         tab.route("**/static/*/**", lambda route: _asset(route, served))
         tab.route("**/api/v1/ledgers/*/events", lambda route: _events(route, doc))
@@ -249,6 +251,7 @@ def _view(tab, path):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--pages", type=Path)
     parser.add_argument("files", nargs="+", type=Path)
     args = parser.parse_args(argv)
     from playwright.sync_api import sync_playwright
@@ -256,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         try:
-            report = run(browser, args.files)
+            report = run(browser, args.files, args.pages)
         finally:
             browser.close()
     print(json.dumps(report))
