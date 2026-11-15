@@ -34,6 +34,7 @@ def test_declaration_dates_never_interrupt_wiring_or_protected_grading(section: 
     entry = {"reason": "Reports results without grading them", "owner": "ci"}
     if expires is not None:
         entry["expires"] = expires
-    config = cast(ci_wiring.Wiring, {section: {key: entry}})
-    assert ci_wiring.check(workflows, config) == []
-    assert gate_protected.grade(workflows, config, workflows, config) == []
+    config = {section: {key: entry}}
+    wiring = cast(ci_wiring.Wiring, config)
+    assert ci_wiring.check(workflows, wiring) == []
+    assert gate_protected.grade(workflows, wiring, workflows, wiring) == []

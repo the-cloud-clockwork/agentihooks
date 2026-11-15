@@ -13,8 +13,15 @@ FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
 FIELDS = ("reason", "owner")
+LAB_FIELDS = (*FIELDS, "replaces")
+LAB_PREFIX = "lab/"
+LAB_GATE_EVENTS = ("merge_group",)
+DELIVERY = "delivery.yaml"
 Declarations = dict[str, dict[str, Any]]
-Wiring = TypedDict("Wiring", {"not_gates": Declarations, "outside_gate": Declarations}, total=False)
+Wiring = TypedDict(
+    "Wiring", {"not_gates": Declarations, "outside_gate": Declarations, "lab_gates": Declarations}, total=False
+)
+Lab = TypedDict("Lab", {"authoritative": list[str], "gate_required": bool}, total=False)
 EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
@@ -57,9 +64,9 @@ def load(root: Path) -> dict[str, dict[Any, Any]]:
     return {path.name: yaml.safe_load(path.read_text()) or cast(dict[Any, Any], {}) for path in paths}
 
 
-def _gate_problems(file: str, workflow: dict[Any, Any]) -> list[str]:
+def _gate_problems(file: str, workflow: dict[Any, Any], events: tuple[str, ...]) -> list[str]:
     on = triggers(workflow)
-    problems = [f"{file} holds {GATE} but does not run on {event}." for event in GATE_EVENTS if event not in on]
+    problems = [f"{file} holds {GATE} but does not run on {event}." for event in events if event not in on]
     for event in FILTERED_EVENTS:
         for key in FILTERS:
             if key in on.get(event, cast(dict[Any, Any], {})):
@@ -106,18 +113,39 @@ def _outside_problems(
     ]
 
 
-def _declaration_problems(declared: dict[str, dict[str, Any]]) -> list[str]:
+def _declaration_problems(declared: dict[str, dict[str, Any]], fields: tuple[str, ...] = FIELDS) -> list[str]:
     return [
         f"{key} is declared without its {field}."
         for key, entry in declared.items()
-        for field in FIELDS
+        for field in fields
         if not entry.get(field)
     ]
 
 
-def check(workflows: dict[str, dict[Any, Any]], config: Wiring) -> list[str]:
+def _lab_problems(workflows: dict[str, dict[Any, Any]], declared: dict[str, dict[str, Any]], lab: Lab) -> list[str]:
+    jobs = {f"{file}/{job_id}" for file, workflow in workflows.items() for job_id in workflow.get("jobs") or ()}
+    problems = _declaration_problems(declared, LAB_FIELDS)
+    problems += [
+        f"{key} is declared a lab gate but is not named {LAB_PREFIX}<gate>."
+        for key in declared
+        if not key.startswith(LAB_PREFIX) or key == LAB_PREFIX
+    ]
+    problems += [
+        f"{key} replaces {entry['replaces']}, which is no workflow job."
+        for key, entry in declared.items()
+        if entry.get("replaces") and entry["replaces"] not in jobs
+    ]
+    return problems + [
+        f"lab.authoritative names {gate}, but {CONFIG} declares no {LAB_PREFIX}{gate} lab gate."
+        for gate in lab.get("authoritative", ())
+        if f"{LAB_PREFIX}{gate}" not in declared
+    ]
+
+
+def check(workflows: dict[str, dict[Any, Any]], config: Wiring, lab: Lab | None = None) -> list[str]:
     from scripts import ci_gate_queue
 
+    lab = lab or Lab()
     try:
         workflows = ci_gate_queue.normalize(workflows)
     except ValueError as error:
@@ -127,6 +155,7 @@ def check(workflows: dict[str, dict[Any, Any]], config: Wiring) -> list[str]:
         config.get("outside_gate", cast(dict[str, Any], {})),
     )
     problems = _declaration_problems({**not_gates, **outside})
+    problems += _lab_problems(workflows, config.get("lab_gates", {}), lab)
     gates = [
         (file, job_id)
         for file, workflow in workflows.items()
@@ -137,7 +166,8 @@ def check(workflows: dict[str, dict[Any, Any]], config: Wiring) -> list[str]:
         return [*problems, f"{len(gates)} jobs are named {GATE}; exactly one must be."]
     gate_file, gate_id = gates[0]
     jobs = workflows[gate_file]["jobs"]
-    problems += _gate_problems(gate_file, workflows[gate_file])
+    events = LAB_GATE_EVENTS if lab.get("gate_required") else GATE_EVENTS
+    problems += _gate_problems(gate_file, workflows[gate_file], events)
     problems += _job_problems(gate_file, gate_id, jobs, not_gates)
     if "feature-suite" in jobs:
         problems += [
@@ -155,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     workflows = load(args.root)
     config = json.loads((args.root / CONFIG).read_text())
-    problems = check(workflows, config)
+    delivery = args.root / DELIVERY
+    lab: Lab | None = yaml.safe_load(delivery.read_text())["lab"] if delivery.is_file() else None
+    problems = check(workflows, config, lab)
     jobs = sum(len(workflow.get("jobs") or cast(dict[Any, Any], {})) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:

@@ -39,7 +39,8 @@ WORD = re.compile(r"[a-z0-9]+")
 
 @dataclass(frozen=True)
 class StaticGate:
-    """One gate step of a static job, with the repository modules it runs and the input paths that key it."""
+    """One gate step of a static job: the repository modules it runs, the input paths that key it, and its env values
+    and if condition as the workflow writes them, an empty condition when the step has none."""
 
     name: str
     job: str
@@ -49,6 +50,8 @@ class StaticGate:
     run: str
     paths: tuple[str, ...]
     base_paths: tuple[str, ...]
+    env: tuple[tuple[str, str], ...] = ()
+    condition: str = ""
 
 
 def _module(value: str) -> str | None:
@@ -74,6 +77,13 @@ def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(sorted(tools)), tuple(sorted(modules))
 
 
+def _text(value: object) -> str:
+    """The text GitHub reads for a YAML scalar in a step's env or if: booleans in lower case, null as empty."""
+    if value is None:
+        return ""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
 def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> StaticGate | None:
     if "run" not in step:
         return None
@@ -86,7 +96,8 @@ def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> Sta
     entry = registry.get(name)
     paths = WHOLE_TREE if entry is None else tuple(entry["paths"])
     base_paths = WHOLE_TREE if entry is None else tuple(entry.get("base_paths", ()))
-    return StaticGate(name, job, title, tools, modules, run, paths, base_paths)
+    env = tuple((str(key), _text(value)) for key, value in step.get("env", {}).items())
+    return StaticGate(name, job, title, tools, modules, run, paths, base_paths, env, _text(step.get("if")))
 
 
 def _job_steps(job: str, body: Mapping[str, Any], reusable: Mapping[str, Any]) -> list[tuple[str, Any]]:
@@ -130,6 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     registry = json.loads((root / REGISTRY).read_text())
     for gate in discover((root / WORKFLOW).read_text(), registry, ci_wiring.load(root)):
         record: dict[str, object] = {field: value for field, value in asdict(gate).items() if field != "run"}
+        record["env"] = dict(gate.env)
         if args.grader is not None:
             record["digest"] = grader.digest(args.grader, gate.modules)
         print(json.dumps(record))

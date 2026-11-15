@@ -311,6 +311,7 @@ class TestStatsSyncEvent:
             "gap": "",
             "frozen": 0,
             "frozen_work": 0,
+            "lab": None,
         }
         assert ctx.stamps["time_left_minutes"] == {"at": NOW, "rev": ctx.rev, "by": "stats"}
         assert ctx.events[0] == {
@@ -423,6 +424,7 @@ class TestStatsSyncEvent:
                 "gap": "",
                 "frozen": 0,
                 "frozen_work": 0,
+                "lab": None,
             },
         }
         assert d["time_left_minutes"] == 60
@@ -496,3 +498,67 @@ class TestStatsSyncEvent:
         ctx.meta["stats_refresh"] = {"state": "failed"}
         assert ledger_core.record_sync(doc(), {"op": "sync", "id": "crew"}, ctx) is False
         assert ctx.events == []
+
+
+LAB = {
+    "url": "http://lab:8080",
+    "at": NOW - 2 * MINUTE,
+    "capacity": {
+        "classes": {
+            "pull_request": {"pending": 3, "running": 1, "predicted_wait_s": 240.0},
+            "queue": {"pending": 0, "running": 0, "predicted_wait_s": 0.0},
+            "backfill": {"pending": 2, "running": 0, "predicted_wait_s": None},
+        },
+        "slots": {"total": 4, "busy": 4, "free": 0},
+        "utilisation": 1.0,
+        "budget_fraction": 1.0,
+        "shed": [],
+    },
+    "error": "",
+    "error_at": 0,
+}
+LAB_CLASSES = [
+    {"class": "pull_request", "pending": 3, "predicted_wait_s": 240.0},
+    {"class": "queue", "pending": 0, "predicted_wait_s": 0.0},
+    {"class": "backfill", "pending": 2, "predicted_wait_s": None},
+]
+
+
+def lab_of(reading: dict | None) -> dict | None:
+    inputs = {"slots": 1, "ci_minutes": 2} if reading is None else {"slots": 1, "ci_minutes": 2, "lab": reading}
+    return ledger_stats.calculate(doc(), [], NOW, inputs)["lab"]
+
+
+def test_without_a_lab_reading_the_lab_block_is_none() -> None:
+    assert ledger_stats.calculate(doc(), [], NOW)["lab"] is None
+    assert lab_of(None) is None
+
+
+@pytest.mark.feature("ledger-stats-lab")
+def test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order() -> None:
+    assert lab_of(LAB) == {"at": NOW - 2 * MINUTE, "error": "", "error_at": 0, "classes": LAB_CLASSES}
+
+
+def test_a_failed_lab_read_keeps_the_last_capacity_beside_its_error() -> None:
+    failed = {**LAB, "error": "timed out", "error_at": NOW - MINUTE}
+    assert lab_of(failed) == {
+        "at": NOW - 2 * MINUTE,
+        "error": "timed out",
+        "error_at": NOW - MINUTE,
+        "classes": LAB_CLASSES,
+    }
+
+
+def test_a_lab_that_never_answered_shows_its_error_and_no_classes() -> None:
+    never = {"url": "http://lab:8080", "error": "connection refused", "error_at": NOW}
+    assert lab_of(never) == {"at": None, "error": "connection refused", "error_at": NOW, "classes": []}
+
+
+@pytest.mark.feature("ledger-stats-lab")
+def test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs() -> None:
+    d = doc(tasks=[task("a", "open")], time_left_minutes=400)
+    meta = {"rev": 0, "stamps": {}, "events": [], "members": {}}
+    meta["time_left"] = {"at": 1, "inputs": {"slots": 1, "ci_minutes": 2, "lab": LAB}, "calculation": {}}
+    ctx = ledger_core.Context(meta, NOW)
+    ledger_stats.refresh(d, ctx, "s1")
+    assert ctx.meta["stats_refresh"]["calculation"]["lab"]["classes"] == LAB_CLASSES

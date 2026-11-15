@@ -2,6 +2,7 @@ import argparse
 import json
 import subprocess
 from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,60 @@ def reuse_jobs(policy: object = None) -> list[dict]:
     return jobs
 
 
+@lru_cache(maxsize=None)
+def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> list[list[dict[str, Any]]]:
+    """Every rendering of the gate-required job's steps the protected branch still accepts, for one (type_gate, postgres, docs) combination."""
+    requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
+    return [
+        typing(
+            sonar(
+                diagnostic(
+                    forward(
+                        finish(
+                            rerun(
+                                shape(
+                                    required(
+                                        lab(
+                                            ci_reuse.gate_steps(
+                                                **form,
+                                                summary=summary,
+                                                docs=docs,
+                                                watcher_loss=watcher_loss,
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        for typing in ((ci_reuse.typing_required,) if type_gate else (list,))
+        for sonar in (list, ci_reuse.test_only_sonar)
+        for diagnostic, forward in (
+            (list, list),
+            (ci_reuse.selection_diagnostic, list),
+            (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+        )
+        for form in (
+            {},
+            {"selected": True},
+            {"queue_tier": True},
+            {"queue_tier": True, "promotion": True},
+            {"queue_tier": True, "consolidated": True},
+            {"queue_tier": True, "promotion": True, "consolidated": True},
+        )
+        for summary in (False, True)
+        for watcher_loss in (False, True)
+        for required in requirements
+        for lab in (list[dict[str, Any]], ci_reuse.lab_verdict)
+        for rerun in (list, ci_reuse.lost_rerun)
+        for shape in (list, ci_reuse.inline_mutation)
+        for finish in (list, ci_reuse.pipefail_summary)
+    ]
+
+
 def _aggregator_problems(
     base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None, retired: frozenset = frozenset()
 ) -> list[str]:
@@ -91,7 +146,6 @@ def _aggregator_problems(
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
     postgres = any(ci_reuse.POSTGRES_REQUIRED[1] in str(step.get("run")) for step in base_job.get("steps") or [])
-    requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
     return problems + [
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
         for field in fields
@@ -105,54 +159,9 @@ def _aggregator_problems(
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
-            in [
-                typing(
-                    sonar(
-                        diagnostic(
-                            forward(
-                                finish(
-                                    rerun(
-                                        shape(
-                                            required(
-                                                lab(
-                                                    ci_reuse.gate_steps(
-                                                        **form,
-                                                        summary=summary,
-                                                        docs="docs" in ci_wiring.needs_of(head_job),
-                                                        watcher_loss=watcher_loss,
-                                                    )
-                                                )
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-                for typing in ((ci_reuse.typing_required,) if "type-gate" in ci_wiring.needs_of(head_job) else (list,))
-                for sonar in (list, ci_reuse.test_only_sonar)
-                for diagnostic, forward in (
-                    (list, list),
-                    (ci_reuse.selection_diagnostic, list),
-                    (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
-                )
-                for form in (
-                    {},
-                    {"selected": True},
-                    {"queue_tier": True},
-                    {"queue_tier": True, "promotion": True},
-                    {"queue_tier": True, "consolidated": True},
-                    {"queue_tier": True, "promotion": True, "consolidated": True},
-                )
-                for summary in (False, True)
-                for watcher_loss in (False, True)
-                for required in requirements
-                for lab in (list[dict[str, Any]], ci_reuse.lab_verdict)
-                for rerun in (list, ci_reuse.lost_rerun)
-                for shape in (list, ci_reuse.inline_mutation)
-                for finish in (list, ci_reuse.pipefail_summary)
-            ]
+            in _accepted_steps_renderings(
+                "type-gate" in ci_wiring.needs_of(head_job), postgres, "docs" in ci_wiring.needs_of(head_job)
+            )
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]

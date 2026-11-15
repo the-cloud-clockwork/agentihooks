@@ -5,7 +5,7 @@ Pure functions over a ledger document and its `_meta` events.
 
 import math
 import statistics
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.repository import hierarchy
@@ -138,8 +138,25 @@ def frozen(doc: dict, pending: dict, inputs: dict) -> set:
     return held
 
 
+def lab_block(lab: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The lab capacity the tick last read: read time, last read error, and per scheduling class in the lab's order
+    the pending units and predicted wait in seconds; None when the tick sent no reading."""
+    if not lab:
+        return None
+    capacity: dict[str, Any] = lab.get("capacity") or {}
+    classes: dict[str, dict[str, Any]] = capacity.get("classes") or {}
+    return {
+        **{key: lab.get(key) for key in ("at", "error", "error_at")},
+        "classes": [
+            {"class": name, "pending": entry["pending"], "predicted_wait_s": entry["predicted_wait_s"]}
+            for name, entry in classes.items()
+        ],
+    }
+
+
 def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> dict:
-    slots, ci = (inputs or {}).get("slots"), (inputs or {}).get("ci_minutes")
+    given: dict[str, Any] = inputs or {}
+    slots, ci = given.get("slots"), given.get("ci_minutes")
     tiers = agent_minutes(doc, events, now)
     pending = {t["id"]: t for t in live(doc, "tasks") if not finished(t) and not t.get("merged_into")}
     left = {tid: remaining_minutes(t, tiers, ci or 0, events, now) for tid, t in pending.items()}
@@ -166,6 +183,7 @@ def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> 
         "gap": gap,
         "frozen": len(held),
         "frozen_work": round(sum(left[tid] for tid in held), 1),
+        "lab": lab_block(given.get("lab")),
     }
 
 

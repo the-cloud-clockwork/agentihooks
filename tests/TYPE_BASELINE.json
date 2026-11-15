@@ -720,7 +720,7 @@
   "scripts/swarm_ledger/api/services.py": 54,
   "scripts/swarm_ledger/api/task_list.py": 55,
   "scripts/swarm_ledger/api/worker_writes.py": 21,
-  "scripts/swarm_ledger/artifact_sanity.py": 171,
+  "scripts/swarm_ledger/artifact_sanity.py": 159,
   "scripts/swarm_ledger/authority_context.py": 16,
   "scripts/swarm_ledger/chat_ledger.py": 2,
   "scripts/swarm_ledger/chat_receipts.py": 10,

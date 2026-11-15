@@ -2275,3 +2275,43 @@ def test_a_head_editing_the_delivery_config_under_the_repository_registry_grades
     head = _put(repo, {"delivery.yaml": "lab:\n  authoritative: [lint]\n"}, "flip lint")
     code, out = _frozen_grade(repo, head, capsys)
     assert (code, out.count("::error::")) == (0, 0), out
+
+
+def test_the_accepted_steps_renderings_are_built_once_per_combination() -> None:
+    from scripts import ci_reuse
+
+    gate_protected._accepted_steps_renderings.cache_clear()
+    calls = {"n": 0}
+    original = ci_reuse.gate_steps
+
+    def counting(
+        selected: bool = False,
+        queue_tier: bool = False,
+        promotion: bool = False,
+        consolidated: bool = False,
+        summary: bool = False,
+        docs: bool = False,
+        watcher_loss: bool = False,
+    ) -> list[dict[str, object]]:
+        calls["n"] += 1
+        return original(
+            selected=selected,
+            queue_tier=queue_tier,
+            promotion=promotion,
+            consolidated=consolidated,
+            summary=summary,
+            docs=docs,
+            watcher_loss=watcher_loss,
+        )
+
+    ci_reuse.gate_steps = counting
+    try:
+        base, head = _aggregators()
+        head["jobs"]["gate-required"]["steps"] = [{"run": "echo not a recognised rendering"}]
+        _grade({"test.yml": head}, base={"test.yml": base})
+        first = calls["n"]
+        assert first > 0
+        _grade({"test.yml": head}, base={"test.yml": base})
+        assert calls["n"] == first
+    finally:
+        ci_reuse.gate_steps = original

@@ -1,6 +1,7 @@
 import inspect
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -322,3 +323,87 @@ def test_a_pull_request_workflow_without_jobs_needs_no_declaration() -> None:
     workflows = {"test.yml": _gate_workflow(), "bare.yml": {"on": "pull_request"}}
 
     assert _check(workflows, {}) == []
+
+
+def _lab_gate(replaces: str = "test.yml/lint", reason: str = "why", owner: str = "eng-1@swarm") -> dict[str, str]:
+    return {"reason": reason, "owner": owner, "replaces": replaces}
+
+
+def _main_with_lab(root: Path, workflow: dict[Any, Any], config: dict[str, Any], lab: dict[str, Any]) -> int:
+    _write(root, {"test.yml": workflow}, config)
+    (root / "delivery.yaml").write_text(yaml.safe_dump({"lab": lab}))
+    return ci_wiring.main(["--root", str(root)])
+
+
+def test_a_planted_undeclared_flag_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/unit": _lab_gate("test.yml/unit")}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, {"authoritative": ["lint", "unit"]}) == 1
+    assert capsys.readouterr().out == (
+        "1 workflows, 3 jobs, 1 wiring problems\n"
+        "::error::lab.authoritative names lint, but .github/gate-wiring.json declares no lab/lint lab gate.\n"
+    )
+
+
+def test_every_declared_authoritative_flag_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, {"authoritative": ["lint", "unit"]}) == 0
+    assert capsys.readouterr().out == "1 workflows, 3 jobs, 0 wiring problems\n"
+
+
+@pytest.mark.parametrize("field", ["reason", "owner", "replaces"])
+def test_a_lab_gate_missing_a_field_is_red(field: str) -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate(**{field: ""})}}
+    assert _check({"test.yml": _gate_workflow()}, config) == [f"lab/lint is declared without its {field}."]
+
+
+@pytest.mark.parametrize("key", ["lint", "lab/"])
+def test_a_lab_gate_named_outside_the_lab_prefix_is_red(key: str) -> None:
+    config = {"lab_gates": {key: _lab_gate()}}
+    assert _check({"test.yml": _gate_workflow()}, config) == [
+        f"{key} is declared a lab gate but is not named lab/<gate>."
+    ]
+
+
+def test_a_lab_gate_replacing_no_workflow_job_is_red() -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate("test.yml/gone"), "lab/unit": _lab_gate("other.yml/unit")}}
+    assert _check({"test.yml": _gate_workflow()}, config) == [
+        "lab/lint replaces test.yml/gone, which is no workflow job.",
+        "lab/unit replaces other.yml/unit, which is no workflow job.",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gate_required", "dropped", "code", "out"),
+    [
+        (True, ("pull_request",), 0, "1 workflows, 3 jobs, 0 wiring problems\n"),
+        (
+            False,
+            ("pull_request",),
+            1,
+            "1 workflows, 3 jobs, 1 wiring problems\n"
+            "::error::test.yml holds Gate — Required but does not run on pull_request.\n",
+        ),
+        (
+            True,
+            ("pull_request", "merge_group"),
+            1,
+            "1 workflows, 3 jobs, 1 wiring problems\n"
+            "::error::test.yml holds Gate — Required but does not run on merge_group.\n",
+        ),
+    ],
+    ids=["lab-gate-lifts-pull-request", "actions-gate-needs-pull-request", "lab-gate-keeps-merge-group"],
+)
+def test_the_lab_gate_required_flag_lifts_only_the_pull_request_trigger(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    gate_required: bool,
+    dropped: tuple[str, ...],
+    code: int,
+    out: str,
+) -> None:
+    workflow = _gate_workflow()
+    for event in dropped:
+        del workflow[True][event]
+    lab = {"authoritative": [], "gate_required": gate_required}
+    assert _main_with_lab(tmp_path, workflow, {}, lab) == code
+    assert capsys.readouterr().out == out
