@@ -6471,6 +6471,9 @@
       "tests": [
         "tests/hub/test_launch_checks.py::test_a_hung_verdict_keeps_a_live_agent_whose_started_record_is_missing",
         "tests/hub/test_launch_checks.py::test_a_hung_verdict_frees_an_agent_its_hive_report_leaves_out"
+      ],
+      "rules": [
+        "hub-hang-frees-live-agent"
       ]
     },
     {
