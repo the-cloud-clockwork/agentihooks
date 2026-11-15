@@ -25,7 +25,7 @@ class Settings:
     ports: PortAllocator
     whitelist: Mapping[str, str]
     timeout: float
-    context: Mapping[str, str] = field(default_factory=dict)
+    context: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
