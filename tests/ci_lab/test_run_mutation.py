@@ -3,6 +3,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import time
 import warnings
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -23,7 +24,7 @@ REPO = Path(__file__).resolve().parents[2]
 OPTIONS = ["-q", "-p", "no:cacheprovider", "-o", "addopts="]
 FUNCTION = "scripts.mutation_self_plant_sample.x_fee"
 SAMPLE = "def fee(amount, rate):\n    return amount * rate + 1\n"
-FIXED_COST_RATIO = 0.5
+FIXED_COST_RATIO = 0.25
 
 
 class Exited(Exception):
@@ -420,7 +421,9 @@ def graded_by_lab(work: Path, tree: Path, names: list[str], tests: dict[str, flo
         "budget": 60.0,
         "cap": 2,
     }
-    return lab(tree, request)
+    started = time.monotonic()
+    graded = lab(tree, request)
+    return {**graded, "elapsed": time.monotonic() - started}
 
 
 def statuses(rows: list[dict[str, Any]]) -> dict[str, str]:
@@ -484,9 +487,10 @@ def test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence(c
 def test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection(corpus_run: dict[str, Any]) -> None:
     graded = corpus_run["graded"]
     seconds = [row["seconds"] for row in graded["rows"]]
-    ratio = statistics.median(seconds) / graded["collection_seconds"]
+    once = graded["elapsed"] - sum(seconds)
+    ratio = statistics.median(seconds) / once
     warnings.warn(
-        f"lab warm runner fixed cost ratio {ratio:.4f}: mutant seconds {seconds}, "
-        f"collection seconds {graded['collection_seconds']:.4f}"
+        f"lab warm runner fixed cost ratio {ratio:.4f}: mutant seconds {seconds}, one time seconds {once:.4f}, "
+        f"of which collection {graded['collection_seconds']:.4f}"
     )
     assert ratio <= FIXED_COST_RATIO
