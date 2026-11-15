@@ -5,6 +5,7 @@ import math
 import os
 import re
 import subprocess
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict, cast
@@ -29,7 +30,6 @@ MARKDOWN_GLOB = re.compile(r"glob\(\s*['\"][^'\"]*\*\.md['\"]")
 # Changing any of these changes how every test runs, so only the full suite grades them.
 HARNESS = frozenset(
     {
-        "pyproject.toml",
         ".github/test-excludes.txt",
         "tests/__init__.py",
         "tests/shards.py",
@@ -41,6 +41,7 @@ HARNESS = frozenset(
     }
 )
 CONFTEST = "conftest.py"
+PYPROJECT = "pyproject.toml"
 # Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail the queue.
 SUITE_SPEED = "tests/test_suite_speed.py"
 FAKEREDIS = "fakeredis"
@@ -67,8 +68,48 @@ def is_test(path: str) -> bool:
     return path.startswith(f"{TESTS}/") and Path(path).name.startswith("test_") and path.endswith(".py")
 
 
-def needs_full_suite(changed: list[str]) -> bool:
-    return any(path in HARNESS or Path(path).name == CONFTEST for path in changed)
+def nested_conftest(path: str) -> bool:
+    """A conftest below the tests root, whose fixtures reach only the tests beneath its directory."""
+    parts = Path(path).parts
+    return parts[-1] == CONFTEST and parts[0] == TESTS and len(parts) > 2
+
+
+def conftest_tests(root: Path, changed: list[str]) -> set[str]:
+    """The test files beneath each changed nested conftest."""
+    return {
+        test.relative_to(root).as_posix()
+        for path in changed
+        if nested_conftest(path)
+        for test in (root / path).parent.rglob("test_*.py")
+    }
+
+
+def harness_tables(root: Path, revision: str) -> tuple[dict[str, object], object, object, object]:
+    """The pyproject tables that change how every test runs at a revision, all empty when it has no pyproject."""
+    shown = subprocess.run(["git", "show", f"{revision}:{PYPROJECT}"], cwd=root, capture_output=True, text=True)
+    data = tomllib.loads(shown.stdout)
+    project = data.get("project", {})
+    return (
+        {name: table for name, table in data.get("tool", {}).items() if name.startswith("pytest")},
+        project.get("dependencies"),
+        project.get("optional-dependencies"),
+        data.get("build-system"),
+    )
+
+
+def pyproject_reaches_tests(root: Path, base: str, head: str) -> bool:
+    """Whether the head changes a pyproject table that changes how every test runs, against the merge base."""
+    fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root, text=True).strip()
+    return harness_tables(root, fork) != harness_tables(root, head)
+
+
+def needs_full_suite(changed: list[str], pyproject: bool) -> bool:
+    return any(
+        path in HARNESS
+        or (path == PYPROJECT and pyproject)
+        or (Path(path).name == CONFTEST and not nested_conftest(path))
+        for path in changed
+    )
 
 
 def is_doc(path: str) -> bool:
@@ -123,6 +164,7 @@ def selected_tests(
         tests.update(recorded_tests(manifest, changed))
     if tree_reshaped:
         tests.update(TREE_CHECKS)
+    tests.update(conftest_tests(root, changed))
     needles: set[str] = set()
     for path in changed:
         needles.add(path)
@@ -249,8 +291,9 @@ def decide(
     limit: int,
     tree_reshaped: bool = False,
     manifest: dict[str, Any] | None = None,
+    pyproject: bool = True,
 ) -> tuple[str, list[list[str]]]:
-    if needs_full_suite(changed):
+    if needs_full_suite(changed, pyproject):
         return FULL, []
     tests = selected_tests(root, changed, tree_reshaped, manifest)
     if not tests:
@@ -274,13 +317,14 @@ def main(argv: list[str] | None = None) -> int:
         for path in args.durations or [args.root / DURATIONS]:
             durations.update(json.loads(path.read_text()))
         changed = changed_files(args.root, args.base, args.head)
+        pyproject = PYPROJECT in changed and pyproject_reaches_tests(args.root, args.base, args.head)
         manifest = None
-        if args.repository and not needs_full_suite(changed) and not all(is_doc(path) for path in changed):
+        if args.repository and not needs_full_suite(changed, pyproject) and not all(is_doc(path) for path in changed):
             if found := find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")):
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds runtime dependent tests.")
         scope, legs = decide(
-            args.root, changed, durations, args.legs, reshaped(args.root, args.base, args.head), manifest
+            args.root, changed, durations, args.legs, reshaped(args.root, args.base, args.head), manifest, pyproject
         )
     outputs = {"scope": scope, "legs": json.dumps(list(range(1, len(legs) + 1))), "count": str(len(legs))}
     outputs.update({f"files_{index}": " ".join(leg) for index, leg in enumerate(legs, 1)})

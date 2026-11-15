@@ -747,6 +747,34 @@ jobs:
           key: durations-merged-${{ github.event.pull_request.base.sha }}
           restore-keys: durations-merged-
 
+      - name: Hold the heavy legs until the head stops moving
+        if: github.event_name == 'pull_request' && vars.AGENTIHOOKS_CI_QUIET_SECONDS != ''
+        env:
+          QUIET: ${{ vars.AGENTIHOOKS_CI_QUIET_SECONDS }}
+          PULL: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          whole='^(0|[1-9][0-9]?)$'
+          if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 60 ]]; then
+            echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 60, not $QUIET"
+            exit 1
+          fi
+          deadline=$((SECONDS + QUIET))
+          while [[ "$SECONDS" -lt "$deadline" ]]; do
+            pause=$((deadline - SECONDS))
+            [[ "$pause" -le 5 ]] || pause=5
+            sleep "$pause"
+            if ! head="$(timeout 20 git -C "$GITHUB_WORKSPACE" ls-remote origin "refs/pull/$PULL/head")"; then
+              echo "::error::Cannot read the head of pull request $PULL from origin"
+              exit 1
+            fi
+            head="${head%%[[:space:]]*}"
+            if [[ -n "$head" && "$head" != "$HEAD_SHA" ]]; then
+              echo "::error::The head moved to $head inside the quiet window; the run for that head grades it"
+              exit 1
+            fi
+          done
+
       - name: Select the tests the change reaches
         id: select
         env:
