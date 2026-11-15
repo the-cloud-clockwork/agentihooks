@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.902 · 2026-11-15
+
+### 2026-11-15 · b430b887b620 · #11293 · @nestorcolt
+
+**Send the hive stop when verify retires an admitted agent for an account mismatch**
+
+When observe verify retires a hub admitted agent whose hive flagged an account mismatch, tick now sends the execution.stop naming "mismatch" once the store accepts the drop, and when the agent can't be reached it retires through the stop path rather than leaving it dangling, matching how the idle case already behaves. This closes the second half of the retirement stop split: both mismatch and idle paths now share the same tested stop behavior, including the previously untested refused-drop case, so operators get consistent hive notifications regardless of why an admitted agent was retired.
+
 ## v2.17.901 · 2026-11-15
 
 ### 2026-11-15 · c1ab1f63d8d9 · #11211 · @agenticore-app
