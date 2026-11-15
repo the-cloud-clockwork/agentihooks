@@ -40,6 +40,12 @@ class Box:
 
     def shrink(self, value):
         return value - 1
+
+
+if LIMIT:
+
+    def fallback(value):
+        return value + 1
 """
 PATH = "scripts/sample.py"
 EVERY_LINE = {PATH: range(1, 40)}
@@ -120,6 +126,7 @@ def edit(root: Path, name: str, old: str, new: str) -> None:
         ([19], ["x_third"]),
         ([25], []),
         ([28, 31], ["xǁBoxǁgrow", "xǁBoxǁshrink"]),
+        ([37], []),
     ],
 )
 def test_one_unit_per_changed_function_with_mutants(tmp_path: Path, lines: list[int], functions: list[str]) -> None:
@@ -132,7 +139,7 @@ def test_a_unit_names_every_mutant_of_its_function_as_mutmut_does(tmp_path: Path
     root = repository(tmp_path, MUTANT_FILES)
     units = expand_mutation.mutant_units(root, {PATH: [12, 28]}, {})
     owners = {"scripts.sample.x_second", "scripts.sample.xǁBoxǁgrow"}
-    every = [f"scripts.sample.{name}" for name in selected_mutant_names(PATH, SAMPLE, set(range(1, 32)))]
+    every = [f"scripts.sample.{name}" for name in selected_mutant_names(PATH, SAMPLE, set(range(1, 40)))]
     assert [member for unit in units for member in unit.members] == [
         name for name in every if name.rpartition("__mutmut_")[0] in owners
     ]
