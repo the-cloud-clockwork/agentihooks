@@ -6470,7 +6470,8 @@
         "tests/swarm/test_events_claim_refunds.py::test_the_reap_pass_sends_no_pending_stop_again_on_the_memory_backend",
         "tests/swarm/test_events_claim_refunds.py::test_a_pass_stops_sending_again_at_the_first_stop_the_bus_still_refuses",
         "tests/swarm/test_events_claim_refunds.py::test_a_refused_stop_for_an_agent_with_no_execution_is_not_kept",
-        "tests/swarm/test_events_claim_refunds.py::test_a_stop_the_bus_takes_for_a_dropped_agent_keeps_nothing_pending"
+        "tests/swarm/test_events_claim_refunds.py::test_a_stop_the_bus_takes_for_a_dropped_agent_keeps_nothing_pending",
+        "tests/swarm/test_events_claim_refunds.py::test_every_retirement_keeps_the_stop_the_bus_refused_pending_for_its_execution"
       ]
     },
     {

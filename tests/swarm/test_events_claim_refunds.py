@@ -534,6 +534,39 @@ def pending_stops(store: RedisStore) -> dict[str, str]:
     return cast("dict[str, str]", store.redis.hgetall(store.key(SLUG, reconciler.PENDING_STOPS)))
 
 
+WATCH_FREES = {
+    "refused": agent_steps._free_refused,
+    "revoked": agent_steps._free_revoked,
+    "stuck": agent_steps._free_stuck,
+}
+
+
+@pytest.mark.feature("events-refused-stop-resent")
+@pytest.mark.parametrize("reason", ["refused", "revoked", "stuck", "mismatch", "idle"])
+def test_every_retirement_keeps_the_stop_the_bus_refused_pending_for_its_execution(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    store, ledger, rt = env
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+    monkeypatch.setattr(execution_stop, "stop", refused_stop)
+
+    if reason in WATCH_FREES:
+        WATCH_FREES[reason](SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
+    else:
+        retire(reason, env, agent)
+
+    held = {execution: json.loads(raw) for execution, raw in pending_stops(store).items()}
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert {execution: (stop["agent"]["name"], stop["reason"]) for execution, stop in held.items()} == {
+        agent.execution_id: (agent.name, reason)
+    }
+
+
 @pytest.mark.feature("events-refused-stop-resent")
 def test_a_refused_stop_for_an_agent_the_swarm_still_seats_is_discarded_and_not_sent_again(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
