@@ -154,10 +154,10 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
 def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
-    ending = "idle"
     agent, event = launched(env, bus, seat)
     spoke_started(bus)
 
@@ -300,10 +300,10 @@ def test_a_reachable_agent_is_retired_through_its_runtime_with_its_task_scratch_
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
+@pytest.mark.parametrize("ending", ["mismatch", "idle"])
 def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
 ) -> None:
-    ending = "idle"
     store, ledger, rt = env
     agent, event = launched(env, bus, seat)
     spoke_started(bus)
