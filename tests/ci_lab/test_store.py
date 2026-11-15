@@ -1,3 +1,4 @@
+import dataclasses
 import io
 import json
 import re
@@ -131,6 +132,21 @@ def test_a_put_after_the_objects_are_lost_rewrites_them_and_the_index(
 
     assert verdicts.get("test", unit) == later
     assert verdicts.objects.read(f"lab/test/{hexdigest(unit)}/log.txt") == b"two\n"
+
+
+def test_a_put_that_finds_a_report_without_a_log_never_adds_a_log_of_another_run(
+    verdicts: store.Store,
+) -> None:
+    unit = key("test", "crashed")
+    first = store.Verdict(kind="test", key=unit, passed=True, flaky=False, seconds=1.0)
+    folder = f"lab/test/{hexdigest(unit)}/"
+    document = {"report": {}, "verdict": dataclasses.asdict(first)}
+    verdicts.objects.write_once(f"{folder}report.json", json.dumps(document).encode())
+
+    assert verdicts.put(store.Verdict(kind="test", key=unit, passed=False, flaky=False, seconds=2.0), {}, b"x") is False
+
+    assert verdicts.get("test", unit) == first
+    assert verdicts.objects.keys("lab/") == [f"{folder}report.json"]
 
 
 def test_get_after_a_redis_flush_plus_reindex_returns_the_verdict(
