@@ -110,17 +110,17 @@ key; the builders are pure and read no file, clock or network.
 | `toolchain` | `interpreter` | Python version the unit runs on |
 | `toolchain` | `tools` | Tool name to version, such as ruff, basedpyright, semgrep |
 | `toolchain` | `lockfile` | Blob id of `uv.lock` |
+| `toolchain` | `pyproject` | Blob id of `pyproject.toml`, which holds the tool and pytest configuration |
 | `toolchain` | `image` | Digest of the worker image |
 | `toolchain` | `environment` | The environment key: each variable the unit reads, with its value |
 | `static` | `gate` | Gate name, such as `ruff` or `type_gate` |
 | `static` | `head` | Path to blob id of every head file the gate grades |
 | `static` | `base` | Path to blob id of every base file the gate compares against |
-| `static` | `grader` | Digest of the gate script's import closure at the protected grader revision |
+| `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
 | `test` | `tests` | Test id to its fingerprint from `tests/dep_manifest.py` |
 | `test` | `opened` | Path to blob id of each file a test opened outside the manifest |
 | `test` | `invocation` | The pytest argument list, plugins included, in order |
-| `test` | `pyproject` | Blob id of `pyproject.toml` |
 | `test` | `toolchain` | The toolchain above |
 | `stats` | `path` | The test file |
 | `stats` | `inputs` | Source to digest of every source the test file reaches |
@@ -151,12 +151,21 @@ key; the builders are pure and read no file, clock or network.
 
 - `stats_key` hashes exactly the stats cache identity of schema 4 with its own record form
   (default JSON separators), so its digest equals `StoredStats.identity` for the same inputs and
-  the lab reuses the stats the cache already holds. Its lockfile input is the `uv.lock` entry of
-  `sources`.
-- A change to `uv.lock` rekeys every unit kind. A grade is keyed by its head, which names the
-  lockfile.
-- The `.github/` tree is not a test input; the pytest invocation stands for it.
+  the lab reuses the stats the cache already holds. Its file inputs are sha256 digests of the file
+  bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
+  Its lockfile and pyproject inputs are the `uv.lock` and `pyproject.toml` entries of `sources`.
+- A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
+  which names both files.
+- The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
+  pytest invocation, which a workflow used to define, is the test input instead. This replaces the
+  manifest's `.github/` prefix invalidation, as the lab's test expansion design specifies; the
+  plan's earlier rule that any change under `.github/` invalidates every test fingerprint does not
+  apply to lab keys.
+- The test expander applies the manifest's fallbacks before it builds `tests` and `opened`: a test
+  that reaches code by dynamic import, starts a process the tracer cannot follow or opens a file
+  outside the manifest is fingerprinted on the whole measured source tree, and each file opened
+  outside the manifest enters `opened` by blob id.
 - Line numbers, the changed line scope and mutation clearances stay out of a mutant key; they apply
   at grade time.
-- A unit that reads the clock or the network is marked nondeterministic and is never cached, so
-  it never needs a key.
+- The expander marks a unit that reads the clock or the network nondeterministic, and the store
+  never caches its verdict, so no builder keys one.

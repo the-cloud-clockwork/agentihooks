@@ -34,10 +34,10 @@ RECORDS = {
     "toolchain": digests.Toolchain,
 }
 GOLDEN = {
-    "static": "static-v1-fc6df8a083aa6d4c93d4ad2ed496cd616c6d73465152800231b72c44a7bd5918",
-    "test": "test-v1-60a1560e8f765fc524b85584ee0ae2844eb6770c2600d61adcbd52f63e31f442",
+    "static": "static-v1-4b187fa1f86aed0defbd09ab7e347535ff7dc1ebe68ce7632699bb2dcae59ffb",
+    "test": "test-v1-28f019682121264e77614e24d678af401a7a77368780a802738e2ec4ce4c0b77",
     "stats": "stats-v4-b5891dcd6fdfc93028d0114781ea86eb2059790bd2a4d1ecfbe764046ed2255d",
-    "mutant": "mutant-v1-f329ac06ff7c1fc7b1257278d6338d6e0faaef5b86e7e4ac4fb9b9ad6c21d981",
+    "mutant": "mutant-v1-d7fa3cbcb90e677e8e1844e25015e79435052a2a335515e5f8f4a4cb5519509b",
     "grade": "grade-v1-3239f51cc667199b67c460ae7e6c8ad5b90dc61f64ca223571b6211149514455",
 }
 
@@ -47,6 +47,7 @@ def toolchain() -> digests.Toolchain:
         interpreter="3.12.7",
         tools={"ruff": "0.8.0", "basedpyright": "1.40.2"},
         lockfile=BLOBS["uv.lock"],
+        pyproject=BLOBS["pyproject.toml"],
         image="sha256:" + "1" * 64,
         environment={"TZ": "UTC", "LANG": "C.UTF-8"},
     )
@@ -71,7 +72,6 @@ def cases() -> dict[str, tuple[Callable[[Any], str], Any]]:
                 tests={"tests/test_app.py::test_answer": UNITS["answer"]},
                 opened={"pyproject.toml": BLOBS["pyproject.toml"]},
                 invocation=("pytest", "-p", "tests.pass_record", "tests/test_app.py"),
-                pyproject=BLOBS["pyproject.toml"],
                 toolchain=chain,
             ),
         ),
@@ -165,7 +165,7 @@ def test_digest_is_sha256_of_canonical_json() -> None:
 
 def test_blob_id_is_the_git_blob_id() -> None:
     assert digests.blob_id(b"hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
-    assert digests.blob_id(b"") == "e69de29bb2d1d6435b8c2ec1fc2d6d4bc5f8a6ba"
+    assert digests.blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -191,15 +191,27 @@ def test_golden_keys_for_the_fixture_tree(kind: str) -> None:
     assert build(inputs) == GOLDEN[kind]
 
 
+@pytest.mark.parametrize("name", ("uv.lock", "pyproject.toml"))
 @pytest.mark.parametrize("kind", ("static", "test", "stats", "mutant"))
-def test_a_lockfile_change_rekeys_every_unit_kind(kind: str) -> None:
+def test_a_lockfile_or_pyproject_change_rekeys_every_unit_kind(kind: str, name: str) -> None:
     build, inputs = cases()[kind]
-    bumped = TREE["uv.lock"] + b'\n[[package]]\nname = "extra"\nversion = "1.0"\n'
+    bumped = TREE[name] + b'\n[tool.bumped]\nvalue = "1.0"\n'
     if kind == "stats":
-        changed = replace(inputs, sources={**inputs.sources, "uv.lock": hashlib.sha256(bumped).hexdigest()})
+        changed = replace(inputs, sources={**inputs.sources, name: hashlib.sha256(bumped).hexdigest()})
     else:
-        changed = replace(inputs, toolchain=replace(inputs.toolchain, lockfile=digests.blob_id(bumped)))
+        field = {"uv.lock": "lockfile", "pyproject.toml": "pyproject"}[name]
+        changed = replace(inputs, toolchain=replace(inputs.toolchain, **{field: digests.blob_id(bumped)}))
     assert build(changed) != build(inputs)
+
+
+def test_mutant_names_enter_the_key_sorted(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, inputs = cases()["mutant"]
+    names = frozenset(f"scripts.app.x_answer__mutmut_{number}" for number in range(1, 40))
+    records: list[dict[str, Any]] = []
+    real = digests.digest
+    monkeypatch.setattr(digests, "digest", lambda record: records.append(record) or real(record))
+    digests.mutant_key(replace(inputs, names=names))
+    assert records[0]["inputs"]["names"] == sorted(names)
 
 
 @pytest.mark.parametrize("kind", KINDS)
