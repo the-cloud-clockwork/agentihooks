@@ -143,9 +143,8 @@ def test_rekeyed_tests_match_the_manifest_invalidation(
 
 
 def test_a_change_to_an_imported_test_module_rekeys_the_importing_tests(repository: Path) -> None:
-    (repository / "tests/test_import.py").write_text(
-        "from tests.test_alpha import test_first as reused\n\n\ndef test_reuse():\n    pass\n"
-    )
+    (repository / "tests/helpers.py").write_text("from tests.test_alpha import test_first as reused\n")
+    (repository / "tests/test_import.py").write_text("from tests import helpers\n\n\ndef test_reuse():\n    pass\n")
     manifest = copy.deepcopy(MANIFEST)
     manifest["tests"]["tests/test_import.py::test_reuse"] = {"units": [], "files": [], "escapes": False}
     cycle = FILES["tests/test_alpha.py"] + "\n\nfrom tests.test_import import test_reuse\n"

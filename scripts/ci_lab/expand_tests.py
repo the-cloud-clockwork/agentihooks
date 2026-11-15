@@ -56,7 +56,7 @@ def _shared(path: str) -> bool:
 
 
 def _reached(tree: Mapping[str, bytes], path: str, reached: set[str]) -> set[str]:
-    """Return the test modules a test module reaches through its imports, added to the modules already reached.
+    """Return the test tree modules a test module reaches through its imports, added to the modules already reached.
 
     The manifest records no test module another test module imports, since an import's own read is not a test read.
     """
@@ -69,7 +69,7 @@ def _reached(tree: Mapping[str, bytes], path: str, reached: set[str]) -> set[str
         return reached
     for name in names:
         module = f"{name.replace('.', '/')}.py"
-        if _test_module(module):
+        if module.startswith("tests/"):
             _reached(tree, module, reached)
     return reached
 
