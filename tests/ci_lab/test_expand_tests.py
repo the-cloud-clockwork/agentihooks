@@ -41,7 +41,7 @@ MANIFEST: dict[str, Any] = {
         "tests/test_alpha.py::test_first": {"units": [2, 3], "files": [], "escapes": False},
         "tests/test_alpha.py::test_second": {"units": [2, 4], "files": [], "escapes": False},
         "tests/test_beta.py::test_run": {"units": [0, 1], "files": ["scripts/data.json"], "escapes": False},
-        "tests/test_beta.py::test_spawn": {"units": [], "files": [], "escapes": True},
+        "tests/test_beta.py::test_spawn": {"units": [], "files": ["docs/guide.md"], "escapes": True},
         "tests/test_group.py::test_one@fakeredis": {"units": [0], "files": [], "escapes": False},
     },
     "lines": {},
@@ -124,7 +124,8 @@ def test_lockfile_removal_rekeys_every_test(repository: Path) -> None:
         ("tests/conftest.py", "import os\n", EVERY_TEST),
         ("tests/helpers.py", "VALUE = 2\n", EVERY_TEST),
         ("tests/fixtures/sample.txt", "changed\n", {SPAWN}),
-        ("docs/guide.md", "changed\n", set()),
+        ("docs/guide.md", "changed\n", {SPAWN}),
+        ("docs/notes.md", "notes\n", set()),
         ("tool.py", "TOOL = 2\n", EVERY_TEST),
         (".github/helper.py", "HELPER = 1\n", EVERY_TEST),
         ("uv.lock", "version = 2\n", EVERY_TEST),
@@ -161,7 +162,7 @@ def test_a_test_that_opened_files_outside_the_manifest_is_keyed_on_the_measured_
     ("record", "expected"),
     [
         ({"units": [], "files": [], "escapes": False}, False),
-        ({"units": [], "files": []}, False),
+        ({"units": [], "files": []}, True),
         ({"units": [], "files": [], "escapes": False, "outside": []}, False),
         ({"units": [], "files": [], "escapes": True}, True),
         ({"units": [], "files": [], "escapes": False, "outside": ["/etc/hosts"]}, True),
@@ -186,7 +187,7 @@ def test_fingerprints_are_golden() -> None:
     }
     assert expand_tests.fingerprints(manifest, tree) == {
         "tests/test_alpha.py::test_first": "50453d70f855a2c09ef48a172dee6f277fb53e9d727059b5eb3ff0ebfca4ea01",
-        "tests/test_alpha.py::test_second": "a0ad3d11bb52a0dbe747f1dbd34f05d16f39c268f61a918e30aa3fd8c397794c",
+        "tests/test_alpha.py::test_second": "9107747a4089126a323cbfc2a542aa9a339ad2254648c5c96fa651fb32e1a19f",
     }
 
 

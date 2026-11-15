@@ -3,8 +3,8 @@
 A test's fingerprint covers the hashes of the units it executed, every repository file it opened, its own test
 module, and a part every test shares: the dependency pins, the test support modules, every Python file outside the
 measured trees, and the pytest invocation, which replaces the manifest's invalidation by workflow files. A broad
-test, whose closure escaped the tracer or that opened files outside the manifest, is keyed on the whole measured
-source tree instead of its own units and files.
+test, whose closure escaped the tracer or that opened files outside the manifest, is keyed on every file under the
+measured trees and the test trees instead of its own units.
 """
 
 import hashlib
@@ -25,7 +25,6 @@ PYTEST_INVOCATION = (
     "-p",
     "tests.flake_ledger",
 )
-BROAD_SIGNALS = ("escapes", "outside")
 BROAD_TREES = (*dep_manifest.MEASURED, "tests/")
 
 
@@ -55,14 +54,22 @@ def _unit_keys(units: Sequence[str], tree: Mapping[str, bytes]) -> list[str | No
 
 
 def broad(record: Mapping[str, Any]) -> bool:
-    """Return whether a manifest record's dependencies are unknown, so it is keyed on the measured tree."""
-    return any(record.get(signal) for signal in BROAD_SIGNALS)
+    """Return whether a manifest record's dependencies are unknown, so it is keyed on the measured tree.
+
+    A record without the tracer's escapes flag is broad; a record listing files it opened outside the manifest is too.
+    """
+    return record.get("escapes", True) or bool(record.get("outside"))
 
 
 def fingerprints(
     manifest: Mapping[str, Any], tree: Mapping[str, bytes], invocation: Sequence[str] = PYTEST_INVOCATION
 ) -> dict[str, str]:
-    """Return a content key per manifest test over the repository tree it runs against."""
+    """Return a content key per manifest test over the repository tree it runs against.
+
+    The tree maps every tracked path to its blob content. The invocation is the interpreter and pytest arguments the
+    executor runs, without its slot count. Inputs the manifest does not record, such as the clock, the network and
+    environment variables, are not keyed.
+    """
     shared = _digest(
         {
             "invocation": list(invocation),
@@ -74,20 +81,19 @@ def fingerprints(
     units = _unit_keys(names, tree)
     keys: dict[str, str] = {}
     for test, record in manifest["tests"].items():
-        if broad(record):
-            keys[test] = _digest({"test": test, "shared": shared, "tree": measured})
-            continue
-        executed: list[int] = record["units"]
         opened: list[str] = record["files"]
         own = dep_manifest.node(test).partition("::")[0]
-        keys[test] = _digest(
-            {
-                "test": test,
-                "shared": shared,
-                "units": {names[index]: units[index] for index in executed},
-                "files": {path: _blob(tree, path) for path in {*opened, own}},
-            }
-        )
+        found: dict[str, object] = {
+            "test": test,
+            "shared": shared,
+            "files": {path: _blob(tree, path) for path in {*opened, own}},
+        }
+        if broad(record):
+            found["tree"] = measured
+        else:
+            executed: list[int] = record["units"]
+            found["units"] = {names[index]: units[index] for index in executed}
+        keys[test] = _digest(found)
     return keys
 
 
