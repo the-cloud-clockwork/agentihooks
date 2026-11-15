@@ -303,8 +303,9 @@ def test_selected_paths_accept_a_test_node_of_an_existing_file(tmp_path):
 def test_proofs_reuse_selected_mutation_and_smoke_execution():
     workflow = _workflow()
     jobs = workflow["jobs"]
+    assert "mutation" not in jobs
+    assert "mutation" not in workflow[True]["workflow_dispatch"]["inputs"]["proof"]["options"]
     for proof, reusable in (
-        ("mutation", "mutation-preflight"),
         ("semgrep", "semgrep"),
         ("worker-image", "swarm-node-smoke"),
         ("swarm-image", "swarm-smoke"),
@@ -317,10 +318,8 @@ def test_proofs_reuse_selected_mutation_and_smoke_execution():
         assert "steps" not in job
         assert "needs" not in job
         assert not job.get("continue-on-error", False)
-        if proof in {"mutation", "semgrep"}:
+        if proof == "semgrep":
             assert job["with"] == {"base": "${{ inputs.base }}"}
-    callable = yaml.safe_load((_ROOT / ".github/workflows/mutation-preflight.yml").read_text())
-    assert callable[True]["workflow_call"]["inputs"]["base"] == {"type": "string", "required": True}
 
 
 def test_a_nested_report_with_workflow_command_text_stays_out_of_the_log(tmp_path):

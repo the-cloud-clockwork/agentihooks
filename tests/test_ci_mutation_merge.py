@@ -16,7 +16,7 @@ def _file(path, counts, failures=(), untouched=(), cleared=()):
 
 
 def _write(folder, shard, report):
-    path = folder / f"mutation-preflight-shard-{shard}" / "report.json"
+    path = folder / f"mutation-report-{shard}" / "report.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(report))
 

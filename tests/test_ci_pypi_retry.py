@@ -256,7 +256,6 @@ def _mutation_installs():
                 "mutation-shard",
             ),
         ),
-        ("mutation-preflight.yml", None),
     ):
         jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
         for name in names or jobs:
@@ -276,16 +275,8 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
         ("test.yml", "mutation-probe"),
         ("test.yml", "mutation-replan"),
         ("test.yml", "mutation-shard"),
-        ("mutation-preflight.yml", "plan"),
-        ("mutation-preflight.yml", "touched-tests"),
-        ("mutation-preflight.yml", "stats"),
-        ("mutation-preflight.yml", "refine"),
-        ("mutation-preflight.yml", "mutation-shard"),
     }
-    helper = {
-        "test.yml": 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh"',
-        "mutation-preflight.yml": "bash .github/scripts/pypi-retry.sh",
-    }
+    helper = {"test.yml": 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh"'}
     for (workflow, job, _), lines in installs.items():
         for line in lines:
             assert line.startswith(f'{helper[workflow]} "Install dependencies" -- uv pip install --system '), (

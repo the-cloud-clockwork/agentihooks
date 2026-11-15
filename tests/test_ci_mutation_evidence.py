@@ -69,11 +69,11 @@ def test_bundle_preserves_every_shard_report_for_the_existing_aggregator(tmp_pat
         report = {"files": [], "not_mutated": [], "failed": False, "shard": measurement}
         (output / "report.json").write_text(json.dumps(report))
         with patch("scripts.ci_mutation.evidence.subprocess.check_output", return_value="revision\n"):
-            stage(tmp_path, output, tmp_path / "shards" / f"mutation-preflight-shard-{shard}", (shard, 2))
+            stage(tmp_path, output, tmp_path / "shards" / f"mutation-report-{shard}", (shard, 2))
     from scripts.ci_mutation.merge import main
 
     assert main([str(tmp_path / "shards"), "--shards", "2", "--output", str(tmp_path / "merged")]) == 0
-    (tmp_path / "shards/mutation-preflight-shard-1/report.json").unlink()
+    (tmp_path / "shards/mutation-report-1/report.json").unlink()
     assert main([str(tmp_path / "shards"), "--shards", "2", "--output", str(tmp_path / "merged")]) == 1
 
 
@@ -118,24 +118,6 @@ def test_replay_rebuilds_sources_then_runs_the_recorded_commands(tmp_path):
     with patch("scripts.ci_mutation.evidence.subprocess.check_output", return_value="wrong\n"):
         with pytest.raises(ValueError, match="revision"):
             replay(tmp_path, bundle, tmp_path / "other", "0-work")
-
-
-def test_shard_workflow_uploads_only_the_staged_bundle():
-    import yaml
-
-    root = Path(__file__).resolve().parents[1]
-    job = yaml.safe_load((root / ".github/workflows/mutation-preflight.yml").read_text())["jobs"]["mutation-shard"]
-    steps = {step.get("name"): step for step in job["steps"]}
-    stage = steps["Stage shard replay evidence"]
-    assert stage["if"] == "always()"
-    assert "scripts.ci_mutation.evidence stage" in stage["run"]
-    upload = steps["Upload shard mutation evidence"]
-    assert "--output .mutation-workspaces --bundle .mutation-gate" in stage["run"]
-    assert "mv .mutation-gate .mutation-workspaces" in stage["run"]
-    assert upload["with"]["path"] == (
-        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
-    )
-    assert list(steps).index(stage["name"]) < list(steps).index(upload["name"])
 
 
 @pytest.mark.parametrize(

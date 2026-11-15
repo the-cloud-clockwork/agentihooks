@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [tests, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -223,12 +223,6 @@ jobs:
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
       TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-
-  mutation:
-    if: inputs.proof == 'mutation'
-    uses: ./.github/workflows/mutation-preflight.yml
-    with:
-      base: ${{ inputs.base }}
 
   semgrep:
     if: inputs.proof == 'semgrep'

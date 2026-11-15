@@ -51,7 +51,6 @@ LANE_USERS = {
     "tick-scale.yml",
     *DIRECT,
 }
-LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 CALLED = {
     "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
     "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
@@ -68,7 +67,6 @@ EXCLUDED = {
     "publish-pypi.yml": "operator release path from main",
     "release.yml": "operator release path; a dry run tags and pushes nothing",
     "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
-    "mutation-preflight.yml": "branch pushes queue each run's legs on the batch runner set, whose ceiling caps them",
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
     EXCLUDED["access-audit.yml"] = "dev push, weekly and manual, one short read only job, no pull request trigger"
@@ -249,24 +247,6 @@ def test_a_focused_tests_proof_never_waits_on_a_lane_and_every_other_proof_keeps
             assert _is_lane(resolved["group"]), (proof, run_id)
 
 
-def test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on():
-    push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight"}
-    mutation = set()
-    for where, leg in LEGS.items():
-        for run_id, index in product(range(1000, 1010), range(3)):
-            group = _resolve(_block(where), matrix={leg if leg == "shard" else "part": index}, run_id=run_id, **push)
-            assert group["group"] == f"mutation-preflight-job-{run_id}-{leg}-{index}", (where, group)
-            mutation.add(group["group"])
-    shared = {
-        _resolve(block, **github)["group"]
-        for where, block in _blocks()
-        if where in LANE_USERS
-        for github in _contexts(where)
-    }
-    assert {"hosted-lane-a", "hosted-lane-b", "hosted-lane-c"} <= shared
-    assert not mutation & shared
-
-
 @pytest.mark.parametrize("caller", ["Tests", "Proofs"])
 def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
     github = {
@@ -282,11 +262,6 @@ def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
             "queue": "single",
             "cancel-in-progress": None,
         }
-    for where, leg in LEGS.items():
-        mutation = _resolve(_block(where), **github)
-        assert mutation["group"] == f"mutation-preflight-job-1000-{leg}-0"
-        assert mutation["queue"] is None
-        assert mutation["group"] != _resolve(_block("mutation-preflight.yml"), **github)["group"]
 
 
 def test_direct_dispatches_queue_on_a_lane():
@@ -330,16 +305,3 @@ def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishe
 def test_lane_titles_match_the_workflow_names():
     for name, (title, _) in DIRECT.items():
         assert _workflow(name)["name"] == title, name
-
-
-@pytest.mark.parametrize("where", sorted(LEGS))
-def test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool(where):
-    index = {"shard" if LEGS[where] == "shard" else "part": 0}
-    groups = set()
-    for ref, run_id in (("refs/heads/branch-one", 1000), ("refs/heads/branch-two", 1001)):
-        push = {"event_name": "push", "ref": ref, "workflow": "Mutation preflight", "run_id": run_id}
-        resolved = _resolve(_block(where), matrix=index, **push)
-        assert not _is_lane(resolved["group"]), (where, resolved)
-        groups.add(resolved["group"])
-    assert len(groups) == 2
-    assert "'anton-oss-batch'" in _workflow("mutation-preflight.yml")["jobs"][where.split(":")[1]]["runs-on"]
