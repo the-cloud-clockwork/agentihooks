@@ -67,13 +67,12 @@ def test_scan_grades_new_findings_against_the_caller_base():
     assert '--baseline-commit "$BASE"' in scan["run"]
 
 
-def test_scan_runs_the_registry_packs_and_the_outage_rules() -> None:
+def test_scan_runs_the_registry_packs_and_the_outage_rules():
     assert set(_jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()) == {
         "p/ci",
         "p/secrets",
         "p/python",
         ".semgrep-incidents",
-        "${{ runner.temp }}/grader/.semgrep-incidents",
     }
 
 

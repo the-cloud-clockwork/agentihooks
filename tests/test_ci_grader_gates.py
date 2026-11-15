@@ -202,10 +202,7 @@ def test_each_semgrep_job_checks_out_the_caller_base_as_the_grader(job: str, gra
     assert checkout["run"].splitlines()[-1] == 'git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD'
     assert '"${BASE#origin/}"' in checkout["run"]
     reads = sorted(
-        name
-        for name, step in steps.items()
-        if name != GRADER_CHECKOUT
-        and ("$RUNNER_TEMP/grader" in step.get("run", "") or "runner.temp" in str(step.get("env")))
+        name for name, step in steps.items() if name != GRADER_CHECKOUT and "$RUNNER_TEMP/grader" in step.get("run", "")
     )
     assert reads == sorted(graded)
     names = list(steps)
@@ -219,5 +216,6 @@ def test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rul
     assert (
         own == 'semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'
     )
-    configs = steps["Fail on findings new against the base"]["env"]["CONFIGS"].split()
-    assert {"${{ runner.temp }}/grader/.semgrep-incidents", ".semgrep-incidents"} <= set(configs)
+    findings = steps["Fail on findings new against the base"]
+    assert ".semgrep-incidents" in findings["env"]["CONFIGS"].split()
+    assert 'args+=(--config "$RUNNER_TEMP/grader/.semgrep-incidents")' in findings["run"].splitlines()
