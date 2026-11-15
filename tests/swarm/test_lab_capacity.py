@@ -66,7 +66,12 @@ class Reply:
 
 def test_read_returns_the_capacity_document_the_lab_serves(lab: str) -> None:
     doc = lab_capacity.read(lab)
-    assert doc["classes"]["queue"] == {"pending": 2, "running": 1, "predicted_wait_s": 20.0}
+    assert doc["classes"]["queue"] == {
+        "pending": 2,
+        "running": 1,
+        "predicted_wait_s": 20.0,
+        "verdict_cache_hit_ratio": None,
+    }
     assert (doc["slots"], doc["utilisation"], doc["budget_fraction"], doc["shed"]) == (
         {"total": 4, "busy": 1, "free": 3},
         0.25,

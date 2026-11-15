@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import yaml
-from chart_timers import ROOT, charts, render, values_files
+from chart_timers import charts, render, tree, values_files
 
 WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job"}
 PROBE_VERSION = "999.999.999"
@@ -36,9 +36,10 @@ def template_drift(before: dict[str, object], after: dict[str, object]) -> list[
     return sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Render every chart and values file at two chart versions and compare the pod templates."""
-    found = charts(ROOT)
+    root = tree(argv)
+    found = charts(root)
     if not found:
         print("No chart found under deploy; the check graded nothing.")
         return 1
@@ -47,7 +48,7 @@ def main() -> int:
         for chart in found:
             copy = bumped_copy(chart, Path(scratch))
             for values in values_files(chart):
-                source = f"{chart.relative_to(ROOT)} with {values.relative_to(ROOT) if values else 'default values'}"
+                source = f"{chart.relative_to(root)} with {values.relative_to(root) if values else 'default values'}"
                 first, second = render(chart, values), render(copy, values)
                 if first.returncode or second.returncode:
                     failures.append(f"{source} failed to render: {(first.stderr or second.stderr).strip()}")

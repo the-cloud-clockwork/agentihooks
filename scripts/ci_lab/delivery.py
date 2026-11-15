@@ -37,6 +37,11 @@ LAB_SCHEMA = {
             },
         },
         "check_prefix": {"type": "string", "minLength": 1},
+        "retry": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"lost": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0}},
+        },
     },
 }
 DELIVERY_SCHEMA = {"type": "object", "required": ["lab"], "properties": {"lab": LAB_SCHEMA}}

@@ -111,11 +111,13 @@ def _aggregator_problems(
                                     rerun(
                                         shape(
                                             required(
-                                                ci_reuse.gate_steps(
-                                                    **form,
-                                                    summary=summary,
-                                                    docs="docs" in ci_wiring.needs_of(head_job),
-                                                    watcher_loss=watcher_loss,
+                                                lab(
+                                                    ci_reuse.gate_steps(
+                                                        **form,
+                                                        summary=summary,
+                                                        docs="docs" in ci_wiring.needs_of(head_job),
+                                                        watcher_loss=watcher_loss,
+                                                    )
                                                 )
                                             )
                                         )
@@ -143,6 +145,7 @@ def _aggregator_problems(
                 for summary in (False, True)
                 for watcher_loss in (False, True)
                 for required in requirements
+                for lab in (list[dict[str, Any]], ci_reuse.lab_verdict)
                 for rerun in (list, ci_reuse.lost_rerun)
                 for shape in (list, ci_reuse.inline_mutation)
                 for finish in (list, ci_reuse.pipefail_summary)
