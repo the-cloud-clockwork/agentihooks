@@ -195,8 +195,13 @@ def test_charts_run_the_chart_timer_guard() -> None:
 
 
 def test_charts_render_every_pod_template_at_two_chart_versions() -> None:
-    runs = [step.get("run", "").splitlines()[:1] for step in _jobs()["charts"]["steps"]]
-    assert ["script=tests/ci_charts/chart_pod_templates.py"] in runs
+    step = next(
+        step
+        for step in _jobs()["charts"]["steps"]
+        if step.get("name") == "A chart version bump leaves every pod template unchanged"
+    )
+    assert step["run"].splitlines()[0] == "script=tests/ci_charts/chart_pod_templates.py"
+    assert 'python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"' in step["run"]
     assert (_ROOT / "tests/ci_charts/chart_pod_templates.py").is_file()
 
 

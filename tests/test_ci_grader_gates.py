@@ -94,6 +94,7 @@ def test_a_head_shadow_ruff_package_cannot_pass_the_lint_check(tmp_path: Path) -
     assert "F401" in graded.stdout
 
 
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_the_lint_check_also_holds_a_rule_the_head_adds(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     config = (ROOT / "pyproject.toml").read_text()
@@ -151,11 +152,13 @@ def test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy(
     assert matched.returncode == 0, matched.stdout + matched.stderr
 
 
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_the_marker_check_runs_after_the_grader_checkout() -> None:
     names = list(_steps("test.yml", "lint"))
     assert names.index(GRADER_CHECKOUT) < names.index("Refuse marker key vector drift from kernel dev")
 
 
+@pytest.mark.feature("lint-gates-grade-from-grader")
 @pytest.mark.parametrize("script", sorted(CHART_STEPS))
 def test_a_chart_check_grades_the_tree_its_root_names(tmp_path: Path, script: str) -> None:
     (tmp_path / "deploy").mkdir()
@@ -184,20 +187,32 @@ def test_a_head_chart_check_that_passes_itself_stays_red_under_the_grader_copy(t
         assert "No chart found under deploy; the check graded nothing." in graded.stdout
 
 
-@pytest.mark.parametrize("job", ["scan", "charts"])
-def test_each_semgrep_job_checks_out_the_caller_base_as_the_grader(job: str) -> None:
+@pytest.mark.feature("lint-gates-grade-from-grader")
+@pytest.mark.parametrize(
+    "job,graded",
+    [
+        ("scan", ["Own rules hold on their fixtures and the code", "Fail on findings new against the base"]),
+        ("charts", sorted(CHART_STEPS.values())),
+    ],
+)
+def test_each_semgrep_job_checks_out_the_caller_base_as_the_grader(job: str, graded: list[str]) -> None:
     steps = _steps("semgrep.yml", job)
     checkout = steps[GRADER_CHECKOUT]
     assert checkout["env"] == {"BASE": "${{ inputs.base }}"}
     assert checkout["run"].splitlines()[-1] == 'git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD'
     assert '"${BASE#origin/}"' in checkout["run"]
-    graded = [name for name, step in steps.items() if "$RUNNER_TEMP/grader" in step.get("run", "")]
-    graded += [name for name, step in steps.items() if "runner.temp" in str(step.get("env", {}))]
-    assert graded
+    reads = sorted(
+        name
+        for name, step in steps.items()
+        if name != GRADER_CHECKOUT
+        and ("$RUNNER_TEMP/grader" in step.get("run", "") or "runner.temp" in str(step.get("env")))
+    )
+    assert reads == sorted(graded)
     names = list(steps)
-    assert all(names.index(GRADER_CHECKOUT) < names.index(name) for name in graded if name != GRADER_CHECKOUT)
+    assert all(names.index(GRADER_CHECKOUT) < names.index(name) for name in graded)
 
 
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules() -> None:
     steps = _steps("semgrep.yml", "scan")
     own = steps["Own rules hold on their fixtures and the code"]["run"].splitlines()[-1]
