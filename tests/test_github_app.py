@@ -155,3 +155,31 @@ def test_rejected_exchange_reports_only_the_fixed_refusal(monkeypatch):
     with pytest.raises(module.GitAuthRefused) as refused:
         module.GitHubAppAuth().get_token()
     assert str(refused.value) == module.REFUSED
+
+
+def test_permission_tokens_request_only_those_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, post = scoped(monkeypatch, {"checks": "write", "metadata": "read"}, [])
+    requested = {"checks": "write"}
+    auth = module.GitHubAppAuth(permissions=requested)
+    requested["contents"] = "write"
+    assert auth.get_token() == "scoped"
+    assert post.call_args.kwargs["json"] == {"permissions": {"checks": "write"}}
+
+
+def test_project_permission_tokens_name_the_repository_and_only_those_permissions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, post = scoped(monkeypatch, {"checks": "write", "metadata": "read"}, ["Example/Private"])
+    auth = module.GitHubAppAuth("github.com/example/private", permissions={"checks": "write"})
+    assert auth.get_token() == "scoped"
+    assert post.call_args.kwargs["json"] == {"repositories": ["private"], "permissions": {"checks": "write"}}
+
+
+@pytest.mark.parametrize("permissions", [{"checks": "read"}, {}, {"contents": "write"}, {"metadata": "read"}])
+def test_permission_tokens_without_the_requested_grant_are_refused(
+    monkeypatch: pytest.MonkeyPatch, permissions: dict[str, str]
+) -> None:
+    module, _ = scoped(monkeypatch, permissions, [])
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth(permissions={"checks": "write"}).get_token()
+    assert str(refused.value) == module.REFUSED
