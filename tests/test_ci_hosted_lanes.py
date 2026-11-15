@@ -45,6 +45,7 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "chart-release.yml",
+    "ci-lab-image.yml",
     "gate-required.yml",
     "changelog.yml",
     "changelog-seed.yml",
@@ -222,6 +223,11 @@ def test_no_required_run_or_its_callee_ever_reaches_a_lane():
             assert set(recorder["jobs"]) == {"count-record"}
             assert recorder["jobs"]["count-record"]["continue-on-error"] is True
             assert all("count-record" not in job.get("needs", []) for job in _workflow("test.yml")["jobs"].values())
+            continue
+        if where == "ci-lab-image.yml":
+            assert set(_workflow(where)[True]) == {"push", "schedule", "workflow_dispatch"}
+            assert _workflow(where)[True]["push"]["branches"] == ["dev", "diffcheck/ci-lab-image-*"]
+            assert all("ci-lab-image" not in (_WORKFLOWS / name).read_text() for name in ("test.yml", "promote.yml"))
             continue
         for github in _contexts(where):
             if github["event_name"] in REQUIRED or (github["event_name"], github["ref"]) == ("push", "refs/heads/dev"):

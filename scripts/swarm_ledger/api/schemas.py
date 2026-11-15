@@ -118,7 +118,7 @@ FIELDS = {
     "alert_claim": "by target",
     "alert_close": "by target item outcome",
     "alert_raise": "by source text item",
-    "time_left": "by slots ci_minutes fix_phase watched",
+    "time_left": "by slots ci_minutes fix_phase watched lab",
     "freeze_set": "by verb target reason quote position only",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
@@ -161,6 +161,7 @@ KIND_TYPES = {
     "freeze_set": {"only": {"type": "boolean"}, "position": {"enum": ["top", "bottom"]}},
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}, "source": {"type": "object"}},
     "task_rank": {"if_owned": {"type": "boolean"}},
+    "time_left": {"lab": {"type": "object"}},
 }
 for _field in (
     "depends_on",

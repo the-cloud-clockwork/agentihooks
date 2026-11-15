@@ -29,6 +29,7 @@ DELEGATED_CLIS = {
     "quick": "scripts.quick.cli",
     "ci-lab-scheduler": "scripts.ci_lab.contract:scheduler",
     "ci-lab-worker": "scripts.ci_lab.contract:worker",
+    "ci": "scripts.ci_lab.evidence:ci",
 }
 
 
