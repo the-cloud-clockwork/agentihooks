@@ -1276,8 +1276,16 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.unit-token.outputs.token }}
         run: |
-          shards=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$UNIT_SOURCE/artifacts?per_page=100" \
-            --jq '.artifacts[] | select(.name | test("^durations-3\\.12-[0-9]+$")) | .name' | wc -l)
+          for attempt in 1 2; do
+            if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$UNIT_SOURCE/artifacts?per_page=100" \
+              --jq '.artifacts[] | select((.expired | not) and (.name | test("^durations-3\\.12-[0-9]+$"))) | .name' > durations-names.txt; then
+              break
+            fi
+            [[ "$attempt" == 2 ]] && exit 1
+            echo "::warning::Listing the queue run's artifacts failed; retrying it once in 30 seconds."
+            sleep 30
+          done
+          shards=$(sort -u durations-names.txt | wc -l)
           legs=$(jq -nc --argjson shards "$shards" '[range(1; 21) | {key: tostring, value: ((. - 1) % $shards + 1)}] | from_entries')
           echo "queue_legs=$legs" >> "$GITHUB_OUTPUT"
 
