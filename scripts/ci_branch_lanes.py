@@ -168,20 +168,23 @@ def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: 
     )
 
 
-def dev_push_only(workflow: Any) -> bool:
-    found: list[Any] = events(workflow) if isinstance(workflow, dict) else []
-    on: Any = found[0] if len(found) == 1 else None
-    if not isinstance(on, dict) or set(on) != {"push"}:
-        return False
-    push: Any = on["push"]
-    return isinstance(push, dict) and set(push) <= {"branches", *PATH_FILTERS} and push.get("branches") == ["dev"]
+def mapping(value: object) -> dict[Any, Any]:
+    return cast(dict[Any, Any], value) if isinstance(value, dict) else {}  # pragma: no mutate
 
 
-def dev_push_group(block: Any, workflow: Any) -> bool:
-    if not isinstance(block, dict) or block.get("cancel-in-progress") not in (None, False):
+def dev_push_only(workflow: object) -> bool:
+    found = events(mapping(workflow))
+    on = mapping(found[0]) if len(found) == 1 else {}
+    push = mapping(on.get("push"))
+    return set(on) == {"push"} and set(push) <= {"branches", *PATH_FILTERS} and push.get("branches") == ["dev"]
+
+
+def dev_push_group(block: object, workflow: object) -> bool:
+    found = mapping(block)
+    if found.get("cancel-in-progress") not in (None, False):
         return False
-    group = " ".join(str(block.get("group")).split())
-    queue = block.get("queue")
+    group = " ".join(str(found.get("group")).split())
+    queue = found.get("queue")
     if dev_push_only(workflow) and queue in (None, "single", "max"):
         return (
             re.fullmatch(
@@ -232,7 +235,9 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
         if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
-        if per_run_mutation_group(name, block, job, trusted) or dev_push_group(block, workflow):
+        if per_run_mutation_group(name, block, job, trusted):
+            continue
+        if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate
             continue
         if (
             trusted.get("name") == "Tests"
