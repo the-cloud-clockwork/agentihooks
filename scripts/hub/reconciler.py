@@ -62,11 +62,10 @@ def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[Ag
     return [agent for agent in store.agents(slug) if agent.name not in kept]
 
 
-def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
+def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
     """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
     answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
-    refused the stop, which then waits in the swarm's pending stops for ``retry_stops`` unless the agent has no
-    execution for a stop to reach."""
+    refused the stop."""
     config = BusConfig.from_environ()
     if config.backend == "memory":
         return execution_stop.UNKNOWN
@@ -79,25 +78,35 @@ def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str
     except Exception as exc:
         outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
     print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
-    pending = store.key(slug, PENDING_STOPS)
+    return outcome
+
+
+def stop_dropped(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
+    """Sends the execution stop for ``agent``, which the swarm dropped, through ``stop_admitted`` and answers it; a
+    stop the bus refused waits in the swarm's pending stops for ``retry_stops`` unless the agent has no execution for
+    a stop to reach."""
+    outcome = stop_admitted(slug, agent, reason)
     if outcome.startswith(execution_stop.FAILED) and agent.execution_id:
-        store.redis.hset(pending, agent.execution_id, json.dumps({"agent": asdict(agent), "reason": reason}))
-    else:
-        store.redis.hdel(pending, agent.execution_id)
+        held = json.dumps({"agent": asdict(agent), "reason": reason})
+        store.redis.hset(store.key(slug, PENDING_STOPS), agent.execution_id, held)
     return outcome
 
 
 def retry_stops(store: Any, slug: str) -> list[str]:
-    """Sends again every stop the bus refused in ``slug`` for an execution the swarm has since dropped and answers one
-    action per stop sent again; a refused stop for an execution the swarm still seats is discarded, since the next
-    judgement of that agent sends afresh. The first stop the bus refuses again ends the pass and leaves the rest for
-    the next one. Reads nothing on the memory bus, where no stop is ever refused."""
+    """Sends again the stops the bus refused in ``slug`` through ``_resend`` and answers one action per stop sent
+    again; reads nothing on the memory bus, where no stop is ever refused."""
     if BusConfig.from_environ().backend == "memory":
         return []
     pending = store.key(slug, PENDING_STOPS)
     held = store.redis.hgetall(pending)
-    if not held:
-        return []
+    return _resend(store, slug, pending, held) if held else []
+
+
+def _resend(store: Any, slug: str, pending: str, held: dict[str, str]) -> list[str]:
+    """Sends again each stop in ``held``, the swarm's pending stops under ``pending`` by execution, whose execution
+    the swarm has since dropped; a refused stop for an execution the swarm still seats is discarded, since the next
+    judgement of that agent sends afresh. A stop the bus takes, or one for an execution that already ended, leaves the
+    pending stops; the first stop the bus refuses again ends the pass and leaves the rest for the next one."""
     seated = {agent.execution_id for agent in store.agents(slug)}
     actions: list[str] = []
     for execution, raw in held.items():
@@ -106,10 +115,11 @@ def retry_stops(store: Any, slug: str) -> list[str]:
             continue
         stop = json.loads(raw)
         agent = AgentRecord(**stop["agent"])
-        outcome = stop_admitted(store, slug, agent, stop["reason"])
+        outcome = stop_dropped(store, slug, agent, stop["reason"])
         actions.append(f"sent the {stop['reason']} stop for {agent.name} again: {outcome}")
         if outcome.startswith(execution_stop.FAILED):
             break
+        store.redis.hdel(pending, execution)
     return actions
 
 
