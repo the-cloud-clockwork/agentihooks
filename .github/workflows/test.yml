@@ -2814,19 +2814,6 @@ jobs:
       - name: Install the comment gate grammars
         run: python -m pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css
 
-      - name: Check out kernel marker vector authority
-        if: ${{ !cancelled() }}
-        uses: actions/checkout@v4
-        with:
-          repository: the-cloud-clockwork/agentibrain-kernel
-          ref: dev
-          path: .marker-kernel
-          persist-credentials: false
-
-      - name: Refuse marker key vector drift from kernel dev
-        if: ${{ !cancelled() }}
-        run: python -m scripts.ci_marker_vectors .marker-kernel/tests/fixtures/marker-idempotency-vectors.json
-
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -2846,18 +2833,42 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
+      - name: Check out kernel marker vector authority
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v4
+        with:
+          repository: the-cloud-clockwork/agentibrain-kernel
+          ref: dev
+          path: .marker-kernel
+          persist-credentials: false
+
+      - name: Refuse marker key vector drift from kernel dev
+        if: ${{ !cancelled() }}
+        run: |
+          vectors="$GITHUB_WORKSPACE/.marker-kernel/tests/fixtures/marker-idempotency-vectors.json"
+          if grep -q -- '--root' "$RUNNER_TEMP/grader/scripts/ci_marker_vectors.py"; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
+          else
+            python -m scripts.ci_marker_vectors "$vectors"
+          fi
+
       # Each control grades even after an earlier one is red, so one run reports every red control.
       - name: Lint check
         if: ${{ !cancelled() }}
-        run: python -m ruff check hooks/ scripts/ tests/
+        run: |
+          python -P -m ruff check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
+          python -P -m ruff check hooks/ scripts/ tests/
 
       - name: Format check
         if: ${{ !cancelled() }}
-        run: python -m ruff format --check hooks/ scripts/ tests/
+        run: python -P -m ruff format --check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
 
       - name: Check every pull request job is a need of Gate Required
         if: ${{ !cancelled() }}
-        run: python -m scripts.ci_wiring
+        run: |
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_wiring --root "$GITHUB_WORKSPACE"
 
       - name: Keep internal addresses, identifiers and private keywords out of public docs
         if: ${{ !cancelled() }}
