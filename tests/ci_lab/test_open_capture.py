@@ -1,6 +1,7 @@
 import functools
 import io
 import os
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -52,23 +53,22 @@ def test_a_worker_records_each_read_under_the_tree_once_relative_to_it(
     capture = open_capture.Capture(str(tree), log)
     frame = sys._getframe()
     events = [
-        ("open", ("relative.txt", "r", 0)),
-        ("open", (str(tree / "a.txt"), "r", 0)),
-        ("open", (str(tree / "a.txt"), "rb", 0)),
-        ("open", (tree / "b.txt", "rb", 0)),
-        ("open", (os.fsencode(tree / "c.txt"), "r", 0)),
-        ("open", (str(tree / "d.txt"), None, 0)),
-        ("open", (str(tree / "w.txt"), "w", 0)),
-        ("open", (str(tree / "x.txt"), "x", 0)),
-        ("open", (str(tree / "y.txt"), "ab", 0)),
-        ("open", (3, "r", 0)),
-        ("open", (str(tmp_path / "tree2" / "e.txt"), "r", 0)),
-        ("open", (str(tmp_path / "f.txt"), "r", 0)),
-        ("exec", (str(tree / "g.txt"), "r", 0)),
+        ("relative.txt", "r", 0),
+        (str(tree / "a.txt"), "r", 0),
+        (str(tree / "a.txt"), "rb", 0),
+        (tree / "b.txt", "rb", 0),
+        (os.fsencode(tree / "c.txt"), "r", 0),
+        (str(tree / "d.txt"), None, 0),
+        (str(tree / "w.txt"), "w", 0),
+        (str(tree / "x.txt"), "x", 0),
+        (str(tree / "y.txt"), "ab", 0),
+        (3, "r", 0),
+        (str(tmp_path / "tree2" / "e.txt"), "r", 0),
+        (str(tmp_path / "f.txt"), "r", 0),
     ]
 
-    for event, args in events:
-        capture.audit(event, args, frame)
+    for args in events:
+        capture.audit(args, frame)
 
     assert log.getvalue() == "relative.txt\na.txt\nb.txt\nc.txt\nd.txt\n"
 
@@ -80,11 +80,11 @@ def test_a_read_by_the_import_system_or_outside_a_worker_is_not_recorded(
     capture = open_capture.Capture(str(tmp_path), log)
 
     def read() -> bool:
-        capture.audit("open", (str(tmp_path / "b.txt"), "r", 0), sys._getframe(1))
+        capture.audit((str(tmp_path / "b.txt"), "r", 0), sys._getframe(1))
         return True
 
     monkeypatch.delenv(open_capture.WORKER, raising=False)
-    capture.audit("open", (str(tmp_path / "a.txt"), "r", 0), sys._getframe())
+    capture.audit((str(tmp_path / "a.txt"), "r", 0), sys._getframe())
     monkeypatch.setenv(open_capture.WORKER, "gw1")
     _from((IMPORT,), read)
     assert log.getvalue() == ""
@@ -104,10 +104,34 @@ def test_install_hooks_a_capture_that_writes_this_process_log_in_the_folder(
 
     open_capture.install()
     _from((IMPORT,), functools.partial(hooks[0], "open", (str(tmp_path / "tree" / "module.json"), "r", 0)))
+    hooks[0]("exec", (str(tmp_path / "tree" / "code.json"), "r", 0))
     hooks[0]("open", (str(tmp_path / "tree" / "data.json"), "r", 0))
 
     assert len(hooks) == 1
     assert (tmp_path / f"{os.getpid()}.txt").read_text() == "data.json\n"
+
+
+def test_an_installed_capture_survives_the_audit_event_its_own_frame_lookup_raises(tmp_path: Path) -> None:
+    tree, folder = tmp_path / "tree", tmp_path / "opened"
+    for path in (tree, folder):
+        path.mkdir()
+    (tree / "data.txt").write_text("data")
+    load = "spec = importlib.util.spec_from_file_location('capture', sys.argv[1])"
+    code = f"import importlib.util, sys; {load}; m = importlib.util.module_from_spec(spec); "
+    code += "spec.loader.exec_module(m); m.install(); open('data.txt').read()"
+    env = {
+        "PATH": os.defpath,
+        open_capture.TREE: str(tree),
+        open_capture.OPENED: str(folder),
+        open_capture.WORKER: "gw0",
+    }
+
+    done = subprocess.run(
+        [sys.executable, "-c", code, open_capture.__file__], cwd=tree, env=env, capture_output=True, text=True
+    )
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert [log.read_text() for log in folder.iterdir()] == ["data.txt\n"]
 
 
 def test_a_relative_read_after_the_working_folder_is_gone_is_not_recorded(
@@ -120,7 +144,7 @@ def test_a_relative_read_after_the_working_folder_is_gone_is_not_recorded(
     gone.rmdir()
     log = io.StringIO()
 
-    open_capture.Capture(str(tmp_path), log).audit("open", ("data.txt", "r", 0), sys._getframe())
+    open_capture.Capture(str(tmp_path), log).audit(("data.txt", "r", 0), sys._getframe())
 
     assert log.getvalue() == ""
 
@@ -131,11 +155,13 @@ def test_install_hooks_nothing_unless_both_the_tree_and_the_folder_are_named(
 ) -> None:
     hooks: list[Callable[[str, tuple[Any, ...]], None]] = []
     monkeypatch.setattr(sys, "addaudithook", hooks.append)
+    folder = tmp_path / "opened"
+    folder.mkdir()
     monkeypatch.setenv(open_capture.TREE, str(tmp_path))
-    monkeypatch.setenv(open_capture.OPENED, str(tmp_path))
+    monkeypatch.setenv(open_capture.OPENED, str(folder))
     monkeypatch.setenv(missing, "")
 
     open_capture.install()
 
     assert hooks == []
-    assert list(tmp_path.iterdir()) == []
+    assert list(folder.iterdir()) == []

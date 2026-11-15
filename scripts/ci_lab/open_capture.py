@@ -53,9 +53,9 @@ class Capture:
         self.log = log
         self.seen: set[str] = set()
 
-    def audit(self, event: str, args: tuple[Any, ...], frame: FrameType | None) -> None:
-        """Record an open event that reads a file under root from code other than an import."""
-        if event != "open" or not os.environ.get(WORKER):
+    def audit(self, args: tuple[Any, ...], frame: FrameType | None) -> None:
+        """Record the file an open event's arguments read under root, when code other than an import opened it."""
+        if not os.environ.get(WORKER):
             return
         path = _read(args[0], args[1])
         if path is None or not path.startswith(self.root) or path in self.seen or loading(frame):
@@ -66,14 +66,18 @@ class Capture:
 
 
 def install() -> None:
-    """Hook a capture into this process when the environment names the tree and the folder for its log."""
+    """Hook a capture into this process when the environment names the tree and the folder for its log.
+
+    The hook looks up its caller's frame only for an open event, since the lookup raises an audit event of its own.
+    """
     root, folder = os.environ.get(TREE), os.environ.get(OPENED)
     if not root or not folder:
         return
     capture = Capture(root, open(os.path.join(folder, f"{os.getpid()}.txt"), "a", encoding="utf-8"))
 
     def audit(event: str, args: tuple[Any, ...]) -> None:
-        frame = inspect.currentframe()
-        capture.audit(event, args, frame and frame.f_back)
+        if event == "open":
+            frame = inspect.currentframe()
+            capture.audit(args, frame and frame.f_back)
 
     sys.addaudithook(audit)
