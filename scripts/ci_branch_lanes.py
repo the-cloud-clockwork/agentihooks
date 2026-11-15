@@ -185,27 +185,23 @@ def dev_push_group(block: object, workflow: dict[Any, Any]) -> bool:
         return False
     group = " ".join(str(cast(dict[str, Any], block).get("group")).split())
     queue = cast(dict[str, Any], block).get("queue")
-    if dev_push_only(workflow) and queue in (None, "single"):
+    if dev_push_only(workflow) and queue in (None, "single", "max"):
         return (
             re.fullmatch(
                 OWN + r"-\$\{\{ github\.ref \}\}|\$\{\{ format\('" + OWN + r"-\{0\}', github\.ref\) \}\}", group
             )
             is not None
         )
-    return (
-        re.fullmatch(
-            r"\$\{\{ "
-            + re.escape(DEV_PUSH)
-            + r" && format\('"
-            + OWN
-            + r"-\{0\}', github\.ref\) \|\| "
-            + re.escape(LANE)
-            + r" \}\}",
-            group,
-        )
-        is not None
-        and queue == f"${{{{ {DEV_PUSH} && 'single' || 'max' }}}}"
-    )
+    return re.fullmatch(
+        r"\$\{\{ "
+        + re.escape(DEV_PUSH)
+        + r" && format\('"
+        + OWN
+        + r"-\{0\}', github\.ref\) \|\| "
+        + re.escape(LANE)
+        + r" \}\}",
+        group,
+    ) is not None and queue in ("max", f"${{{{ {DEV_PUSH} && 'single' || 'max' }}}}")
 
 
 def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:

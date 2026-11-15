@@ -1126,6 +1126,11 @@ def _image(on: object, concurrency: object) -> dict[str, object]:
         (DEV_ONLY, {"group": PER_BRANCH}),
         (DEV_ONLY, {"group": PER_BRANCH, "queue": "single", "cancel-in-progress": False}),
         (DEV_ONLY, {"group": "${{ format('image-{0}', github.ref) }}"}),
+        (DEV_ONLY, {"group": "${{  format('dev-image-{0}',\n github.ref) }}"}),
+        (DEV_ONLY, {"group": "dev-image-${{ github.ref }}"}),
+        (DEV_ONLY, {"group": PER_BRANCH, "queue": "max", "cancel-in-progress": False}),
+        ({"workflow_dispatch": None}, {**DEV_OR_LANE, "queue": "max"}),
+        ({"push": {"branches": ["dev"], "paths": ["a"], "paths-ignore": ["b"]}}, {"group": PER_BRANCH}),
         ({"push": {"branches": ["dev"], "paths": ["docker/**"]}}, {"group": PER_BRANCH}),
         ({"push": {"branches": ["dev"], "paths-ignore": ["docs/**"]}}, {"group": PER_BRANCH}),
         (DEV_ONLY, DEV_OR_LANE),
@@ -1147,18 +1152,24 @@ def test_a_dev_push_workflow_with_a_per_branch_group_passes_without_an_exemption
         ({"push": {"branches-ignore": ["main"]}}, {"group": PER_BRANCH}),
         ({"push": {"branches": ["dev"], "tags": ["v*"]}}, {"group": PER_BRANCH}),
         ({"push": None}, {"group": PER_BRANCH}),
+        ({"push": {"paths": ["docker/**"]}}, {"group": PER_BRANCH}),
+        ({"push": {}}, {"group": PER_BRANCH}),
+        (["push"], {"group": PER_BRANCH}),
+        (DEV_ONLY, {"group": "image${{ github.ref }}"}),
+        (DEV_ONLY, {"group": "-${{ github.ref }}"}),
+        ({"workflow_dispatch": None}, {**DEV_OR_LANE, "group": DEV_OR_LANE["group"].replace(lanes.LANE, "'x'")}),
         ("push", {"group": PER_BRANCH}),
         ({**DEV_ONLY, "workflow_dispatch": None}, {"group": PER_BRANCH}),
         ({**DEV_ONLY, "pull_request": None}, {"group": PER_BRANCH}),
-        (DEV_ONLY, {"group": PER_BRANCH, "queue": "max"}),
+        (DEV_ONLY, {"group": PER_BRANCH, "queue": "${{ 'max' }}"}),
         (DEV_ONLY, {"group": PER_BRANCH, "cancel-in-progress": True}),
         (DEV_ONLY, {"group": "image"}),
         (DEV_ONLY, {"group": "Image-${{ github.ref }}"}),
         (DEV_ONLY, {"group": "image-${{ github.ref }}-${{ github.run_id }}"}),
         (DEV_ONLY, {"group": "${{ format('image-{0}', github.run_id) }}"}),
         (DEV_ONLY, "image-${{ github.ref }}"),
-        ({"workflow_dispatch": None}, {**DEV_OR_LANE, "queue": "max"}),
         ({"workflow_dispatch": None}, {**DEV_OR_LANE, "queue": "single"}),
+        ({"workflow_dispatch": None}, {**DEV_OR_LANE, "queue": None}),
         ({"workflow_dispatch": None}, {**DEV_OR_LANE, "cancel-in-progress": True}),
         ({"workflow_dispatch": None}, {**DEV_OR_LANE, "group": DEV_OR_LANE["group"].replace("dev'", "task'")}),
         ({"workflow_dispatch": None}, {**DEV_OR_LANE, "queue": DEV_OR_LANE["queue"].replace("dev'", "task'")}),
@@ -1171,7 +1182,7 @@ def test_a_per_branch_group_that_a_branch_run_could_hold_is_refused(on: object, 
     assert lanes.grade(yaml.safe_dump(_image(on, block))) == ["job build has no shared hosted lane concurrency group"]
 
 
-def test_a_new_dev_push_image_workflow_is_not_refused_on_its_branch(
+def test_a_new_dev_push_workflow_is_refused_only_when_its_group_is_not_per_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     base, head, sha = _repo(
@@ -1185,5 +1196,7 @@ def test_a_new_dev_push_image_workflow_is_not_refused_on_its_branch(
 
 
 def test_a_dev_push_workflow_with_two_event_keys_is_not_dev_only() -> None:
+    assert lanes.DEV_PUSH == "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+    assert not lanes.dev_push_only({})
     assert not lanes.dev_push_only({"on": DEV_ONLY, True: DEV_ONLY})
     assert lanes.dev_push_only({True: DEV_ONLY})
