@@ -1,0 +1,165 @@
+import stat
+import subprocess
+from collections import OrderedDict
+from pathlib import Path
+
+import pytest
+
+from scripts.ci_lab import worktrees
+from tests.dep_manifest import _git
+
+WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+
+
+def _commit(repo: Path, name: str, text: str) -> str:
+    (repo / name).write_text(text)
+    _git(repo, "add", name)
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", name)
+    return _git(repo, "rev-parse", "HEAD").strip()
+
+
+@pytest.fixture
+def origin(tmp_path: Path) -> Path:
+    repo = tmp_path / "origin"
+    _git(tmp_path, "init", "-q", "-b", "main", str(repo))
+    return repo
+
+
+def _mirror(tmp_path: Path, origin: Path, have: str) -> worktrees.Mirror:
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    _git(node, "fetch", "-q", f"file://{origin}", f"{have}:refs/heads/main")
+    return worktrees.Mirror(node=node, store=tmp_path / "store", remote=f"file://{origin}")
+
+
+def _own_objects(store: Path) -> set[str]:
+    return {f"{path.parent.name}{path.name}" for path in (store / "objects").glob("??/*")}
+
+
+def _registered(store: Path) -> list[str]:
+    listed = _git(store, "worktree", "list", "--porcelain").splitlines()
+    paths = (line.removeprefix("worktree ") for line in listed if line.startswith("worktree "))
+    return sorted(path for path in paths if path != str(store))
+
+
+def _writable(tree: Path) -> list[str]:
+    paths = (tree, *tree.rglob("*"))
+    return sorted(str(path.relative_to(tree)) for path in paths if path.lstat().st_mode & WRITE)
+
+
+def test_fetch_takes_nothing_when_the_node_mirror_holds_the_sha(tmp_path: Path, origin: Path) -> None:
+    head = _commit(origin, "a", "a")
+    mirror = _mirror(tmp_path, origin, head)
+    assert mirror.fetch(head) is False
+    assert (mirror.store / "objects/info/alternates").read_text() == f"{tmp_path / 'node' / 'objects'}\n"
+    assert _own_objects(mirror.store) == set()
+    assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
+
+
+def test_fetch_takes_only_the_objects_the_node_mirror_lacks(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    head = _commit(origin, "b", "b")
+    mirror = _mirror(tmp_path, origin, base)
+    missing = {line.split()[0] for line in _git(origin, "rev-list", "--objects", head, f"^{base}").splitlines()}
+    assert mirror.fetch(head) is True
+    assert len(missing) == 3
+    assert _own_objects(mirror.store) == missing
+    assert mirror.fetch(head) is False
+    assert _own_objects(mirror.store) == missing
+
+
+def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
+    mirror = _mirror(tmp_path, origin, _commit(origin, "a", "a"))
+    with pytest.raises(subprocess.CalledProcessError):
+        mirror.fetch("1" * 40)
+
+
+def test_a_second_lease_of_the_same_head_reuses_the_tree(tmp_path: Path, origin: Path) -> None:
+    head = _commit(origin, "a", "a")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=2)
+    first = trees.lease(head)
+    second = trees.lease(head)
+    assert first == second == tmp_path / "trees" / head
+    assert trees.live == OrderedDict({head: 2})
+    assert _registered(trees.mirror.store) == [str(first)]
+    assert (first / "a").read_text() == "a"
+    assert _git(first, "rev-parse", "HEAD").strip() == head
+
+
+def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: Path, origin: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.write_text("outside")
+    (origin / "sub").mkdir()
+    (origin / "sub" / "link").symlink_to(outside)
+    _git(origin, "add", "sub/link")
+    head = _commit(origin, "a", "a")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
+    tree = trees.lease(head)
+    assert _writable(tree) == ["sub/link"]
+    assert outside.stat().st_mode & stat.S_IWUSR
+
+
+def test_an_idle_tree_within_capacity_stays(tmp_path: Path, origin: Path) -> None:
+    first = _commit(origin, "a", "a")
+    second = _commit(origin, "b", "b")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, second), root=tmp_path / "trees", capacity=2)
+    trees.lease(first)
+    trees.release(first)
+    trees.lease(second)
+    assert trees.live == OrderedDict({first: 0, second: 1})
+    assert (tmp_path / "trees" / first / "a").is_file()
+
+
+def test_the_least_recently_leased_idle_tree_goes_first(tmp_path: Path, origin: Path) -> None:
+    heads = [_commit(origin, name, name) for name in ("a", "b", "c")]
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, heads[2]), root=tmp_path / "trees", capacity=2)
+    for head in (heads[0], heads[1], heads[0]):
+        trees.lease(head)
+        trees.release(head)
+    trees.lease(heads[2])
+    assert trees.live == OrderedDict({heads[0]: 0, heads[2]: 1})
+    assert not (tmp_path / "trees" / heads[1]).exists()
+    assert _registered(trees.mirror.store) == sorted(str(tmp_path / "trees" / head) for head in (heads[0], heads[2]))
+
+
+def test_a_tree_with_live_units_is_never_evicted(tmp_path: Path, origin: Path) -> None:
+    first = _commit(origin, "a", "a")
+    second = _commit(origin, "b", "b")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, second), root=tmp_path / "trees", capacity=1)
+    trees.lease(first)
+    trees.lease(second)
+    assert trees.live == OrderedDict({first: 1, second: 1})
+    assert (tmp_path / "trees" / first / "a").is_file()
+    trees.release(first)
+    assert trees.live == OrderedDict({second: 1})
+    assert not (tmp_path / "trees" / first).exists()
+    assert trees.lease(first) == tmp_path / "trees" / first
+    assert (tmp_path / "trees" / first / "a").read_text() == "a"
+
+
+def test_a_failed_lease_records_no_tree(tmp_path: Path, origin: Path) -> None:
+    trees = worktrees.Worktrees(
+        mirror=_mirror(tmp_path, origin, _commit(origin, "a", "a")), root=tmp_path / "trees", capacity=1
+    )
+    with pytest.raises(subprocess.CalledProcessError):
+        trees.lease("1" * 40)
+    assert trees.live == OrderedDict()
+
+
+def test_a_mutation_unit_gets_its_own_writable_copy(tmp_path: Path, origin: Path) -> None:
+    head = _commit(origin, "a", "a")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
+    own = trees.own(head)
+    shared = trees.lease(head)
+    other = trees.own(head)
+    assert len({shared, own, other}) == 3
+    assert own.parent == tmp_path / "trees"
+    assert own.name.startswith(f"{head}.")
+    assert _git(own, "rev-parse", "HEAD").strip() == head
+    assert _writable(own) == sorted(str(path.relative_to(own)) for path in (own, *own.rglob("*")))
+    (own / "a").write_text("mutant")
+    assert (shared / "a").read_text() == "a"
+    assert trees.live == OrderedDict({head: 1})
+    trees.drop(own)
+    assert not own.exists()
+    assert _registered(trees.mirror.store) == sorted([str(shared), str(other)])
