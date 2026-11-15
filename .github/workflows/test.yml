@@ -754,9 +754,9 @@ jobs:
           PULL: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          whole='^(0|[1-9][0-9]{0,2})$'
-          if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 180 ]]; then
-            echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 180, not $QUIET"
+          whole='^(0|[1-9][0-9]?)$'
+          if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 60 ]]; then
+            echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 60, not $QUIET"
             exit 1
           fi
           deadline=$((SECONDS + QUIET))
@@ -3945,8 +3945,8 @@ jobs:
           retention-days: 90
 
   mutation-plan:
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev' && needs.select.result == 'success') || github.event_name == 'workflow_dispatch') }}
-    needs: [select, admission]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    needs: [admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
