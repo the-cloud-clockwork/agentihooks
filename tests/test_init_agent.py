@@ -642,7 +642,7 @@ def test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch(
     rc = _quick_seat(monkeypatch, tmp_path, _routed(status), extra=["--routed-only"])
     captured = capsys.readouterr()
     assert rc == 3
-    assert "routed_only=failed" in captured.out
+    assert captured.out.splitlines()[-1] == "routed_only=failed" and "\nroute_status=" in captured.out
     assert captured.err.endswith(
         "agentihooks init-agent: the agent was not routed to an account, so the launch failed\n"
     )
@@ -655,6 +655,24 @@ def test_a_routed_quick_seat_starts(
     assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--routed-only"]) == 0
     out = capsys.readouterr().out
     assert "route_status=routed" in out and "routed_only=failed" not in out
+
+
+def test_only_a_launch_that_had_to_be_routed_and_was_not_is_refused_with_its_own_line() -> None:
+    handoff = argparse.Namespace(handoff=True, routed_only=False)
+    routed_only = argparse.Namespace(handoff=False, routed_only=True)
+    plain = argparse.Namespace(handoff=False, routed_only=False)
+    assert init_agent._unrouted(handoff, {"status": "bare"}) == (
+        "handoff=failed",
+        "handoff failed; the new session was not routed to another account",
+    )
+    assert init_agent._unrouted(routed_only, {"status": "failed"}) == (
+        "routed_only=failed",
+        "the agent was not routed to an account, so the launch failed",
+    )
+    assert init_agent._unrouted(routed_only, {"status": "routed"}) is None
+    assert init_agent._unrouted(plain, {"status": "bare"}) is None
+    assert (init_agent._routed_only(handoff), init_agent._routed_only(routed_only)) == (True, True)
+    assert init_agent._routed_only(plain) is False
 
 
 @pytest.mark.feature("quick-swarm")

@@ -65,7 +65,7 @@ def _round(folder: Path, herdr: FakeHerdr, now: float = 10_000.0) -> list[dict]:
         herdr,
         lambda f, seat: relaunched.append(seat) or "started",
         now,
-        lambda f, seat: forced.append(seat) or "started",
+        lambda f, seat: forced.append(seat if f == folder else f"{seat} in {f}") or "started",
     )
     return [*outcomes, *({"relaunched": seat} for seat in relaunched), *({"forced": seat} for seat in forced)]
 
@@ -438,11 +438,14 @@ def _ended(folder: Path, eng_state: str) -> tuple[list[tuple[str, str]], list[li
         started.append(argv)
         return 0
 
+    naps: list[float] = []
+
     def bare(pane: str) -> bool:
+        assert naps or not started
         return bool(ended) and not started
 
-    outcome = launch.force(folder, "eng-1", {}, bare=bare, end=end, start=start, sleep=lambda s: None)
-    assert outcome == "started"
+    outcome = launch.force(folder, "eng-1", {}, bare=bare, end=end, start=start, sleep=naps.append)
+    assert outcome == "started" and sum(naps) == launch.SETTLE_S
     return ended, started
 
 
@@ -473,6 +476,27 @@ def test_force_never_ends_the_master_nor_a_seat_being_launched(tmp_path: Path) -
     assert ended == [] and seat is not None and seat.state == registry.LAUNCHING
 
 
+def test_force_never_ends_a_seat_whose_state_changed_since_it_was_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stale = _swarm(tmp_path)
+    registry.set_state(tmp_path, "eng-1", registry.LAUNCHING)
+    real = registry.load
+    reads: list[Path] = []
+
+    def load(folder: Path) -> registry.Swarm | None:
+        reads.append(folder)
+        return stale if len(reads) == 1 else real(folder)
+
+    monkeypatch.setattr(registry, "load", load)
+    ended: list[str] = []
+    outcome = launch.force(tmp_path, "eng-1", {}, bare=lambda pane: True, end=ended.append, start=lambda a, e: 0)
+    assert outcome == "launching" and ended == []
+    loaded = real(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert seat is not None and seat.state == registry.LAUNCHING
+
+
 @pytest.mark.parametrize("hangs", [False, True])
 def test_end_agent_terminates_the_session_by_name_and_keeps_its_pane(
     monkeypatch: pytest.MonkeyPatch, hangs: bool
@@ -482,6 +506,7 @@ def test_end_agent_terminates_the_session_by_name_and_keeps_its_pane(
     def run(command: list[str], **kwargs: object) -> None:
         ran.append(command)
         assert kwargs["check"] is False and kwargs["timeout"] == launch.END_TIMEOUT_S == 120.0
+        assert kwargs["capture_output"] is True
         if hangs:
             raise subprocess.TimeoutExpired(command, launch.END_TIMEOUT_S)
 
