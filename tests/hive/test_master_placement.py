@@ -26,7 +26,7 @@ def test_master_prefers_the_declared_interactive_login_before_ui_tokens():
         hive("z-first", interactive={"claude": "login"}, prefer={"master": 2}),
         hive("wrong", interactive={"claude": "other"}, prefer={"master": 0}),
     ]
-    assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.MasterPlacement(
+    assert placement.place_master("claude", "login", REPO, hives, NOW, front=True) == placement.MasterPlacement(
         "z-first", "login", "interactive", False
     )
 
@@ -59,9 +59,9 @@ def test_master_uses_a_headless_hive_only_when_it_does_not_exclude_the_master(ex
 
 def test_master_reconsiders_interactive_hives_at_the_next_handoff():
     hives = [hive("ui"), hive("login", interactive={"claude": "login"}, heartbeat_at=1)]
-    assert placement.place_master("claude", "", REPO, hives, NOW).hive == "ui"
+    assert placement.place_master("claude", "", REPO, hives, NOW, front=True).hive == "ui"
     hives[1]["heartbeat_at"] = NOW
-    assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
+    assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
         "login", "login", "interactive", False
     )
 
@@ -171,6 +171,13 @@ def test_the_front_door_master_takes_a_hive_master_login_and_never_its_slots():
 
 def test_a_secondary_master_ignores_a_hive_master_login():
     hives = [hive("login", master_login={"claude": "operator"})]
+    assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
+        "login", "token", "subscription", False
+    )
+
+
+def test_a_secondary_master_ignores_a_hive_interactive_login():
+    hives = [hive("login", interactive={"claude": "unrouted"}, prefer={"master": 1})]
     assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
         "login", "token", "subscription", False
     )
