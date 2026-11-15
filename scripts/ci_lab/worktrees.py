@@ -50,7 +50,7 @@ class Worktrees:
     mirror: Mirror
     root: Path
     capacity: int
-    live: OrderedDict[str, int] = field(default_factory=OrderedDict[str, int])
+    live: OrderedDict[str, int] = field(default_factory=OrderedDict)
 
     def lease(self, head: str) -> Path:
         """Return the head's shared tree, cutting it on first use, and count one more live unit on it."""
@@ -73,7 +73,7 @@ class Worktrees:
     def own(self, head: str) -> Path:
         """Cut a private writable worktree of head for a mutation unit."""
         self.mirror.fetch(head)
-        self.root.mkdir(exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True)
         tree = Path(tempfile.mkdtemp(prefix=f"{head}.", dir=self.root))
         _git(self.mirror.store, "worktree", "add", "--quiet", "--detach", str(tree), head)
         return tree

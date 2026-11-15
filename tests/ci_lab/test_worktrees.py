@@ -1,3 +1,4 @@
+import os
 import stat
 import subprocess
 from collections import OrderedDict
@@ -94,20 +95,24 @@ def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: P
     _git(origin, "add", "sub/link")
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
-    tree = trees.lease(head)
+    umask = os.umask(0)
+    try:
+        tree = trees.lease(head)
+    finally:
+        os.umask(umask)
     assert _writable(tree) == ["sub/link"]
     assert outside.stat().st_mode & stat.S_IWUSR
 
 
-def test_an_idle_tree_within_capacity_stays(tmp_path: Path, origin: Path) -> None:
+def test_idle_trees_within_capacity_stay(tmp_path: Path, origin: Path) -> None:
     first = _commit(origin, "a", "a")
     second = _commit(origin, "b", "b")
-    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, second), root=tmp_path / "trees", capacity=2)
-    trees.lease(first)
-    trees.release(first)
-    trees.lease(second)
-    assert trees.live == OrderedDict({first: 0, second: 1})
-    assert (tmp_path / "trees" / first / "a").is_file()
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, second), root=tmp_path / "trees", capacity=3)
+    for head in (first, second):
+        trees.lease(head)
+        trees.release(head)
+    assert trees.live == OrderedDict({first: 0, second: 0})
+    assert _registered(trees.mirror.store) == sorted(str(tmp_path / "trees" / head) for head in (first, second))
 
 
 def test_the_least_recently_leased_idle_tree_goes_first(tmp_path: Path, origin: Path) -> None:
@@ -148,12 +153,12 @@ def test_a_failed_lease_records_no_tree(tmp_path: Path, origin: Path) -> None:
 
 def test_a_mutation_unit_gets_its_own_writable_copy(tmp_path: Path, origin: Path) -> None:
     head = _commit(origin, "a", "a")
-    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)
     own = trees.own(head)
     shared = trees.lease(head)
     other = trees.own(head)
     assert len({shared, own, other}) == 3
-    assert own.parent == tmp_path / "trees"
+    assert own.parent == tmp_path / "pod" / "trees"
     assert own.name.startswith(f"{head}.")
     assert _git(own, "rev-parse", "HEAD").strip() == head
     assert _writable(own) == sorted(str(path.relative_to(own)) for path in (own, *own.rglob("*")))
