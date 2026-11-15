@@ -34,7 +34,9 @@ def _run_quiet_window(tmp_path: Path, quiet: str, heads: list[str], fake_sleep: 
         f'echo x >> "{calls}"\n'
         f'n=$(wc -l < "{calls}")\n'
         f"heads=({' '.join(heads)})\n"
-        'printf "%s\\trefs/pull/7/head\\n" "${heads[$(( n > ${#heads[@]} ? ${#heads[@]} - 1 : n - 1 ))]}"\n'
+        'head="${heads[$(( n > ${#heads[@]} ? ${#heads[@]} - 1 : n - 1 ))]}"\n'
+        '[[ "$head" != fail ]] || exit 3\n'
+        'printf "%s\\trefs/pull/7/head\\n" "$head"\n'
     )
     git.chmod(0o755)
     if fake_sleep:
@@ -69,6 +71,15 @@ def test_quiet_window_holds_select_on_pull_requests_before_the_selection() -> No
     assert "continue-on-error" not in step
 
 
+def test_mutation_starts_on_a_pull_request_only_after_the_quiet_window_passes() -> None:
+    plan = _workflow()["jobs"]["mutation-plan"]
+    assert plan["needs"] == ["select", "admission"]
+    assert (
+        "github.event_name == 'pull_request' && github.base_ref == 'dev' && needs.select.result == 'success'"
+        in (plan["if"])
+    )
+
+
 def test_quiet_window_stops_the_heavy_legs_when_the_head_moves(tmp_path: Path) -> None:
     code, reads = _run_quiet_window(tmp_path, "300", ["a" * 40, "b" * 40], fake_sleep=True)
     assert code == 1
@@ -85,5 +96,10 @@ def test_quiet_window_of_zero_reads_nothing(tmp_path: Path) -> None:
     assert _run_quiet_window(tmp_path, "0", ["b" * 40], fake_sleep=True) == (0, 0)
 
 
-def test_quiet_window_refuses_a_value_that_is_not_whole_seconds(tmp_path: Path) -> None:
-    assert _run_quiet_window(tmp_path, "1m", ["a" * 40], fake_sleep=True) == (1, 0)
+@pytest.mark.parametrize("quiet", ["1m", "010", "181", "-1", ""])
+def test_quiet_window_refuses_a_value_outside_whole_seconds_up_to_180(tmp_path: Path, quiet: str) -> None:
+    assert _run_quiet_window(tmp_path, quiet, ["a" * 40], fake_sleep=True) == (1, 0)
+
+
+def test_quiet_window_fails_when_the_head_cannot_be_read(tmp_path: Path) -> None:
+    assert _run_quiet_window(tmp_path, "300", ["a" * 40, "fail"], fake_sleep=True) == (1, 2)
