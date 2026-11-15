@@ -50,8 +50,9 @@ def closure(root: Path, modules: Iterable[str]) -> tuple[str, ...]:
         if module in sources:
             continue
         sources[module] = source = _source(root, module)
-        parts = module.split(".")
-        pending.extend(".".join(parts[:end]) for end in range(1, len(parts)))
+        parent = module.rpartition(".")[0]
+        if parent:
+            pending.append(parent)
         if source is not None:
             pending.extend(_imports(source, module))
     return tuple(sorted(path.relative_to(root).as_posix() for path in sources.values() if path is not None))
@@ -60,4 +61,4 @@ def closure(root: Path, modules: Iterable[str]) -> tuple[str, ...]:
 def digest(root: Path, modules: Iterable[str]) -> str:
     """Return the sha256 over the repository paths and content digests of the modules' closure."""
     record = [[path, hashlib.sha256((root / path).read_bytes()).hexdigest()] for path in closure(root, modules)]
-    return hashlib.sha256(json.dumps(record, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(record).encode()).hexdigest()

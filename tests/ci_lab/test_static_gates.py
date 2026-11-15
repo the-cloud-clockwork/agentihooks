@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts import ci_wiring
 from scripts.ci_lab import grader, static_gates
 from scripts.ci_lab.static_gates import WHOLE_TREE, StaticGate
 
@@ -112,7 +113,7 @@ jobs:
           python "${grader}" check --base FETCH_HEAD
 """
 
-REUSABLE = {".github/workflows/semgrep.yml": SEMGREP}
+REUSABLE = {"semgrep.yml": yaml.safe_load(SEMGREP)}
 
 REGISTRY: dict[str, Any] = {
     "lint/lint-check": {"paths": ["hooks", "scripts"], "base_paths": ["scripts/size_limits.py"], "tools": ["ruff"]},
@@ -337,7 +338,18 @@ def test_a_gate_absent_from_the_registry_keys_the_whole_trees() -> None:
 def test_a_reusable_workflow_not_given_is_refused() -> None:
     with pytest.raises(ValueError) as refused:
         static_gates.discover(WORKFLOW, REGISTRY)
-    assert str(refused.value) == "semgrep uses .github/workflows/semgrep.yml, which was not given"
+    assert str(refused.value) == "semgrep uses ./.github/workflows/semgrep.yml, which was not given"
+
+
+def test_setup_commands_are_not_gates() -> None:
+    setup = [
+        {"name": "Install a pinned tool", "run": 'python -m pip install "ruff==0.15.12" "semgrep==1.177.0"'},
+        {"name": "Install an unpinned tool", "run": "uv pip install basedpyright semgrep"},
+        {"name": "Make a venv", "run": 'uv venv --python "$PYTHON_PATH" "$HOME/venv" && python -m venv .venv'},
+        {"name": "Probe versions", "run": "semgrep --version\nbasedpyright --version\nruff --version"},
+    ]
+    gates = static_gates.discover(_edited(WORKFLOW, "lint", setup), REGISTRY, REUSABLE)
+    assert _names(gates) == [name for name, job, *_ in EXPECTED if job != "lint"]
 
 
 def test_two_steps_with_one_gate_name_are_refused() -> None:
@@ -349,10 +361,9 @@ def test_two_steps_with_one_gate_name_are_refused() -> None:
 
 def test_discovery_over_the_real_workflow_lists_every_gate_the_lint_job_runs() -> None:
     workflows = ROOT / ".github" / "workflows"
-    reusable = {f".github/workflows/{path.name}": path.read_text() for path in workflows.glob("*.yml")}
     registry = json.loads((ROOT / ".github" / "input-keys.json").read_text())
     text = (workflows / "test.yml").read_text()
-    gates = static_gates.discover(text, registry, reusable)
+    gates = static_gates.discover(text, registry, ci_wiring.load(ROOT))
     lint = {gate.step: gate for gate in gates if gate.job == "lint"}
     for step in yaml.safe_load(text)["jobs"]["lint"]["steps"]:
         for module in re.findall(r"python -m (scripts\.[\w.]+)", step.get("run", "")):
@@ -422,7 +433,7 @@ def test_digest_covers_the_closure_files_and_nothing_else(tmp_path: Path) -> Non
     root = _tree(tmp_path / "tree")
     before = grader.digest(root, ["scripts.gate"])
     record = [[path, hashlib.sha256((root / path).read_bytes()).hexdigest()] for path in GATE_CLOSURE]
-    assert before == hashlib.sha256(json.dumps(record, separators=(",", ":")).encode()).hexdigest()
+    assert before == hashlib.sha256(json.dumps(record).encode()).hexdigest()
     (root / "scripts" / "unused.py").write_text("CHANGED = 1\n")
     assert grader.digest(root, ["scripts.gate"]) == before
     (root / "scripts" / "deep" / "leaf.py").write_text("VALUE = 2\n")

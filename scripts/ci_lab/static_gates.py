@@ -6,17 +6,18 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
 
+from scripts import ci_wiring
 from scripts.ci_lab import grader
 
 __all__ = ["STATIC_JOBS", "WHOLE_TREE", "StaticGate", "discover", "main"]
 
 STATIC_JOBS = ("lint", "type-gate", "semgrep")
 WHOLE_TREE = (".",)
-WORKFLOWS = Path(".github/workflows")
+WORKFLOW = Path(".github/workflows/test.yml")
 REGISTRY = Path(".github/input-keys.json")
 TOOLS = {
     "basedpyright": re.compile(r"\bbasedpyright\b"),
@@ -26,7 +27,7 @@ TOOLS = {
 }
 UNGATED_MODULES = frozenset({"basedpyright", "ruff", "venv"})
 COMMAND = re.compile(r"&&|\|\||[;\n|()]")
-UNGATED = re.compile(r"\bpip\s+install\b|--version\b")
+SETUP_COMMAND = re.compile(r"\bpip\s+install\b|--version\b")
 PYTHON = re.compile(
     r'^\s*(?:\w+=\S*\s+)*(?:(?:then|else|do)\s+)?"?(?:\S*/)?python[\d.]*"?((?:\s+-[A-Za-z]+)*)\s+"?([^\s"]+)'
 )
@@ -62,7 +63,7 @@ def _scripts(text: str, target: str) -> set[str]:
 
 
 def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    parts = [part for part in COMMAND.split(run.replace("\\\n", " ")) if not UNGATED.search(part)]
+    parts = [part for part in COMMAND.split(run.replace("\\\n", " ")) if not SETUP_COMMAND.search(part)]
     tools = {tool for tool, pattern in TOOLS.items() if any(pattern.search(part) for part in parts)}
     modules: set[str] = set()
     for match in filter(None, map(PYTHON.match, parts)):
@@ -88,25 +89,28 @@ def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> Sta
     return StaticGate(name, job, title, tools, modules, run, paths, base_paths)
 
 
-def _job_steps(job: str, body: Mapping[str, Any], reusable: Mapping[str, str]) -> list[tuple[str, Any]]:
+def _job_steps(job: str, body: Mapping[str, Any], reusable: Mapping[str, Any]) -> list[tuple[str, Any]]:
     if "uses" not in body:
         return [(job, body["steps"])]
-    path = str(body["uses"]).removeprefix("./")
-    if path not in reusable:
-        raise ValueError(f"{job} uses {path}, which was not given")
-    jobs = cast(dict[str, Any], yaml.safe_load(reusable[path])["jobs"])
-    return [(f"{job}/{name}", spec["steps"]) for name, spec in jobs.items()]
+    uses = str(body["uses"])
+    workflow = reusable.get(uses.removeprefix("./.github/workflows/"))
+    if workflow is None:
+        raise ValueError(f"{job} uses {uses}, which was not given")
+    return [(f"{job}/{name}", spec["steps"]) for name, spec in workflow["jobs"].items()]
 
 
 def discover(
-    workflow_text: str, registry: Mapping[str, Any] | None = None, reusable: Mapping[str, str] | None = None
+    workflow_text: str, registry: Mapping[str, Any] | None = None, reusable: Mapping[str, Any] | None = None
 ) -> tuple[StaticGate, ...]:
-    """Return one StaticGate per gate step of the static jobs of a workflow, in job and step order."""
-    jobs = cast(dict[str, Any], yaml.safe_load(workflow_text)["jobs"])
+    """Return one StaticGate per gate step of the static jobs of a workflow, in job and step order.
+
+    reusable maps a workflow file name to its parsed workflow, as scripts.ci_wiring.load returns it.
+    """
+    jobs: dict[str, Any] = yaml.safe_load(workflow_text)["jobs"]
     gates: dict[str, StaticGate] = {}
     for job in (job for job in STATIC_JOBS if job in jobs):
         for label, steps in _job_steps(job, jobs[job], reusable or {}):
-            for step in cast(list[dict[str, Any]], steps):
+            for step in steps:
                 gate = _gate(label, step, registry or {})
                 if gate is None:
                     continue
@@ -119,13 +123,12 @@ def discover(
 def main(argv: Sequence[str] | None = None) -> int:
     """Print one JSON line per static gate of the repository at --root, with its closure digest at --grader."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path())
+    parser.add_argument("--root", default=".")
     parser.add_argument("--grader", type=Path)
     args = parser.parse_args(argv)
-    root = cast(Path, args.root)
-    reusable = {(WORKFLOWS / path.name).as_posix(): path.read_text() for path in (root / WORKFLOWS).glob("*.yml")}
+    root = Path(args.root)
     registry = json.loads((root / REGISTRY).read_text())
-    for gate in discover(reusable[(WORKFLOWS / "test.yml").as_posix()], registry, reusable):
+    for gate in discover((root / WORKFLOW).read_text(), registry, ci_wiring.load(root)):
         record: dict[str, object] = {field: value for field, value in asdict(gate).items() if field != "run"}
         if args.grader is not None:
             record["digest"] = grader.digest(args.grader, gate.modules)
