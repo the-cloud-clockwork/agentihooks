@@ -187,8 +187,9 @@ def test_an_output_over_the_github_limit_keeps_the_full_count_and_points_at_the_
     tail = f"The full list of 2000 unit keys is at {OUTPUT.details}"
     line = len(f"- tests `{units[0].key}`\n")
     listed = (65535 - len(tail)) // line
-    assert rendered["text"] == "".join(f"- tests `{unit.key}`\n" for unit in units[:listed]) + tail
+    assert len(rendered["text"]) == listed * line + len(tail)
     assert len(rendered["text"]) <= 65535 < len(rendered["text"]) + line
+    assert rendered["text"] == "".join(f"- tests `{unit.key}`\n" for unit in units[:listed]) + tail
     assert rendered["summary"].endswith(f"Unit keys: {listed} of 2000 listed")
 
 
@@ -207,8 +208,8 @@ def test_an_output_over_the_github_limit_lists_the_lines_that_end_exactly_at_it(
     key = "k" * (65535 - len(tail) - len(short) - len("- tests ``\n"))
     units = (Unit("tests", key, ()), Unit("tests", "k", ()), Unit("tests", "k" * 100, ()))
     rendered = checks.render(replace(OUTPUT, units=units))
-    assert rendered["text"] == f"- tests `{key}`\n{short}{tail}"
     assert len(rendered["text"]) == 65535
+    assert rendered["text"] == f"- tests `{key}`\n{short}{tail}"
     assert rendered["summary"].endswith("Unit keys: 2 of 3 listed")
 
 
