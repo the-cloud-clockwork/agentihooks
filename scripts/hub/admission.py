@@ -42,6 +42,23 @@ class LateAdmission(RuntimeError):
     """An admission finished after the asking hive stopped waiting for its answer."""
 
 
+class _StepTimer:
+    """Milliseconds since the previous mark, one instance per admit call so concurrent calls on one Admission
+    never share timing state."""
+
+    def __init__(self, clock: lease.Clock, started: int) -> None:
+        self._clock, self._last = clock, started
+        self.marks: dict[str, int] = {}
+
+    def mark(self, step: str) -> None:
+        now = self._clock()
+        self.marks[step] = now - self._last
+        self._last = now
+
+    def line(self) -> str:
+        return " ".join(f"{step}={ms}" for step, ms in self.marks.items())
+
+
 def refused(slug: str, request: dict[str, Any], reason: str) -> None:
     """Prints the one line naming the member hive, the task and the reason a lane admission is refused."""
     print(
@@ -71,10 +88,13 @@ class Admission:
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         started = self.clock()
+        timer = _StepTimer(self.clock, started)
         if older := self._outdated(request["hive"]):
             refused(slug, request, older)
             return None
+        timer.mark("release")
         held = self.store.redis.get(self._key(slug, request))
+        timer.mark("held")
         if held:
             admitted = json.loads(held)
             live = admitted["name"] in self.store.listed(slug)
@@ -86,19 +106,23 @@ class Admission:
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             refused(slug, request, "claims are stopped")
             return None
+        timer.mark("stopped")
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
         view = self.source.snapshot(slug)
+        timer.mark("snapshot")
         if withdrawn := readiness.withdrawal(
             SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
         ):
             refused(slug, request, f"the offer is withdrawn, {withdrawn}")
             return None
+        timer.mark("withdrawal")
         if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]):
             print(
                 f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
                 file=sys.stderr,
             )
             return None
+        timer.mark("placement")
         from scripts.swarm import tick
 
         if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
@@ -106,18 +130,23 @@ class Admission:
                 f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
             )
             return None
+        timer.mark("cap")
         with self._turn(request["hive"]) as busy:
+            timer.mark("turn")
             if full := busy or self._full(request["hive"]):
                 refused(slug, request, full)
                 held: dict[str, str] = {hive_admission.HELD: full}
                 return held
-            admitted = self._claim(slug, request, view.rows, view.doc)
+            timer.mark("full")
+            admitted = self._claim(slug, request, view.rows, view.doc, timer)
         if admitted is None:
             refused(slug, request, "another holder took the claim")
             return None
-        return self._answered(slug, request, started, admitted)
+        return self._answered(slug, request, started, admitted, timer)
 
-    def _answered(self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any]) -> dict[str, Any]:
+    def _answered(
+        self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any], timer: _StepTimer
+    ) -> dict[str, Any]:
         """The admission the asking hive is still waiting for; one finished past its wait is released and refused."""
         elapsed = self.clock() - started
         if elapsed < ANSWER_MS:
@@ -125,7 +154,7 @@ class Admission:
         self.reopen(slug, request)
         print(
             f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} late: "
-            f"finished after {elapsed} ms, the hive stopped waiting at {ANSWER_MS} ms",
+            f"finished after {elapsed} ms, the hive stopped waiting at {ANSWER_MS} ms {timer.line()}",
             file=sys.stderr,
         )
         raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
@@ -191,7 +220,7 @@ class Admission:
         return f"{live} of {cap} agents on the hive" if live >= cap else ""
 
     def _claim(
-        self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any]
+        self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
     ) -> dict[str, Any] | None:
         from scripts.hive import orders
         from scripts.swarm import launch_check, profile_choice, tick
@@ -201,18 +230,22 @@ class Admission:
         name = self.store.next_name(slug, lane, now)
         if not self.store.claim(slug, task_id, name, tick.LEASE_MS):
             return None
+        timer.mark("claim")
         taken = {agent.seat for agent in self.store.agents(slug)}
         saved = cast(Any, self.store).redis.hget(self.store.key(slug, "launch-assignments"), task_id)
         preferred = cast(str, json.loads(saved)["seat"] if saved else self.store.handoff_seat(slug, task_id))
         seat = tick._free_seat(slug, lane, taken, preferred)
         record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
         previous = self.store.execution_occupants(slug).get(seat)
+        timer.mark("seat")
         try:
             agent = self.store.start_execution(slug, record, previous.execution_id if previous else "")
         except Exception:
             self._unclaim(slug, task_id, name)
             raise
+        timer.mark("execution")
         live = self._mark(slug, request, row, name)
+        timer.mark("write")
         if live is None:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))

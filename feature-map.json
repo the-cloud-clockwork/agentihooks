@@ -872,6 +872,16 @@
       ]
     },
     {
+      "id": "hub-admission-step-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admission-step-timing",
+      "behaviour": "A late hub admission's printed line also names the elapsed milliseconds of each step from the release check through the ledger claim write.",
+      "seam": "Admission.admit on the hub",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step"
+      ]
+    },
+    {
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
