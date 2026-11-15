@@ -6341,6 +6341,7 @@
       "tests": [
         "tests/swarm/test_time_left.py::test_refresh_sends_the_lab_reading_once_the_tick_has_read_one",
         "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block",
+        "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_check_accepts_every_optional_key_at_once",
         "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order",
         "tests/swarm_ledger/test_ledger_stats.py::test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs",
         "tests/swarm_ledger/test_stats_drawer.py::test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck"

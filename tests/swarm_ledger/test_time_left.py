@@ -563,6 +563,12 @@ class TestTimeLeftOp:
                 ledger_time_left.check({**self.op(), "lab": bad})
             assert str(refused.value) == "lab must be an object"
 
+    @pytest.mark.feature("ledger-stats-lab")
+    def test_check_accepts_every_optional_key_at_once(self) -> None:
+        op = {**self.op(), "fix_phase": "p1", "watched": ["the focus on x"], "lab": {"capacity": {}}}
+        assert set(op) == ledger_time_left.FIELDS | set(ledger_time_left.OPTIONAL)
+        assert ledger_time_left.check(op) is None
+
 
 class TestPageInputs:
     def run(self, body):
