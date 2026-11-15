@@ -124,11 +124,7 @@ def _declaration_problems(declared: dict[str, dict[str, Any]], fields: tuple[str
 
 
 def _lab_problems(workflows: dict[str, dict[Any, Any]], declared: dict[str, dict[str, Any]], lab: Lab) -> list[str]:
-    jobs = {
-        f"{file}/{job_id}"
-        for file, workflow in workflows.items()
-        for job_id in workflow.get("jobs") or cast(dict[str, Any], {})
-    }
+    jobs = {f"{file}/{job_id}" for file, workflow in workflows.items() for job_id in workflow.get("jobs") or ()}
     problems = _declaration_problems(declared, LAB_FIELDS)
     problems += [
         f"{key} is declared a lab gate but is not named {LAB_PREFIX}<gate>."
@@ -160,7 +156,7 @@ def check(workflows: dict[str, dict[Any, Any]], config: Wiring, today: date, lab
         config.get("outside_gate", cast(dict[str, Any], {})),
     )
     problems = _declaration_problems({**not_gates, **outside})
-    problems += _lab_problems(workflows, config.get("lab_gates", cast(dict[str, Any], {})), lab)
+    problems += _lab_problems(workflows, config.get("lab_gates", {}), lab)
     gates = [
         (file, job_id)
         for file, workflow in workflows.items()
