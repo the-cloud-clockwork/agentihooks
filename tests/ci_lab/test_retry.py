@@ -82,7 +82,10 @@ def test_policy_reads_lab_retry(tmp_path: Path, counts: dict[str, int], expected
     assert retry.policy(delivery.lab(tree(tmp_path, {**LAB, "retry": counts}))) == expected
 
 
-@pytest.mark.parametrize("counts", [{"lost": -1}, {"failed": -1}, {"lost": "one"}, {"lost": True}, {"extra": 1}, []])
+@pytest.mark.parametrize(
+    "counts",
+    [{"lost": -1}, {"failed": -1}, {"lost": 1.5}, {"failed": 0.5}, {"lost": "one"}, {"lost": True}, {"extra": 1}, []],
+)
 def test_invalid_lab_retry_is_an_error(tmp_path: Path, counts: object) -> None:
     with pytest.raises(delivery.DeliveryError, match="retry"):
         delivery.lab(tree(tmp_path, {**LAB, "retry": counts}))
