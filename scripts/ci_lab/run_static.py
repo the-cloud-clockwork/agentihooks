@@ -3,9 +3,10 @@
 import os
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.ci_lab import expressions
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import StaticGate
 
@@ -17,28 +18,32 @@ SUMMARY = "GITHUB_STEP_SUMMARY"
 
 @dataclass(frozen=True)
 class Settings:
-    """Where gate runs keep their folders, the venv whose bin leads PATH, the ports, whitelist and time limit."""
+    """Where gate runs keep their folders, the venv whose bin leads PATH, the ports, whitelist and time limit, and the
+    context values, such as inputs.base, that the steps' if conditions and env expressions read."""
 
     root: Path
     venv: Path
     ports: PortAllocator
     whitelist: Mapping[str, str]
     timeout: float
+    context: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
 class Result:
-    """A gate's verdict over one head: the exit code, None on timeout, its combined log and its step summary."""
+    """A gate's verdict over one head: the exit code, None on timeout or skip, its combined log, its step summary and
+    whether its if condition skipped it."""
 
     gate: str
     code: int | None
     log: Path
     report: Path
+    skipped: bool = False
 
     @property
     def green(self) -> bool:
-        """True when the step exited zero."""
-        return self.code == 0
+        """True when the step exited zero or its if condition skipped it, as CI passes a skipped step."""
+        return self.skipped or self.code == 0
 
 
 def _folder(root: Path, base_tree: Path, grader_tree: Path) -> Path:
@@ -55,13 +60,21 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
 
     The step finds the grader and base trees at $RUNNER_TEMP/grader and $RUNNER_TEMP/base and the head at
     $GITHUB_WORKSPACE, so a step that changes into the grader runs the grader's copy of its module and reads the
-    head only as data. The caller passes a gate discovered from the grader tree's workflow, never the head's. The
-    whitelist cannot replace the tree variables, and the run folders stay under settings.root.
+    head only as data. The caller passes a gate discovered from the grader tree's workflow, never the head's. A step
+    whose if condition is false under settings.context is skipped without running, as CI skips it. The step's env,
+    its ${{ }} expressions read from settings.context, joins the whitelist; neither can replace the tree variables,
+    and the run folders stay under settings.root. A condition or env expression outside the subset that
+    scripts.ci_lab.expressions reads raises ValueError before the step runs.
     """
     folder = _folder(settings.root, base_tree, grader_tree)
+    if not expressions.holds(gate.condition, settings.context):
+        log = folder / "skipped.txt"
+        log.write_text(f"if is false: {gate.condition}\n")
+        return Result(gate=gate.name, code=None, log=log, report=folder / SUMMARY, skipped=True)
     whitelist = {
         "PATH": os.pathsep.join((str(settings.venv / "bin"), os.defpath)),
         **settings.whitelist,
+        **{name: expressions.interpolate(value, settings.context) for name, value in gate.env},
         "RUNNER_TEMP": str(folder),
         "GITHUB_WORKSPACE": str(head_tree),
         SUMMARY: str(folder / SUMMARY),
