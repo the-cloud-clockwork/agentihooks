@@ -79,6 +79,7 @@ STATS_FILES = {
     "scripts/ci_mutation/__init__.py": "",
     "scripts/ci_mutation/tool.py": "TOOL = 1\n",
     "tests/__init__.py": "",
+    "tests/elsewhere.json": "{}\n",
     "tests/fixtures/data.json": "{}\n",
     "tests/fixtures/gone.json": "{}\n",
     "tests/test_a.py": TEST_A,
@@ -232,8 +233,9 @@ def test_the_mutmut_pin_is_read_from_pyproject(tmp_path: Path, line: str) -> Non
 @pytest.mark.parametrize("line", ['dev = ["mutmut>=3.6"]', 'dev = ["pytest==8.0"]'])
 def test_a_pyproject_that_pins_no_mutmut_version_is_refused(tmp_path: Path, line: str) -> None:
     (tmp_path / "pyproject.toml").write_text(f"[project.optional-dependencies]\n{line}\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as refused:
         expand_mutation.mutmut_pin(tmp_path)
+    assert str(refused.value) == f"{tmp_path / 'pyproject.toml'} pins no mutmut version"
 
 
 def test_covering_fingerprints_enter_only_their_function_key(tmp_path: Path) -> None:
