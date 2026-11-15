@@ -138,6 +138,21 @@ def frozen(doc: dict, pending: dict, inputs: dict) -> set:
     return held
 
 
+def lab_block(lab: dict | None) -> dict | None:
+    """The lab capacity the tick last read: read time, last read error, and per scheduling class in the lab's order
+    the pending units and predicted wait in seconds; None when the tick sent no reading."""
+    if not lab:
+        return None
+    classes = (lab.get("capacity") or {}).get("classes") or {}
+    return {
+        **{key: lab.get(key) for key in ("at", "error", "error_at")},
+        "classes": [
+            {"class": name, "pending": entry["pending"], "predicted_wait_s": entry["predicted_wait_s"]}
+            for name, entry in classes.items()
+        ],
+    }
+
+
 def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> dict:
     slots, ci = (inputs or {}).get("slots"), (inputs or {}).get("ci_minutes")
     tiers = agent_minutes(doc, events, now)
@@ -166,6 +181,7 @@ def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> 
         "gap": gap,
         "frozen": len(held),
         "frozen_work": round(sum(left[tid] for tid in held), 1),
+        "lab": lab_block((inputs or {}).get("lab")),
     }
 
 

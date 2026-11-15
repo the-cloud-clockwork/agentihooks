@@ -311,6 +311,7 @@ class TestStatsSyncEvent:
             "gap": "",
             "frozen": 0,
             "frozen_work": 0,
+            "lab": None,
         }
         assert ctx.stamps["time_left_minutes"] == {"at": NOW, "rev": ctx.rev, "by": "stats"}
         assert ctx.events[0] == {

@@ -175,6 +175,7 @@ class TestCalculate:
             "gap": "",
             "frozen": 0,
             "frozen_work": 0,
+            "lab": None,
         }
 
     def test_the_chain_bound_wins_when_slots_are_many_and_rounds_up(self):
@@ -402,7 +403,7 @@ class TestTimeLeftOp:
         from scripts.swarm_ledger.api import schemas
 
         assert ledger_core.EXTENSION_OPS["time_left"].OPS == ("time_left",)
-        assert schemas.FIELDS["time_left"] == "by slots ci_minutes fix_phase watched"
+        assert schemas.FIELDS["time_left"] == "by slots ci_minutes fix_phase watched lab"
         assert schemas.TYPES["watched"] == {
             "type": "array",
             "maxItems": 100,
@@ -420,8 +421,14 @@ class TestTimeLeftOp:
     @pytest.mark.parametrize(
         ("change", "message"),
         [
-            ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
-            ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
+            (
+                {"by": "eng"},
+                "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase, watched and lab",
+            ),
+            (
+                {"extra": 1},
+                "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase, watched and lab",
+            ),
             ({"slots": -1}, "slots must be a nonnegative integer or null"),
             ({"slots": True}, "slots must be a nonnegative integer or null"),
             ({"slots": 1.0}, "slots must be a nonnegative integer or null"),
@@ -442,7 +449,7 @@ class TestTimeLeftOp:
             ledger_time_left.check(op)
         assert (
             str(refused.value)
-            == "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"
+            == "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase, watched and lab"
         )
 
     def test_check_takes_the_tick_focus_and_refuses_a_malformed_one(self):
