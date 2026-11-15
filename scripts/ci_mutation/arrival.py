@@ -9,7 +9,7 @@ from pathlib import Path
 
 def missing_producers(folder: Path, parts: list[int]) -> list[str]:
     """Return the job name of every stats producer whose collected marker is absent from folder."""
-    return [f"mutation-stats ({part})" for part in parts if not (folder / f"collected-{part}").is_file()]
+    return [f"mutation-stats ({part})" for part in parts if not folder.joinpath(f"collected-{part}").is_file()]
 
 
 def main(argv: list[str] | None = None) -> int:
