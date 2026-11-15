@@ -94,7 +94,7 @@ def test_put_stores_the_verdict_report_and_log_and_get_returns_it(
 def test_a_second_put_is_a_no_op(verdicts: store.Store) -> None:
     unit = key("mutant", "f")
     first = store.Verdict(kind="mutant", key=unit, passed=True, flaky=False, seconds=4.0)
-    second = store.Verdict(kind="mutant", key=unit, passed=False, flaky=True, seconds=9.0)
+    second = store.Verdict(kind="mutant", key=unit, passed=False, flaky=False, seconds=9.0)
     folder = f"lab/mutant/{hexdigest(unit)}/"
     verdicts.put(first, {"killed": 3}, b"first\n")
     report = verdicts.objects.read(f"{folder}report.json")
@@ -216,6 +216,14 @@ def test_a_negative_verdict_hits_unless_the_caller_bypasses_negatives(verdicts: 
     assert verdicts.get("test", failed.key, bypass_negative=True) is None
     assert verdicts.get("test", passed.key, bypass_negative=True) == passed
     assert verdicts.get("test", key("test", "unknown")) is None
+
+
+def test_a_flaky_verdict_is_a_pass() -> None:
+    unit = key("test", "flake")
+
+    with pytest.raises(ValueError, match=f"^a flaky verdict is a pass: {unit}$"):
+        store.Verdict(kind="test", key=unit, passed=False, flaky=True, seconds=1.0)
+    assert store.Verdict(kind="test", key=unit, passed=True, flaky=True, seconds=1.0).flaky is True
 
 
 def test_put_refuses_a_key_of_another_kind_or_shape(verdicts: store.Store) -> None:

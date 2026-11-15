@@ -22,6 +22,11 @@ class Verdict:
     flaky: bool
     seconds: float
 
+    def __post_init__(self) -> None:
+        """Refuse a flaky red: flaky marks a pass after a failure on identical inputs."""
+        if self.flaky and not self.passed:
+            raise ValueError(f"a flaky verdict is a pass: {self.key}")
+
 
 def _json(document: Mapping[str, object]) -> str:
     return json.dumps(document, sort_keys=True)
