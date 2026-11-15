@@ -1195,7 +1195,7 @@ def test_a_new_dev_push_workflow_is_refused_only_when_its_group_is_not_per_branc
     }
 
 
-def test_a_dev_push_workflow_with_two_event_keys_is_not_dev_only() -> None:
+def test_dev_only_needs_exactly_one_event_key_and_the_dev_push_test_is_pinned() -> None:
     assert lanes.DEV_PUSH == "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
     assert not lanes.dev_push_only({})
     assert not lanes.dev_push_only({"on": DEV_ONLY, True: DEV_ONLY})
