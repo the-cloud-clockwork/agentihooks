@@ -6901,6 +6901,16 @@
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only",
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap"
       ]
+    },
+    {
+      "id": "master-interactive-login-without-front-gate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-backend-master-unrouted-account",
+      "behaviour": "place_master offers a hive's native/interactive Claude login as a placement candidate only to the front-door master seat; a secondary master seat (master-2, master-3, ...) never selects it and falls through to a subscription or api slot instead, so it never races the front door for the single cap-1 unrouted account and fails hive admission with \"account reservation is full\".",
+      "seam": "scripts.hive.placement.place_master, the native-login candidate branch gated by front",
+      "tests": [
+        "tests/hive/test_master_placement.py::test_a_secondary_master_ignores_a_hive_interactive_login"
+      ]
     }
   ],
   "unmapped_rules": [

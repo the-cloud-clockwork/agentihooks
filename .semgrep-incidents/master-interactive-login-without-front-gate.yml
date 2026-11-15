@@ -1,0 +1,22 @@
+rules:
+  - id: master-interactive-login-without-front-gate
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive's native/interactive Claude login is a single, cap-1 account only the front-door master may hold.
+      Offering it as a master placement candidate without checking `front` lets a backend seat race the front
+      door for it and fail hive admission with "account reservation is full".
+    paths:
+      include:
+        - /scripts/hive/placement.py
+        - master-interactive-login-without-front-gate.py
+    patterns:
+      - pattern-inside: |
+          def place_master(...):
+              ...
+      - pattern: |
+          if native and $LOGIN in ("", native) and $CHECK:
+              ...
+      - pattern-not: |
+          if front and native and $LOGIN in ("", native) and $CHECK:
+              ...

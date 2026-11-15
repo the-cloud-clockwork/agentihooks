@@ -176,6 +176,7 @@ def test_a_secondary_master_ignores_a_hive_master_login():
     )
 
 
+@pytest.mark.feature("master-interactive-login-without-front-gate")
 def test_a_secondary_master_ignores_a_hive_interactive_login():
     hives = [hive("login", interactive={"claude": "unrouted"}, prefer={"master": 1})]
     assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
