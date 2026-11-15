@@ -1,10 +1,12 @@
 """The lab's soft daily core budget: a core minute counter per UTC day in Redis and the classes it sheds."""
 
+import time
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from scripts.ci_lab.capacity import Load
+from scripts.ci_lab.delivery import CLASSES, SHEDDABLE
 from scripts.ci_lab.store import PREFIX
 
 __all__ = [
@@ -47,42 +49,62 @@ class Status:
 
 def policy(runtime: Mapping[str, Any]) -> Policy:
     """The budget policy of a validated scheduler runtime config."""
-    raise NotImplementedError(runtime)
+    budget = runtime["budget"]
+    return Policy(budget["coreMinutesPerDay"], budget["shed"])
 
 
 def day_key(now_ms: int) -> str:
     """The Redis key of the core minute counter for the UTC day holding the instant."""
-    raise NotImplementedError(now_ms)
+    return KEY + time.strftime("%Y-%m-%d", time.gmtime(now_ms / 1000))
 
 
 def shed(share: float, fractions: Mapping[str, float]) -> tuple[str, ...]:
-    """The classes shed once share of the day's budget is spent."""
-    raise NotImplementedError(share, fractions)
+    """The classes shed once share of the day's budget is spent.
+
+    A class sheds when the share reaches its fraction, and every class before it in the shed order sheds with it, so
+    backfill always sheds first; a class without a fraction sheds only behind a later one. Classes outside the shed
+    order, hotfix and pull_request, never shed.
+    """
+    depth = 0
+    for index, name in enumerate(SHEDDABLE, start=1):
+        if name in fractions and share >= fractions[name]:
+            depth = index
+    return SHEDDABLE[:depth]
 
 
 def assess(spent_minutes: float, policy: Policy) -> Status:
     """The budget status after spent_minutes of the day's core minutes."""
-    raise NotImplementedError(spent_minutes, policy)
+    share = spent_minutes / policy.core_minutes_per_day
+    return Status(max(1.0 - share, 0.0), shed(share, policy.fractions))
 
 
 def waiting(pending: Mapping[str, int], shed: Collection[str]) -> int:
     """Pending slots of every class but backfill that may lease."""
-    raise NotImplementedError(pending, shed)
+    return sum(pending.get(name, 0) for name in CLASSES if name != BACKFILL and name not in shed)
 
 
 def slots_wanted(running: Mapping[str, int], pending: Mapping[str, int], shed: Collection[str]) -> int:
-    """Slots to ask the autoscaler for."""
-    raise NotImplementedError(running, pending, shed)
+    """Slots to ask the autoscaler for: running slots of every class but backfill plus the waiting slots.
+
+    Backfill never counts, so it takes free slots only; a shed class keeps its running slots but not its pending ones.
+    """
+    return sum(running.get(name, 0) for name in CLASSES if name != BACKFILL) + waiting(pending, shed)
 
 
 def admits(name: str, slots: int, free_slots: int, waiting: int, shed: Collection[str]) -> bool:
-    """Whether a unit of the class taking slots may lease now."""
-    raise NotImplementedError(name, slots, free_slots, waiting, shed)
+    """Whether a unit of the class taking slots may lease now.
+
+    A shed class never leases; backfill leases only into the slots left free after the waiting slots of every other
+    class that may lease.
+    """
+    if name in shed:
+        return False
+    return name != BACKFILL or slots <= free_slots - waiting
 
 
 def observe(load: Load, status: Status) -> Load:
     """The load snapshot carrying the budget fraction and shed classes that /capacity and the metrics show."""
-    raise NotImplementedError(load, status)
+    return replace(load, budget_fraction=status.fraction, shed=status.shed)
 
 
 @dataclass(frozen=True)
@@ -94,13 +116,19 @@ class Budget:
     policy: Policy
 
     def charge(self, slots: int, seconds: float) -> Status:
-        """Add a finished unit's core minutes to today's counter and return the new status."""
-        raise NotImplementedError(slots, seconds)
+        """Add a finished unit's core minutes, slots times seconds, to today's counter and return the new status."""
+        key = day_key(self.clock())
+        pipe = self.client.pipeline()
+        pipe.incrbyfloat(key, slots * seconds / 60)
+        pipe.expire(key, TTL_S)
+        spent, _ = pipe.execute()
+        return assess(float(spent), self.policy)
 
     def spent(self) -> float:
         """Core minutes spent today."""
-        raise NotImplementedError
+        value = self.client.get(day_key(self.clock()))
+        return 0.0 if value is None else float(value)
 
     def status(self) -> Status:
         """The budget status for today."""
-        raise NotImplementedError
+        return assess(self.spent(), self.policy)
