@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "grader-gates-fail-closed-on-stale-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
+      "behaviour": "The marker vector step and the two chart steps run only the protected grader's copy of their script with the head as root, so a pull request whose base predates root support fails closed and a head copy edited to pass never decides the verdict.",
+      "seam": "The lint marker vector step and the Semgrep chart step run text, executed over a stale grader tree and a planted head copy that exits 0",
+      "tests": [
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_never_runs",
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_runs"
+      ]
+    },
+    {
       "id": "hub-started-clears-launch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
