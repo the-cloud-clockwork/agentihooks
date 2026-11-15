@@ -1462,6 +1462,10 @@ def test_the_launch_selector_forwards_every_option_to_the_selector_it_picks(
     assert calls == [(selector, defaults), (selector, given)]
 
 
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize(
+    ("marker", "selector"), [("", "select_master_credential"), ("AGENTIHOOKS_SWARM", "select_credential")]
+)
 def test_a_launch_routes_over_the_operator_token_block_its_shell_never_loaded(
     monkeypatch: pytest.MonkeyPatch, marker: str, selector: str
 ) -> None:

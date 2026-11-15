@@ -620,6 +620,7 @@ def _quick_seat(
     return init_agent.main([*argv, "--start-timeout", "0.5", "--route-timeout", "0.5", *extra], env)
 
 
+@pytest.mark.feature("quick-swarm")
 def test_a_quick_seat_never_falls_back_to_bare_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     routed = ["--routed-only", "--dry-run"]
     assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=routed) == 0
@@ -633,6 +634,8 @@ def test_a_quick_seat_never_falls_back_to_bare_claude(monkeypatch: pytest.Monkey
     assert (option.default, option.help) == (False, init_agent.ROUTED_ONLY_HELP)
 
 
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("status", ["bare", "failed", ""])
 def test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], status: str
 ) -> None:
@@ -645,6 +648,7 @@ def test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch(
     )
 
 
+@pytest.mark.feature("quick-swarm")
 def test_a_routed_quick_seat_starts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

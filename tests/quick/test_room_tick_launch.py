@@ -446,6 +446,8 @@ def _ended(folder: Path, eng_state: str) -> tuple[list[tuple[str, str]], list[li
     return ended, started
 
 
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("state", [registry.READY, registry.PENDING])
 def test_force_ends_the_seat_agent_with_its_pane_kept_and_starts_its_successor(tmp_path: Path, state: str) -> None:
     ended, started = _ended(tmp_path, state)
     loaded = registry.load(tmp_path)
