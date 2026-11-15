@@ -4565,6 +4565,27 @@
       ]
     },
     {
+      "id": "lint-gates-grade-from-grader",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
+      "behaviour": "The lint job's ruff, wiring and marker vector steps and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
+      "seam": "The lint and Semgrep workflow step run text, executed over a planted head with the repository as grader",
+      "tests": [
+        "tests/test_ci_grader_gates.py::test_a_head_config_that_drops_a_rule_stays_red_under_the_grader_config",
+        "tests/test_ci_grader_gates.py::test_a_head_shadow_ruff_package_cannot_pass_the_lint_check",
+        "tests/test_ci_grader_gates.py::test_the_lint_check_also_holds_a_rule_the_head_adds",
+        "tests/test_ci_grader_gates.py::test_a_head_formatter_config_stays_red_under_the_grader_config",
+        "tests/test_ci_grader_gates.py::test_a_head_wiring_check_that_passes_itself_stays_red_under_the_grader_copy",
+        "tests/test_ci_grader_gates.py::test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy",
+        "tests/test_ci_grader_gates.py::test_the_marker_check_reads_the_vectors_under_the_root_it_names",
+        "tests/test_ci_grader_gates.py::test_the_marker_check_runs_after_the_grader_checkout",
+        "tests/test_ci_grader_gates.py::test_a_chart_check_grades_the_tree_its_root_names",
+        "tests/test_ci_grader_gates.py::test_a_head_chart_check_that_passes_itself_stays_red_under_the_grader_copy",
+        "tests/test_ci_grader_gates.py::test_each_semgrep_job_checks_out_the_caller_base_as_the_grader",
+        "tests/test_ci_grader_gates.py::test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules"
+      ]
+    },
+    {
       "id": "hive-rollout-lease-failed-sync",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
@@ -6182,8 +6203,8 @@
     {
       "id": "quick-swarm",
       "origin": "inventory",
-      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly.",
-      "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, and init-agent --pane",
+      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, never the master.",
+      "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, init-agent --pane and its quick seat route check, and the token block read of scripts.claude_quota_balancer.select_launch_credential",
       "tests": [
         "tests/quick/test_cli.py::test_up_seats_the_caller_as_master_and_launches_the_engineers",
         "tests/quick/test_cli.py::test_up_outside_herdr_fails_loudly",
@@ -6226,7 +6247,17 @@
         "tests/quick/test_room_tick_launch.py::test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending",
         "tests/quick/test_room_tick_launch.py::test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds",
         "tests/quick/test_room_tick_launch.py::test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching",
-        "tests/quick/test_quick_hooks.py::test_the_quick_gate_names_the_tokens_held_and_checks_a_named_handoff_file"
+        "tests/quick/test_quick_hooks.py::test_the_quick_gate_names_the_tokens_held_and_checks_a_named_handoff_file",
+        "tests/test_init_agent.py::test_a_quick_seat_never_falls_back_to_bare_claude",
+        "tests/test_init_agent.py::test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch",
+        "tests/test_init_agent.py::test_a_routed_quick_seat_starts",
+        "tests/test_claude_quota_balancer.py::test_a_launch_routes_over_the_operator_token_block_its_shell_never_loaded",
+        "tests/quick/test_room_tick_launch.py::test_an_engineer_whose_agent_is_signed_out_is_started_again_and_the_master_never_is",
+        "tests/quick/test_room_tick_launch.py::test_force_ends_the_seat_agent_with_its_pane_kept_and_starts_its_successor",
+        "tests/quick/test_room_tick_launch.py::test_force_never_ends_the_master_nor_a_seat_being_launched",
+        "tests/quick/test_cli_mutants.py::test_relaunch_force_ends_the_live_agent_and_starts_its_successor",
+        "tests/test_init_agent.py::test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready",
+        "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
     },
@@ -6322,6 +6353,19 @@
       ]
     },
     {
+      "id": "lab-full-pool-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-full-pool-wait",
+      "behaviour": "The CI lab predicts each class's queue wait by draining its pending estimates across the pool, each free slot working from now and each busy slot from when its running unit frees it, so a pool with every slot busy reports a positive pull request wait in the capacity document, the queue wait gauge and the swarm lab reading whose pull request wait the lab behind claim hold reads; a full pool with no known free time still reports no wait.",
+      "seam": "scripts.ci_lab.capacity.predicted_wait with Load.frees_in, through scripts.ci_lab.capacity.document, scripts.ci_lab.metrics.observe_load and scripts.swarm.lab_capacity.capture",
+      "tests": [
+        "tests/ci_lab/test_capacity.py::test_predicted_wait_drains_pending_work_as_running_units_free_their_slots",
+        "tests/ci_lab/test_capacity.py::test_a_full_pool_predicts_its_wait_from_when_running_units_free_their_slots",
+        "tests/ci_lab/test_metrics.py::test_the_queue_wait_gauge_predicts_a_full_pool_from_when_running_units_free_their_slots",
+        "tests/swarm/test_lab_capacity.py::test_a_full_lab_reading_carries_the_pull_request_wait_the_claim_hold_reads"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
@@ -6330,6 +6374,46 @@
         "tests/tick/steps/test_lab_capacity.py::test_lab_capacity",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
+      ]
+    },
+    {
+      "id": "ledger-stats-lab",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-ledger-stats-lab",
+      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units and predicted wait; the Stats panel shows one Lab row before the top bottleneck.",
+      "seam": "scripts.swarm.time_left.refresh, LedgerClient.time_left, ledger_time_left.check and apply, ledger_stats.calculate, renderStats Lab row",
+      "tests": [
+        "tests/swarm/test_time_left.py::test_refresh_sends_the_lab_reading_once_the_tick_has_read_one",
+        "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block",
+        "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_check_accepts_every_optional_key_at_once",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs",
+        "tests/swarm_ledger/test_stats_drawer.py::test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck"
+      ]
+    },
+    {
+      "id": "lab-capacity-verdict-cache-hits",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-class-cache-hits",
+      "behaviour": "The CI lab capacity document gives every scheduling class a verdict cache hit ratio, the class's verdict cache hits over its hits plus misses from the load snapshot, and null when the class had no verdict cache lookups; a load snapshot carries no lookups by default.",
+      "seam": "scripts.ci_lab.capacity Load cache_hits and cache_misses, hit_ratio and document, the body of GET /capacity",
+      "tests": [
+        "tests/ci_lab/test_capacity.py::test_capacity_document_reports_every_class",
+        "tests/ci_lab/test_capacity.py::test_hit_ratio_is_hits_over_lookups",
+        "tests/ci_lab/test_capacity.py::test_capacity_document_reports_the_verdict_cache_hit_ratio_per_class",
+        "tests/ci_lab/test_capacity.py::test_load_defaults_to_no_verdict_cache_lookups"
+      ]
+    },
+    {
+      "id": "lab-warm-mutant-runner",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-run-mutation",
+      "behaviour": "The lab mutation runner grades every mutant of a function unit with the status the selection gate gives it on the self plant corpus: it collects the covering tests once and forks one child per mutant that selects it through MUTANT_UNDER_TEST, a runner that grades a killable mutant survived fails the equivalence, and the per mutant fixed cost stays a fraction of the one collection.",
+      "seam": "scripts.ci_lab.run_mutation run for a stats unit and a mutant unit, started as python -m scripts.ci_lab.run_mutation in a tree holding the trampolined sources",
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does",
+        "tests/ci_lab/test_run_mutation.py::test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence",
+        "tests/ci_lab/test_run_mutation.py::test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection"
       ]
     },
     {
@@ -6426,6 +6510,20 @@
         "tests/hub/test_launch_checks.py::test_a_raising_stop_keeps_the_check_and_sends_again_one_deadline_later",
         "tests/hub/test_launch_checks.py::test_a_sent_stop_holds_the_check_until_the_exit_drops_the_agent",
         "tests/hub/test_launch_checks.py::test_the_hub_registry_polls_launch_checks_on_the_real_stop"
+      ]
+    },
+    {
+      "id": "events-launch-check-live-agent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-hang-drops-live-agent",
+      "behaviour": "A hub admitted worker with no started record that fails its launch check on launched, whose execution stop answers unknown, keeps its agent, claim, seat and claimed task when the hive that took it names it in its live report: the hub forgets the check, keeps the failed report and sends no stop. A worker its hive report leaves out is freed and its task reopened as before.",
+      "seam": "LaunchChecks.check and _halt reading the hive report under reports.key for the agent's hive before Admission.free",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_a_hung_verdict_keeps_a_live_agent_whose_started_record_is_missing",
+        "tests/hub/test_launch_checks.py::test_a_hung_verdict_frees_an_agent_its_hive_report_leaves_out"
+      ],
+      "rules": [
+        "hub-hang-frees-live-agent"
       ]
     },
     {
@@ -6855,6 +6953,35 @@
       ],
       "rules": [
         "tick-launch-path"
+      ]
+    },
+    {
+      "id": "lab-sandbox-read-only-trees",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-readonly-grader",
+      "behaviour": "A lab unit given read only trees, the grader tree and the base tree, runs inside bubblewrap, with or without network, and its bubblewrap arguments bind each tree read only with --ro-bind after the root bind; a networked unit with read only trees keeps the host network, and it cannot run when bwrap is missing.",
+      "seam": "scripts.ci_lab.sandbox Sandbox.run and argv_for, the bubblewrap arguments the unit runs under",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only",
+        "tests/ci_lab/test_sandbox.py::test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap"
+      ]
+    },
+    {
+      "id": "lab-static-step-env",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
+      "behaviour": "Static gate discovery records each gate step's env values and if condition as the workflow writes them and the command prints both on the gate's JSON line; the lab executor resolves the ${{ }} expressions in that env from its context, gives the env to the sandboxed step without letting it replace the tree variables, and skips a step whose if condition is false without running it, reporting it skipped and green as CI does.",
+      "seam": "scripts.ci_lab.static_gates discover and main, the StaticGate env and condition, scripts.ci_lab.run_static run with Settings.context and Result.skipped, and scripts.ci_lab.expressions holds and interpolate",
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_carries_its_step_env_and_if_condition",
+        "tests/ci_lab/test_static_gates.py::test_yaml_booleans_in_step_env_and_if_read_as_github_writes_them",
+        "tests/ci_lab/test_static_gates.py::test_the_command_prints_each_gate_step_env_and_if_condition",
+        "tests/ci_lab/test_static_gates.py::test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read",
+        "tests/ci_lab/test_run_static.py::test_a_step_whose_if_is_false_is_skipped_green_without_running",
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_its_env_with_expressions_resolved_from_the_context",
+        "tests/ci_lab/test_expressions.py::test_an_expression_evaluates_as_github_actions_evaluates_it",
+        "tests/ci_lab/test_expressions.py::test_syntax_outside_the_subset_is_refused",
+        "tests/ci_lab/test_expressions.py::test_a_condition_holds_when_its_expression_is_truthy"
       ]
     }
   ],

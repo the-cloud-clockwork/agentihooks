@@ -1,7 +1,7 @@
 """Launch checks for the workers the hub admits on the events engine, timed on the hub clock alone: the join deadline
 runs from the poll that first reads the execution's started record, and a spawn the hive never started fails one spawn
 timeout and one deadline after the hive began it. A failed worker is stopped on its hive and its check is kept until
-its exit drops it; a worker no hive started is freed and its task reopened."""
+its exit drops it; a worker no hive started is freed and its task reopened, unless its hive's live report names it."""
 
 import json
 import sys
@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
-from scripts.hive import execution_events, execution_stop
+from scripts.hive import execution_events, execution_stop, reports
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
 from scripts.swarm.runtime import SPAWN_TIMEOUT_S
@@ -35,6 +35,13 @@ def hung(since: int, now: int) -> Misses:
         return {}
     window = f"a started execution within {HUNG_MS // 1000} seconds of the hive taking it"
     return {"launched": {"expected": window, "actual": "none started"}}
+
+
+def live(store: Any, agent: AgentRecord) -> bool:
+    """True while the live report of the hive that took ``agent`` names it, so the agent runs with no started record."""
+    reader: Any = reports.Reports(store.redis)
+    report: dict[str, Any] | None = reader.read(agent.hive)
+    return report is not None and agent.name in report["names"]
 
 
 class LaunchChecks:
@@ -141,12 +148,16 @@ class LaunchChecks:
         return self._halt(slug, agent, {**entry, REASON: f"its launch check failed on {', '.join(found)}"}, now)
 
     def _halt(self, slug: str, agent: AgentRecord, entry: dict[str, Any], now: int) -> str:
-        """Stops the agent on its hive, keeping the check until its exit drops the agent; frees an agent no hive
-        started. A raising stop leaves the check stopping, so the next deadline sends it again."""
+        """Stops the agent on its hive, keeping the check until its exit drops the agent; keeps an agent no hive
+        started while its hive's live report names it, and frees it otherwise. A raising stop leaves the check
+        stopping, so the next deadline sends it again."""
         self._save(slug, agent.name, {**entry, STOPPING: now})
         outcome = self._stop(self._bus, slug, agent, str(entry[REASON]))
         if outcome != execution_stop.UNKNOWN:
             return f"stop {outcome} for {agent.name} because {entry[REASON]}; held until its exit"
+        if live(self._connected(), agent):
+            launch_check.forget(self._connected(), slug, agent.name)
+            return f"kept {agent.name} on {agent.task}: {entry[REASON]}, but hive {agent.hive} lists it"
         self._freer().free(slug, agent)
         launch_check.forget(self._connected(), slug, agent.name)
         return f"freed {agent.name} and reopened {agent.task} because {entry[REASON]} and no hive started it"

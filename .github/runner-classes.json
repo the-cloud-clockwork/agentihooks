@@ -8,6 +8,8 @@
   "chaos.yml/chaos": "standard",
   "chart-release.yml/package": "light",
   "chart-release.yml/publish": "light",
+  "ci-lab-image.yml/image": "standard",
+  "ci-lab-image.yml/refresh": "light",
   "ci-minutes.yml/measure": "light",
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from scripts.ci_lab import metrics as lab_metrics
-from scripts.ci_lab.capacity import Load
+from scripts.ci_lab.capacity import Load, document
 from scripts.swarm import cli, lab_capacity, status
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -66,7 +66,12 @@ class Reply:
 
 def test_read_returns_the_capacity_document_the_lab_serves(lab: str) -> None:
     doc = lab_capacity.read(lab)
-    assert doc["classes"]["queue"] == {"pending": 2, "running": 1, "predicted_wait_s": 20.0}
+    assert doc["classes"]["queue"] == {
+        "pending": 2,
+        "running": 1,
+        "predicted_wait_s": 20.0,
+        "verdict_cache_hit_ratio": None,
+    }
     assert (doc["slots"], doc["utilisation"], doc["budget_fraction"], doc["shed"]) == (
         {"total": 4, "busy": 1, "free": 3},
         0.25,
@@ -149,6 +154,20 @@ def test_capture_keeps_the_capacity_in_the_lab_block_and_returns_its_rows(store:
     assert [row["class"] for row in found] == sorted(lab_capacity.read(lab)["classes"])
     block = json.loads(store.redis.get(store.key("sw", "lab-capacity")))
     assert block == {"url": lab, "at": NOW, "capacity": lab_capacity.read(lab), "error": "", "error_at": 0}
+
+
+@pytest.mark.feature("lab-full-pool-wait")
+def test_a_full_lab_reading_carries_the_pull_request_wait_the_claim_hold_reads(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    full = Load({"pull_request": (1800.0, 1200.0)}, {"queue": 2}, slots_total=2, slots_busy=2, frees_in=(900.0, 600.0))
+    monkeypatch.setattr(lab_capacity, "urlopen", lambda url, timeout: Reply(json.dumps(document(full)).encode()))
+    found = lab_capacity.capture(store, "sw", "http://lab:8800", NOW)
+    block = lab_capacity.status(store, "sw")
+    assert block is not None
+    assert block["capacity"]["slots"]["free"] == 0
+    assert block["capacity"]["classes"]["pull_request"]["predicted_wait_s"] == 2250.0
+    assert {row["class"]: row["predicted_wait_s"] for row in found}["pull_request"] == 2250.0
 
 
 def test_a_failed_capture_keeps_the_last_capacity_and_records_the_error(
