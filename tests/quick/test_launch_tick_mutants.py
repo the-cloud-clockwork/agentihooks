@@ -438,6 +438,7 @@ def test_the_footer_is_every_line_below_the_last_input_rule_and_nothing_without_
     rule = "─" * 12
     assert tick._footer(f"out\n{rule}\n❯ typed\n{rule}\nstatus one\nstatus two") == "status one\nstatus two"
     assert tick._footer(f"{rule}\n{rule}\n") == ""
+    assert tick._footer(f"said\n{rule}\nmore\n{rule}\n❯ \n{rule}\nstatus") == "status"
     assert tick._footer("no box at all\nNot logged in · Run /login") == ""
 
 

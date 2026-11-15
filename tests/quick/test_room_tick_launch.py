@@ -39,6 +39,7 @@ class FakeHerdr:
     def __init__(self, status: str = "idle", typed: str = "", bare: bool | None = False, screen: str = "") -> None:
         self._status, self._typed, self._bare, self._screen = status, typed, bare, screen
         self.prompts: list[tuple[str, str]] = []
+        self.read: list[str] = []
 
     def status(self, pane_id: str) -> str:
         return self._status
@@ -50,6 +51,7 @@ class FakeHerdr:
         return self._bare
 
     def screen(self, pane_id: str) -> str:
+        self.read.append(pane_id)
         return self._screen
 
     def prompt(self, pane_id: str, text: str) -> bool:
@@ -403,7 +405,7 @@ def test_an_engineer_whose_agent_is_signed_out_is_started_again_and_the_master_n
         "eng-1": "signed-out-started",
     }
     assert [row for row in outcomes if "forced" in row or "relaunched" in row] == [{"forced": "eng-1"}]
-    assert herdr.prompts == []
+    assert herdr.prompts == [] and herdr.read == ["w1:p2"]
 
 
 @pytest.mark.feature("quick-swarm")
