@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -7,7 +8,7 @@ from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
-from scripts.hive import execution_events, presence, reports
+from scripts.hive import execution_events, execution_stop, presence, reports
 from scripts.hub import lease
 from scripts.hub.lifecycle import Lifecycle
 from scripts.hub.registry import Reactor
@@ -58,6 +59,25 @@ def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[Ag
         return []
     kept = {agent.name for agent in legacy}
     return [agent for agent in store.agents(slug) if agent.name not in kept]
+
+
+def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
+    """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
+    answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
+    refused the stop."""
+    config = BusConfig.from_environ()
+    if config.backend == "memory":
+        return execution_stop.UNKNOWN
+    try:
+        bus = open_bus(config)
+        try:
+            outcome = execution_stop.stop(bus, slug, agent, reason)
+        finally:
+            bus.close()
+    except Exception as exc:
+        outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
+    print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
+    return outcome
 
 
 def event_slugs(store: RedisStore) -> list[str]:
