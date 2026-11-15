@@ -1,4 +1,4 @@
-"""Every swarm runs on the events engine: no tick step launches an agent, no source under scripts brings the tick
+"""Every swarm runs on the events engine: no tick step launches a task agent, no source under scripts brings the tick
 launch back, a tick pass leaves a claimable task to the hub, and a new or unmarked config reads events."""
 
 import ast
@@ -205,9 +205,11 @@ def test_a_tick_pass_over_an_open_claimable_task_spawns_no_agent_and_writes_no_c
     store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
+    seated = [name for name, _ in runtime.masters]
+    tick("sw", store, ledger, runtime, now_ms=2_000)
     _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
     row = ledger.rows["t1"]
-    assert (runtime.spawned, runtime.tasks) == ([], [])
+    assert ([name for name, _ in runtime.masters], runtime.spawned, runtime.tasks) == (seated, [], [])
     assert (store.claimant("sw", "t1"), row["state"], row["claimed_by"]) == (None, "open", "")
     assert [task["id"] for task in ready["eng"]] == ["t1"]
 
