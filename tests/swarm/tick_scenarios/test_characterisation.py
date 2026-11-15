@@ -201,6 +201,7 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
         time_ns=Mock(return_value=BASE_MS * 1000000),
     )
     monkeypatch.setattr(timing, "time", clock)
+    monkeypatch.setattr(timing, "emit", lambda stream, line: None)
     if cadence := CADENCES.get(scenario):
         monkeypatch.setenv("AGENTIHOOKS_TICK_CADENCE", cadence)
     appended = Mock()
@@ -238,6 +239,27 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     if scenario.startswith("interval"):
         result["step_rows"] = step_rows(appended)
     return canonical(result, (str(tmp_path), str(Path.home()), str(Path.cwd())))
+
+
+class _ExplodingStream:
+    """A stand-in for ``sys.stderr`` that fails the test the moment anything writes to it."""
+
+    def write(self, data: str) -> int:
+        raise AssertionError("tick replay must not write to the real stderr sink")
+
+    def flush(self) -> None:
+        raise AssertionError("tick replay must not flush the real stderr sink")
+
+
+@pytest.mark.feature("swarm-tick-replay-hermetic-emission")
+@pytest.mark.parametrize("entry", ["tick", "run_tick"])
+def test_replay_never_writes_to_the_real_stderr_sink(
+    entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "stderr", _ExplodingStream())
+    replay("running", entry, monkeypatch, tmp_path)
 
 
 def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
