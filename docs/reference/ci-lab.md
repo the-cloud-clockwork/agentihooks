@@ -10,7 +10,9 @@ nav_order: 90
 The CI lab runs as two services, the scheduler and the worker. This page lists what each one
 exposes and reads: its entry point, environment, ports and metric names. Every name lives in
 `scripts.ci_lab.contract`; the services and the platform tests are to import these constants by
-name, so a rename fails an import instead of dropping a series.
+name, so a rename fails an import instead of dropping a series. The worker's PriorityClass is a
+cluster object outside that module; [Worker scheduling priority](#worker-scheduling-priority)
+covers it.
 
 ## Entry points
 
@@ -79,6 +81,123 @@ A worker started with any `GITHUB_APP_*` variable in its environment refuses to 
 `BUS_PREFIX`, `MINIO_PREFIX`, `GITHUB_APP_PREFIX`, `REDIS_URL`, `RUNTIME_CONFIG`,
 `SCHEDULER_URL`, `SLOTS`, `GIT_MIRROR` and `UV_CACHE_DIR`, with `SCHEDULER_PORT` and
 `METRICS_PORT` for the ports.
+
+## Worker scheduling priority
+
+Lab worker pods run under the PriorityClass `ci-lab-worker`. When the nodes are full, new pods wait
+in Pending and the scheduler places them in priority order as capacity frees. A pending lab worker
+waits behind every pending CI runner, so lab grading never delays pull request checks or the merge
+queue.
+
+| PriorityClass | Value | `preemptionPolicy` | Pods that name it |
+|---|---|---|---|
+| `qitp-trading` | 1000 | can preempt lower priority pods | Trading workers |
+| `arc-runners-oss-checks` | 200 | `Never` | Every CI runner: pull request checks, image builds, merge queue groups and batch mutation runners |
+| `ci-lab-worker` | 150 | `Never` | Lab workers |
+| `arc-runners-oss-batch-priority` | 100 | `Never` | None; it stays defined until no pod names it |
+| none | 0 | | Every pod that names no class |
+
+The class is defined as:
+
+```yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-lab-worker
+value: 150
+preemptionPolicy: Never
+globalDefault: false
+description: ci-lab workers schedule after pull request and merge queue runners and ahead of batch runners
+```
+
+- `preemptionPolicy: Never`: a pending worker never evicts a running pod to get a node; only its
+  place in the queue changes. A higher class that preempts, such as `qitp-trading`, can still evict
+  a running worker.
+- `globalDefault: false`: the class applies only to pods that name it. A pod that names no class
+  keeps priority 0.
+- The description and the manifest's header comment place lab workers ahead of batch runners at
+  100. Batch runners name `arc-runners-oss-checks`, so a lab worker waits behind them too.
+
+### Where it lives and how it reaches the cluster
+
+The class sits alone in `k8s/manifests/cluster/ci-lab-priority-classes.yaml` in the deployment
+repository, apart from the runner classes in `runner-priority-classes.yaml` beside it. It landed in
+that repository's pull request 1740 on 15 November 2026. The `cluster-rbac` Argo CD Application
+syncs `k8s/manifests/cluster` recursively from that repository's `dev` branch with automated prune
+and self heal, so a change to the class reaches the cluster when it merges into `dev`, with no
+promotion step.
+
+The deployment repository's `tests/unit/ci_lab/test_priority.py` holds the file to this one class,
+the value to 150 with batch at 100 < 150 < checks at 200 < trading at 1000, and the class to
+`scheduling.k8s.io/v1`, `Never` and `globalDefault: false`. A re-rank changes that test in the same
+pull request.
+
+### Use it from a worker pod
+
+A pod gets the rank only by naming the class in its spec. The worker Deployment's pod template
+carries:
+
+```yaml
+spec:
+  template:
+    spec:
+      priorityClassName: ci-lab-worker
+```
+
+Admission resolves the name to `spec.priority` when the pod is created, so a running pod keeps the
+priority it was created with. Admission refuses a pod that names a class the cluster does not hold. No
+chart sets `priorityClassName: ci-lab-worker` yet; until the lab chart's worker Deployment does,
+its pods run at priority 0.
+
+### Verify
+
+```bash
+kubectl get priorityclass ci-lab-worker
+```
+
+```text
+NAME            VALUE   GLOBAL-DEFAULT   AGE   PREEMPTIONPOLICY
+ci-lab-worker   150     false            42s   Never
+```
+
+That output is the proof recorded on pull request 1740 after `cluster-rbac` synced it. The full
+order, system classes included:
+
+```bash
+kubectl get priorityclass --sort-by=.value
+```
+
+The class and priority a running worker pod resolved to:
+
+```bash
+kubectl get pod <worker pod> -n <namespace> -o jsonpath='{.spec.priorityClassName} {.spec.priority}{"\n"}'
+```
+
+```text
+ci-lab-worker 150
+```
+
+### Re-rank
+
+`value` is immutable on an existing PriorityClass, so an edit of it in place fails the
+`cluster-rbac` sync. To move the lab workers:
+
+1. Add a class with a new name and the new value in `ci-lab-priority-classes.yaml`, and update
+   `tests/unit/ci_lab/test_priority.py` to the new name, value and order.
+2. Point the worker Deployment's `priorityClassName` at the new class; pods pick it up as they are
+   recreated.
+3. Remove the old class once no pod names it.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `kubectl get priorityclass ci-lab-worker` answers `NotFound` | `cluster-rbac` has not synced the commit that adds it, or its sync failed | `kubectl -n argocd get application cluster-rbac -o jsonpath='{.status.sync.status} {.status.sync.revision}{"\n"}'`; the revision must be at or after the commit on `dev` |
+| The worker ReplicaSet reports `FailedCreate` with `no PriorityClass with name ci-lab-worker was found` | The pod template names the class before the cluster holds it | Sync `cluster-rbac` first, as above; the ReplicaSet retries pod creation by itself |
+| Worker pods stay Pending while runner pods schedule | The intended order: every CI runner outranks a lab worker | `kubectl get pods -A --field-selector=status.phase=Pending -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority --sort-by=.spec.priority` |
+| A worker pod shows priority 0 | Its pod template names no class | The jsonpath check above prints an empty class name |
+| A running worker pod was evicted | A higher class that preempts took its node | `kubectl get events -n <namespace> --field-selector reason=Preempted` |
+| `cluster-rbac` sync fails after the value was edited | `value` is immutable | Re-rank by name as above |
 
 ## Digest specification
 
