@@ -362,10 +362,11 @@ def test_a_lab_gate_missing_a_field_is_red(field: str) -> None:
     assert _check({"test.yml": _gate_workflow()}, config) == [f"lab/lint is declared without its {field}."]
 
 
-def test_a_lab_gate_named_outside_the_lab_prefix_is_red() -> None:
-    config = {"lab_gates": {"lint": _lab_gate()}}
+@pytest.mark.parametrize("key", ["lint", "lab/"])
+def test_a_lab_gate_named_outside_the_lab_prefix_is_red(key: str) -> None:
+    config = {"lab_gates": {key: _lab_gate()}}
     assert _check({"test.yml": _gate_workflow()}, config) == [
-        "lint is declared a lab gate but is not named lab/<gate>."
+        f"{key} is declared a lab gate but is not named lab/<gate>."
     ]
 
 

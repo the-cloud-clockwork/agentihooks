@@ -131,7 +131,7 @@ def _lab_problems(
     problems += [
         f"{key} is declared a lab gate but is not named {LAB_PREFIX}<gate>."
         for key in declared
-        if not key.startswith(LAB_PREFIX)
+        if not key.startswith(LAB_PREFIX) or key == LAB_PREFIX
     ]
     problems += [
         f"{key} replaces {entry['replaces']}, which is no workflow job."
