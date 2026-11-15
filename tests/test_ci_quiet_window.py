@@ -2,7 +2,10 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[1]
 
