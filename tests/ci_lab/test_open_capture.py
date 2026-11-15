@@ -1,3 +1,4 @@
+import functools
 import io
 import os
 import sys
@@ -15,7 +16,7 @@ TOKENIZE = f"{os.sep}lib{os.sep}tokenize.py"
 TEST = f"{os.sep}repo{os.sep}tests{os.sep}test_x.py"
 
 
-def _from(filenames: tuple[str, ...], call: Callable[[], bool]) -> bool:
+def _from(filenames: tuple[str, ...], call: Callable[[], Any]) -> Any:
     """Call call from a stack of frames whose code sits in each filename, the first outermost."""
     for filename in reversed(filenames):
         namespace: dict[str, Any] = {"call": call}
@@ -99,10 +100,26 @@ def test_install_hooks_a_capture_that_writes_this_process_log_in_the_folder(
     monkeypatch.setenv(open_capture.WORKER, "gw0")
 
     open_capture.install()
+    _from((IMPORT,), functools.partial(hooks[0], "open", (str(tmp_path / "tree" / "module.json"), "r", 0)))
     hooks[0]("open", (str(tmp_path / "tree" / "data.json"), "r", 0))
 
     assert len(hooks) == 1
     assert (tmp_path / f"{os.getpid()}.txt").read_text() == "data.json\n"
+
+
+def test_a_relative_read_after_the_working_folder_is_gone_is_not_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(open_capture.WORKER, "gw0")
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+    log = io.StringIO()
+
+    open_capture.Capture(str(tmp_path), log).audit("open", ("data.txt", "r", 0), sys._getframe())
+
+    assert log.getvalue() == ""
 
 
 @pytest.mark.parametrize("missing", ["CI_LAB_TREE", "CI_LAB_OPENED"])

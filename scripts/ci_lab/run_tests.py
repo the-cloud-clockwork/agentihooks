@@ -6,14 +6,36 @@ failure is red and final, so the store keeps the negative verdict. A repository 
 manifest records leave out is listed on the verdict and makes it broad.
 """
 
+import json
+import os
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.ci_lab.sandbox import PortAllocator
+from scripts.ci_lab import open_capture
+from scripts.ci_lab.expand_tests import PYTEST_INVOCATION
+from scripts.ci_lab.sandbox import PortAllocator, Sandbox
+from tests import dep_manifest
 
-__all__ = ["Attempt", "Lab", "Verdict", "flake_rows", "outside", "run"]
+__all__ = ["COVERAGE", "Attempt", "Lab", "Verdict", "flake_rows", "outside", "run"]
+
+COVERAGE = (
+    "--cov=hooks",
+    "--cov=scripts",
+    "--cov-report=",
+    "--cov-config=.github/coverage/coverage.ini",
+    "--cov-context=test",
+)
+SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/", ".pytest_cache/")
+SITE = (
+    "import importlib.util\n"
+    "_spec = importlib.util.spec_from_file_location('ci_lab_open_capture', {path!r})\n"
+    "_module = importlib.util.module_from_spec(_spec)\n"
+    "_spec.loader.exec_module(_module)\n"
+    "_module.install()\n"
+)
 
 
 @dataclass(frozen=True)
@@ -26,7 +48,7 @@ class Lab:
     manifest: Mapping[str, Any]
     flakes: Path
     timeout: float
-    net: bool = False
+    net: bool
 
 
 @dataclass(frozen=True)
@@ -57,17 +79,91 @@ class Verdict:
         return bool(self.outside)
 
 
+def _nodes(batch: Sequence[str]) -> list[str]:
+    """Return the pytest node ids of a batch's manifest tests, in batch order without repeats."""
+    return list(dict.fromkeys(dep_manifest.node(test) for test in batch))
+
+
+def _shared(path: str) -> bool:
+    """Return whether a tree file is an input every test shares or a file the manifest never records."""
+    shared = path in dep_manifest.GLOBAL_FILES or path.startswith((*dep_manifest.GLOBAL_PREFIXES, *SKIPPED))
+    return shared or path.endswith(".pyc") or "__pycache__" in path
+
+
+def _environment(tree: Path, venv: Path, folder: Path, whitelist: Mapping[str, str]) -> dict[str, str]:
+    """Return the whitelist with venv first on the path and the attempt's output files under folder."""
+    return {
+        **whitelist,
+        "PATH": os.pathsep.join((str(venv / "bin"), whitelist.get("PATH", os.defpath))),
+        "PYTHONPATH": str(folder / "site"),
+        "CI_RESULTS": str(folder / "results"),
+        "CI_FLAKES": str(folder / "flakes.jsonl"),
+        "COVERAGE_FILE": str(folder / ".coverage"),
+        open_capture.TREE: str(tree),
+        open_capture.OPENED: str(folder / "opened"),
+    }
+
+
+def _attempt(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> Attempt:
+    """Run the batch's pytest once in a fresh output folder under the lab root."""
+    folder = Path(tempfile.mkdtemp(dir=lab.root))
+    for name in ("site", "opened"):
+        (folder / name).mkdir()
+    (folder / "site" / "sitecustomize.py").write_text(SITE.format(path=open_capture.__file__))
+    durations = ("--store-durations", "--durations-path", str(folder / "durations.json"))
+    argv = [str(venv / "bin" / "python"), "-m", *PYTEST_INVOCATION, "-n", str(slots), *COVERAGE, *durations]
+    box = Sandbox(lab.root, tree, lab.ports, _environment(tree, venv, folder, lab.whitelist))
+    outcome = box.run([*argv, *_nodes(batch)], lab.timeout, lab.net)
+    return Attempt(code=outcome.code, folder=folder, log=outcome.log)
+
+
+def _opened(attempt: Attempt) -> set[str]:
+    """Return the tree files the attempt's pytest workers read, relative to the tree."""
+    return {path for log in (attempt.folder / "opened").glob("*.txt") for path in log.read_text().splitlines()}
+
+
+def _durations(attempt: Attempt) -> dict[str, float]:
+    """Return the seconds per node id the attempt stored, none when it ended before storing them."""
+    path = attempt.folder / "durations.json"
+    return json.loads(path.read_text()) if path.is_file() else {}
+
+
 def outside(opened: set[str], batch: Sequence[str], tree: Path, manifest: Mapping[str, Any]) -> tuple[str, ...]:
     """Return the tree files the batch opened that neither its manifest records nor the inputs every test shares hold."""
-    raise NotImplementedError
+    listed = {path for test in batch for path in manifest["tests"][test]["files"]}
+    found = (path for path in opened if path not in listed and not _shared(path) and (tree / path).is_file())
+    return tuple(sorted(found))
 
 
 def flake_rows(first: Attempt, batch: Sequence[str]) -> list[dict[str, Any]]:
     """Return the flake ledger rows of a batch whose retry passed: one per test the first attempt failed, or one per
     batch test when the first attempt recorded no failed test."""
-    raise NotImplementedError
+    ledger = first.folder / "flakes.jsonl"
+    lines = ledger.read_text().splitlines() if ledger.is_file() else []
+    failed = [row for row in map(json.loads, lines) if row["outcome"] == "failed"]
+    if not failed:
+        error = f"pytest exited with code {first.code}"
+        failed = [{"test": node, "errors": [error], "tracebacks": []} for node in _nodes(batch)]
+    return [{**row, "attempts": 2, "outcome": "flaky"} for row in failed]
 
 
 def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> Verdict:
     """Run a batch from tree with venv's python on slots workers, once more on identical inputs after a failure."""
-    raise NotImplementedError
+    attempts = [_attempt(batch, tree, venv, slots, lab)]
+    if attempts[0].code != 0:
+        attempts.append(_attempt(batch, tree, venv, slots, lab))
+    final = attempts[-1]
+    flaky = final.code == 0 and len(attempts) == 2
+    if flaky:
+        with lab.flakes.open("a") as ledger:
+            ledger.writelines(json.dumps(row) + "\n" for row in flake_rows(attempts[0], batch))
+    opened = {path for attempt in attempts for path in _opened(attempt)}
+    return Verdict(
+        outcome="passed" if final.code == 0 else "failed",
+        flaky=flaky,
+        outside=outside(opened, batch, tree, lab.manifest),
+        durations=_durations(final),
+        attempts=len(attempts),
+        log=final.log,
+        coverage=final.folder / ".coverage",
+    )
