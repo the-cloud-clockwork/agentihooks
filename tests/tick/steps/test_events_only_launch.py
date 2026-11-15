@@ -27,7 +27,6 @@ SPAWN_HELPERS = frozenset(
 REFUSAL = ("scripts/swarm/store.py", "SwarmConfig.__post_init__")
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 SCOPES = (*FUNCTIONS, ast.ClassDef)
-ENGINE = re.compile(r"\bengine\b")
 ENGINE_LEGACY = re.compile(r"\bengine\s*=\s*legacy\b")
 REFUSED_LEGACY = (
     "class SwarmConfig:\n"
@@ -47,6 +46,9 @@ PLANTED = (
     ("scripts/swarm/tick.py", "if config.engine == 'legacy':\n    pass\n", "legacy engine"),
     ("scripts/swarm/store.py", "raw.get('engine', 'legacy')\n", "legacy engine"),
     ("scripts/swarm/cli.py", "HELP = 'engine=legacy|events'\n", "legacy engine"),
+    ("scripts/swarm/cli.py", "def boot(config, engine: str = 'legacy'):\n    return config\n", "legacy engine"),
+    ("scripts/swarm/cli.py", "@launch(engine='legacy')\ndef boot():\n    return None\n", "legacy engine"),
+    ("scripts/swarm/tick.py", "with engines(engine='legacy') as chosen:\n    pass\n", "legacy engine"),
     ("scripts/swarm/cli.py", REFUSED_LEGACY, "legacy engine"),
 )
 CLEAN = (
@@ -88,27 +90,37 @@ def _step_name(node: ast.AST) -> str:
     return names[0] if called in STEP_TYPES and names else ""
 
 
-def _own_expression(node: ast.AST) -> ast.AST | None:
-    """The code a statement runs itself: a simple statement whole, the test of an if or while, nothing for a block."""
-    if isinstance(node, (ast.If, ast.While)):
-        return node.test
-    if isinstance(node, ast.stmt) and not hasattr(node, "body") and not isinstance(node, ast.Match):
-        return node
-    return None
+def _own_parts(node: ast.AST) -> list[ast.AST]:
+    """The code a statement runs itself: a simple statement whole, a block's header such as a test, the items of a
+    with, or a def's arguments and decorators, never the statements nested in it."""
+    if not isinstance(node, ast.stmt):
+        return []
+    nested = (ast.stmt, ast.excepthandler, ast.match_case)
+    return [child for child in ast.iter_child_nodes(node) if not isinstance(child, nested)]
 
 
-def _legacy_engine(node: ast.AST, text: str, docs: set[int]) -> bool:
+def _words(part: ast.AST) -> Iterator[str]:
+    """The names, attributes, parameters, keywords and string values one expression spells."""
+    for node in ast.walk(part):
+        if isinstance(node, ast.Name):
+            yield node.id
+        elif isinstance(node, ast.Attribute):
+            yield node.attr
+        elif isinstance(node, (ast.arg, ast.keyword)) and node.arg:
+            yield node.arg
+
+
+def _legacy_engine(node: ast.AST, docs: set[int]) -> bool:
     """Whether a statement names the legacy engine: a ``legacy`` value beside ``engine``, or ``engine=legacy`` text."""
-    own = _own_expression(node)
-    if own is None:
-        return False
+    parts = _own_parts(node)
     values = [
-        part.value
-        for part in ast.walk(own)
-        if isinstance(part, ast.Constant) and isinstance(part.value, str) and id(part) not in docs
+        found.value
+        for part in parts
+        for found in ast.walk(part)
+        if isinstance(found, ast.Constant) and isinstance(found.value, str) and id(found) not in docs
     ]
-    beside = "legacy" in values and ENGINE.search(ast.get_source_segment(text, own) or "") is not None
-    return beside or any(ENGINE_LEGACY.search(value) for value in values)
+    spelled = {*values, *(word for part in parts for word in _words(part))}
+    return ("legacy" in values and "engine" in spelled) or any(ENGINE_LEGACY.search(value) for value in values)
 
 
 def _findings(rel: str, text: str) -> Iterator[str]:
@@ -121,7 +133,7 @@ def _findings(rel: str, text: str) -> Iterator[str]:
             yield f"{rel}:{line}: def {scope}"
         if _step_name(node) in LAUNCH_STEPS:
             yield f"{rel}:{line}: step {_step_name(node)}"
-        if (rel, scope) != REFUSAL and _legacy_engine(node, text, docs):
+        if (rel, scope) != REFUSAL and _legacy_engine(node, docs):
             yield f"{rel}:{line}: legacy engine"
 
 
@@ -153,7 +165,11 @@ def test_no_source_under_scripts_brings_the_tick_launch_back() -> None:
 
 @pytest.mark.feature("swarm-events-only-launch")
 def test_each_spawn_helper_the_scan_spares_is_still_defined() -> None:
-    missing = sorted((rel, scope) for rel, scope in SPAWN_HELPERS if scope not in _spawn_scopes(ROOT / rel))
+    missing = sorted(
+        (rel, scope)
+        for rel, scope in SPAWN_HELPERS
+        if not (ROOT / rel).is_file() or scope not in _spawn_scopes(ROOT / rel)
+    )
     assert missing == []
 
 
