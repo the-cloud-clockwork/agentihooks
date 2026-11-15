@@ -9,6 +9,7 @@ import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -1017,6 +1018,99 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
         needs[job]["result"] = status
     result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
     assert result.returncode != 0, result.stdout + result.stderr
+
+
+def _lab_needs(lint: str, verdict: str | None, outputs: dict[str, str]) -> dict[str, dict[str, Any]]:
+    needs: dict[str, dict[str, Any]] = {"lint": {"result": lint}, "unit": {"result": "success"}}
+    if verdict is not None:
+        needs["lab-verdict"] = {"result": verdict, "outputs": outputs}
+    return needs
+
+
+@pytest.mark.parametrize(
+    "lint, verdict, outputs, event, passed",
+    [
+        ("skipped", "success", {"authoritative": '{"lint": true}', "lab_lint": "success"}, "pull_request", True),
+        ("skipped", "success", {"authoritative": '{"lint": true}', "lab_lint": "failure"}, "pull_request", False),
+        ("skipped", "success", {"authoritative": '{"lint": true}'}, "pull_request", False),
+        ("skipped", "success", {"authoritative": '{"lint": true}', "lab_lint": ""}, "pull_request", False),
+        ("skipped", "success", {"authoritative": '{"lint": true}', "lab_lint": "success"}, "merge_group", False),
+        ("skipped", "success", {"authoritative": '{"lint": false}', "lab_lint": "success"}, "pull_request", False),
+        ("skipped", "success", {"authoritative": '{"unit": true}', "lab_lint": "success"}, "pull_request", False),
+        ("failure", "success", {"authoritative": '{"lint": true}', "lab_lint": "success"}, "pull_request", True),
+        ("success", "success", {"authoritative": "{}"}, "pull_request", True),
+        ("success", "success", {"authoritative": ""}, "pull_request", True),
+        ("success", "success", {}, "pull_request", True),
+        ("success", "success", {}, "merge_group", True),
+        ("success", None, {}, "pull_request", True),
+        ("failure", None, {}, "pull_request", False),
+        ("success", "success", {"authoritative": '["lint"]'}, "pull_request", False),
+        ("success", "success", {"authoritative": "null"}, "pull_request", False),
+        ("success", "success", {"authoritative": "{"}, "pull_request", False),
+        ("success", "skipped", {}, "pull_request", False),
+        ("success", "skipped", {}, "merge_group", True),
+        ("success", "failure", {}, "merge_group", False),
+        ("success", "cancelled", {}, "pull_request", False),
+    ],
+)
+def test_the_lab_aggregation_reads_authoritative_gates_from_the_lab_verdict(
+    lint: str, verdict: str | None, outputs: dict[str, str], event: str, passed: bool
+) -> None:
+    from scripts import ci_reuse
+
+    result = _gate(ci_reuse.lab_verdict(ci_reuse.gate_steps()), _lab_needs(lint, verdict, outputs), event=event)
+    assert (result.returncode == 0) == passed, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "verdict, outputs, event",
+    [
+        ("success", {"authoritative": "{"}, "pull_request"),
+        ("success", {"authoritative": "[]"}, "pull_request"),
+        ("failure", {}, "pull_request"),
+        ("cancelled", {}, "merge_group"),
+    ],
+)
+def test_a_refused_lab_verdict_names_the_lab_verdict_job(verdict: str, outputs: dict[str, str], event: str) -> None:
+    from scripts import ci_reuse
+
+    result = _gate(ci_reuse.lab_verdict(ci_reuse.gate_steps()), _lab_needs("success", verdict, outputs), event=event)
+    assert result.returncode == 1
+    assert result.stdout.endswith(
+        "::error::The lab verdict job must succeed, or be skipped off pull requests, and publish its authoritative"
+        " gates as one JSON object.\n"
+    ), result.stdout
+
+
+@pytest.mark.parametrize("lab_lint", ["success", "failure", None])
+def test_the_lab_queue_aggregation_drops_its_verdict_job_and_keeps_unselected_gates_skipped(
+    lab_lint: str | None,
+) -> None:
+    from scripts import ci_reuse
+
+    needs: dict[str, dict[str, Any]] = {
+        name: {"result": "success"} for name in ("select", "test-count", "semgrep", "sonar", "unit-selected")
+    }
+    needs["select"]["outputs"] = {"scope": "selected"}
+    needs["lint"] = {"result": "skipped"}
+    needs["unit"] = {"result": "skipped"}
+    outputs = {"authoritative": '{"lint": true, "unit": true}'}
+    if lab_lint is not None:
+        outputs["lab_lint"] = lab_lint
+    needs["lab-verdict"] = {"result": "success", "outputs": outputs}
+    steps = ci_reuse.lab_verdict(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    result = _gate(steps, needs, event="pull_request")
+    assert (result.returncode == 0) == (lab_lint == "success"), result.stdout + result.stderr
+
+
+def test_the_lab_aggregation_only_prefixes_the_reviewed_aggregation() -> None:
+    from scripts import ci_reuse
+
+    form = {"queue_tier": True, "consolidated": True, "summary": True, "docs": True, "watcher_loss": True}
+    [lab, *lab_rest] = ci_reuse.lab_verdict(ci_reuse.gate_steps(**form))
+    [plain, *rest] = ci_reuse.gate_steps(**form)
+    assert lab_rest == rest
+    assert lab == {**plain, "run": ci_reuse.LAB_VERDICT + plain["run"]}
 
 
 _LOST_RERUN_FORM = {"queue_tier": True, "promotion": True, "consolidated": True, "watcher_loss": True}

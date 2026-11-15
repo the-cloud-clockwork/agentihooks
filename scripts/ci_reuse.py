@@ -123,6 +123,22 @@ fi
 """
 )
 
+LAB_VERDICT = """if ! NEEDS=$(jq -c --arg event "${EVENT:-}" '
+  (."lab-verdict" // {"result": "success"}) as $verdict
+  | ($verdict.outputs.authoritative // "" | if . == "" then {} else fromjson end) as $authoritative
+  | if ($authoritative | type) != "object" then error("authoritative is not a JSON object")
+    elif $verdict.result != "success" and ($event == "pull_request" or $verdict.result != "skipped")
+    then error("the lab verdict job ended \\($verdict.result)")
+    else del(."lab-verdict") end
+  | if $event != "pull_request" then . else with_entries(
+      if $authoritative[.key] == true and ($verdict.outputs["lab_" + .key] // "") != ""
+      then .value.result = $verdict.outputs["lab_" + .key] else . end) end
+' <<< "$NEEDS"); then
+  echo "::error::The lab verdict job must succeed, or be skipped off pull requests, and publish its authoritative gates as one JSON object."
+  exit 1
+fi
+"""
+
 
 def gate_steps(
     selected: bool = False,
@@ -268,6 +284,12 @@ def collected_stats(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Accept a skipped stats job when the plan job forwarded the report or collected the stats itself."""
     [aggregation, *rest] = steps
     return [{**aggregation, "run": COLLECTED_STATS + aggregation["run"]}, *rest]
+
+
+def lab_verdict(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prefix the aggregation with the lab verdict that grades authoritative gates on pull requests."""
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": LAB_VERDICT + aggregation["run"]}, *rest]
 
 
 def reuse_job() -> dict[str, Any]:
