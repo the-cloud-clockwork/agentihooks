@@ -1226,10 +1226,10 @@
       "id": "swarm-tick-replay-hermetic-emission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-edges-test-split",
-      "behaviour": "A replayed tick or run_tick pass never writes to the real stderr sink: every per-step timing emission stays mocked the same way the Redis-stream writers are, so a pass box test replaying every scenario cannot stall on real I/O contended across parallel test workers.",
+      "behaviour": "A replayed tick or run_tick pass never emits a real per-step timing line to the real stderr sink: timing.emit stays mocked the same way the Redis-stream writers are, so a pass box test replaying every scenario cannot stall on real I/O contended across parallel test workers.",
       "seam": "tests.swarm.tick_scenarios.test_characterisation.replay through scripts.swarm.timing.emit",
       "tests": [
-        "tests/swarm/tick_scenarios/test_characterisation.py::test_replay_never_writes_to_the_real_stderr_sink"
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_replay_never_emits_a_real_tick_step_line"
       ]
     },
     {

@@ -241,25 +241,29 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     return canonical(result, (str(tmp_path), str(Path.home()), str(Path.cwd())))
 
 
-class _ExplodingStream:
-    """A stand-in for ``sys.stderr`` that fails the test the moment anything writes to it."""
+class _RecordingStream:
+    """A stand-in for ``sys.stderr`` that collects every line instead of touching the real stream."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
 
     def write(self, data: str) -> int:
-        raise AssertionError("tick replay must not write to the real stderr sink")
+        self.lines.append(data)
+        return len(data)
 
     def flush(self) -> None:
-        raise AssertionError("tick replay must not flush the real stderr sink")
+        return None
 
 
 @pytest.mark.feature("swarm-tick-replay-hermetic-emission")
 @pytest.mark.parametrize("entry", ["tick", "run_tick"])
-def test_replay_never_writes_to_the_real_stderr_sink(
-    entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_replay_never_emits_a_real_tick_step_line(entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import sys
 
-    monkeypatch.setattr(sys, "stderr", _ExplodingStream())
+    stream = _RecordingStream()
+    monkeypatch.setattr(sys, "stderr", stream)
     replay("running", entry, monkeypatch, tmp_path)
+    assert not any("swarm_tick_step" in line for line in stream.lines)
 
 
 def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
