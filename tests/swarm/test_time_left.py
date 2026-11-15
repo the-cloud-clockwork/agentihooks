@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from scripts.doctor import loop, priming
-from scripts.swarm import ci_speed, freeze, time_left
+from scripts.swarm import ci_speed, freeze, lab_capacity, time_left
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 
 OBSERVED = SimpleNamespace(quota_capacity=lambda *args: {})
@@ -153,3 +153,24 @@ def test_the_client_carries_the_tick_focus(monkeypatch):
     LedgerClient().time_left("sw", 3, None, fix_phase="p9", watched=["the focus on x"])
     [(_, [op])] = calls
     assert (op["fix_phase"], op["watched"]) == ("p9", ["the focus on x"])
+
+
+@pytest.mark.feature("ledger-stats-lab")
+def test_refresh_sends_the_lab_reading_once_the_tick_has_read_one(store: Any) -> None:
+    observe(store)
+    ledger = Ledger()
+    time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {})
+    block = {"url": "http://lab:8080", "at": 5, "capacity": {"classes": {}}, "error": "", "error_at": 0}
+    store.redis.set(store.key("sw", lab_capacity.KEY), json.dumps(block))
+    time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {})
+    assert ledger.sent == [("sw", 2, 4), ("sw", 2, 4, ("lab", block))]
+
+
+def test_the_client_carries_the_lab_reading_only_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Any] = []
+    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: calls.append((slug, ops)))
+    LedgerClient().time_left("sw", 3, None, lab={"url": "http://lab:8080"})
+    LedgerClient().time_left("sw", 3, None)
+    [(_, [sent]), (_, [plain])] = calls
+    assert sent["lab"] == {"url": "http://lab:8080"}
+    assert "lab" not in plain

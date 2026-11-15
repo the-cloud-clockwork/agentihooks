@@ -528,6 +528,34 @@ class TestTimeLeftOp:
         assert ctx.meta["stats_refresh"]["calculation"]["slots"] == 2
         assert "computed 0h 30m" in text
 
+    @pytest.mark.feature("ledger-stats-lab")
+    def test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block(self) -> None:
+        from scripts.swarm_ledger.api import schemas
+
+        queue = {"pending": 1, "running": 0, "predicted_wait_s": 30.0}
+        lab = {
+            "url": "http://lab:8080",
+            "at": NOW,
+            "capacity": {"classes": {"queue": queue}},
+            "error": "",
+            "error_at": 0,
+        }
+        op = {**self.op(), "lab": lab}
+        assert ledger_time_left.check(op) is None
+        assert schemas.operation_schema("time_left")["properties"]["lab"] == {"type": "object"}
+        ctx = self.ctx()
+        ledger_time_left.apply(doc(task("a", "open", "S")), op, ctx)
+        assert ctx.meta["time_left"]["inputs"] == {"slots": 1, "ci_minutes": 5, "lab": lab}
+        assert ctx.meta["time_left"]["calculation"]["lab"]["classes"] == [
+            {"class": "queue", "pending": 1, "predicted_wait_s": 30.0}
+        ]
+
+    def test_the_op_refuses_a_lab_reading_that_is_not_an_object(self) -> None:
+        for bad in ("x", [1], None, 3):
+            with pytest.raises(ValueError) as refused:
+                ledger_time_left.check({**self.op(), "lab": bad})
+            assert str(refused.value) == "lab must be an object"
+
 
 class TestPageInputs:
     def run(self, body):

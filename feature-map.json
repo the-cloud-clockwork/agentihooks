@@ -6333,6 +6333,20 @@
       ]
     },
     {
+      "id": "ledger-stats-lab",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-ledger-stats-lab",
+      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units and predicted wait; the Stats panel shows one Lab row before the top bottleneck.",
+      "seam": "scripts.swarm.time_left.refresh, LedgerClient.time_left, ledger_time_left.check and apply, ledger_stats.calculate, renderStats Lab row",
+      "tests": [
+        "tests/swarm/test_time_left.py::test_refresh_sends_the_lab_reading_once_the_tick_has_read_one",
+        "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs",
+        "tests/swarm_ledger/test_stats_drawer.py::test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
