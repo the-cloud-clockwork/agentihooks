@@ -3153,7 +3153,14 @@ jobs:
 
       - name: Artifact sanity checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
-        run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
+        run: |
+          checker="$RUNNER_TEMP/grader/scripts/swarm_ledger/artifact_sanity.py"
+          if [[ -f "$checker" ]] && grep -q -- '"--pages"' "$checker"; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.swarm_ledger.artifact_sanity --pages "$GITHUB_WORKSPACE/scripts/swarm_ledger" "$GITHUB_WORKSPACE"/tests/fixtures/artifacts/*
+          else
+            python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
+          fi
 
       - name: Plant only when the mutation gate or an input it reads changed
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
