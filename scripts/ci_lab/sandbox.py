@@ -98,11 +98,14 @@ def _bwrap() -> str:
 class Sandbox:
     """Runs units from cwd, each in a private directory under root with a port range and the whitelisted environment."""
 
-    def __init__(self, root: Path, cwd: Path, ports: PortAllocator, whitelist: Mapping[str, str]) -> None:
+    def __init__(
+        self, root: Path, cwd: Path, ports: PortAllocator, whitelist: Mapping[str, str], readonly: Sequence[Path] = ()
+    ) -> None:
         self.root = root
         self.cwd = cwd
         self.ports = ports
         self.whitelist = dict(whitelist)
+        self.readonly = tuple(readonly)
 
     def run(self, argv: Sequence[str], timeout: float, net: bool = False) -> Outcome:
         """Run argv in its own session; the code is None when timeout ended it and its process group was killed.
