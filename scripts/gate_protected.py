@@ -45,10 +45,14 @@ def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
     ]
 
 
-def _protected_config(base: dict, head: dict) -> dict:
+def _kept(base: ci_wiring.Declarations, head: ci_wiring.Declarations) -> ci_wiring.Declarations:
+    return {key: entry for key, entry in base.items() if key in head}
+
+
+def _protected_config(base: ci_wiring.Wiring, head: ci_wiring.Wiring) -> ci_wiring.Wiring:
     return {
-        section: {key: entry for key, entry in base.get(section, {}).items() if key in head.get(section, {})}
-        for section in ("not_gates", "outside_gate")
+        "not_gates": _kept(base.get("not_gates", {}), head.get("not_gates", {})),
+        "outside_gate": _kept(base.get("outside_gate", {}), head.get("outside_gate", {})),
     }
 
 
@@ -218,7 +222,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
 
 
 def _mutation_stage_entries(
-    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: dict[str, Any]
+    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: ci_wiring.Wiring
 ) -> dict[str, Any]:
     """Return the head's non gate entries for mutation stages whose results the required mutation job merges."""
     needs = ci_wiring.needs_of
@@ -290,10 +294,11 @@ def grade(
             problems.append("The test summary must use the reviewed reporting job.")
         else:
             key = f"{file}/test-summary"
-            if key in head_config.get("not_gates", {}):
-                config["not_gates"].setdefault(key, head_config["not_gates"][key])
+            declared = head_config.get("not_gates", {})
+            if key in declared:
+                config.setdefault("not_gates", {}).setdefault(key, declared[key])
     for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
-        config["not_gates"].setdefault(key, entry)
+        config.setdefault("not_gates", {}).setdefault(key, entry)
     return problems + ci_wiring.check(head_workflows, config)
 
 

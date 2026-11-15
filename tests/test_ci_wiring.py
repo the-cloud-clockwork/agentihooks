@@ -1,3 +1,4 @@
+import inspect
 import json
 from pathlib import Path
 
@@ -61,6 +62,10 @@ def test_main_ignores_declaration_dates(tmp_path: Path, capsys: pytest.CaptureFi
     _write(tmp_path, {"test.yml": _gate_workflow(old={}, new={})}, config)
     assert ci_wiring.main(["--root", str(tmp_path)]) == 0
     assert capsys.readouterr().out == "1 workflows, 5 jobs, 0 wiring problems\n"
+
+
+def test_the_check_takes_the_workflows_and_the_config_only() -> None:
+    assert list(inspect.signature(ci_wiring.check).parameters) == ["workflows", "config"]
 
 
 def test_help_names_what_the_check_enforces(capsys):

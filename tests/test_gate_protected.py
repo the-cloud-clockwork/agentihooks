@@ -1,4 +1,5 @@
 import copy
+import inspect
 import json
 import os
 import subprocess
@@ -250,6 +251,10 @@ def test_main_reads_top_level_workflows_only_and_runs_without_a_wiring_file(repo
 def test_main_needs_a_head():
     with pytest.raises(SystemExit):
         gate_protected.main([])
+
+
+def test_the_grade_takes_no_date() -> None:
+    assert "today" not in inspect.signature(gate_protected.grade).parameters
 
 
 def test_main_refuses_an_unknown_head(repo):
@@ -1416,7 +1421,7 @@ def test_the_reviewed_summary_may_run_outside_required_grading(separate, declare
     base, head = _aggregators()
     base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=True)
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=not separate)
-    config = {}
+    config: ci_wiring.Wiring = {}
     if separate:
         head["jobs"]["test-summary"] = {
             "needs": ["unit", "unit-selected"],
@@ -1455,7 +1460,7 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
     }
     head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"].append("unit-selected")
-    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    config: ci_wiring.Wiring = {"not_gates": {"test.yml/test-summary": _entry()}}
     problems = gate_protected.grade(
         {"test.yml": base},
         config if declared_on_base else {},
@@ -1482,7 +1487,7 @@ def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_m
         head["jobs"]["gate-required"]["needs"].append("mutation")
     else:
         head["jobs"]["mutation"]["if"] = "github.event_name == 'push'"
-    config = {"not_gates": {f"test.yml/{stage}": _entry()}}
+    config: ci_wiring.Wiring = {"not_gates": {f"test.yml/{stage}": _entry()}}
     accepted = gated and merged and stage != "audit"
     expected = [] if accepted else [f"test.yml/{stage} runs on pull requests but is not a need of Gate — Required."]
     assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _POLICY) == expected
@@ -1495,13 +1500,13 @@ def test_a_merged_mutation_stage_ignores_the_base_declaration_date(stage: str) -
     head["jobs"]["mutation"] = {"needs": [stage], "runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"].append("mutation")
     key = f"test.yml/{stage}"
-    base_config = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
-    head_config = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
+    base_config: ci_wiring.Wiring = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
+    head_config: ci_wiring.Wiring = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
     problems = gate_protected.grade({"test.yml": base}, base_config, {"test.yml": head}, head_config, _POLICY)
     assert problems == []
 
 
-def _separate_summary(head, steps):
+def _separate_summary(head, steps) -> ci_wiring.Wiring:
     head["jobs"]["test-summary"] = {
         "needs": ["unit", "unit-selected"],
         "if": "${{ always() }}",
