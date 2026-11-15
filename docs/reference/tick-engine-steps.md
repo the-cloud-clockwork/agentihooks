@@ -621,11 +621,9 @@ missing value in the early end streak and returns the
 `pass ended early: no step stored <value>, the pass left <steps>` line; the
 closing group stamps last tick and the heartbeat afterwards.
 
-The closing lane exists for a pass whose critical lane ran out. Before it, the
-three steps sat in the `wrapper metrics`, `after` and `wrapper status` groups
-on the critical lane, so a pass whose critical lane ran out dropped
-them and wrote no heartbeat, and the stale watcher then judged a live tick
-stale. Now a pass with a hung step still stamps and publishes: in
+The closing lane exists for a pass whose critical lane ran out. On the
+critical lane, such a pass dropped the three steps and wrote no heartbeat, and
+the stale watcher then judged a live tick stale. Now a pass with a hung step still stamps and publishes: in
 `tests/tick/test_closing_lane.py` a reboot pass planted to hang for 300
 seconds under a 1 second critical lane ends early, and the closing group
 records `heartbeat`, `last tick` and `status publish` as `ok` with last tick
