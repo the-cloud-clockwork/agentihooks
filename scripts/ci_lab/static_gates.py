@@ -89,7 +89,8 @@ def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> Sta
     entry = registry.get(name)
     paths = WHOLE_TREE if entry is None else tuple(entry["paths"])
     base_paths = WHOLE_TREE if entry is None else tuple(entry.get("base_paths", ()))
-    return StaticGate(name, job, title, tools, modules, run, paths, base_paths)
+    env = tuple((str(key), str(value)) for key, value in step.get("env", {}).items())
+    return StaticGate(name, job, title, tools, modules, run, paths, base_paths, env, str(step.get("if", "")))
 
 
 def _job_steps(job: str, body: Mapping[str, Any], reusable: Mapping[str, Any]) -> list[tuple[str, Any]]:
@@ -133,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     registry = json.loads((root / REGISTRY).read_text())
     for gate in discover((root / WORKFLOW).read_text(), registry, ci_wiring.load(root)):
         record: dict[str, object] = {field: value for field, value in asdict(gate).items() if field != "run"}
+        record["env"] = dict(gate.env)
         if args.grader is not None:
             record["digest"] = grader.digest(args.grader, gate.modules)
         print(json.dumps(record))
