@@ -6459,6 +6459,16 @@
       ]
     },
     {
+      "id": "events-refused-stop-resent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refused-stop-retry",
+      "behaviour": "A hive execution stop the bus refused waits in the swarm's pending stops with the agent and its retirement reason, and the agents reap step sends it again at the start of every pass, one action per stop sent again, until the bus takes it or the execution already ended, which clears it. Only the stop of an agent the swarm dropped is sent again; a pending stop for an agent the swarm still seats is discarded, since the next judgement of that agent sends afresh. On the memory bus, where no hive records a start, no pending stop is sent again.",
+      "seam": "reconciler.stop_admitted recording a refused stop and reconciler.retry_stops sending it again from the agents reap step",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_stop_the_bus_refused_is_sent_again_on_each_reap_pass_until_the_bus_takes_it"
+      ]
+    },
+    {
       "id": "events-parked-retirement-after-release-refunds-nothing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
