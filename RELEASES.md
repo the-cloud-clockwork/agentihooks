@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.896 · 2026-11-15
+
+### 2026-11-15 · 7df66604a400 · #11209 · @agenticore-app
+
+**Retire hub admitted agents for account mismatch and idling**
+
+This change extends retirement handling to hub admitted agents that were started under the hive, catching two failure modes previously unhandled by legacy spawn logic: an account mismatch detected via runtime bindings, and idling detected when an agent's pane is dead. In both cases the agent is now retired and its claim life refunded through the tick drop, closing a coverage gap between hub-admitted and legacy-spawned agents. The hive-side stop retry and kill logic for these retirements is deferred to a follow-up PR (#11250) due to mutation budget limits, and broader nats/Redis smoke testing and outage-hold coverage remain open follow-ups.
+
 ## v2.17.892 · 2026-11-14
 
 ### 2026-11-14 · 12eef2cef6aa · #11208 · @nestorcolt
