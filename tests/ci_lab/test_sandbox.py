@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -27,6 +28,24 @@ except OSError:
     print("egress refused")
 else:
     print("egress open")
+"""
+READ_ONLY = """
+import os, sys
+for tree in sys.argv[1:]:
+    gate = os.path.join(tree, "gate.py")
+    attempts = (
+        ("chmod", lambda: os.chmod(gate, 0o644)),
+        ("rewrite", lambda: open(gate, "w").close()),
+        ("plant", lambda: open(os.path.join(tree, "planted.py"), "w").close()),
+    )
+    for name, attempt in attempts:
+        try:
+            attempt()
+        except OSError as error:
+            print(name, error.errno)
+        else:
+            print(name, "landed")
+open("unit.txt", "w").close()
 """
 
 
@@ -189,3 +208,59 @@ def test_loopback_works_and_egress_is_refused_without_network(tmp_path: Path) ->
     unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), {})
     outcome = unit.run([sys.executable, "-c", NETWORK], timeout=30)
     assert (outcome.code, outcome.log.read_text().strip()) == (0, "egress refused")
+
+
+@pytest.mark.feature("lab-sandbox-read-only-trees")
+@pytest.mark.parametrize(("net", "network"), [(False, ["--unshare-net"]), (True, [])])
+def test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, net: bool, network: list[str]
+) -> None:
+    record = tmp_path / "args"
+    _fake_bwrap(tmp_path / "bin", record)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    grader, base, root = tmp_path / "grader", tmp_path / "base", tmp_path / "root"
+    root.mkdir()
+    ports = sandbox.PortAllocator(first=20000, last=20099, width=100)
+    unit = sandbox.Sandbox(root=root, cwd=root, ports=ports, whitelist={}, readonly=[grader, base])
+    assert unit.run(["/bin/true"], timeout=30, net=net).code == 0
+    binds = ["--ro-bind", str(grader), str(grader), "--ro-bind", str(base), str(base)]
+    isolation = ["--dev-bind", "/", "/", *binds, *network, "--die-with-parent", "--"]
+    assert record.read_text().splitlines() == [*isolation, "/bin/true"]
+
+
+@pytest.mark.feature("lab-sandbox-read-only-trees")
+def test_a_unit_with_network_and_read_only_trees_is_cannot_run_without_bwrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
+    root = tmp_path / "root"
+    root.mkdir()
+    ports = sandbox.PortAllocator(first=20000, last=20099, width=100)
+    unit = sandbox.Sandbox(root=root, cwd=root, ports=ports, whitelist={}, readonly=[tmp_path / "grader"])
+    message = "^bwrap is not installed, so a unit with read only trees cannot run$"
+    with pytest.raises(sandbox.CannotRun, match=message):
+        unit.run(["/bin/true"], timeout=30, net=True)
+
+
+@pytest.mark.parametrize("net", [False, True])
+def test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree(tmp_path: Path, net: bool) -> None:
+    if not _bwrap_isolates():
+        pytest.skip("bubblewrap cannot create namespaces on this runner")
+    trees = [tmp_path / "grader", tmp_path / "base"]
+    for tree in trees:
+        tree.mkdir()
+        (tree / "gate.py").write_text("graded\n")
+        (tree / "gate.py").chmod(0o444)
+    worktree, root = tmp_path / "worktree", tmp_path / "root"
+    worktree.mkdir()
+    root.mkdir()
+    ports = sandbox.PortAllocator(first=20000, last=20099, width=100)
+    unit = sandbox.Sandbox(root=root, cwd=worktree, ports=ports, whitelist={}, readonly=trees)
+    outcome = unit.run([sys.executable, "-c", READ_ONLY, *map(str, trees)], timeout=30, net=net)
+    refused = [f"{name} {errno.EROFS}" for _ in trees for name in ("chmod", "rewrite", "plant")]
+    assert (outcome.code, outcome.log.read_text().splitlines()) == (0, refused)
+    for tree in trees:
+        assert [path.name for path in tree.iterdir()] == ["gate.py"]
+        assert (tree / "gate.py").read_text() == "graded\n"
+        assert stat.S_IMODE((tree / "gate.py").stat().st_mode) == 0o444
+    assert (worktree / "unit.txt").is_file()

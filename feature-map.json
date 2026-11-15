@@ -6856,6 +6856,17 @@
       "rules": [
         "tick-launch-path"
       ]
+    },
+    {
+      "id": "lab-sandbox-read-only-trees",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-readonly-grader",
+      "behaviour": "A lab unit given read only trees, the grader tree and the base tree, runs inside bubblewrap with each tree bound read only after the root bind, with or without network, so a unit running as the same user can neither restore write bits on the code that grades it nor rewrite it; a networked unit with read only trees keeps the host network, and it cannot run when bwrap is missing.",
+      "seam": "scripts.ci_lab.sandbox Sandbox.run and argv_for, the bubblewrap arguments the unit runs under",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only",
+        "tests/ci_lab/test_sandbox.py::test_a_unit_with_network_and_read_only_trees_is_cannot_run_without_bwrap"
+      ]
     }
   ],
   "unmapped_rules": [
