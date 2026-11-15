@@ -337,7 +337,7 @@ function labLine(entry) {
 
 function labStat(lab) {
   const age = !lab ? "" : lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
-  const lines = lab ? lab.classes.map((entry) => h("li", { text: labLine(entry) })) : [h("li", { text: "unavailable" })];
+  const lines = lab ? lab.classes.map((entry) => h("li", { text: labLine(entry) })) : [h("li", { text: "—" })];
   const failed = lab && lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];
   return h("div", { class: "stat lab-capacity", "data-stat": statKey("Lab") },
     h("dt", {}, statGrip("Lab"), `Lab${age}`),

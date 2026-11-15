@@ -178,4 +178,4 @@ def test_a_failed_lab_read_names_its_error_and_no_reading_reads_unavailable(lab_
     assert row.locator("li").count() == 1
     row = lab_page(None).locator("#stats .lab-capacity")
     assert row.locator("dt").inner_text() == "LAB"
-    assert row.locator("li").all_inner_texts() == ["unavailable"]
+    assert row.locator("li").all_inner_texts() == ["—"]
