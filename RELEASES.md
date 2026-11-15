@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.910 · 2026-11-15
+
+### 2026-11-15 · 939218019074 · #11369 · @nestorcolt
+
+**Admit a lost test when its file or import the head deletes**
+
+This change teaches the test-count floor to correctly clear a lost test when its entire file vanished because the module it imports no longer exists, and to recognize GitHub Actions workflow YAML (not just JSON) as legitimate executable content a deleted test can be tied to. It closes two false-positive gaps found on live PRs, where 107 and 238 legitimately-deleted tests were being flagged as unexplained losses, while leaving unrelated cases—like a method removed from a module that otherwise survives—still correctly flagged as red.
+
 ## v2.17.904 · 2026-11-15
 
 ### 2026-11-15 · f28f173768ba · #11304 · @agenticore-app
