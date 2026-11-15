@@ -6880,7 +6880,10 @@
         "tests/ci_lab/test_static_gates.py::test_the_command_prints_each_gate_step_env_and_if_condition",
         "tests/ci_lab/test_static_gates.py::test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read",
         "tests/ci_lab/test_run_static.py::test_a_step_whose_if_is_false_is_skipped_green_without_running",
-        "tests/ci_lab/test_run_static.py::test_the_step_reads_its_env_with_expressions_resolved_from_the_context"
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_its_env_with_expressions_resolved_from_the_context",
+        "tests/ci_lab/test_expressions.py::test_an_expression_evaluates_as_github_actions_evaluates_it",
+        "tests/ci_lab/test_expressions.py::test_syntax_outside_the_subset_is_refused",
+        "tests/ci_lab/test_expressions.py::test_a_condition_holds_when_its_expression_is_truthy"
       ]
     }
   ],

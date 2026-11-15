@@ -150,7 +150,8 @@ def test_a_step_whose_if_is_false_is_skipped_green_without_running(
     marker = tmp_path / "ran"
     gate = _step(f"touch '{marker}'\n", condition=CHANGED)
     trees = _folders(tmp_path)
-    result = run_static.run(gate, *trees, settings)
+    unchanged = dataclasses.replace(settings, context={"steps.self-plant.outputs.changed": "false"})
+    result = run_static.run(gate, *trees, unchanged)
     assert (result.gate, result.code, result.skipped, result.green) == ("lint/probe", None, True, True)
     assert result.log.read_text() == f"if is false: {CHANGED}\n"
     assert result.report.read_text() == ""

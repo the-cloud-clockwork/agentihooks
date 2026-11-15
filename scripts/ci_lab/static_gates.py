@@ -78,7 +78,9 @@ def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
 
 
 def _text(value: object) -> str:
-    """The text GitHub reads for a YAML scalar in a step's env or if: booleans in lower case."""
+    """The text GitHub reads for a YAML scalar in a step's env or if: booleans in lower case, null as empty."""
+    if value is None:
+        return ""
     return str(value).lower() if isinstance(value, bool) else str(value)
 
 

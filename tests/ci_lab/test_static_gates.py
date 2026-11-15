@@ -410,9 +410,12 @@ def test_a_gate_carries_its_step_env_and_if_condition() -> None:
 
 @pytest.mark.feature("lab-static-step-env")
 def test_yaml_booleans_in_step_env_and_if_read_as_github_writes_them() -> None:
-    flagged = {"name": "Flagged gate", "if": True, "env": {"FLAG": False}, "run": "python -m scripts.flagged"}
+    env = {"FLAG": False, "MODE": "Fast", "EMPTY": None}
+    flagged = {"name": "Flagged gate", "if": True, "env": env, "run": "python -m scripts.flagged"}
     gates = static_gates.discover(_edited(WORKFLOW, "type-gate", [flagged]), REGISTRY, REUSABLE)
-    assert [(gate.env, gate.condition) for gate in gates if gate.job == "type-gate"] == [((("FLAG", "false"),), "true")]
+    assert [(gate.env, gate.condition) for gate in gates if gate.job == "type-gate"] == [
+        ((("FLAG", "false"), ("MODE", "Fast"), ("EMPTY", "")), "true")
+    ]
 
 
 @pytest.mark.feature("lab-static-step-env")

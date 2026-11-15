@@ -6,6 +6,9 @@ CONTEXT = {
     "github.event_name": "pull_request",
     "inputs.base": "origin/dev",
     "steps.self-plant.outputs.changed": "true",
+    "steps.empty.outputs.sha": "",
+    "steps.empty.outputs.changed": "",
+    "steps.count.outputs.one": " 1 ",
 }
 
 
@@ -18,7 +21,7 @@ CONTEXT = {
         ("null", ""),
         ("inputs.base", "origin/dev"),
         ("  inputs.base  ", "origin/dev"),
-        ("steps.missing.outputs.sha", ""),
+        ("steps.empty.outputs.sha", ""),
         ("always()", True),
         ("success()", True),
         ("cancelled()", False),
@@ -32,12 +35,22 @@ CONTEXT = {
         ("github.event_name != 'pull_request'", False),
         ("true == true", True),
         ("true == 'true'", False),
+        ("'' == false", True),
+        ("null == false", True),
+        ("'0' == false", True),
+        ("'  ' == false", True),
+        ("steps.count.outputs.one == true", True),
+        ("'1.5e1' == '15'", False),
+        ("'x' == false", False),
+        ("'x' != false", True),
+        ("'x' == 'x' == true", True),
+        ("'a' == 'b' == false", True),
         ("!'x' == 'y'", False),
         ("inputs.base && 'yes'", "yes"),
-        ("steps.missing.outputs.sha && 'yes'", ""),
+        ("steps.empty.outputs.sha && 'yes'", ""),
         ("inputs.base && true && 'last'", "last"),
         ("inputs.base || 'other'", "origin/dev"),
-        ("steps.missing.outputs.sha || inputs.base", "origin/dev"),
+        ("steps.empty.outputs.sha || inputs.base", "origin/dev"),
         ("'' || false || 'last'", "last"),
         ("true || true && false", True),
         ("!(true && false)", True),
@@ -46,6 +59,7 @@ CONTEXT = {
         ("!cancelled() && steps.self-plant.outputs.changed == 'true'", True),
     ],
 )
+@pytest.mark.feature("lab-static-step-env")
 def test_an_expression_evaluates_as_github_actions_evaluates_it(expression: str, value: str | bool) -> None:
     assert expressions.evaluate(expression, CONTEXT) == value
     assert type(expressions.evaluate(expression, CONTEXT)) is type(value)
@@ -61,7 +75,8 @@ def test_an_expression_evaluates_as_github_actions_evaluates_it(expression: str,
         ("(true", "expected ')', found ''"),
         ("(true true", "expected ')', found 'true'"),
         ("true)", "expected the end, found ')'"),
-        ("true == true == true", "expected the end, found '=='"),
+        ("steps.missing.outputs.sha", "no value for 'steps.missing.outputs.sha' in the context"),
+        ("inputs.base || steps.missing.outputs.sha", "no value for 'steps.missing.outputs.sha' in the context"),
         ("contains(inputs.base)", "expected the end, found '('"),
         ("contains(inputs.base, 'dev')", "cannot read \", 'dev')\""),
         ("inputs.base < 'z'", "cannot read \"< 'z'\""),
@@ -69,6 +84,7 @@ def test_an_expression_evaluates_as_github_actions_evaluates_it(expression: str,
         ("'open", 'cannot read "\'open"'),
     ],
 )
+@pytest.mark.feature("lab-static-step-env")
 def test_syntax_outside_the_subset_is_refused(expression: str, message: str) -> None:
     with pytest.raises(ValueError) as refused:
         expressions.evaluate(expression, CONTEXT)
@@ -76,7 +92,7 @@ def test_syntax_outside_the_subset_is_refused(expression: str, message: str) -> 
 
 
 def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:
-    text = "swarm-${{ inputs.base }}-${{ true }}-${{ false }}-${{ steps.missing.outputs.sha }}-${{github.event_name}}"
+    text = "swarm-${{ inputs.base }}-${{ true }}-${{ false }}-${{ steps.empty.outputs.sha }}-${{github.event_name}}"
     assert expressions.interpolate(text, CONTEXT) == "swarm-origin/dev-true-false--pull_request"
     assert expressions.interpolate(".semgrep", CONTEXT) == ".semgrep"
     assert expressions.interpolate("${{\n  inputs.base\n}}", CONTEXT) == "origin/dev"
@@ -90,12 +106,13 @@ def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:
         ("${{ !cancelled() }}", True),
         ("${{ cancelled() }}", False),
         ("  ${{ steps.self-plant.outputs.changed == 'true' }}\n", True),
-        ("${{ steps.missing.outputs.changed == 'true' }}", False),
+        ("${{ steps.empty.outputs.changed == 'true' }}", False),
         ("${{\n  !cancelled() &&\n  steps.self-plant.outputs.changed == 'true'\n}}", True),
         ("github.event_name == 'push'", False),
-        ("steps.missing.outputs.sha", False),
+        ("steps.empty.outputs.sha", False),
         ("inputs.base", True),
     ],
 )
+@pytest.mark.feature("lab-static-step-env")
 def test_a_condition_holds_when_its_expression_is_truthy(condition: str, held: bool) -> None:
     assert expressions.holds(condition, CONTEXT) is held

@@ -1,10 +1,12 @@
 """GitHub Actions expressions in the workflow steps the lab runs: a step's if condition and the ${{ }} in its env.
 
-The subset: string, true, false and null literals, context names, !, ==, !=, && and || with GitHub's precedence and
-operand results, parentheses, and the status functions of a lab run, which is never cancelled and runs each step after
-steps that succeeded. Anything else is refused, never guessed.
+The subset: string, true, false and null literals, context names, !, ==, !=, && and || with GitHub's precedence,
+operand results and number conversion, parentheses, and the status functions of a lab run, which is never cancelled
+and runs each step after steps that succeeded. Anything else, and a context name the caller did not supply, is
+refused, never guessed.
 """
 
+import math
 import re
 from collections import deque
 from collections.abc import Mapping
@@ -18,6 +20,7 @@ WRAPPED = re.compile(r"\s*\$\{\{(.*)\}\}\s*", re.DOTALL)
 STATUS = {"always()": True, "cancelled()": False, "failure()": False, "success()": True}
 LITERALS: dict[str, Value] = {"false": False, "null": "", "true": True}
 OPERATORS = frozenset({"!", "!=", "&&", "(", ")", "==", "||"})
+NUMBER = re.compile(r"\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*")
 
 
 def _tokens(expression: str) -> deque[str]:
@@ -50,7 +53,9 @@ def _primary(tokens: deque[str], context: Mapping[str, str]) -> Value:
         return LITERALS[token]
     if not token or token in OPERATORS or token.endswith("()"):
         raise ValueError(f"expected a value, found {token!r}")
-    return context.get(token, "")
+    if token not in context:
+        raise ValueError(f"no value for {token!r} in the context")
+    return context[token]
 
 
 def _unary(tokens: deque[str], context: Mapping[str, str]) -> Value:
@@ -61,20 +66,29 @@ def _unary(tokens: deque[str], context: Mapping[str, str]) -> Value:
     return _primary(tokens, context)
 
 
+def _number(value: Value) -> float:
+    """The number GitHub converts a value to: true is 1, false and empty text are 0, other text not a number is NaN."""
+    if isinstance(value, bool):
+        return float(value)
+    if not value.strip():
+        return 0.0
+    return float(value) if NUMBER.fullmatch(value) else math.nan
+
+
 def _equal(left: Value, right: Value) -> bool:
-    """Compare as GitHub does for these values: strings ignore case, values of different types differ."""
+    """Compare as GitHub does: strings ignore case, and values of different types compare as numbers."""
     if isinstance(left, str) and isinstance(right, str):
         return left.casefold() == right.casefold()
-    return left == right
+    return _number(left) == _number(right)
 
 
 def _compared(tokens: deque[str], context: Mapping[str, str]) -> Value:
-    """Read a value, or one == or != comparison of two values."""
-    left = _unary(tokens, context)
-    if tokens and tokens[0] in ("==", "!="):
+    """Read values joined by == and !=, comparing from the left."""
+    value = _unary(tokens, context)
+    while tokens and tokens[0] in ("==", "!="):
         equal = tokens.popleft() == "=="
-        return _equal(left, _unary(tokens, context)) == equal
-    return left
+        value = _equal(value, _unary(tokens, context)) == equal
+    return value
 
 
 def _both(tokens: deque[str], context: Mapping[str, str]) -> Value:
@@ -98,7 +112,7 @@ def _either(tokens: deque[str], context: Mapping[str, str]) -> Value:
 
 
 def evaluate(expression: str, context: Mapping[str, str]) -> Value:
-    """Return the value of one expression, reading context names from context and an absent name as empty."""
+    """Return the value of one expression, reading context names from context and refusing a name it lacks."""
     tokens = _tokens(expression)
     value = _either(tokens, context)
     if tokens:
