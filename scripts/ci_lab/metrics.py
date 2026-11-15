@@ -181,7 +181,7 @@ def observe_load(registry: Registry, load: Load) -> None:
     for name in CLASSES:
         labels = {"class": name}
         pending = load.pending.get(name, ())
-        wait = predicted_wait(pending, free)
+        wait = predicted_wait(pending, free, load.frees_in)
         registry.set("ci_lab_units_queued", len(pending), labels)
         registry.set("ci_lab_units_running", load.running.get(name, 0), labels)
         registry.set("ci_lab_class_shed", 1.0 if name in load.shed else 0.0, labels)

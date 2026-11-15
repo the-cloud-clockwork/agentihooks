@@ -31,6 +31,9 @@ def parser() -> argparse.ArgumentParser:
     again = sub.add_parser("relaunch", help="Start the successor of a seat that handed off")
     again.add_argument("seat")
     again.add_argument("--folder", required=True)
+    again.add_argument(
+        "--force", action="store_true", help="End the seat's live agent with its pane kept, then start again"
+    )
     send = sub.add_parser("send", help="Post a message to another seat through the room")
     send.add_argument("to")
     send.add_argument("text")
@@ -118,9 +121,10 @@ def _handoff(document: str, environ: Mapping[str, str]) -> int:
     return 0
 
 
-def _relaunch(seat: str, folder: str, environ: dict[str, str]) -> int:
+def _relaunch(seat: str, folder: str, environ: dict[str, str], forced: bool) -> int:
     live = tick.LiveHerdr(environ)
-    outcome = launch.relaunch(Path(folder), seat, environ, bare=live.bare)
+    start = launch.force if forced else launch.relaunch
+    outcome = start(Path(folder), seat, environ, bare=live.bare)
     print(outcome)
     return 0 if outcome == "started" else 1
 
@@ -158,7 +162,7 @@ def _run(args: argparse.Namespace, environ: dict[str, str]) -> int:
     if args.command == "handoff":
         return _handoff(args.document, environ)
     if args.command == "relaunch":
-        return _relaunch(args.seat, args.folder, environ)
+        return _relaunch(args.seat, args.folder, environ, args.force)
     if args.command == "send":
         return _send(args.to, args.text, environ)
     if args.command == "tick":
