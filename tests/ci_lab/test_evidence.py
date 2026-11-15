@@ -115,6 +115,14 @@ def test_a_second_record_of_a_run_keeps_the_first_evidence(
     assert (code, capsys.readouterr().out) == (0, PULL_REQUEST_BLOCK)
 
 
+def test_record_writes_one_empty_head_marker_per_run(blobs: objects.Objects) -> None:
+    prefix = evidence.head_prefix(HEAD)
+
+    markers = {path.removeprefix(prefix): blobs.read(path) for path in blobs.keys(prefix)}
+
+    assert markers == {"run-2": b"", "run-3": b""}
+
+
 def test_an_unknown_grade_exits_non_zero_naming_its_path(
     blobs: objects.Objects, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
