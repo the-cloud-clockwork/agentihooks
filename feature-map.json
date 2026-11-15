@@ -6333,6 +6333,19 @@
       ]
     },
     {
+      "id": "lab-capacity-verdict-cache-hits",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-class-cache-hits",
+      "behaviour": "The CI lab capacity document gives every scheduling class a verdict cache hit ratio, the class's verdict cache hits over its hits plus misses from the load snapshot, and null when the class had no verdict cache lookups; a load snapshot carries no lookups by default.",
+      "seam": "scripts.ci_lab.capacity Load cache_hits and cache_misses, hit_ratio and document, the body of GET /capacity",
+      "tests": [
+        "tests/ci_lab/test_capacity.py::test_capacity_document_reports_every_class",
+        "tests/ci_lab/test_capacity.py::test_hit_ratio_is_hits_over_lookups",
+        "tests/ci_lab/test_capacity.py::test_capacity_document_reports_the_verdict_cache_hit_ratio_per_class",
+        "tests/ci_lab/test_capacity.py::test_load_defaults_to_no_verdict_cache_lookups"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
