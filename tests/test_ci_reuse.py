@@ -1061,18 +1061,23 @@ def test_the_lab_aggregation_reads_authoritative_gates_from_the_lab_verdict(
     assert (result.returncode == 0) == passed, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("outputs", [{"authoritative": "{"}, {"authoritative": "[]"}, {}])
-def test_a_refused_lab_verdict_names_the_lab_verdict_job(outputs: dict[str, str]) -> None:
+@pytest.mark.parametrize(
+    "verdict, outputs, event",
+    [
+        ("success", {"authoritative": "{"}, "pull_request"),
+        ("success", {"authoritative": "[]"}, "pull_request"),
+        ("failure", {}, "pull_request"),
+        ("cancelled", {}, "merge_group"),
+    ],
+)
+def test_a_refused_lab_verdict_names_the_lab_verdict_job(verdict: str, outputs: dict[str, str], event: str) -> None:
     from scripts import ci_reuse
 
-    verdict = "success" if outputs else "failure"
-    result = _gate(
-        ci_reuse.lab_verdict(ci_reuse.gate_steps()), _lab_needs("success", verdict, outputs), event="pull_request"
-    )
+    result = _gate(ci_reuse.lab_verdict(ci_reuse.gate_steps()), _lab_needs("success", verdict, outputs), event=event)
     assert result.returncode == 1
     assert result.stdout.endswith(
-        "::error::The lab verdict job must succeed on pull requests and publish its authoritative gates"
-        " as one JSON object.\n"
+        "::error::The lab verdict job must succeed, or be skipped off pull requests, and publish its authoritative"
+        " gates as one JSON object.\n"
     ), result.stdout
 
 

@@ -131,7 +131,7 @@ LAB_VERDICT = """if ! NEEDS=$(jq -c --arg event "${EVENT:-}" '
       if $authoritative[.key] == true and ($verdict.outputs["lab_" + .key] // "") != ""
       then .value.result = $verdict.outputs["lab_" + .key] else . end) end
 ' <<< "$NEEDS"); then
-  echo "::error::The lab verdict job must succeed on pull requests and publish its authoritative gates as one JSON object."
+  echo "::error::The lab verdict job must succeed, or be skipped off pull requests, and publish its authoritative gates as one JSON object."
   exit 1
 fi
 """

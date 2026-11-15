@@ -2273,7 +2273,11 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
 
 
-def test_the_repository_registry_leaves_the_delivery_config_unfrozen(
+def test_the_repository_registry_leaves_the_delivery_config_unfrozen() -> None:
+    assert "delivery.yaml" not in json.loads((_ROOT / gate_protected.FROZEN).read_text())
+
+
+def test_a_head_editing_the_delivery_config_under_the_repository_registry_grades_green(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _commit(repo, {"test.yml": _workflow()}, {}, "base")
@@ -2282,5 +2286,4 @@ def test_the_repository_registry_leaves_the_delivery_config_unfrozen(
     _git(repo, "checkout", "-q", "-b", "pr")
     head = _put(repo, {"delivery.yaml": "lab:\n  authoritative: [lint]\n"}, "flip lint")
     code, out = _frozen_grade(repo, head, capsys)
-    assert "delivery.yaml" not in json.loads(registry)
     assert (code, out.count("::error::")) == (0, 0), out
