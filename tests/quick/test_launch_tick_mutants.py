@@ -177,6 +177,9 @@ class _BusySpy:
         self.typed_calls.append(pane_id)
         return self._typed
 
+    def screen(self, pane_id: str) -> str:
+        return ""
+
     def prompt(self, pane_id: str, text: str) -> bool:
         return True
 
@@ -247,6 +250,9 @@ class _BareSpy:
         return "idle"
 
     def typed(self, pane_id: str) -> str:
+        return ""
+
+    def screen(self, pane_id: str) -> str:
         return ""
 
     def prompt(self, pane_id: str, text: str) -> bool:

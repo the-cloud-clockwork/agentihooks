@@ -142,13 +142,12 @@ def force(
     bare: Callable[[str], bool | None],
     end: Callable[[str], None] = end_agent,
     start: Start = init_agent,
-    wait_s: float = WAIT_BARE_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
     """End an engineer's live but unusable agent with its pane kept, then start its successor; the outcome.
 
-    The master is the operator's own session and a seat being launched already has a successor coming, so neither
-    is ended.
+    The successor waits up to WAIT_BARE_S for the pane to return to a bare shell. The master is the operator's own
+    session and a seat being launched already has a successor coming, so neither is ended.
     """
     swarm = registry.load(folder)
     seat = swarm.seat(seat_name) if swarm else None
@@ -159,4 +158,4 @@ def force(
     if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.PENDING) is None:
         return "launching"
     end(seat.name)
-    return relaunch(folder, seat_name, base, bare=bare, start=start, wait_s=wait_s, sleep=sleep)
+    return relaunch(folder, seat_name, base, bare=bare, start=start, wait_s=WAIT_BARE_S, sleep=sleep)
