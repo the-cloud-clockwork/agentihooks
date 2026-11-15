@@ -9,7 +9,7 @@ import pytest
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
-from scripts.hive import execution_events, execution_stop, join_report
+from scripts.hive import execution_events, execution_stop, join_report, reports
 from scripts.hub.launch_checks import HUNG_MS, STOPPING, LaunchChecks
 from scripts.swarm import commands, launch_check
 from scripts.swarm.store import AgentRecord
@@ -209,6 +209,43 @@ def test_a_sent_stop_holds_the_check_until_the_exit_drops_the_agent(rig: SimpleN
 
     assert checks.check(SLUG, 90_000) == []
     assert launch_check.pending(rig.store, SLUG) == {}
+
+
+def hung_with_report(rig: SimpleNamespace, bus: Any, listed: bool) -> tuple[str, str]:
+    admitted = rig.admitter.admit(SLUG, ask())
+    name = admitted["name"]
+    execution_events.prepare(bus, SLUG, name, admitted["task"]["execution_generation"])
+    names = ["other", name] if listed else ["other"]
+    rig.store.redis.set(reports.key("hive-a"), json.dumps({"names": names, "observed_at": 10_000}))
+    checks = checker(rig, bus)
+    checks.check(SLUG, 10_000)
+    [action] = checks.check(SLUG, 10_000 + HUNG_MS)
+    return name, action
+
+
+@pytest.mark.feature("events-launch-check-live-agent")
+def test_a_hung_verdict_keeps_a_live_agent_whose_started_record_is_missing(rig: SimpleNamespace, bus: Any) -> None:
+    name, action = hung_with_report(rig, bus, listed=True)
+
+    assert action == f"kept {name} on t1: its launch check failed on launched, but hive hive-a lists it"
+    assert [(agent.name, agent.seat) for agent in rig.store.agents(SLUG)] == [(name, "eng-1@sw")]
+    assert {seat: agent.name for seat, agent in rig.store.execution_occupants(SLUG).items()} == {"eng-1@sw": name}
+    assert rig.store.claimant(SLUG, "t1") == name
+    assert rig.rows["t1"]["state"] == "claimed"
+    assert launch_check.pending(rig.store, SLUG) == {}
+    assert launch_check.report(rig.store, SLUG, "t1")["state"] == "failed"
+    assert checker(rig, bus).check(SLUG, 10_000 + 2 * HUNG_MS) == []
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [name]
+    assert stops(bus) == []
+
+
+@pytest.mark.feature("events-launch-check-live-agent")
+def test_a_hung_verdict_frees_an_agent_its_hive_report_leaves_out(rig: SimpleNamespace, bus: Any) -> None:
+    name, action = hung_with_report(rig, bus, listed=False)
+
+    assert action == f"freed {name} and reopened t1 because its launch check failed on launched and no hive started it"
+    assert rig.store.agents(SLUG) == []
+    assert rig.rows["t1"]["state"] == "open"
 
 
 @pytest.mark.feature("events-launch-check-tick-filter")

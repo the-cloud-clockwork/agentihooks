@@ -6488,6 +6488,20 @@
       ]
     },
     {
+      "id": "events-launch-check-live-agent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-hang-drops-live-agent",
+      "behaviour": "A hub admitted worker with no started record that fails its launch check on launched, whose execution stop answers unknown, keeps its agent, claim, seat and claimed task when the hive that took it names it in its live report: the hub forgets the check, keeps the failed report and sends no stop. A worker its hive report leaves out is freed and its task reopened as before.",
+      "seam": "LaunchChecks.check and _halt reading the hive report under reports.key for the agent's hive before Admission.free",
+      "tests": [
+        "tests/hub/test_launch_checks.py::test_a_hung_verdict_keeps_a_live_agent_whose_started_record_is_missing",
+        "tests/hub/test_launch_checks.py::test_a_hung_verdict_frees_an_agent_its_hive_report_leaves_out"
+      ],
+      "rules": [
+        "hub-hang-frees-live-agent"
+      ]
+    },
+    {
       "id": "events-launch-check-tick-filter",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-launch-check-fixes",
