@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict, replace
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -80,9 +81,10 @@ def rig():
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 3, "done": False}
     ledger = SimpleNamespace(task=lambda *_: dict(row), writes=[])
 
-    def update(*args, **kwargs):
+    def update(*args: Any, **kwargs: Any) -> dict[str, Any]:
         ledger.writes.append((args, kwargs))
         row.update(args[2])
+        return dict(row)
 
     ledger.update_task = update
     returned = []

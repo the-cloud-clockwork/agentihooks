@@ -74,9 +74,10 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNames
     row = {"id": "task", "state": "claimed", "claimed_by": agent.name, "claim_generation": 7, "done": False}
     ledger: Any = SimpleNamespace(task=lambda *_: dict(row))
 
-    def update(*args: Any, **kwargs: Any) -> None:
+    def update(*args: Any, **kwargs: Any) -> dict[str, Any]:
         """Apply a ledger task write to the row."""
         row.update(args[2])
+        return dict(row)
 
     ledger.update_task = update
     returned: list[tuple[Any, ...]] = []
