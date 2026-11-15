@@ -168,23 +168,20 @@ def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: 
     )
 
 
-def dev_push_only(workflow: dict[Any, Any]) -> bool:
-    found = events(workflow)
-    if len(found) != 1 or not isinstance(found[0], dict) or set(cast(dict[Any, Any], found[0])) != {"push"}:
+def dev_push_only(workflow: Any) -> bool:
+    found: list[Any] = events(workflow) if isinstance(workflow, dict) else []
+    on: Any = found[0] if len(found) == 1 else None
+    if not isinstance(on, dict) or set(on) != {"push"}:
         return False
-    push = cast(dict[Any, Any], found[0])["push"]
-    return (
-        isinstance(push, dict)
-        and set(cast(dict[Any, Any], push)) <= {"branches", *PATH_FILTERS}
-        and cast(dict[Any, Any], push).get("branches") == ["dev"]
-    )
+    push: Any = on["push"]
+    return isinstance(push, dict) and set(push) <= {"branches", *PATH_FILTERS} and push.get("branches") == ["dev"]
 
 
-def dev_push_group(block: object, workflow: dict[Any, Any]) -> bool:
-    if not isinstance(block, dict) or cast(dict[str, Any], block).get("cancel-in-progress") not in (None, False):
+def dev_push_group(block: Any, workflow: Any) -> bool:
+    if not isinstance(block, dict) or block.get("cancel-in-progress") not in (None, False):
         return False
-    group = " ".join(str(cast(dict[str, Any], block).get("group")).split())
-    queue = cast(dict[str, Any], block).get("queue")
+    group = " ".join(str(block.get("group")).split())
+    queue = block.get("queue")
     if dev_push_only(workflow) and queue in (None, "single", "max"):
         return (
             re.fullmatch(
@@ -235,7 +232,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
         if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
-        if per_run_mutation_group(name, block, job, trusted) or dev_push_group(block, cast(dict[Any, Any], workflow)):
+        if per_run_mutation_group(name, block, job, trusted) or dev_push_group(block, workflow):
             continue
         if (
             trusted.get("name") == "Tests"
