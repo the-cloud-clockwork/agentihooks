@@ -636,6 +636,30 @@ def queued_at_now(merging):
     assert merging.run() == [f"queued {URL} for task t1"]
 
 
+def test_merge_pass_reads_every_pull_request_in_one_batch_not_per_task():
+    urls = [f"https://github.com/o/r/pull/{i}" for i in range(30)]
+    rows = {
+        f"t{i}": {"id": f"t{i}", "state": "pr", "claimed_by": AGENT, "pr_url": url, "awaiting": ""}
+        for i, url in enumerate(urls)
+    }
+    many_calls: list[list[str]] = []
+    github_calls: list[str] = []
+
+    def many(batch: list[str]) -> dict[str, PullRequest]:
+        many_calls.append(list(batch))
+        return {url: GREEN for url in batch}
+
+    def github(url: str) -> PullRequest | None:
+        github_calls.append(url)
+        return None
+
+    run = ready.Pass(None, "sw", None, github, github, NOW, many=many)
+    assert ready.merge_pass(run, rows) == []
+    assert github_calls == []
+    assert len(many_calls) == 1
+    assert sorted(many_calls[0]) == sorted(urls)
+
+
 def test_the_merge_pass_waits_while_checks_run(merging):
     assert merging.run() == []
     assert merging.queued == [] and merging.rows["t1"]["state"] == "pr"
