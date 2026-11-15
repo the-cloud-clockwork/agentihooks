@@ -6856,6 +6856,19 @@
       "rules": [
         "tick-launch-path"
       ]
+    },
+    {
+      "id": "count-floor-admits-deleted-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-count-floor-deleted-reads",
+      "behaviour": "The test count floor admits a lost test when its whole test file is deleted together with a project-local module it imported that the head no longer carries as a file, and when the test reads by literal path a repository workflow file (a YAML job definition with run steps, not only a JSON step fixture) that the head deletes; a lost test whose test file, imported module or fixture content still exists anywhere in the head stays counted.",
+      "seam": "tests.count_floor.main's admission loop: _emptied_test_files, _fixture_subject and _deleted_fixtures",
+      "tests": [
+        "tests/test_count_floor.py::test_a_module_deleted_together_with_its_test_file_passes_the_floor",
+        "tests/test_count_floor.py::test_a_deleted_test_file_whose_imported_module_survives_admits_nothing",
+        "tests/test_count_floor.py::test_a_deleted_workflow_file_explains_only_its_own_lost_test",
+        "tests/test_count_floor.py::test_moving_a_workflow_file_keeps_its_lost_test_red"
+      ]
     }
   ],
   "unmapped_rules": [
