@@ -223,6 +223,7 @@ def test_productive_stages_have_no_threshold_and_every_other_threshold_is_above_
         "merge_queue": 1.0,
         "intent_fix": 1.0,
         "ci_queue": 1.0,
+        "lab_wait": 1.0,
         "ci_overrun": 0.25,
         "launch_failure": 0.25,
     }
