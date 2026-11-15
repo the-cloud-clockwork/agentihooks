@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable
 from copy import copy
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
@@ -59,12 +59,17 @@ class Lifecycle:
             agent = self.store.execution_registry.get(event.swarm, event.key)
         except SwarmError:
             return
-        if (agent.execution_id, agent.generation, agent.task, agent.name) != (
-            event.key,
-            event.version,
-            event.data["task"],
-            event.data["name"],
-        ) or (value["state"] == "started" and self._resumed(event, agent, claims, key, value, entry.revision)):
+        if (
+            (agent.execution_id, agent.generation, agent.task, agent.name)
+            != (
+                event.key,
+                event.version,
+                event.data["task"],
+                event.data["name"],
+            )
+            or self._held(event.swarm, agent, value)
+            or (value["state"] == "started" and self._resumed(event, agent, claims, key, value, entry.revision))
+        ):
             return
         revision = entry.revision
         if value["state"] != "exiting":
@@ -89,6 +94,25 @@ class Lifecycle:
             revision = claims.update(key, json.dumps(value).encode(), revision)
         self._settle(event, agent)
         claims.update(key, json.dumps({**value, "state": "exited"}).encode(), revision)
+
+    def _held(self, slug: str, agent: AgentRecord, value: dict[str, Any]) -> bool:
+        """True while a pending outage resume, or an outage the tick shared, holds ``agent`` before its slot returned.
+
+        A shared outage never holds a finished agent, one whose task is done or one whose exit was deliberate.
+        """
+        from scripts.hub import lease
+        from scripts.swarm import deliberate_exit, outage, resume
+
+        store = cast(RedisStore, self.store)
+        if value.get("returned"):
+            return False
+        if resume.recovery_pending(store, slug, agent):
+            return True
+        if agent.state == "finished" or not outage.shared_open(store, slug, lease.wall_ms()):
+            return False
+        row: dict[str, Any] = cast(Any, self.ledger).task(slug, agent.task) or {}
+        finished = bool(row.get("done")) or row.get("state") == "done"
+        return not finished and not deliberate_exit.recorded(store, slug, agent.name)
 
     def _resumed(self, event: Envelope, agent: AgentRecord, claims: Any, key: Any, value: Any, revision: int) -> bool:
         """Order the agent's hive to reopen its own conversation in its seat, at most RECOVERY_ATTEMPTS times per

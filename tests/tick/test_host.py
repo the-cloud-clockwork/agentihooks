@@ -100,6 +100,7 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
     monkeypatch.setattr(timing, "call", call)
     monkeypatch.setattr(host, "LaunchSlots", _Slots)
     monkeypatch.setattr(outage, "providers", lambda *args: calls.append(("providers", *args)))
+    monkeypatch.setattr(outage, "share", lambda *args: calls.append(("share", *args)))
     monkeypatch.setattr(hive_ledger, "observe", lambda *args: calls.append(("hive", *args)))
     found = actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
     assert set(loaded) <= {"scripts.swarm.cli"}
@@ -144,6 +145,7 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
         ("call", relay.relay, "redis"),
         ("call", ("refresh reported", "redis"), 7),
         ("providers", STORE, "sw", "runtime", 7),
+        ("share", STORE, "sw", 7),
         ("hive", STORE, "sw", 7),
     ]
 
