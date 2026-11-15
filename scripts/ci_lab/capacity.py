@@ -29,13 +29,16 @@ class Load:
 
 
 def predicted_wait(estimates: Sequence[float], free_slots: int, frees_in: Sequence[float] = ()) -> float | None:
-    """Seconds until the pending estimates drain across the free slots; None when no slot is free."""
+    """Seconds until the pending estimates drain across the pool, each free slot working from now and each busy slot
+    from when its running unit frees it; None when no slot is free and no running unit's free time is known.
+
+    With the ``count`` earliest slots working, the work drains at ``(work + their start times) / count``; every other
+    count is no earlier, so the drain is the least of these."""
     work = fsum(estimates)
     if not work:
         return 0.0
-    if free_slots <= 0:
-        return None
-    return work / free_slots
+    starts = sorted([0.0] * free_slots + [max(at, 0.0) for at in frees_in])
+    return min(((work + fsum(starts[:count])) / count for count in range(1, len(starts) + 1)), default=None)
 
 
 def utilisation(load: Load) -> float:
