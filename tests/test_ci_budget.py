@@ -127,7 +127,7 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
         ["mutation-shard", "10m00s", "3m30s", "over"],
         ["unit", "4m30s", "5m00s", "ok"],
         ["swarm-image", "1m35s", "3m00s", "ok"],
-        ["select", "0m35s", "1m00s", "ok"],
+        ["select", "0m35s", "2m00s", "ok"],
         ["brand-new", "0m10s", "none", "no", "budget"],
         ["push", "to", "this", "report", "16m00s", "15m00s", "over"],
     ]
@@ -178,7 +178,7 @@ def test_cli_prints_the_table_summary_and_annotations(tmp_path, monkeypatch, cap
             "| Stage | Wall | Budget | Verdict |",
             "| --- | ---: | ---: | --- |",
             "| mutation-shard | 10m00s | 3m30s | over |",
-            "| select | 0m35s | 1m00s | ok |",
+            "| select | 0m35s | 2m00s | ok |",
             "| brand-new | 0m10s | none | no budget |",
             "| push to this report | 16m00s | 15m00s | over |",
             "",
