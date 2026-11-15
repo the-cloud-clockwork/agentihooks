@@ -168,6 +168,17 @@ def test_a_restarted_worker_recuts_a_tree_its_predecessor_left(tmp_path: Path, o
     assert _registered(mirror.store) == [str(tree)]
 
 
+def test_a_lease_replaces_an_unregistered_directory_at_the_head_path(tmp_path: Path, origin: Path) -> None:
+    head = _commit(origin, "a", "a")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
+    (tmp_path / "trees" / head / "deep").mkdir(parents=True)
+    (tmp_path / "trees" / head / "deep" / "left").write_text("left")
+    (tmp_path / "trees" / head / "deep").chmod(0o500)
+    tree = trees.lease(head)
+    assert sorted(path.name for path in tree.iterdir()) == [".git", "a"]
+    assert _registered(trees.mirror.store) == [str(tree)]
+
+
 def test_a_mutation_unit_gets_its_own_writable_copy(tmp_path: Path, origin: Path) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)

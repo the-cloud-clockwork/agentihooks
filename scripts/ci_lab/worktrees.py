@@ -1,5 +1,6 @@
 """Pod git for the lab worker: a private store over the node mirror and read only worktrees per head."""
 
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -81,9 +82,10 @@ class Worktrees:
         return tree
 
     def drop(self, tree: Path) -> None:
-        """Remove a worktree and its registration in the store."""
+        """Remove a worktree directory, registered or not, and prune the store's registrations."""
         _writable(tree, True)
-        _git(self.mirror.store, "worktree", "remove", "--force", str(tree))
+        shutil.rmtree(tree)
+        _git(self.mirror.store, "worktree", "prune")
 
     def _evict(self) -> None:
         idle = [head for head, units in self.live.items() if units == 0]

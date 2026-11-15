@@ -1,3 +1,4 @@
+import fcntl
 import os
 import subprocess
 import threading
@@ -110,9 +111,9 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv, mon
     first, second = threading.Thread(target=call), threading.Thread(target=call)
     first.start()
     assert started.wait(10)
+    with (tmp_path / "venvs" / f"{DIGEST}.lock").open() as held, pytest.raises(BlockingIOError):
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
     second.start()
-    second.join(0.5)
-    assert second.is_alive()
     finish.set()
     first.join(10)
     second.join(10)
