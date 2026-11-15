@@ -47,6 +47,7 @@ def source():
     store.config.return_value = SimpleNamespace(slug="rig", state="running", repo="", template="", engine="events")
     store.agents.return_value = []
     store.claimant.return_value = None
+    store.redis.get.return_value = None
     ledger.state.return_value = document
     ledger.metadata.side_effect = lambda _: {"_meta": {"rev": id(ledger.state.return_value)}}
     return row, store, ledger
@@ -144,6 +145,21 @@ def test_snapshot_uses_live_owners_and_release_and_apply_admission(monkeypatch):
     assert readiness.claimable(row, "eng", provider.snapshot("rig"))
     store.config.return_value = SimpleNamespace(**{**vars(store.config.return_value), "state": "paused"})
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_events_snapshot_holds_eng_offers_while_the_lab_is_behind(monkeypatch):
+    from tests.swarm.test_claim_hold import lab
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    row, store, ledger = source()
+    provider = readiness.Source(store, ledger)
+    store.redis.get.return_value = json.dumps(lab(35 * 60))
+    assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
+    assert readiness.claimable({**row, "lane": "ci"}, "ci", provider.snapshot("rig"))
+    store.redis.get.return_value = json.dumps(lab(5 * 60))
+    assert readiness.claimable(row, "eng", provider.snapshot("rig"))
 
 
 def test_snapshot_holds_a_task_red_only_from_checks_failing_across_its_repository(monkeypatch):

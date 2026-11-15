@@ -159,3 +159,81 @@ def test_the_same_task_in_two_swarms_has_independent_hold_and_notice_times(held)
     items = InboxStore(store.redis).inbox("master@other")
     assert len(items) == 1
     assert "task set t1 awaiting=" in items[0].text
+
+
+LAB_NOW = 1_800_000_000_000
+BEHIND = "the lab is {} minutes behind on pull request grading"
+
+
+def lab(wait_s, at=None, name="pull_request"):
+    """A stored lab block whose pull request class predicts ``wait_s`` seconds, read at ``at`` or now."""
+    import time
+
+    entry = {"pending": 4, "running": 2, "predicted_wait_s": wait_s}
+    read = int(time.time() * 1000) if at is None else at
+    capacity = {"classes": {name: entry}, "slots": {"total": 2, "busy": 2, "free": 0}}
+    return {"url": "http://lab", "at": read, "capacity": capacity, "error": "", "error_at": 0}
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_lab_holds_eng_claims_outside_the_fix_phase_while_pull_request_grading_runs_behind():
+    from scripts.swarm import claim_hold
+    from scripts.swarm.health.findings import Limits
+
+    limits, eng = Limits(), {"id": "t1", "lane": "eng", "phase": "p1"}
+    assert claim_hold.ci_behind(eng, lab(35 * 60), limits, "fix") == BEHIND.format(35)
+    assert claim_hold.ci_behind(eng, lab(21 * 60), limits, "fix") == BEHIND.format(21)
+    assert claim_hold.ci_behind(eng, lab(21 * 60 - 1), limits, "fix") == ""
+    assert claim_hold.ci_behind({**eng, "lane": "ci"}, lab(35 * 60), limits, "fix") == ""
+    assert claim_hold.ci_behind({**eng, "phase": "fix"}, lab(35 * 60), limits, "fix") == ""
+    assert claim_hold.ci_behind({"id": "t2", "phase": ""}, lab(35 * 60), limits, "") == BEHIND.format(35)
+    assert claim_hold.ci_behind(eng, lab(35 * 60), Limits(ci_behind_minutes=40), "fix") == ""
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds():
+    from scripts.swarm import claim_hold
+
+    assert claim_hold.lab_minutes(lab(35 * 60, LAB_NOW - 600_000), LAB_NOW) == 35
+    assert claim_hold.lab_minutes(lab(35 * 60, LAB_NOW - 600_001), LAB_NOW) == 0
+    assert claim_hold.lab_minutes(None, LAB_NOW) == 0
+    assert claim_hold.lab_minutes({"url": "http://lab", "error": "refused", "error_at": LAB_NOW}, LAB_NOW) == 0
+    assert claim_hold.lab_minutes(lab(None, LAB_NOW), LAB_NOW) == 0
+    assert claim_hold.lab_minutes(lab(35 * 60, LAB_NOW, "queue"), LAB_NOW) == 0
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_lab_threshold_reads_its_environment_variable():
+    from scripts.swarm.health.findings import ENV, Limits, limits
+
+    assert ENV["ci_behind_minutes"] == "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES"
+    assert Limits().ci_behind_minutes == 20
+    assert limits({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "45"}).ci_behind_minutes == 45
+
+
+@pytest.fixture
+def running():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    return store
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_tick_claims_no_eng_task_while_the_lab_is_behind_and_resumes_below_the_threshold(running):
+    import json
+
+    from scripts.swarm import tick as tick_module
+
+    store = running
+    rows = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}, {"id": "t3", "lane": "eng"}])
+    doc = rows.state("sw")
+
+    def ready(lane):
+        return [task["id"] for task in tick_module.ready_in_order("sw", store, rows.rows, doc, lane)]
+
+    store.redis.set(store.key("sw", "lab-capacity"), json.dumps(lab(35 * 60)))
+    assert (ready("eng"), ready("ci")) == ([], ["t2"])
+    store.redis.set(store.key("sw", "lab-capacity"), json.dumps(lab(5 * 60)))
+    assert (ready("eng"), ready("ci")) == (["t1", "t3"], ["t2"])
