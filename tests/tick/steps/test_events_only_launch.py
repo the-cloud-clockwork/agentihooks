@@ -49,6 +49,7 @@ PLANTED = (
     ("scripts/swarm/cli.py", "def boot(config, engine: str = 'legacy'):\n    return config\n", "legacy engine"),
     ("scripts/swarm/cli.py", "@launch(engine='legacy')\ndef boot():\n    return None\n", "legacy engine"),
     ("scripts/swarm/tick.py", "with engines(engine='legacy') as chosen:\n    pass\n", "legacy engine"),
+    ("scripts/swarm/tick.py", "try:\n    pass\nexcept refused(engine='legacy'):\n    pass\n", "legacy engine"),
     ("scripts/swarm/cli.py", REFUSED_LEGACY, "legacy engine"),
 )
 CLEAN = (
@@ -91,9 +92,10 @@ def _step_name(node: ast.AST) -> str:
 
 
 def _own_parts(node: ast.AST) -> list[ast.AST]:
-    """The code a statement runs itself: a simple statement whole, a block's header such as a test, the items of a
-    with, or a def's arguments and decorators, never the statements nested in it."""
-    if not isinstance(node, ast.stmt):
+    """The code a statement or except clause runs itself: a simple statement whole, a block's header such as a test,
+    the items of a with, an except clause's type, or a def's arguments and decorators, never the statements nested in
+    it."""
+    if not isinstance(node, (ast.stmt, ast.excepthandler)):
         return []
     nested = (ast.stmt, ast.excepthandler, ast.match_case)
     return [child for child in ast.iter_child_nodes(node) if not isinstance(child, nested)]
