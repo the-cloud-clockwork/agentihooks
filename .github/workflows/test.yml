@@ -754,13 +754,16 @@ jobs:
           PULL: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [[ ! "$QUIET" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((QUIET > 180)); then
+          whole='^(0|[1-9][0-9]{0,2})$'
+          if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 180 ]]; then
             echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 180, not $QUIET"
             exit 1
           fi
           deadline=$((SECONDS + QUIET))
-          while ((SECONDS < deadline)); do
-            sleep $((deadline - SECONDS < 5 ? deadline - SECONDS : 5))
+          while [[ "$SECONDS" -lt "$deadline" ]]; do
+            pause=$((deadline - SECONDS))
+            [[ "$pause" -le 5 ]] || pause=5
+            sleep "$pause"
             if ! head="$(timeout 20 git -C "$GITHUB_WORKSPACE" ls-remote origin "refs/pull/$PULL/head")"; then
               echo "::error::Cannot read the head of pull request $PULL from origin"
               exit 1
