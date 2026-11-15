@@ -198,8 +198,7 @@ def test_a_watch_retirement_refunds_and_sends_the_stop_to_the_hive_that_started_
 
 def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
     """The stops waiting for the hive that ``agent`` names."""
-    events = bus.for_swarm(SLUG).events
-    stops = events.consumer(
+    stops = bus.for_swarm(SLUG).stops.consumer(
         execution_stop.durable(SLUG, agent.hive), execution_stop.stop_subject(SLUG, agent.hive), execution_stop.POLICY
     )
     return [delivery.event for delivery in stops.fetch(execution_stop.BATCH, 0)]
