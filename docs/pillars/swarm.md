@@ -1860,8 +1860,7 @@ pull request for the published branch with `swarm pr`.
 
 A successor continuing an existing pull request publishes its commit only to
 the retained pull request branch. Its newly prepared local branch is not also
-pushed. This removes the second branch push that previously started another
-Mutation preflight for the same commit. The `push-stop` gate uses the same
+pushed, so the same commit is never pushed to a second branch. The `push-stop` gate uses the same
 retained target when it pushes committed work at Stop.
 
 For `publish`, the retained target can come from `continue_from` in the
@@ -1916,11 +1915,11 @@ rather than recreated; a changed remote ref can also reject the push. Read the
 remote state and reconcile the continuation before retrying. Removing the
 lease or pushing the same commit to a second branch defeats this protection.
 
-See [continuation publication and preflight runs](../reference/mutation-gate.md#continuation-publication-and-preflight-runs)
-for CI inspection and the distinction between a workflow run and mutation work.
+See [continuation publication](../reference/mutation-gate.md#continuation-publication)
+for checking which branch received the push.
 Delivered by [pull request 4076](https://github.com/the-cloud-clockwork/agentihooks/pull/4076),
 with a [successful focused regression proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39036611380)
-and [successful mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39037126637).
+and [successful mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39037126637).
 Those proofs establish the tested branch selection and gate results; inspecting
 one live continuation's workflow runs is a separate operational check.
 
@@ -1973,12 +1972,12 @@ request, the published target and the pull request head branch should agree.
 
 [Pull request 4418](https://github.com/the-cloud-clockwork/agentihooks/pull/4418)
 delivered the preparation and publication correction. Its reported incident
-started four duplicate preflights on a successor's new branch before the same
+started four duplicate mutation runs on a successor's new branch before the same
 commits reached the existing pull request branch. The focused regression was
 [red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39104180650)
 and then [green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39104598310).
 These runs prove the tested selection behavior; they do not establish a live
-before and after count of mismatched task branches or duplicate preflights.
+before and after count of mismatched task branches or duplicate mutation runs.
 
 ### Resume parked work and publish
 
@@ -2133,8 +2132,7 @@ Repeating `swarm publish` after a successful publication avoids an unnecessary
 push when there is nothing new to deliver. After staging the explicit file
 list, publish checks the selected branch on `origin` with `git ls-remote`.
 If the index has no changes and that remote branch already points at local
-`HEAD`, it makes no commit, runs no prepush gate and makes no push. This repeat
-publication starts no push-triggered mutation preflight.
+`HEAD`, it makes no commit, runs no prepush gate and makes no push.
 
 Run from the task worktree, using repository relative file names after `--`:
 
@@ -8781,7 +8779,7 @@ merged into `dev` on 27 October 2026 at 18:33 UTC for issue 7794. Its
 final head passed the
 [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40549044022)
 and the
-[Mutation preflight run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40549036252).
+[mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40549036252).
 The cases in `tests/inbox/test_member_mail.py` assert that an idle legacy Codex
 pane on a hive gets one `nudge` order carrying the swarm, agent, execution,
 generation and wake text, from both the tick pass and `wake_now`; that a

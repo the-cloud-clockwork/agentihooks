@@ -55,7 +55,7 @@ Promotion never publishes to PyPI and never dispatches another workflow. PyPI pu
 
 The `Squash the graded tree snapshot into main` step runs `promote.cjs`, so it covers steps 2 to 8 of the list above: snapshot, pull request, the mergeability wait, the squash, the tree check and the branch delete. Its time is the step 5 wait plus the API calls of the other steps; the command below reports only the step total.
 
-Pushing a `promotion/**` branch starts no Mutation preflight run: `mutation-preflight.yml` lists `promotion/**` in its push `branches-ignore`, beside `dev`, `main`, `gh-readonly-queue/**`, `wip/**` and `diffcheck/**`. Before [#3886](https://github.com/the-cloud-clockwork/agentihooks/pull/3886) the push ran a mutation preflight on the promotion head, a tree whose changes had already been mutation graded on their pull requests, and the merge waited for its `mutation` check. Other workflows still run on that push; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
+Pushing a `promotion/**` branch runs no mutation: the promotion head's changes were already mutation graded on their pull requests. Other workflows still run on that push; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
 
 The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` job, holds the merge until it finishes or the four minute limit fails the step.
 
@@ -170,7 +170,7 @@ through code and CI; changing a running container does not repair its image.
 The original dev push [39092038586](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39092038586)
 failed with the missing git error. The repair's [green regression run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094909940)
 passed 23 tests, including resolved path fallback and a linked watched swarm and
-Doctor retaining one fixer without git on `PATH`. Its [mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094879605)
+Doctor retaining one fixer without git on `PATH`. Its [mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39094879605)
 killed all 24 mutants. After merge, [helm-kind / kind in dev push 39098125691](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39098125691/job/117589554915)
 succeeded. That job proves the missing git recovery; it does not establish that
 every check in that push passed or that a release was promoted.
