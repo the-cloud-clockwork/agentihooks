@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts import ci_runner_classes
+from scripts import ci_branch_lanes, ci_runner_classes
 
 pytestmark = pytest.mark.unit
 
@@ -152,6 +152,13 @@ def test_the_workflow_builds_on_dev_pushes_to_its_inputs_a_daily_refresh_and_dis
     )
     assert on["schedule"] == [{"cron": "47 5 * * *"}]
     assert "workflow_dispatch" in on
+
+
+def test_every_run_queues_on_a_shared_hosted_lane_and_is_never_cancelled() -> None:
+    workflow = _workflow()
+    assert workflow["concurrency"]["queue"] == "max"
+    assert workflow["concurrency"]["cancel-in-progress"] is False
+    assert ci_branch_lanes.problems(workflow) == []
 
 
 def test_the_daily_refresh_rebuilds_on_dev() -> None:
