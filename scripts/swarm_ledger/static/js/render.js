@@ -335,7 +335,7 @@ function labLine(entry) {
   return `${entry.class.replace(/_/g, " ")} · ${entry.pending} pending · ${wait}`;
 }
 
-export function labStat(lab) {
+function labStat(lab) {
   const age = !lab ? "" : lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
   const lines = lab ? lab.classes.map((entry) => h("li", { text: labLine(entry) })) : [h("li", { text: "unavailable" })];
   const failed = lab && lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];

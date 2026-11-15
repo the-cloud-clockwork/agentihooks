@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -115,35 +116,44 @@ def test_the_chat_send_button_sends_the_typed_message(tab):
     assert tab.locator("#chat-send").get_attribute("type") == "button"
 
 
-def lab_page(browser: Any, lab: dict | None) -> tuple[Any, Any]:
-    context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    html = shell_html()
-    context.route(
-        "**/*",
-        lambda route: (
-            route.fulfill(json={})
-            if "/api/" in route.request.url
-            else route.fulfill(body=html, content_type="text/html")
-        ),
-    )
-    meta = {"time_left": {"at": 1, "inputs": {}, "calculation": {"lab": lab}}}
-    serve_modules(context, ledger_state({**DOC, "_meta": meta}))
-    page = context.new_page()
-    page.goto(URL)
-    loaded(page)
-    page.set_default_timeout(1500)
-    return context, page
+@pytest.fixture
+def lab_page(browser: Any) -> Iterator[Callable[[dict | None], Any]]:
+    contexts: list[Any] = []
+
+    def open_page(lab: dict | None) -> Any:
+        context = browser.new_context(viewport={"width": 1920, "height": 1080})
+        contexts.append(context)
+        html = shell_html()
+        context.route(
+            "**/*",
+            lambda route: (
+                route.fulfill(json={})
+                if "/api/" in route.request.url
+                else route.fulfill(body=html, content_type="text/html")
+            ),
+        )
+        meta = {"time_left": {"at": 1, "inputs": {}, "calculation": {"lab": lab}}}
+        serve_modules(context, ledger_state({**DOC, "_meta": meta}))
+        page = context.new_page()
+        page.goto(URL)
+        loaded(page)
+        page.set_default_timeout(1500)
+        return page
+
+    yield open_page
+    for context in contexts:
+        context.close()
 
 
 @pytest.mark.feature("ledger-stats-lab")
-def test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck(browser: Any) -> None:
+def test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck(lab_page: Any) -> None:
     now = int(time.time() * 1000)
     classes = [
         {"class": "pull_request", "pending": 3, "predicted_wait_s": 240.0},
         {"class": "queue", "pending": 0, "predicted_wait_s": 0.0},
         {"class": "backfill", "pending": 2, "predicted_wait_s": None},
     ]
-    context, page = lab_page(browser, {"at": now - 2 * 60_000, "error": "", "error_at": 0, "classes": classes})
+    page = lab_page({"at": now - 2 * 60_000, "error": "", "error_at": 0, "classes": classes})
     row = page.locator("#stats .lab-capacity")
     assert row.locator("dt").inner_text() == "LAB · 2M AGO"
     assert row.locator("li").all_inner_texts() == [
@@ -157,21 +167,15 @@ def test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the
     bounds = row.bounding_box()
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 1920
     assert row.evaluate("e => e.scrollWidth <= e.clientWidth")
-    context.close()
 
 
-def test_a_failed_lab_read_names_its_error_and_no_reading_reads_unavailable(browser: Any) -> None:
+def test_a_failed_lab_read_names_its_error_and_no_reading_reads_unavailable(lab_page: Any) -> None:
     now = int(time.time() * 1000)
-    context, page = lab_page(
-        browser, {"at": None, "error": "connection refused", "error_at": now - 60_000, "classes": []}
-    )
+    page = lab_page({"at": None, "error": "connection refused", "error_at": now - 60_000, "classes": []})
     row = page.locator("#stats .lab-capacity")
     assert row.locator("dt").inner_text() == "LAB · NEVER"
     assert row.locator("li.lab-error").all_inner_texts() == ["Read failed 1m ago: connection refused"]
     assert row.locator("li").count() == 1
-    context.close()
-    context, page = lab_page(browser, None)
-    row = page.locator("#stats .lab-capacity")
+    row = lab_page(None).locator("#stats .lab-capacity")
     assert row.locator("dt").inner_text() == "LAB"
     assert row.locator("li").all_inner_texts() == ["unavailable"]
-    context.close()
