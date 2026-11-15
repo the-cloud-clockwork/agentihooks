@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.898 · 2026-11-15
+
+### 2026-11-15 · db3a37b20379 · #11226 · @agenticore-app
+
+**Clear the saved launch assignment on a durable start and keep the leaver's seat on every reclaim**
+
+This change fixes two related seat-tracking bugs. First, when a task's `execution.started` event is recorded for a new life, the saved launch seat assignment is now cleared, so a missed or delayed launch report can no longer lock future lives into an outdated seat, model, or account. Second, whenever a leaver's task is reopened and reassigned (via the tick drop helper or stall watchdog), their seat is explicitly saved as the handoff seat, ensuring the replacement worker inherits that seat and its mail correctly. Tests, feature map entries, and a Semgrep rule guard against regressions.
+
 ## v2.17.897 · 2026-11-15
 
 ### 2026-11-15 · 12e4fe6592ee · #11288 · @agenticore-app
