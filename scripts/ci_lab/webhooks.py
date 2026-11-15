@@ -49,8 +49,9 @@ def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
 def _pull_request(payload: Mapping[str, Any]) -> list[HeadEvent]:
     if payload["action"] not in PULL_ACTIONS:
         return []
-    pull, repo, actor = payload["pull_request"], payload["repository"]["html_url"], payload["sender"]["login"]
-    return [HeadEvent("pull_request", repo, pull["head"]["sha"], pull["base"]["sha"], actor, payload["action"])]
+    pull, repo = payload["pull_request"], payload["repository"]["html_url"]
+    head, base, author = pull["head"]["sha"], pull["base"]["sha"], pull["user"]["login"]
+    return [HeadEvent("pull_request", repo, head, base, author, payload["action"])]
 
 
 def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:
@@ -79,7 +80,12 @@ HEADS: Mapping[str, Callable[[Mapping[str, Any]], list[HeadEvent]]] = {
 
 
 def head_events(name: str | None, payload: Mapping[str, Any]) -> list[HeadEvent]:
-    """Return the heads a GitHub delivery names for the lab; a rerequested check run with no pull request has no base."""
+    """Return the heads a GitHub delivery names for the lab.
+
+    A pull request head's actor is the pull request's author, as `reconcile` reads it, so a trusted
+    sender reopening an untrusted author's pull request admits nothing; every other head's actor is
+    the delivery's sender. A rerequested check run with no pull request has no base.
+    """
     if name is None or name not in HEADS:
         return []
     return HEADS[name](payload)

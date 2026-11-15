@@ -389,6 +389,7 @@ def lab_pull_request(action="opened", head="a1"):
     payload["repository"] = {"html_url": REPO}
     payload["sender"] = {"login": "nestorcolt"}
     payload["pull_request"]["base"] = {"sha": "b0"}
+    payload["pull_request"]["user"] = {"login": "agenticore-app[bot]"}
     return payload
 
 
@@ -438,7 +439,7 @@ def test_a_wired_lab_answers_400_for_a_head_payload_it_cannot_read():
 def test_a_wired_lab_still_records_the_pull_request_when_its_head_cannot_be_read():
     ingress, swarm, lab = lab_setup()
     payload = lab_pull_request()
-    del payload["sender"]
+    del payload["pull_request"]["user"]
     assert deliver(ingress, "pull_request", payload) == 400
     assert [e.type for e in drain(swarm)] == ["pull.opened"]
     assert drain(lab) == []

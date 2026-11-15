@@ -28,12 +28,14 @@ def push(ref: str = "refs/heads/dev", deleted: bool = False) -> dict[str, Any]:
     }
 
 
-def pull_request(action: str = "opened") -> dict[str, Any]:
+def pull_request(
+    action: str = "opened", author: str = "agenticore-app[bot]", sender: str = "nestorcolt"
+) -> dict[str, Any]:
     return {
         "action": action,
         "repository": {"html_url": REPO},
-        "sender": {"login": "agenticore-app[bot]"},
-        "pull_request": {"head": {"sha": HEAD}, "base": {"sha": BASE}},
+        "sender": {"login": sender},
+        "pull_request": {"head": {"sha": HEAD}, "base": {"sha": BASE}, "user": {"login": author}},
     }
 
 
@@ -236,6 +238,12 @@ def test_only_a_trusted_actors_head_becomes_a_grade_request() -> None:
     assert intake.admit(trusted_head, trusted) == intake.request_from(trusted_head)
     assert intake.admit(head("pull_request", "stranger", "opened"), trusted) is None
     assert intake.admit(head("push", "stranger[bot]", "pushed"), trusted) is None
+
+
+def test_a_trusted_sender_reopening_an_untrusted_authors_pull_request_admits_nothing() -> None:
+    (event,) = webhooks.head_events("pull_request", pull_request("reopened", author="stranger", sender="nestorcolt"))
+    assert event.actor == "stranger"
+    assert intake.admit(event, intake.trusted_actors(ROOT)) is None
 
 
 def open_pull(sha: str, author: str = "agenticore-app[bot]") -> dict[str, Any]:
