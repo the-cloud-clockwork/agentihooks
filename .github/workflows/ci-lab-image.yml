@@ -12,7 +12,7 @@ on:
       - scripts/ci_lab/**
       - scripts/cli_delegates.py
   schedule:
-    - cron: "47 5 * * *"
+    - cron: "47 14 * * *"
   workflow_dispatch:
 
 permissions:
@@ -59,7 +59,7 @@ jobs:
       - name: Build the candidate on the newest runner image
         run: docker build --pull --platform linux/amd64 --file docker/ci-lab/Dockerfile --tag "$CANDIDATE" .
       - name: Smoke the candidate with no network
-        run: bash docker/ci-lab/smoke.sh "$CANDIDATE"
+        run: bash docker/ci-lab/smoke.sh "$CANDIDATE" "$(sha256sum .github/test-requirements.lock | cut -d ' ' -f 1)"
       - name: Publish the dev tags
         if: github.ref == 'refs/heads/dev'
         run: |

@@ -104,21 +104,21 @@ def test_the_image_runs_the_lab_worker_as_the_runner_user() -> None:
 
 
 def test_the_smoke_runs_the_self_test_and_the_image_checks_with_no_network(tmp_path: Path) -> None:
-    result = _smoke(tmp_path, "worker:candidate")
+    result = _smoke(tmp_path, "worker:candidate", "ab12")
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "docker.log").read_text().splitlines() == [
         "run --rm --network none worker:candidate --self-test",
-        "run --rm -i --network none --entrypoint bash worker:candidate -s",
+        "run --rm -i --network none -e LOCK_DIGEST=ab12 --entrypoint bash worker:candidate -s",
     ]
     checks = (tmp_path / "docker.stdin").read_text()
     assert "bwrap --version\n" in checks
-    assert "grep -Eqx '[0-9a-f]{64}' /opt/agentihooks-venv/lockfile.sha256\n" in checks
+    assert 'if [[ "$(cat /opt/agentihooks-venv/lockfile.sha256)" != "$LOCK_DIGEST" ]]; then\n' in checks
     assert "if [[ -e /etc/sudoers || -e /etc/sudoers.d ]]; then\n" in checks
     assert "/opt/agentihooks-venv/bin/python -c 'import scripts.ci_lab.contract, pytest, xdist" in checks
 
 
 def test_the_image_checks_refuse_an_image_that_still_has_sudo(tmp_path: Path) -> None:
-    assert _smoke(tmp_path, "worker:candidate").returncode == 0
+    assert _smoke(tmp_path, "worker:candidate", "ab12").returncode == 0
     fake = tmp_path / "bin/sudo"
     fake.write_text("#!/usr/bin/env bash\n")
     fake.chmod(0o755)
@@ -130,17 +130,18 @@ def test_the_image_checks_refuse_an_image_that_still_has_sudo(tmp_path: Path) ->
 
 
 def test_the_smoke_stops_when_the_self_test_fails(tmp_path: Path) -> None:
-    result = _smoke(tmp_path, "worker:candidate", exit_code=3)
+    result = _smoke(tmp_path, "worker:candidate", "ab12", exit_code=3)
     assert result.returncode == 3
     assert (tmp_path / "docker.log").read_text().splitlines() == [
         "run --rm --network none worker:candidate --self-test"
     ]
 
 
-def test_the_smoke_needs_an_image(tmp_path: Path) -> None:
-    result = _smoke(tmp_path)
+@pytest.mark.parametrize("args", [(), ("worker:candidate",)])
+def test_the_smoke_needs_an_image_and_the_lock_digest(tmp_path: Path, args: tuple[str, ...]) -> None:
+    result = _smoke(tmp_path, *args)
     assert result.returncode != 0
-    assert "usage: smoke.sh IMAGE" in result.stderr
+    assert " usage: smoke.sh IMAGE LOCK_DIGEST\n" in result.stderr
     assert not (tmp_path / "docker.log").exists()
 
 
@@ -150,7 +151,7 @@ def test_the_workflow_builds_on_dev_pushes_to_its_inputs_a_daily_refresh_and_dis
     assert {"docker/ci-lab/**", ".github/workflows/ci-lab-image.yml", ".github/test-requirements.lock"} <= set(
         on["push"]["paths"]
     )
-    assert on["schedule"] == [{"cron": "47 5 * * *"}]
+    assert on["schedule"] == [{"cron": "47 14 * * *"}]
     assert "workflow_dispatch" in on
 
 
@@ -177,7 +178,8 @@ def test_the_image_job_smokes_the_candidate_before_it_publishes_dev_and_the_shor
     assert checkout == {"uses": "actions/checkout@v4", "with": {"persist-credentials": False}}
     assert login["uses"] == "docker/login-action@v3"
     assert '--file docker/ci-lab/Dockerfile --tag "$CANDIDATE" .' in build["run"]
-    assert smoke["run"] == 'bash docker/ci-lab/smoke.sh "$CANDIDATE"'
+    digest = "$(sha256sum .github/test-requirements.lock | cut -d ' ' -f 1)"
+    assert smoke["run"] == f'bash docker/ci-lab/smoke.sh "$CANDIDATE" "{digest}"'
     assert "if" not in smoke
     assert publish["if"] == "github.ref == 'refs/heads/dev'"
     env = {**_fake_docker(tmp_path), **job["env"], "CANDIDATE": "candidate", "GITHUB_SHA": "123456789abcdef"}

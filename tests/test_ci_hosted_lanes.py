@@ -225,6 +225,7 @@ def test_no_required_run_or_its_callee_ever_reaches_a_lane():
             assert all("count-record" not in job.get("needs", []) for job in _workflow("test.yml")["jobs"].values())
             continue
         if where == "ci-lab-image.yml":
+            assert set(_workflow(where)[True]) == {"push", "schedule", "workflow_dispatch"}
             assert _workflow(where)[True]["push"]["branches"] == ["dev", "diffcheck/ci-lab-image-*"]
             assert all("ci-lab-image" not in (_WORKFLOWS / name).read_text() for name in ("test.yml", "promote.yml"))
             continue
