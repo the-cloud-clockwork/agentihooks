@@ -6,6 +6,7 @@ import stat
 import subprocess
 import sys
 import time
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,7 @@ def test_the_environment_is_private_and_whitelisted(tmp_path: Path) -> None:
         "TZ": "UTC",
         "LANG": "C.UTF-8",
         "CI": "true",
+        "PYTHONDONTWRITEBYTECODE": "1",
         "CI_LAB_PORT_FIRST": "20000",
         "CI_LAB_PORT_LAST": "20099",
     }
@@ -101,6 +103,13 @@ def test_the_whitelist_key_is_the_digest_of_its_names_and_values() -> None:
     assert sandbox.whitelist_key({"B": "2", "A": "1"}) == expected
     assert sandbox.whitelist_key({"B": "2", "A": "3"}) != expected
     assert sandbox.whitelist_key({"B": "2", "C": "1"}) != expected
+
+
+def test_port_ranges_and_outcomes_are_frozen(tmp_path: Path) -> None:
+    with pytest.raises(FrozenInstanceError):
+        setattr(sandbox.PortRange(first=1, last=2), "first", 3)
+    with pytest.raises(FrozenInstanceError):
+        setattr(sandbox.Outcome(code=0, log=tmp_path), "code", 1)
 
 
 def test_the_allocator_hands_out_disjoint_ranges_inside_the_span() -> None:
@@ -128,7 +137,7 @@ def test_a_returned_range_is_handed_out_again() -> None:
 def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path) -> None:
     whitelist = {"PATH": os.environ["PATH"]}
     unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), whitelist)
-    outcome = unit.run(["/bin/sh", "-c", "sleep 60 & echo $!; wait"], timeout=1.5, net=True)
+    outcome = unit.run(["/bin/sh", "-c", "sleep 60 & echo $!; wait"], timeout=3, net=True)
     assert outcome.code is None
     assert _gone_within(int(outcome.log.read_text().split()[0]), 5)
 

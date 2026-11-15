@@ -1,4 +1,7 @@
-"""Per unit sandbox: a private environment, a port range, no network unless asked, the process group killed on timeout."""
+"""Per unit sandbox: private environment, port range, no network unless asked, process group killed on timeout.
+
+The private HOME, TMPDIR and XDG folders are environment variables; the host filesystem stays shared.
+"""
 
 import hashlib
 import json
@@ -72,6 +75,7 @@ def environment(directory: Path, ports: PortRange, whitelist: Mapping[str, str])
         "TZ": "UTC",
         "LANG": "C.UTF-8",
         "CI": "true",
+        "PYTHONDONTWRITEBYTECODE": "1",
         "CI_LAB_PORT_FIRST": str(ports.first),
         "CI_LAB_PORT_LAST": str(ports.last),
     }
