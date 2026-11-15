@@ -122,6 +122,19 @@ def test_an_unreachable_github_keeps_the_run_wait(tick, actions):  # noqa: F811
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["target"] == RUN
 
 
+def test_undecodable_gh_stderr_is_reported_with_replacement_characters(actions):
+    actions["code"], actions["stderr"] = 1, b"HTTP \xff502"
+    with pytest.raises(run_wait.Unreachable) as unreachable:
+        run_wait._api(ENDPOINT, "waits.checks")
+    assert str(unreachable.value) == f"gh api {ENDPOINT}: HTTP �502"
+
+
+def test_utf8_json_is_parsed_without_process_locale_decoding(monkeypatch):
+    body = json.dumps({"display_title": "café"}, ensure_ascii=False).encode()
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, body, b""))
+    assert run_wait._api(ENDPOINT, "waits.checks") == {"display_title": "café"}
+
+
 def job(name, conclusion):
     return {"name": name, "status": "completed", "conclusion": conclusion}
 
