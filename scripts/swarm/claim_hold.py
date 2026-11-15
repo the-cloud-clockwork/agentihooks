@@ -1,17 +1,21 @@
-"""Why the tick may not claim an open task: its phase, a freeze or focus, or an open dependency.
+"""Why the tick may not claim an open task: its phase, a freeze or focus, an open dependency, or a lab behind on grading.
 
 Every claim filter asks here, so the urgent hold health finding reports exactly what keeps a task from a seat.
 """
 
 from collections.abc import Callable
+from functools import partial
 from time import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import freeze, phase_state
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import task_dependencies
+
+if TYPE_CHECKING:
+    from scripts.swarm.health.findings import Limits
 
 PHASES = {
     "waiting": "waiting on an earlier phase",
@@ -23,6 +27,10 @@ PHASES = {
     "out_of_scope": "out of scope",
 }
 FOCUS = "a focus elsewhere holds it"
+LAB_LANE = "eng"
+LAB_CLASS = "pull_request"
+LAB_FRESH_MS = 600_000
+LAB_BEHIND = "the lab is {minutes} minutes behind on pull request grading"
 
 
 def hold(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
@@ -110,16 +118,36 @@ def waits(task: dict, rows: dict) -> str:
     return f"it waits on task {open_[0]}" if len(open_) == 1 else f"it waits on tasks {', '.join(open_)}"
 
 
+def lab_held(task: dict[str, Any], fix: str) -> bool:
+    """Whether the lab hold reaches the task: an eng task outside the fix phase."""
+    return task.get("lane", LAB_LANE) == LAB_LANE and not (fix and task.get("phase") == fix)
+
+
+def wait_minutes(wait_s: float | None) -> int:
+    """Whole minutes of a predicted wait, zero when the lab predicts none."""
+    return int(wait_s // 60) if wait_s and wait_s > 0 else 0
+
+
 def lab_minutes(reading: dict[str, Any] | None, now_ms: int) -> int:
-    """Whole minutes a fresh lab reading predicts pull request grading waits."""
-    return 0
+    """Whole minutes a lab reading taken within the fresh window predicts pull request grading waits; zero for an
+    older, failed or missing reading."""
+    if not reading or now_ms - reading.get("at", 0) > LAB_FRESH_MS:
+        return 0
+    return wait_minutes(reading["capacity"]["classes"].get(LAB_CLASS, {}).get("predicted_wait_s"))
 
 
-def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limits: Any, fix: str = "") -> str:
-    """Why the lab holds the task from a claim, empty when it does not."""
-    return ""
+def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limits: "Limits", fix: str = "") -> str:
+    """Why the lab holds the task from a claim: its pull request grading runs more minutes behind than the limit;
+    empty when it does not or the task is outside the hold."""
+    minutes = lab_minutes(reading, int(time() * 1000))
+    if minutes <= limits.ci_behind_minutes or not lab_held(task, fix):
+        return ""
+    return LAB_BEHIND.format(minutes=minutes)
 
 
 def lab_reason(store: Any, slug: str, fix: str) -> Callable[[dict[str, Any]], str]:
-    """Each task's ``ci_behind`` text against the swarm's stored lab reading and health limits."""
-    return lambda task: ""
+    """Each task's ``ci_behind`` text against the swarm's stored lab reading and the health limits."""
+    from scripts.swarm import lab_capacity
+    from scripts.swarm.health import findings
+
+    return partial(ci_behind, reading=lab_capacity.status(store, slug), limits=findings.limits(), fix=fix)

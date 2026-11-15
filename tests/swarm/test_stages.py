@@ -196,7 +196,7 @@ def test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait():
 
 
 @pytest.mark.feature("swarm-lab-behind-hold")
-def test_a_claimed_task_charges_lab_wait_only_inside_its_claim_waits():
+def test_a_claimed_task_charges_lab_wait_only_before_its_claim():
     found = stages.report(
         rows(
             ledger_events=[ledger("task done", at(7), "tasks/t0"), ledger("joined", at(8), by="e1")],
@@ -210,7 +210,7 @@ def test_a_claimed_task_charges_lab_wait_only_inside_its_claim_waits():
         [{**TASK, "state": "claimed"}],
         NOW,
     )
-    assert seconds_of(found) == {("lab_wait", ""): 1200.0, ("seat_wait", ""): 6000.0, ("build", ""): 3600.0}
+    assert seconds_of(found) == {("lab_wait", ""): 600.0, ("seat_wait", ""): 6600.0, ("build", ""): 3600.0}
 
 
 def test_an_open_ready_task_waits_for_its_claim_until_now():

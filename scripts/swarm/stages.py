@@ -16,7 +16,7 @@ from scripts.swarm_ledger.repository import hierarchy
 
 KEY = "bottleneck-stages"
 TOP = 3
-SOURCES = (*bottleneck.SOURCES, "ci_stages", "ledger_events")
+SOURCES = (*bottleneck.SOURCES, "ci_stages", "ledger_events", "lab_capacity")
 READY = ("added", "task open", "back in scope")
 PHASE_OPENS = ("review changed", "planning changed", "depends_on changed", "back in scope")
 CHECKED, FOCUSED, UNFROZEN = "checked", "focused", "unfrozen"
@@ -24,7 +24,8 @@ CLAIM_WAIT, SEAT_WAIT, QUEUE_WAIT = "claim_wait", "seat_wait", "queue_wait"
 LANE = "eng"
 DONE = "task done"
 JOINED = "joined"
-OVERLAYS = ("merge_queue", "intent_fix", "launch_failure", "launch", "claim_wait", "ci_overrun", "ci_queue")
+LAB_WAIT = "lab_wait"
+OVERLAYS = ("merge_queue", "intent_fix", "launch_failure", "launch", LAB_WAIT, "claim_wait", "ci_overrun", "ci_queue")
 INTENT = ("intent_failed", "intent_passed")
 NO_FIX_PHASE = ""
 SPOKEN = {"ci_overrun": "in", "review": "in"}
@@ -138,7 +139,7 @@ def _rounds(task_id: str, rows: dict, green: float, end: float) -> list[Span]:
     ]
 
 
-def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim", marks: list) -> Timeline:
+def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim", marks: list, lab: list[Span]) -> Timeline:
     task_id = task["id"]
     mine = [event for event in rows["agent_events"] if event["task"] == task_id]
     claimed = min(event["ts_ms"] for event in mine if event["kind"] == "claim")
@@ -165,6 +166,7 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim", ma
         *_rounds(task_id, rows, green, end),
     )
     overlays = (
+        *_lab_waits(lab, base[0]),
         *_reviews(task_id, rows, end),
         *(launch for _, launch in lives),
         *_gaps([life for life, _ in lives], claimed, pushed),
@@ -174,13 +176,37 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim", ma
     return Timeline(start, end, base, overlays, task_id, task.get("lane", LANE), seats)
 
 
-def _waiting(task: dict, marks: list, ready: "Claim", now_ms: int) -> Timeline | None:
+def _waiting(task: dict, marks: list, ready: "Claim", now_ms: int, lab: list[Span]) -> Timeline | None:
     if not ready(task):
         return None
     start = _ready(task, marks, now_ms, ready)
     if start is None:
         return None
-    return Timeline(start, now_ms, (Span(CLAIM_WAIT, start, now_ms),), (), task["id"], task.get("lane", LANE))
+    wait = Span(CLAIM_WAIT, start, now_ms)
+    return Timeline(start, now_ms, (wait,), tuple(_lab_waits(lab, wait)), task["id"], task.get("lane", LANE))
+
+
+def lab_spans(samples: list[dict], now_ms: int, minutes: int) -> list[Span]:
+    """Each stretch a lab capacity sample predicts pull request grading more than ``minutes`` behind: a sample holds
+    until the next one, for at most the claim hold's fresh window."""
+    from scripts.swarm import claim_hold
+
+    ticks = sorted((row["ts_ms"], row["predicted_wait_s"]) for row in samples if row["class"] == claim_hold.LAB_CLASS)
+    ends = [*(at for at, _ in ticks[1:]), now_ms]
+    return [
+        Span(LAB_WAIT, at, min(end, at + claim_hold.LAB_FRESH_MS))
+        for (at, wait), end in zip(ticks, ends)
+        if claim_hold.wait_minutes(wait) > minutes
+    ]
+
+
+def _lab_waits(lab: list[Span], wait: Span) -> list[Span]:
+    """The parts of a claim wait the lab hold covers."""
+    return [
+        Span(LAB_WAIT, max(wait.start, span.start), min(wait.end, span.end))
+        for span in lab
+        if max(wait.start, span.start) < min(wait.end, span.end)
+    ]
 
 
 class Claim:
@@ -258,10 +284,18 @@ def claimable(doc: dict, fix_phase: str, seats: Mapping[str, int] | None = None)
 
 
 def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) -> list[Timeline]:
+    from scripts.swarm import claim_hold
+    from scripts.swarm.health import findings
+
     claimed = {event["task"] for event in rows["agent_events"] if event["kind"] == "claim"}
     by_id = {task["id"]: task for task in tasks}
     ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
     marks = history(rows["ledger_events"])
+    lab, fix = lab_spans(rows.get("lab_capacity", []), now_ms, findings.limits().ci_behind_minutes), ready.fix_phase
+
+    def held(task: dict) -> list[Span]:
+        return lab if claim_hold.lab_held(task, fix) else []
+
     found = [
         _claimed(
             by_id.get(task_id, {"id": task_id}),
@@ -270,10 +304,11 @@ def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) 
             by_id.get(task_id, {}).get("state") in bottleneck.OPEN,
             ready,
             marks,
+            held(by_id.get(task_id, {})),
         )
         for task_id in sorted(claimed)
     ]
-    waiting = [_waiting(task, marks, ready, now_ms) for task in tasks if task["id"] not in claimed]
+    waiting = [_waiting(task, marks, ready, now_ms, held(task)) for task in tasks if task["id"] not in claimed]
     return found + [timeline for timeline in waiting if timeline is not None]
 
 

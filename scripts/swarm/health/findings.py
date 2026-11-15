@@ -54,7 +54,7 @@ class Limits:
     cooldown_minutes: int = 60
     drain_minutes: int = 10
     drain_left: int = quota_state.DRAIN_LEFT
-    ci_behind_minutes: int = 0
+    ci_behind_minutes: int = 20
 
 
 @dataclass(frozen=True)
