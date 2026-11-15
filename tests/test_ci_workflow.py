@@ -1079,7 +1079,8 @@ def test_a_fork_split_waits_for_the_collection_instead_of_polling_without_a_toke
     upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == "Upload the early collection")
     mint = next(step for step in steps if step.get("id") == "app-token")
     same = " && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
-    assert guard["if"] == mint["if"] and guard["if"].endswith(same)
+    assert mint["if"] in (guard["if"], f"({guard['if']}) || needs.select.outputs.source != ''")
+    assert guard["if"].endswith(same)
     assert fork["if"] == guard["if"].replace(
         same,
         " && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository",

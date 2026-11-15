@@ -198,7 +198,7 @@ def test_cli_publishes_passed_source(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert output.read_text() == "existing=kept\nsource=123\n"
 
 
-@pytest.mark.parametrize("shards", [12, 16, 19])
+@pytest.mark.parametrize("shards", [1, 12, 16, 19])
 def test_a_queue_run_with_fewer_shards_feeds_the_dev_push(tmp_path: Path, shards: int) -> None:
     evidence(tmp_path, shards=shards)
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
