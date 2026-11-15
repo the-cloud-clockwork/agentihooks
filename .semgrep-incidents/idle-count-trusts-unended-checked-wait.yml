@@ -12,6 +12,9 @@ rules:
         - idle-count-trusts-unended-checked-wait.py
     patterns:
       - pattern-not-inside: _holding_wait(...)
+      - pattern-not-inside: |
+          def _merge_wait(...):
+              ...
       - pattern-either:
           - pattern: $TICK.idle_state.wait(...)
           - pattern: $TIMING.timed($TICK.idle_state.wait, ...)
