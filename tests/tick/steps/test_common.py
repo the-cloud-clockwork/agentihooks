@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import tick
+from scripts.swarm import ready, tick
 from scripts.tick.steps import common
 
 pytestmark = pytest.mark.unit
@@ -357,6 +357,93 @@ def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.Monkey
     ]
     assert ledger.calls == []
     assert settled == [(("inbox", "redis"), "a", "", "stopped")]
+
+
+MERGING = "https://github.com/o/r/pull/7"
+
+
+def _merge_wait_drop(
+    monkeypatch: pytest.MonkeyPatch, on: dict[str, object] | None, live: dict[str, object]
+) -> tuple[str, _DropStore, _DropLedger, dict[str, dict[str, object]], dict[str, list[tuple[object, ...]]]]:
+    """Drops holder a of pr task t1 whose declared wait is ``on`` against a ledger answering ``live``."""
+    seen: dict[str, list[tuple[object, ...]]] = {"read": [], "saved": [], "forgotten": [], "settled": []}
+    wait = {"until": 9_000, "at": 1_000, "reason": "declared", **({"on": on} if on else {})}
+    monkeypatch.setattr(tick, "InboxStore", lambda redis: ("inbox", redis))
+    monkeypatch.setattr(tick.exits, "settle", lambda *args: seen["settled"].append(args))
+    monkeypatch.setattr(tick.idle_state, "wait", lambda *args: seen["read"].append(args) or wait)
+    monkeypatch.setattr(ready, "save", lambda *args: seen["saved"].append(args))
+    monkeypatch.setattr(ready, "forget", lambda *args: seen["forgotten"].append(args))
+    row: dict[str, object] = {"id": "t1", "state": "pr", "claimed_by": "a", "claim_generation": 2, "pr_url": MERGING}
+    store, ledger = _DropStore(1), _DropLedger(live, row)
+    rows = {"t1": dict(row)}
+    agent = SimpleNamespace(name="a", task="t1", seat="eng-1@slug")
+    return common._drop("slug", store, ledger, rows, agent, refund=True), store, ledger, rows, seen
+
+
+@pytest.mark.feature("swarm-tick-drop-merge-wait")
+def test_drop_leaves_a_task_whose_holder_waits_on_its_merge_to_the_merge_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    on: dict[str, object] = {"kind": "merge", "target": MERGING, "queued": True}
+    live = {"id": "t1", "state": "pr", "claimed_by": "a", "claim_generation": 2, "pr_url": MERGING, "awaiting": "merge"}
+    dropped, store, ledger, rows, seen = _merge_wait_drop(monkeypatch, on, live)
+    assert dropped == f", task t1 left to the merge of {MERGING}"
+    assert seen["read"] == [("redis", "slug", "a")]
+    assert store.calls == [
+        ("claim_generation", "slug", "t1"),
+        ("release", "slug", "t1", "a"),
+        ("drop_agent", "slug", "a"),
+    ]
+    assert ledger.calls == [
+        (
+            "slug",
+            "t1",
+            {"awaiting": "merge"},
+            {"if_state": ("pr",), "if_match": {"claimed_by": "a", "claim_generation": 2}},
+        )
+    ]
+    record = {"url": MERGING, "head": "", "worktree": "", "agent": "a", "at": 1_000, "on": on, "queued_at": 1_000}
+    assert seen["saved"] == [(store, "slug", "t1", record)]
+    assert seen["forgotten"] == []
+    assert rows["t1"]["awaiting"] == "merge"
+    assert seen["settled"] == [(("inbox", "redis"), "a", "", "stopped")]
+
+
+@pytest.mark.feature("swarm-tick-drop-merge-wait")
+def test_drop_forgets_the_merge_record_when_the_ledger_refuses_the_hand_over(monkeypatch: pytest.MonkeyPatch) -> None:
+    on: dict[str, object] = {"kind": "merge", "target": MERGING}
+    dropped, store, _, rows, seen = _merge_wait_drop(monkeypatch, on, {"state": "open", "claimed_by": "b"})
+    assert dropped == ""
+    assert len(seen["saved"]) == 1
+    assert seen["forgotten"] == [(store, "slug", "t1")]
+    assert rows["t1"]["claimed_by"] == "b"
+    assert seen["settled"] == [(("inbox", "redis"), "a", "", "stopped")]
+
+
+@pytest.mark.feature("swarm-tick-drop-merge-wait")
+@pytest.mark.parametrize(
+    "on",
+    [{"kind": "merge", "target": "https://github.com/o/r/pull/8"}, {"kind": "checks", "target": MERGING}, None],
+)
+def test_drop_still_reopens_a_task_whose_holder_waits_on_anything_but_its_merge(
+    monkeypatch: pytest.MonkeyPatch, on: dict[str, object] | None
+) -> None:
+    dropped, store, ledger, _, seen = _merge_wait_drop(monkeypatch, on, {"state": "open", "claimed_by": ""})
+    assert dropped == ", task t1 reopened"
+    assert seen["read"] == [("redis", "slug", "a")]
+    assert store.calls == [
+        ("claims", "slug", "t1"),
+        ("claim_generation", "slug", "t1"),
+        ("refund", "slug", "t1", "a", 5),
+        ("release", "slug", "t1", "a"),
+        ("drop_agent", "slug", "a"),
+        ("keep_seat", "slug", "t1", "eng-1@slug"),
+    ]
+    expected = {"claimed_by": "a", "claim_generation": 2}
+    assert ledger.calls == [
+        ("task", "slug", "t1"),
+        ("slug", "t1", {"state": "open", "claimed_by": ""}, {"if_state": tick.ACTIVE, "if_match": expected}),
+    ]
+    assert seen["saved"] == []
+    assert seen["settled"] == [(("inbox", "redis"), "a", "eng-1@slug", "stopped")]
 
 
 class _CollectRedis:

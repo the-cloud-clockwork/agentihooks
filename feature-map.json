@@ -1415,6 +1415,18 @@
       ]
     },
     {
+      "id": "swarm-tick-drop-merge-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-done-task-reclaimed",
+      "behaviour": "When the tick retires the holder of a pull request task whose declared wait is on the merge of that task's own pull request, the drop hands the task to the merge pass with a ready record and awaiting merge instead of reopening it, so no successor is admitted to a task whose pull request is merging; a refused hand over forgets the record, and a holder waiting on anything else still reopens the task.",
+      "seam": "The tick drop helper in scripts.tick.steps.common, the ready record and the task awaiting field",
+      "tests": [
+        "tests/tick/steps/test_common.py::test_drop_leaves_a_task_whose_holder_waits_on_its_merge_to_the_merge_pass",
+        "tests/tick/steps/test_common.py::test_drop_forgets_the_merge_record_when_the_ledger_refuses_the_hand_over",
+        "tests/tick/steps/test_common.py::test_drop_still_reopens_a_task_whose_holder_waits_on_anything_but_its_merge"
+      ]
+    },
+    {
       "id": "hub-owned-claim-lease-renewal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-lease",
