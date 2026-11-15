@@ -14,6 +14,7 @@ __all__ = [
     "FLOORS",
     "HEADROOM",
     "JUDGE",
+    "OBSERVED",
     "SLOW_S",
     "SPAWN_NEEDS",
     "SPAWN_START_S",
@@ -37,7 +38,8 @@ LIGHT_S = 2.0
 REBUILT = "tick:walls-rebuilt"
 _LEDGER_READ_S = 3.0
 JUDGE = frozenset({"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"})
-SPAWN_NEEDS = JUDGE | {"orphans", "preempt"}
+SPAWN_NEEDS = JUDGE | {"orphans"}
+OBSERVED = frozenset({"stopped branch", "ledger state", "automated cleanup"})
 LIVE: ContextVar[Mapping[str, float]] = ContextVar("tick_live_budgets", default=MappingProxyType({}))
 
 
@@ -57,7 +59,6 @@ FLOORS: dict[str, Timing] = {
     "recover master": Timing(LIGHT_S, CRITICAL_S),
     "ledger state": Timing(_LEDGER_READ_S, CRITICAL_S),
     "automated cleanup": Timing(LIGHT_S, CRITICAL_S),
-    "spawn due": Timing(33.0, CRITICAL_S),
     "exits sweep": Timing(10.0, CRITICAL_S),
     "master start watch": Timing(LIGHT_S, CRITICAL_S),
     "launch checks": Timing(LIGHT_S, CRITICAL_S),
@@ -68,8 +69,6 @@ FLOORS: dict[str, Timing] = {
     "strays": Timing(LIGHT_S, WIDE_S),
     "failed panes": Timing(LIGHT_S, WIDE_S),
     "orphans": Timing(LIGHT_S, CRITICAL_S),
-    "preempt": Timing(18.0, CRITICAL_S),
-    "spawn": Timing(33.0, CRITICAL_S),
     "conversations": Timing(LIGHT_S, WIDE_S),
     "session models": Timing(LIGHT_S, WIDE_S),
     "handoff transfers": Timing(LIGHT_S, CRITICAL_S),
@@ -103,7 +102,6 @@ FLOORS: dict[str, Timing] = {
     "dispatcher group": Timing(LIGHT_S, CRITICAL_S),
     "settle": Timing(LIGHT_S, CRITICAL_S),
     "close space": Timing(LIGHT_S, CRITICAL_S),
-    "collect acks": Timing(7.0, CRITICAL_S),
     "codex hook order": Timing(LIGHT_S, CRITICAL_S),
     "rank pass": Timing(7.0, CRITICAL_S),
     "bottleneck remedy": Timing(LIGHT_S, CRITICAL_S),

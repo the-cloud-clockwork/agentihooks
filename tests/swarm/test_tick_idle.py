@@ -2,12 +2,26 @@
 
 import pytest
 
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from tests.swarm import test_tick
-from tests.swarm.test_tick import IDLER, STALE_MS, FakeRuntime, idle_for, spawned, stale_nudges, tasks, workers
+from tests.swarm.test_tick import IDLER, STALE_MS, FakeLedger, FakeRuntime, idle_for, stale_nudges, tasks, workers
+from tests.swarm.test_tick_verification import seated
 
 store = test_tick.store
+
+
+def spawned(
+    store: RedisStore, status: str = "idle", runtime: FakeRuntime | None = None
+) -> tuple[FakeLedger, FakeRuntime]:
+    """An engineer on t1 seated through hub admission, then a tick at 1_000 that seats the master, the swarm paused
+    and the engineer's pane reading ``status``."""
+    ledger, runtime = tasks(("t1", "eng")), runtime or FakeRuntime()
+    seated(store, ledger, runtime, "t1")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses[IDLER] = status
+    return ledger, runtime
 
 
 @pytest.mark.feature("swarm-tick-idle-retire")
@@ -15,6 +29,7 @@ def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(st
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
@@ -193,6 +208,7 @@ def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store
     from scripts.gates import log
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
     tick("sw", store, ledger, runtime, now_ms=1_500)
@@ -213,6 +229,7 @@ def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store, state):
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     inbox = InboxStore(store.redis)
     item = inbox.send("ci@a1b2c3-0009", "engineer@a1b2c3-0001", "contract confirmed")
@@ -230,6 +247,7 @@ def test_a_busy_turn_resets_the_idle_count(store):
     from scripts.swarm.tick import IDLE_NUDGE_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     for n, status in enumerate(["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1)):
         runtime.statuses["engineer@a1b2c3-0001"] = status
@@ -242,6 +260,7 @@ def test_an_idle_agent_under_a_declared_wait_is_never_nudged_or_retired(store):
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
@@ -257,6 +276,7 @@ def test_a_wait_that_ended_lets_the_idle_count_run_again(store):
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
@@ -271,6 +291,7 @@ def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_r
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
@@ -286,6 +307,7 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seated(store, ledger, runtime, "t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
     inbox = InboxStore(store.redis)

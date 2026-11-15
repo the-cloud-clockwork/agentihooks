@@ -5,125 +5,8 @@ import pytest
 
 from scripts.hive.launch import Selection
 from scripts.swarm import controller
-from scripts.swarm.tick import ACK_LATER, SpawnError, _room_wait, _spawn_order
-from scripts.swarm_v2.runtime.base import RuntimeRouter
-from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
-from tests.swarm.test_tick import FakeLedger
-
-
-def test_cached_placements_keep_each_task_and_lane_separate(setup):  # noqa: F811
-    from dataclasses import replace
-
-    from scripts.hive.placement import Wait
-
-    setup.config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, "compose")
-    launch = runtime.runtime.hive_launch
-    launch.hives = Mock(wraps=launch.hives)
-    one, two = {"id": "one"}, {"id": "two"}
-    ordered(setup, runtime, one)
-    first = launch.select(setup.config, "eng", one)
-    second = launch.select(setup.config, "eng", two)
-    ci = launch.select(setup.config, "ci", one)
-    assert first.account.name == second.account.name == "account"
-    assert isinstance(ci, Wait)
-    assert launch.hives.call_count == 3
-    assert launch.select(setup.config, "eng", one) is first
-    assert launch.select(setup.config, "eng", two) is second
-    assert launch.select(setup.config, "ci", one) is ci
-    assert launch.hives.call_count == 3
-
-
-def ordered(world, runtime, task):
-    ledger = FakeLedger([task])
-    return _spawn_order(
-        world.config.slug, world.config, world.store, [], ledger.rows, ledger.state(world.config.slug), runtime
-    )
-
-
-@pytest.mark.parametrize("refused", [False, True])
-def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setup, refused):  # noqa: F811
-    task = {"id": "task", "title": "Launch on a hive"}
-    if refused:
-        write_hive(setup, excluded=["engineer"])
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, "compose")
-    launch = runtime.runtime.hive_launch
-    launch.opening = setup.launcher.opening
-    launch.hives = Mock(wraps=launch.hives)
-
-    queue, waits = ordered(setup, runtime, task)
-    assert len(queue) == (0 if refused else 1)
-    assert bool(waits) is refused
-    assert launch.hives.call_count == 1
-    first = launch.select(setup.config, "eng", task)
-    if not refused:
-        assert _room_wait(runtime, "eng", task) == ""
-        request = request_for(setup)
-        request.task[ACK_LATER] = True
-        with pytest.raises(SpawnError, match="hive launch ordered"):
-            runtime.spawn(setup.config, "eng", request.name, request.task)
-        order = launch.orders_for(request.task["id"])
-        assert order.hive == first.hive
-        setup.store.drop_agent(setup.config.slug, request.name)
-    assert launch.hives.call_count == 1
-
-    write_hive(setup, excluded=[] if refused else ["engineer"])
-    queue, waits = ordered(setup, runtime, task)
-    assert len(queue) == (1 if refused else 0)
-    assert bool(waits) is not refused
-    assert launch.hives.call_count == 2
-
-
-def test_spawn_pass_ends_the_placement_cache_for_later_launches(setup):  # noqa: F811
-    from scripts.swarm.tick import _placement_pass, _spawn
-
-    task = {"id": "task", "title": "Launch on a hive"}
-    write_hive(setup, excluded=["engineer"])
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, "compose")
-    launch = runtime.runtime.hive_launch
-    launch.hives = Mock(wraps=launch.hives)
-    ledger = FakeLedger([task])
-    slug = setup.config.slug
-
-    with _placement_pass(runtime):
-        _spawn(slug, setup.config, setup.store, ledger, runtime, ledger.rows, ledger.state(slug), 0)
-        assert launch.placement_cache
-    assert launch.hives.call_count == 1
-    assert launch.placement_cache is None
-
-    write_hive(setup, excluded=[])
-    assert launch.select(setup.config, "eng", task).hive
-    assert launch.hives.call_count == 2
-
-
-def test_a_running_tick_ends_the_placement_pass_after_spawning():
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore, SwarmConfig
-    from scripts.swarm.tick import tick
-    from tests.swarm.test_tick import FakeRuntime
-
-    class PassRuntime(FakeRuntime):
-        def __init__(self):
-            super().__init__()
-            self.passes = []
-
-        def begin_placement_pass(self):
-            self.passes.append(("begin", len(self.spawned)))
-
-        def end_placement_pass(self):
-            self.passes.append(("end", len(self.spawned)))
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
-    runtime = PassRuntime()
-    tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, now_ms=1_000)
-    assert runtime.spawned
-    assert runtime.passes[-1] == ("end", len(runtime.spawned))
 
 
 def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, monkeypatch):  # noqa: F811
@@ -191,38 +74,6 @@ def test_a_placement_pass_reads_the_bundle_revision_once_and_the_next_pass_reads
     assert revision("one") == "fourth"
 
 
-def test_a_placement_pass_checks_the_workstation_herdr_once_and_the_next_pass_checks_again(
-    setup,  # noqa: F811
-    monkeypatch,
-):
-    from scripts import herdr_host
-
-    write_hive(setup, excluded=["engineer"])
-    checks = []
-
-    def running(environ):
-        checks.append(environ)
-        return True
-
-    monkeypatch.setattr(herdr_host, "server_running", running)
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
-
-    runtime.placement_refusal("eng", {"id": "one"})
-    runtime.placement_refusal("eng", {"id": "two"})
-    assert len(checks) == 2
-    runtime.begin_placement_pass()
-    assert runtime.runtime.hive_launch.herdr.pass_memo == {}
-    runtime.placement_refusal("eng", {"id": "one"})
-    runtime.placement_refusal("eng", {"id": "two"})
-    assert len(checks) == 3
-    runtime.end_placement_pass()
-    assert runtime.runtime.hive_launch.herdr.pass_memo is None
-    runtime.begin_placement_pass()
-    runtime.placement_refusal("eng", {"id": "one"})
-    assert len(checks) == 4
-
-
 def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypatch):
     from scripts import herdr_host
 
@@ -244,65 +95,6 @@ def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypat
     assert len(checks) == 2
     assert controller._to_workstation("eng", refused, memo) is False
     assert len(checks) == 2
-
-
-class _Stop(Exception):
-    pass
-
-
-@pytest.mark.parametrize("step", ["placement_refusal", "spawn"])
-def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
-    setup,  # noqa: F811
-    monkeypatch,
-    step,
-):
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
-    refused = controller.WORKSTATION.format(lane="master")
-    monkeypatch.setattr(runtime, "_refusal", lambda lane, task, claim="": refused)
-    memos = []
-
-    def to_workstation(lane, seen, memo=None):
-        memos.append(memo)
-        raise _Stop
-
-    monkeypatch.setattr(controller, "_to_workstation", to_workstation)
-    runtime.begin_placement_pass()
-    pass_memo = runtime.runtime.hive_launch.herdr.pass_memo
-    with pytest.raises(_Stop):
-        if step == "spawn":
-            runtime._spawn(setup.config, "master", "master@x-1", {"id": "master"})
-        else:
-            runtime.placement_refusal("master", {"id": "master"})
-    assert len(memos) == 1
-    assert memos[0] is pass_memo
-
-
-def test_workstation_room_reads_local_slots_through_the_pass_cache_only_inside_a_pass(
-    setup,  # noqa: F811
-    monkeypatch,
-):
-    from scripts.swarm import local_slots
-
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
-    caches = []
-
-    def held(store, machine, slug, task, cache=None):
-        caches.append(cache)
-        raise _Stop
-
-    monkeypatch.setattr(local_slots, "running", lambda store, slug, task, cache=None: caches.append(cache) or 0)
-    monkeypatch.setattr(local_slots, "held", held)
-    runtime.begin_placement_pass()
-    with pytest.raises(_Stop):
-        runtime._workstation_room("workstation", {"id": "one"})
-    assert isinstance(caches[0], local_slots.PassCache)
-    assert caches[1] is caches[0]
-    runtime.end_placement_pass()
-    with pytest.raises(_Stop):
-        runtime._workstation_room("workstation", {"id": "one"})
-    assert caches[2:] == [None, None]
 
 
 @pytest.mark.parametrize("in_pass", [False, True])
@@ -362,36 +154,3 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, monke
         rooms = {hive["id"]: hive["room"] for hive in launch.hives()}
         assert rooms["remote"] == 0
         assert rooms["spare"] > 0
-
-
-@pytest.mark.parametrize(
-    "refused",
-    [
-        "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
-        "no hive has room, and the local machine runs 4 of its 4 agents",
-        ", and the local machine runs 4 of its 4 agents: cpu: five minute load 1.17 on 8 CPUs",
-    ],
-)
-def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(refused):
-    from types import SimpleNamespace
-
-    import fakeredis
-
-    from scripts.handoff import transfers
-    from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
-    from scripts.swarm.tick import tick
-    from tests.swarm.test_tick import FakeRuntime
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
-    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
-    transfers.record(store, "sw", SimpleNamespace(name="old", seat="master@sw", task=MASTER), "recycle", "", 500)
-    actions = tick("sw", store, ledger, FakeRuntime(crash=SpawnError(refused, "unavailable")), now_ms=1_000)
-    assert not [action for action in actions if "spawn failed" in action]
-    assert f"task t1 waits: {refused}" in actions
-    assert f"the master waits: {refused}" in actions
-    assert store.redis.get(store.key("sw", "master-start")) is None
-    [transfer] = transfers.list_transfers(store, "sw")
-    assert (transfer["successor"], transfer["binding"]) == ("", {"state": "pending"})
-    assert ledger.rows["t1"]["state"] == "open"
-    assert [row["state"] for row in store.launches("sw")] == ["waiting"]

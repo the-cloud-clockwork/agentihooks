@@ -548,7 +548,8 @@ def _write_launcher(
     from scripts import session_exit
 
     exit_record = session_exit.path_for(launcher, environ)
-    exit_command = shlex.join([sys.executable, "-P", "-m", "scripts.session_exit", str(exit_record)])
+    viewer = ["--viewer"] if app_server else []
+    exit_command = shlex.join([sys.executable, "-P", "-m", "scripts.session_exit", *viewer, str(exit_record)])
     exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
     if environ.get("HIVE_GITHUB_AUTH_MODE"):

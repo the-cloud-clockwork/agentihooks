@@ -111,7 +111,6 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
     declared = {step.name: step.effects for step in registry.steps() if step.effects}
     assert declared == {
         "reap": frozenset({"ledger", "runtime", "inbox"}),
-        "spawn": frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"}),
         "hive sweep": frozenset({"coordination"}),
         "workflow runner": frozenset({"host"}),
         "knowledge warm": frozenset({"host"}),
@@ -156,6 +155,21 @@ def test_the_pass_spool_opens_once_and_appends_every_batch(monkeypatch: pytest.M
     spool.append_many([], first)
     assert opened == [("spool", ("sink", True))]
     assert appended == [([("rows", [{"a": 1}])], first), ([], first)]
+
+
+def test_the_pass_spool_stays_closed_without_a_metrics_sink(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(path: object, sink: object) -> None:
+        pytest.fail("a pass without a metrics sink opened the spool")
+
+    def unset(environ: object) -> None:
+        return None
+
+    monkeypatch.setattr(metrics_outbox, "Outbox", refuse)
+    monkeypatch.setattr(metrics_outbox, "settings", unset)
+    first: Callable[..., None] = print
+    spool = cli._PassSpool()  # pyright: ignore[reportPrivateUsage]
+    spool.append_many([("rows", [{"a": 1}])], first)
+    spool.append_many([], first)
 
 
 def _recorder(name: str) -> Callable[..., tuple[object, ...]]:

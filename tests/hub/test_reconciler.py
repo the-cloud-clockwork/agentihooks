@@ -109,14 +109,6 @@ def test_fresh_exit_repairs_task_and_slot_without_an_exit_event(rig):
     assert json.loads(rig.bus.state("spoke-work").get("claim").value)["state"] == "exited"
 
 
-def test_a_swarm_on_the_legacy_engine_is_left_to_the_tick(rig):
-    rig.store.update("rig", engine="legacy")
-    rig.react.poll()
-    assert rig.row["state"] == "claimed"
-    assert rig.returned == [] and rig.ledger.writes == []
-    assert [a.name for a in rig.store.agents("rig")] == ["engineer"]
-
-
 def test_a_swarm_removed_mid_scan_does_not_stop_the_pass(rig):
     from scripts.swarm.store import PREFIX
 
@@ -774,3 +766,87 @@ def test_another_hive_losing_presence_cannot_settle_this_execution(rig):
     presence.beat(rig.bus, "other", 0)
     rig.react.poll()
     assert rig.returned == []
+
+
+def _hub_admitted(
+    rig: SimpleNamespace, names: list[str] | None, pod_started: int, age: int, lag: int = 0, **fields: int
+) -> None:
+    """Record the rig agent as a hub admitted one, with no host target or pane, and save a hive report of it observed
+    ``age`` past startup, read ``lag`` later."""
+    from scripts.hive import reports
+
+    agent = replace(rig.agent, runtime_target={}, pane_id="", **fields)
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    rig.agent = agent
+    observed = 900_000 + reports.STARTUP_MS + age
+    rig.clock.return_value = observed + lag
+    rig.report.clear()
+    rig.report.update(observed_at=observed, executions={}, panes={}, names=names, started_at=pod_started)
+    rig.save()
+
+
+@pytest.mark.feature("hub-reap-unlisted-agent")
+@pytest.mark.parametrize(("names", "pod_started"), [([], 900_001), (["engineer@other"], 800_000)])
+def test_a_hub_admitted_agent_its_beating_hive_no_longer_lists_is_settled_once(
+    rig: SimpleNamespace, names: list[str], pod_started: int
+) -> None:
+    _hub_admitted(rig, names, pod_started, 0)
+    rig.react.poll()
+    assert len(rig.returned) == 1
+    rig.clock.return_value += 300_000
+    rig.report["observed_at"] = rig.clock()
+    rig.save()
+    rig.react.poll()
+    assert len(rig.returned) == len(rig.ledger.writes) == 1
+    assert rig.row["state"] == "open"
+    assert rig.store.agents("rig") == []
+    assert json.loads(rig.bus.state("spoke-work").get("claim").value)["state"] == "exited"
+
+
+@pytest.mark.feature("hub-reap-unlisted-agent")
+@pytest.mark.parametrize(
+    ("names", "pod_started", "age", "lag", "fields"),
+    [
+        (["engineer"], 900_001, 0, 0, {}),
+        ([], 900_000, 0, 0, {}),
+        (None, 900_001, 0, 0, {}),
+        ([], 900_001, -1, 0, {}),
+        ([], 900_001, -1, 2, {}),
+        ([], 850_000, 0, 0, {"started_at": 800_000, "launched_at": 0}),
+        ([], 920_000, 0, 0, {"launched_at": 950_000}),
+        ([], 920_000, 0, 0, {"started_at": 950_000, "launched_at": 0}),
+        (["engineer@other"], 800_000, -1, 0, {}),
+    ],
+)
+def test_a_hub_admitted_agent_its_hive_still_lists_or_cannot_yet_disown_is_preserved(
+    rig: SimpleNamespace, names: list[str] | None, pod_started: int, age: int, lag: int, fields: dict[str, int]
+) -> None:
+    _hub_admitted(rig, names, pod_started, age, lag, **fields)
+    rig.react.poll()
+    assert rig.returned == []
+    assert rig.row["state"] == "claimed"
+    assert rig.store.agents("rig") == [rig.agent]
+
+
+@pytest.mark.feature("hub-reap-unlisted-agent")
+def test_a_host_targeted_agent_the_same_report_no_longer_lists_is_preserved(rig: SimpleNamespace) -> None:
+    _hub_admitted(rig, [], 900_001, 0)
+    agent = replace(rig.agent, runtime_target={"host_id": "hive"})
+    rig.store.redis.hset(rig.store.key("rig", "executions"), agent.execution_id, json.dumps(asdict(agent)))
+    rig.store.redis.hset(rig.store.key("rig", "agents"), agent.name, json.dumps(asdict(agent)))
+    rig.react.poll()
+    assert rig.returned == []
+    assert rig.store.agents("rig") == [agent]
+
+
+@pytest.mark.feature("hub-reap-unlisted-agent")
+def test_the_join_report_of_a_settled_hub_admitted_agent_ends_on_the_next_heartbeat(rig: SimpleNamespace) -> None:
+    from scripts.hive import join_report
+
+    _hub_admitted(rig, [], 900_001, 0)
+    join_report.start(rig.store.redis, "rig", rig.agent, "session", {}, {}, rig.clock() - 1_000)
+    rig.react.poll()
+    join_report.heartbeat(rig.store.redis, "hive", rig.clock())
+    [report] = join_report.listing(rig.store.redis, "hive")
+    assert (report.get("exit_reason"), report["status"]) == (join_report.GONE, "ended")

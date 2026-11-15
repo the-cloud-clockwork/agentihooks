@@ -90,7 +90,6 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
-    ack_pass,
     affinity,
     agent_up,
     blockers,
@@ -176,6 +175,7 @@ from scripts.swarm.store import (
     DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
+    EVENTS_ENGINE,
     FULL,
     MASTER,
     AgentRecord,
@@ -835,7 +835,7 @@ def cmd_waits(store, args):
         except Exception as exc:
             timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
-    jobs = [(slug, passing) for slug in store.slugs() for passing in (run_waits, ack_pass.run)]
+    jobs = [(slug, run_waits) for slug in store.slugs()]
     if jobs:
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             list(pool.map(check, jobs))
@@ -1015,6 +1015,8 @@ def cmd_create(store, args):
         caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
+        engine=EVENTS_ENGINE,
+        repo_origin=_create_origin(repo),
     )
     store.create(config)
     from scripts.swarm import commands
@@ -1356,6 +1358,13 @@ def _engine_origin(config, changes):
     return {**changes, "repo_origin": identity}
 
 
+def _create_origin(repo: str) -> str:
+    """The Git origin of the checkout a new swarm works in, empty when it has none."""
+    from scripts.hive.daemon import origin
+
+    return origin(Path(repo))
+
+
 def on_off(value):
     if value not in ON_OFF:
         raise SwarmError("hive-placement takes on or off")
@@ -1435,7 +1444,7 @@ def cmd_set(store, args):
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
-                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events, tick-mode=sequential|parallel"
+                f"or {', '.join(LANE_KEYS)}=<value>, engine=events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)

@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm import status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from tests.helpers import store_seed
 
 MIDNIGHT = 1_791_244_800_000
 HOUR = 3_600_000
@@ -225,6 +226,30 @@ def test_status_keeps_remote_agents_outside_the_local_process_table(store, monke
     assert [agent["name"] for agent in report["agents"]] == [name]
 
 
+@pytest.mark.feature("swarm-status-lists-remote-hub-agents")
+def test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from scripts.swarm import commands
+    from scripts.swarm.runtime import HerdrRuntime
+
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
+    names: list[str] = []
+    for seat, hive in enumerate(("06db8fa06259f56a", "root", "", "06db8fa06259f56a"), 1):
+        name = store.next_name("sw", "eng", 1_000)
+        store.start_execution("sw", AgentRecord(name, "eng", f"t{seat}", seat=f"eng-{seat}@sw", hive=hive))
+        names.append(name)
+    ended = next(agent for agent in store.agents("sw") if agent.name == names[3])
+    store.put_agent("sw", replace(ended, state="finished"))
+    report = status.status_report(store, "sw", {"tasks": []})
+    assert [agent["name"] for agent in report["agents"]] == names[:1]
+    assert {agent.name for agent in store.agents("sw")} == set(names)
+
+
 def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     from scripts.swarm import launch_check
 
@@ -242,7 +267,7 @@ def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
 def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, monkeypatch):
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", started_at=10, pane_id="w1:p9")
-    store.record_launch("sw", agent, "failed", "account not found")
+    store_seed.record_launch(store, "sw", agent, "failed", "account not found")
     store.note_launch_pane("sw", agent.name, ["account not found", "$"])
     monkeypatch.setattr(status, "page_quota", lambda: {})
     report = status.status_report(store, "sw", {"tasks": []})

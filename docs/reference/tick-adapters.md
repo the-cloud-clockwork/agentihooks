@@ -899,10 +899,10 @@ listings for its three launches.
 
 ## One placement scan per placement pass
 
-The spawn step places a lane's ready tasks in one placement pass: `_spawn_order` in `scripts.swarm.tick` calls the
-runtime's `begin_placement_pass` before it reads capacity, and the place and observe steps wrap their launches in
-`tick._placement_pass`, which calls `end_placement_pass` when the pass ends, even when it raises. On `controller.FencedRuntime` the pass holds one `local_slots.PassCache` in
-`_local_slots_cache`; `end_placement_pass` drops it, so the next pass starts empty.
+Nothing opens a placement pass since the tick spawn step was removed. `controller.FencedRuntime` keeps
+`_local_slots_cache` empty, so every read in the table below behaves as its Outside a placement pass column says. A
+caller that builds its own `local_slots.PassCache` and passes it to `local_slots.running`, `held` or `claim` still
+reads once per cache.
 
 `PassCache.once(read, *args)` returns the pass's result of `read(*args)`. The first call with a given function and
 arguments runs the read under the cache's lock and keeps the value; every later call in that pass, from any launch
@@ -939,9 +939,8 @@ def placed(store, slug, tasks):
     return [local_slots.running(store, slug, task, cache) for task in tasks]
 ```
 
-`tests.hive.test_fenced_spawn_pass` holds the contract: five launches started together in one pass make one session
-scan and one host reading and claim five slots; with a local cap of three they admit three and refuse two; the next
-pass scans again; a refusal outside a pass scans on every call.
+`tests.hive.test_fenced_spawn_pass` holds the cache contract: a pass cache reads each value once, and a claim given
+the cache counts live workers from its one scan.
 
 ### Timed rows inside a fenced spawn
 
@@ -969,9 +968,7 @@ look at the placement reads in the table above.
 
 `_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
 `scripts.tick.steps.place._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
-while `_spawn_order` runs. Once per spawn order it first times the runtime's `begin_placement_pass` when the runtime
-has one, recorded under that method's name, such as `scripts.swarm.controller.FencedRuntime.begin_placement_pass`.
-Then it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
+while `_spawn_order` runs. It first times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
 `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for each lane in the caps, it times four
 parts in this order:
 
@@ -1024,15 +1021,15 @@ percentiles do not add, and the estimate runs low for a row with a long tail, so
 
 | What the report shows | Where the time goes |
 |---|---|
-| The `begin_placement_pass`, `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part is the slow one: the runtime's per pass hive and herdr reads, the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
+| The `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part is the slow one: the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
 | The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
 | `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
 | The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
 
 `tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
 row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
-inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `begin_placement_pass`, `ranks`
-and `ordered` row per spawn order. The running filter keeps only the lane's agents that have not ended and still own their
+inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `ranks` and `ordered` row per spawn
+order. The running filter keeps only the lane's agents that have not ended and still own their
 task, with a placeholder row for an agent whose task row is missing.
 
 ### Focus ranks in spawn order
@@ -1450,7 +1447,7 @@ and call the port from the step.
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
-| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Check the caller runs inside `begin_placement_pass` and `end_placement_pass`, and route a repeated read through the pass cache, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
+| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Route a repeated read through `PassCache.once`, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
 | The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
 | Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |

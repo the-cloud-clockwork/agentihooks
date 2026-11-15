@@ -1,7 +1,9 @@
 import pytest
 
 from scripts.swarm import elapsed
+from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import IDLE_KILL_MS, IDLE_KILL_TICKS, IDLE_NUDGE_MS, IDLE_NUDGE_TICKS, agent_status, tick
+from tests.helpers.seat import seat_owner
 from tests.swarm.test_tick import IDLER, FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
 
@@ -61,8 +63,9 @@ def test_due_reads_the_stored_start_or_anchors_the_count(store):
     assert elapsed.due(store, "sw", elapsed.IDLE_SINCE, IDLER, 39 * MINUTE, 1, IDLE_KILL_MS)
 
 
-def stalled_and_retired(store, period_ms):
+def stalled_and_retired(store: RedisStore, period_ms: int) -> tuple[int | None, int]:
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    seat_owner(store, ledger, runtime, "t1", 1_000)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     runtime.statuses[IDLER] = "idle"
     store.update("sw", state="paused")

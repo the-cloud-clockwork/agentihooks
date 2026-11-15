@@ -99,7 +99,6 @@ def test_the_start_check_reads_the_clock_adds_the_appliers_and_scans_once(
     before = reaper.PASS.get()
     assert found.hooks()["start"]() is True
     assert state["now_ms"] == 7
-    assert state["due"] == store.key("sw", tick_module.SPAWN_DUE)
     assert set(found.apply) == set(task_steps.appliers(state))
     assert found.scan is not None
     scanning = reaper.PASS.get()

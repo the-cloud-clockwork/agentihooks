@@ -163,19 +163,6 @@ def anywhere(event: Envelope) -> bool:
     return True
 
 
-def tick_launches(engine: str) -> bool:
-    """Under the events engine hives take every task, a workstation task on the root hive, so the tick launches
-    none."""
-    return engine != EVENTS_ENGINE
-
-
-def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The ready tasks the tick launches under ``engine``, narrowed to the capacity decision's tasks when it names
-    any."""
-    ready = ready if tick_launches(engine) else []
-    return [task for task in ready if task["id"] in decision["tasks"]] if "tasks" in decision else ready
-
-
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     """Each claimable task's offer, focused tasks first, then by ledger rank band, then by focus record order."""
     from scripts.swarm import focus_budget

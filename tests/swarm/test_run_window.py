@@ -260,19 +260,6 @@ def test_only_swarm_set_extends_the_window_and_a_new_window_starts_fresh(swarm):
     assert len(_items(store, "master-watchdog")) == 2
 
 
-def test_the_tick_refuses_new_claims_after_an_enforced_cutoff(swarm):
-    store, _ = swarm
-    config = store.update(SLUG, gates={"window": "enforce"})
-
-    class Runtime:
-        def has_capacity(self, config):
-            return True
-
-    assert tick._spawn_stop(SLUG, config, store, Runtime(), END) == (
-        "the run window ended at 25 October 12:00 UTC, no new claims until swarm set changes the window"
-    )
-
-
 def test_the_tick_runs_the_window_step(env, monkeypatch):  # noqa: F811
     store, ledger, rt = env
     from tests.swarm.test_delivery import FakeHerdr

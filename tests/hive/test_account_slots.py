@@ -154,6 +154,82 @@ def test_launch_selects_only_the_requested_harness_and_account(rig):
     assert first.take("two", "codex", "other") == "other"
 
 
+@pytest.mark.feature("hive-saved-account-slot-preference")
+@pytest.mark.parametrize("cap,sessions,expected", [(1, 0, True), (1, 1, False), (0, 0, False)])
+def test_room_answers_whether_the_hub_holds_a_worker_slot_on_the_account_for_the_execution(
+    monkeypatch: pytest.MonkeyPatch, cap: int, sessions: int, expected: bool
+) -> None:
+    from scripts.events import factory
+    from scripts.hive import account_slots
+
+    bus = open_bus(BusConfig())
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    report = reading(cap=cap, sessions=sessions)
+    report["slots"].insert(0, {"harness": "claude", "account": "other", "cap": 9})
+
+    def opened(config: BusConfig) -> object:
+        assert isinstance(config, BusConfig)
+        return bus
+
+    def local_reading(hive: str) -> dict[str, object]:
+        assert hive == "one"
+        return report
+
+    monkeypatch.setattr(factory, "open_bus", opened)
+    monkeypatch.setattr(account_slots, "_reading", local_reading)
+    monkeypatch.setattr(bus, "close", lambda: None)
+    assert account_slots.room("one", "execution", "claude", "a") is expected
+    assert account_slots.room("one", "execution", "claude", "missing") is False
+    entry = bus.state("account-slots").get(account_slots.key("claude", "a"))
+    holders = json.loads(entry.value)["holders"] if entry else {}
+    assert holders.get("execution", {}).get("hive") == ("one" if expected else None)
+    assert account_slots.room("one", "execution", "claude", "a") is expected
+    bus.close()
+
+
+@pytest.mark.feature("hive-saved-account-slot-preference")
+def test_room_reports_a_failed_slot_request_as_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events import factory
+    from scripts.hive import account_slots
+
+    bus = open_bus(BusConfig())
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig())
+    monkeypatch.setattr(factory, "open_bus", lambda config: bus)
+
+    def unreadable(hive: str) -> dict[str, object]:
+        raise TimeoutError("no responders")
+
+    monkeypatch.setattr(account_slots, "_reading", unreadable)
+    with pytest.raises(account_slots.Unavailable, match="^Account slot admission failed$"):
+        account_slots.room("one", "execution", "claude", "a")
+
+
+@pytest.mark.feature("hive-saved-account-slot-preference")
+def test_room_asks_the_hub_of_the_bound_swarm_for_the_hive_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events import factory
+    from scripts.events.config import SWARMS_ENV
+    from scripts.hive import account_slots
+
+    asked: list[tuple[str, str, dict[str, object]]] = []
+
+    def asker(bus: object, swarm: str, hive: str) -> object:
+        def ask(request: dict[str, object]) -> object:
+            asked.append((swarm, hive, request))
+            return request["preferred"]
+
+        return ask
+
+    monkeypatch.setenv(SWARMS_ENV, "rig")
+    monkeypatch.setattr(BusConfig, "from_environ", lambda: BusConfig(backend="nats"))
+    monkeypatch.setattr(factory, "open_bus", lambda config: open_bus(BusConfig()))
+    monkeypatch.setattr(account_slots, "asker", asker)
+    monkeypatch.setattr(account_slots, "_reading", lambda hive: {"hive": hive})
+    assert account_slots.room("one", "execution", "claude", "a") is True
+    assert [(swarm, hive, request["op"], request["report"]) for swarm, hive, request in asked] == [
+        ("rig", "one", "take", {"hive": "one"})
+    ]
+
+
 def test_hive_restart_recovers_the_counter_index_and_releases_dead_agents(rig):
     from scripts.hive import account_slots
 

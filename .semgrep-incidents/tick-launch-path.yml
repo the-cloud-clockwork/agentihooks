@@ -1,0 +1,15 @@
+rules:
+  - id: tick-launch-path
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step runs the tick's own lane launch. Every swarm runs on the events engine, where agents launch only
+      through hub admission and hive spokes, so the tick pass must never call tick._spawn, gated or not.
+    paths:
+      include:
+        - /scripts/tick/steps/
+        - tick-launch-path.py
+    pattern-either:
+      - pattern: tick._spawn(...)
+      - pattern: tick.skip_refused(tick._spawn, ...)
+      - pattern: timing.timed(tick._spawn, ...)

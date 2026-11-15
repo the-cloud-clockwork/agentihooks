@@ -132,18 +132,18 @@ def test_a_step_that_waits_behind_a_slow_sibling_and_then_runs_quickly_is_not_ab
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     ran: list[str] = []
-    steps = [step("grouping release", 0.5, 10.0, ran), step("spawn", 0.8, 10.0, ran)]
+    steps = [step("grouping release", 0.5, 10.0, ran), step("exits sweep", 0.8, 10.0, ran)]
     with recording(), pool.running(workers=1, critical_s=1.0, reserves={}):
         records = {row.name: row for row in engine.run_group("planted", Context(View(), Deadline.after(60.0)), steps)}
-    joined("grouping release", "spawn")
+    joined("grouping release", "exits sweep")
     err = capsys.readouterr().err
-    assert ran == ["grouping release", "spawn"]
-    assert records["spawn"].wall_s < 0.9
-    assert records["spawn"].cut and not records["spawn"].abandoned
-    assert records["spawn"].outcome == engine.CUT
-    assert [row["step"] for row in rows(err) if row.get("event") == engine.CUT_EVENT] == ["spawn"]
+    assert ran == ["grouping release", "exits sweep"]
+    assert records["exits sweep"].wall_s < 0.9
+    assert records["exits sweep"].cut and not records["exits sweep"].abandoned
+    assert records["exits sweep"].outcome == engine.CUT
+    assert [row["step"] for row in rows(err) if row.get("event") == engine.CUT_EVENT] == ["exits sweep"]
     assert abandoned(err) == []
-    assert outcomes(err, "spawn") == ["success"]
+    assert outcomes(err, "exits sweep") == ["success"]
 
 
 @pytest.mark.feature("tick-step-budget-from-start")

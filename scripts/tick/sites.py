@@ -123,7 +123,6 @@ class TickSites:
         if self.scanning:
             self.scan = reaper.PASS.set(reaper.PassProcesses(lambda: reaper.processes()))
         self.state["now_ms"] = self.clock()
-        self.state["due"] = self.state["store"].key(self.state["slug"], tick.SPAWN_DUE)
         self.apply.update(task_steps.appliers(self.state))
         return True
 

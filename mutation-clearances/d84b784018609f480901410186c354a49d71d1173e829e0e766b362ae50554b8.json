@@ -1,0 +1,6 @@
+{
+  "scripts/hub/lifecycle.py:scripts.hub.lifecycle.x\u01c1Lifecycle\u01c1_held:9d015a79e7d60dcbe95e4f9ee45bcd5363a0f2c15fffd4d0a70ba1cc2caf2af8": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime and never reads its first, so replacing the cast type with None leaves the object and every later call identical."
+  }
+}

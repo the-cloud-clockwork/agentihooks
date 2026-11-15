@@ -2,7 +2,7 @@
 other hives; a hive that stopped beating has no report."""
 
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.hive import registry
 from scripts.hive.auth import HiveError
@@ -30,6 +30,15 @@ def host(agent: "AgentRecord") -> str:
 def pane_key(agent: "AgentRecord") -> str:
     remote = host(agent)
     return f"{remote}/{agent.pane_id}" if remote else agent.pane_id
+
+
+def unlisted(report: dict[str, Any], agent: "AgentRecord", launched: int) -> bool:
+    """True when ``report`` no longer names ``agent`` while it names others or its pod started after ``launched``."""
+    found: object = report.get("names")
+    if not isinstance(found, list):
+        return False
+    names = cast("list[object]", found)
+    return agent.name not in names and (bool(names) or report.get("started_at", 0) > launched)
 
 
 class Reports:
@@ -81,12 +90,7 @@ class Reports:
             return False
         if not raw:
             return self._unlisted(agent.hive, now_ms)
-        report = json.loads(cast(str, raw))
-        found: object = report.get("names")
-        if not isinstance(found, list):
-            return False
-        names = cast("list[object]", found)
-        return agent.name not in names and (bool(names) or report.get("started_at", 0) > launched)
+        return unlisted(json.loads(cast(str, raw)), agent, launched)
 
     def _unlisted(self, hive: str, now_ms: int) -> bool:
         """True when ``hive`` is out of the hive index and its record is gone or no longer beating."""

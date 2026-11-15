@@ -3,16 +3,20 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, TextIO, cast
 from unittest.mock import patch
 
 import pytest
 
+from scripts.hub import admission
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, name_state, resume, snapshot
+from scripts.swarm import cli, commands, name_state, readiness, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
+from tests.helpers.seat import seat_agent
+from tests.helpers.seat import view as seat_view
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm_ledger import legacy_page
 
@@ -424,7 +428,17 @@ def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: 
     assert [(d.id, d.state) for d in restored.receipts.recover("sw-eng-old", "bridge-1")] == [(delivery.id, "unknown")]
 
 
-def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
+def admitted_task(store: RedisStore, ledger: FakeLedger, task_id: str, at: int) -> dict[str, Any]:
+    """The launch payload hub admission hands the hive for ``task_id`` of swarm ``sw`` at ``at``."""
+    row = ledger.rows[task_id]
+    request = {"hive": readiness.ROOT, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
+    source = SimpleNamespace(snapshot=lambda name: seat_view(store, ledger, name))
+    admitted = admission.Admission(store, ledger, source, lambda: at).admit("sw", request)  # pyright: ignore[reportArgumentType]
+    assert admitted and "task" in admitted, admitted
+    return admitted["task"]
+
+
+def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store: RedisStore) -> None:
     seed(store, "sw")
     store.update("sw", state="running")
     snapshot.take(store, "sw", 99, run=_no_git)
@@ -446,10 +460,10 @@ def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
     assert ledger.rows["t1"]["state"] == "open" and "retired engineer@a1b2c3-0001" in actions
     assert store.seats.occupant("master@sw").occupant == "master@a1b2c3-0002"
     store.update("sw", state="running")
-    tick("sw", store, ledger, rt, 20_000)
-    successor = next(t for t in rt.tasks if t["id"] == "t2")
+    launched = [admitted_task(store, ledger, task_id, 20_000) for task_id in ("t1", "t2")]
+    successor = next(t for t in launched if t["id"] == "t2")
     assert successor["handoff"] == "carry on from the parser" and successor["seat"] == "eng-2@sw"
-    resumed = next(t for t in rt.tasks if t["id"] == "t1")
+    resumed = next(t for t in launched if t["id"] == "t1")
     assert resumed["learned"][0]["text"] == "run the gates twice"
 
 
@@ -518,10 +532,11 @@ def env(monkeypatch, store):
     return store, ledger, rt
 
 
-def test_stop_takes_a_snapshot_before_it_retires_anyone(env):
+def test_stop_takes_a_snapshot_before_it_retires_anyone(env: tuple[RedisStore, FakeLedger, FakeRuntime]) -> None:
     store, ledger, rt = env
     cli.main(["sw", "create", "--repo", "/repo"])
     cli.main(["sw", "start"])
+    rt.live.add(seat_agent(store, ledger, "sw", "t1", hive=commands.hive_id()).name)
     assert cli.main(["sw", "stop", "--now"]) == 0
     doc = json.loads(snapshot.path("sw").read_text())
     agents = doc["state"]["keys"][store.key("sw", "agents")]["value"]

@@ -5,7 +5,7 @@ import pytest
 
 from scripts.hive import launch, placement, registry
 from scripts.hive.placement import Choice, choose
-from tests.hive.test_controller_launch import NO_RAM, publish_room, write_hive
+from tests.hive.test_controller_launch import publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_placement import NOW, hive
 
@@ -186,25 +186,6 @@ def test_a_checkout_without_an_origin_matches_only_by_its_path(live, tmp_path):
     )
     write_hive(live, **{**anton(repos=[POD, ORIGIN, str(bare)]), "heartbeat_at": live.hive["heartbeat_at"]})
     assert live.launcher.select(config, "eng", {"id": "task", "hive": ANTON}).hive == ANTON
-
-
-def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
-    from scripts.swarm.tick import tick
-    from tests.swarm.test_tick import FakeRuntime, tasks
-
-    publish_room(live.store, ANTON, 0)
-    publish_room(live.store, "root", 0)
-
-    class LiveHives(FakeRuntime):
-        def placement_refusal(self, lane, task):
-            selected = live.launcher.select(live.config, lane, task) if task.get("id") else None
-            return selected.reason if isinstance(selected, placement.Wait) else ""
-
-    runtime = LiveHives()
-    live.store.create(replace(live.config, slug="sw"))
-    actions = tick("sw", live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    assert f"task t1 waits: no hive for eng has room: {ANTON} {NO_RAM}; root {NO_RAM}" in actions
-    assert runtime.spawned == []
 
 
 MISSING = placement.Wait(f"hive gone is not in the hive listing for {ORIGIN}")
