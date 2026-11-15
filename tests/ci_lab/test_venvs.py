@@ -1,5 +1,6 @@
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -60,8 +61,8 @@ def test_the_baked_venv_serves_a_matching_digest(tmp_path: Path, uv: Uv) -> None
 
 @pytest.mark.parametrize("baked_digest", [None, OTHER])
 def test_a_digest_the_baked_venv_lacks_builds_its_own_venv(tmp_path: Path, uv: Uv, baked_digest: str | None) -> None:
-    venv = tmp_path / "venvs" / DIGEST
-    built = venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", _baked(tmp_path, baked_digest))
+    venv = tmp_path / "pod" / "venvs" / DIGEST
+    built = venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "pod" / "venvs", _baked(tmp_path, baked_digest))
     assert built == venv
     assert uv.calls == [_build(tmp_path / "tree", venv)]
     assert (venv / "lockfile.sha256").read_text() == f"{DIGEST}\n"
@@ -89,3 +90,31 @@ def test_a_failed_build_leaves_no_marker_and_builds_again(
     monkeypatch.setattr(subprocess, "run", uv)
     assert venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked) == tmp_path / "venvs" / DIGEST
     assert failing.calls == uv.calls == [_build(tmp_path / "tree", tmp_path / "venvs" / DIGEST)]
+
+
+def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv, monkeypatch: pytest.MonkeyPatch) -> None:
+    started, finish = threading.Event(), threading.Event()
+
+    def slow(argv: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        started.set()
+        finish.wait(10)
+        return uv(argv, **options)
+
+    monkeypatch.setattr(subprocess, "run", slow)
+    baked = _baked(tmp_path, None)
+    built: list[Path] = []
+
+    def call() -> None:
+        built.append(venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked))
+
+    first, second = threading.Thread(target=call), threading.Thread(target=call)
+    first.start()
+    assert started.wait(10)
+    second.start()
+    second.join(0.5)
+    assert second.is_alive()
+    finish.set()
+    first.join(10)
+    second.join(10)
+    assert built == [tmp_path / "venvs" / DIGEST] * 2
+    assert uv.calls == [_build(tmp_path / "tree", tmp_path / "venvs" / DIGEST)]

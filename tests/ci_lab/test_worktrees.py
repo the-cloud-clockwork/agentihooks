@@ -90,9 +90,12 @@ def test_a_second_lease_of_the_same_head_reuses_the_tree(tmp_path: Path, origin:
 def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: Path, origin: Path) -> None:
     outside = tmp_path / "outside"
     outside.write_text("outside")
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "file").write_text("file")
     (origin / "sub").mkdir()
     (origin / "sub" / "link").symlink_to(outside)
-    _git(origin, "add", "sub/link")
+    (origin / "dirlink").symlink_to(tmp_path / "elsewhere")
+    _git(origin, "add", "sub/link", "dirlink")
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
     umask = os.umask(0)
@@ -100,8 +103,10 @@ def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: P
         tree = trees.lease(head)
     finally:
         os.umask(umask)
-    assert _writable(tree) == ["sub/link"]
+    assert _writable(tree) == ["dirlink", "sub/link"]
     assert outside.stat().st_mode & stat.S_IWUSR
+    assert (tmp_path / "elsewhere").stat().st_mode & stat.S_IWUSR
+    assert (tmp_path / "elsewhere" / "file").stat().st_mode & stat.S_IWUSR
 
 
 def test_idle_trees_within_capacity_stay(tmp_path: Path, origin: Path) -> None:
