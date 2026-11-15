@@ -83,7 +83,7 @@ def test_a_planted_failure_is_red_on_both_attempts_and_final(tmp_path: Path) -> 
 
     assert (verdict.outcome, verdict.flaky, verdict.attempts) == ("failed", False, 2)
     assert "assert 1 == 2" in verdict.log.read_text()
-    assert retry.decide(retry.UnitResult(outcome=verdict.outcome, attempts=0)) == "final"
+    assert retry.decide(retry.UnitResult(outcome=verdict.outcome, attempts=verdict.attempts)) == "final"
     assert not lab.flakes.exists()
 
 
@@ -172,7 +172,7 @@ def test_a_flake_row_keeps_the_first_attempts_errors_and_counts_two_attempts(tmp
 
     rows = run_tests.flake_rows(first, ("t::a", "t::b"))
 
-    assert rows == [{**failed, "outcome": "flaky", "attempts": 2}]
+    assert rows == [{**failed, "outcome": "flaky", "attempts": 2}, flaky]
 
 
 def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Path) -> None:

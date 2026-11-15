@@ -136,19 +136,19 @@ def outside(opened: set[str], batch: Sequence[str], tree: Path, manifest: Mappin
 
 
 def flake_rows(first: Attempt, batch: Sequence[str]) -> list[dict[str, Any]]:
-    """Return the flake ledger rows of a batch whose retry passed: one per test the first attempt failed, or one per
-    batch test when the first attempt recorded no failed test."""
+    """Return the flake ledger rows of a batch whose retry passed: one per test the first attempt's ledger names, or
+    one per batch test when that ledger names none."""
     ledger = first.folder / "flakes.jsonl"
-    lines = ledger.read_text().splitlines() if ledger.is_file() else []
-    failed = [row for row in map(json.loads, lines) if row["outcome"] == "failed"]
-    if not failed:
+    rows = [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.is_file() else []
+    if not rows:
         error = f"pytest exited with code {first.code}"
-        failed = [{"test": node, "errors": [error], "tracebacks": []} for node in _nodes(batch)]
-    return [{**row, "attempts": 2, "outcome": "flaky"} for row in failed]
+        rows = [{"test": node, "errors": [error], "tracebacks": []} for node in _nodes(batch)]
+    return [{**row, "attempts": 2, "outcome": "flaky"} for row in rows]
 
 
 def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> Verdict:
-    """Run a batch from tree with venv's python on slots workers, once more on identical inputs after a failure."""
+    """Run a batch from tree with venv's python on slots workers, at least one, and once more on identical inputs after
+    a failure."""
     attempts = [_attempt(batch, tree, venv, slots, lab)]
     if attempts[0].code != 0:
         attempts.append(_attempt(batch, tree, venv, slots, lab))
