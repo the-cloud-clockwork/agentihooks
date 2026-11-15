@@ -21,7 +21,7 @@ PASSING = (
     "if __name__ == '__main__':\n    raise SystemExit(main())\n"
 )
 LAYOUT = (
-    'pwd -P\ncd "$RUNNER_TEMP/grader" && pwd -P\ncd "$RUNNER_TEMP/base" && pwd -P\n'
+    'pwd -P\necho "$GITHUB_WORKSPACE"\ncd "$RUNNER_TEMP/grader" && pwd -P\ncd "$RUNNER_TEMP/base" && pwd -P\n'
     'command -v python\necho "$PATH"\necho "$CI_LAB_PORT_FIRST"\necho "$CI_LAB_TEST"\n'
     'echo summary > "$GITHUB_STEP_SUMMARY"\n'
 )
@@ -112,7 +112,7 @@ def test_the_step_reads_each_tree_where_the_workflow_puts_it(tmp_path: Path, set
     result = run_static.run(_step(LAYOUT), head, base, grader, settings)
     assert result.gate == "lint/probe"
     assert result.green
-    trees = [str(head.resolve()), str(grader.resolve()), str(base.resolve())]
+    trees = [str(head.resolve()), str(head), str(grader.resolve()), str(base.resolve())]
     bin_folder = settings.venv / "bin"
     path = f"{bin_folder}{os.pathsep}{os.defpath}"
     assert result.log.read_text().splitlines() == [*trees, str(bin_folder / "python"), path, "41000", "kept"]
