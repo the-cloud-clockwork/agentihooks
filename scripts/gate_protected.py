@@ -408,6 +408,17 @@ def _equivalence_problems(
     return []
 
 
+def _filtered_equivalence(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> set[str]:
+    """Name the equivalence workflow when the head only adds or drops its ledger path filter, so lanes keep trusting it."""
+    file = EQUIVALENCE[0]
+    base = base_workflows.get(file)
+    if base is None or head_workflows.get(file) not in _path_forms(base, "pull_request", EQUIVALENCE_PATHS):
+        return set()
+    return {file}
+
+
 def _blob(root: Path, rev: str, path: str) -> str | None:
     listing = _git(root, "ls-tree", rev, path).split()
     return listing[2] if listing[1:2] == ["blob"] else None
@@ -462,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
+    governed |= _filtered_equivalence(base_workflows, head_workflows)
     problems += preflight
     problems += _equivalence_problems(tip_workflows, head_workflows)
     problems += _frozen_problems(root, merge_base, args.base, args.head)
