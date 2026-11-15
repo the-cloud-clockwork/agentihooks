@@ -226,8 +226,8 @@ def test_the_pre_tool_hook_refuses_independent_github_watches(worker, monkeypatc
     assert "agentihooks swarm rig wait --on checks <pr url>" in str(blocked.value)
     assert str(blocked.value) == (
         "Independent GitHub watches spend the shared GitHub hourly quota. "
-        "Use agentihooks swarm rig wait --on checks <pr url>, "
-        "or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally."
+        "Use agentihooks swarm rig wait --on checks <pr url> or <run url>. "
+        "The swarm tick resolves these waits centrally."
     )
 
 

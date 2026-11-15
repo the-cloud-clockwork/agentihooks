@@ -4599,7 +4599,7 @@ The notice is context only. It never refuses or delays the call, and no stop gat
 Separately, an eng or ci swarm agent's `gh run watch` or `gh pr checks --watch` in a `Bash` or `Monitor` call is refused before it runs, task or not, because independent watches spend the shared GitHub hourly quota:
 
 ```text
-Independent GitHub watches spend the shared GitHub hourly quota. Use agentihooks swarm my-swarm wait --on checks <pr url>, or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally.
+Independent GitHub watches spend the shared GitHub hourly quota. Use agentihooks swarm my-swarm wait --on checks <pr url> or <run url>. The swarm tick resolves these waits centrally.
 ```
 
 The guard reads the command's own words, so `gh -R owner/repo run watch 1` is refused as well.
@@ -4650,7 +4650,7 @@ Delivered in [pull request 8620](https://github.com/the-cloud-clockwork/agentiho
 
 #### A checked wait ends the turn
 
-A checked wait (`--on checks|merge|reply|task|mutation|intent`) that the command accepts prints one JSON line with a `next` field:
+A checked wait (`--on checks|merge|reply|task|intent`) that the command accepts prints one JSON line with a `next` field:
 
 ```bash
 agentihooks swarm my-swarm wait --on checks https://github.com/<owner>/<repo>/pull/<number>
@@ -4690,7 +4690,7 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 | A worker sleeps with no notice | Check the session environment for all three swarm variables and an `eng` or `ci` agent name, then `agentihooks swarm <id> status` for a declared wait that still holds. Search the hook log for `swarm wait nudge failed`. A `cmd` in single quotes or backticks, or one with an undecodable escape, is not read. |
 | A Claude agent gets the notice twice for one call | Not expected: post tool delivery runs only when `can_inject_context("PreToolUse")` is false. Check `AGENTIHOOKS_TARGET` in the session; the codex wrapper sets it to `codex`. |
 | A Codex agent keeps polling after `wait --on checks` | Read the command output for `next`. When it is missing, the wait was refused or was a bare wait; fix the target and declare it again. |
-| `gh run watch` is refused | The GitHub watch guard. Use `wait --on checks <pr url>` or `wait --on mutation <run url>`. |
+| `gh run watch` is refused | The GitHub watch guard. Use `wait --on checks <pr url>` or `wait --on checks <run url>`. |
 | `gh run view` is refused with `one REST call per job` | The [full run view refusal](#full-gh-run-view-refusal). Add `--json <fields>`, `--log-failed`, or `--job <job id>`; to wait for the run, declare `wait --on checks <run url>`. |
 | A master's `gh run view` is refused while its `gh run watch` is not | Expected: the watch refusal covers eng and ci agents only, the full run view refusal covers every swarm agent. |
 

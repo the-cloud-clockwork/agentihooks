@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import cli, idle, mutation_wait, waits
+from scripts.swarm import cli, idle, run_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
@@ -70,6 +70,14 @@ def test_a_mutation_wait_is_refused_with_the_kinds_list(started, capsys):  # noq
     assert held(store) is None
 
 
+def test_a_stored_mutation_wait_ends_with_the_kinds_list(tick):  # noqa: F811
+    on = {"kind": "mutation", "target": RUN, "task": "t1"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=on)
+    outcome = f"mutation {RUN}, now ended; wait on one of: checks, merge, reply, task, intent"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 @pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
 def test_a_run_still_going_keeps_the_wait(tick, actions, status):  # noqa: F811
     actions["run"] = {"status": status, "conclusion": None}
@@ -103,7 +111,7 @@ def test_the_tick_ends_a_run_wait_with_its_conclusion(tick, actions, conclusion,
 def test_a_missing_run_ends_the_wait_with_that_reason(tick, actions):  # noqa: F811
     actions["code"], actions["stderr"] = 1, b"gh: Not Found (HTTP 404)"
     hold_run(tick)
-    assert mutation_wait.run_resolution(RUN) == f"checks on {RUN}, missing; GitHub has no such run"
+    assert run_wait.run_resolution(RUN) == f"checks on {RUN}, missing; GitHub has no such run"
     assert tick.end() == [f"ended the wait of {ME}: checks on {RUN}, missing; GitHub has no such run"]
 
 
