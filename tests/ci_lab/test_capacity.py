@@ -75,6 +75,35 @@ def test_a_full_pool_reports_no_wait_estimate_and_classes_in_shed_order() -> Non
     json.dumps(body, allow_nan=False)
 
 
+@pytest.mark.feature("lab-full-pool-wait")
+@pytest.mark.parametrize(
+    ("estimates", "free", "frees_in", "expected"),
+    [
+        ((60.0,), 0, (300.0, 100.0), 160.0),
+        ((600.0,), 0, (300.0, 100.0), 500.0),
+        ((45.0,), 0, (20.0, 10.0), 37.5),
+        ((50.0, 50.0), 0, (40.0, -30.0), 70.0),
+        ((90.0,), 1, (30.0,), 60.0),
+        ((), 0, (100.0,), 0.0),
+        ((10.0,), 0, (), None),
+    ],
+)
+def test_predicted_wait_drains_pending_work_as_running_units_free_their_slots(
+    estimates: tuple[float, ...], free: int, frees_in: tuple[float, ...], expected: float | None
+) -> None:
+    assert capacity.predicted_wait(estimates, free, frees_in) == expected
+
+
+@pytest.mark.feature("lab-full-pool-wait")
+def test_a_full_pool_predicts_its_wait_from_when_running_units_free_their_slots() -> None:
+    load = Load({"pull_request": (120.0, 60.0)}, {"queue": 2}, slots_total=2, slots_busy=2, frees_in=(300.0, 60.0))
+    body = capacity.document(load)
+    assert body["slots"] == {"total": 2, "busy": 2, "free": 0}
+    assert body["classes"]["pull_request"]["predicted_wait_s"] == 240.0  # type: ignore[index]
+    assert body["classes"]["hotfix"]["predicted_wait_s"] == 0.0  # type: ignore[index]
+    json.dumps(body, allow_nan=False)
+
+
 def test_load_defaults_to_a_full_budget_and_nothing_shed() -> None:
     body = capacity.document(Load({}, {}, slots_total=1, slots_busy=0))
     assert body["budget_fraction"] == 1.0

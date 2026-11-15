@@ -39,6 +39,8 @@ TESTS_GROUPS = tuple(
     for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
 )
 PATH_FILTERS = ("paths", "paths-ignore")
+DEV_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+OWN = r"[a-z0-9-]+"
 
 
 def git(*args: str) -> str:
@@ -166,6 +168,42 @@ def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: 
     )
 
 
+def mapping(value: object) -> dict[Any, Any]:
+    return cast(dict[Any, Any], value) if isinstance(value, dict) else {}  # pragma: no mutate
+
+
+def dev_push_only(workflow: object) -> bool:
+    found = events(mapping(workflow))
+    on = mapping(found[0]) if len(found) == 1 else {}
+    push = mapping(on.get("push"))
+    return set(on) == {"push"} and set(push) <= {"branches", *PATH_FILTERS} and push.get("branches") == ["dev"]
+
+
+def dev_push_group(block: object, workflow: object) -> bool:
+    found = mapping(block)
+    if found.get("cancel-in-progress") not in (None, False):
+        return False
+    group = " ".join(str(found.get("group")).split())
+    queue = found.get("queue")
+    if dev_push_only(workflow) and queue in (None, "single", "max"):
+        return (
+            re.fullmatch(
+                OWN + r"-\$\{\{ github\.ref \}\}|\$\{\{ format\('" + OWN + r"-\{0\}', github\.ref\) \}\}", group
+            )
+            is not None
+        )
+    return re.fullmatch(
+        r"\$\{\{ "
+        + re.escape(DEV_PUSH)
+        + r" && format\('"
+        + OWN
+        + r"-\{0\}', github\.ref\) \|\| "
+        + re.escape(LANE)
+        + r" \}\}",
+        group,
+    ) is not None and queue in ("max", f"${{{{ {DEV_PUSH} && 'single' || 'max' }}}}")
+
+
 def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
@@ -198,6 +236,8 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
         if per_run_mutation_group(name, block, job, trusted):
+            continue
+        if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate
             continue
         if (
             trusted.get("name") == "Tests"

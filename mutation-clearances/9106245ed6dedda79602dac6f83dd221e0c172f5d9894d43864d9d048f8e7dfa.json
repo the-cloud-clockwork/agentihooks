@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wiring.py:scripts.ci_wiring.x_main:c878bea417dc0de5bb3a94b45172931b4d7b0c385f6a065cc6f119af116213d6": {
+    "reader": "standards_reader",
+    "reason": "Passes None in place of today to check, which never reads today: the parameter appears only in the check signature at the head and at the base, so the mutant cannot change output. test_declarations_remain_valid_after_their_former_expiry and test_main_ignores_declaration_dates pin that declaration dates never affect the result."
+  }
+}
