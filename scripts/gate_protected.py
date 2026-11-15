@@ -2,7 +2,6 @@ import argparse
 import json
 import subprocess
 from copy import deepcopy
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -239,7 +238,6 @@ def grade(
     base_config: dict[str, Any],
     head_workflows: dict[str, dict[str, Any]],
     head_config: dict[str, Any],
-    today: date,
     policy: object = None,
 ) -> list[str]:
     from scripts import ci_gate_queue
@@ -296,7 +294,7 @@ def grade(
                 config["not_gates"].setdefault(key, head_config["not_gates"][key])
     for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
         config["not_gates"].setdefault(key, entry)
-    return problems + ci_wiring.check(head_workflows, config, today)
+    return problems + ci_wiring.check(head_workflows, config)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -440,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
     if ci_runner_trust.ACTORS in _git(root, "ls-tree", "-r", "--name-only", args.base).splitlines():
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
-    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    problems = grade(base_workflows, base_config, head_workflows, head_config, actors)
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     problems += preflight

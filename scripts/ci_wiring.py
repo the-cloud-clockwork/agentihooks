@@ -1,7 +1,6 @@
 import argparse
 import json
 import re
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -114,7 +113,7 @@ def _declaration_problems(declared: dict[str, dict[str, Any]]) -> list[str]:
     ]
 
 
-def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any]) -> list[str]:
     from scripts import ci_gate_queue
 
     try:
@@ -154,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     workflows = load(args.root)
     config = json.loads((args.root / CONFIG).read_text())
-    problems = check(workflows, config, datetime.now(UTC).date())
+    problems = check(workflows, config)
     jobs = sum(len(workflow.get("jobs") or cast(dict[Any, Any], {})) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:
