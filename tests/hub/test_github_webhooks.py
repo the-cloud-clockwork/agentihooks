@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from scripts.ci_lab.webhooks import LabIntake
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -44,11 +45,11 @@ def check_suite(action="completed", conclusion="success", head="a1", numbers=(7,
     }
 
 
-def setup():
+def setup(lab=None):
     bus = open_bus(BusConfig())
     pulls = Pulls(bus, fetch=lambda url: pytest.fail("unexpected fetch"), clock=lambda: 1000)
     pulls.track("crew", URL)
-    return bus, Ingress(pulls, SECRET), bus.events.consumer("watch", "swarm.>")
+    return bus, Ingress(pulls, SECRET, lab and lab(bus)), bus.events.consumer("watch", "swarm.>")
 
 
 def deliver(ingress, name, payload, signature=None):
@@ -363,3 +364,180 @@ def test_the_hub_registry_runs_the_pulls_reactor_on_the_hub_clock():
     reactors = {reactor.name: reactor for reactor in registry.configured(bus, lambda: 4242)}
     reactors["pulls"].poll(lambda: True)
     assert json.loads(bus.state("hub-github").get("polled").value) == 4242
+
+
+NOTICE_SECRET = b"notice-secret"
+NOTICE = {"repo": REPO, "head": "a1", "base": "b0", "actor": "agenticore-app[bot]"}
+
+
+def lab_setup():
+    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.events, NOTICE_SECRET))
+    return ingress, swarm, bus.events.consumer("lab", "ci.lab.head.>")
+
+
+def merge_group(action="checks_requested"):
+    return {
+        "action": action,
+        "repository": {"html_url": REPO},
+        "sender": {"login": "github-merge-queue[bot]"},
+        "merge_group": {"head_sha": "a1", "base_sha": "b0"},
+    }
+
+
+def lab_pull_request(action="opened", head="a1"):
+    payload = pull_request(action, head=head)
+    payload["repository"] = {"html_url": REPO}
+    payload["sender"] = {"login": "nestorcolt"}
+    payload["pull_request"]["base"] = {"sha": "b0"}
+    payload["pull_request"]["user"] = {"login": "agenticore-app[bot]"}
+    return payload
+
+
+def send_notice(ingress, payload, signature=None):
+    body = json.dumps(payload).encode()
+    return ingress.notice({"X-Hub-Signature-256": sign(body, NOTICE_SECRET) if signature is None else signature}, body)
+
+
+def test_a_merge_group_asking_for_checks_is_published_as_a_lab_head():
+    ingress, swarm, lab = lab_setup()
+    assert deliver(ingress, "merge_group", merge_group()) == 200
+    assert drain(swarm) == []
+    assert [(e.type, e.data["head"], e.data["base"], e.author) for e in drain(lab)] == [
+        ("ci.lab.head.merge_group", "a1", "b0", "github-merge-queue[bot]")
+    ]
+    assert deliver(ingress, "merge_group", merge_group("destroyed")) == 200
+    assert drain(lab) == []
+
+
+def test_a_wired_lab_keeps_the_pull_request_events_and_adds_the_lab_head():
+    ingress, swarm, lab = lab_setup()
+    assert deliver(ingress, "pull_request", lab_pull_request()) == 200
+    assert [(e.swarm, e.type, e.key) for e in drain(swarm)] == [("crew", "pull.opened", URL)]
+    assert [(e.type, e.data["action"]) for e in drain(lab)] == [("ci.lab.head.pull_request", "opened")]
+    assert deliver(ingress, "pull_request", lab_pull_request("enqueued")) == 200
+    assert [e.type for e in drain(swarm)] == ["merge.queued"]
+    assert drain(lab) == []
+
+
+def test_a_wired_lab_keeps_the_check_suite_events_and_publishes_no_head_for_them():
+    ingress, swarm, lab = lab_setup()
+    deliver(ingress, "pull_request", lab_pull_request())
+    drain(swarm)
+    drain(lab)
+    assert deliver(ingress, "check_suite", check_suite()) == 200
+    assert [e.type for e in drain(swarm)] == ["checks.completed"]
+    assert drain(lab) == []
+
+
+def test_a_wired_lab_answers_400_for_a_head_payload_it_cannot_read():
+    ingress, swarm, lab = lab_setup()
+    assert deliver(ingress, "merge_group", {"action": "checks_requested"}) == 400
+    assert drain(swarm) == []
+    assert drain(lab) == []
+
+
+def test_a_wired_lab_still_records_the_pull_request_when_its_head_cannot_be_read():
+    ingress, swarm, lab = lab_setup()
+    payload = lab_pull_request()
+    del payload["pull_request"]["user"]
+    assert deliver(ingress, "pull_request", payload) == 400
+    assert [e.type for e in drain(swarm)] == ["pull.opened"]
+    assert drain(lab) == []
+
+
+def test_a_signed_head_notice_is_published_as_a_lab_head():
+    ingress, swarm, lab = lab_setup()
+    assert send_notice(ingress, NOTICE) == 200
+    assert drain(swarm) == []
+    assert [(e.type, e.key, e.author, e.data["action"]) for e in drain(lab)] == [
+        ("ci.lab.head.notice", f"{REPO}@a1", "agenticore-app[bot]", "pushed")
+    ]
+
+
+@pytest.mark.parametrize(
+    "signature", ["", "sha256=" + "0" * 64, sign(json.dumps(NOTICE).encode()), sign(b"other", NOTICE_SECRET)]
+)
+def test_an_unsigned_or_wrongly_signed_head_notice_answers_401(signature):
+    ingress, _, lab = lab_setup()
+    assert send_notice(ingress, NOTICE, signature) == 401
+    assert ingress.notice({}, json.dumps(NOTICE).encode()) == 401
+    assert drain(lab) == []
+
+
+@pytest.mark.parametrize("payload", [{**NOTICE, "actor": ""}, {"repo": REPO}, [], "x"])
+def test_a_signed_but_malformed_head_notice_is_a_bad_request(payload):
+    ingress, _, lab = lab_setup()
+    assert send_notice(ingress, payload) == 400
+    assert drain(lab) == []
+
+
+def test_a_head_notice_is_not_served_without_the_lab():
+    _, ingress, _ = setup()
+    assert send_notice(ingress, NOTICE) == 404
+
+
+def test_a_lab_bus_failure_answers_503_so_the_sender_retries(capsys):
+    class Down:
+        def publish(self, subject, event):
+            raise ConnectionError("lab bus down")
+
+    _, ingress, _ = setup(lambda bus: LabIntake(Down(), NOTICE_SECRET))
+    assert send_notice(ingress, NOTICE) == 503
+    assert deliver(ingress, "merge_group", merge_group()) == 503
+    assert capsys.readouterr().err.endswith("ConnectionError: lab bus down\n")
+    assert deliver(ingress, "ping", {}) == 200
+
+
+class NoticeRecorder(Recorder):
+    def __init__(self, status=200):
+        super().__init__(status)
+        self.notices = []
+
+    def notice(self, headers, body):
+        self.notices.append((dict(headers), body))
+        return self.status
+
+
+def test_http_handler_routes_the_head_notice_to_the_ingress():
+    ingress = NoticeRecorder(401)
+    assert request(ingress, "/lab/head", body=b'{"a": 1}') == [("status", 401), ("Content-Length", "0"), ("end",)]
+    assert ingress.notices == [({"Content-Length": "8", "X-GitHub-Event": "ping"}, b'{"a": 1}')]
+    assert ingress.calls == []
+    assert request(ingress, "/lab/head", length="")[0] == ("status", 411)
+    assert request(ingress, "/lab", body=b"{}")[0] == ("status", 404)
+    assert len(ingress.notices) == 1
+
+
+def test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", "s")
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.delenv("AGENTIHOOKS_CI_LAB_NOTICE_SECRET", raising=False)
+    buses = []
+    answers = []
+
+    def opener(config):
+        buses.append(open_bus(BusConfig()))
+        return buses[-1]
+
+    class Server:
+        def __init__(self, address, handler):
+            body = json.dumps(NOTICE).encode()
+            signed = {"X-Hub-Signature-256": sign(body, NOTICE_SECRET)}
+            answers.append(request(None, "/lab/head", body=body, cls=handler, headers=signed)[0])
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(github_webhooks, "open_bus", opener)
+    monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Server)
+    with pytest.raises(KeyboardInterrupt):
+        github_webhooks.main([])
+    monkeypatch.setenv("AGENTIHOOKS_CI_LAB_NOTICE_SECRET", NOTICE_SECRET.decode())
+    with pytest.raises(KeyboardInterrupt):
+        github_webhooks.main([])
+    assert answers == [("status", 404), ("status", 200)]
+    assert [subject for subject, _ in buses[0].events.entries] == []
+    assert [subject for subject, _ in buses[1].events.entries] == ["ci.lab.head.notice"]
