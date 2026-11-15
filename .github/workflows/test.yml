@@ -852,7 +852,6 @@ jobs:
 
       - &python
         name: Set up Python ${{ matrix.python-version }}
-        if: env.UNIT_SOURCE == ''
         id: python
         uses: actions/setup-python@v5
         with:
@@ -863,7 +862,6 @@ jobs:
       # scan modules loaded from the repo root.
       - &day
         name: Stamp the day
-        if: env.UNIT_SOURCE == ''
         id: day
         uses: ./.github/actions/test-env-key
         with:
@@ -871,7 +869,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_SOURCE == '' && (env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted')
+        if: env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted'
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -908,7 +906,6 @@ jobs:
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
       - &use-venv
         name: Use the test environment
-        if: env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Check out the base revision
