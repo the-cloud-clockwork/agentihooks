@@ -301,13 +301,19 @@ def test_triggers_reads_every_form():
     assert ci_wiring.triggers({}) == {}
 
 
-def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs():
+def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     needs = set(workflow["jobs"]["gate-required"]["needs"])
     assert {"lint", "brain-smoke"} <= needs
     assert "wiring" not in workflow["jobs"]
     lint = workflow["jobs"]["lint"]
-    check = next(step for step in lint["steps"] if step.get("run") == "python -m scripts.ci_wiring")
+    check = next(
+        step for step in lint["steps"] if step.get("name") == "Check every pull request job is a need of Gate Required"
+    )
+    assert check["run"].splitlines() == [
+        'cd "$RUNNER_TEMP/grader"',
+        'python -m scripts.ci_wiring --root "$GITHUB_WORKSPACE"',
+    ]
     assert check["if"] == "${{ !cancelled() }}"
     assert lint["needs"] in (["reuse"], ["reuse", "admission"])
 
