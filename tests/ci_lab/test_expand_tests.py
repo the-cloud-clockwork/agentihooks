@@ -42,7 +42,7 @@ MANIFEST: dict[str, Any] = {
         "tests/test_alpha.py::test_second": {"units": [2, 4], "files": [], "escapes": False},
         "tests/test_beta.py::test_run": {"units": [0, 1], "files": ["scripts/data.json"], "escapes": False},
         "tests/test_beta.py::test_spawn": {"units": [], "files": ["docs/guide.md"], "escapes": True},
-        "tests/test_group.py::test_one@fakeredis": {"units": [0], "files": [], "escapes": False},
+        "tests/test_group.py::TestGroup::test_one@fakeredis": {"units": [0], "files": [], "escapes": False},
     },
     "lines": {},
 }
@@ -212,11 +212,15 @@ def _manifest(*tests: str) -> dict[str, Any]:
 
 
 def test_each_file_under_the_budget_is_one_batch() -> None:
-    manifest = _manifest("tests/test_b.py::test_two", "tests/test_a.py::test_one", "tests/test_b.py::test_one")
-    durations = {"tests/test_a.py::test_one": 3.0, "tests/test_b.py::test_one": 4.0, "tests/test_b.py::test_two": 6.0}
+    manifest = _manifest("tests/test_b.py::TestB::test_two", "tests/test_a.py::test_one", "tests/test_b.py::test_one")
+    durations = {
+        "tests/test_a.py::test_one": 3.0,
+        "tests/test_b.py::test_one": 4.0,
+        "tests/test_b.py::TestB::test_two": 6.0,
+    }
     assert expand_tests.batches(manifest, durations, 10.0) == [
         ("tests/test_a.py::test_one",),
-        ("tests/test_b.py::test_one", "tests/test_b.py::test_two"),
+        ("tests/test_b.py::TestB::test_two", "tests/test_b.py::test_one"),
     ]
 
 

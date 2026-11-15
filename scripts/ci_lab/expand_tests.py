@@ -42,7 +42,7 @@ def _blob(tree: Mapping[str, bytes], path: str) -> str | None:
 
 def _text(content: bytes) -> str:
     """Return a source file's text the way the manifest's change reader decodes it."""
-    return content.decode("utf-8", "replace")
+    return content.decode(errors="replace")
 
 
 def _test_module(path: str) -> bool:
@@ -76,9 +76,10 @@ def _reached(tree: Mapping[str, bytes], path: str, reached: set[str]) -> set[str
 
 def _unit_keys(units: Sequence[str], tree: Mapping[str, bytes]) -> list[str | None]:
     """Return the hash of every manifest unit in the tree, None for a unit the tree no longer holds."""
-    sources = {name.partition("::")[0] for name in units}
+    pairs = [name.split("::") for name in units]
+    sources = {pair[0] for pair in pairs}
     hashes = {path: dep_manifest.unit_hashes(_text(tree[path])) for path in sources if path in tree}
-    return [hashes.get(path, {}).get(unit) for path, _, unit in (name.partition("::") for name in units)]
+    return [hashes.get(path, {}).get(unit) for path, unit in pairs]
 
 
 def broad(record: Mapping[str, Any]) -> bool:
