@@ -33,6 +33,7 @@ ENV = {
     "cooldown_minutes": "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES",
     "drain_minutes": "AGENTIHOOKS_HEALTH_DRAIN_MINUTES",
     "drain_left": "AGENTIHOOKS_HEALTH_DRAIN_LEFT",
+    "ci_behind_minutes": "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES",
 }
 
 
@@ -53,6 +54,7 @@ class Limits:
     cooldown_minutes: int = 60
     drain_minutes: int = 10
     drain_left: int = quota_state.DRAIN_LEFT
+    ci_behind_minutes: int = 0
 
 
 @dataclass(frozen=True)

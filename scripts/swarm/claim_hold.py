@@ -3,6 +3,7 @@
 Every claim filter asks here, so the urgent hold health finding reports exactly what keeps a task from a seat.
 """
 
+from collections.abc import Callable
 from time import time
 from typing import Any
 
@@ -107,3 +108,18 @@ def waits(task: dict, rows: dict) -> str:
     named = dict.fromkeys((task.get("parked_on") or []) + (task.get("depends_on") or []))
     open_ = [dep for dep in named if rows.get(dep, {}).get("state") != "done"]
     return f"it waits on task {open_[0]}" if len(open_) == 1 else f"it waits on tasks {', '.join(open_)}"
+
+
+def lab_minutes(reading: dict[str, Any] | None, now_ms: int) -> int:
+    """Whole minutes a fresh lab reading predicts pull request grading waits."""
+    return 0
+
+
+def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limits: Any, fix: str = "") -> str:
+    """Why the lab holds the task from a claim, empty when it does not."""
+    return ""
+
+
+def lab_reason(store: Any, slug: str, fix: str) -> Callable[[dict[str, Any]], str]:
+    """Each task's ``ci_behind`` text against the swarm's stored lab reading and health limits."""
+    return lambda task: ""

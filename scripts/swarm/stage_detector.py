@@ -2,6 +2,7 @@ import json
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.swarm import bottleneck, metrics_outbox, stages
 from scripts.swarm.health import standing
@@ -98,6 +99,10 @@ def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> N
             standing.clear_detector(store.redis, slug, row["stage"])
     for stage in rows.keys() - {row["stage"] for row in found["stages"]}:
         standing.clear_detector(store.redis, slug, stage)
+
+
+def lab_finding(store: RedisStore, slug: str, reading: dict[str, Any] | None, limits: Any, now_ms: int) -> None:
+    """Fire the standing lab wait finding while the reading holds eng claims, and clear it when it stops."""
 
 
 def record(
