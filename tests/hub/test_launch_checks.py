@@ -228,11 +228,14 @@ def test_a_hung_verdict_keeps_a_live_agent_whose_started_record_is_missing(rig: 
     name, action = hung_with_report(rig, bus, listed=True)
 
     assert action == f"kept {name} on t1: its launch check failed on launched, but hive hive-a lists it"
-    assert [agent.name for agent in rig.store.agents(SLUG)] == [name]
+    assert [(agent.name, agent.seat) for agent in rig.store.agents(SLUG)] == [(name, "eng-1@sw")]
+    assert {seat: agent.name for seat, agent in rig.store.execution_occupants(SLUG).items()} == {"eng-1@sw": name}
     assert rig.store.claimant(SLUG, "t1") == name
     assert rig.rows["t1"]["state"] == "claimed"
     assert launch_check.pending(rig.store, SLUG) == {}
     assert launch_check.report(rig.store, SLUG, "t1")["state"] == "failed"
+    assert checker(rig, bus).check(SLUG, 10_000 + 2 * HUNG_MS) == []
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [name]
     assert stops(bus) == []
 
 
