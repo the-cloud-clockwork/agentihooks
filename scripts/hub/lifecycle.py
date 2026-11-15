@@ -210,7 +210,8 @@ class Lifecycle:
                 fields,
                 if_state=("claimed", "pr"),
                 if_match={"claimed_by": agent.name, "claim_generation": event.data["task_generation"]},
-            ),
+            )
+            or {},
         )
         if live.get("state") == "open" and agent.seat:
             cast(RedisStore, self.store).keep_seat(event.swarm, agent.task, agent.seat)
