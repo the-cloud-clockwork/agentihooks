@@ -6333,6 +6333,18 @@
       ]
     },
     {
+      "id": "lab-warm-mutant-runner",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-run-mutation",
+      "behaviour": "The lab mutation runner grades every mutant of a function unit with the status the selection gate gives it on the self plant corpus: it collects the covering tests once and forks one child per mutant that selects it through MUTANT_UNDER_TEST, a runner that grades a killable mutant survived fails the equivalence, and the per mutant fixed cost stays a fraction of the one collection.",
+      "seam": "scripts.ci_lab.run_mutation run for a stats unit and a mutant unit, started as python -m scripts.ci_lab.run_mutation in a tree holding the trampolined sources",
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does",
+        "tests/ci_lab/test_run_mutation.py::test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence",
+        "tests/ci_lab/test_run_mutation.py::test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
