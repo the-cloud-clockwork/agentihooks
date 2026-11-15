@@ -396,6 +396,7 @@ def test_a_lab_gate_replacing_no_workflow_job_is_red() -> None:
             "::error::test.yml holds Gate — Required but does not run on merge_group.\n",
         ),
     ],
+    ids=["lab-gate-lifts-pull-request", "actions-gate-needs-pull-request", "lab-gate-keeps-merge-group"],
 )
 def test_the_lab_gate_required_flag_lifts_only_the_pull_request_trigger(
     tmp_path: Path,
