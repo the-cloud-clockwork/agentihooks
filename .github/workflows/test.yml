@@ -3562,6 +3562,51 @@ jobs:
             exit 1
           fi
 
+      - name: Turn off automatic git maintenance
+        run: |
+          echo "GIT_CONFIG_COUNT=1" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_KEY_0=maintenance.auto" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=false" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        if: needs.mutation.result == 'success'
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Download every shard's mutation report
+        if: needs.mutation.result == 'success'
+        id: download-every-shards-mutation-report
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &gate-required-download-every-shards-mutation-report
+          pattern: mutation-report-*
+          path: .mutation-reports
+
+      - name: Download every shard's mutation report, wait before attempt 2
+        if: steps.download-every-shards-mutation-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download every shard's mutation report failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download every shard's mutation report, attempt 2
+        if: steps.download-every-shards-mutation-report.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *gate-required-download-every-shards-mutation-report
+
+      - name: Grade the split mutation units from the protected grader
+        if: needs.mutation.result == 'success'
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+          GRADER: ${{ github.event.pull_request.base.sha || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+          PLANNED: ${{ needs.mutation-plan.outputs.shards }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+          grader="$RUNNER_TEMP/grader"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade units .mutation-reports "$(jq length <<< "$PLANNED")" . "$BASES"
+
   test-summary:
     needs: [unit, unit-selected]
     if: ${{ always() }}
@@ -3924,7 +3969,7 @@ jobs:
     outputs:
       shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}
       stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
-      bases: ${{ steps.plan.outputs.bases }}
+      bases: ${{ steps.bases.outputs.bases }}
       browser: ${{ steps.plan.outputs.browser }}
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
@@ -4067,18 +4112,17 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      # The protected copy holds the planned bases, so a pull request cannot narrow the lines it is graded on.
-      - name: Hold the planned mutation bases to the protected grader
+      # The protected copy chooses the bases, so a pull request cannot narrow the lines it is graded on.
+      - name: Choose the mutation bases with the protected grader
+        id: bases
         if: steps.reuse.outputs.reused != 'true'
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
-          BASES: ${{ steps.plan.outputs.bases }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" "$BASES"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade bases . "$BASE" >> "$GITHUB_OUTPUT"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
       - name: Check the planned selection contract
@@ -4109,12 +4153,11 @@ jobs:
       - name: Grade the empty change set
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
-          BASES: ${{ steps.plan.outputs.bases }}
+          BASES: ${{ steps.bases.outputs.bases }}
         run: |
           python -m scripts.ci_mutation --bases "$BASES" --budget 1080
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
       - name: Forward the reused or empty mutation report
@@ -4346,8 +4389,7 @@ jobs:
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES" --stats .mutation-stats
 
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
@@ -5081,11 +5123,12 @@ jobs:
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
         run: |
           grader="$RUNNER_TEMP/grader"
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES" --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
