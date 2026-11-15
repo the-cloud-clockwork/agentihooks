@@ -193,7 +193,8 @@ scope` writes it), the new member is listed there with its swarms, the credentia
 and the invite force syncs the ExternalSecret `AGENTIHOOKS_NATS_SIGNER_SYNC` (namespace/name, default
 `agentihooks-swarm/agentihooks-swarm-nats-signer`). The success line then ends `requested a sync of the signer record
 <target>`, or `could not force the sync of <target> (<reason>), so hive join sees it at the next refresh`; a failed
-sync never fails the invite. Without the listing the member is not listed and the credential is not scoped.
+sync never fails the invite. Without the listing the invite refuses before minting a member and names `agentihooks
+hive scope`, which adds the listing on the hub.
 
 Success prints `invited hive member <id> as <label>; OpenBao secret/<path>: wrote <keys> (<n> keys total)`, with key
 names only. A rerun on the same record revokes the member the record held before and adds `revoked the previous member

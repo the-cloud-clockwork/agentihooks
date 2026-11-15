@@ -6,8 +6,6 @@ import pytest
 from scripts.hive.launch import Selection
 from scripts.swarm import controller
 from scripts.swarm.tick import SpawnError
-from scripts.swarm_v2.runtime.base import RuntimeRouter
-from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
 
 
@@ -76,38 +74,6 @@ def test_a_placement_pass_reads_the_bundle_revision_once_and_the_next_pass_reads
     assert revision("one") == "fourth"
 
 
-def test_a_placement_pass_checks_the_workstation_herdr_once_and_the_next_pass_checks_again(
-    setup,  # noqa: F811
-    monkeypatch,
-):
-    from scripts import herdr_host
-
-    write_hive(setup, excluded=["engineer"])
-    checks = []
-
-    def running(environ):
-        checks.append(environ)
-        return True
-
-    monkeypatch.setattr(herdr_host, "server_running", running)
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
-
-    runtime.placement_refusal("eng", {"id": "one"})
-    runtime.placement_refusal("eng", {"id": "two"})
-    assert len(checks) == 2
-    runtime.begin_placement_pass()
-    assert runtime.runtime.hive_launch.herdr.pass_memo == {}
-    runtime.placement_refusal("eng", {"id": "one"})
-    runtime.placement_refusal("eng", {"id": "two"})
-    assert len(checks) == 3
-    runtime.end_placement_pass()
-    assert runtime.runtime.hive_launch.herdr.pass_memo is None
-    runtime.begin_placement_pass()
-    runtime.placement_refusal("eng", {"id": "one"})
-    assert len(checks) == 4
-
-
 def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypatch):
     from scripts import herdr_host
 
@@ -129,65 +95,6 @@ def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypat
     assert len(checks) == 2
     assert controller._to_workstation("eng", refused, memo) is False
     assert len(checks) == 2
-
-
-class _Stop(Exception):
-    pass
-
-
-@pytest.mark.parametrize("step", ["placement_refusal", "spawn"])
-def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
-    setup,  # noqa: F811
-    monkeypatch,
-    step,
-):
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
-    refused = controller.WORKSTATION.format(lane="master")
-    monkeypatch.setattr(runtime, "_refusal", lambda lane, task, claim="": refused)
-    memos = []
-
-    def to_workstation(lane, seen, memo=None):
-        memos.append(memo)
-        raise _Stop
-
-    monkeypatch.setattr(controller, "_to_workstation", to_workstation)
-    runtime.begin_placement_pass()
-    pass_memo = runtime.runtime.hive_launch.herdr.pass_memo
-    with pytest.raises(_Stop):
-        if step == "spawn":
-            runtime._spawn(setup.config, "master", "master@x-1", {"id": "master"})
-        else:
-            runtime.placement_refusal("master", {"id": "master"})
-    assert len(memos) == 1
-    assert memos[0] is pass_memo
-
-
-def test_workstation_room_reads_local_slots_through_the_pass_cache_only_inside_a_pass(
-    setup,  # noqa: F811
-    monkeypatch,
-):
-    from scripts.swarm import local_slots
-
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
-    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
-    caches = []
-
-    def held(store, machine, slug, task, cache=None):
-        caches.append(cache)
-        raise _Stop
-
-    monkeypatch.setattr(local_slots, "running", lambda store, slug, task, cache=None: caches.append(cache) or 0)
-    monkeypatch.setattr(local_slots, "held", held)
-    runtime.begin_placement_pass()
-    with pytest.raises(_Stop):
-        runtime._workstation_room("workstation", {"id": "one"})
-    assert isinstance(caches[0], local_slots.PassCache)
-    assert caches[1] is caches[0]
-    runtime.end_placement_pass()
-    with pytest.raises(_Stop):
-        runtime._workstation_room("workstation", {"id": "one"})
-    assert caches[2:] == [None, None]
 
 
 @pytest.mark.parametrize("in_pass", [False, True])

@@ -21,6 +21,14 @@ def signer_path(environ: Mapping[str, str]) -> str | None:
     return path if path is not None and path.startswith(nats_grant.HUB_PATH) else None
 
 
+def unscoped(path: str) -> str:
+    """The refusal for a hub signer record at path with no member_swarms field, naming the command that adds it."""
+    return (
+        f"the hub signer record {path} has no {FIELD} field, so the hub scopes no member and mints no bus "
+        "credential; run agentihooks hive scope on the hub first"
+    )
+
+
 def sync_target(environ: Mapping[str, str]) -> str | None:
     if signer_path(environ) is None:
         return None

@@ -11,12 +11,12 @@ def renew(store: Any, slug: str, legacy: Sequence[AgentRecord], lease_ms: int) -
     """Renew the claim lease of every agent of the swarm outside ``legacy``.
 
     Its hive published its execution start, so the reap pass leaves it to the hub and only this renewal keeps its claim
-    past the first lease. A claim naming another agent, or one already lapsed, is left alone; the memory bus backend
-    owns no agent.
+    past the first lease. A finished agent is left out so its claim lapses and its task can be claimed again. A claim
+    naming another agent, or one already lapsed, is left alone; the memory bus backend owns no agent.
     """
     if BusConfig.from_environ().backend == "memory":
         return
     judged = {agent.name for agent in legacy}
     for agent in store.agents(slug):
-        if agent.name not in judged:
+        if agent.name not in judged and agent.state != "finished":
             store.refresh(slug, agent.task, agent.name, lease_ms)

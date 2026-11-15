@@ -39,26 +39,6 @@ class RuntimeCalls:
         return self.port.dismiss(agent, deadline=self.deadline)
 
 
-@dataclass(frozen=True)
-class AdmissionCalls:
-    """The pending admission gate of the spawn helpers, over the runtime port."""
-
-    port: Runtime
-    deadline: Deadline
-
-    def admit(self, slug: str, tasks: Sequence[Mapping[str, Any]], now_ms: int) -> Any:
-        return self.port.admit(slug, tasks, now_ms, deadline=self.deadline)
-
-    def release(self, slug: str, task_id: str, reservation: str) -> None:
-        self.port.release_admission(slug, task_id, reservation, deadline=self.deadline)
-
-    def held(self, slug: str, task_id: str) -> str:
-        return self.port.held_admission(slug, task_id, deadline=self.deadline)
-
-    def activate(self, slug: str, task_id: str, reservation: str) -> bool:
-        return self.port.activate_admission(slug, task_id, reservation, deadline=self.deadline)
-
-
 _STORE_GROUPS = frozenset({"redis", "seats", "memory", "culture", "execution_registry", "names"})
 
 

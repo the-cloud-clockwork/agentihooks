@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/outage.py:scripts.swarm.outage.x_share:f0c6653f1d645b6f2705c2679ddcee2c692bc903f6f9dd3ac8fea5e79ba9e59d": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns store unchanged at runtime, so .redis reads the same attribute and the annotation is erased; replacing the cast type with None changes no output."
+  }
+}

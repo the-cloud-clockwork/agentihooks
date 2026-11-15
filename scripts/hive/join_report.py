@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any
 from scripts.hive import registry
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from redis import Redis
 
     from scripts.swarm.store import AgentRecord
@@ -28,11 +30,29 @@ HEARTBEAT_MS = 180_000
 LEDGER_RETRY_MS = 30_000
 LEDGER_CHECKS = ("ledger_join", "ledger_write")
 GONE = "agent gone from the swarm"
+RESTARTED = "agent ended with its member's restart"
 ENDED = ("finished", "ended")
 
 
 def key(hive: str) -> str:
     return f"{registry.key(hive)}:join-reports"
+
+
+def epoch(boot_id: "Path", proc: "Path") -> str:
+    """One life of this member's process namespace, the boot and the clock tick its process 1 started at, which a
+    pod restart replaces; empty when unreadable."""
+    try:
+        tick = (proc / "1" / "stat").read_text().rpartition(")")[2].split()[19]
+        return f"{boot_id.read_text().strip()}/{tick}"
+    except (OSError, IndexError):
+        return ""
+
+
+def local_epoch() -> str:
+    """This host's epoch."""
+    from scripts.swarm_v2.runtime.process import BOOT_ID, PROC
+
+    return epoch(BOOT_ID, PROC)
 
 
 def graded(report: dict[str, Any]) -> dict[str, Any]:
@@ -101,6 +121,8 @@ def start(redis: "Redis", slug: str, agent: "AgentRecord", session: str, checks:
             "status": "running",
             "checks": checks,
             "context": context,
+            "member": registry.member_name(),
+            "epoch": local_epoch(),
         }
     )
     redis.hset(key(host(agent)), agent.execution_id, json.dumps(report))
@@ -215,6 +237,18 @@ def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[di
     return kept
 
 
+def end_restarted(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[dict]:
+    """End the reports this member wrote in an earlier epoch, whose agents died with its restart, and keep the rest."""
+    member, current = registry.member_name(), local_epoch()
+    kept = []
+    for report in reports:
+        if current and report.get("member") == member and (report.get("epoch") or current) != current:
+            end(redis, hive, report["execution_id"], report["session_id"], RESTARTED, "ended", at)
+        else:
+            kept.append(report)
+    return kept
+
+
 def held_checks(redis: "Redis", report: dict[str, Any]) -> dict[str, bool]:
     """A check that passed at join stays passed; a check still missing takes the fresh probe."""
     stored: dict[str, Any] = report["checks"]
@@ -226,7 +260,7 @@ def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     from redis.exceptions import WatchError
 
     reports = [report for report in listing(redis, hive) if report["status"] == "running"]
-    for report in end_gone(redis, hive, reports, at):
+    for report in end_gone(redis, hive, end_restarted(redis, hive, reports, at), at):
         if at - report["heartbeat_at"] < HEARTBEAT_MS:
             continue
         checks = held_checks(redis, report)

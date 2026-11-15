@@ -36,6 +36,9 @@ class _Redis:
     def set(self, key: str, value: object) -> None:
         self.keys[key] = value
 
+    def delete(self, *keys: str) -> int:
+        return sum(self.keys.pop(key, None) is not None for key in keys)
+
 
 class _Store:
     def __init__(self, state: str, keys: dict[str, object] | None = None) -> None:
@@ -172,6 +175,21 @@ def test_a_stopped_swarm_that_sleeps_finishes_the_pass(monkeypatch: pytest.Monke
     assert seen[0][1][5].args == ("sw", store, state["ledger"], {"t1": {"id": "t1"}})
     assert seen[2][1] == ("sw", store, state["ledger"], {"tasks": [{"id": "t1"}], "slug": "sw"})
     assert store.updates == []
+
+
+@pytest.mark.feature("events-outage-hold-hub-agents")
+def test_a_stopped_swarm_clears_its_shared_outages(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import outage
+
+    store = _Store("stopped", {f"sw:{outage.SHARED}": "published"})
+    state, box = _state(store)
+    monkeypatch.setattr(automated_gc, "run", lambda *args: [])
+    monkeypatch.setattr(tick_module, "_woken", lambda slug, config, store, ledger: False)
+    monkeypatch.setattr(tick_module, "_close_space", lambda *args: [])
+    monkeypatch.setattr(tick_module, "_bin_closed", lambda *args: [])
+    engine.run_group("start", _ctx(state))
+    assert box["finished"] is True
+    assert f"sw:{outage.SHARED}" not in store.redis.keys
 
 
 def test_a_stopped_swarm_with_retired_tasks_awake_keeps_finishing(monkeypatch: pytest.MonkeyPatch) -> None:

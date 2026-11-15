@@ -1,0 +1,1 @@
+The hub exit handler holds an engineer the hub started over the bus while a Redis, ledger or provider outage is open or its outage resume is pending, so the exit neither retires it nor reopens its task until recovery has run.

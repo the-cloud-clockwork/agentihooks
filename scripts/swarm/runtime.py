@@ -239,6 +239,19 @@ def _pinned(worn, revision):
     return ["--bundle-revision", revision]
 
 
+def _slot_room(task: dict[str, Any], harness: str, account: str | None) -> bool:
+    """Whether a saved account routes the launch: outside a hive slot launch always, on one only while the hub
+    account slot holds or takes a worker seat on it for this execution, so a full account never pins a successor."""
+    if not (account and task.get("account_slot_hive")):
+        return bool(account)
+    from scripts.hive import account_slots
+
+    try:
+        return account_slots.room(task["account_slot_hive"], task["execution_id"], harness, account)
+    except account_slots.Unavailable as exc:
+        raise SpawnError(str(exc), "unavailable") from exc
+
+
 def _predecessor(task):
     conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
     return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
@@ -850,14 +863,15 @@ class HerdrRuntime:
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = bool(forced)
+        repick = route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer))
         route = forced or (
             ["--route", "interactive"]
             if route_kind == "interactive"
-            else (["--route", saved["account"]] if saved.get("account") else [])
+            else (["--route", saved["account"]] if not repick and _slot_room(task, agent, saved.get("account")) else [])
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer)):
+        if repick:
             account, routed = self._route_account(agent, saved, task["id"], lane, admitted)
             route = ["--route", routed.name]
         with self._seat_returned_on_failure(account, lane, agent):

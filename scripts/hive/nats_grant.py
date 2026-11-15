@@ -12,7 +12,7 @@ from scripts import openbao_kv
 from scripts.events import nkey, subjects
 from scripts.events.dead import DEAD_STREAM
 from scripts.events.resource_names import legacy_stream_name
-from scripts.hive import auth, buckets
+from scripts.hive import auth, buckets, stop_names
 from scripts.hub import slots
 
 if TYPE_CHECKING:
@@ -26,6 +26,9 @@ ACCOUNT_NAME = "SWARM"
 REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
 PUSH_TIMEOUT_S = 10
+UNSCOPED_RECORD = (
+    "the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential"
+)
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
 # A render with no member, such as the grant grader's, names no one hive.
 ANY_HIVE = "*"
@@ -61,8 +64,10 @@ MEMBER_PUBLISH = (
 )
 MEMBER_DENY = (
     *(f"{subjects.PREFIX}.*.{family}execution.stop{tail}" for family in ("", "events.") for tail in ("", ".>")),
+    f"{subjects.PREFIX}.*.{stop_names.FAMILY}.>",
     *(f"{subjects.PREFIX}.*.{family}execution.exited" for family in ("", "events.")),
 )
+MEMBER_SUB_DENY = (f"{subjects.PREFIX}.*.{stop_names.FAMILY}.>",)
 SCHEDULER_BUCKET = "scheduler"
 SCHEDULER_STREAM_VERBS = ("INFO", "MSG.GET", "CREATE")
 CONTROLLER_BUCKETS = (
@@ -149,6 +154,17 @@ def swarm_publish(swarm: str) -> list[str]:
                 f"$JS.ACK.{stream}.>",
             )
         ),
+    ]
+
+
+def stop_publish(swarm: str, member: str) -> list[str]:
+    """The stop stream grants of one member in one swarm: stream info and its own stop consumer only."""
+    stream, consumer = stop_names.stream(swarm), stop_names.consumer(swarm, member)
+    return [
+        f"$JS.API.STREAM.INFO.{stream}",
+        f"$JS.API.CONSUMER.INFO.{stream}.{consumer}",
+        f"$JS.API.CONSUMER.MSG.NEXT.{stream}.{consumer}",
+        f"$JS.ACK.{stream}.{consumer}.>",
     ]
 
 
@@ -245,10 +261,14 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str 
         )
     ]
     publish += own
+    publish += [subject for swarm in swarms for subject in stop_publish(swarm, member)]
     return {
         **user_claims(),
         "pub": {"allow": publish, "deny": list(MEMBER_DENY)} if publish else {"deny": [">"]},
-        "sub": {"allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"]},
+        "sub": {
+            "allow": [*(f"{subjects.PREFIX}.{swarm}.>" for swarm in swarms), f"{subjects.inbox(user)}.>"],
+            "deny": list(MEMBER_SUB_DENY),
+        },
     }
 
 
@@ -264,17 +284,19 @@ def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:
     return nkey.derive(signer.account, nkey.USER, member_id)
 
 
-def require_listed(signer: Signer, member_id: str) -> None:
-    if signer.member_swarms is not None and member_id not in signer.member_swarms:
+def require_listed(signer: Signer, member_id: str) -> tuple[str, ...]:
+    if signer.member_swarms is None:
+        raise auth.HiveError(UNSCOPED_RECORD)
+    if member_id not in signer.member_swarms:
         raise auth.HiveError(
             f"the hub record lists no member swarms for hive member {member_id}; it mints no unscoped bus credential"
         )
+    return tuple(signer.member_swarms[member_id])
 
 
 def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
-    require_listed(signer, member_id)
-    swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
+    swarms = require_listed(signer, member_id)
     claims = member_claims(user.public, swarms, member=member_id)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 

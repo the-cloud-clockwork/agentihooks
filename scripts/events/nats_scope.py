@@ -11,7 +11,7 @@ from .nats_names import existing_stream
 from .nats_state import ScopedStateStore
 from .resource_names import legacy_stream_name
 from .scope import ScopedLog, queue_lane
-from .subjects import PREFIX, in_swarm, stream_name, subject
+from .subjects import PREFIX, STOPS, in_swarm, stream_name, subject
 
 if TYPE_CHECKING:
     from .nats import NatsBus
@@ -54,8 +54,28 @@ class NatsScopedBus:
                         duplicate_window=_seconds(root._config.dedupe_window_ms),
                     )
                 )
+            root._loop.run(
+                root._js.add_stream(
+                    name=stream_name(swarm, STOPS),
+                    subjects=[f"{subject(swarm, STOPS.lower())}.>"],
+                    duplicate_window=_seconds(root._config.dedupe_window_ms),
+                )
+            )
             for bucket in SCOPED_STATE_BUCKETS:
                 self.state(bucket)
+        self.stops = ScopedLog(
+            NatsEventLog(
+                root._loop,
+                root._js,
+                root._config.queue,
+                stream_name(swarm, STOPS),
+                root._config.provision,
+                swarm,
+                root._config.credentials,
+            ),
+            swarm,
+            STOPS.lower(),
+        )
         self.events = ScopedLog(
             NatsEventLog(
                 root._loop,

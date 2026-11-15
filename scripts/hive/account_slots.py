@@ -206,7 +206,7 @@ def _slots(bus: Bus, backend: str, hive: str, read: Callable[[], dict], environ:
     return Remote(asker(bus, _swarm(environ), hive), hive, read)
 
 
-def _reading(hive: str) -> dict:
+def _reading(hive: str) -> dict[str, Any]:
     from hooks.context import account_sessions
     from scripts.hive import daemon
     from scripts.swarm.store import connect
@@ -237,6 +237,23 @@ def execute(
     try:
         slots = _slots(bus, config.backend, hive, lambda: _reading(hive), environ)
         return slots.launch(environ[EXECUTION_ENV], harness, account, lambda selected: invoke(child), master=master)
+    finally:
+        bus.close()
+
+
+def room(hive: str, execution: str, harness: str, account: str) -> bool:
+    """Whether the hub holds or takes a worker slot on ``account`` for ``execution`` on ``hive``, reserving it so the
+    launcher's own take for the same execution finds the holder."""
+    from scripts.events.config import BusConfig
+    from scripts.events.factory import open_bus
+
+    config = BusConfig.from_environ()
+    bus = open_bus(config)
+    try:
+        slots = _slots(bus, config.backend, hive, lambda: _reading(hive), os.environ)
+        return slots.take(execution, harness, account) == account
+    except Exception as exc:
+        raise Unavailable("Account slot admission failed") from exc
     finally:
         bus.close()
 
