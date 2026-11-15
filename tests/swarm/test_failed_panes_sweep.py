@@ -2,7 +2,6 @@
 
 import json
 
-import fakeredis
 import pytest
 
 from scripts.swarm import failed_panes
@@ -53,6 +52,8 @@ class _Runtime:
 
 @pytest.fixture
 def store() -> RedisStore:
+    import fakeredis
+
     redis_store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     redis_store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=0))
     return redis_store
