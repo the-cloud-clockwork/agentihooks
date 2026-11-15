@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -49,7 +50,12 @@ def attest(folder, record, source=""):
     )
 
 
-def evidence(tmp_path, *, reused=False, run_id=123):
+def shard_artifacts(shards):
+    legs = {name: re.fullmatch(r".+-3\.12-(\d+)", name) for name in EXPECTED_ARTIFACTS}
+    return {name for name, leg in legs.items() if leg is None or int(leg[1]) <= shards}
+
+
+def evidence(tmp_path, *, reused=False, run_id=123, shards=20):
     run = {
         "id": run_id,
         "run_attempt": 2,
@@ -74,9 +80,9 @@ def evidence(tmp_path, *, reused=False, run_id=123):
     folder.mkdir()
     attest(folder, record)
     jobs = [{"name": "reuse", "conclusion": "success"}]
-    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)]
+    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, shards + 1)]
     (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
-    artifacts = [{"name": name, "expired": False} for name in sorted(EXPECTED_ARTIFACTS)]
+    artifacts = [{"name": name, "expired": False} for name in sorted(shard_artifacts(shards))]
     (folder / "artifacts.jsonl").write_text("".join(json.dumps(item) + "\n" for item in artifacts))
     (tmp_path / "runs.json").write_text(json.dumps({"workflow_runs": [run]}))
     return run, record, folder
@@ -176,7 +182,7 @@ def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
     output = tmp_path / "outputs"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_dev_reuse.main(["--head", "d" * 40, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
-    assert output.read_text() == "source=\n"
+    assert output.read_text() == "source=\nqueue_legs=\n"
 
 
 def test_cli_publishes_passed_source(tmp_path, monkeypatch):
@@ -185,7 +191,49 @@ def test_cli_publishes_passed_source(tmp_path, monkeypatch):
     output.write_text("existing=kept\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
-    assert output.read_text() == "existing=kept\nsource=123\n"
+    legs = json.dumps({str(leg): leg for leg in range(1, 21)}, separators=(",", ":"))
+    assert output.read_text() == f"existing=kept\nsource=123\nqueue_legs={legs}\n"
+
+
+@pytest.mark.parametrize("shards", [12, 16, 19])
+def test_a_queue_run_with_fewer_shards_feeds_the_dev_push(tmp_path, shards):
+    evidence(tmp_path, shards=shards)
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
+
+
+def test_cli_maps_every_push_leg_onto_a_sixteen_shard_queue_run(tmp_path, monkeypatch):
+    evidence(tmp_path, shards=16)
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
+    legs = {**{str(leg): leg for leg in range(1, 17)}, "17": 1, "18": 2, "19": 3, "20": 4}
+    assert output.read_text() == f"source=123\nqueue_legs={json.dumps(legs, separators=(',', ':'))}\n"
+
+
+def test_a_queue_run_with_a_missing_middle_shard_never_feeds_the_dev_push(tmp_path):
+    _, _, folder = evidence(tmp_path, shards=16)
+    jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
+    (folder / "jobs.jsonl").write_text(
+        "".join(json.dumps(job) + "\n" for job in jobs if job["name"] != "unit (3.12, 9)")
+    )
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+def test_a_queue_run_whose_last_shard_failed_never_feeds_the_dev_push(tmp_path):
+    _, _, folder = evidence(tmp_path, shards=16)
+    with (folder / "jobs.jsonl").open("a") as jobs:
+        jobs.write(json.dumps({"name": "unit (3.12, 17)", "conclusion": "failure"}) + "\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+@pytest.mark.parametrize("missing", ["coverage-3.12-16", "durations-3.12-16", "flakes-3.12-16"])
+def test_a_sixteen_shard_queue_run_missing_its_last_artifact_never_feeds_the_dev_push(tmp_path, missing):
+    _, _, folder = evidence(tmp_path, shards=16)
+    items = [json.loads(line) for line in (folder / "artifacts.jsonl").read_text().splitlines()]
+    (folder / "artifacts.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in items if item["name"] != missing)
+    )
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
 def source_evidence(tmp_path, queue, record, folder):
