@@ -8,7 +8,7 @@ nav_order: 13
 
 The Mutation workflow runs beside Tests for pull requests into dev. It discovers changed Python files in `hooks` and `scripts` from the pull request merge base. Each file runs in an isolated copy with pinned mutmut 3.6.0. Pytest runs serially; matching, importing and recorded covering tests provide mutmut's function coverage stats and per mutant test selection.
 
-Open the draft pull request into `dev` at the first push; for a stacked branch, open it into its dependency branch. The branch mutation preflight is removed: a branch push runs no mutation, and the pull request Tests run is the only mutation source. Sections below that describe the preflight are history until the preflight documentation pass rewrites them. Tests and mutation runs execute in CI only.
+Open the draft pull request into `dev` at the first push; for a stacked branch, open it into its dependency branch. A branch push runs no mutation: the pull request Tests run grades mutation on the pull request head, and the Proofs workflow runs focused mutation proofs. Tests and mutation runs execute in CI only.
 
 ## Required gate proof
 
@@ -16,7 +16,7 @@ Open the draft pull request into `dev` at the first push; for a stacked branch, 
 in Tests, and `Gate — Required` is the required status check of both dev
 rulesets (`.github/rulesets/dev-history.json`, `dev-no-delete.json`). On a pull
 request into dev `mutation-plan` must succeed; `mutation-stats` must succeed
-unless a reused plan forwards its result; `mutation` must succeed unless the
+unless the plan forwards its result; `mutation` must succeed unless the
 plan grades inline in `mutation-stats`.
 
 The both-ways proof is two full Tests dispatches with `gate_plant=true` on the
@@ -117,9 +117,8 @@ jq '."scripts/swarm/health/verdicts.py"' \
 A successful lookup prints
 `Recorded coverage from dev run RUN_ID adds the tests that executed a changed function.`
 Read the returned entries for the expected helper caller, then inspect the
-mutation report to establish whether those tests killed the mutant. A reused
-report can skip planning and have no new selection artifact; follow its
-`reuse.json` to the source run. The selection artifact is retained for one day;
+mutation report to establish whether those tests killed the mutant. The
+selection artifact is retained for one day;
 mutation reports are retained for seven days.
 
 ### Selection limits and troubleshooting
@@ -250,7 +249,7 @@ modules in the tree.
 
 The fallback covers reading the record only. A failed upload or download of
 the planner's own selection artifact between jobs is a separate transfer
-failure; see [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+failure; see [Empty pull request runs](#empty-pull-request-runs).
 
 ### Delivery evidence
 
@@ -838,12 +837,12 @@ described under
 
 ### Inspect a plan
 
-The plan step prints `Mutation shards: N` and `Stats parts: P`; the `refine`
-step prints `Measured mutation worker seconds` and `Measured mutation shards`.
+The plan step prints `Mutation shards: N` and `Stats parts: P`; the
+`mutation-refine` job prints `Measured mutation worker seconds` and `Measured mutation shards`.
 The measured plan carries the worker count it was sized with:
 
 ```bash
-gh run download RUN_ID --name mutation-plan --dir EVIDENCE_DIR/plan
+gh run download RUN_ID --name mutation-measured-plan --dir EVIDENCE_DIR/plan
 jq '{workers, shards, estimated_worker_seconds, shard_worker_seconds}' \
   EVIDENCE_DIR/plan/plan.json
 ```
@@ -893,8 +892,8 @@ The decision reads two outputs of `mutation-plan`:
 | two or more shards | any | any | Collects its parts | One job per shard |
 
 `python -m scripts.ci_mutation.plan` writes `shards` and `stats_parts` from its
-measured shard and part counts. A reused report also sets both to `[0]`; see
-[Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
+measured shard and part counts. An empty change set sets both to `[0]`; see
+[Empty pull request runs](#empty-pull-request-runs).
 
 The inline step runs after **Upload mutation stats part**, on the same runner:
 
@@ -1021,8 +1020,6 @@ statistics cache entries. This happens automatically in the pull request
 These in-memory values reduce repeated planning work. The persisted statistics
 cache still validates its inputs before reusing collected results, as described
 in [Measured shards and split mutants](#measured-shards-and-split-mutants).
-[Report reuse](#reused-and-empty-pull-request-runs) is a separate decision that
-can skip planning altogether.
 
 ### Planning reuse configuration and usage
 
@@ -1124,7 +1121,6 @@ still install `.[dev,all]`.
 
 ```yaml
       - name: Install dependencies
-        if: steps.reuse.outputs.reused != 'true'
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 ```
 
@@ -1304,7 +1300,7 @@ A broken contract fails the unit suite with the test name above. Move the
 
 ## Measured shards and split mutants
 
-The preflight collects shared function-to-test coverage and test durations, then its `refine` job builds the measured plan. Expensive mutants are placed first on the least loaded shard. A survivor must run all its covering tests, which can leave one shard running long after shards whose mutants were killed early.
+The pull request Tests run collects shared function-to-test coverage and test durations in its `mutation-stats` parts, then its `mutation-refine` job builds the measured plan. Expensive mutants are placed first on the least loaded shard. A survivor must run all its covering tests, which can leave one shard running long after shards whose mutants were killed early.
 
 The planner splits a heavy function's covering tests into a shared fast head and balanced tail slices. Every mutant of that function runs as several units: each unit runs the head plus one slice on a distinct shard. The head repeats so tests that kill mutants quickly remain available on every unit; the slices together retain every remaining covering test. Other mutants keep one shard assignment.
 
@@ -1334,25 +1330,25 @@ mutmut stops a mutant at its first failing test, and a shard runs the test that 
 
 For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
 
-The preflight `stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads its cache folder and `refine` merges them and saves the cache once after all parts finish. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. The pull request `mutation-stats` parts of the Tests workflow keep the same merged cache; with more parts each uploads only the entries it wrote, and the first `mutation` shard restores the previous merged cache, lays the parts over it and saves it. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often.
+The `mutation-stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads only the entries it wrote, and the first `mutation-shard` job restores the previous merged cache, lays the parts over it and saves it. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often.
 
-Only the branch preflight (`mutation-preflight.yml`) carries killing tests between runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The preflight keeps them per branch in an actions cache:
+The pull request Tests run carries killing tests between its runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The run keeps them per ref in an actions cache:
 
 | Job | Killing test step |
 |---|---|
-| `stats`, when it plans as a single job, and `refine` | Restore the newest `mutation-killers-v1-<os>-<branch>-` cache before building the plan |
+| `mutation-stats`, when it plans as a single job, `mutation-refine`, `mutation-probe` and `mutation-replan` | Restore the newest `mutation-killers-v1-<os>-<ref>-` cache before building the plan |
 | `mutation-shard` | Restore the same cache; `seed_measured_shard` copies it into the shard work folder, so the shard runs the priced test first. After mutating, upload this shard's kills as `mutation-killers-<shard>` |
 | `mutation` | Restore the cache, add every shard's kills on top, and save the union under a key naming this run and attempt |
 
-A branch's first preflight has no cache and prices every mutant from its traced tests; its second run is the first to use kills. The kill artifacts are kept for one day. The pull request Tests run plans without a kill cache, though each of its shards still orders tests by the kills it records during that run.
+A pull request's first run has no cache and prices every mutant from its traced tests; its second run is the first to use kills. The kill artifacts are kept for one day. Each shard also orders tests by the kills it records during that run.
 
-Inspect a preflight's kill handling in its job logs:
+Inspect a run's kill handling in its job logs:
 
 | Log line | Where | Meaning |
 |---|---|---|
 | `Cache restored from key: mutation-killers-v1-...` | Restore steps | Earlier kills reached this job |
-| `Cache not found for input keys: ...` | Restore steps | First run on the branch, or the cache expired |
-| `Measured mutation worker seconds: N` | `refine` | The plan's total estimate, with kill pricing applied |
+| `Cache not found for input keys: ...` | Restore steps | First run on the ref, or the cache expired |
+| `Measured mutation worker seconds: N` | `mutation-refine` | The plan's total estimate, with kill pricing applied |
 | `Functions with a recorded killing test: N` | `mutation-shard`, **Collect the tests that killed mutants** | Kills this shard uploads |
 
 ```bash
@@ -1361,7 +1357,7 @@ gh run view RUN_ID --log | grep -E 'mutation-killers-v1|Measured mutation worker
 
 When the estimate still runs far over the **Mutate changed Python files** step time, check whether the restore found a cache, then whether the heavy mutants belong to split functions: split units keep their traced cost even when a killing test is known. A cached killer that no longer kills falls back to normal ordering in the shard, and is replaced by the next test that kills.
 
-[Pull request 4753](https://github.com/the-cloud-clockwork/agentihooks/pull/4753) delivered kill pricing and the cache. In [proof run 39237282629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237282629) the first attempt found no cache and planned 418.3 worker seconds for 40 mutants against 52 worker seconds of mutation; the rerun restored three killing tests and planned 226.1 against 56. [Seeding proof run 39239742322](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39239742322) showed `refine`, all eight shards and the merge job restoring the cache and the merge job saving the union. Before the merge, 625 preflight shards between 18 October 09:50 UTC and 19 October 09:50 UTC had a median planned over actual ratio of 9.77, and 6.72 for shards without split units. The remaining floor is the fixed 5.6 seconds per mutant against about 1.4 seconds observed in the proof run.
+[Pull request 4753](https://github.com/the-cloud-clockwork/agentihooks/pull/4753) delivered kill pricing and the cache. In [proof run 39237282629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39237282629) the first attempt found no cache and planned 418.3 worker seconds for 40 mutants against 52 worker seconds of mutation; the rerun restored three killing tests and planned 226.1 against 56. [Seeding proof run 39239742322](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39239742322) showed `refine`, all eight shards and the merge job restoring the cache and the merge job saving the union. Before the merge, 625 mutation shards between 18 October 09:50 UTC and 19 October 09:50 UTC had a median planned over actual ratio of 9.77, and 6.72 for shards without split units. The remaining floor is the fixed 5.6 seconds per mutant against about 1.4 seconds observed in the proof run.
 
 ### Test durations adjusted for statistics contention
 
@@ -1390,7 +1386,7 @@ There is no setting for the ratio, and no log line prints it. Compare `Measured 
 
 ### Early stage and shards sized after it
 
-A preflight plan with split mutants runs two stages. In the early stage (`probe`), each split mutant runs only its head tests once. The shards then skip the head and run only what the early stage left. Each stage is sized for its own work, so neither stage is sized for the worst case of the other.
+A plan with split mutants runs two stages. In the early stage (`mutation-probe`), each split mutant runs only its head tests once. The shards then skip the head and run only what the early stage left. Each stage is sized for its own work, so neither stage is sized for the worst case of the other.
 
 | Stage | Job count | Work priced |
 |---|---|---|
@@ -1415,21 +1411,21 @@ A shard grades its unsplit mutants normally and records split results under `uni
 
 Splitting changes execution units, not the selected mutant set or the clearance fingerprint. An uncleared combined survivor on graded lines still fails. Per-shard `expected` and `graded` count assigned units, so their sum can exceed the number of distinct mutants; use the merged file counts when comparing distinct mutant totals. Retained mutation replay uses the same split selection and combined grading, and checks completeness against the planned unit count.
 
-### Inspect a preflight
+### Inspect a run
 
-Download evidence from the preflight run being investigated into a task work folder. Replace `RUN_ID` and `EVIDENCE_DIR` with that run and folder:
+Download evidence from the Tests run being investigated into a task work folder. Replace `RUN_ID` and `EVIDENCE_DIR` with that run and folder:
 
 ```bash
 gh run download RUN_ID \
-  --name mutation-plan \
+  --name mutation-measured-plan \
   --dir EVIDENCE_DIR/plan
 
 gh run download RUN_ID \
-  --name mutation-preflight-report \
+  --name mutation-report \
   --dir EVIDENCE_DIR/merged
 
 gh run download RUN_ID \
-  --pattern 'mutation-preflight-shard-*' \
+  --pattern 'mutation-report-*' \
   --dir EVIDENCE_DIR/shards
 
 jq '{shards, shard_worker_seconds, assignments, splits}' \
@@ -1439,7 +1435,7 @@ jq '{failed, shards, files}' \
   EVIDENCE_DIR/merged/report.json
 ```
 
-In `assignments`, an integer is an unsplit mutant's shard; an array maps each slice position to its shard. `splits` records the function's head, slices and unit costs. Shard reports record `wall_seconds`, `expected`, `graded`, `complete`, `budget_exhausted` and estimated worker seconds. Plan and report artifacts are retained for seven days. A reused report or a run with no changed Python may have no measured plan or shard artifacts; inspect the merged evidence and run steps first.
+In `assignments`, an integer is an unsplit mutant's shard; an array maps each slice position to its shard. `splits` records the function's head, slices and unit costs. Shard reports record `wall_seconds`, `expected`, `graded`, `complete`, `budget_exhausted` and estimated worker seconds. Plan and report artifacts are retained for seven days. A run with no changed Python may have no measured plan or shard artifacts; inspect the merged evidence and run steps first.
 
 When investigating uneven work, compare the **Mutate changed Python files** step durations within one run, excluding setup and runner waits. Inspect the heavy function's slices and shard completeness before comparing distinct mutant counts. Missing reports, incomplete grading and budget exhaustion are failures to investigate; shard balancing retains every selected mutant and covering test.
 
@@ -1452,13 +1448,13 @@ gh workflow run proofs.yml \
   -f base=third
 ```
 
-The replay uploads `mutation-replay-proof` with the plan and completeness evidence. It checks a retained case rather than measuring current branch preflight timing.
+The replay uploads `mutation-replay-proof` with the plan and completeness evidence. It checks a retained case rather than measuring current pull request mutation timing.
 
 ### Delivery evidence and timing limits
 
-[Pull request 4025](https://github.com/the-cloud-clockwork/agentihooks/pull/4025) delivered splitting and combined grading, with [successful branch preflight 39028535693](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39028535693). Its planning replay of run 38999090987 divided the slow survivor's function into nine units of about 173 estimated worker seconds and estimated shard loads between 3000 and 3108 worker seconds. Those numbers describe the plan, not observed shard completion times.
+[Pull request 4025](https://github.com/the-cloud-clockwork/agentihooks/pull/4025) delivered splitting and combined grading, with [successful mutation run 39028535693](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39028535693). Its planning replay of run 38999090987 divided the slow survivor's function into nine units of about 173 estimated worker seconds and estimated shard loads between 3000 and 3108 worker seconds. Those numbers describe the plan, not observed shard completion times.
 
-The source acceptance target is a slowest mutation shard within sixty seconds of the next slowest, preserving the graded mutant set. The recorded comparison covered twenty preflight runs before and twenty-one after: the maximum gap between the slowest and next slowest shard fell from 369 to 18 seconds. Three earlier runs exceeded sixty seconds; none of the later runs did. All later runs reported complete grading with expected and graded unit counts equal; two earlier runs were incomplete. These are observations across different branch workloads, rather than a replay of identical mutant sets.
+The source acceptance target is a slowest mutation shard within sixty seconds of the next slowest, preserving the graded mutant set. The recorded comparison covered twenty mutation runs before and twenty-one after: the maximum gap between the slowest and next slowest shard fell from 369 to 18 seconds. Three earlier runs exceeded sixty seconds; none of the later runs did. All later runs reported complete grading with expected and graded unit counts equal; two earlier runs were incomplete. These are observations across different branch workloads, rather than a replay of identical mutant sets.
 
 For example, [earlier run 38999090987](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38999090987) recorded shard walls of 399 and 30 seconds for its slowest two shards. [Later run 39052293854](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39052293854) recorded 212 and 194 seconds, an eighteen-second gap, with all 1656 planned units graded. The target compares the slowest two shards, not the spread across all shards or their absolute completion time. See [Tests workflow timing](../ci-timing.md) for the surrounding CI timing context.
 
@@ -1469,14 +1465,13 @@ A branch is graded only on its own lines, so a dev refresh or a stacked branch d
 - **Real bases.** The plan job resolves them once:
   - the merge base with the given base;
   - the merge base with `origin/dev`;
-  - every pushed commit inside the head whose own push Mutation preflight had a successful `mutation` job, or, for an open pull request, whose Tests run graded every shard, inline or in a shard job (see [Gate Required and graded bases](#gate-required-and-graded-bases)).
+  - every pushed commit inside the head whose pull request Tests run graded every shard, inline or in a shard job (see [Gate Required and graded bases](#gate-required-and-graded-bases)).
 - **Which lines count.** A line is graded only when it differs from every real base. Because the given base always counts, the scope never grows past `base...head`.
-- **Proof of grading.** The plan reads the preflight proof through the Actions API on the App token. Dispatched runs never count, since they choose their own base.
+- **Proof of grading.** The plan reads the Tests run proof through the Actions API on the App token. Dispatched runs never count, since they choose their own base.
 - **Weakened tests.** The narrowing never hides weakened tests. If the head changed `tests/` against a newer base beyond adding tests, every line that base excluded is graded again. Adding tests means new `test_` functions, or new `Test` classes holding only test methods, with only `pytest.mark` decorators, or imports in a new test file, and no reused or repeated name. An import added to an existing test file counts as a change, since it can shadow a fixture or builtin those tests use. Anything else counts as a change: an edit, a deletion, a rename, a skip marker, a fixture, a helper, a conftest or a data file.
-- **One list for every job.** The plan writes the resolved list as `bases`. The stats parts, shards, push preflight and the proofs mutation take it with `--bases`, so every job grades the same mutants.
+- **One list for every job.** The plan writes the resolved list as `bases`. The stats parts, shards and the proofs mutation take it with `--bases`, so every job grades the same mutants.
 
-- **Reuse on the push preflight.** Before the stats and shard legs take a batch runner, each under a concurrency group of its own run that the proofs workflow and other dispatches never wait on (see [Mutation preflight legs on the batch pool](../ci-timing.md#mutation-preflight-legs-on-the-batch-pool)), the cheap decision job reads the newest graded push preflight for the same head on any branch, then the branch's newest. When that run concluded success with a complete green report and this head equals it or only adds tests since, as defined above, its report is uploaded as this run's `mutation-preflight-report` with a `reuse.json` naming the source run, and the mutation job is skipped. A newer red or failed run, a missing report, any change outside `tests/` or any lookup error runs the mutation job as before, so no head goes green without a complete green report. A reused head never counts as a graded base. Measured on PR 2624: the full preflight 38151448161 took 116 s; the tests only head after it reused that report in run 38151636224, whose decision job took 18 s.
-- **Forwarding in the pull request plan.** When the pull request plan reuses the branch preflight report of its exact head, or its plan finds no changed Python file and grades that empty set itself, the plan job uploads the report as `mutation-report-0`. The `mutation-stats` and `mutation` jobs then run none of their own steps and still succeed, so Gate Required is unchanged. Measured on PR 3965: an empty change set spent 8 s in stats and 9 s in mutation in run 39019862061, against 25 s and 28 s in run 39018870323, with the same report. [Reused and empty pull request runs](#reused-and-empty-pull-request-runs) covers the conditions, what a forwarded run looks like and how to inspect one.
+- **Forwarding in the pull request plan.** When the pull request plan finds no changed Python file and grades that empty set itself, the plan job uploads the report as `mutation-report-0`. The `mutation-stats` and `mutation` jobs then run none of their own steps and still succeed, so Gate Required is unchanged. Measured on PR 3965: an empty change set spent 8 s in stats and 9 s in mutation in run 39019862061, against 25 s and 28 s in run 39018870323, with the same report. [Empty pull request runs](#empty-pull-request-runs) covers the conditions, what a forwarded run looks like and how to inspect one.
 
 Measured on dispatched proofs:
 
@@ -1487,27 +1482,17 @@ Measured on dispatched proofs:
 
 On the pull request that delivered this, the whole mutation chain finished 184 s into the Tests run: the plan, including the App token mint, took 21 s, and the stats and two shards finished by 184 s. Gate Required finished at 431 s, well inside the fifteen minute budget. Sonar and the coverage ratchet set that time, not mutation.
 
-## Reused and empty pull request runs
+## Empty pull request runs
 
-On a pull request into dev and on a dispatched Tests run, mutation runs as three jobs of the Tests workflow: `mutation-plan`, then the `mutation-stats` matrix, then the `mutation` shard matrix. All three are needs of Gate Required. Two cases need no mutant work, so the plan job forwards the final report, the preflight's for an exact head reuse and its own grading of an empty set otherwise, `mutation-stats` succeeds after its runner setup steps, and `mutation` is skipped as for a [single shard plan](#single-shard-plans-in-the-statistics-job). Exact head reuse applies only to pull requests; the empty change set path also applies to dispatched runs.
+On a pull request into dev and on a dispatched Tests run, mutation runs as three jobs of the Tests workflow: `mutation-plan`, then the `mutation-stats` matrix, then the `mutation` shard matrix. All three are needs of Gate Required. A change with no changed Python file needs no mutant work, so the plan job forwards its own grading of the empty set, `mutation-stats` succeeds after its runner setup steps, and `mutation` is skipped as for a [single shard plan](#single-shard-plans-in-the-statistics-job). This path applies to pull requests and dispatched runs.
 
 ### When the plan forwards
 
-The plan job sets its `forwarded` output to `true` in either case:
+The plan job sets its `forwarded` output to `true` in this case:
 
 | Case | Condition | Report in `mutation-report-0` |
 |---|---|---|
-| Exact head reuse | The reuse step finds a green branch preflight report for this exact head and base. | The preflight's `report.json` and evidence without its `scope.json`, plus `reuse.json` naming the source run and head |
-| Empty change set | Reuse found nothing, and `python -m scripts.ci_mutation.plan` reports `changed=0`: no changed Python file in `hooks` or `scripts` that still exists at the head, against the graded bases. A pull request that only deletes Python files takes this path. | The plan job's own grading of the empty set, run as `python -m scripts.ci_mutation --bases "$BASES" --budget 1080` |
-
-Exact head reuse runs `scripts.ci_mutation.reuse` from a detached checkout of the pull request base commit, so a branch cannot change the code that decides reuse. It reuses only when all of these hold:
-
-- The files that produce a preflight report are identical between that base commit and the head: `.github/workflows/mutation-preflight.yml`, `.github/workflows/test.yml`, `.github/actions/`, `.github/test-excludes.txt`, `pyproject.toml` and `scripts/ci_mutation/`.
-- The lookup walks completed push preflights on this branch for this head, newest first, and ignores cancelled and skipped runs. It takes the first run that concluded success with an unexpired `mutation-preflight-report` artifact; a success whose artifact is missing or expired is passed over for an older one. A newer run with a red report, or one that concluded failure, stops the walk and blocks reuse.
-- That report's `report.json` has no failed file, no file left unmutated and no file with failures.
-- Its `scope.json` names this head and the merge base of the head with `origin/dev`.
-
-A pull request whose head is a tests-only addition on top of a graded head does not qualify: unlike the push preflight's own reuse, the pull request plan requires the exact head. The pull request lookup does not wait for a preflight still running on the head; it reads only completed runs. A lookup error prints `Reuse lookup failed, mutating instead` and the run takes the normal path.
+| Empty change set | `python -m scripts.ci_mutation.plan` reports `changed=0`: no changed Python file in `hooks` or `scripts` that still exists at the head, against the graded bases. A pull request that only deletes Python files takes this path. | The plan job's own grading of the empty set, run as `python -m scripts.ci_mutation --bases "$BASES" --budget 1080` |
 
 Everything else runs unchanged. A change with one or more changed Python files still collects stats in every planned part and mutates in every planned shard, so the selected tests and the statistics match a run before forwarding existed.
 
@@ -1532,7 +1517,7 @@ report.
 The missing file path preserves test selection and mutation grading for older
 producers. It does not waive the mutation gate. A malformed file must be fixed
 in the producer; removing it to hide the failure discards the planned selection.
-For reused or empty reports, the [forwarding behavior](#when-the-plan-forwards)
+For empty reports, the [forwarding behavior](#when-the-plan-forwards)
 still applies, and forwarded jobs do not download a selection.
 
 #### Format and configuration
@@ -1586,7 +1571,6 @@ cat EVIDENCE_DIR/.mutation-selection.json
 | Symptom | Interpretation and action |
 |---|---|
 | No selection artifact and the older planner summary is present | Expected compatibility fallback; inspect stats and mutation results for the actual grade |
-| No selection artifact on a reused report | Expected; inspect the forwarded report and reuse evidence instead |
 | Contract step reports malformed selection | Read the producer output and correct its JSON or value types; this case never falls back |
 | Selection was promised but upload or download fails | Inspect the transfer step and artifact availability; the fallback covers an absent planner file, not a failed artifact transfer |
 
@@ -1601,23 +1585,16 @@ behavior.
 
 | Job | Forwarded run | Normal run |
 |---|---|---|
-| `mutation-plan` | Ends with `Forward the reused or empty mutation report`; a reused run skips installing dependencies and planning | Reuse lookup and planning; the forward step is skipped |
+| `mutation-plan` | Ends with `Forward the empty mutation report` | Planning; the forward step is skipped |
 | `mutation-stats (0)` | Succeeds after its runner setup and post steps; no `mutation-stats-*` artifact | Collects one stats part per matrix entry and uploads `mutation-stats-<part>` |
 | `mutation` | Skipped, since both matrices are `[0]`; uploads nothing | Mutates its shard and uploads `mutation-report-<shard>`, or is skipped when a [single shard plan](#single-shard-plans-in-the-statistics-job) mutates inside `mutation-stats (0)` |
 | Gate Required | Accepts the skipped `mutation` job because both outputs are `[0]` | Reads the same three job results, or the inline form for a single shard plan |
 
-A reused run sets both matrices to the single entry `[0]`. An empty change set gets `[0]` from the plan, since it has no mutants to split.
+An empty change set gets the single entry `[0]` for both matrices from the plan, since it has no mutants to split.
 
-The plan log names the path taken:
-
-```text
-Reused the green mutation report of run <preflight run id> for <head sha>
-```
-
-or, for an empty change set, with the last line printed by the `Grade the empty change set` step:
+For an empty change set the plan log ends with the line printed by the `Grade the empty change set` step:
 
 ```text
-No green mutation report covers this head; mutating
 Mutation bases: <base sha>
 Mutation shards: 1
 Stats parts: 1
@@ -1646,17 +1623,13 @@ Download the forwarded report:
 ```bash
 gh run download <run id> -n mutation-report-0 -D mutation-report
 cat mutation-report/report.json
-cat mutation-report/reuse.json
 ```
-
-`reuse.json` is present only for exact head reuse.
 
 ### Troubleshooting
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| `mutation-plan` fails at `Forward the reused or empty mutation report` with no files found | The forward step requires `.mutation-gate/`, and the reuse unpack or the empty grading wrote nothing | Read the reuse and `Grade the empty change set` step logs; Gate Required stays red because `mutation-stats` and `mutation` do not start after a failed plan |
-| A branch whose push preflight passed still runs the full stats and mutation jobs | The head changed one of the producer files listed above, the preflight graded another head or base, its report artifact expired, a newer preflight on the head failed, or the preflight had not completed when the plan looked | Expected; the run grades the change itself |
+| `mutation-plan` fails at `Forward the empty mutation report` with no files found | The forward step requires `.mutation-gate/`, and the empty grading wrote nothing | Read the `Grade the empty change set` step log; Gate Required stays red because `mutation-stats` and `mutation` do not start after a failed plan |
 | `mutation-plan` fails at `Grade the empty change set` | The empty grading exited nonzero | Fix the error named in the step log; the forward step still runs, and when it finds no files the grade step log is the evidence |
 | `mutation-stats` or `mutation` skipped rather than succeeded | `mutation-plan` did not succeed | Fix the plan failure; on a pull request into dev Gate Required needs all three mutation jobs to succeed, so a skipped one fails it |
 
@@ -1754,8 +1727,6 @@ Open the run page to read the job summary, or download the evidence. Every artif
 |---|---|---|
 | Tests, on a pull request | `mutation-stats` part | `mutation-evidence-stats-<part>` |
 | Tests, on a pull request | `mutation` shard, or the inline step of a single shard `mutation-stats` job | `mutation-report-<shard>` |
-| Mutation preflight, on a branch push | statistics part | `mutation-evidence-stats-<part>` |
-| Mutation preflight, on a branch push | `mutation-shard` | `mutation-preflight-shard-<shard>` |
 
 For example, for a failed statistics part:
 
@@ -1785,7 +1756,6 @@ The mutation planner tests check what a plan does, never how the planner spells 
 | Test module | What it checks |
 |---|---|
 | `tests/test_ci_mutation_plan.py` | Plans built in a real Git repository with real revisions: the selected tests and mutants, the duration budgets that size shards and statistics parts, the published `plan.json` and the planner CLI's printed result. Fakes that remain for `discover_changes` and `own_bases` accept any arguments; none answers only for one exact argument tuple, and the measured CLI test reads its head from a real `git rev-parse` |
-| `tests/test_ci_mutation_preflight.py` | Each planning step in the workflow: parsed arguments that run, published selections and matrices, and only the step environment keys the test is about. Environment checks assert single keys, such as `step["env"]["BASES"]`. The four steps whose whole mapping was compared before, the reuse, sizing, refine and merge steps, now add `UNRELATED_SETTING` first and then assert their own keys, so a new setting on a step passes |
 | `tests/test_ci_mutation_scope.py` | Finds the `mutation-plan` step by its `id`, `plan`, instead of by the start of its `run` text |
 
 Two pull requests delivered this:
@@ -1793,7 +1763,7 @@ Two pull requests delivered this:
 | Pull request | Change |
 |---|---|
 | [4811](https://github.com/the-cloud-clockwork/agentihooks/pull/4811), closing [4810](https://github.com/the-cloud-clockwork/agentihooks/issues/4810) | Planner tests check selection, budgets, Git revisions and public CLI results; the scope test finds the step by `id` |
-| [5455](https://github.com/the-cloud-clockwork/agentihooks/pull/5455), closing [5452](https://github.com/the-cloud-clockwork/agentihooks/issues/5452) | Preflight step environment checks assert only their own keys, so the added `MUTATION_SHARD_CPU_QUOTA` and any later setting pass |
+| [5455](https://github.com/the-cloud-clockwork/agentihooks/pull/5455), closing [5452](https://github.com/the-cloud-clockwork/agentihooks/issues/5452) | Workflow step environment checks assert only their own keys, so the added `MUTATION_SHARD_CPU_QUOTA` and any later setting pass |
 
 Both pull requests changed tests only; planner code and its outputs are unchanged.
 
@@ -1818,7 +1788,7 @@ The target, zero on heads that include pull request 4811, was met. Five after wi
 
 | Runs | Pull request | Classification |
 |---|---|---|
-| 39376506323, 39381366510 | 5140 | A preflight test compared a step's whole `env` with `==` and failed once the branch added `MUTATION_SHARD_CPU_QUOTA`. A separate class, fixed by pull request 5455 |
+| 39376506323, 39381366510 | 5140 | A workflow step test compared a step's whole `env` with `==` and failed once the branch added `MUTATION_SHARD_CPU_QUOTA`. A separate class, fixed by pull request 5455 |
 | 39380533356 | 5140 | Tests first red: a new behaviour test ran before its step existed |
 | 39392961654 | 5186 | Tests first red: `scope.SHARDS` was not yet implemented |
 
@@ -1858,7 +1828,7 @@ Each printed line is a run, a job and its match count. Then classify each matchi
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| A preflight test fails with `assert {...} == {...}` on a step `env` after a setting was added | A test still compares the whole mapping | Change it to add `UNRELATED_SETTING` and assert only its own keys, as `tests/test_ci_mutation_preflight.py` does |
+| A workflow step test fails with `assert {...} == {...}` on a step `env` after a setting was added | A test still compares the whole mapping | Assert only the keys the test is about, as [Writing a planner test](#writing-a-planner-test) shows |
 | A plan test fails after a planner refactor that kept the plan the same | The test pins an internal call or command text | Rewrite it to build a Git project and assert the plan's result |
 | A plan test fails because the selected tests changed | The planner's selection changed | Real behaviour change: confirm it is intended, then update the expected selection |
 | The scan prints a run on a branch that has not merged dev since 4811 | The branch head predates the change | Count it under heads without 4811; it is not a regression |
