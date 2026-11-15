@@ -638,7 +638,8 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
 
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms"
+        f"the hive stopped waiting at {admission.ANSWER_MS} ms release={admission.ANSWER_MS + 5} held=0 stopped=0 "
+        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 write=0"
     ]
 
 
