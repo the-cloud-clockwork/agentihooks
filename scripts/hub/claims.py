@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import Any, cast
+from typing import Any
 
 from scripts.events.envelope import Envelope
 from scripts.hub.registry import Reactor
@@ -61,7 +61,7 @@ class Claims:
         )
         if lives:
             self.store.clear_failed_harness(event.swarm, task)
-            store = cast(Any, self.store)
+            store: Any = self.store
             if store.claimant(event.swarm, task) == name:
                 store.redis.hdel(store.key(event.swarm, "launch-assignments"), task)
             print(
