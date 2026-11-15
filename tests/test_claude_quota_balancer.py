@@ -1462,6 +1462,26 @@ def test_the_launch_selector_forwards_every_option_to_the_selector_it_picks(
     assert calls == [(selector, defaults), (selector, given)]
 
 
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize(
+    ("marker", "selector"), [("", "select_master_credential"), ("AGENTIHOOKS_SWARM", "select_credential")]
+)
+def test_a_launch_routes_over_the_operator_token_block_its_shell_never_loaded(
+    monkeypatch: pytest.MonkeyPatch, marker: str, selector: str
+) -> None:
+    seen: dict[str, str] = {}
+
+    def selected(environ: dict[str, str], **kwargs: object) -> None:
+        seen.update({name: value for name, value in environ.items() if name.startswith(balancer.TOKEN_PREFIX)})
+        raise balancer.RoutingError("stop")
+
+    monkeypatch.setattr(balancer.operator_env, "block_tokens", lambda: {"AH_CC_TOKEN_alpha": "block-token"})
+    monkeypatch.setattr(balancer, selector, selected)
+    with pytest.raises(balancer.RoutingError, match="^stop$"):
+        balancer.select_launch_credential({"HOME": "/home/operator", **({marker: "x"} if marker else {})})
+    assert seen == {"AH_CC_TOKEN_alpha": "block-token"}
+
+
 def _window_result(
     account: str,
     five: float | None,

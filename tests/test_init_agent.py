@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -590,6 +591,58 @@ def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path,
     assert marked == []
     assert "handoff=failed" in captured.out
     assert captured.err == "agentihooks init-agent: handoff failed; the new session was not routed to another account\n"
+
+
+def _quick_seat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, popen: Callable[..., None], extra: Sequence[str] = ()
+) -> int:
+    from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV
+
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        QUICK_ENV: "quick-abc",
+        SEAT_ENV: "eng-1",
+        DIR_ENV: str(tmp_path / "quick"),
+    }
+    argv = ["--dir", str(tmp_path), "--name", "quick-abc-eng-1", "--prompt", "seed"]
+    return init_agent.main([*argv, "--start-timeout", "0.5", "--route-timeout", "0.5", *extra], env)
+
+
+def test_a_quick_seat_never_falls_back_to_bare_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--dry-run"]) == 0
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "--agentihooks-fallback-bare" not in launcher.read_text()
+
+
+def test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], status: str
+) -> None:
+    rc = _quick_seat(monkeypatch, tmp_path, _routed(status))
+    captured = capsys.readouterr()
+    assert rc == 3
+    assert "quick_seat=failed" in captured.out
+    assert captured.err.endswith(
+        "agentihooks init-agent: the quick seat's agent was not routed to an account; the seat stays pending\n"
+    )
+
+
+def test_a_routed_quick_seat_starts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta")) == 0
+    out = capsys.readouterr().out
+    assert "route_status=routed" in out and "quick_seat=failed" not in out
 
 
 def test_agenti_writes_the_route_report_and_honours_exclusions(monkeypatch, tmp_path):

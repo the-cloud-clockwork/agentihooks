@@ -257,6 +257,34 @@ def test_relaunch_that_does_not_start_fails_the_command(
     assert capsys.readouterr().out == "not-pending\n"
 
 
+@pytest.mark.feature("quick-swarm")
+def test_relaunch_force_ends_the_live_agent_and_starts_its_successor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: dict[str, object] = {}
+
+    class Herdr:
+        def bare(self, pane_id: str) -> bool:
+            return True
+
+    herdr = Herdr()
+
+    def force(folder: Path, seat_name: str, base: dict[str, str], *, bare: object) -> str:
+        calls["args"] = (folder, seat_name, base, bare)
+        return "started"
+
+    monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: herdr)
+    monkeypatch.setattr(cli.launch, "relaunch", lambda *args, **kwargs: pytest.fail("relaunched a live agent"))
+    monkeypatch.setattr(cli.launch, "force", force)
+    environ = {"HOME": str(tmp_path)}
+    assert cli.main(["relaunch", "eng-1", "--folder", str(tmp_path), "--force"], environ) == 0
+    assert calls["args"] == (tmp_path, "eng-1", environ, herdr.bare)
+    assert capsys.readouterr().out == "started\n"
+    again = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction)).choices["relaunch"]
+    option = again._option_string_actions["--force"]
+    assert (option.default, option.help) == (False, "End the seat's live agent with its pane kept, then start again")
+
+
 def test_send_posts_with_the_current_time_and_a_live_herdr_built_from_the_environ(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

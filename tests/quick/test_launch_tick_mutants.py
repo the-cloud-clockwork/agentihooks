@@ -2,11 +2,13 @@
 
 import dataclasses
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from scripts import herdr_host
 from scripts.handoff import resolve
 from scripts.quick import guard, handoff, launch, layout, paths, registry, room, tick
 from tests.quick.test_room_tick_launch import FakeHerdr, _swarm
@@ -260,7 +262,7 @@ def test_outcome_relaunches_a_pending_seat_at_its_own_pane(tmp_path: Path) -> No
         relaunch_calls.append((folder, name))
         return "started"
 
-    outcome = tick._outcome(tmp_path, seat, herdr, relaunch, 0.0)
+    outcome = tick._outcome(tmp_path, seat, herdr, relaunch, 0.0, relaunch)
     assert outcome == "relaunched-started"
     assert herdr.calls == ["w1:p2"]
     assert relaunch_calls == [(tmp_path, "eng-1")]
@@ -278,7 +280,7 @@ def test_outcome_revives_an_exited_engineer_at_its_own_pane(tmp_path: Path) -> N
         relaunch_calls.append((folder, name))
         return "started"
 
-    outcome = tick._outcome(tmp_path, seat, herdr, relaunch, 0.0)
+    outcome = tick._outcome(tmp_path, seat, herdr, relaunch, 0.0, relaunch)
     assert outcome == "revived-started"
     assert herdr.calls == ["w1:p2"]
     assert relaunch_calls == [(tmp_path, "eng-1")]
@@ -300,7 +302,7 @@ def test_outcome_only_revives_a_seat_whose_registry_state_is_still_ready(tmp_pat
         relaunch_calls.append((folder, name))
         return "started"
 
-    outcome = tick._outcome(tmp_path, stale_seat, FakeHerdr(bare=True), relaunch, 0.0)
+    outcome = tick._outcome(tmp_path, stale_seat, FakeHerdr(bare=True), relaunch, 0.0, relaunch)
     assert relaunch_calls == [] and not outcome.startswith("revived")
 
 
@@ -340,6 +342,36 @@ def test_live_herdr_bare_asks_process_info_for_the_pane_and_environ(monkeypatch:
     assert seen == [("w1:p9", {"K": "V"})]
 
 
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("no pane"), subprocess.TimeoutExpired("herdr", 30)])
+def test_live_herdr_screen_reads_the_pane_and_nothing_from_a_pane_it_cannot_read(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def fake_screen(pane_id: str, environ: dict[str, str]) -> str:
+        seen.append((pane_id, environ))
+        if pane_id == "w1:gone":
+            raise error
+        return "the visible text"
+
+    monkeypatch.setattr(tick.herdr_host, "screen", fake_screen)
+    live = tick.LiveHerdr({"K": "V"})
+    assert live.screen("w1:p3") == "the visible text" and live.screen("w1:gone") == ""
+    assert seen == [("w1:p3", {"K": "V"}), ("w1:gone", {"K": "V"})]
+
+
+def test_herdr_screen_is_the_visible_pane_without_its_styles(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def fake_read(pane_id: str, environ: dict[str, str]) -> str:
+        seen.append((pane_id, environ))
+        return "\x1b[2maccount:\x1b[0mdefault \x1b[31;1mNot logged in\x1b[0m · Run /login"
+
+    monkeypatch.setattr(herdr_host, "_read", fake_read)
+    assert herdr_host.screen("w1:p3", {"K": "V"}) == "account:default Not logged in · Run /login"
+    assert seen == [("w1:p3", {"K": "V"})]
+
+
 def test_run_round_builds_a_live_herdr_from_the_environ_when_none_given(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -374,6 +406,26 @@ def test_run_round_wires_its_relaunch_arguments_into_round_for(monkeypatch: pyte
     rows = tick.run_round(environ)
     assert {"folder": str(tmp_path), "seat": "eng-1", "outcome": "relaunched-started"} in rows
     assert calls == [(tmp_path, "eng-1", environ, herdr.bare, 0.0)]
+
+
+def test_run_round_forces_a_signed_out_engineer_with_its_own_environ_and_herdr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    swarm = _swarm(tmp_path)
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path / "home")}
+    paths.register(environ, swarm.quick_id, tmp_path)
+    herdr = FakeHerdr(screen="Not logged in · Run /login")
+    calls: list[tuple[Path, str, dict[str, str], object]] = []
+
+    def fake_force(folder: Path, seat: str, base: dict[str, str], *, bare: object) -> str:
+        calls.append((folder, seat, base, bare))
+        return "started"
+
+    monkeypatch.setattr(launch, "force", fake_force)
+    monkeypatch.setattr(tick, "LiveHerdr", lambda env: herdr)
+    rows = tick.run_round(environ)
+    assert {"folder": str(tmp_path), "seat": "eng-1", "outcome": "signed-out-started"} in rows
+    assert calls == [(tmp_path, "eng-1", environ, herdr.bare)]
 
 
 def test_run_round_accumulates_rows_across_every_registered_quick_swarm(
