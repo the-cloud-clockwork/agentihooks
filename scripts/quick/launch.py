@@ -1,5 +1,6 @@
 """Launch a quick seat's agent into its own herdr pane, first at quick up and again after each handoff."""
 
+import contextlib
 import subprocess
 import sys
 import time
@@ -7,20 +8,22 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from scripts.quick import paths, registry, seeds
+from scripts.quick.layout import MASTER
 from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV, Member
 
 WAIT_BARE_S = 60.0
 SETTLE_S = 20.0
 POLL_S = 1.0
+END_TIMEOUT_S = 120.0
 SWARM_KEYS = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_AGENT_NAME")
 Start = Callable[[list[str], dict[str, str]], int]
 
 
 def argv(swarm: registry.Swarm, seat: registry.Seat, prompt_file: Path) -> list[str]:
-    """The init-agent arguments that open the seat's agent in its own herdr pane."""
+    """The init-agent arguments that open the seat's agent in its own herdr pane, only on a routed account."""
     return [
         *("--host", "herdr", "--pane", seat.pane_id, "--name", seat.name, "--agent", seat.harness),
-        *("--dir", swarm.directory, "--prompt-file", str(prompt_file)),
+        *("--dir", swarm.directory, "--prompt-file", str(prompt_file), "--routed-only"),
     ]
 
 
@@ -124,3 +127,41 @@ def relaunch(
     if code != 0:
         return f"failed-{code}"
     return "exited" if gone else "started"
+
+
+def end_agent(name: str) -> None:
+    """End the agent session called ``name`` and keep its herdr pane; whether it ended shows as the pane going bare."""
+    command = [sys.executable, "-m", "scripts.terminate_agent", name, "--type", "any", "--keep-pane"]
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(command, capture_output=True, check=False, timeout=END_TIMEOUT_S)
+
+
+def force(
+    folder: Path,
+    seat_name: str,
+    base: Mapping[str, str],
+    *,
+    bare: Callable[[str], bool | None],
+    end: Callable[[str], None] = end_agent,
+    start: Start = init_agent,
+    sleep: Callable[[float], None] = time.sleep,
+) -> str:
+    """End an engineer's live but unusable agent with its pane kept, then start its successor; the outcome.
+
+    The seat reads launching while its agent is ended, so no tick starts a successor the end could reach; the
+    successor then waits up to WAIT_BARE_S for the pane to return to a bare shell. The master is the operator's own
+    session and a seat being launched already has a successor coming, so neither is ended.
+    """
+    swarm = registry.load(folder)
+    seat = swarm.seat(seat_name) if swarm else None
+    if seat is None:
+        return "no-seat"
+    if seat.seat == MASTER:
+        return "master"
+    if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.LAUNCHING) is None:
+        return "launching"
+    try:
+        end(seat.name)
+    finally:
+        registry.set_state(folder, seat_name, registry.PENDING)
+    return relaunch(folder, seat_name, base, bare=bare, start=start, sleep=sleep)

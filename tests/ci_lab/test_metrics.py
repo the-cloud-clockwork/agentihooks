@@ -127,6 +127,16 @@ def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
     assert "\nci_lab_budget_fraction 0.25\n" in text
 
 
+@pytest.mark.feature("lab-full-pool-wait")
+def test_the_queue_wait_gauge_predicts_a_full_pool_from_when_running_units_free_their_slots() -> None:
+    registry = metrics.Registry()
+    load = Load({"pull_request": (90.0,)}, {"pull_request": 2}, slots_total=2, slots_busy=2, frees_in=(400.0, 30.0))
+    metrics.observe_load(registry, load)
+    text = registry.render()
+    assert 'ci_lab_queue_wait_seconds{class="pull_request"} 120.0' in text
+    assert 'ci_lab_queue_wait_seconds{class="hotfix"} 0.0' in text
+
+
 def test_counters_accumulate_and_gauges_replace() -> None:
     registry = metrics.Registry()
     registry.inc("ci_lab_units_lost_total")

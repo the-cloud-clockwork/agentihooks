@@ -44,6 +44,21 @@ def test_static_assets_lists_every_page_file_by_its_static_name():
     assert list(page_assets.static_assets().items()) == list(expected.items())
 
 
+def test_static_assets_reads_a_given_page_folder_by_the_same_layout(tmp_path: Path) -> None:
+    files = ("palette.css", "tooltips.js", "static/css/ledger.css", "static/js/main.js", "static/js/added.js")
+    for name in (*files, "static/home/home.js"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(name)
+    assert list(page_assets.static_assets(tmp_path).items()) == [
+        ("palette.css", tmp_path / "palette.css"),
+        ("tooltips.js", tmp_path / "tooltips.js"),
+        ("css/ledger.css", tmp_path / "static" / "css" / "ledger.css"),
+        ("js/added.js", tmp_path / "static" / "js" / "added.js"),
+        ("js/main.js", tmp_path / "static" / "js" / "main.js"),
+        ("home/home.js", tmp_path / "static" / "home" / "home.js"),
+    ]
+
+
 def test_page_version_hashes_both_shells_and_every_named_asset():
     digest = hashlib.sha256((PAGES / "shell.html").read_bytes() + (PAGES / "home.html").read_bytes())
     digest.update(b"a.js\0one")
