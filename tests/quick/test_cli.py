@@ -37,6 +37,9 @@ class IdleHerdr:
     def bare(self, pane_id: str) -> bool:
         return False
 
+    def screen(self, pane_id: str) -> str:
+        return ""
+
     def prompt(self, pane_id: str, text: str) -> bool:
         IdleHerdr.prompts.append((pane_id, text))
         return True

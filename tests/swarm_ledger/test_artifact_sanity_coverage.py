@@ -14,7 +14,9 @@ from scripts.swarm_ledger import artifact_sanity
 
 
 @pytest.mark.skipif(sys.version_info[:2] != (3, 12), reason="Browser coverage runs on Python 3.12")
-def test_only_browser_test_files_track_greenlets_and_record_only_executable_artifact_sanity_lines(tmp_path):
+def test_only_browser_test_files_track_greenlets_and_record_only_executable_artifact_sanity_lines(
+    tmp_path: Path,
+) -> None:
     root = Path(__file__).parents[2]
     tests = {
         "shared.py": """
@@ -96,7 +98,9 @@ def test_only_browser_test_files_track_greenlets_and_record_only_executable_arti
     threaded = set(data.lines(measured[Path(account_names.__file__).resolve()]) or [])
     assert account_names.codex_token_env.__code__.co_firstlineno + 1 in threaded, threaded
     recorded = set(data.lines(measured[source]) or [])
-    assert artifact_sanity.run.__code__.co_firstlineno + 1 in recorded, recorded
-    viewer = {line for _, line in dis.findlinestarts(artifact_sanity._view.__code__)}
+    run = getattr(artifact_sanity, "x_run__mutmut_orig", artifact_sanity.run)
+    view = getattr(artifact_sanity, "x__view__mutmut_orig", artifact_sanity._view)
+    assert run.__code__.co_firstlineno + 1 in recorded, recorded
+    viewer = {line for _, line in dis.findlinestarts(view.__code__)}
     assert not (missing := viewer - recorded), sorted(missing)
     assert not (impossible := recorded - executable), sorted(impossible)

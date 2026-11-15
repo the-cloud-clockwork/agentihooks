@@ -1,8 +1,11 @@
 import hashlib
 import json
+import re
+import subprocess
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -49,7 +52,14 @@ def attest(folder, record, source=""):
     )
 
 
-def evidence(tmp_path, *, reused=False, run_id=123):
+def shard_artifacts(shards: int) -> set[str]:
+    legs = {name: re.fullmatch(r".+-3\.12-(\d+)", name) for name in EXPECTED_ARTIFACTS}
+    return {name for name, leg in legs.items() if leg is None or int(leg[1]) <= shards}
+
+
+def evidence(
+    tmp_path: Path, *, reused: bool = False, run_id: int = 123, shards: int = 20
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
     run = {
         "id": run_id,
         "run_attempt": 2,
@@ -74,9 +84,9 @@ def evidence(tmp_path, *, reused=False, run_id=123):
     folder.mkdir()
     attest(folder, record)
     jobs = [{"name": "reuse", "conclusion": "success"}]
-    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)]
+    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, shards + 1)]
     (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
-    artifacts = [{"name": name, "expired": False} for name in sorted(EXPECTED_ARTIFACTS)]
+    artifacts = [{"name": name, "expired": False} for name in sorted(shard_artifacts(shards))]
     (folder / "artifacts.jsonl").write_text("".join(json.dumps(item) + "\n" for item in artifacts))
     (tmp_path / "runs.json").write_text(json.dumps({"workflow_runs": [run]}))
     return run, record, folder
@@ -171,7 +181,7 @@ def test_null_provenance_inputs_fall_back(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
-def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
+def test_cli_publishes_empty_source_on_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     evidence(tmp_path)
     output = tmp_path / "outputs"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -179,13 +189,63 @@ def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
     assert output.read_text() == "source=\n"
 
 
-def test_cli_publishes_passed_source(tmp_path, monkeypatch):
+def test_cli_publishes_passed_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     evidence(tmp_path)
     output = tmp_path / "outputs"
     output.write_text("existing=kept\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
     assert output.read_text() == "existing=kept\nsource=123\n"
+
+
+@pytest.mark.parametrize("shards", [1, 12, 16, 19])
+def test_a_queue_run_with_fewer_shards_feeds_the_dev_push(tmp_path: Path, shards: int) -> None:
+    evidence(tmp_path, shards=shards)
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
+
+
+@pytest.mark.parametrize("shards", [12, 16, 20])
+def test_split_maps_every_push_leg_onto_a_queue_shard(shards: int) -> None:
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(step for step in jobs["split"]["steps"] if step.get("id") == "queue-legs")
+    assert step["if"] == "needs.select.outputs.source != ''"
+    assert jobs["split"]["outputs"]["queue_legs"] == "${{ steps.queue-legs.outputs.queue_legs }}"
+    legs = re.search(r"jq -nc --argjson shards \"\$shards\" '([^']+)'", step["run"])
+    assert legs is not None
+    mapped = subprocess.run(
+        ["jq", "-nc", "--argjson", "shards", str(shards), legs[1]], capture_output=True, text=True, check=True
+    )
+    assert json.loads(mapped.stdout) == {str(leg): (leg - 1) % shards + 1 for leg in range(1, 21)}
+
+
+def test_a_queue_run_with_a_missing_middle_shard_never_feeds_the_dev_push(tmp_path: Path) -> None:
+    _, _, folder = evidence(tmp_path, shards=16)
+    jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
+    (folder / "jobs.jsonl").write_text(
+        "".join(json.dumps(job) + "\n" for job in jobs if job["name"] != "unit (3.12, 9)")
+    )
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+def test_a_queue_run_whose_last_shard_failed_never_feeds_the_dev_push(tmp_path: Path) -> None:
+    _, _, folder = evidence(tmp_path, shards=16)
+    with (folder / "jobs.jsonl").open("a") as jobs:
+        jobs.write(json.dumps({"name": "unit (3.12, 17)", "conclusion": "failure"}) + "\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+@pytest.mark.parametrize("missing", ["coverage-3.12-16", "durations-3.12-16", "flakes-3.12-16"])
+def test_a_sixteen_shard_queue_run_missing_its_last_artifact_never_feeds_the_dev_push(
+    tmp_path: Path, missing: str
+) -> None:
+    _, _, folder = evidence(tmp_path, shards=16)
+    items = [json.loads(line) for line in (folder / "artifacts.jsonl").read_text().splitlines()]
+    (folder / "artifacts.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in items if item["name"] != missing)
+    )
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
 def source_evidence(tmp_path, queue, record, folder):
@@ -214,21 +274,38 @@ def test_source_from_other_repository_falls_back(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
-def test_workflow_preserves_downstream_artifacts():
+def test_workflow_preserves_downstream_artifacts() -> None:
     import yaml
 
     jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     unit = jobs["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     assert steps["Run tests"]["if"] == "needs.split.outputs.source == ''"
+    mapped = "${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}"
     for kind in ("durations", "flakes", "coverage"):
         restored = steps[f"Restore queue shard {kind}"]
         assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
+        leg = "${{ matrix.shard }}" if kind == "flakes" else mapped
+        assert restored["with"]["name"] == f"{kind}-${{{{ matrix.python-version }}}}-{leg}"
+    emptied = steps["Empty the test reports of a leg above the queue's shard count"]
+    assert emptied["run"].split("\n")[:2] == ["echo '{}' > durations.json", "rm -f elapsed.json"]
+    assert "queue_legs" not in jobs["select"]["outputs"]
     producer = "durations" if "durations" in jobs else "select"
     assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"
     assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
     for job in ("sonar", "coverage-baseline", "refresh-durations", "flake-budget"):
         assert "unit" in jobs[job]["needs"]
+
+
+def test_a_reusing_leg_sets_up_the_python_its_coverage_steps_run() -> None:
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    steps = {step.get("name"): step for step in jobs["unit"]["steps"]}
+    setup = ["Set up Python ${{ matrix.python-version }}", "Stamp the day", "Restore the test environment"]
+    for name in [*setup, "Use the test environment", "Check the coverage database", "Summarize the executed lines"]:
+        assert "UNIT_SOURCE" not in steps[name].get("if", "")
+        assert "outputs.source" not in steps[name].get("if", "")
 
 
 def test_artifact_contract_matches_the_eighteen_shards():

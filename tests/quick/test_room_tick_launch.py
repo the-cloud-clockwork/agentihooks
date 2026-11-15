@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,9 +36,10 @@ def test_an_empty_room_has_nothing_waiting(tmp_path):
 
 
 class FakeHerdr:
-    def __init__(self, status: str = "idle", typed: str = "", bare: bool | None = False) -> None:
-        self._status, self._typed, self._bare = status, typed, bare
+    def __init__(self, status: str = "idle", typed: str = "", bare: bool | None = False, screen: str = "") -> None:
+        self._status, self._typed, self._bare, self._screen = status, typed, bare, screen
         self.prompts: list[tuple[str, str]] = []
+        self.read: list[str] = []
 
     def status(self, pane_id: str) -> str:
         return self._status
@@ -48,6 +50,10 @@ class FakeHerdr:
     def bare(self, pane_id: str) -> bool | None:
         return self._bare
 
+    def screen(self, pane_id: str) -> str:
+        self.read.append(pane_id)
+        return self._screen
+
     def prompt(self, pane_id: str, text: str) -> bool:
         self.prompts.append((pane_id, text))
         return True
@@ -55,8 +61,15 @@ class FakeHerdr:
 
 def _round(folder: Path, herdr: FakeHerdr, now: float = 10_000.0) -> list[dict]:
     relaunched: list[str] = []
-    outcomes = tick.round_for(folder, herdr, lambda f, seat: relaunched.append(seat) or "started", now)
-    return [*outcomes, *({"relaunched": seat} for seat in relaunched)]
+    forced: list[str] = []
+    outcomes = tick.round_for(
+        folder,
+        herdr,
+        lambda f, seat: relaunched.append(seat) or "started",
+        now,
+        lambda f, seat: forced.append(seat if f == folder else f"{seat} in {f}") or "started",
+    )
+    return [*outcomes, *({"relaunched": seat} for seat in relaunched), *({"forced": seat} for seat in forced)]
 
 
 @pytest.mark.feature("quick-swarm")
@@ -260,7 +273,7 @@ def test_the_launch_lands_in_the_seat_pane_with_the_quick_variables(tmp_path):
     seat = swarm.seats[1]
     argv = launch.argv(swarm, seat, tmp_path / "opening.md")
     expected = "--host herdr --pane w1:p2 --name quick-abc-eng-1 --agent codex --dir /work --prompt-file"
-    assert argv == [*expected.split(), str(tmp_path / "opening.md")]
+    assert argv == [*expected.split(), str(tmp_path / "opening.md"), "--routed-only"]
     env = launch.environ({"PATH": "/bin", "AGENTIHOOKS_SWARM": "x"}, tmp_path, swarm, seat)
     assert env[member.QUICK_ENV] == "quick-abc" and env[member.SEAT_ENV] == "eng-1"
     assert env[member.DIR_ENV] == str(tmp_path) and "AGENTIHOOKS_SWARM" not in env and env["PATH"] == "/bin"
@@ -370,3 +383,137 @@ def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert seat is not None and seat.state == registry.READY and sum(naps) == launch.SETTLE_S == 20.0
+
+
+RULE = "─" * 40
+SIGNED_OUT_SCREEN = f"Login reached its time limit · Please run /login\n{RULE}\n❯ \n{RULE}\n  account:default  Not logged in · Run /login\n"
+QUOTED_SCREEN = f"the notice reads Not logged in · Run /login\n{RULE}\n❯ \n{RULE}\n  account:alpha\n"
+TIMED_OUT_SCREEN = f"{RULE}\n❯ \n{RULE}\n  account:default  Login reached its time limit · Please run /login\n"
+
+
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("screen", [SIGNED_OUT_SCREEN, TIMED_OUT_SCREEN])
+@pytest.mark.parametrize("state", [registry.READY, registry.PENDING])
+def test_an_engineer_whose_agent_is_signed_out_is_started_again_and_the_master_never_is(
+    tmp_path: Path, state: str, screen: str
+) -> None:
+    _swarm(tmp_path, eng_state=state)
+    herdr = FakeHerdr(screen=screen)
+    outcomes = _round(tmp_path, herdr)
+    assert {row["seat"]: row["outcome"] for row in outcomes if "seat" in row} == {
+        "master": "idle",
+        "eng-1": "signed-out-started",
+    }
+    assert [row for row in outcomes if "forced" in row or "relaunched" in row] == [{"forced": "eng-1"}]
+    assert herdr.prompts == [] and herdr.read == ["w1:p2"]
+
+
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize(
+    "herdr",
+    [
+        FakeHerdr(screen=QUOTED_SCREEN),
+        FakeHerdr(screen="Not logged in · Run /login"),
+        FakeHerdr(status="working", screen=SIGNED_OUT_SCREEN),
+        FakeHerdr(typed="half a line", screen=SIGNED_OUT_SCREEN),
+        FakeHerdr(bare=None, screen=SIGNED_OUT_SCREEN),
+    ],
+)
+def test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced(
+    tmp_path: Path, herdr: FakeHerdr
+) -> None:
+    _swarm(tmp_path)
+    assert not [row for row in _round(tmp_path, herdr) if "forced" in row]
+
+
+def _ended(folder: Path, eng_state: str) -> tuple[list[tuple[str, str]], list[list[str]]]:
+    _swarm(folder, eng_state=eng_state)
+    ended: list[tuple[str, str]] = []
+    started: list[list[str]] = []
+
+    def end(name: str) -> None:
+        loaded = registry.load(folder)
+        seat = loaded.seat("eng-1") if loaded else None
+        ended.append((name, seat.state if seat else "gone"))
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        started.append(argv)
+        return 0
+
+    naps: list[float] = []
+
+    def bare(pane: str) -> bool:
+        assert naps or not started
+        return bool(ended) and not started
+
+    outcome = launch.force(folder, "eng-1", {}, bare=bare, end=end, start=start, sleep=naps.append)
+    assert outcome == "started" and sum(naps) == launch.SETTLE_S
+    return ended, started
+
+
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("state", [registry.READY, registry.PENDING])
+def test_force_ends_the_seat_agent_with_its_pane_kept_and_starts_its_successor(tmp_path: Path, state: str) -> None:
+    ended, started = _ended(tmp_path, state)
+    loaded = registry.load(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert ended == [("quick-abc-eng-1", registry.LAUNCHING)] and len(started) == 1
+    assert seat is not None and seat.state == registry.READY
+
+
+@pytest.mark.feature("quick-swarm")
+def test_force_never_ends_the_master_nor_a_seat_being_launched(tmp_path: Path) -> None:
+    _swarm(tmp_path, eng_state=registry.LAUNCHING)
+    ended: list[str] = []
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        raise AssertionError("started")
+
+    def force(seat: str) -> str:
+        return launch.force(tmp_path, seat, {}, bare=lambda pane: True, end=ended.append, start=start)
+
+    assert (force("master"), force("eng-1"), force("eng-9")) == ("master", "launching", "no-seat")
+    loaded = registry.load(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert ended == [] and seat is not None and seat.state == registry.LAUNCHING
+
+
+def test_force_never_ends_a_seat_whose_state_changed_since_it_was_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stale = _swarm(tmp_path)
+    registry.set_state(tmp_path, "eng-1", registry.LAUNCHING)
+    real = registry.load
+    reads: list[Path] = []
+
+    def load(folder: Path) -> registry.Swarm | None:
+        reads.append(folder)
+        return stale if len(reads) == 1 else real(folder)
+
+    monkeypatch.setattr(registry, "load", load)
+    ended: list[str] = []
+    outcome = launch.force(tmp_path, "eng-1", {}, bare=lambda pane: True, end=ended.append, start=lambda a, e: 0)
+    assert outcome == "launching" and ended == []
+    loaded = real(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert seat is not None and seat.state == registry.LAUNCHING
+
+
+@pytest.mark.parametrize("hangs", [False, True])
+def test_end_agent_terminates_the_session_by_name_and_keeps_its_pane(
+    monkeypatch: pytest.MonkeyPatch, hangs: bool
+) -> None:
+    ran: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> None:
+        ran.append(command)
+        assert kwargs["check"] is False and kwargs["timeout"] == launch.END_TIMEOUT_S == 120.0
+        assert kwargs["capture_output"] is True
+        if hangs:
+            raise subprocess.TimeoutExpired(command, launch.END_TIMEOUT_S)
+
+    monkeypatch.setattr(launch.subprocess, "run", run)
+    assert launch.end_agent("quick-abc-eng-1") is None
+    assert ran == [
+        [launch.sys.executable, "-m", "scripts.terminate_agent", "quick-abc-eng-1", "--type", "any", "--keep-pane"]
+    ]
