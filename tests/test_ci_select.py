@@ -153,6 +153,27 @@ def test_a_pyproject_change_runs_the_full_suite_only_when_it_reaches_tests(
     assert run_main(repo, monkeypatch, tmp_path, "pull_request") == written
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "asked"),
+    [('version = "1.0"', 'version = "1.1"', ["owner/repo"]), ('"pyyaml>=6"', '"pyyaml>=7"', [])],
+    ids=["version", "dependencies"],
+)
+def test_recorded_coverage_is_read_only_when_a_pyproject_change_skips_the_full_suite(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, old: str, new: str, asked: list[str]
+) -> None:
+    commit_pyproject(repo, PYPROJECT, "pyproject")
+    commit_pyproject(repo, PYPROJECT.replace(old, new), "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    calls: list[str] = []
+
+    def record(repository: str, before: str) -> None:
+        calls.append(repository)
+
+    monkeypatch.setattr(ci_select, "find_record", record)
+    run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert calls == asked
+
+
 def test_a_new_pyproject_runs_the_full_suite(repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     commit_pyproject(repo, PYPROJECT, "pyproject")
     assert run_main(repo, monkeypatch, tmp_path, "pull_request") == PYPROJECT_FULL

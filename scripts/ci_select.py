@@ -84,7 +84,7 @@ def conftest_tests(root: Path, changed: list[str]) -> set[str]:
     }
 
 
-def harness_tables(root: Path, revision: str) -> tuple[object, ...]:
+def harness_tables(root: Path, revision: str) -> tuple[dict[str, object], object, object, object]:
     """The pyproject tables that change how every test runs at a revision, all empty when it has no pyproject."""
     shown = subprocess.run(["git", "show", f"{revision}:{PYPROJECT}"], cwd=root, capture_output=True, text=True)
     data = tomllib.loads(shown.stdout)
@@ -105,7 +105,9 @@ def pyproject_reaches_tests(root: Path, base: str, head: str) -> bool:
 
 def needs_full_suite(changed: list[str], pyproject: bool) -> bool:
     return any(
-        path in HARNESS or path == PYPROJECT and pyproject or Path(path).name == CONFTEST and not nested_conftest(path)
+        path in HARNESS
+        or (path == PYPROJECT and pyproject)
+        or (Path(path).name == CONFTEST and not nested_conftest(path))
         for path in changed
     )
 
