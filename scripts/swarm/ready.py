@@ -201,6 +201,7 @@ class Pass:
     queue: Callable = merge_queue.operate
     exits: Callable = queue_exit.own_failures
     journal: Callable = queue_record.Journal
+    many: Callable[[list[str]], Mapping[str, Any]] | None = None
 
 
 def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
