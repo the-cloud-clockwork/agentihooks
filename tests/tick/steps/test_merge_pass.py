@@ -83,3 +83,54 @@ def test_merge_pass(env: tuple[RedisStore, Any, FakeRuntime], monkeypatch: pytes
     assert store.agents("sw") == []
     assert AGENT not in runtime.live
     assert runtime.killed == [AGENT]
+
+
+@pytest.mark.feature("merge-pass-batched-pull-request-prefetch")
+def test_the_production_merge_pass_wiring_batches_from_the_tick_view_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm import github_reads
+
+    urls = [f"https://github.com/o/r/pull/{i}" for i in range(30)]
+    rows = {
+        f"t{i}": {"id": f"t{i}", "state": "pr", "claimed_by": AGENT, "pr_url": url, "awaiting": ""}
+        for i, url in enumerate(urls)
+    }
+    snapshots = {url: ledger_events.PullRequest("OPEN", None, 1, False, True, head="h") for url in urls}
+    live_calls: list[str] = []
+
+    class TickViewLookup:
+        """The shape ``ledger_events.tick_view`` returns: a single url reader carrying the snapshots its own
+        earlier batch already found."""
+
+        def __init__(self, snapshots: dict[str, ledger_events.PullRequest]) -> None:
+            self.snapshots = snapshots
+
+        def __call__(self, url: str) -> ledger_events.PullRequest | None:
+            if url in self.snapshots:
+                return self.snapshots[url]
+            live_calls.append(url)
+            return None
+
+    lookup = TickViewLookup(snapshots)
+    batch_calls: list[list[str]] = []
+    real_batched = github_reads.Batched
+
+    def recording(read: Any, batch_urls: list[str], fallback: Any) -> Any:
+        batch_calls.append(list(batch_urls))
+        return real_batched(read, batch_urls, fallback)
+
+    monkeypatch.setattr(github_reads, "Batched", recording)
+    monkeypatch.setattr(cli, "now_ms", lambda: NOW)
+    get = {
+        "store": SimpleNamespace(redis=None),
+        "slug": "sw",
+        "ledger": SimpleNamespace(),
+        "view": lookup,
+        "rows": rows,
+    }.get
+    actions = report._merge_pass(cli, get)
+    assert actions == []
+    assert live_calls == []
+    assert len(batch_calls) == 1
+    assert sorted(batch_calls[0]) == sorted(urls)
