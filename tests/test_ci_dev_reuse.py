@@ -4,6 +4,7 @@ import re
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -50,12 +51,14 @@ def attest(folder, record, source=""):
     )
 
 
-def shard_artifacts(shards):
+def shard_artifacts(shards: int) -> set[str]:
     legs = {name: re.fullmatch(r".+-3\.12-(\d+)", name) for name in EXPECTED_ARTIFACTS}
     return {name for name, leg in legs.items() if leg is None or int(leg[1]) <= shards}
 
 
-def evidence(tmp_path, *, reused=False, run_id=123, shards=20):
+def evidence(
+    tmp_path: Path, *, reused: bool = False, run_id: int = 123, shards: int = 20
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
     run = {
         "id": run_id,
         "run_attempt": 2,
@@ -177,7 +180,7 @@ def test_null_provenance_inputs_fall_back(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
-def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
+def test_cli_publishes_empty_source_on_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     evidence(tmp_path)
     output = tmp_path / "outputs"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -185,7 +188,7 @@ def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
     assert output.read_text() == "source=\nqueue_legs=\n"
 
 
-def test_cli_publishes_passed_source(tmp_path, monkeypatch):
+def test_cli_publishes_passed_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     evidence(tmp_path)
     output = tmp_path / "outputs"
     output.write_text("existing=kept\n")
@@ -196,12 +199,14 @@ def test_cli_publishes_passed_source(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("shards", [12, 16, 19])
-def test_a_queue_run_with_fewer_shards_feeds_the_dev_push(tmp_path, shards):
+def test_a_queue_run_with_fewer_shards_feeds_the_dev_push(tmp_path: Path, shards: int) -> None:
     evidence(tmp_path, shards=shards)
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
 
 
-def test_cli_maps_every_push_leg_onto_a_sixteen_shard_queue_run(tmp_path, monkeypatch):
+def test_cli_maps_every_push_leg_onto_a_sixteen_shard_queue_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     evidence(tmp_path, shards=16)
     output = tmp_path / "outputs"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -210,7 +215,7 @@ def test_cli_maps_every_push_leg_onto_a_sixteen_shard_queue_run(tmp_path, monkey
     assert output.read_text() == f"source=123\nqueue_legs={json.dumps(legs, separators=(',', ':'))}\n"
 
 
-def test_a_queue_run_with_a_missing_middle_shard_never_feeds_the_dev_push(tmp_path):
+def test_a_queue_run_with_a_missing_middle_shard_never_feeds_the_dev_push(tmp_path: Path) -> None:
     _, _, folder = evidence(tmp_path, shards=16)
     jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
     (folder / "jobs.jsonl").write_text(
@@ -219,7 +224,7 @@ def test_a_queue_run_with_a_missing_middle_shard_never_feeds_the_dev_push(tmp_pa
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
-def test_a_queue_run_whose_last_shard_failed_never_feeds_the_dev_push(tmp_path):
+def test_a_queue_run_whose_last_shard_failed_never_feeds_the_dev_push(tmp_path: Path) -> None:
     _, _, folder = evidence(tmp_path, shards=16)
     with (folder / "jobs.jsonl").open("a") as jobs:
         jobs.write(json.dumps({"name": "unit (3.12, 17)", "conclusion": "failure"}) + "\n")
@@ -227,7 +232,9 @@ def test_a_queue_run_whose_last_shard_failed_never_feeds_the_dev_push(tmp_path):
 
 
 @pytest.mark.parametrize("missing", ["coverage-3.12-16", "durations-3.12-16", "flakes-3.12-16"])
-def test_a_sixteen_shard_queue_run_missing_its_last_artifact_never_feeds_the_dev_push(tmp_path, missing):
+def test_a_sixteen_shard_queue_run_missing_its_last_artifact_never_feeds_the_dev_push(
+    tmp_path: Path, missing: str
+) -> None:
     _, _, folder = evidence(tmp_path, shards=16)
     items = [json.loads(line) for line in (folder / "artifacts.jsonl").read_text().splitlines()]
     (folder / "artifacts.jsonl").write_text(
@@ -262,7 +269,7 @@ def test_source_from_other_repository_falls_back(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
-def test_workflow_preserves_downstream_artifacts():
+def test_workflow_preserves_downstream_artifacts() -> None:
     import yaml
 
     jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]

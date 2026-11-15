@@ -1586,7 +1586,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         expected = "needs.split.outputs.source != ''"
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
-        if step["name"] == "Restore queue shard flakes" and len(names) == 5:
+        if step["name"] == "Restore queue shard flakes" and names != restores:
             expected += f" && {own}"
         if step["name"].startswith("Empty the test reports"):
             expected += f" && {own.replace(' == ', ' != ')}"
