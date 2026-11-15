@@ -316,7 +316,9 @@ def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
     return workflows, config
 
 
-def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+def _preflight_problems(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> list[str]:
     baseline = base_workflows.get("branch-lanes.yml")
     if baseline is None:
         return []
@@ -325,20 +327,21 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    forms = [form for preflight in (baseline, expanded) for form in _path_forms(preflight, PREFLIGHT_PATHS)]
+    forms = [*_path_forms(baseline, PREFLIGHT_PATHS), *_path_forms(expanded, PREFLIGHT_PATHS)]
     if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
 
 
-def _path_forms(workflow: dict, paths: list[str]) -> list[dict]:
+def _path_forms(workflow: dict[Any, Any], paths: list[str]) -> list[dict[Any, Any]]:
     """Return the workflow as given, then with its push or pull_request trigger unfiltered and filtered to the paths."""
     forms = [workflow]
-    for kept in ([], paths):
+    for kept in (None, paths):
         form = deepcopy(workflow)
-        events = form[True] if True in form else form["on"]
+        events: dict[str, Any] = form[True] if True in form else form["on"]
         for event in {"push", "pull_request"} & set(events):
-            trigger = {key: value for key, value in (events[event] or {}).items() if key != "paths"}
+            trigger: dict[str, Any] = dict(events[event] or {})
+            trigger.pop("paths", None)
             events[event] = {**trigger, "paths": list(kept)} if kept else trigger or None
         forms.append(form)
     return forms
@@ -377,7 +380,9 @@ def _dev_parent_form(steps: list[dict]) -> list[dict]:
     return form
 
 
-def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+def _equivalence_problems(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> list[str]:
     file, job_id = EQUIVALENCE
     base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
     base_job, head_job = ((workflow.get("jobs") or {}).get(job_id) or {} for workflow in (base, head))
