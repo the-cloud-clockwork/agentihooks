@@ -63,7 +63,7 @@ def resources_of(paths: list[str]) -> dict[str, set[str]]:
 
 
 def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -> tuple[Unit, ...]:
-    """Key one stats unit per test file by the stats cache SCHEMA 4 identity of its static closure.
+    """Key one stats unit per test file by the stats cache identity, at its current SCHEMA, of its static closure.
 
     The key takes no run output, so it differs from the measured records a stats run stores for the same file.
     """
