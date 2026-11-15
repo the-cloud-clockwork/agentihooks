@@ -1,0 +1,69 @@
+name: CI lab image
+
+on:
+  push:
+    branches: [dev, 'diffcheck/ci-lab-image-*']
+    paths:
+      - docker/ci-lab/**
+      - .github/workflows/ci-lab-image.yml
+      - .github/test-requirements.lock
+      - .github/test-excludes.txt
+      - pyproject.toml
+      - scripts/ci_lab/**
+      - scripts/cli_delegates.py
+  schedule:
+    - cron: "47 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.event_name == 'schedule'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Rebuild on dev after the runner wheelhouse refresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci-lab-image.yml --repo "$GITHUB_REPOSITORY" --ref dev
+
+  image:
+    if: github.event_name != 'schedule'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker
+      CANDIDATE: agentihooks-ci-lab-worker-candidate:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the candidate on the newest runner image
+        run: docker build --pull --platform linux/amd64 --file docker/ci-lab/Dockerfile --tag "$CANDIDATE" .
+      - name: Smoke the candidate with no network
+        run: bash docker/ci-lab/smoke.sh "$CANDIDATE" "$(sha256sum .github/test-requirements.lock | cut -d ' ' -f 1)"
+      - name: Publish the dev tags
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          for tag in "$IMAGE:dev-${GITHUB_SHA:0:7}" "$IMAGE:dev"; do
+            docker tag "$CANDIDATE" "$tag"
+            docker push "$tag"
+          done
