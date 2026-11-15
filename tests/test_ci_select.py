@@ -143,6 +143,7 @@ def commit_pyproject(repo: Path, text: str, message: str) -> None:
         ('"setuptools>=80"', '"setuptools>=81"', PYPROJECT_FULL),
         ('markers = ["unit"]', 'markers = ["unit", "slow"]', PYPROJECT_FULL),
     ],
+    ids=["version", "ruff", "dependencies", "optional-dependencies", "build-system", "pytest"],
 )
 def test_a_pyproject_change_runs_the_full_suite_only_when_it_reaches_tests(
     repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, old: str, new: str, written: str
