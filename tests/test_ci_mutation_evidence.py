@@ -69,11 +69,11 @@ def test_bundle_preserves_every_shard_report_for_the_existing_aggregator(tmp_pat
         report = {"files": [], "not_mutated": [], "failed": False, "shard": measurement}
         (output / "report.json").write_text(json.dumps(report))
         with patch("scripts.ci_mutation.evidence.subprocess.check_output", return_value="revision\n"):
-            stage(tmp_path, output, tmp_path / "shards" / f"mutation-report-{shard}", (shard, 2))
+            stage(tmp_path, output, tmp_path / "shards" / f"mutation-preflight-shard-{shard}", (shard, 2))
     from scripts.ci_mutation.merge import main
 
     assert main([str(tmp_path / "shards"), "--shards", "2", "--output", str(tmp_path / "merged")]) == 0
-    (tmp_path / "shards/mutation-report-1/report.json").unlink()
+    (tmp_path / "shards/mutation-preflight-shard-1/report.json").unlink()
     assert main([str(tmp_path / "shards"), "--shards", "2", "--output", str(tmp_path / "merged")]) == 1
 
 

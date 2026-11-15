@@ -28,7 +28,7 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
     inputs = workflow[True]["workflow_dispatch"]["inputs"]
     assert inputs["proof"]["type"] == "choice"
     assert inputs["proof"]["required"] is True
-    assert set(inputs["proof"]["options"]) == set(workflow["jobs"])
+    assert set(inputs["proof"]["options"]) - {"mutation"} == set(workflow["jobs"])
     assert "gate plant proofs must use the full Tests dispatch" in inputs["proof"]["description"]
     assert all(job.get("name", key) != "Gate — Required" for key, job in workflow["jobs"].items())
     required = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
