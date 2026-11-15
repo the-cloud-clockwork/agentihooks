@@ -1014,7 +1014,7 @@ def test_the_repository_aggregator_rendered_for_the_lab_grades_green() -> None:
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
     assert step["run"].count(_QUEUE_TIER_OPENING) == 1
     step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
-    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == []
+    assert gate_protected.grade(workflows, config, head, config, actors) == []
 
 
 @pytest.mark.parametrize(
