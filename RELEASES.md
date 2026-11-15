@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.904 · 2026-11-15
+
+### 2026-11-15 · f28f173768ba · #11304 · @agenticore-app
+
+**Report no process only for a validated agent no live hive lists**
+
+This change stops the controller from falsely marking a validated agent as having no process when that agent is actually running live on another hive; previously, because the controller only scans its own host's processes, an idle agent waiting past its heartbeat window on a different hive got wrongly reported as dead and was retired by the tick's verify step. Now `HerdrRuntime.bindings` checks whether another hive's live report already lists the agent before writing that false "process: False" fact, so legitimately running cross-hive agents are no longer killed just for sitting idle locally.
+
 ## v2.17.903 · 2026-11-15
 
 ### 2026-11-15 · 87f6b2199e9b · #11296 · @agenticore-app
