@@ -32,6 +32,8 @@ EQUIVALENCE_DEV_PARENT = {
     "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
 }
 EQUIVALENCE_DEV_PARENT_REF = "${{ steps.comparison-base.outputs.sha }}"
+PREFLIGHT_PATHS = [".github/workflows/**"]
+EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
@@ -323,14 +325,23 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    if head_workflows.get("branch-lanes.yml") in (
-        baseline,
-        expanded,
-        *_checkout_forms(baseline),
-        *_checkout_forms(expanded),
-    ):
+    forms = [form for preflight in (baseline, expanded) for form in _path_forms(preflight, PREFLIGHT_PATHS)]
+    if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
+
+
+def _path_forms(workflow: dict, paths: list[str]) -> list[dict]:
+    """Return the workflow as given, then with its push or pull_request trigger unfiltered and filtered to the paths."""
+    forms = [workflow]
+    for kept in ([], paths):
+        form = deepcopy(workflow)
+        events = form[True] if True in form else form["on"]
+        for event in {"push", "pull_request"} & set(events):
+            trigger = {key: value for key, value in (events[event] or {}).items() if key != "paths"}
+            events[event] = {**trigger, "paths": list(kept)} if kept else trigger or None
+        forms.append(form)
+    return forms
 
 
 def _checkout_forms(preflight: dict) -> list[dict]:
@@ -381,7 +392,10 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
         accepted is None
         or any(word in json.dumps(step) for step in head_steps[len(accepted) :] for word in EQUIVALENCE_WORDS)
         or {key: value for key, value in head.items() if key != "jobs"}
-        != {key: value for key, value in base.items() if key != "jobs"}
+        not in [
+            {key: value for key, value in form.items() if key != "jobs"}
+            for form in _path_forms(base, EQUIVALENCE_PATHS)
+        ]
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
         != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}
     ):
