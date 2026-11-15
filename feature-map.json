@@ -1149,6 +1149,17 @@
       ]
     },
     {
+      "id": "admission-launch-carries-admitted-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-working-retired",
+      "behaviour": "The hub claim's launch identity names the admitted execution under the same key scripts.swarm_v2.runtime.codex.arguments reads, so a hub-admitted Codex app-server launch always carries --execution for its admitted execution instead of self-admitting a second, untracked one that a 360 second hung launch check then frees while the real execution keeps working.",
+      "seam": "scripts.hub.admission.Admission._claim building admitted[\"task\"] and scripts.swarm_v2.runtime.codex.arguments reading it",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_admitted_task_carries_its_launch_execution_identity",
+        "tests/hub/test_admission.py::test_the_admitted_task_launch_arguments_pass_the_admitted_execution"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -6377,6 +6388,21 @@
       ]
     },
     {
+      "id": "ledger-stats-lab",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-ledger-stats-lab",
+      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units and predicted wait; the Stats panel shows one Lab row before the top bottleneck.",
+      "seam": "scripts.swarm.time_left.refresh, LedgerClient.time_left, ledger_time_left.check and apply, ledger_stats.calculate, renderStats Lab row",
+      "tests": [
+        "tests/swarm/test_time_left.py::test_refresh_sends_the_lab_reading_once_the_tick_has_read_one",
+        "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block",
+        "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_check_accepts_every_optional_key_at_once",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs",
+        "tests/swarm_ledger/test_stats_drawer.py::test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck"
+      ]
+    },
+    {
       "id": "lab-capacity-verdict-cache-hits",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-class-cache-hits",
@@ -6938,6 +6964,19 @@
       ],
       "rules": [
         "tick-launch-path"
+      ]
+    },
+    {
+      "id": "count-floor-admits-deleted-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-count-floor-deleted-reads",
+      "behaviour": "The test count floor admits a lost test when its whole test file is deleted together with a project-local module it imported that the head no longer carries as a file, and when the test reads by literal path a repository workflow file (a YAML job definition with run steps, not only a JSON step fixture) that the head deletes; a lost test whose test file, imported module or fixture content still exists anywhere in the head stays counted.",
+      "seam": "tests.count_floor.main's admission loop: _emptied_test_files, _fixture_subject and _deleted_fixtures",
+      "tests": [
+        "tests/test_count_floor.py::test_a_module_deleted_together_with_its_test_file_passes_the_floor",
+        "tests/test_count_floor.py::test_a_deleted_test_file_whose_imported_module_survives_admits_nothing",
+        "tests/test_count_floor.py::test_a_deleted_workflow_file_explains_only_its_own_lost_test",
+        "tests/test_count_floor.py::test_moving_a_workflow_file_keeps_its_lost_test_red"
       ]
     },
     {
