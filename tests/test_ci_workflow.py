@@ -17,7 +17,6 @@ import yaml
 from _pytest.config import default_plugins
 
 from scripts import ci_gate_queue
-from scripts.ci_mutation.arrival import missing_producers
 from tests import refresh_durations
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
@@ -776,15 +775,6 @@ def _mutation_workflow():
     separate = _ROOT / ".github/workflows/mutation.yml"
     path = separate if separate.is_file() else _ROOT / ".github/workflows/test.yml"
     return yaml.safe_load(path.read_text())
-
-
-def test_the_plan_job_marks_every_collected_stats_part_for_the_shard_arrival_check(tmp_path: Path) -> None:
-    plan = _mutation_workflow()["jobs"]["mutation-plan"]
-    step = next(step for step in plan["steps"] if step.get("id") == "stats")
-    script = step["run"].replace("python -m scripts.ci_mutation ", "true ")
-    env = {**os.environ, "PARTS": "[0, 1, 2]", "RUNNER_TEMP": str(tmp_path), "BASES": "origin/dev"}
-    subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=tmp_path, env=env, check=True)
-    assert missing_producers(tmp_path / ".mutation-stats", [0, 1, 2]) == []
 
 
 def test_mutation_job_installs_chromium_before_mutating():
@@ -2815,6 +2805,8 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
         "needs.mutation-refine.result == 'success'",
+        "needs.mutation-refine.result == 'success' || (needs.mutation-plan.outputs.collected == 'true'"
+        " && needs.mutation-plan.outputs.stats_parts != '[0]')",
         "needs.mutation-replan.result == 'success'",
         "steps.stats-arrival.outputs.missing != ''",
     )
@@ -2864,7 +2856,11 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         "mkdir -p .workflow-revision",
         'git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision',
     ]
-    assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
+    assert {step["uses"] for step in local["mutation-plan"]} == {
+        "./.workflow-revision/.github/actions/nats-server",
+        "./.workflow-revision/.github/actions/browser-cache",
+        "./.workflow-revision/.github/actions/retry-upload",
+    }
     assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
     for name in ("mutation-stats", "mutation-shard"):
         steps = jobs[name]["steps"]

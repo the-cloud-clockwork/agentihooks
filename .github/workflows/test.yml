@@ -4138,28 +4138,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Grade the empty change set
-        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
-        env:
-          BASES: ${{ steps.plan.outputs.bases }}
-        run: |
-          python -m scripts.ci_mutation --bases "$BASES" --budget 1080
-          grader="$RUNNER_TEMP/grader"
-          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
-          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
-          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
-
-      - name: Forward the reused or empty mutation report
-        if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
-        uses: ./.workflow-revision/.github/actions/retry-upload
-        with:
-          after-cancel: true
-          name: mutation-report-0
-          path: .mutation-gate/
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Collect the mutation stats in this job when four parts or fewer cover them
         id: collect
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed != '0'
@@ -4367,6 +4345,28 @@ jobs:
         with:
           name: mutation-measured-plan
           path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Grade the empty change set
+        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+        run: |
+          python -m scripts.ci_mutation --bases "$BASES" --budget 1080
+          grader="$RUNNER_TEMP/grader"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+
+      - name: Forward the reused or empty mutation report
+        if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: mutation-report-0
+          path: .mutation-gate/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
