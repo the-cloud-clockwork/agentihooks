@@ -57,7 +57,9 @@ def test_fetch_takes_nothing_when_the_node_mirror_holds_the_sha(tmp_path: Path, 
     assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
 
 
-def test_fetch_takes_only_the_objects_the_node_mirror_lacks(tmp_path: Path, origin: Path) -> None:
+def test_fetch_takes_only_the_objects_the_node_mirror_lacks(
+    tmp_path: Path, origin: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     base = _commit(origin, "a", "a")
     head = _commit(origin, "b", "b")
     mirror = _mirror(tmp_path, origin, base)
@@ -67,6 +69,8 @@ def test_fetch_takes_only_the_objects_the_node_mirror_lacks(tmp_path: Path, orig
     assert _own_objects(mirror.store) == missing
     assert mirror.fetch(head) is False
     assert _own_objects(mirror.store) == missing
+    assert not (mirror.store / "FETCH_HEAD").exists()
+    assert capfd.readouterr() == ("", "")
 
 
 def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
@@ -75,7 +79,9 @@ def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
         mirror.fetch("1" * 40)
 
 
-def test_a_second_lease_of_the_same_head_reuses_the_tree(tmp_path: Path, origin: Path) -> None:
+def test_a_second_lease_of_the_same_head_reuses_the_tree(
+    tmp_path: Path, origin: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=2)
     first = trees.lease(head)
@@ -85,6 +91,8 @@ def test_a_second_lease_of_the_same_head_reuses_the_tree(tmp_path: Path, origin:
     assert _registered(trees.mirror.store) == [str(first)]
     assert (first / "a").read_text() == "a"
     assert _git(first, "rev-parse", "HEAD").strip() == head
+    assert _git(first, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD\n"
+    assert capfd.readouterr() == ("", "")
 
 
 def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: Path, origin: Path) -> None:
@@ -190,7 +198,9 @@ def test_a_lease_replaces_an_unregistered_directory_at_the_head_path(tmp_path: P
     assert _registered(trees.mirror.store) == [str(tree)]
 
 
-def test_a_mutation_unit_gets_its_own_writable_copy(tmp_path: Path, origin: Path) -> None:
+def test_a_mutation_unit_gets_its_own_writable_copy(
+    tmp_path: Path, origin: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)
     own = trees.own(head)
@@ -207,3 +217,4 @@ def test_a_mutation_unit_gets_its_own_writable_copy(tmp_path: Path, origin: Path
     trees.drop(own)
     assert not own.exists()
     assert _registered(trees.mirror.store) == sorted([str(shared), str(other)])
+    assert capfd.readouterr() == ("", "")

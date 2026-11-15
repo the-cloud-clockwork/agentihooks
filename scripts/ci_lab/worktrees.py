@@ -17,11 +17,18 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True)
 
 
-def _writable(tree: Path, writable: bool) -> None:
-    for path in (tree, *tree.rglob("*")):
-        if not path.is_symlink():
-            mode = path.stat().st_mode
-            path.chmod(mode | stat.S_IWUSR if writable else mode & ~WRITE)
+def _owned(tree: Path) -> list[Path]:
+    return [path for path in (tree, *tree.rglob("*")) if not path.is_symlink()]
+
+
+def _seal(tree: Path) -> None:
+    for path in _owned(tree):
+        path.chmod(path.stat().st_mode & ~WRITE)
+
+
+def _unseal(tree: Path) -> None:
+    for path in _owned(tree):
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
 
 
 @dataclass(frozen=True)
@@ -40,7 +47,7 @@ class Mirror:
         found = subprocess.run(["git", "-C", str(self.store), "cat-file", "-t", sha], capture_output=True, text=True)
         if found.stdout == "commit\n":
             return False
-        _git(self.store, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", self.remote, sha)
+        _git(self.store, "fetch", "--no-write-fetch-head", self.remote, sha)
         return True
 
 
@@ -60,8 +67,8 @@ class Worktrees:
             self.mirror.fetch(head)
             if tree.exists():
                 self.drop(tree)
-            _git(self.mirror.store, "worktree", "add", "--quiet", "--detach", str(tree), head)
-            _writable(tree, False)
+            _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)
+            _seal(tree)
             self.live[head] = 0
         self.live[head] += 1
         self.live.move_to_end(head)
@@ -78,12 +85,12 @@ class Worktrees:
         self.mirror.fetch(head)
         self.root.mkdir(parents=True, exist_ok=True)
         tree = Path(tempfile.mkdtemp(prefix=f"{head}.", dir=self.root))
-        _git(self.mirror.store, "worktree", "add", "--quiet", "--detach", str(tree), head)
+        _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)
         return tree
 
     def drop(self, tree: Path) -> None:
         """Remove a worktree directory, registered or not, and prune the store's registrations."""
-        _writable(tree, True)
+        _unseal(tree)
         shutil.rmtree(tree)
         _git(self.mirror.store, "worktree", "prune")
 
