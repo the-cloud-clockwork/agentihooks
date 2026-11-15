@@ -184,10 +184,12 @@ def test_a_forked_child_exits_with_its_grade_and_a_crash_exits_suspicious(
     monkeypatch: pytest.MonkeyPatch, graded: int | None, code: int
 ) -> None:
     loop = WarmLoop(["m"], ["t"], KillMemory(Path("unused")), 1)
-    graded_names: list[str] = []
+    session = as_session(SimpleNamespace())
+    items = cast(Mapping[str, pytest.Item], {"t": SimpleNamespace(nodeid="t")})
+    graded_calls: list[tuple[pytest.Session, Mapping[str, pytest.Item], str]] = []
 
-    def child(session: pytest.Session, items: Mapping[str, pytest.Item], name: str) -> int:
-        graded_names.append(name)
+    def child(child_session: pytest.Session, child_items: Mapping[str, pytest.Item], name: str) -> int:
+        graded_calls.append((child_session, child_items, name))
         if graded is None:
             raise RuntimeError("the child crashed")
         return graded
@@ -196,9 +198,9 @@ def test_a_forked_child_exits_with_its_grade_and_a_crash_exits_suspicious(
     monkeypatch.setattr(run_mutation, "_exit", exit_with)
     monkeypatch.setattr(loop, "child", child)
     with pytest.raises(Exited) as exited:
-        loop.fork(as_session(SimpleNamespace()), {}, "m")
+        loop.fork(session, items, "m")
     assert exited.value.args == (code,)
-    assert graded_names == ["m"]
+    assert graded_calls == [(session, items, "m")]
 
 
 def test_the_loop_forks_each_mutant_at_most_lanes_at_a_time_and_rows_its_status_and_seconds(
@@ -259,7 +261,7 @@ def test_a_unit_without_covering_tests_grades_no_tests_without_collecting(monkey
 def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-    monkeypatch.setenv(run_mutation.SWITCH, "stale")
+    monkeypatch.setenv(run_mutation.SWITCH, run_mutation.environ.get(run_mutation.SWITCH, ""))
     memory = KillMemory(tmp_path / "killers")
     sessions: list[tuple[list[str], list[Any], str]] = []
 
@@ -293,7 +295,7 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
 
 
 def test_stats_collection_traces_one_session_and_returns_one_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(run_mutation.SWITCH, "stale")
+    monkeypatch.setenv(run_mutation.SWITCH, run_mutation.environ.get(run_mutation.SWITCH, ""))
     monkeypatch.setattr(run_mutation, "process_time", clock(2.0, 5.5))
     switches: list[str] = []
 
