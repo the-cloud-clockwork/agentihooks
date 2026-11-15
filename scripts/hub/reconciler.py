@@ -80,31 +80,35 @@ def stop_admitted(store: Any, slug: str, agent: AgentRecord, reason: str) -> str
     print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
     pending = store.key(slug, PENDING_STOPS)
     if outcome.startswith(execution_stop.FAILED):
-        store.redis.hset(pending, agent.name, json.dumps({"agent": asdict(agent), "reason": reason}))
+        store.redis.hset(pending, agent.execution_id, json.dumps({"agent": asdict(agent), "reason": reason}))
     else:
-        store.redis.hdel(pending, agent.name)
+        store.redis.hdel(pending, agent.execution_id)
     return outcome
 
 
 def retry_stops(store: Any, slug: str) -> list[str]:
-    """Sends again every stop the bus refused in ``slug`` for an agent the swarm has since dropped and answers one
-    action per stop sent again; a refused stop for an agent the swarm still seats is discarded, since the next
-    judgement of that agent sends afresh. Reads nothing on the memory bus, where no stop is ever refused."""
+    """Sends again every stop the bus refused in ``slug`` for an execution the swarm has since dropped and answers one
+    action per stop sent again; a refused stop for an execution the swarm still seats is discarded, since the next
+    judgement of that agent sends afresh. The first stop the bus refuses again ends the pass and leaves the rest for
+    the next one. Reads nothing on the memory bus, where no stop is ever refused."""
     if BusConfig.from_environ().backend == "memory":
         return []
     pending = store.key(slug, PENDING_STOPS)
     held = store.redis.hgetall(pending)
     if not held:
         return []
-    seated = {agent.name for agent in store.agents(slug)}
+    seated = {agent.execution_id for agent in store.agents(slug)}
     actions: list[str] = []
-    for name, raw in held.items():
-        if name in seated:
-            store.redis.hdel(pending, name)
+    for execution, raw in held.items():
+        if execution in seated:
+            store.redis.hdel(pending, execution)
             continue
         stop = json.loads(raw)
-        outcome = stop_admitted(store, slug, AgentRecord(**stop["agent"]), stop["reason"])
-        actions.append(f"sent the {stop['reason']} stop for {name} again: {outcome}")
+        agent = AgentRecord(**stop["agent"])
+        outcome = stop_admitted(store, slug, agent, stop["reason"])
+        actions.append(f"sent the {stop['reason']} stop for {agent.name} again: {outcome}")
+        if outcome.startswith(execution_stop.FAILED):
+            break
     return actions
 
 

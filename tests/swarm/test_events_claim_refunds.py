@@ -281,8 +281,8 @@ def test_the_hub_stop_reports_its_answer_on_stderr_and_closes_the_bus_it_opened(
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: config)
     monkeypatch.setattr(reconciler, "open_bus", open_for)
     monkeypatch.setattr(reconciler.execution_stop, "stop", lambda _bus, _slug, _agent, _reason: execution_stop.SENT)
-    agent = AgentRecord(name="a1", lane="eng", task="t1")
-    store.redis.hset(store.key(SLUG, reconciler.PENDING_STOPS), agent.name, "an earlier refused stop")
+    agent = AgentRecord(name="a1", lane="eng", task="t1", execution_id="x1")
+    store.redis.hset(store.key(SLUG, reconciler.PENDING_STOPS), agent.execution_id, "an earlier refused stop")
 
     outcome = reconciler.stop_admitted(store, SLUG, agent, "idle")
 
@@ -290,7 +290,7 @@ def test_the_hub_stop_reports_its_answer_on_stderr_and_closes_the_bus_it_opened(
     assert (outcome, opened, closed) == (expected, [config], [] if refused else [True])
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == ("", f"hub execution stop for a1 in swarm {SLUG} after idle: {expected}\n")
-    held = {agent.name: json.dumps({"agent": asdict(agent), "reason": "idle"})}
+    held = {agent.execution_id: json.dumps({"agent": asdict(agent), "reason": "idle"})}
     assert pending_stops(store) == (held if refused else {})
 
 
@@ -509,7 +509,7 @@ def test_a_stop_the_bus_refused_is_sent_again_on_each_reap_pass_until_the_bus_ta
 
 
 def pending_stops(store: RedisStore) -> dict[str, str]:
-    """The stops of swarm ``sw`` waiting to be sent again, by agent name."""
+    """The stops of swarm ``sw`` waiting to be sent again, by execution id."""
     return cast("dict[str, str]", store.redis.hgetall(store.key(SLUG, reconciler.PENDING_STOPS)))
 
 
@@ -541,10 +541,32 @@ def test_the_reap_pass_sends_no_pending_stop_again_on_the_memory_backend(
     env: tuple[RedisStore, Any, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, _, _ = env
-    held = json.dumps({"agent": asdict(AgentRecord(name="a1", lane="eng", task="t1")), "reason": "idle"})
-    store.redis.hset(store.key(SLUG, reconciler.PENDING_STOPS), "a1", held)
+    agent = AgentRecord(name="a1", lane="eng", task="t1", execution_id="x1")
+    held = json.dumps({"agent": asdict(agent), "reason": "idle"})
+    store.redis.hset(store.key(SLUG, reconciler.PENDING_STOPS), agent.execution_id, held)
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
 
     assert reconciler.retry_stops(store, SLUG) == []
 
-    assert pending_stops(store) == {"a1": held}
+    assert pending_stops(store) == {agent.execution_id: held}
+
+
+@pytest.mark.feature("events-refused-stop-resent")
+def test_a_pass_stops_sending_again_at_the_first_stop_the_bus_still_refuses(
+    env: tuple[RedisStore, Any, Any], bus: Bus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _, _ = env
+    agents = [AgentRecord(name=f"a{n}", lane="eng", task="t1", execution_id=f"x{n}") for n in (1, 2)]
+    working = execution_stop.stop
+    monkeypatch.setattr(execution_stop, "stop", refused_stop)
+    assert [reconciler.stop_admitted(store, SLUG, agent, "idle") for agent in agents] == [REFUSED, REFUSED]
+
+    refused = reconciler.retry_stops(store, SLUG)
+    still = sorted(pending_stops(store))
+    monkeypatch.setattr(execution_stop, "stop", working)
+    taken = reconciler.retry_stops(store, SLUG)
+
+    assert refused == [f"sent the idle stop for a1 again: {REFUSED}"]
+    assert still == ["x1", "x2"]
+    assert taken == [f"sent the idle stop for a{n} again: {execution_stop.UNKNOWN}" for n in (1, 2)]
+    assert pending_stops(store) == {}
