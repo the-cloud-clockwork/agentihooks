@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from scripts.ci_mutation import stats_cache
+from scripts.profiles.sources import blob as blob_id
 
 __all__ = [
     "SCHEMAS",
@@ -110,11 +111,6 @@ class GradeInputs:
 def digest(record: dict[str, object]) -> str:
     """Return the sha256 hex digest of a record's canonical JSON: sorted keys, compact separators."""
     return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
-def blob_id(data: bytes) -> str:
-    """Return the git blob id of a file's bytes, the id every file input is named by."""
-    return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
 
 
 def _key(kind: str, inputs: dict[str, object]) -> str:
