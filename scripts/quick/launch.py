@@ -7,11 +7,13 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from scripts.quick import paths, registry, seeds
+from scripts.quick.layout import MASTER
 from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV, Member
 
 WAIT_BARE_S = 60.0
 SETTLE_S = 20.0
 POLL_S = 1.0
+END_TIMEOUT_S = 120.0
 SWARM_KEYS = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_AGENT_NAME")
 Start = Callable[[list[str], dict[str, str]], int]
 
@@ -124,3 +126,37 @@ def relaunch(
     if code != 0:
         return f"failed-{code}"
     return "exited" if gone else "started"
+
+
+def end_agent(name: str) -> None:
+    """End the agent session called ``name`` and keep its herdr pane for the successor."""
+    command = [sys.executable, "-m", "scripts.terminate_agent", name, "--type", "any", "--keep-pane"]
+    subprocess.run(command, capture_output=True, check=False, timeout=END_TIMEOUT_S)
+
+
+def force(
+    folder: Path,
+    seat_name: str,
+    base: Mapping[str, str],
+    *,
+    bare: Callable[[str], bool | None],
+    end: Callable[[str], None] = end_agent,
+    start: Start = init_agent,
+    wait_s: float = WAIT_BARE_S,
+    sleep: Callable[[float], None] = time.sleep,
+) -> str:
+    """End an engineer's live but unusable agent with its pane kept, then start its successor; the outcome.
+
+    The master is the operator's own session and a seat being launched already has a successor coming, so neither
+    is ended.
+    """
+    swarm = registry.load(folder)
+    seat = swarm.seat(seat_name) if swarm else None
+    if seat is None:
+        return "no-seat"
+    if seat.seat == MASTER:
+        return "master"
+    if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.PENDING) is None:
+        return "launching"
+    end(seat.name)
+    return relaunch(folder, seat_name, base, bare=bare, start=start, wait_s=wait_s, sleep=sleep)

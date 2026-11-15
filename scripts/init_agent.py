@@ -1099,6 +1099,22 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
         raise ValueError("explicit authentication refused by the sign ins gate")
 
 
+def _routed_only(args: argparse.Namespace, environ: dict[str, str]) -> bool:
+    """A handoff must land on another account and a quick seat on a routed one, so neither falls back to bare Claude."""
+    from scripts.quick.member import SEAT_ENV
+
+    return bool(args.handoff or environ.get(SEAT_ENV))
+
+
+def _unrouted(args: argparse.Namespace, environ: dict[str, str], route: dict[str, str]) -> tuple[str, str] | None:
+    """The report line and error of a launch that had to be routed and was not; None when the launch stands."""
+    if route.get("status") == "routed" or not _routed_only(args, environ):
+        return None
+    if args.handoff:
+        return "handoff=failed", "handoff failed; the new session was not routed to another account"
+    return "quick_seat=failed", "the quick seat's agent was not routed to an account; the seat stays pending"
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
@@ -1134,7 +1150,6 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
         claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args
-        # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
             name,
@@ -1144,7 +1159,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             AgentSpec(
                 agent=agent,
                 exclude=exclude,
-                fallback_bare=not args.handoff,
+                fallback_bare=not _routed_only(args, active_env),
                 resume=args.resume,
                 profile=args.profile,
                 channel=channel,
@@ -1272,11 +1287,10 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env, launch)}")
-    if args.handoff and route.get("status") != "routed":
-        print("\n".join([*report, "handoff=failed"]))
-        print(
-            "agentihooks init-agent: handoff failed; the new session was not routed to another account", file=sys.stderr
-        )
+    refused = _unrouted(args, active_env, route)
+    if refused:
+        print("\n".join([*report, refused[0]]))
+        print(f"agentihooks init-agent: {refused[1]}", file=sys.stderr)
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
