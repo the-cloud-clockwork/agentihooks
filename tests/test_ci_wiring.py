@@ -1,5 +1,4 @@
 import json
-from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,6 @@ import yaml
 from scripts import ci_wiring
 
 _ROOT = Path(__file__).resolve().parents[1]
-_TODAY = date(2026, 10, 8)
 pytestmark = pytest.mark.unit
 
 
@@ -33,7 +31,7 @@ def _declared(*keys):
 
 
 def _check(workflows, config):
-    return ci_wiring.check(workflows, config, _TODAY)
+    return ci_wiring.check(workflows, config)
 
 
 def _write(root: Path, workflows: dict, config: dict) -> None:
@@ -63,21 +61,6 @@ def test_main_ignores_declaration_dates(tmp_path: Path, capsys: pytest.CaptureFi
     _write(tmp_path, {"test.yml": _gate_workflow(old={}, new={})}, config)
     assert ci_wiring.main(["--root", str(tmp_path)]) == 0
     assert capsys.readouterr().out == "1 workflows, 5 jobs, 0 wiring problems\n"
-
-
-def test_main_ignores_declaration_dates_across_utc_midnight(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    class Clock:
-        @staticmethod
-        def now(tz: object) -> datetime:
-            assert tz is UTC
-            return datetime(2026, 10, 9, 0, 30, tzinfo=UTC)
-
-    monkeypatch.setattr(ci_wiring, "datetime", Clock)
-    _write(tmp_path, {"test.yml": _gate_workflow(x={})}, {"not_gates": {"test.yml/x": _entry(expires="2026-10-08")}})
-    assert ci_wiring.main(["--root", str(tmp_path)]) == 0
-    assert capsys.readouterr().out == "1 workflows, 4 jobs, 0 wiring problems\n"
 
 
 def test_help_names_what_the_check_enforces(capsys):
