@@ -1,0 +1,19 @@
+rules:
+  - id: local-session-miss-reads-as-no-process
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The swarm controller scans only its own processes, so a validated hive agent it found no session for was
+      reported with no process, and once the agent sat idle past its heartbeat window the tick verify step retired it
+      live through the mismatch drop. Report no process only when no other live hive lists the agent's name, through
+      HerdrRuntime._listed_elsewhere; an agent another hive lists has no binding fact on this host.
+    paths:
+      include:
+        - /scripts/swarm/runtime.py
+        - local-session-miss-reads-as-no-process.py
+    patterns:
+      - pattern: |
+          $FACTS[$AGENT.name] = {"process": False}
+      - pattern-not-inside: |
+          if not $SELF._listed_elsewhere($AGENT.name):
+              ...

@@ -1133,6 +1133,71 @@ def test_unbound_absent_process_has_no_live_report(monkeypatch):
     assert HerdrRuntime().bindings([AgentRecord("engineer", "eng", "one")]) == {}
 
 
+@pytest.mark.feature("hive-listed-agent-no-local-process-fact")
+@pytest.mark.parametrize(
+    ("hive", "names", "expected"),
+    [
+        ("hive-a", ["engineer@zz"], {}),
+        ("hive-a", ["other@zz"], {"engineer@zz": {"process": False}}),
+        ("hive-a", [], {"engineer@zz": {"process": False}}),
+        ("controller", ["engineer@zz"], {"engineer@zz": {"process": False}}),
+    ],
+)
+def test_a_validated_agent_a_live_hive_lists_has_no_process_fact_on_a_host_without_its_session(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, hive: str, names: list[str], expected: dict
+) -> None:
+    from scripts import terminate_agent
+    from scripts.hive import reports
+    from scripts.swarm import commands
+    from scripts.swarm.runtime import HerdrRuntime
+
+    store, _, _ = ticking
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: [hive])
+    store.redis.set(reports.key(hive), json.dumps({"names": names, "executions": {}, "panes": {}}))
+    controller = HerdrRuntime()
+    monkeypatch.setattr(controller, "hive", reports.Reports(store.redis))
+    agent = AgentRecord("engineer@zz", "eng", "one", hive="hive-a", profile_decision={"validation": {"pid": 99}})
+    assert controller.bindings([agent]) == expected
+    assert controller._binding_pids == {"engineer@zz": None}
+
+
+@pytest.mark.feature("hive-listed-agent-no-local-process-fact")
+def test_tick_keeps_an_idle_hive_agent_a_live_hive_report_lists_past_its_heartbeat_window(
+    launched: tuple[RedisStore, FakeRuntime, FakeLedger], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import terminate_agent
+    from scripts.hive import reports
+    from scripts.swarm import commands, idle
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = launched
+    tick("sw", store, ledger, runtime, 100)
+    seated = next(a for a in store.agents("sw") if a.lane == "eng")
+    validation = {**seated.profile_decision.get("validation", {}), "pid": 99}
+    agent = replace(
+        seated, hive="hive-a", runtime_target={}, profile_decision={**seated.profile_decision, "validation": validation}
+    )
+    store.put_agent("sw", agent)
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["hive-a"])
+    store.redis.set(reports.key("hive-a"), json.dumps({"names": [agent.name], "executions": {}, "panes": {}}))
+    now = 10_000_000
+    idle.beat(store.redis, "sw", agent.name, idle.IDLE, now - reports.LOST_MS - 1)
+    controller = HerdrRuntime()
+    monkeypatch.setattr(controller, "hive", reports.Reports(store.redis))
+    monkeypatch.setattr(runtime, "bindings", controller.bindings)
+    tick("sw", store, ledger, runtime, now)
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), agent.name))
+    assert agent.name not in runtime.killed
+    assert ledger.rows["one"]["claimed_by"] == agent.name
+    assert [(a.name, a.state) for a in store.agents("sw") if a.lane == "eng"] == [(agent.name, agent.state)]
+    assert (report["at"], report["state"]) == (100, "matching")
+
+
 @pytest.mark.parametrize(
     "status, session_id, expected",
     [
