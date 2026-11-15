@@ -29,18 +29,22 @@ def _reap(
     now_ms: int,
     deadline: Deadline | None = None,
 ) -> list[str]:
-    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order.
+    """Judge every agent of the swarm, legacy and hub admitted, one task per pass worker, returning actions in agent
+    order.
 
     Past ``deadline`` no further agent is judged: the rest are left for the next pass, named in one closing action.
     """
     from scripts.hub import owned_leases
-    from scripts.hub.reconciler import legacy_agents
+    from scripts.hub.reconciler import admitted_agents, legacy_agents
 
     live, rows = tick.timing.timed(tick._live_names, runtime), dict(rows)
 
     judging = tick._Reaping(slug, store, ledger, runtime, rows, live, now_ms)
     agents = list(tick.timing.timed(legacy_agents, store, slug))
     tick.timing.timed(owned_leases.renew, store, slug, agents, tick.LEASE_MS)
+    admitted = list(tick.timing.timed(admitted_agents, store, slug, agents))
+    hub_owned = {agent.name for agent in admitted}
+    agents += admitted
     by_task: dict[str, list[int]] = {}
     for index, agent in enumerate(agents):
         by_task.setdefault(agent.task or agent.name, []).append(index)
@@ -54,7 +58,8 @@ def _reap(
             agent = agents[index]
             with tick.timing.acting(agent.name):
                 try:
-                    judged.append((index, _kept_on_refusal(agent.name, tick._reap_agent(judging, agent))))
+                    judge = _reap_admitted if agent.name in hub_owned else tick._reap_agent
+                    judged.append((index, _kept_on_refusal(agent.name, judge(judging, agent))))
                 except tick.SwarmError as exc:
                     if _IDENTITY_CONFLICT not in str(exc):
                         raise
@@ -294,6 +299,23 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     if now_ms - max(agent.started_at, agent.launched_at) > tick.STARTUP_GRACE_MS:
         return tick.timing.timed(tick._lost, slug, store, ledger, runtime, rows, agent, now_ms)
     return []
+
+
+def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
+    """Return the actions the live agent watch takes on one agent whose hive recorded its start while its pane is
+    live; its exit, its recovery and its lease stay with the hub lifecycle and reconciler."""
+    slug, store = judging.slug, judging.store
+    if (
+        agent.name not in judging.live
+        or agent.state in {"awaiting-decision", "retiring"}
+        or (agent.lane == tick.MASTER and agent.state == "starting")
+        or tick.timing.timed(tick._acknowledging, slug, store, agent)
+        or tick._ended(agent, judging.rows)
+    ):
+        return []
+    return tick.timing.timed(
+        tick._watch_agent, slug, store, judging.ledger, judging.runtime, judging.rows, agent, judging.now_ms
+    )
 
 
 def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
