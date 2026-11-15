@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from scripts.ci_mutation import stats_cache
 
-__all__ = (
+__all__ = [
     "SCHEMAS",
     "GradeInputs",
     "MutantInputs",
@@ -27,18 +27,19 @@ __all__ = (
     "static_key",
     "stats_key",
     "test_key",
-)
+]
 
 SCHEMAS: dict[str, int] = {"static": 1, "test": 1, "stats": stats_cache.SCHEMA, "mutant": 1, "grade": 1}
 
 
 @dataclass(frozen=True)
 class Toolchain:
-    """What a unit runs on: interpreter, tool versions, lockfile, worker image and environment key."""
+    """What a unit runs on: interpreter, tool versions, lockfile, pyproject, worker image and environment key."""
 
     interpreter: str
     tools: Mapping[str, str]
     lockfile: str
+    pyproject: str
     image: str
     environment: Mapping[str, str]
 
@@ -61,7 +62,6 @@ class TestInputs:
     tests: Mapping[str, str]
     opened: Mapping[str, str]
     invocation: tuple[str, ...]
-    pyproject: str
     toolchain: Toolchain
 
 
@@ -114,7 +114,7 @@ def digest(record: dict[str, object]) -> str:
 
 def blob_id(data: bytes) -> str:
     """Return the git blob id of a file's bytes, the id every file input is named by."""
-    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+    return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
 
 
 def _key(kind: str, inputs: dict[str, object]) -> str:
@@ -127,6 +127,7 @@ def _toolchain(toolchain: Toolchain) -> dict[str, object]:
         "interpreter": toolchain.interpreter,
         "tools": dict(toolchain.tools),
         "lockfile": toolchain.lockfile,
+        "pyproject": toolchain.pyproject,
         "image": toolchain.image,
         "environment": dict(toolchain.environment),
     }
@@ -154,14 +155,17 @@ def test_key(inputs: TestInputs) -> str:
             "tests": dict(inputs.tests),
             "opened": dict(inputs.opened),
             "invocation": list(inputs.invocation),
-            "pyproject": inputs.pyproject,
             "toolchain": _toolchain(inputs.toolchain),
         },
     )
 
 
 def stats_key(inputs: StatsInputs) -> str:
-    """Return the key of one test file's mutation stats, whose digest is the stats cache identity."""
+    """Return the key of one test file's mutation stats.
+
+    The record is hashed in the stats cache's own JSON form, default separators, so the digest
+    equals the stats cache identity and the lab reuses the stats the cache already holds.
+    """
     schema = SCHEMAS["stats"]
     context = {
         "schema": schema,
