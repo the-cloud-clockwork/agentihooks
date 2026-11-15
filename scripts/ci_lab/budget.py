@@ -72,34 +72,34 @@ def shed(share: float, fractions: Mapping[str, float]) -> tuple[str, ...]:
     return SHEDDABLE[:depth]
 
 
-def assess(spent_minutes: float, policy: Policy) -> Status:
+def assess(spent_minutes: float, budget_policy: Policy) -> Status:
     """The budget status after spent_minutes of the day's core minutes."""
-    share = spent_minutes / policy.core_minutes_per_day
-    return Status(max(1.0 - share, 0.0), shed(share, policy.fractions))
+    share = spent_minutes / budget_policy.core_minutes_per_day
+    return Status(max(1.0 - share, 0.0), shed(share, budget_policy.fractions))
 
 
-def waiting(pending: Mapping[str, int], shed: Collection[str]) -> int:
+def waiting(pending: Mapping[str, int], shed_classes: Collection[str]) -> int:
     """Pending slots of every class but backfill that may lease."""
-    return sum(pending.get(name, 0) for name in CLASSES if name != BACKFILL and name not in shed)
+    return sum(pending.get(name, 0) for name in CLASSES if name != BACKFILL and name not in shed_classes)
 
 
-def slots_wanted(running: Mapping[str, int], pending: Mapping[str, int], shed: Collection[str]) -> int:
+def slots_wanted(running: Mapping[str, int], pending: Mapping[str, int], shed_classes: Collection[str]) -> int:
     """Slots to ask the autoscaler for: running slots of every class but backfill plus the waiting slots.
 
     Backfill never counts, so it takes free slots only; a shed class keeps its running slots but not its pending ones.
     """
-    return sum(running.get(name, 0) for name in CLASSES if name != BACKFILL) + waiting(pending, shed)
+    return sum(running.get(name, 0) for name in CLASSES if name != BACKFILL) + waiting(pending, shed_classes)
 
 
-def admits(name: str, slots: int, free_slots: int, waiting: int, shed: Collection[str]) -> bool:
+def admits(name: str, slots: int, free_slots: int, waiting_slots: int, shed_classes: Collection[str]) -> bool:
     """Whether a unit of the class taking slots may lease now.
 
     A shed class never leases; backfill leases only into the slots left free after the waiting slots of every other
     class that may lease.
     """
-    if name in shed:
+    if name in shed_classes:
         return False
-    return name != BACKFILL or slots <= free_slots - waiting
+    return name != BACKFILL or slots <= free_slots - waiting_slots
 
 
 def observe(load: Load, status: Status) -> Load:

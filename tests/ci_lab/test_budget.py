@@ -1,3 +1,4 @@
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -64,6 +65,17 @@ def test_policy_reads_the_budget_of_the_validated_runtime_config() -> None:
 )
 def test_the_day_key_names_the_utc_date_of_the_instant(now_ms: int, key: str) -> None:
     assert budget.day_key(now_ms) == key
+
+
+def test_the_day_key_ignores_the_host_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TZ", "Pacific/Kiritimati")
+    time.tzset()
+    try:
+        assert budget.day_key(at(15, 10)) == "agentihooks-ci:budget:2026-11-15"
+        assert budget.day_key(at(15, 23, 59, 59, 999)) == "agentihooks-ci:budget:2026-11-15"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_nothing_is_spent_before_the_first_charge(make: Callable[[budget.Policy], budget.Budget]) -> None:
