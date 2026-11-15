@@ -145,6 +145,23 @@ def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
     assert "red with no push for 15 minutes" in swarm.inbox()[0].text
 
 
+@pytest.mark.feature("swarm-reclaim-keeps-seat")
+def test_a_watchdog_reopen_keeps_the_leavers_seat_for_the_next_life() -> None:
+    swarm = Swarm(RED)
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+    assert swarm.store.handoff_seat(SLUG, "t1") == "eng-1@sw"
+
+
+@pytest.mark.feature("swarm-reclaim-keeps-seat")
+def test_a_watchdog_reopen_saves_no_seat_when_the_leaver_was_not_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    swarm = Swarm(RED)
+    monkeypatch.setattr(swarm.store, "drop_agent", lambda *args, **kwargs: False)
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+    assert swarm.store.handoff_seat(SLUG, "t1") == ""
+
+
 def test_a_watchdog_reopen_marks_the_next_start_as_after_the_watchdog():
     swarm = Swarm(RED)
     swarm.tick(START + 14 * MINUTE)
