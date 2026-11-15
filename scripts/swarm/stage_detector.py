@@ -104,19 +104,17 @@ def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> N
         standing.clear_detector(store.redis, slug, stage)
 
 
-def lab_finding(
-    store: RedisStore, slug: str, reading: dict[str, Any] | None, limits: findings.Limits, now_ms: int
-) -> None:
+def lab_finding(store: Any, slug: str, reading: dict[str, Any] | None, limits: findings.Limits, now_ms: int) -> None:
     """Fire the standing lab wait finding while the reading holds eng claims, and clear it once the reading falls
     back; a lab wait row the detector measured in task hours is left to the detector."""
     minutes = claim_hold.lab_minutes(reading, now_ms)
-    row = standing.read(store.redis, slug).get(stages.LAB_WAIT, {})
+    row: dict[str, Any] = standing.read(store.redis, slug).get(stages.LAB_WAIT, {})
     mine = row.get("unit") == LAB_UNIT
     if minutes <= limits.ci_behind_minutes:
         if mine:
             standing.clear(store.redis, slug, stages.LAB_WAIT)
         return
-    episode = row["episodes"][-1] if mine else f"{stages.LAB_WAIT}:{now_ms}"
+    episode = str(row["episodes"][-1]) if mine else f"{stages.LAB_WAIT}:{now_ms}"
     held = LAB_HELD.format(hold=claim_hold.LAB_BEHIND.format(minutes=minutes))
     found = standing.Reading(minutes, limits.ci_behind_minutes, LAB_UNIT, episode, held)
     standing.fire(store.redis, slug, stages.LAB_WAIT, found, now_ms)

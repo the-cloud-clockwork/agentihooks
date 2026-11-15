@@ -6,6 +6,7 @@ The calculator only reports; the master diagnoses and the operator decides.
 import dataclasses
 import os
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
@@ -92,7 +93,8 @@ class Finding:
         return {**found, "evidence": list(self.evidence)}
 
 
-def limits(environ=None):
+def limits(environ: Mapping[str, str] | None = None) -> Limits:
+    """The health limits, each from its environment variable when that holds a positive whole number."""
     env = os.environ if environ is None else environ
     values = {}
     for field in fields(Limits):

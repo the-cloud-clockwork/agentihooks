@@ -9,6 +9,7 @@ became claimable and is reported as seat wait or queue wait.
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from typing import Any
 
 from scripts.swarm import bottleneck, freeze, metrics_outbox
 from scripts.swarm.store import RedisStore
@@ -186,12 +187,14 @@ def _waiting(task: dict, marks: list, ready: "Claim", now_ms: int, lab: list[Spa
     return Timeline(start, now_ms, (wait,), tuple(_lab_waits(lab, wait)), task["id"], task.get("lane", LANE))
 
 
-def lab_spans(samples: list[dict], now_ms: int, minutes: int) -> list[Span]:
+def lab_spans(samples: list[dict[str, Any]], now_ms: int, minutes: int) -> list[Span]:
     """Each stretch a lab capacity sample predicts pull request grading more than ``minutes`` behind: a sample holds
     until the next one, for at most the claim hold's fresh window."""
     from scripts.swarm import claim_hold
 
-    ticks = sorted((row["ts_ms"], row["predicted_wait_s"]) for row in samples if row["class"] == claim_hold.LAB_CLASS)
+    ticks: list[tuple[int, float | None]] = sorted(
+        (row["ts_ms"], row["predicted_wait_s"]) for row in samples if row["class"] == claim_hold.LAB_CLASS
+    )
     ends = [*(at for at, _ in ticks[1:]), now_ms]
     return [
         Span(LAB_WAIT, at, min(end, at + claim_hold.LAB_FRESH_MS))
@@ -283,7 +286,9 @@ def claimable(doc: dict, fix_phase: str, seats: Mapping[str, int] | None = None)
     return Claim(doc, fix_phase, seats)
 
 
-def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) -> list[Timeline]:
+def timelines(
+    rows: dict[str, Any], tasks: list[dict[str, Any]], now_ms: int, ready: Claim | None = None
+) -> list[Timeline]:
     from scripts.swarm import claim_hold
     from scripts.swarm.health import findings
 
@@ -293,7 +298,7 @@ def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) 
     marks = history(rows["ledger_events"])
     lab, fix = lab_spans(rows.get("lab_capacity", []), now_ms, findings.limits().ci_behind_minutes), ready.fix_phase
 
-    def held(task: dict) -> list[Span]:
+    def held(task: dict[str, Any]) -> list[Span]:
         return lab if claim_hold.lab_held(task, fix) else []
 
     found = [
