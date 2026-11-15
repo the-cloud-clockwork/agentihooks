@@ -156,6 +156,18 @@ def test_a_failed_lease_records_no_tree(tmp_path: Path, origin: Path) -> None:
     assert trees.live == OrderedDict()
 
 
+def test_a_restarted_worker_recuts_a_tree_its_predecessor_left(tmp_path: Path, origin: Path) -> None:
+    head = _commit(origin, "a", "a")
+    mirror = _mirror(tmp_path, origin, head)
+    worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1).lease(head)
+    trees = worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1)
+    tree = trees.lease(head)
+    assert trees.live == OrderedDict({head: 1})
+    assert (tree / "a").read_text() == "a"
+    assert _writable(tree) == []
+    assert _registered(mirror.store) == [str(tree)]
+
+
 def test_a_mutation_unit_gets_its_own_writable_copy(tmp_path: Path, origin: Path) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)

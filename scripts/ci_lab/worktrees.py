@@ -57,6 +57,8 @@ class Worktrees:
         tree = self.root / head
         if head not in self.live:
             self.mirror.fetch(head)
+            if tree.exists():
+                self.drop(tree)
             _git(self.mirror.store, "worktree", "add", "--quiet", "--detach", str(tree), head)
             _writable(tree, False)
             self.live[head] = 0
