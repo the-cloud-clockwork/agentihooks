@@ -1,3 +1,6 @@
+import hashlib
+import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -121,14 +124,18 @@ def test_a_malformed_head_payload_raises(name: str, payload: Any) -> None:
 
 def test_a_head_envelope_carries_the_event_on_its_own_subject() -> None:
     event = head("merge_group", "github-merge-queue[bot]", "checks_requested")
+    before = time.time_ns() // 1_000_000
     envelope = webhooks.envelope(event)
+    after = time.time_ns() // 1_000_000
     assert envelope.type == "ci.lab.head.merge_group"
-    assert (envelope.swarm, envelope.entity, envelope.key, envelope.author) == (
+    assert (envelope.swarm, envelope.entity, envelope.key, envelope.author, envelope.version) == (
         "ci-lab",
         "head",
         f"{REPO}@{HEAD}",
         "github-merge-queue[bot]",
+        0,
     )
+    assert before <= envelope.time <= after
     assert envelope.data == {
         "event": "merge_group",
         "repo": REPO,
@@ -137,6 +144,7 @@ def test_a_head_envelope_carries_the_event_on_its_own_subject() -> None:
         "actor": "github-merge-queue[bot]",
         "action": "checks_requested",
     }
+    assert envelope.id == hashlib.sha256(json.dumps(envelope.data).encode()).hexdigest()
 
 
 class Published:
@@ -188,12 +196,17 @@ def test_a_head_notice_names_its_repository_head_base_and_actor() -> None:
     [
         {"repo": REPO, "head": HEAD, "base": BASE, "actor": ""},
         {"repo": REPO, "head": HEAD, "base": 3, "actor": "nestorcolt"},
-        {"repo": REPO, "head": HEAD, "base": BASE},
     ],
 )
-def test_a_head_notice_without_every_field_is_refused(notice: dict[str, Any]) -> None:
-    with pytest.raises((KeyError, ValueError)):
+def test_a_head_notice_with_an_empty_or_non_text_field_is_refused(notice: dict[str, Any]) -> None:
+    with pytest.raises(ValueError) as refused:
         webhooks.notice_event(notice)
+    assert str(refused.value) == "a lab head notice needs non empty repo, head, base, actor"
+
+
+def test_a_head_notice_missing_a_field_is_refused() -> None:
+    with pytest.raises(KeyError, match="actor"):
+        webhooks.notice_event({"repo": REPO, "head": HEAD, "base": BASE})
 
 
 @pytest.mark.parametrize(
@@ -244,6 +257,21 @@ def test_a_trusted_sender_reopening_an_untrusted_authors_pull_request_admits_not
     (event,) = webhooks.head_events("pull_request", pull_request("reopened", author="stranger", sender="nestorcolt"))
     assert event.actor == "stranger"
     assert intake.admit(event, intake.trusted_actors(ROOT)) is None
+
+
+def test_a_cached_negative_answers_a_request_unless_it_is_a_rerequested_check() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def negative(repo: str, sha: str) -> bool:
+        seen.append((repo, sha))
+        return True
+
+    pushed = intake.request_from(head("pull_request", "nestorcolt", "synchronize"))
+    rerun = intake.request_from(head("check_run", "nestorcolt", "rerequested"))
+    assert intake.answered(pushed, negative) is True
+    assert intake.answered(rerun, negative) is False
+    assert intake.answered(pushed, lambda repo, sha: False) is False
+    assert seen == [(REPO, HEAD)]
 
 
 def open_pull(sha: str, author: str = "agenticore-app[bot]") -> dict[str, Any]:

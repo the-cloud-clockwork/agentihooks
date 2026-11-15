@@ -113,7 +113,7 @@ class Ingress:
         try:
             for observed in seen:
                 self._pulls.observe(observed)
-            if self._lab is not None and heads:
+            if self._lab is not None:
                 self._lab.publish(heads)
         except Exception:
             print("hub: GitHub webhook could not record the event", file=sys.stderr)

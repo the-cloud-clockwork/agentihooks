@@ -103,7 +103,7 @@ def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
 def envelope(event: HeadEvent) -> Envelope:
     """Return the envelope recording a head, typed with its bus subject; one head event always has one id, so a resend is dropped."""
     return Envelope(
-        id=hashlib.sha256(json.dumps(asdict(event), sort_keys=True).encode()).hexdigest(),
+        id=hashlib.sha256(json.dumps(asdict(event)).encode()).hexdigest(),
         type=f"{HEAD_SUBJECT}.{event.event}",
         swarm=LAB,
         entity=ENTITY,

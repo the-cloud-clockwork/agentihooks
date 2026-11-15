@@ -14,6 +14,8 @@ from scripts.ci_lab.units import Priority, priority_of
 from scripts.ci_lab.webhooks import NOTICE, HeadEvent
 from scripts.ci_runner_trust import ACTORS, validate_actors
 
+__all__ = ["GradeRequest", "admit", "answered", "reconcile", "request_from", "trusted_actors"]
+
 RERUN = "rerequested"
 RECONCILE = "reconcile"
 PULL_REQUEST = "pull_request"
@@ -34,8 +36,14 @@ class GradeRequest:
 
 def request_from(event: HeadEvent) -> GradeRequest:
     """Return the grade request a head event asks for; a rerequested check bypasses a cached negative verdict."""
-    tier = priority_of({"event_name": TIER_EVENTS.get(event.event, event.event)})
-    return GradeRequest(event.repo, event.head, event.base, tier, event.actor, event.action == RERUN)
+    return GradeRequest(
+        repo=event.repo,
+        head=event.head,
+        base=event.base,
+        tier=priority_of({"event_name": TIER_EVENTS.get(event.event, event.event)}),
+        actor=event.actor,
+        bypass_negative=event.action == RERUN,
+    )
 
 
 def trusted_actors(root: Path) -> frozenset[str]:
@@ -46,6 +54,11 @@ def trusted_actors(root: Path) -> frozenset[str]:
 def admit(event: HeadEvent, trusted: Collection[str]) -> GradeRequest | None:
     """Return the grade request for a trusted actor's head, and none for an untrusted head, which stays recorded only."""
     return request_from(event) if event.actor in trusted else None
+
+
+def answered(request: GradeRequest, negative: Callable[[str, str], bool]) -> bool:
+    """Return whether a cached negative verdict, `negative(repo, head)`, already answers the request; a bypass never is."""
+    return not request.bypass_negative and negative(request.repo, request.head)
 
 
 def reconcile(open_pull_requests: Iterable[Mapping[str, Any]], graded: Callable[[str, str], bool]) -> list[HeadEvent]:
