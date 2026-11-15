@@ -6594,6 +6594,22 @@
       ]
     },
     {
+      "id": "hub-reap-unlisted-agent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-dead-agent-reap",
+      "behaviour": "A hub admitted agent, which has no host target or recorded pane so its hive report lists no execution for it, is settled once as exited by the hub reconciler when a fresh report of its beating hive no longer names it, past startup, while the report names other agents or its pod started after the agent's start; the lifecycle drops the agent, reopens its task and returns its slot, and the next join report heartbeat ends its running join report. An agent the report still names, a report with no names, a pod that started before the agent's start, a report observed inside startup, or an agent with a host target leaves the agent and its claim in place.",
+      "seam": "Reconciler.poll with Lifecycle.handle, reports.unlisted, and join_report.heartbeat",
+      "tests": [
+        "tests/hub/test_reconciler.py::test_a_hub_admitted_agent_its_beating_hive_no_longer_lists_is_settled_once",
+        "tests/hub/test_reconciler.py::test_a_hub_admitted_agent_its_hive_still_lists_or_cannot_yet_disown_is_preserved",
+        "tests/hub/test_reconciler.py::test_a_host_targeted_agent_the_same_report_no_longer_lists_is_preserved",
+        "tests/hub/test_reconciler.py::test_the_join_report_of_a_settled_hub_admitted_agent_ends_on_the_next_heartbeat"
+      ],
+      "rules": [
+        "hub-exit-ignores-unlisted-agent"
+      ]
+    },
+    {
       "id": "swarm-events-claim-cap",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-spawn-claims",
@@ -6654,6 +6670,29 @@
       "tests": [
         "tests/test_worker_profile_offline.py::test_offline_codex_profile_passes_a_lifecycle_gc_job_that_outlives_registration",
         "tests/test_worker_profile_offline.py::test_offline_codex_profile_still_fails_a_hook_child_beside_a_lifecycle_gc_job"
+      ]
+    },
+    {
+      "id": "hive-own-stop-consumer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-grant-own-consumer-scoped",
+      "behaviour": "Execution stops travel on a dedicated per swarm stop stream, and a scoped hive member credential may read, fetch and ack only its own stop consumer there, so no hive can pull, ack or forge another hive's stops; the hub creates each consumer and publishes the stops.",
+      "seam": "scripts.hive.nats_grant.member_claims enforced by a live NATS server, and the stops log of the scoped NATS bus that scripts.hive.execution_stop reads and writes",
+      "tests": [
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_fetches_and_acks_the_stops_on_its_own_stop_consumer",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_fetch_on_another_hives_stop_consumer_is_denied",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_ack_on_another_hives_stop_consumer_is_denied",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_cannot_publish_onto_the_stop_stream",
+        "tests/hive/test_stop_consumer_grant.py::test_a_member_subscribe_on_a_stop_subject_is_denied",
+        "tests/events/test_scoped_memory.py::test_scoped_memory_aggregate_stops_include_legacy_and_owned_logs",
+        "tests/events/test_memory.py::test_an_exhausted_stop_is_dead_lettered_like_an_event",
+        "tests/events/test_scoped_nats.py::test_hub_fans_in_scoped_stop_streams_and_the_legacy_events_stream",
+        "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_denies_every_stop_subscription",
+        "tests/hive/test_stop_consumer_grant.py::test_the_scoped_member_grant_names_only_its_own_stop_consumer",
+        "tests/hive/test_stop_consumer_grant.py::test_each_swarm_and_hive_has_its_own_stop_consumer_name"
+      ],
+      "rules": [
+        "stop-on-events-log"
       ]
     },
     {
