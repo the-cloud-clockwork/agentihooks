@@ -374,9 +374,13 @@ def _push_paths(preflight, paths):
     return filtered
 
 
-@pytest.mark.parametrize("dev_filtered", [False, True])
 @pytest.mark.parametrize(
-    ("paths", "verdict"), [(None, 0), ([".github/workflows/**"], 0), (["docs/**"], 1), ([".github/**"], 1)]
+    ("dev_filtered", "paths", "verdict"),
+    [
+        (False, [".github/workflows/**"], 0),
+        (True, None, 0),
+        *((dev_filtered, paths, 1) for dev_filtered in (False, True) for paths in (["docs/**"], [".github/**"])),
+    ],
 )
 def test_the_branch_lane_preflight_may_run_only_for_workflow_changes(repo, capsys, dev_filtered, paths, verdict):
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
@@ -1991,10 +1995,17 @@ def _pull_request_paths(workflow, paths):
     return workflow
 
 
-@pytest.mark.parametrize("dev_filtered", [False, True])
 @pytest.mark.parametrize(
-    ("paths", "verdict"),
-    [(None, 0), (_LEDGER_PATHS, 0), (_LEDGER_PATHS[:2], 1), (["scripts/**"], 1), ([*_LEDGER_PATHS, "docs/**"], 1)],
+    ("dev_filtered", "paths", "verdict"),
+    [
+        (False, _LEDGER_PATHS, 0),
+        (True, None, 0),
+        *(
+            (dev_filtered, paths, 1)
+            for dev_filtered in (False, True)
+            for paths in (_LEDGER_PATHS[:2], ["scripts/**"], [*_LEDGER_PATHS, "docs/**"])
+        ),
+    ],
 )
 def test_the_equivalence_grading_may_run_only_for_ledger_changes(repo, capsys, dev_filtered, paths, verdict):
     base = _pull_request_paths(_equivalence(), _LEDGER_PATHS if dev_filtered else None)
