@@ -245,6 +245,29 @@ def test_a_legacy_agent_retirement_sends_no_stop(
     assert sent_stops(bus, agent) == []
 
 
+@pytest.mark.feature("events-legacy-free-sends-no-stop")
+@pytest.mark.parametrize(
+    "free",
+    [agent_steps._free_revoked, agent_steps._free_refused, agent_steps._free_stuck],
+    ids=["revoked", "refused", "stuck"],
+)
+def test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], free: Callable[..., list[str]]
+) -> None:
+    store, ledger, rt = env
+    assert run(SLUG, "create", "--repo", "/repo") == 0
+    agent = replace(seat("t1"), state="working", pane_id="w1:p1", launched_at=NOW)
+    store.put_agent(SLUG, agent)
+    rt.live.add(agent.name)
+    assert [legacy.name for legacy in reconciler.legacy_agents(store, SLUG)] == [agent.name]
+
+    free(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
+
+    assert agent.name in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert sent_stops(bus, agent) == []
+
+
 @pytest.mark.feature("events-retirement-stops-the-execution")
 def test_the_hub_stop_opens_no_bus_on_the_memory_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     def unexpected(_config: Any) -> Any:
