@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -79,14 +79,14 @@ def _load(objects: Objects, run: str) -> GradeEvidence | None:
     return GradeEvidence(run=document["run"], inputs=GradeInputs(**document["inputs"]), units=units)
 
 
-def _absent(objects: Objects, units: Sequence[GradeUnit]) -> list[str]:
+def _missing(objects: Objects, units: Sequence[GradeUnit]) -> list[str]:
     paths = [unit_path(unit.kind, unit.key, name) for unit in units for name in NAMES]
     folders = dict.fromkeys(path.rsplit("/", 1)[0] + "/" for path in paths)
     present = {key for folder in folders for key in objects.keys(folder)}
     return [path for path in paths if path not in present]
 
 
-def _render(evidence: GradeEvidence, units: Sequence[GradeUnit], absent: Sequence[str]) -> str:
+def _render(evidence: GradeEvidence, units: Sequence[GradeUnit], missing: Set[str]) -> str:
     inputs = evidence.inputs
     kinds = Counter(unit.kind for unit in units)
     lines = [
@@ -96,13 +96,13 @@ def _render(evidence: GradeEvidence, units: Sequence[GradeUnit], absent: Sequenc
         f"base {inputs.base}",
         f"tier {inputs.tier}",
         f"grader {inputs.grader}",
-        "kinds " + " ".join(f"{kind}:{kinds[kind]}" for kind in sorted(kinds)),
+        " ".join(["kinds", *(f"{kind}:{kinds[kind]}" for kind in sorted(kinds))]),
     ]
     for unit in units:
         lines.append(f"unit {unit.kind} {unit.key} run {unit.run}")
         for name in NAMES:
             path = unit_path(unit.kind, unit.key, name)
-            lines.append(f"  {name} {path}" + (" missing" if path in absent else ""))
+            lines.append(f"  {name} {path}" + (" missing" if path in missing else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -116,13 +116,13 @@ def show(objects: Objects, runs: Sequence[str]) -> tuple[str, list[str]]:
             missing.append(grade_path(run))
             continue
         units = sorted(set(evidence.units), key=lambda unit: (unit.kind, unit.key, unit.run))
-        absent = _absent(objects, units)
-        blocks.append(_render(evidence, units, absent))
+        absent = _missing(objects, units)
+        blocks.append(_render(evidence, units, set(absent)))
         missing.extend(absent)
     return "\n".join(blocks), missing
 
 
-def _print(objects: Objects, runs: Sequence[str]) -> int:
+def _emit(objects: Objects, runs: Sequence[str]) -> int:
     text, missing = show(objects, runs)
     sys.stdout.write(text)
     sys.stderr.writelines(f"missing {path}\n" for path in missing)
@@ -135,11 +135,11 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--grade", required=True)
     parser.add_argument("--objects", type=Path, required=True)
     arguments = parser.parse_args(argv)
-    return _print(LocalObjects(arguments.objects), [arguments.grade])
+    return _emit(LocalObjects(arguments.objects), [arguments.grade])
 
 
-def ci(argv: list[str]) -> int:
-    """Print every grade of a head: agentihooks ci lab show SHA --objects ROOT."""
+def ci(argv: Sequence[str]) -> int:
+    """Print every grade of a head in run order: agentihooks ci lab show SHA --objects ROOT."""
     parser = argparse.ArgumentParser(prog="agentihooks ci")
     lab = parser.add_subparsers(dest="group", required=True).add_parser("lab")
     show_parser = lab.add_subparsers(dest="command", required=True).add_parser("show")
@@ -148,8 +148,8 @@ def ci(argv: list[str]) -> int:
     arguments = parser.parse_args(argv)
     objects = LocalObjects(arguments.objects)
     prefix = head_prefix(arguments.sha)
-    runs = [path.removeprefix(prefix) for path in objects.keys(prefix)]
+    runs = sorted((path.removeprefix(prefix) for path in objects.keys(prefix)), key=lambda run: (len(run), run))
     if not runs:
         sys.stderr.write(f"missing {prefix}\n")
         return 1
-    return _print(objects, runs)
+    return _emit(objects, runs)

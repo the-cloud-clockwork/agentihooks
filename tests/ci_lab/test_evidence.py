@@ -120,15 +120,48 @@ def test_a_head_without_a_grade_exits_non_zero_naming_its_path(
     assert (code, captured.out, captured.err) == (1, "", f"missing lab/heads/{BASE}/\n")
 
 
-def test_a_missing_unit_object_is_marked_and_exits_non_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_head_marker_without_its_grade_exits_non_zero_naming_the_grade(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     store = objects.LocalObjects(tmp_path)
-    stored(store, "test", FIRST_TEST, names=("report",))
+    store.write_once(evidence.head_prefix(HEAD) + "run-5", b"")
+
+    code = evidence.ci(["lab", "show", HEAD, "--objects", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (1, "", "missing lab/grades/run-5/grade.json\n")
+
+
+def test_ci_lab_show_orders_numeric_runs_by_value_and_prints_an_empty_grade(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = objects.LocalObjects(tmp_path)
+    for run in ("10", "9"):
+        evidence.record(store, grade(run, "queue", ()))
+    block = (
+        f"repository the-cloud-clockwork/agentihooks\nhead {HEAD}\nbase {BASE}\ntier queue\ngrader {GRADER}\nkinds\n"
+    )
+
+    code = evidence.ci(["lab", "show", HEAD, "--objects", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (0, f"grade 9\n{block}\ngrade 10\n{block}", "")
+
+
+@pytest.mark.parametrize(
+    ("absent", "path"),
+    [("report", f"lab/test/{'2' * 64}/report.json"), ("log", f"lab/test/{'2' * 64}/log.txt")],
+)
+def test_a_missing_unit_object_is_marked_and_exits_non_zero(
+    absent: str, path: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = objects.LocalObjects(tmp_path)
+    stored(store, "test", FIRST_TEST, names=tuple(name for name in ("report", "log") if name != absent))
     evidence.record(store, grade("run-3", "queue", (evidence.GradeUnit(kind="test", key=FIRST_TEST, run="run-1"),)))
-    log = f"lab/test/{'2' * 64}/log.txt"
 
     code = evidence.main(["--grade", "run-3", "--objects", str(tmp_path)])
 
     captured = capsys.readouterr()
     assert code == 1
-    assert captured.out == QUEUE_BLOCK.replace(f"  log {log}\n", f"  log {log} missing\n")
-    assert captured.err == f"missing {log}\n"
+    assert captured.out == QUEUE_BLOCK.replace(f"  {absent} {path}\n", f"  {absent} {path} missing\n")
+    assert captured.err == f"missing {path}\n"
