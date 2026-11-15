@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import engine_migration, launch_job
+from scripts.swarm import ack_pass, engine_migration, launch_job
 from scripts.swarm import store as store_module
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 pytestmark = pytest.mark.unit
 
@@ -118,7 +118,7 @@ def test_a_swarm_with_legacy_agents_in_flight_is_left_for_the_master_with_its_la
     store.redis.hset(store.key("agents", launch_job.KEY), "engineer@2", json.dumps({"task": "t2"}))
 
     assert engine_migration.migrate(store) == {
-        "agents": "skipped: live legacy agents or launches",
+        "agents": "skipped: live legacy agents",
         "idle": "migrated: github.com/team/project",
     }
     assert configs(store) == {
@@ -138,7 +138,7 @@ def test_a_swarm_with_only_launch_jobs_whose_agents_are_gone_drops_them_and_migr
 
     assert engine_migration.migrate(store) == {
         "launching": "migrated: github.com/team/project",
-        "other": "skipped: live legacy agents or launches",
+        "other": "skipped: live legacy agents",
     }
     assert configs(store) == {
         "launching": ("events", "github.com/team/project"),
@@ -154,6 +154,41 @@ def test_a_swarm_without_an_origin_keeps_its_launch_jobs_when_skipped(store: Red
 
     assert engine_migration.migrate(store) == {"orphan": "skipped: no repository origin"}
     assert store.redis.hgetall(store.key("orphan", launch_job.KEY)) == {"engineer@4": json.dumps({"task": "t4"})}
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_refused_config_update_keeps_the_launch_rows(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    store.create(replace(SwarmConfig("refused", "/missing", 1, 1), repo_origin="github.com/team/project"))
+    store.redis.hset(store.key("refused", launch_job.KEY), "engineer@5", json.dumps({"task": "t5"}))
+    store.redis.hset(store.key("refused", "launches"), "engineer@5", json.dumps({"state": "launching"}))
+
+    def refuse(slug: str, **fields: str) -> None:
+        raise SwarmError(f"refused {slug}")
+
+    monkeypatch.setattr(store, "update", refuse)
+
+    assert engine_migration.migrate(store) == {"refused": "skipped: refused refused"}
+    assert store.redis.hgetall(store.key("refused", launch_job.KEY)) == {"engineer@5": json.dumps({"task": "t5"})}
+    assert store.redis.hgetall(store.key("refused", "launches")) == {"engineer@5": json.dumps({"state": "launching"})}
+
+
+@pytest.mark.feature("engine-config-migration")
+def test_a_stopped_doctor_with_no_agents_takes_the_watched_origin_and_drops_every_collecting_launch(
+    store: RedisStore,
+) -> None:
+    store.create(replace(SwarmConfig("watch", "/missing", 1, 1), engine="events", repo_origin=ORIGIN))
+    store.create(SwarmConfig("watch-doctor", "/missing", 1, 0, template="doctor"))
+    store.set_peer("watch-doctor", "watch")
+    store.redis.hset(store.key("watch-doctor", launch_job.KEY), "doctor@1", json.dumps({"task": "d1"}))
+    states = {f"doctor@{n}": "launching" for n in range(2, 9)} | {"doctor@9": "acknowledging", "doctor@10": "failed"}
+    for name, state in states.items():
+        store.redis.hset(store.key("watch-doctor", "launches"), name, json.dumps({"state": state}))
+
+    assert engine_migration.migrate(store) == {"watch": "unchanged", "watch-doctor": f"migrated: {ORIGIN}"}
+    assert configs(store)["watch-doctor"] == ("events", ORIGIN)
+    assert store.redis.exists(store.key("watch-doctor", launch_job.KEY)) == 0
+    assert store.redis.hgetall(store.key("watch-doctor", "launches")) == {"doctor@10": json.dumps({"state": "failed"})}
+    assert ack_pass.due(store, "watch-doctor") is False
 
 
 @pytest.mark.feature("engine-config-migration")
