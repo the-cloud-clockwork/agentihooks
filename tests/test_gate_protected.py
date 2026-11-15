@@ -1001,6 +1001,54 @@ def test_a_head_switching_to_either_canonical_aggregation_is_green(selected):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
+_QUEUE_TIER_OPENING = 'if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then\n'
+
+
+@pytest.mark.parametrize(
+    "form",
+    [{}, {"selected": True}, {"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True}],
+)
+def test_a_head_switching_to_a_lab_aggregation_is_green(form: dict[str, bool]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, lab=True)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+def test_the_repository_aggregator_rendered_for_the_lab_grades_green() -> None:
+    from scripts import ci_reuse, ci_runner_trust
+
+    workflows = ci_wiring.load(_ROOT)
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
+    head = copy.deepcopy(workflows)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    assert step["run"].count(_QUEUE_TIER_OPENING) == 1
+    step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
+    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        ('if $event != "pull_request" then . else', "if false then . else"),
+        ('($verdict.outputs["lab_" + .key] // "") != ""', "true"),
+        ('error("authoritative is not a JSON object")', "{}"),
+    ],
+)
+def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, lab=True)
+    assert edit[0] in step["run"]
+    head["jobs"]["gate-required"]["steps"] = [{**step, "run": step["run"].replace(*edit)}]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        f"The head's {gate_protected.GATE} changes its steps; the protected branch grades with its own."
+    ]
+
+
 @pytest.mark.parametrize("docs", [False, True])
 @pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
 def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:
@@ -2223,3 +2271,16 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     assert set(registry) in (expected, expected | {"scripts/ci_reuse.py"})
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
+
+
+def test_the_repository_registry_leaves_the_delivery_config_unfrozen(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    registry = (_ROOT / gate_protected.FROZEN).read_text()
+    _put(repo, {"delivery.yaml": "lab:\n  authoritative: []\n", gate_protected.FROZEN: registry}, "freeze")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _put(repo, {"delivery.yaml": "lab:\n  authoritative: [lint]\n"}, "flip lint")
+    code, out = _frozen_grade(repo, head, capsys)
+    assert "delivery.yaml" not in json.loads(registry)
+    assert (code, out.count("::error::")) == (0, 0), out
