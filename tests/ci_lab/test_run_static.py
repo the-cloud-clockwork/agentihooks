@@ -16,10 +16,14 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = "tests/SIZE_ALLOWLIST.json"
 NARROW = "def narrow(a: int) -> int:\n    return a\n"
 WIDE = "def wide(a, b, c, d, e, f, g, h):\n    return a\n"
-PASSING = "def main(argv: object = None) -> int:\n    return 0\n\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n"
+PASSING = (
+    "def main(argv: object = None) -> int:\n    return 0\n\n\n"
+    "if __name__ == '__main__':\n    raise SystemExit(main())\n"
+)
 LAYOUT = (
     'pwd -P\ncd "$RUNNER_TEMP/grader" && pwd -P\ncd "$RUNNER_TEMP/base" && pwd -P\n'
-    'command -v python\necho "$CI_LAB_TEST"\necho summary > "$GITHUB_STEP_SUMMARY"\n'
+    'command -v python\necho "$PATH"\necho "$CI_LAB_PORT_FIRST"\necho "$CI_LAB_TEST"\n'
+    'echo summary > "$GITHUB_STEP_SUMMARY"\n'
 )
 
 
@@ -40,7 +44,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> run_static.Sett
         root=root,
         venv=Path(sys.executable).parent.parent,
         ports=PortAllocator(41000, 41099, 10),
-        whitelist={"CI_LAB_TEST": "kept"},
+        whitelist={"CI_LAB_TEST": "kept", "GITHUB_WORKSPACE": "/nowhere", "RUNNER_TEMP": "/nowhere"},
         timeout=120.0,
     )
 
@@ -108,8 +112,10 @@ def test_the_step_reads_each_tree_where_the_workflow_puts_it(tmp_path: Path, set
     result = run_static.run(_step(LAYOUT), head, base, grader, settings)
     assert result.gate == "lint/probe"
     assert result.green
-    seen = [str(head.resolve()), str(grader.resolve()), str(base.resolve()), str(settings.venv / "bin" / "python")]
-    assert result.log.read_text().splitlines() == [*seen, "kept"]
+    trees = [str(head.resolve()), str(grader.resolve()), str(base.resolve())]
+    bin_folder = settings.venv / "bin"
+    path = f"{bin_folder}{os.pathsep}{os.defpath}"
+    assert result.log.read_text().splitlines() == [*trees, str(bin_folder / "python"), path, "41000", "kept"]
     assert result.report.read_text() == "summary\n"
     assert settings.root in result.report.parents
     assert settings.root in result.log.parents

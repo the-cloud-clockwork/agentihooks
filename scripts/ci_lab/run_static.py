@@ -17,7 +17,7 @@ SUMMARY = "GITHUB_STEP_SUMMARY"
 
 @dataclass(frozen=True)
 class Settings:
-    """Where gate runs keep their folders, the venv whose bin leads PATH, the ports, the whitelist and the time limit."""
+    """Where gate runs keep their folders, the venv whose bin leads PATH, the ports, whitelist and time limit."""
 
     root: Path
     venv: Path
@@ -55,7 +55,8 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
 
     The step finds the grader and base trees at $RUNNER_TEMP/grader and $RUNNER_TEMP/base and the head at
     $GITHUB_WORKSPACE, so a step that changes into the grader runs the grader's copy of its module and reads the
-    head only as data. The gate comes from the grader tree's workflow. The run folders stay under settings.root.
+    head only as data. The caller passes a gate discovered from the grader tree's workflow, never the head's. The
+    whitelist cannot replace the tree variables, and the run folders stay under settings.root.
     """
     folder = _folder(settings.root, base_tree, grader_tree)
     whitelist = {
