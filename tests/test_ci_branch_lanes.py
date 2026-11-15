@@ -1200,3 +1200,15 @@ def test_dev_only_needs_exactly_one_event_key_and_the_dev_push_test_is_pinned() 
     assert not lanes.dev_push_only({})
     assert not lanes.dev_push_only({"on": DEV_ONLY, True: DEV_ONLY})
     assert lanes.dev_push_only({True: DEV_ONLY})
+
+
+def test_a_job_after_an_accepted_dev_push_job_is_still_graded() -> None:
+    workflow = {
+        "name": "Image",
+        "on": DEV_ONLY,
+        "jobs": {
+            "build": {"runs-on": "ubuntu-latest", "concurrency": {"group": PER_BRANCH}},
+            "push": {"runs-on": "ubuntu-latest", "concurrency": {"group": "image"}},
+        },
+    }
+    assert lanes.problems(workflow) == ["job push has no shared hosted lane concurrency group"]
