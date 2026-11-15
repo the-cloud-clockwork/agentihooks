@@ -4110,6 +4110,7 @@ jobs:
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
+          MUTATION_GRADER: ${{ runner.temp }}/grader
         run: |
           python -m scripts.ci_mutation --bases "$BASES" --budget 1080
           grader="$RUNNER_TEMP/grader"
@@ -4335,6 +4336,7 @@ jobs:
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
+          MUTATION_GRADER: ${{ runner.temp }}/grader
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
 
       # Clearance files come from the pull request, since each survivor's clearance lands with its change.
@@ -5062,6 +5064,7 @@ jobs:
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
+          MUTATION_GRADER: ${{ runner.temp }}/grader
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
@@ -5071,6 +5074,7 @@ jobs:
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
+          MUTATION_GRADER: ${{ runner.temp }}/grader
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
