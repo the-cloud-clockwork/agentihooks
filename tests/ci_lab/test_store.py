@@ -106,6 +106,19 @@ def test_a_second_put_is_a_no_op(verdicts: store.Store) -> None:
     assert verdicts.objects.read(f"{folder}log.txt") == b"first\n"
 
 
+def test_a_second_put_never_rewrites_an_existing_index_entry(
+    verdicts: store.Store, client: fakeredis.FakeRedis
+) -> None:
+    unit = key("test", "kept")
+    verdict = store.Verdict(kind="test", key=unit, passed=True, flaky=False, seconds=1.0)
+    verdicts.put(verdict, {}, b"")
+    client.set(f"agentihooks-ci:verdict:test:{unit}", "held")
+
+    assert verdicts.put(verdict, {}, b"") is False
+
+    assert client.get(f"agentihooks-ci:verdict:test:{unit}") == "held"
+
+
 def test_a_put_after_the_index_is_lost_keeps_the_first_verdict(
     verdicts: store.Store, client: fakeredis.FakeRedis
 ) -> None:
@@ -210,7 +223,8 @@ def test_put_refuses_a_key_of_another_kind_or_shape(verdicts: store.Store) -> No
 
     with pytest.raises(ValueError, match=f"^not a test unit key: {other}$"):
         verdicts.put(store.Verdict(kind="test", key=other, passed=True, flaky=False, seconds=0.0), {}, b"")
-    for bad in ("test-v1-abc", key("test", "a") + "x", "test-v1-" + "g" * 64, "test-" + hexdigest(key("test", "a"))):
+    digest = hexdigest(key("test", "a"))
+    for bad in ("test-v1-abc", key("test", "a") + "x", "test-v1-" + "g" * 64, "test-" + digest, "test-v-" + digest):
         with pytest.raises(ValueError, match=f"^not a test unit key: {bad}$"):
             verdicts.put(store.Verdict(kind="test", key=bad, passed=True, flaky=False, seconds=0.0), {}, b"")
     assert verdicts.objects.keys("lab/") == []

@@ -49,7 +49,7 @@ class Store:
         return None if bypass_negative and not verdict.passed else verdict
 
     def put(self, verdict: Verdict, report: Mapping[str, object], log: bytes) -> bool:
-        """Store a verdict once; return False and change nothing when its key is already stored."""
+        """Store a verdict once; return False when its report exists, indexing that report only where unindexed."""
         report_path = unit_path(verdict.kind, verdict.key, "report")
         log_path = unit_path(verdict.kind, verdict.key, "log")
         document = {"report": dict(report), "verdict": asdict(verdict)}
