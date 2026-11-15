@@ -4354,6 +4354,7 @@ jobs:
       - name: Refine mutation shards from measured statistics
         id: refine
         if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts != '[0]'
+        timeout-minutes: 5
         env:
           BASES: ${{ steps.plan.outputs.bases }}
           MUTATION_SHARD_CPU_QUOTA: "3"

@@ -17,6 +17,7 @@ import yaml
 from _pytest.config import default_plugins
 
 from scripts import ci_gate_queue
+from scripts.ci_mutation.arrival import missing_producers
 from tests import refresh_durations
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
@@ -778,8 +779,6 @@ def _mutation_workflow():
 
 
 def test_the_plan_job_marks_every_collected_stats_part_for_the_shard_arrival_check(tmp_path: Path) -> None:
-    from scripts.ci_mutation.arrival import missing_producers
-
     plan = _mutation_workflow()["jobs"]["mutation-plan"]
     step = next(step for step in plan["steps"] if step.get("id") == "stats")
     script = step["run"].replace("python -m scripts.ci_mutation ", "true ")
