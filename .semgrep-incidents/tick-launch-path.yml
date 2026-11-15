@@ -4,7 +4,8 @@ rules:
     severity: ERROR
     message: >-
       A tick step runs the tick's own lane launch. Every swarm runs on the events engine, where agents launch only
-      through hub admission and hive spokes, so the tick pass must never call tick._spawn, gated or not.
+      through hub admission and hive spokes, so the tick pass must never call tick._spawn, gated or not, nor spawn
+      on a runtime, router or herdr, called or passed on as a callable.
     paths:
       include:
         - /scripts/tick/steps/
@@ -13,3 +14,8 @@ rules:
       - pattern: tick._spawn(...)
       - pattern: tick.skip_refused(tick._spawn, ...)
       - pattern: timing.timed(tick._spawn, ...)
+      - patterns:
+          - pattern: $RUNTIME.spawn
+          - metavariable-regex:
+              metavariable: $RUNTIME
+              regex: (?i).*(runtime|router|herdr)
