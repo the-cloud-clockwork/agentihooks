@@ -87,17 +87,16 @@ def _merge_hand_over(
     slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, held: dict[str, Any], expected: dict[str, Any]
 ) -> str:
     """Leaves the pr task of a dropped holder to the merge pass as swarm ready would: a ready record naming its pull
-    request and holder, and awaiting merge under the holder's claim; a refused ledger write forgets the record."""
+    request and holder, and awaiting merge under the holder's claim; the record is saved only once the ledger takes it."""
     ready: Any = import_module("scripts.swarm.ready")
     url = rows[agent.task]["pr_url"]
-    found = {"url": url, "head": "", "worktree": "", "agent": agent.name, "at": held["at"], "on": held["on"]}
-    ready.save(store, slug, agent.task, {**found, "queued_at": held["at"]})
     live = ledger.update_task(slug, agent.task, {"awaiting": ready.AWAITING}, if_state=("pr",), if_match=expected)
     rows[agent.task].update(live)
-    if ready.awaiting(live):
-        return f", task {agent.task} left to the merge of {url}"
-    ready.forget(store, slug, agent.task)
-    return ""
+    if not ready.awaiting(live):
+        return ""
+    found = {"url": url, "head": "", "worktree": "", "agent": agent.name, "at": held["at"], "on": held["on"]}
+    ready.save(store, slug, agent.task, {**found, "queued_at": held["at"]})
+    return f", task {agent.task} left to the merge of {url}"
 
 
 def _stop_hive(slug: str, store: Any, agent: Any, reason: str, dropped: str) -> str:
