@@ -62,6 +62,14 @@ def test_checks_take_a_pull_request_or_a_run_and_merge_takes_only_a_pull_request
     assert waits.target_problem("merge", RUN, "t1", {}, None) == f"wait on merge needs a pull request url, not {RUN}"
 
 
+@pytest.mark.feature("swarm-run-wait")
+def test_a_mutation_wait_is_refused_with_the_kinds_list(started, capsys):  # noqa: F811
+    store, _ = started
+    assert run("sw", "--as", ME, "wait", "--on", "mutation", RUN, "--reason", "preflight") == 1
+    assert capsys.readouterr().err.endswith("swarm: wait on one of: checks, merge, reply, task, intent\n")
+    assert held(store) is None
+
+
 @pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
 def test_a_run_still_going_keeps_the_wait(tick, actions, status):  # noqa: F811
     actions["run"] = {"status": status, "conclusion": None}
