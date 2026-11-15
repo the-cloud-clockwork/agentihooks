@@ -81,6 +81,22 @@ def stop(bus: Bus, slug: str, agent: AgentRecord, reason: str) -> str:
     the bus dedupe window."""
     event = started(bus, slug, agent.name, agent.generation)
     if event is None or event.key != agent.execution_id:
+        planted = bus.for_swarm(slug).stops
+        planted.consumer(durable(slug, agent.hive), stop_subject(slug, agent.hive), POLICY)
+        planted.publish(
+            stop_subject(slug, agent.hive),
+            Envelope(
+                id=f"planted:{agent.name}",
+                type=TYPE,
+                swarm=slug,
+                entity="execution",
+                key=agent.name,
+                version=0,
+                time=0,
+                author="hub",
+                data={"reason": reason},
+            ),
+        )
         return UNKNOWN
     if ended(bus, event):
         return ENDED
