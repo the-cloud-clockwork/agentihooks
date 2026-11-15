@@ -13,7 +13,6 @@ import yaml
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
-FEATURE = "lint-gates-grade-from-grader"
 VECTORS = "tests/fixtures/marker-idempotency-vectors.json"
 LINT_SELECT = 'select = ["E", "F", "I", "W"]'
 QUOTE_STYLE = 'quote-style = "double"'
@@ -69,21 +68,21 @@ def _planted_module(head: Path, module: str) -> None:
     (head / f"scripts/{module}.py").write_text("raise SystemExit(0)\n")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_config_that_drops_a_rule_stays_red_under_the_grader_config(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     config = (ROOT / "pyproject.toml").read_text()
     assert LINT_SELECT in config
     (head / "pyproject.toml").write_text(config.replace(LINT_SELECT, 'select = ["E", "I", "W"]'))
     (head / "hooks/planted.py").write_text("import os\n")
-    own = _run("python -I -m ruff check hooks/ scripts/ tests/", head, tmp_path / "runner")
+    own = _run("python -P -m ruff check hooks/ scripts/ tests/", head, tmp_path / "runner")
     graded = _run(_lint("Lint check"), head, tmp_path / "runner")
     assert own.returncode == 0, own.stdout + own.stderr
     assert graded.returncode == 1, graded.stdout + graded.stderr
     assert "F401" in graded.stdout
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_shadow_ruff_package_cannot_pass_the_lint_check(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     (head / "ruff").mkdir()
@@ -105,21 +104,21 @@ def test_the_lint_check_also_holds_a_rule_the_head_adds(tmp_path: Path) -> None:
     assert "UP006" in graded.stdout
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_formatter_config_stays_red_under_the_grader_config(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     config = (ROOT / "pyproject.toml").read_text()
     assert QUOTE_STYLE in config
     (head / "pyproject.toml").write_text(config.replace(QUOTE_STYLE, 'quote-style = "single"'))
     (head / "hooks/planted.py").write_text("NAME = 'planted'\n")
-    own = _run("python -I -m ruff format --check hooks/ scripts/ tests/", head, tmp_path / "runner")
+    own = _run("python -P -m ruff format --check hooks/ scripts/ tests/", head, tmp_path / "runner")
     graded = _run(_lint("Format check"), head, tmp_path / "runner")
     assert own.returncode == 0, own.stdout + own.stderr
     assert graded.returncode == 1, graded.stdout + graded.stderr
     assert "hooks/planted.py" in graded.stdout
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_wiring_check_that_passes_itself_stays_red_under_the_grader_copy(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     shutil.copytree(ROOT / ".github/workflows", head / ".github/workflows")
@@ -133,7 +132,7 @@ def test_a_head_wiring_check_that_passes_itself_stays_red_under_the_grader_copy(
     assert "planted.yml/planted runs on pull requests outside test.yml" in graded.stdout
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     (head / "tests/fixtures").mkdir()
@@ -170,7 +169,7 @@ def test_a_chart_check_grades_the_tree_its_root_names(tmp_path: Path, script: st
     assert "No chart found under deploy; the check graded nothing." in result.stdout
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_chart_check_that_passes_itself_stays_red_under_the_grader_copy(tmp_path: Path) -> None:
     head = tmp_path / "head"
     (head / "deploy").mkdir(parents=True)

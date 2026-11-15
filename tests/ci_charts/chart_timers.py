@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,13 @@ TIMED_KINDS = {"CronJob"}
 def charts(root: Path) -> list[Path]:
     found = sorted(p.parent for p in (root / "deploy").rglob("Chart.yaml"))
     return [c for c in found if not any(other in c.parents for other in found)]
+
+
+def tree(argv: list[str] | None = None) -> Path:
+    """Return the repository whose charts are graded: --root, else this checkout."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=ROOT)
+    return parser.parse_args(argv).root
 
 
 def values_files(chart: Path) -> list[Path | None]:
@@ -37,8 +45,9 @@ def timed_objects(documents: list) -> list[str]:
     return found
 
 
-def main() -> int:
-    found = charts(ROOT)
+def main(argv: list[str] | None = None) -> int:
+    root = tree(argv)
+    found = charts(root)
     if not found:
         print("No chart found under deploy; the check graded nothing.")
         return 1
@@ -46,7 +55,7 @@ def main() -> int:
     for chart in found:
         for values in values_files(chart):
             renders += 1
-            source = f"{chart.relative_to(ROOT)} with {values.relative_to(ROOT) if values else 'default values'}"
+            source = f"{chart.relative_to(root)} with {values.relative_to(root) if values else 'default values'}"
             result = render(chart, values)
             if result.returncode:
                 failures.append(f"{source} failed to render: {result.stderr.strip()}")
