@@ -1,10 +1,9 @@
 import argparse
 import json
 import re
-from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import yaml
 
@@ -19,6 +18,11 @@ LAB_FIELDS = (*FIELDS, "replaces")
 LAB_PREFIX = "lab/"
 LAB_GATE_EVENTS = ("merge_group",)
 DELIVERY = "delivery.yaml"
+Declarations = dict[str, dict[str, Any]]
+Wiring = TypedDict(
+    "Wiring", {"not_gates": Declarations, "outside_gate": Declarations, "lab_gates": Declarations}, total=False
+)
+Lab = TypedDict("Lab", {"authoritative": list[str], "gate_required": bool}, total=False)
 EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
@@ -119,9 +123,7 @@ def _declaration_problems(declared: dict[str, dict[str, Any]], fields: tuple[str
     ]
 
 
-def _lab_problems(
-    workflows: dict[str, dict[Any, Any]], declared: dict[str, dict[str, Any]], lab: Mapping[str, Any]
-) -> list[str]:
+def _lab_problems(workflows: dict[str, dict[Any, Any]], declared: dict[str, dict[str, Any]], lab: Lab) -> list[str]:
     jobs = {
         f"{file}/{job_id}"
         for file, workflow in workflows.items()
@@ -145,11 +147,10 @@ def _lab_problems(
     ]
 
 
-def _grade(
-    workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date, lab: Mapping[str, Any]
-) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], config: Wiring, today: date, lab: Lab | None = None) -> list[str]:
     from scripts import ci_gate_queue
 
+    lab = lab or Lab()
     try:
         workflows = ci_gate_queue.normalize(workflows)
     except ValueError as error:
@@ -183,10 +184,6 @@ def _grade(
     return problems
 
 
-def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date) -> list[str]:
-    return _grade(workflows, config, today, {})
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=f"fail unless every pull request job is a need of {GATE}")
     parser.add_argument("--root", type=Path, default=Path.cwd())
@@ -194,8 +191,8 @@ def main(argv: list[str] | None = None) -> int:
     workflows = load(args.root)
     config = json.loads((args.root / CONFIG).read_text())
     delivery = args.root / DELIVERY
-    lab = yaml.safe_load(delivery.read_text())["lab"] if delivery.is_file() else cast(dict[str, Any], {})
-    problems = _grade(workflows, config, datetime.now(UTC).date(), lab)
+    lab: Lab | None = yaml.safe_load(delivery.read_text())["lab"] if delivery.is_file() else None
+    problems = check(workflows, config, datetime.now(UTC).date(), lab)
     jobs = sum(len(workflow.get("jobs") or cast(dict[Any, Any], {})) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:
