@@ -187,7 +187,8 @@ def test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait():
         lab(at(8, 35), 1800.0),
         lab(at(8, 40), 60.0),
         lab(at(8, 50), 9000.0, "queue"),
-        lab(at(9), -1.0),
+        lab(at(9), 1200.0),
+        lab(at(9, 15), -1.0),
         lab(at(9, 30), 1800.0),
     ]
     source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], lab_capacity=samples)
