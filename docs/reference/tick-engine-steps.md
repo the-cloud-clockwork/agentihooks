@@ -948,9 +948,12 @@ the step checks it and returns no actions when it does not hold.
 
 The placement sites launch only seats: the `master seats` steps place the
 master through `seat_spawn.place` and the `dispatch seat` step launches the
-dispatcher seat. No tick step launches a lane agent; hives pull lane work from
-the hub and the hub admits each launch, see
+dispatcher seat. A new lane agent comes from the hub: hives pull lane work and
+the hub admits each launch, see
 [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub).
+The one tick step that starts a lane agent is `recover outages` in the
+`agents` group, which restarts a dead agent in its own lane from its handoff
+through `resume.recover_outages`.
 
 ### Close (`scripts.tick.steps.tasks`)
 
@@ -1479,7 +1482,7 @@ The delivered proof and limitations are recorded in
 | `AttributeError: module 'scripts.swarm.tick' has no attribute ...` from a common helper | A moved helper names a tick module attribute that no longer exists there; import it back into the tick module or reference its new home |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
-| No lane agent launches after the placement sites run | Expected: no tick step launches a lane agent; the `master seats` and `dispatch seat` steps launch only the master and the dispatcher seat. Hives take lane offers from the hub and the hub admits each launch; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
+| No lane agent launches after the placement sites run | Expected: the `master seats` and `dispatch seat` steps launch only the master and the dispatcher seat, and `recover outages` only restarts a dead agent from its handoff. New lane agents come from hub offers that hives take and the hub admits; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |
