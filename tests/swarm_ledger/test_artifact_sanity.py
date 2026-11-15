@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 from collections import Counter
 from pathlib import Path
@@ -14,7 +15,17 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "artifacts"
 AUDIT = FIXTURES / "impeccable-audit-summary.md"
 DELIVERY = FIXTURES / "realtime-delivery-findings.md"
 NARROW = ".art-doc { max-width: 90ch; overflow-wrap: anywhere; }"
+WIDE = ".art-doc { max-width: 180ch; margin: 0 auto; line-height: 1.6; overflow-wrap: break-word; }"
 browser = chromium_browser
+
+
+def page_folder(root: Path) -> Path:
+    """A copy of the ledger page shell and every static asset, as a head checkout would carry them."""
+    own = sanity.SHELL.parent
+    shutil.copytree(own / "static", root / "static")
+    for name in ("shell.html", "palette.css", "tooltips.js"):
+        shutil.copy(own / name, root / name)
+    return root
 
 
 def good_markdown(**changes):
@@ -188,11 +199,10 @@ def fixture_files():
 def narrow(tmp_path, monkeypatch):
     served = sanity.assets()
     styles = tmp_path / "ledger.css"
-    wide = ".art-doc { max-width: 180ch; margin: 0 auto; line-height: 1.6; overflow-wrap: break-word; }"
     source = served["css/ledger.css"].read_text()
-    assert wide in source
-    styles.write_text(source.replace(wide, NARROW))
-    monkeypatch.setattr(sanity, "assets", lambda: {**served, "css/ledger.css": styles})
+    assert WIDE in source
+    styles.write_text(source.replace(WIDE, NARROW))
+    monkeypatch.setattr(sanity, "assets", lambda pages=None: {**served, "css/ledger.css": styles})
 
 
 def test_real_artifacts_render_wide_and_readable_in_the_viewer(browser, fixture_files):
@@ -320,3 +330,31 @@ def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_t
     assert answered(tab.routes["**/static/*/**"], css)["body"] == sanity.assets()["css/home.css"].read_text()
     snapshot = answered(tab.routes["**/api/v1/ledgers/*/events"])["body"]
     assert json.loads(snapshot.split("data: ", 1)[1]) == {"ledger": sanity.ledger_doc([]), "swarm": None}
+
+
+def test_the_pages_option_reads_the_shell_and_every_asset_from_the_given_folder(tmp_path: Path) -> None:
+    pages = page_folder(tmp_path)
+    (pages / "shell.html").write_text("<title>__LEDGER_TITLE__ on __LEDGER_PORT__</title>")
+    (pages / "static" / "js" / "head-only.js").write_text("export {};")
+    assert sanity.page_html(pages) == "<title>Artifact sanity on 9</title>"
+    served = sanity.assets(pages)
+    assert served["js/head-only.js"] == pages / "static" / "js" / "head-only.js"
+    assert served["palette.css"] == pages / "palette.css"
+    assert all(path.is_relative_to(pages) for path in served.values())
+
+
+def test_the_harness_serves_the_page_and_assets_of_the_given_folder(tmp_path: Path) -> None:
+    pages = page_folder(tmp_path)
+    (pages / "shell.html").write_text("head shell __LEDGER_SLUG__")
+    (pages / "static" / "css" / "home.css").write_text("head styles")
+    browser = FakeBrowser()
+    assert sanity.run(browser, [], pages) == {}
+    assert answered(browser.tab.routes[sanity.PAGE_URL]) == {
+        "body": "head shell artifact-sanity",
+        "content_type": "text/html; charset=utf-8",
+    }
+    css = "http://127.0.0.1:9/static/000000000000/css/home.css"
+    assert answered(browser.tab.routes["**/static/*/**"], css) == {
+        "body": "head styles",
+        "content_type": "text/css; charset=utf-8",
+    }
