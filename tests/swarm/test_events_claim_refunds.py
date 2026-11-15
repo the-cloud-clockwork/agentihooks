@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -209,10 +209,11 @@ def sent_stops(bus: Bus, agent: AgentRecord) -> list[Envelope]:
 def test_the_hive_stop_waits_for_the_store_to_take_the_drop(
     env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], dropped: str, stops: int
 ) -> None:
+    store, _, _ = env
     agent, _ = launched(env, bus, seat)
     spoke_started(bus)
 
-    assert tick_module._stop_hive(SLUG, agent, "idle", dropped) == dropped
+    assert tick_module._stop_hive(SLUG, store, agent, "idle", dropped) == dropped
 
     assert len(sent_stops(bus, agent)) == stops
 
@@ -240,7 +241,7 @@ def test_a_legacy_agent_retirement_sends_no_stop(
     agent = seat("t1")
     assert reconciler.legacy_agents(store, SLUG) == [agent]
 
-    assert reconciler.stop_admitted(SLUG, agent, "idle") == execution_stop.UNKNOWN
+    assert reconciler.stop_admitted(store, SLUG, agent, "idle") == execution_stop.UNKNOWN
 
     assert sent_stops(bus, agent) == []
 
@@ -253,7 +254,7 @@ def test_the_hub_stop_opens_no_bus_on_the_memory_backend(monkeypatch: pytest.Mon
     monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
     monkeypatch.setattr(reconciler, "open_bus", unexpected)
 
-    assert reconciler.stop_admitted(SLUG, AgentRecord(name="a1", lane="eng", task="t1"), "idle") == (
+    assert reconciler.stop_admitted(None, SLUG, AgentRecord(name="a1", lane="eng", task="t1"), "idle") == (
         execution_stop.UNKNOWN
     )
 
@@ -261,8 +262,12 @@ def test_the_hub_stop_opens_no_bus_on_the_memory_backend(monkeypatch: pytest.Mon
 @pytest.mark.feature("events-retirement-stops-the-execution")
 @pytest.mark.parametrize("refused", [False, True])
 def test_the_hub_stop_reports_its_answer_on_stderr_and_closes_the_bus_it_opened(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refused: bool
+    env: tuple[RedisStore, Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    refused: bool,
 ) -> None:
+    store, _, _ = env
     config = SimpleNamespace(backend="nats")
     opened: list[Any] = []
     closed: list[bool] = []
@@ -277,13 +282,16 @@ def test_the_hub_stop_reports_its_answer_on_stderr_and_closes_the_bus_it_opened(
     monkeypatch.setattr(reconciler, "open_bus", open_for)
     monkeypatch.setattr(reconciler.execution_stop, "stop", lambda _bus, _slug, _agent, _reason: execution_stop.SENT)
     agent = AgentRecord(name="a1", lane="eng", task="t1")
+    store.redis.hset(store.key(SLUG, reconciler.PENDING_STOPS), agent.name, "an earlier refused stop")
 
-    outcome = reconciler.stop_admitted(SLUG, agent, "idle")
+    outcome = reconciler.stop_admitted(store, SLUG, agent, "idle")
 
     expected = f"{execution_stop.FAILED} (ConnectionError: bus down)" if refused else execution_stop.SENT
     assert (outcome, opened, closed) == (expected, [config], [] if refused else [True])
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == ("", f"hub execution stop for a1 in swarm {SLUG} after idle: {expected}\n")
+    held = {agent.name: json.dumps({"agent": asdict(agent), "reason": "idle"})}
+    assert pending_stops(store) == (held if refused else {})
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
@@ -294,7 +302,7 @@ def test_a_reachable_agent_is_retired_through_its_runtime_with_its_task_scratch_
     runtime = SimpleNamespace(retire=lambda agent, **kwargs: retired.append((agent.name, kwargs)) or True)
     monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
 
-    assert tick_module._retire_or_stop(SLUG, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle")
+    assert tick_module._retire_or_stop(SLUG, None, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle")
 
     assert retired == [("a1", {"homes": [f"{SLUG}/t1"]})]
 
@@ -498,3 +506,45 @@ def test_a_stop_the_bus_refused_is_sent_again_on_each_reap_pass_until_the_bus_ta
     assert after == []
     sent = [(stop.key, stop.cause, stop.data["reason"]) for stop in sent_stops(bus, agent)]
     assert sent == [(agent.execution_id, event.id, "idle")]
+
+
+def pending_stops(store: RedisStore) -> dict[str, str]:
+    """The stops of swarm ``sw`` waiting to be sent again, by agent name."""
+    return cast("dict[str, str]", store.redis.hgetall(store.key(SLUG, reconciler.PENDING_STOPS)))
+
+
+@pytest.mark.feature("events-refused-stop-resent")
+def test_a_refused_stop_for_an_agent_the_swarm_still_seats_is_discarded_and_not_sent_again(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _, _ = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    seated = seat("t2")
+    working = execution_stop.stop
+    monkeypatch.setattr(execution_stop, "stop", refused_stop)
+    assert reconciler.stop_admitted(store, SLUG, seated, "mismatch") == REFUSED
+    assert reconciler.stop_admitted(store, SLUG, agent, "idle") == REFUSED
+    assert store.drop_agent(SLUG, agent.name)
+    monkeypatch.setattr(execution_stop, "stop", working)
+
+    resent = reconciler.retry_stops(store, SLUG)
+
+    assert resent == [f"sent the idle stop for {agent.name} again: {execution_stop.SENT}"]
+    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == [(agent.execution_id, event.id)]
+    assert [record.name for record in store.agents(SLUG)] == [seated.name]
+    assert pending_stops(store) == {}
+
+
+@pytest.mark.feature("events-refused-stop-resent")
+def test_the_reap_pass_sends_no_pending_stop_again_on_the_memory_backend(
+    env: tuple[RedisStore, Any, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _, _ = env
+    held = json.dumps({"agent": asdict(AgentRecord(name="a1", lane="eng", task="t1")), "reason": "idle"})
+    store.redis.hset(store.key(SLUG, reconciler.PENDING_STOPS), "a1", held)
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
+
+    assert reconciler.retry_stops(store, SLUG) == []
+
+    assert pending_stops(store) == {"a1": held}
