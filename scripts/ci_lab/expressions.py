@@ -20,7 +20,7 @@ WRAPPED = re.compile(r"\s*\$\{\{(.*)\}\}\s*", re.DOTALL)
 STATUS = {"always()": True, "cancelled()": False, "failure()": False, "success()": True}
 LITERALS: dict[str, Value] = {"false": False, "null": "", "true": True}
 OPERATORS = frozenset({"!", "!=", "&&", "(", ")", "==", "||"})
-NUMBER = re.compile(r"\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*")
+NUMBER = re.compile(r"\s*-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?\s*")
 
 
 def _tokens(expression: str) -> deque[str]:
@@ -67,7 +67,8 @@ def _unary(tokens: deque[str], context: Mapping[str, str]) -> Value:
 
 
 def _number(value: Value) -> float:
-    """The number GitHub converts a value to: true is 1, false and empty text are 0, other text not a number is NaN."""
+    """The number GitHub converts a value to: true is 1, false and empty text 0, text in JSON number form its number,
+    and any other text NaN."""
     if isinstance(value, bool):
         return float(value)
     if not value.strip():
