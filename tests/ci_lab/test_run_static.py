@@ -155,6 +155,7 @@ def test_a_step_whose_if_is_false_is_skipped_green_without_running(
     assert (result.gate, result.code, result.skipped, result.green) == ("lint/probe", None, True, True)
     assert result.log.read_text() == f"if is false: {CHANGED}\n"
     assert result.report.read_text() == ""
+    assert result.log == result.report.parent / "skipped.txt"
     assert settings.root in result.log.parents
     assert not marker.exists()
     assert not (tmp_path / "bwrap.args").exists()

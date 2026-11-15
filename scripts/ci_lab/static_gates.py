@@ -97,7 +97,7 @@ def _gate(job: str, step: Mapping[str, Any], registry: Mapping[str, Any]) -> Sta
     paths = WHOLE_TREE if entry is None else tuple(entry["paths"])
     base_paths = WHOLE_TREE if entry is None else tuple(entry.get("base_paths", ()))
     env = tuple((str(key), _text(value)) for key, value in step.get("env", {}).items())
-    return StaticGate(name, job, title, tools, modules, run, paths, base_paths, env, _text(step.get("if", "")))
+    return StaticGate(name, job, title, tools, modules, run, paths, base_paths, env, _text(step.get("if")))
 
 
 def _job_steps(job: str, body: Mapping[str, Any], reusable: Mapping[str, Any]) -> list[tuple[str, Any]]:
