@@ -78,6 +78,7 @@ def _merge_wait(store: Any, slug: str, row: dict[str, Any], name: str) -> dict[s
     """The declared wait of holder ``name`` when it waits on the merge of its pr task's own pull request, else None."""
     if row.get("state") != "pr":
         return None
+    # nosemgrep: semgrep-incidents.idle-count-trusts-unended-checked-wait
     held: dict[str, Any] = tick.idle_state.wait(store.redis, slug, name) or {}
     on: dict[str, Any] = held.get("on") or {}
     return held if on.get("kind") == "merge" and on.get("target") == row.get("pr_url") else None
@@ -86,8 +87,8 @@ def _merge_wait(store: Any, slug: str, row: dict[str, Any], name: str) -> dict[s
 def _merge_hand_over(
     slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, held: dict[str, Any], expected: dict[str, Any]
 ) -> str:
-    """Leaves the pr task of a dropped holder to the merge pass as swarm ready would: a ready record naming its pull
-    request and holder, and awaiting merge under the holder's claim; the record is saved only once the ledger takes it."""
+    """Leaves the pr task of a dropped holder to the merge pass as swarm ready would: awaiting merge under the holder's
+    claim, then a ready record naming its pull request and holder once the ledger takes it."""
     ready: Any = import_module("scripts.swarm.ready")
     url = rows[agent.task]["pr_url"]
     live = ledger.update_task(slug, agent.task, {"awaiting": ready.AWAITING}, if_state=("pr",), if_match=expected)

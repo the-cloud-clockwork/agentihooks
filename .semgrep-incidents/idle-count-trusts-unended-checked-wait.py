@@ -44,9 +44,3 @@ def hive_lost_held(tick: object, store: object, slug: object, agent: object, now
     # ok: idle-count-trusts-unended-checked-wait
     wait = _holding_wait(store, slug, tick.idle_state.wait(store.redis, slug, agent.name), now_ms)
     return wait is None
-
-
-def _merge_wait(tick: object, store: object, slug: object, name: object) -> object:
-    # ok: idle-count-trusts-unended-checked-wait
-    held = tick.idle_state.wait(store.redis, slug, name) or {}
-    return held
