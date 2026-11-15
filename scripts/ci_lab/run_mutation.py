@@ -19,7 +19,7 @@ from os import _exit, environ, fork, wait, waitstatus_to_exitcode
 from pathlib import Path
 from time import monotonic, process_time
 from types import ModuleType, SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from mutmut.utils.format_utils import get_mutant_name
@@ -187,8 +187,9 @@ def collect(options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
 
 def stats(root: Path, cache: Path, file_batch: Sequence[str], options: Sequence[str]) -> list[dict[str, Any]]:
     """Return the stats records of file_batch from the cache keyed by root's content, collecting misses here."""
-    records = collect_cached_stats(root, cache, {}, list(file_batch), list(options), partial(collect, options))  # pyright: ignore[reportUnknownVariableType]
-    return cast(list[dict[str, Any]], records)
+    collected = partial(collect, options)
+    records: list[dict[str, Any]] = collect_cached_stats(root, cache, {}, list(file_batch), list(options), collected)  # pyright: ignore[reportUnknownVariableType]
+    return records
 
 
 def mutants(

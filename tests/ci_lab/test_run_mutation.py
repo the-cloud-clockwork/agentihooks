@@ -11,6 +11,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from mutmut.mutation.pragma_handling import PragmaParseError
 
 from scripts.ci_lab import run_mutation
 from scripts.ci_lab.run_mutation import Recorder, Row, WarmLoop
@@ -88,6 +89,16 @@ def test_trampoline_writes_every_mutant_of_the_file_and_names_them_as_mutmut_doe
     assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
     assert len(names) > 1
     assert (tmp_path / path).read_text() == selected_mutants(path, SAMPLE, {1, 2})[0]
+
+
+def test_trampoline_names_the_file_mutmut_refuses_a_pragma_in(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(
+        "def fee(amount, rate):\n    # pragma: no mutate start\n    return amount * rate + 1\n"
+    )
+    with pytest.raises(PragmaParseError, match="scripts/sample.py:2"):
+        run_mutation.trampoline(tmp_path, path)
 
 
 @pytest.mark.parametrize("code, status", [(0, "survived"), (1, "killed"), (3, "suspicious"), (-9, "suspicious")])
