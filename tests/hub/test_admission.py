@@ -126,7 +126,7 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
 
 
 @pytest.mark.feature("admission-launch-carries-admitted-execution")
-def test_the_admitted_task_carries_its_launch_execution_identity(rig):
+def test_the_admitted_task_carries_its_launch_execution_identity(rig: Any) -> None:
     admitted = rig.admitter.admit(SLUG, ask())
 
     [agent] = rig.store.agents(SLUG)
@@ -136,7 +136,7 @@ def test_the_admitted_task_carries_its_launch_execution_identity(rig):
 
 
 @pytest.mark.feature("admission-launch-carries-admitted-execution")
-def test_the_admitted_task_launch_arguments_pass_the_admitted_execution(rig):
+def test_the_admitted_task_launch_arguments_pass_the_admitted_execution(rig: Any) -> None:
     from dataclasses import replace
 
     from scripts.swarm_v2.runtime import codex
