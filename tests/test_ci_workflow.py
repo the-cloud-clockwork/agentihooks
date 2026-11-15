@@ -777,6 +777,17 @@ def _mutation_workflow():
     return yaml.safe_load(path.read_text())
 
 
+def test_the_plan_job_marks_every_collected_stats_part_for_the_shard_arrival_check(tmp_path: Path) -> None:
+    from scripts.ci_mutation.arrival import missing_producers
+
+    plan = _mutation_workflow()["jobs"]["mutation-plan"]
+    step = next(step for step in plan["steps"] if step.get("id") == "stats")
+    script = step["run"].replace("python -m scripts.ci_mutation ", "true ")
+    env = {**os.environ, "PARTS": "[0, 1, 2]", "RUNNER_TEMP": str(tmp_path), "BASES": "origin/dev"}
+    subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=tmp_path, env=env, check=True)
+    assert missing_producers(tmp_path / ".mutation-stats", [0, 1, 2]) == []
+
+
 def test_mutation_job_installs_chromium_before_mutating():
     steps = _mutation_workflow()["jobs"]["mutation-shard"]["steps"]
     names = [s.get("name") for s in steps]

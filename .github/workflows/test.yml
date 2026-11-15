@@ -3948,7 +3948,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     needs: [admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 26
+    timeout-minutes: 30
     outputs:
       shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.refine.outputs.shards || steps.plan.outputs.shards }}
       stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
@@ -4210,7 +4210,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           total=$(jq length <<< "$PARTS")
-          mkdir -p .mutation-stats && touch .mutation-stats/collected
+          mkdir -p .mutation-stats
+          for (( part = 0; part < total; part++ )); do touch ".mutation-stats/collected-$part"; done
           pids=()
           for (( part = 0; part < total; part++ )); do
             python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --output ".mutation-gate-stats/$part" --stats .mutation-stats --stats-part "$part" --stats-parts "$total" > "$RUNNER_TEMP/stats-$part.log" 2>&1 &
@@ -4253,7 +4254,7 @@ jobs:
 
       - name: Keep only the test stats the parts wrote
         if: steps.collect.outputs.collected == 'true'
-        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer .mutation-stats/collected -exec cp -p {} .mutation-stats-fresh/ \;
+        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer .mutation-stats/collected-0 -exec cp -p {} .mutation-stats-fresh/ \;
 
       - name: Upload the parts' test stats cache
         if: steps.collect.outputs.collected == 'true'
@@ -4743,7 +4744,7 @@ jobs:
 
   mutation-probe:
     needs: [mutation-plan, mutation-refine]
-    if: ${{ !cancelled() && (needs.mutation-refine.result == 'success' || needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.collected == 'true') && (needs.mutation-refine.outputs.probe || needs.mutation-plan.outputs.probe) == 'true' && (needs.mutation-refine.outputs.probe_shards || needs.mutation-plan.outputs.probe_shards) != '' }}
+    if: ${{ !cancelled() && (needs.mutation-refine.result == 'success' || (needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.collected == 'true')) && (needs.mutation-refine.outputs.probe || needs.mutation-plan.outputs.probe) == 'true' && (needs.mutation-refine.outputs.probe_shards || needs.mutation-plan.outputs.probe_shards) != '' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
@@ -5225,7 +5226,7 @@ jobs:
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Download the measured mutation plan
-        if: needs.mutation-refine.result == 'success' || needs.mutation-plan.outputs.collected == 'true' && needs.mutation-plan.outputs.stats_parts != '[0]'
+        if: needs.mutation-refine.result == 'success' || (needs.mutation-plan.outputs.collected == 'true' && needs.mutation-plan.outputs.stats_parts != '[0]')
         id: download-the-measured-mutation-plan
         continue-on-error: true
         uses: actions/download-artifact@v4
