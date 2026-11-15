@@ -230,13 +230,24 @@ def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
 
 def _prefetched(run: Pass, rows: Mapping[str, dict[str, Any]]) -> Pass:
     """``run``, its github reader serving every pull request the pass needs from one batched read of ``run.many``,
-    or ``run`` unchanged when it declares no batched reader or no task needs one."""
-    if run.many is None:
+    or of the snapshot its own github reader already carries from an earlier batch, or ``run`` unchanged when
+    neither exists or no task needs one."""
+    many = run.many or _snapshot_reader(run.github)
+    if many is None:
         return run
     urls = [row["pr_url"] for row in rows.values() if row.get("pr_url") and row.get("state") in ("pr", "claimed")]
     if not urls:
         return run
-    return replace(run, github=github_reads.Batched(run.many, urls, run.github))
+    return replace(run, github=github_reads.Batched(many, urls, run.github))
+
+
+def _snapshot_reader(github: Callable) -> Callable[[list[str]], Mapping[str, Any]] | None:
+    """A batched reader slicing ``github``'s own ``snapshots`` mapping, when it carries one from an earlier batch;
+    None when it carries none."""
+    snapshots = getattr(github, "snapshots", None)
+    if snapshots is None:
+        return None
+    return lambda urls: {url: snapshots[url] for url in urls if url in snapshots}
 
 
 def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str]) -> list[str]:
