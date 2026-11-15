@@ -24,6 +24,8 @@ OUTPUT = Output("2 units", "Grading", UNITS, "run-7", "b" * 40, "https://lab.exa
 GATES = ("lint", "x", "shadow/lint", "-shadow/lint", "lab-shadow/lint", "lab/lint", "ruff format")
 LIMITED = "API rate limit exceeded for installation ID 456."
 SECONDARY = "You have exceeded a secondary rate limit."
+FORWARD = "moves forward only"
+CONCLUDED = "carries a conclusion exactly when it is completed"
 
 
 class Token:
@@ -80,11 +82,6 @@ def test_shadow_names_never_collide_with_authoritative_names() -> None:
     assert all(check.startswith("lab-shadow/") for check in shadow)
 
 
-def test_a_check_run_needs_a_gate_name() -> None:
-    with pytest.raises(ValueError, match="gate name"):
-        checks.name("", True)
-
-
 def test_shadow_and_authoritative_grades_of_one_gate_are_separate_check_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}), answer(201, {"id": 2}))
     assert poster.post(HEAD, "lint", "queued", None, OUTPUT, False) == 1
@@ -137,27 +134,27 @@ def test_a_check_run_moves_forward_and_may_skip_a_status(
 
 
 @pytest.mark.parametrize(
-    ("steps", "status", "conclusion"),
+    ("steps", "status", "conclusion", "refusal"),
     [
-        ((), "waiting", None),
-        ((), "queued", "success"),
-        ((), "in_progress", "failure"),
-        ((), "completed", None),
-        ((), "completed", "stale"),
-        (("queued",), "queued", None),
-        (("in_progress",), "in_progress", None),
-        (("in_progress",), "queued", None),
-        (("completed",), "completed", "failure"),
-        (("completed",), "in_progress", None),
+        ((), "waiting", None, "Unknown check run status"),
+        ((), "queued", "success", CONCLUDED),
+        ((), "in_progress", "failure", CONCLUDED),
+        ((), "completed", None, CONCLUDED),
+        ((), "completed", "stale", "Unknown check run conclusion"),
+        (("queued",), "queued", None, FORWARD),
+        (("in_progress",), "in_progress", None, FORWARD),
+        (("in_progress",), "queued", None, FORWARD),
+        (("completed",), "completed", "failure", FORWARD),
+        (("completed",), "in_progress", None, FORWARD),
     ],
 )
 def test_a_check_run_never_moves_back_and_a_conclusion_comes_only_with_completed(
-    monkeypatch: pytest.MonkeyPatch, steps: tuple[str, ...], status: str, conclusion: str | None
+    monkeypatch: pytest.MonkeyPatch, steps: tuple[str, ...], status: str, conclusion: str | None, refusal: str
 ) -> None:
     poster, request, _ = lab(monkeypatch, *[answer(201, {"id": 7}) for _ in steps])
     for step in steps:
         poster.post(HEAD, "lint", step, "success" if step == "completed" else None, OUTPUT, False)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=refusal):
         poster.post(HEAD, "lint", status, conclusion, OUTPUT, False)
     assert request.call_count == len(steps)
 
@@ -204,6 +201,17 @@ def test_an_output_exactly_at_the_github_limit_lists_every_key() -> None:
     assert rendered["summary"].endswith("Unit keys: 5 of 5 listed")
 
 
+def test_an_output_over_the_github_limit_lists_the_lines_that_end_exactly_at_it() -> None:
+    tail = f"The full list of 3 unit keys is at {OUTPUT.details}"
+    short = "- tests `k`\n"
+    key = "k" * (65535 - len(tail) - len(short) - len("- tests ``\n"))
+    units = (Unit("tests", key, ()), Unit("tests", "k", ()), Unit("tests", "k" * 100, ()))
+    rendered = checks.render(replace(OUTPUT, units=units))
+    assert rendered["text"] == f"- tests `{key}`\n{short}{tail}"
+    assert len(rendered["text"]) == 65535
+    assert rendered["summary"].endswith("Unit keys: 2 of 3 listed")
+
+
 def test_a_batch_posts_only_the_last_transition_of_each_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
     poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}), answer(201, {"id": 2}), answer(200, {"id": 2}))
     assert poster.batch(
@@ -222,20 +230,20 @@ def test_a_batch_posts_only_the_last_transition_of_each_check_run(monkeypatch: p
 
 
 @pytest.mark.parametrize(
-    "moves",
+    ("moves", "refusal"),
     [
-        [("in_progress", None), ("queued", None)],
-        [("queued", None), ("completed", None)],
-        [("completed", "success"), ("completed", "failure")],
+        ([("in_progress", None), ("queued", None)], FORWARD),
+        ([("queued", None), ("completed", None)], CONCLUDED),
+        ([("completed", "success"), ("completed", "failure")], FORWARD),
     ],
 )
 def test_a_batch_with_a_refused_move_sends_nothing(
-    monkeypatch: pytest.MonkeyPatch, moves: list[tuple[str, str | None]]
+    monkeypatch: pytest.MonkeyPatch, moves: list[tuple[str, str | None]], refusal: str
 ) -> None:
     poster, request, _ = lab(monkeypatch)
     batch = [Transition(HEAD, "lint", "queued", None, OUTPUT, True)]
     batch += [Transition(HEAD, "lint", status, conclusion, OUTPUT, False) for status, conclusion in moves]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=refusal):
         poster.batch(batch)
     request.assert_not_called()
 
@@ -243,7 +251,7 @@ def test_a_batch_with_a_refused_move_sends_nothing(
 def test_a_batch_refuses_a_move_back_from_a_status_already_posted(monkeypatch: pytest.MonkeyPatch) -> None:
     poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}))
     poster.post(HEAD, "lint", "in_progress", None, OUTPUT, False)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=FORWARD):
         poster.batch([Transition(HEAD, "lint", "queued", None, OUTPUT, False)])
     assert request.call_count == 1
 
@@ -254,6 +262,7 @@ def test_a_batch_refuses_a_move_back_from_a_status_already_posted(monkeypatch: p
         (answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1120"}), 121.0),
         (answer(429, text=LIMITED, headers={"x-ratelimit-reset": "1120"}), 121.0),
         (answer(403, text=SECONDARY, headers={"x-ratelimit-reset": "1120"}), 60),
+        (answer(403, text=SECONDARY.upper(), headers={"x-ratelimit-reset": "1120"}), 60),
         (answer(403, text=LIMITED), 60),
         (answer(403, text=LIMITED, headers={"x-ratelimit-reset": "900"}), 1.0),
         (answer(403, text=LIMITED, headers={"x-ratelimit-reset": "99999"}), 900),

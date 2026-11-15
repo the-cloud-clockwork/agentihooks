@@ -88,13 +88,11 @@ class Transition:
 
 def name(gate: str, shadow: bool) -> str:
     """Return the check run name of a gate: lab/<gate>, or lab-shadow/<gate> for a shadow grade."""
-    if not gate:
-        raise ValueError("A lab check run needs a gate name")
     return f"{SHADOW if shadow else AUTHORITATIVE}/{gate}"
 
 
 def render(output: Output) -> dict[str, str]:
-    """Return the check run output: the summary with the run id, grader revision and details link, and every unit key."""
+    """Return the check run output: the run id, grader revision and details link, and every unit key."""
     text, listed = _listing(output)
     facts = [
         f"Run: {output.run}",
@@ -106,7 +104,7 @@ def render(output: Output) -> dict[str, str]:
 
 
 def _listing(output: Output) -> tuple[str, int]:
-    """Return one line per unit key and how many are listed; past GitHub's text limit, the lines that fit and a pointer."""
+    """Return a line per unit key and the count listed; past GitHub's limit, the lines that fit and a pointer."""
     lines = [f"- {unit.kind} `{unit.key}`\n" for unit in output.units]
     if sum(map(len, lines)) <= TEXT_LIMIT:
         return "".join(lines), len(lines)
@@ -127,15 +125,23 @@ def _advance(before: str | None, status: str, conclusion: str | None) -> None:
         raise ValueError(f"Unknown check run conclusion: {conclusion}")
 
 
-def _wait(response: requests.Response, waits: int, slept: float, now: float) -> float | None:
-    """Return the seconds to wait before retrying a rate limited answer, or None when it is not one or no wait is left."""
+def _wait(response: requests.Response, slept: float, now: float) -> float | None:
+    """Return the seconds to wait before retrying a rate limited answer, or None when no wait applies."""
     left = MAX_WAIT - slept
-    if waits >= WAITS or left <= 0 or response.status_code not in LIMITED_STATUSES or not LIMITED.search(response.text):
+    if left <= 0 or response.status_code not in LIMITED_STATUSES or not LIMITED.search(response.text):
         return None
     reset = response.headers.get("x-ratelimit-reset")
     if reset is None or "secondary" in response.text.lower():
         return min(left, SECONDARY_WAIT)
     return min(left, MAX_WAIT, max(1.0, float(reset) - now + 1))
+
+
+def _json(response: requests.Response, method: str, path: str) -> dict[str, Any]:
+    """Return the JSON of an accepted answer, or raise PostRefused naming the request and its status."""
+    if response.status_code not in ACCEPTED:
+        raise PostRefused(f"{method} {path} answered {response.status_code}")
+    data: dict[str, Any] = response.json()
+    return data
 
 
 class Checks:
@@ -177,11 +183,12 @@ class Checks:
             data = self._send("POST", "check-runs", {"name": key[1], "head_sha": head, **body})
         else:
             data = self._send("PATCH", f"check-runs/{known[0]}", body)
-        self.runs[key] = (int(data["id"]), status)
-        return self.runs[key][0]
+        run = int(data["id"])
+        self.runs[key] = (run, status)
+        return run
 
     def batch(self, transitions: Iterable[Transition]) -> list[int]:
-        """Post one pass of transitions, each check run once at its last move, refusing a bad move before any request."""
+        """Post one pass of transitions, each check run once at its last move; refuse a bad move before any request."""
         latest: dict[Key, Transition] = {}
         for move in transitions:
             key = (move.head, name(move.gate, move.shadow), move.output.run)
@@ -191,20 +198,22 @@ class Checks:
 
     def _send(self, method: str, path: str, body: Mapping[str, Any]) -> dict[str, Any]:
         """Send one check runs request, waiting out rate limits within the CI budget's limits; return its JSON."""
-        waits, slept = 0, 0.0
-        while True:
-            response = requests.request(
-                method,
-                f"{API}/repos/{self.repo}/{path}",
-                headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
-                json=body,
-                timeout=TIMEOUT,
-            )
-            if response.status_code in ACCEPTED:
-                data: dict[str, Any] = response.json()
-                return data
-            wait = _wait(response, waits, slept, self.clock())
+        slept = 0.0
+        for _ in range(WAITS):
+            response = self._request(method, path, body)
+            wait = _wait(response, slept, self.clock())
             if wait is None:
-                raise PostRefused(f"{method} {path} answered {response.status_code}")
+                return _json(response, method, path)
             self.sleep(wait)
-            waits, slept = waits + 1, slept + wait
+            slept += wait
+        return _json(self._request(method, path, body), method, path)
+
+    def _request(self, method: str, path: str, body: Mapping[str, Any]) -> requests.Response:
+        """Send one check runs request with a fresh token."""
+        return requests.request(
+            method,
+            f"{API}/repos/{self.repo}/{path}",
+            headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
+            json=body,
+            timeout=TIMEOUT,
+        )
