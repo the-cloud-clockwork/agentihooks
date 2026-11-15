@@ -164,4 +164,4 @@ def force(
         end(seat.name)
     finally:
         registry.set_state(folder, seat_name, registry.PENDING)
-    return relaunch(folder, seat_name, base, bare=bare, start=start, wait_s=WAIT_BARE_S, sleep=sleep)
+    return relaunch(folder, seat_name, base, bare=bare, start=start, sleep=sleep)
