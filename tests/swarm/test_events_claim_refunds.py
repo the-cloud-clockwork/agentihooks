@@ -154,10 +154,10 @@ def test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent(
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("ending", ["idle"])
 def test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
 ) -> None:
+    ending = "idle"
     agent, event = launched(env, bus, seat)
     spoke_started(bus)
 
@@ -300,10 +300,10 @@ def test_a_reachable_agent_is_retired_through_its_runtime_with_its_task_scratch_
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
-@pytest.mark.parametrize("ending", ["idle"])
 def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
-    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
 ) -> None:
+    ending = "idle"
     store, ledger, rt = env
     agent, event = launched(env, bus, seat)
     spoke_started(bus)
@@ -316,6 +316,22 @@ def test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop(
     assert store.claims(SLUG, "t1") == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
     assert [(stop.key, stop.data["reason"]) for stop in sent_stops(bus, agent)] == [(agent.execution_id, ending)]
+
+
+@pytest.mark.feature("events-retirement-stops-the-execution")
+def test_an_unreachable_agent_is_stopped_before_its_drop_and_stays_seated_when_the_store_refuses_it(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _, rt = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    rt.stuck.add(agent.name)
+    monkeypatch.setattr(store, "drop_agent", lambda *_args, **_kwargs: False)
+
+    retire("idle", env, agent)
+
+    assert [(stop.key, stop.cause) for stop in sent_stops(bus, agent)] == [(agent.execution_id, event.id)]
+    assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
