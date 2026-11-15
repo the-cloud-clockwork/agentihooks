@@ -12,6 +12,11 @@ def missing_producers(folder: Path, parts: list[int]) -> list[str]:
     return [f"mutation-stats ({part})" for part in parts if not folder.joinpath(f"collected-{part}").is_file()]
 
 
+def planted_survivor(count: int) -> int:
+    """Return one more than count; no test calls it, so its mutants survive."""
+    return count + 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Report missing stats producers to the job output; with --required, fail naming them as a producer error."""
     parser = argparse.ArgumentParser()
