@@ -56,6 +56,8 @@ def _collected(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: 
 def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, refund: bool = False) -> str:
     held = rows.get(agent.task, {}).get("state") in tick.ACTIVE and rows[agent.task].get("claimed_by") == agent.name
     held = held and not tick.awaiting_merge(rows[agent.task])
+    merging = _merge_wait(store, slug, rows[agent.task], agent.name) if held else None
+    held = held and merging is None
     expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
     refund = refund and held and store.claims(slug, agent.task) > 0
     generation = store.claim_generation(slug, agent.task)
@@ -64,11 +66,38 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     store.release(slug, agent.task, agent.name)
     if store.drop_agent(slug, agent.name) is False:
         return DROP_REFUSED
+    handed = _merge_hand_over(slug, store, ledger, rows, agent, merging, expected) if merging else ""
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
     if reopen and agent.seat:
         store.keep_seat(slug, agent.task, agent.seat)
     _settle_exit(store, agent.name, agent.seat if reopen else "")
-    return f", task {agent.task} reopened" if reopen else ""
+    return handed or (f", task {agent.task} reopened" if reopen else "")
+
+
+def _merge_wait(store: Any, slug: str, row: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """The declared wait of holder ``name`` when it waits on the merge of its pr task's own pull request, else None."""
+    if row.get("state") != "pr":
+        return None
+    held: dict[str, Any] = tick.idle_state.wait(store.redis, slug, name) or {}
+    on: dict[str, Any] = held.get("on") or {}
+    return held if on.get("kind") == "merge" and on.get("target") == row.get("pr_url") else None
+
+
+def _merge_hand_over(
+    slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, held: dict[str, Any], expected: dict[str, Any]
+) -> str:
+    """Leaves the pr task of a dropped holder to the merge pass as swarm ready would: a ready record naming its pull
+    request and holder, and awaiting merge under the holder's claim; a refused ledger write forgets the record."""
+    ready: Any = import_module("scripts.swarm.ready")
+    url = rows[agent.task]["pr_url"]
+    found = {"url": url, "head": "", "worktree": "", "agent": agent.name, "at": held["at"], "on": held["on"]}
+    ready.save(store, slug, agent.task, {**found, "queued_at": held["at"]})
+    live = ledger.update_task(slug, agent.task, {"awaiting": ready.AWAITING}, if_state=("pr",), if_match=expected)
+    rows[agent.task].update(live)
+    if ready.awaiting(live):
+        return f", task {agent.task} left to the merge of {url}"
+    ready.forget(store, slug, agent.task)
+    return ""
 
 
 def _stop_hive(slug: str, store: Any, agent: Any, reason: str, dropped: str) -> str:
