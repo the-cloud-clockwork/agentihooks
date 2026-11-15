@@ -6,16 +6,13 @@ Every claim filter asks here, so the urgent hold health finding reports exactly 
 from collections.abc import Callable
 from functools import partial
 from time import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import freeze, phase_state
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import task_dependencies
-
-if TYPE_CHECKING:
-    from scripts.swarm.health.findings import Limits
 
 PHASES = {
     "waiting": "waiting on an earlier phase",
@@ -136,18 +133,18 @@ def lab_minutes(reading: dict[str, Any] | None, now_ms: int) -> int:
     return wait_minutes(reading["capacity"]["classes"].get(LAB_CLASS, {}).get("predicted_wait_s"))
 
 
-def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limits: "Limits", fix: str = "") -> str:
-    """Why the lab holds the task from a claim: its pull request grading runs more minutes behind than the limit;
+def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limit: int, fix: str = "") -> str:
+    """Why the lab holds the task from a claim: its pull request grading runs more than ``limit`` minutes behind;
     empty when it does not or the task is outside the hold."""
     minutes = lab_minutes(reading, int(time() * 1000))
-    if minutes <= limits.ci_behind_minutes or not lab_held(task, fix):
+    if minutes <= limit or not lab_held(task, fix):
         return ""
     return LAB_BEHIND.format(minutes=minutes)
 
 
 def lab_reason(store: Any, slug: str, fix: str) -> Callable[[dict[str, Any]], str]:
-    """Each task's ``ci_behind`` text against the swarm's stored lab reading and the health limits."""
+    """Each task's ``ci_behind`` text against the swarm's stored lab reading and the lab threshold."""
     from scripts.swarm import lab_capacity
     from scripts.swarm.health import findings
 
-    return partial(ci_behind, reading=lab_capacity.status(store, slug), limits=findings.limits(), fix=fix)
+    return partial(ci_behind, reading=lab_capacity.status(store, slug), limit=findings.ci_behind_minutes(), fix=fix)

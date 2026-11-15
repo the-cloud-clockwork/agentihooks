@@ -36,6 +36,7 @@ ENV = {
     "drain_left": "AGENTIHOOKS_HEALTH_DRAIN_LEFT",
     "ci_behind_minutes": "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES",
 }
+CI_BEHIND_MINUTES = 20
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,6 @@ class Limits:
     cooldown_minutes: int = 60
     drain_minutes: int = 10
     drain_left: int = quota_state.DRAIN_LEFT
-    ci_behind_minutes: int = 20
 
 
 @dataclass(frozen=True)
@@ -93,8 +93,7 @@ class Finding:
         return {**found, "evidence": list(self.evidence)}
 
 
-def limits(environ: Mapping[str, str] | None = None) -> Limits:
-    """The health limits, each from its environment variable when that holds a positive whole number."""
+def limits(environ=None):
     env = os.environ if environ is None else environ
     values = {}
     for field in fields(Limits):
@@ -102,6 +101,13 @@ def limits(environ: Mapping[str, str] | None = None) -> Limits:
         if raw.isdigit() and int(raw) > 0:
             values[field.name] = int(raw)
     return Limits(**values)
+
+
+def ci_behind_minutes(environ: Mapping[str, str] | None = None) -> int:
+    """Whole minutes the lab may run behind on pull request grading before eng claims wait, from its environment
+    variable when that holds a positive whole number."""
+    raw = (os.environ if environ is None else environ).get(ENV["ci_behind_minutes"], "")
+    return int(raw) if raw.isdigit() and int(raw) > 0 else CI_BEHIND_MINUTES
 
 
 def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozenset(), talk=None):

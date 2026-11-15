@@ -296,7 +296,7 @@ def timelines(
     by_id = {task["id"]: task for task in tasks}
     ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
     marks = history(rows["ledger_events"])
-    lab, fix = lab_spans(rows.get("lab_capacity", []), now_ms, findings.limits().ci_behind_minutes), ready.fix_phase
+    lab, fix = lab_spans(rows.get("lab_capacity", []), now_ms, findings.ci_behind_minutes()), ready.fix_phase
 
     def held(task: dict[str, Any]) -> list[Span]:
         return lab if claim_hold.lab_held(task, fix) else []

@@ -104,19 +104,19 @@ def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> N
         standing.clear_detector(store.redis, slug, stage)
 
 
-def lab_finding(store: Any, slug: str, reading: dict[str, Any] | None, limits: findings.Limits, now_ms: int) -> None:
+def lab_finding(store: Any, slug: str, reading: dict[str, Any] | None, limit: int, now_ms: int) -> None:
     """Fire the standing lab wait finding while the reading holds eng claims, and clear it once the reading falls
     back; a lab wait row the detector measured in task hours is left to the detector."""
     minutes = claim_hold.lab_minutes(reading, now_ms)
     row: dict[str, Any] = standing.read(store.redis, slug).get(stages.LAB_WAIT, {})
     mine = row.get("unit") == LAB_UNIT
-    if minutes <= limits.ci_behind_minutes:
+    if minutes <= limit:
         if mine:
             standing.clear(store.redis, slug, stages.LAB_WAIT)
         return
     episode = str(row["episodes"][-1]) if mine else f"{stages.LAB_WAIT}:{now_ms}"
     held = LAB_HELD.format(hold=claim_hold.LAB_BEHIND.format(minutes=minutes))
-    found = standing.Reading(minutes, limits.ci_behind_minutes, LAB_UNIT, episode, held)
+    found = standing.Reading(minutes, limit, LAB_UNIT, episode, held)
     standing.fire(store.redis, slug, stages.LAB_WAIT, found, now_ms)
 
 
@@ -130,7 +130,7 @@ def record(
     ready: Callable[[dict], bool] | None = None,
 ) -> dict:
     config = settings(environ)
-    lab_finding(store, slug, lab_capacity.status(store, slug), findings.limits(environ), now_ms)
+    lab_finding(store, slug, lab_capacity.status(store, slug), findings.ci_behind_minutes(environ), now_ms)
     count = store.redis.incr(store.key(slug, "stage-detector-ticks"))
     if (count - 1) % config.ticks:
         return stages.read(store, slug)

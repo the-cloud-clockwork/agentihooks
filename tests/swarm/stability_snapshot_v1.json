@@ -70,8 +70,7 @@
    "master_watch_ratio": 15,
    "cooldown_minutes": 60,
    "drain_minutes": 10,
-   "drain_left": 10,
-   "ci_behind_minutes": 20
+   "drain_left": 10
   },
   "sessions": {
    "five_hour_bands": [

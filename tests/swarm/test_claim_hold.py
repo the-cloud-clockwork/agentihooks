@@ -178,16 +178,15 @@ def lab(wait_s, at=None, name="pull_request"):
 @pytest.mark.feature("swarm-lab-behind-hold")
 def test_the_lab_holds_eng_claims_outside_the_fix_phase_while_pull_request_grading_runs_behind():
     from scripts.swarm import claim_hold
-    from scripts.swarm.health.findings import Limits
 
-    limits, eng = Limits(), {"id": "t1", "lane": "eng", "phase": "p1"}
-    assert claim_hold.ci_behind(eng, lab(35 * 60), limits, "fix") == BEHIND.format(35)
-    assert claim_hold.ci_behind(eng, lab(21 * 60), limits, "fix") == BEHIND.format(21)
-    assert claim_hold.ci_behind(eng, lab(21 * 60 - 1), limits, "fix") == ""
-    assert claim_hold.ci_behind({**eng, "lane": "ci"}, lab(35 * 60), limits, "fix") == ""
-    assert claim_hold.ci_behind({**eng, "phase": "fix"}, lab(35 * 60), limits, "fix") == ""
-    assert claim_hold.ci_behind({"id": "t2", "phase": ""}, lab(35 * 60), limits, "") == BEHIND.format(35)
-    assert claim_hold.ci_behind(eng, lab(35 * 60), Limits(ci_behind_minutes=40), "fix") == ""
+    eng = {"id": "t1", "lane": "eng", "phase": "p1"}
+    assert claim_hold.ci_behind(eng, lab(35 * 60), 20, "fix") == BEHIND.format(35)
+    assert claim_hold.ci_behind(eng, lab(21 * 60), 20, "fix") == BEHIND.format(21)
+    assert claim_hold.ci_behind(eng, lab(21 * 60 - 1), 20, "fix") == ""
+    assert claim_hold.ci_behind({**eng, "lane": "ci"}, lab(35 * 60), 20, "fix") == ""
+    assert claim_hold.ci_behind({**eng, "phase": "fix"}, lab(35 * 60), 20, "fix") == ""
+    assert claim_hold.ci_behind({"id": "t2", "phase": ""}, lab(35 * 60), 20, "") == BEHIND.format(35)
+    assert claim_hold.ci_behind(eng, lab(35 * 60), 40, "fix") == ""
 
 
 @pytest.mark.feature("swarm-lab-behind-hold")
@@ -204,11 +203,12 @@ def test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds():
 
 @pytest.mark.feature("swarm-lab-behind-hold")
 def test_the_lab_threshold_reads_its_environment_variable():
-    from scripts.swarm.health.findings import ENV, Limits, limits
+    from scripts.swarm.health.findings import ENV, ci_behind_minutes
 
     assert ENV["ci_behind_minutes"] == "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES"
-    assert Limits().ci_behind_minutes == 20
-    assert limits({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "45"}).ci_behind_minutes == 45
+    assert ci_behind_minutes({}) == 20
+    assert ci_behind_minutes({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "45"}) == 45
+    assert ci_behind_minutes({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "0"}) == 20
 
 
 @pytest.fixture

@@ -104,19 +104,18 @@ def test_record_measures_with_the_readiness_it_is_given(tmp_path, store, monkeyp
 
 @pytest.mark.feature("swarm-lab-behind-hold")
 def test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below(store):
-    from scripts.swarm.health.findings import Limits
     from tests.swarm.test_claim_hold import lab
 
     assert stage_detector.THRESHOLD_HOURS["lab_wait"] == 1.0
-    stage_detector.lab_finding(store, "scratch", lab(35 * 60, NOW), Limits(), NOW)
+    stage_detector.lab_finding(store, "scratch", lab(35 * 60, NOW), 20, NOW)
     [finding] = standing.findings(store.redis, "scratch", NOW)
     assert finding.id == "bottleneck-stage/lab_wait"
     assert finding.summary == "lab wait at 35 minutes behind on pull request grading, over its 20 threshold"
     assert "eng claims are held: the lab is 35 minutes behind on pull request grading" in finding.evidence
-    stage_detector.lab_finding(store, "scratch", lab(40 * 60, NOW + 60_000), Limits(), NOW + 60_000)
+    stage_detector.lab_finding(store, "scratch", lab(40 * 60, NOW + 60_000), 20, NOW + 60_000)
     row = standing.read(store.redis, "scratch")["lab_wait"]
     assert (row["value"], row["threshold"], row["fired"]) == (40, 20, 1)
-    stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 120_000), Limits(), NOW + 120_000)
+    stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 120_000), 20, NOW + 120_000)
     assert standing.read(store.redis, "scratch") == {}
     measured = {
         "stage": "lab_wait",
@@ -128,7 +127,7 @@ def test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below(st
         "episodes": ["lab_wait:t1:1"],
     }
     stage_detector.update_findings(store, "scratch", {"stages": [measured]}, NOW + 180_000)
-    stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 240_000), Limits(), NOW + 240_000)
+    stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 240_000), 20, NOW + 240_000)
     assert standing.read(store.redis, "scratch")["lab_wait"]["unit"] == standing.DETECTOR_UNIT
 
 

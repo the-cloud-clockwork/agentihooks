@@ -59,7 +59,6 @@ def test_health_limits_match_the_snapshot():
         "cooldown_minutes": 60,
         "drain_minutes": 10,
         "drain_left": 10,
-        "ci_behind_minutes": 20,
     }
     assert SNAPSHOT["thresholds"]["health"] == asdict(findings.Limits())
 
