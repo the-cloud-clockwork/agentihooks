@@ -1,6 +1,7 @@
 """Per unit sandbox: private environment, port range, no network unless asked, process group killed on timeout.
 
-The private HOME, TMPDIR and XDG folders are environment variables; the host filesystem stays shared.
+The private HOME, TMPDIR and XDG folders are environment variables; the host filesystem stays shared, except the
+read only trees, such as the grader and base trees, which bubblewrap binds read only.
 """
 
 import hashlib
@@ -81,22 +82,38 @@ def environment(directory: Path, ports: PortRange, whitelist: Mapping[str, str])
     }
 
 
-def argv_for(argv: Sequence[str], env: Mapping[str, str], bwrap: str | None) -> list[str]:
-    """The command that runs argv with exactly env, inside bubblewrap without network unless bwrap is None."""
-    isolation = [] if bwrap is None else [bwrap, "--dev-bind", "/", "/", "--unshare-net", "--die-with-parent", "--"]
+def argv_for(
+    argv: Sequence[str], env: Mapping[str, str], bwrap: str | None, readonly: Sequence[Path] = (), net: bool = False
+) -> list[str]:
+    """The command that runs argv with exactly env, inside bubblewrap unless bwrap is None.
+
+    Inside bubblewrap each readonly tree is bound read only over the root bind, and the unit has no network unless net.
+    """
+    binds = [arg for tree in readonly for arg in ("--ro-bind", str(tree), str(tree))]
+    network = [] if net else ["--unshare-net"]
+    isolation = [] if bwrap is None else [bwrap, "--dev-bind", "/", "/", *binds, *network, "--die-with-parent", "--"]
     return ["env", "-i", *(f"{name}={value}" for name, value in sorted(env.items())), *isolation, *argv]
 
 
-def _bwrap() -> str:
-    """The bubblewrap executable, or CannotRun when it is not installed."""
+def _bwrap(net: bool, readonly: Sequence[Path]) -> str | None:
+    """The bubblewrap executable the unit needs, None for a unit with network and no read only trees.
+
+    Raises CannotRun when the unit needs bubblewrap and it is not installed.
+    """
+    if net and not readonly:
+        return None
     path = shutil.which("bwrap")
     if path is None:
-        raise CannotRun("bwrap is not installed, so a unit without network cannot run")
+        unit = "a unit with read only trees" if net else "a unit without network"
+        raise CannotRun(f"bwrap is not installed, so {unit} cannot run")
     return path
 
 
 class Sandbox:
-    """Runs units from cwd, each in a private directory under root with a port range and the whitelisted environment."""
+    """Runs units from cwd, each in a private directory under root with a port range and the whitelisted environment.
+
+    Each readonly tree, an absolute path, is bound read only inside bubblewrap, so a unit given one always runs there.
+    """
 
     def __init__(
         self, root: Path, cwd: Path, ports: PortAllocator, whitelist: Mapping[str, str], readonly: Sequence[Path] = ()
@@ -112,7 +129,7 @@ class Sandbox:
 
         The run directory, the log's parent, keeps the private folders for the caller to remove.
         """
-        bwrap = None if net else _bwrap()
+        bwrap = _bwrap(net, self.readonly)
         ports = self.ports.take()
         try:
             directory = Path(tempfile.mkdtemp(dir=self.root))
@@ -120,6 +137,7 @@ class Sandbox:
             for name in ("HOME", "TMPDIR", "XDG_RUNTIME_DIR"):
                 Path(env[name]).mkdir(mode=0o700)
             log = directory / "log.txt"
-            return Outcome(code=run_process(argv_for(argv, env, bwrap), self.cwd, timeout, log), log=log)
+            command = argv_for(argv, env, bwrap, self.readonly, net)
+            return Outcome(code=run_process(command, self.cwd, timeout, log), log=log)
         finally:
             self.ports.give(ports)
