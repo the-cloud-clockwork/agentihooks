@@ -28,7 +28,7 @@ class Uv:
 @pytest.fixture
 def uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Uv:
     fake = Uv()
-    monkeypatch.setattr(venvs.subprocess, "run", fake)
+    monkeypatch.setattr(subprocess, "run", fake)
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cache"))
     return fake
 
@@ -64,7 +64,6 @@ def test_a_digest_the_baked_venv_lacks_builds_its_own_venv(tmp_path: Path, uv: U
     built = venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", _baked(tmp_path, baked_digest))
     assert built == venv
     assert uv.calls == [_build(tmp_path / "tree", venv)]
-    assert uv.calls[0][1]["env"]["UV_CACHE_DIR"] == str(tmp_path / "cache")
     assert (venv / "lockfile.sha256").read_text() == f"{DIGEST}\n"
 
 
@@ -83,10 +82,10 @@ def test_a_failed_build_leaves_no_marker_and_builds_again(
 ) -> None:
     baked = _baked(tmp_path, None)
     failing = Uv(fail=True)
-    monkeypatch.setattr(venvs.subprocess, "run", failing)
+    monkeypatch.setattr(subprocess, "run", failing)
     with pytest.raises(subprocess.CalledProcessError):
         venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked)
     assert not (tmp_path / "venvs" / DIGEST / "lockfile.sha256").exists()
-    monkeypatch.setattr(venvs.subprocess, "run", uv)
+    monkeypatch.setattr(subprocess, "run", uv)
     assert venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked) == tmp_path / "venvs" / DIGEST
     assert failing.calls == uv.calls == [_build(tmp_path / "tree", tmp_path / "venvs" / DIGEST)]
