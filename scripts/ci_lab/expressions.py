@@ -14,7 +14,7 @@ from collections.abc import Mapping
 __all__ = ["Value", "evaluate", "holds", "interpolate"]
 
 Value = str | bool
-TOKEN = re.compile(r"\s*('(?:[^']|'')*'|&&|\|\||==|!=|[!()]|[A-Za-z_][\w.-]*(?:\(\))?)")
+TOKEN = re.compile(r"'(?:[^']|'')*'|&&|\|\||==|!=|[!()]|[A-Za-z_][\w.-]*(?:\(\))?")
 EMBEDDED = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
 WRAPPED = re.compile(r"\s*\$\{\{(.*)\}\}\s*", re.DOTALL)
 STATUS = {"always()": True, "cancelled()": False, "failure()": False, "success()": True}
@@ -25,9 +25,9 @@ NUMBER = re.compile(r"\s*-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?\s*")
 
 def _tokens(expression: str) -> deque[str]:
     """Split an expression into its tokens, refusing the text no token reads."""
-    unread = TOKEN.sub("", expression).strip()
+    unread = TOKEN.sub(" ", expression).split()
     if unread:
-        raise ValueError(f"cannot read {unread!r}")
+        raise ValueError(f"cannot read {' '.join(unread)!r}")
     return deque(TOKEN.findall(expression))
 
 
