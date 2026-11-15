@@ -125,12 +125,14 @@ def test_a_head_marker_without_its_grade_exits_non_zero_naming_the_grade(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     store = objects.LocalObjects(tmp_path)
-    store.write_once(evidence.head_prefix(HEAD) + "run-5", b"")
+    stored(store, "test", FIRST_TEST)
+    store.write_once(evidence.head_prefix(HEAD) + "run-2", b"")
+    evidence.record(store, grade("run-3", "queue", (evidence.GradeUnit(kind="test", key=FIRST_TEST, run="run-1"),)))
 
     code = evidence.ci(["lab", "show", HEAD, "--objects", str(tmp_path)])
 
     captured = capsys.readouterr()
-    assert (code, captured.out, captured.err) == (1, "", "missing lab/grades/run-5/grade.json\n")
+    assert (code, captured.out, captured.err) == (1, QUEUE_BLOCK, "missing lab/grades/run-2/grade.json\n")
 
 
 def test_ci_lab_show_orders_numeric_runs_by_value_and_prints_an_empty_grade(
@@ -153,6 +155,7 @@ def test_ci_lab_show_orders_numeric_runs_by_value_and_prints_an_empty_grade(
     ("command", "argv", "error"),
     [
         (evidence.main, ["--grade", "run-2"], "python -m scripts.ci_lab evidence: error: {} --objects"),
+        (evidence.main, ["--objects", "objects"], "python -m scripts.ci_lab evidence: error: {} --grade"),
         (evidence.ci, [], "agentihooks ci: error: {} group"),
         (evidence.ci, ["lab"], "agentihooks ci lab: error: {} command"),
         (evidence.ci, ["lab", "show", HEAD], "agentihooks ci lab show: error: {} --objects"),
