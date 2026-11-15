@@ -24,16 +24,11 @@ NUMBER = re.compile(r"\s*-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?\s*")
 
 
 def _tokens(expression: str) -> deque[str]:
-    """Split an expression into its tokens, refusing the first text no token reads."""
-    tokens: deque[str] = deque()
-    position = 0
-    while expression[position:].strip():
-        match = TOKEN.match(expression, position)
-        if match is None:
-            raise ValueError(f"cannot read {expression[position:].strip()!r}")
-        tokens.append(match.group(1))
-        position = match.end()
-    return tokens
+    """Split an expression into its tokens, refusing the text no token reads."""
+    unread = TOKEN.sub("", expression).strip()
+    if unread:
+        raise ValueError(f"cannot read {unread!r}")
+    return deque(TOKEN.findall(expression))
 
 
 def _primary(tokens: deque[str], context: Mapping[str, str]) -> Value:

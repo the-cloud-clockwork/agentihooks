@@ -192,5 +192,5 @@ def test_a_condition_outside_the_expression_subset_is_refused_before_the_step_ru
     gate = _step("true\n", condition="${{ contains(github.ref, 'dev') }}")
     with pytest.raises(ValueError) as refused:
         run_static.run(gate, *_folders(tmp_path), settings)
-    assert str(refused.value) == "cannot read \", 'dev')\""
+    assert str(refused.value) == "cannot read ','"
     assert not (tmp_path / "bwrap.args").exists()
