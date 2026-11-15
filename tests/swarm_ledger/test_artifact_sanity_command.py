@@ -39,12 +39,16 @@ def test_the_pages_option_grades_the_given_page_folder_instead_of_its_own(
     chromium: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pages = page_folder(tmp_path)
+    assert sanity.main(["--pages", str(pages), str(AUDIT)]) == 0
+    assert json.loads(capsys.readouterr().out) == {AUDIT.name: []}
     styles = pages / "static" / "css" / "ledger.css"
     styles.write_text(styles.read_text().replace(WIDE, NARROW))
     assert sanity.main(["--pages", str(pages), str(AUDIT)]) == 1
     report = json.loads(capsys.readouterr().out)
     assert list(report) == [AUDIT.name]
     assert any(failure.startswith("reading width") for failure in report[AUDIT.name]), report
+    assert sanity.main([str(AUDIT)]) == 0
+    assert json.loads(capsys.readouterr().out) == {AUDIT.name: []}
 
 
 def test_the_command_needs_at_least_one_file(capsys):
