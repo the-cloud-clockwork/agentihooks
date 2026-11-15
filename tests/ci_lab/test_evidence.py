@@ -56,6 +56,18 @@ def grade(run: str, tier: str, units: tuple[evidence.GradeUnit, ...]) -> evidenc
     return evidence.GradeEvidence(run=run, inputs=inputs, units=units)
 
 
+class Listings(objects.LocalObjects):
+    """A local object store that records every prefix it lists."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.prefixes: list[str] = []
+
+    def keys(self, prefix: str) -> list[str]:
+        self.prefixes.append(prefix)
+        return super().keys(prefix)
+
+
 @pytest.fixture
 def blobs(tmp_path: Path) -> objects.Objects:
     store = objects.LocalObjects(tmp_path)
@@ -149,6 +161,17 @@ def test_ci_lab_show_orders_numeric_runs_by_value_and_prints_an_empty_grade(
 
     captured = capsys.readouterr()
     assert (code, captured.out, captured.err) == (0, f"grade 9\n{block}\ngrade 10\n{block}", "")
+
+
+def test_show_lists_only_the_grade_folder_and_each_unit_folder(tmp_path: Path) -> None:
+    store = Listings(tmp_path)
+    stored(store, "test", FIRST_TEST)
+    evidence.record(store, grade("run-3", "queue", (evidence.GradeUnit(kind="test", key=FIRST_TEST, run="run-1"),)))
+
+    text, missing = evidence.show(store, ["run-3"])
+
+    assert (text, missing) == (QUEUE_BLOCK, [])
+    assert store.prefixes == ["lab/grades/run-3/", f"lab/test/{'2' * 64}/"]
 
 
 @pytest.mark.parametrize(
