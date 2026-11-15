@@ -162,7 +162,7 @@ def test_the_same_function_in_another_module_gets_its_own_key(tmp_path: Path) ->
     assert units[0].key != units[1].key
 
 
-def test_a_whitespace_only_edit_outside_the_function_keeps_its_key(tmp_path: Path) -> None:
+def test_a_whitespace_only_edit_keeps_the_key_of_every_function_it_falls_outside(tmp_path: Path) -> None:
     root = repository(tmp_path, MUTANT_FILES)
     before = keys(root)
     edit(root, PATH, "LIMIT = 1\n\n\n", "LIMIT=1\n\n\n\n\n")
@@ -186,8 +186,15 @@ def test_a_body_edit_changes_only_its_function_key(tmp_path: Path) -> None:
     }
 
 
-@pytest.mark.parametrize(("old", "new"), [("LIMIT = 1", "LIMIT = 2"), ("SIZE = 3", "SIZE = 4")])
-def test_a_module_level_code_edit_changes_every_key(tmp_path: Path, old: str, new: str) -> None:
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("LIMIT = 1", "LIMIT = 2"),
+        ("SIZE = 3", "SIZE = 4"),
+        ("        return value + 1", "        return value + 2"),
+    ],
+)
+def test_an_edit_to_code_no_trampolined_function_holds_changes_every_key(tmp_path: Path, old: str, new: str) -> None:
     root = repository(tmp_path, MUTANT_FILES)
     before = keys(root)
     edit(root, PATH, old, new)
@@ -214,6 +221,19 @@ def test_only_the_mutmut_pin_and_runner_tree_enter_the_key(
     after = keys(root)
     assert after.keys() == before.keys()
     assert [after[function] != before[function] for function in before] == [changed] * len(before)
+
+
+@pytest.mark.parametrize("line", ['dev = ["mutmut==3.6.0"]', "dev = ['mutmut == 3.6.0']"])
+def test_the_mutmut_pin_is_read_from_pyproject(tmp_path: Path, line: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(f"[project.optional-dependencies]\n{line}\n")
+    assert expand_mutation.mutmut_pin(tmp_path) == "3.6.0"
+
+
+@pytest.mark.parametrize("line", ['dev = ["mutmut>=3.6"]', 'dev = ["pytest==8.0"]'])
+def test_a_pyproject_that_pins_no_mutmut_version_is_refused(tmp_path: Path, line: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(f"[project.optional-dependencies]\n{line}\n")
+    with pytest.raises(ValueError):
+        expand_mutation.mutmut_pin(tmp_path)
 
 
 def test_covering_fingerprints_enter_only_their_function_key(tmp_path: Path) -> None:

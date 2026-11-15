@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 import libcst as cst
-from libcst.metadata import PositionProvider, WhitespaceInclusivePositionProvider
+from libcst.metadata import ParentNodeProvider, PositionProvider, WhitespaceInclusivePositionProvider
 from mutmut.mutation.file_mutation import group_by_top_level_node
 from mutmut.mutation.trampoline_templates import mangle_function_name
 from mutmut.utils.format_utils import get_mutant_name
@@ -36,7 +36,7 @@ from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyrigh
 __all__ = ["mutant_units", "stats_units"]
 
 RUNNER = "scripts/ci_mutation/"
-PIN = re.compile(r'"(mutmut==[^"]+)"')
+PIN = re.compile(r"""["']mutmut\s*==\s*([^"'\s]+)\s*["']""")
 DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -63,7 +63,10 @@ def resources_of(paths: list[str]) -> dict[str, set[str]]:
 
 
 def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -> tuple[Unit, ...]:
-    """Key one stats unit per test file by the stats cache identity of its static closure, known before a run."""
+    """Key one stats unit per test file by the stats cache SCHEMA 4 identity of its static closure.
+
+    The key takes no run output, so it differs from the measured records a stats run stores for the same file.
+    """
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
@@ -80,8 +83,12 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
 
 
 def mutmut_pin(root: Path) -> str:
-    """Return the mutmut requirement pinned in root's pyproject."""
-    return next(PIN.finditer((root / "pyproject.toml").read_text())).group(1)
+    """Return the mutmut version pinned in root's pyproject."""
+    pyproject = root / "pyproject.toml"
+    match = PIN.search(pyproject.read_text())
+    if match is None:
+        raise ValueError(f"{pyproject} pins no mutmut version")
+    return match[1]
 
 
 def runner_digest(root: Path) -> str:
@@ -91,7 +98,7 @@ def runner_digest(root: Path) -> str:
 
 
 def module_digest(source: str) -> str:
-    """Digest the module's code outside its functions and methods, blind to whitespace and comments."""
+    """Digest the module's code outside the functions and methods mutmut trampolines, blind to whitespace and comments."""
     tree = ast.parse(source)
     tree.body = [node for node in tree.body if not isinstance(node, DEFINITIONS)]
     for node in tree.body:
@@ -100,45 +107,39 @@ def module_digest(source: str) -> str:
     return hashlib.sha256(ast.dump(tree).encode()).hexdigest()
 
 
-def trampolined(module: cst.Module) -> list[tuple[cst.FunctionDef, str | None]]:
-    """List the functions mutmut trampolines in module, with the class name of each method."""
-    found: list[tuple[cst.FunctionDef, str | None]] = []
-    for statement in module.body:
-        if isinstance(statement, cst.FunctionDef):
-            found.append((statement, None))
-        elif isinstance(statement, cst.ClassDef) and isinstance(statement.body, cst.IndentedBlock):
-            found.extend(
-                (method, statement.name.value) for method in statement.body.body if isinstance(method, cst.FunctionDef)
-            )
-    return found
-
-
 def function_units(
     root: Path, path: str, changed: set[int], runner: str, covering: Mapping[str, Mapping[str, str]]
 ) -> list[Unit]:
-    """Return one mutant unit for each trampolined function of path that has mutants and whose lines meet changed."""
+    """Return one mutant unit for each function mutmut trampolines in path whose lines meet changed."""
     source = (root / path).read_text()
     wrapper, graded, _ = created_mutations(path, source)
-    grouped = group_by_top_level_node(graded)
     starts = wrapper.resolve(WhitespaceInclusivePositionProvider)
     ends = wrapper.resolve(PositionProvider)
+    parents = wrapper.resolve(ParentNodeProvider)
     module = module_digest(source)
     units: list[Unit] = []
-    for function, class_name in trampolined(wrapper.module):
-        count = len(grouped.get(function, ()))
-        if not count or not changed.intersection(range(starts[function].start.line, ends[function].end.line + 1)):
+    for function, mutations in group_by_top_level_node(graded).items():
+        if not isinstance(function, cst.FunctionDef) or not changed.intersection(
+            range(starts[function].start.line, ends[function].end.line + 1)
+        ):
             continue
+        owner = parents.get(parents[function])
+        class_name = owner.name.value if isinstance(owner, cst.ClassDef) else None
         name = get_mutant_name(Path(path), mangle_function_name(name=function.name.value, class_name=class_name))
         text = wrapper.module.code_for_node(function.with_changes(leading_lines=()))
         key = digest([name, text, module, runner, dict(covering.get(name, {}))])
-        units.append(Unit("mutant", key, tuple(f"{name}__mutmut_{index}" for index in range(1, count + 1))))
+        units.append(Unit("mutant", key, tuple(f"{name}__mutmut_{index}" for index in range(1, len(mutations) + 1))))
     return units
 
 
 def mutant_units(
     root: Path, changes: Mapping[str, Iterable[int]], covering: Mapping[str, Mapping[str, str]]
 ) -> tuple[Unit, ...]:
-    """Name every mutant of each changed function and key it by the inputs that decide its verdicts."""
+    """Name every mutant of each changed function and key it by the inputs that decide its verdicts.
+
+    changes maps each mutated source file, a Python file present under root, to its changed lines; covering maps a
+    qualified mutmut function name to the fingerprints of the tests that cover it.
+    """
     runner = runner_digest(root)
     return tuple(
         unit for path in sorted(changes) for unit in function_units(root, path, set(changes[path]), runner, covering)
