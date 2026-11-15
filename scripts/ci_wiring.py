@@ -145,12 +145,11 @@ def _lab_problems(
     ]
 
 
-def check(
-    workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date, lab: Mapping[str, Any] | None = None
+def _grade(
+    workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date, lab: Mapping[str, Any]
 ) -> list[str]:
     from scripts import ci_gate_queue
 
-    lab = lab or {}
     try:
         workflows = ci_gate_queue.normalize(workflows)
     except ValueError as error:
@@ -184,6 +183,10 @@ def check(
     return problems
 
 
+def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date) -> list[str]:
+    return _grade(workflows, config, today, {})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=f"fail unless every pull request job is a need of {GATE}")
     parser.add_argument("--root", type=Path, default=Path.cwd())
@@ -192,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     config = json.loads((args.root / CONFIG).read_text())
     delivery = args.root / DELIVERY
     lab = yaml.safe_load(delivery.read_text())["lab"] if delivery.is_file() else cast(dict[str, Any], {})
-    problems = check(workflows, config, datetime.now(UTC).date(), lab)
+    problems = _grade(workflows, config, datetime.now(UTC).date(), lab)
     jobs = sum(len(workflow.get("jobs") or cast(dict[Any, Any], {})) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:
