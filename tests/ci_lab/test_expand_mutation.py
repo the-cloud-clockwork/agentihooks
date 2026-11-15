@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from mutmut.mutation.pragma_handling import PragmaParseError
 
 from scripts.ci_lab import expand_mutation
 from scripts.ci_lab.units import Unit
@@ -145,6 +146,14 @@ def test_a_unit_names_every_mutant_of_its_function_as_mutmut_does(tmp_path: Path
         name for name in every if name.rpartition("__mutmut_")[0] in owners
     ]
     assert [unit.kind for unit in units] == ["mutant", "mutant"]
+
+
+def test_a_malformed_pragma_is_refused_naming_its_file(tmp_path: Path) -> None:
+    broken = "# pragma: no mutate end\ndef first(value):\n    return value + 1\n"
+    root = repository(tmp_path, {**MUTANT_FILES, "scripts/broken.py": broken})
+    with pytest.raises(PragmaParseError) as refused:
+        expand_mutation.mutant_units(root, {"scripts/broken.py": [3]}, {})
+    assert str(refused.value) == "# pragma: no mutate end at scripts/broken.py:1 without a # pragma: no mutate start"
 
 
 def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Path) -> None:
