@@ -120,6 +120,17 @@ def test_idle_trees_within_capacity_stay(tmp_path: Path, origin: Path) -> None:
     assert _registered(trees.mirror.store) == sorted(str(tmp_path / "trees" / head) for head in (first, second))
 
 
+def test_an_idle_tree_at_exact_capacity_stays(tmp_path: Path, origin: Path) -> None:
+    first = _commit(origin, "a", "a")
+    second = _commit(origin, "b", "b")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, second), root=tmp_path / "trees", capacity=2)
+    trees.lease(first)
+    trees.release(first)
+    trees.lease(second)
+    assert trees.live == OrderedDict({first: 0, second: 1})
+    assert (tmp_path / "trees" / first / "a").is_file()
+
+
 def test_the_least_recently_leased_idle_tree_goes_first(tmp_path: Path, origin: Path) -> None:
     heads = [_commit(origin, name, name) for name in ("a", "b", "c")]
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, heads[2]), root=tmp_path / "trees", capacity=2)
