@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.901 · 2026-11-15
+
+### 2026-11-15 · c1ab1f63d8d9 · #11211 · @agenticore-app
+
+**Guard the tick free paths with legacy no stop tests and a hive stop Semgrep rule**
+
+This change adds safety nets around the free-agent paths that previously could silently skip sending an execution stop. It introduces regression tests confirming that legacy agents freed via revoked, refused, or stuck reasons are retired without triggering a stop, and adds a Semgrep rule that flags any tick function retiring and dropping an agent with refund without routing through `_stop_hive`. Together these guard against reintroducing the earlier defect where hive stop was silently bypassed on these free paths.
+
 ## v2.17.900 · 2026-11-15
 
 ### 2026-11-15 · 1a5b5bb66ebf · #11291 · @agenticore-app
