@@ -6,11 +6,8 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 from urllib.parse import urlsplit
-
-if TYPE_CHECKING:
-    from playwright.sync_api import Browser
 
 SHELL = Path(__file__).resolve().parent / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
@@ -213,7 +210,7 @@ def _events(route, doc):
     route.fulfill(body=f"id: c0\nevent: snapshot\ndata: {data}\n\n", content_type="text/event-stream")
 
 
-def run(browser: "Browser", files: list[Path], pages: Path | None = None) -> dict[str, list[str]]:
+def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
     doc, served = ledger_doc(files), assets()
     tab = browser.new_page(viewport=VIEWPORT)
