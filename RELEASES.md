@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.900 · 2026-11-15
+
+### 2026-11-15 · 1a5b5bb66ebf · #11291 · @agenticore-app
+
+**Lock the events only engine against regression: source scan, wider Semgrep rule, tick no claim test**
+
+This change adds regression guards ensuring the legacy tick launch path, removed in #11141, cannot silently return. A source scanner walks all scripts for forbidden `_spawn` definitions, spawn-related call/write steps, or `legacy`/`engine` mixing outside the one sanctioned spot; a widened Semgrep rule now catches direct spawn calls on runtime, router, or herdr receivers; and a new tick-pass test confirms a second pass makes no spawn call and leaves claims, ledger, and readiness untouched. Together these lock the events-only engine in place.
+
 ## v2.17.898 · 2026-11-15
 
 ### 2026-11-15 · db3a37b20379 · #11226 · @agenticore-app
