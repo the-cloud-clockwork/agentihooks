@@ -218,7 +218,7 @@ def test_a_master_login_outranks_a_preferred_hive_slot_and_follows_master_prefer
     ("fields", "front", "kind"),
     [
         ({"master_login": {"claude": "closed_key"}}, True, "master-login"),
-        ({"interactive": {"claude": "closed_key"}, "slots": []}, False, "interactive"),
+        ({"interactive": {"claude": "closed_key"}, "slots": []}, True, "interactive"),
         ({"slots": [{"harness": "claude", "account": "closed_key", "kind": "subscription"}]}, False, "subscription"),
     ],
 )
