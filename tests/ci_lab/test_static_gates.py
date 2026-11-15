@@ -46,9 +46,7 @@ jobs:
           if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_trust.py" ]]; then
             cd "$RUNNER_TEMP/grader"
             python -m scripts.gate_protected --head "$GITHUB_SHA"
-          else
-            python -m scripts.ci_runner_trust
-          fi
+          else python -m scripts.ci_runner_trust; fi
       - run: python -m scripts.unnamed_check --strict
       - name: Prove the mutation gate self plant
         run: |
@@ -66,7 +64,9 @@ jobs:
       - name: Hold the strict type checker
         run: python -m scripts.type_gate --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
       - name: Install basedpyright
-        run: uv pip install basedpyright
+        run: |
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install basedpyright
       - name: Measure the type errors
         run: python -m basedpyright --outputjson
   semgrep:
@@ -87,12 +87,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install Semgrep
-        run: python -m pip install "semgrep==$SEMGREP_VERSION"
+        run: |
+          if [[ "$(semgrep --version)" != "$SEMGREP_VERSION" ]]; then
+            python -m pip install "semgrep==$SEMGREP_VERSION"
+          fi
       - name: Own rules hold
-        run: semgrep scan --error --config "$RULES" .
+        run: |
+          python -m pip install "semgrep==$SEMGREP_VERSION"
+          semgrep scan --error --config "$RULES" .
       - name: Rule exceptions only shrink
         run: |
-          python - <<'PY'
+          LIST="$list" python - <<'PY'
           print("ok")
           PY
   charts:
@@ -231,8 +236,9 @@ TREE = {
     "scripts/deep/leaf.py": "VALUE = 1\n",
     "scripts/shared.py": "",
     "scripts/unused.py": "",
-    "scripts/tool/__init__.py": "",
-    "scripts/tool/__main__.py": "from scripts.tool import core\n",
+    "scripts/tool/__init__.py": "from . import core\n",
+    "scripts/tool/__main__.py": "from scripts.tool import cli\n",
+    "scripts/tool/cli.py": "",
     "scripts/tool/core.py": "",
 }
 
@@ -407,6 +413,7 @@ def test_closure_of_a_package_runs_its_main(tmp_path: Path) -> None:
         "scripts/__init__.py",
         "scripts/tool/__init__.py",
         "scripts/tool/__main__.py",
+        "scripts/tool/cli.py",
         "scripts/tool/core.py",
     )
 
