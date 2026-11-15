@@ -10,7 +10,7 @@ from scripts.hive import execution_events, presence, reports
 from scripts.hub import lease
 from scripts.hub.lifecycle import Lifecycle
 from scripts.hub.registry import Reactor
-from scripts.swarm.store import EVENTS_ENGINE, AgentRecord, RedisStore, connect
+from scripts.swarm.store import AgentRecord, RedisStore, connect
 
 INTERVAL_MS = 300_000
 BUCKET = "hub-reconciler"
@@ -51,7 +51,7 @@ def legacy_agents(store: RedisStore, slug: str) -> list[AgentRecord]:
 
 
 def event_slugs(store: RedisStore) -> list[str]:
-    return [slug for slug in store.slugs() if store.redis.hget(store.key(slug, "config"), "engine") == EVENTS_ENGINE]
+    return list(store.slugs())
 
 
 def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) -> bool:
@@ -68,7 +68,11 @@ def _exited(report: dict | None, event: Envelope, agent: AgentRecord, now: int) 
             agent.generation,
         ) and record["pane"]["state"] in execution_events.ENDED
     panes = report.get("pane_ids")
-    return isinstance(panes, list) and bool(agent.pane_id) and agent.pane_id not in panes
+    if isinstance(panes, list) and bool(agent.pane_id) and agent.pane_id not in panes:
+        return True
+    launched = max(agent.started_at, agent.launched_at, event.time)
+    hub_admitted = not agent.runtime_target
+    return hub_admitted and observed - launched >= reports.STARTUP_MS and reports.unlisted(report, agent, launched)
 
 
 def _ending(

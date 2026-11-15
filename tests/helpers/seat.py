@@ -3,7 +3,7 @@ acknowledgement writes its launch decision and the hub reactor on execution star
 no tick pass and no runtime spawn run."""
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +14,7 @@ from scripts.hub import admission, claims, lease
 from scripts.swarm import commands, readiness
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.repository import hierarchy
+from tests.helpers import store_seed
 
 SLUG = "sw"
 LAUNCH = {"harness": "claude", "account": "acct", "model": "opus", "effort": "high"}
@@ -36,6 +37,15 @@ def view(store: RedisStore, ledger: Any, slug: str) -> readiness.Snapshot:
         lambda task_id: store.claimant(slug, task_id) is not None,
         lambda task: True,
     )
+
+
+@dataclass(frozen=True)
+class Launched:
+    """How a seated agent is launched: admitted, started and launched at ``at``, and listed by ``runtime``'s ``live``
+    set beside its ``started`` launch row when ``runtime`` is given."""
+
+    at: int = LAUNCHED_AT
+    runtime: Any = None
 
 
 def seat_agent(
@@ -92,6 +102,19 @@ def seat_agent(
         )
     )
     return next(agent for agent in store.agents(slug) if agent.name == admitted["name"])
+
+
+def seat_launched(store: RedisStore, ledger: Any, slug: str, task_id: str, hive: str, started: Launched) -> AgentRecord:
+    """Seats one agent through ``seat_agent`` from ``hive`` with the admission clock at ``started.at`` and returns it
+    launched at that time: given ``started.runtime``, that runtime lists the agent live and the swarm holds its
+    ``started`` launch row, so the tick judges it as an agent it already launched."""
+    seated = seat_agent(store, ledger, slug, task_id, hive, clock=lambda: started.at)
+    agent = replace(seated, launched_at=started.at)
+    store.execution_registry.update(slug, agent)
+    if started.runtime is not None:
+        started.runtime.live.add(agent.name)
+        store_seed.record_launch(store, slug, agent, "started")
+    return agent
 
 
 @pytest.fixture

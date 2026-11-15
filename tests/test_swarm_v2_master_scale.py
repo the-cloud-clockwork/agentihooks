@@ -682,8 +682,6 @@ def test_an_over_budget_host_launches_the_master_and_still_holds_an_engineer(swa
     tick_module._spend_host(store, "earlier", NOW - 1)
     run(store, runtime)
     assert [agent.seat for agent in extras(store)] == [SECOND]
-    held = tick_module._spawn_stop(SLUG, store.config(SLUG), store, runtime, NOW)
-    assert held.startswith("holding spawns: host memory room 1, 2 spawned since it was granted")
 
 
 def test_a_regrowth_clears_the_retire_state_and_names_why(swarm):

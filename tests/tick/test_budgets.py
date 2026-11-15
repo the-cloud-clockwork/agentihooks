@@ -59,16 +59,16 @@ def test_a_live_p95_under_the_floor_keeps_the_floor() -> None:
 @pytest.mark.feature("swarm-tick-live-budgets")
 def test_fifty_nine_walls_give_the_floor() -> None:
     store = _store()
-    _push(store, "spawn", [100.0] * 59)
-    assert _resolved(store, "spawn") == budgets.floor_of("spawn") == 33.0
+    _push(store, "fleet red notice", [100.0] * 59)
+    assert _resolved(store, "fleet red notice") == budgets.floor_of("fleet red notice") == 30.0
 
 
 @pytest.mark.feature("swarm-tick-live-budgets")
 def test_the_window_keeps_the_last_sixty_walls() -> None:
     store = _store()
-    _push(store, "preempt", [500.0] * 10 + [20.0] * 60)
-    assert store.redis.llen(store.key("sw", "tick:walls:preempt")) == budgets.WINDOW == 60
-    assert _resolved(store, "preempt") == 30.0
+    _push(store, "night watch", [500.0] * 10 + [20.0] * 60)
+    assert store.redis.llen(store.key("sw", "tick:walls:night watch")) == budgets.WINDOW == 60
+    assert _resolved(store, "night watch") == 30.0
 
 
 @pytest.mark.feature("swarm-tick-live-budgets")
@@ -95,15 +95,15 @@ def test_a_missing_window_is_rebuilt_from_the_steps_stream() -> None:
 @pytest.mark.feature("swarm-tick-live-budgets")
 def test_a_step_budget_reads_the_live_budget_of_its_pass() -> None:
     store = _store()
-    step = {each.name: each for each in place.STEPS}["spawn"]
-    _push(store, "spawn", [40.0] * 60)
+    step = {each.name: each for each in place.STEPS}["rank pass"]
+    _push(store, "rank pass", [40.0] * 60)
 
     def run() -> tuple[float, float]:
         before = step.budget_s
         budgets.resolve(store, "sw")
         return before, step.budget_s
 
-    assert copy_context().run(run) == (33.0, 60.0)
+    assert copy_context().run(run) == (7.0, 60.0)
 
 
 @pytest.mark.feature("swarm-tick-live-budgets")
@@ -123,8 +123,6 @@ def test_a_write_step_budget_follows_its_live_budget() -> None:
 def test_floors_keep_the_six_heavy_rows_and_two_seconds_elsewhere() -> None:
     heavy = {
         "reap": 22.0,
-        "spawn": 33.0,
-        "preempt": 18.0,
         "night watch": 22.0,
         "metrics record": 29.0,
         "fleet red notice": 30.0,
@@ -141,11 +139,11 @@ def test_spawn_starts_on_floors_by_forty_seconds_whatever_the_live_budgets() -> 
     store = _store()
     _push(store, "reap", [200.0] * 60)
     needed = [CallStep(name, "place", lambda tick, get: None) for name in sorted(budgets.SPAWN_NEEDS)]
-    spawn = CallStep("spawn", "place", lambda tick, get: None, needs=budgets.SPAWN_NEEDS)
+    settle = CallStep("settle", "place", lambda tick, get: None, needs=budgets.SPAWN_NEEDS)
 
     def run() -> float:
         budgets.resolve(store, "sw")
-        return registry.latest_start("spawn", [*needed, spawn])
+        return registry.latest_start("settle", [*needed, settle])
 
     start = copy_context().run(run)
     assert start == 22.0

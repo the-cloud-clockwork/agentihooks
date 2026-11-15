@@ -1,0 +1,6 @@
+{
+  "scripts/hive/reports.py:scripts.hive.reports.x\u01c1Reports\u01c1vanished:4e1a8455b84057931bb20e1f9a353fd65aa8ce7a11f54d699f5e9059ae15d8f1": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: typing.cast is an identity function at runtime and ignores its first argument, so cast(None, raw) returns raw unchanged and the call to unlisted(json.loads(...)) is the same. The mutant only changes a type argument, which the static checker sees but tests cannot observe."
+  }
+}

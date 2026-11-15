@@ -13,6 +13,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.subjects import subject
 from scripts.hive import execution_events
+from scripts.hive.stop_names import durable
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.runtime.base import NamedRuntime
 
@@ -34,11 +35,6 @@ POLICY = QueuePolicy(max_deliver=100_000, ack_wait_ms=RETRY_MS)
 def stop_subject(swarm: str, hive: str) -> str:
     """The subject one hive reads the stops for its executions in a swarm from."""
     return subject(swarm, "execution", "stop", hive)
-
-
-def durable(swarm: str, hive: str) -> str:
-    """The durable consumer one hive reads its stops through in a swarm."""
-    return f"execution-stop-{hashlib.sha256(json.dumps([swarm, hive]).encode()).hexdigest()}"
 
 
 def _now() -> int:
@@ -89,9 +85,9 @@ def stop(bus: Bus, slug: str, agent: AgentRecord, reason: str) -> str:
     if ended(bus, event):
         return ENDED
     hive = _fields(event)["hive"]
-    events = bus.for_swarm(slug).events
-    events.consumer(durable(slug, hive), stop_subject(slug, hive), POLICY)
-    return SENT if events.publish(stop_subject(slug, hive), request(event, reason)) else PENDING
+    stops = bus.for_swarm(slug).stops
+    stops.consumer(durable(slug, hive), stop_subject(slug, hive), POLICY)
+    return SENT if stops.publish(stop_subject(slug, hive), request(event, reason)) else PENDING
 
 
 def _unprovisioned(exc: Exception) -> bool:
@@ -113,7 +109,7 @@ class Stopper:
         consumer, and on a failed read, it answers nothing until the next pass."""
         try:
             if self._consumer is None:
-                self._consumer = self.bus.events.consumer(
+                self._consumer = self.bus.stops.consumer(
                     durable(self.swarm, self.hive), stop_subject(self.swarm, self.hive), POLICY
                 )
             deliveries = self._consumer.fetch(BATCH, timeout_ms)

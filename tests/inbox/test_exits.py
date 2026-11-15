@@ -7,6 +7,7 @@ from scripts.inbox import exits, wake
 from scripts.inbox.store import CLOSED, SETTLED_EXITS, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from tests.helpers import store_seed
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.unit
@@ -304,7 +305,7 @@ def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis
     peer = AgentRecord(name="sw-eng-3", lane="eng", task="t3", seat="eng-2@sw")
     successor = AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw")
     for agent in (departed, peer):
-        store.record_launch("sw", agent, "started")
+        store_seed.record_launch(store, "sw", agent, "started")
     store.seats.occupy(departed.seat, departed.name, 1)
     item = inbox.send(peer.name, departed.seat, "Please tell me when your branch is pushed.", task="t1")
     inbox.deliver(item.id, departed.name)
@@ -353,9 +354,9 @@ def test_the_sweep_keeps_peer_mail_that_still_belongs_to_the_seat(redis, retaine
     departed = AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw")
     peer = AgentRecord(name="sw-eng-3", lane="eng", task="master" if retained == "master sender" else "t3")
     if retained != "unknown task":
-        store.record_launch("sw", departed, "started")
+        store_seed.record_launch(store, "sw", departed, "started")
     if retained != "unknown sender":
-        store.record_launch("sw", peer, "started")
+        store_seed.record_launch(store, "sw", peer, "started")
     store.seats.occupy(departed.seat, departed.name, 1)
     item = inbox.send(
         peer.name,

@@ -28,7 +28,6 @@ LAUNCH_MS = 75000
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
-GONE = "the hive launch order ended before its acknowledgement"
 EXPIRED = "hive launch acknowledgement expired"
 LATE = "hive launch reservation expired"
 ACCOUNT_FULL = "account reservation is full"
@@ -754,51 +753,6 @@ class HiveLaunch:
                     return refused
                 except WatchError:
                     continue
-
-    def collect(self, request: SpawnRequest) -> Outcome:
-        order = self.orders_for(request.task["id"])
-        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if previous and previous.state == "finished":
-            return self.finished(request, order, previous)
-        if not previous or previous.state in ("ended", "finished"):
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
-        if self.unacknowledged(order):
-            self.retire(order, previous)
-            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
-        return self.spawn(request)
-
-    def finished(self, request: SpawnRequest, order: LaunchOrder, agent: AgentRecord) -> Outcome:
-        lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
-        lease.require_epoch(self.store, self.slug, order.epoch)
-        _match("claimant", agent.name, request.name)
-        _match("seat", agent.seat, request.task["seat"])
-        _match("generation", order.generation, agent.generation)
-        ack = self.orders.ack(order)
-        if not ack:
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
-        admission.release(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
-        if ack.status != "live":
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=f"hive launch failed: {ack.failure}")
-        _match("ack host", order.hive, ack.target.get("host_id"))
-        if agent.runtime_target != ack.target:
-            bound = replace(
-                agent,
-                runtime_target=ack.target,
-                pane_id=ack.execution["pane_id"],
-                launched_at=ack.execution["launched_at"],
-                launch_timings=ack.execution["launch_timings"],
-            )
-            self.store.execution_registry.update(self.slug, bound)
-        return Outcome("spawn", Status.OK, HIVE)
-
-    def expire(self, request: SpawnRequest) -> bool | None:
-        """False when the hive acknowledged the order, which leaves its launch running for a later collect."""
-        order = self.orders_for(request.task["id"])
-        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
-            if self.orders.ack(order) is not None:
-                return False
-            self.retire(order, previous)
 
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
         if selected.master_placement is not None:

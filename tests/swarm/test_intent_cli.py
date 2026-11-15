@@ -1,4 +1,5 @@
 import json
+from typing import Any
 from unittest.mock import ANY
 
 import pytest
@@ -6,8 +7,11 @@ import pytest
 from scripts.gates import intent, lift
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli
+from scripts.swarm import cli, commands
+from scripts.swarm.store import RedisStore
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_tick import FakeRuntime
 
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/9"
@@ -15,12 +19,16 @@ TEXT = intent.text_key("T", "")
 
 
 @pytest.fixture
-def started(env, monkeypatch):  # noqa: F811
-    store, ledger, _ = env
+def started(
+    env: tuple[RedisStore, Any, FakeRuntime],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RedisStore, Any, list[tuple[str, Any, Any]]]:
+    store, ledger, rt = env
     ledger.phases = [{"id": "p1", "title": "Gates", "description": "Stop failures."}]
     ledger.rows["t1"].update(phase="p1", title="Intent", description="Refuse a failed merge.")
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    rt.live.update(seat_agent(store, ledger, SLUG, task, hive=commands.hive_id()).name for task in ("t1", "t2"))
     stamped = []
     monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: stamped.append((url, doc, task)) or True)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME)

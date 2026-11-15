@@ -1,12 +1,41 @@
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
+from scripts.gates import intent
 from scripts.swarm import cli
+from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm_ledger import ledger_workspace
+from tests.helpers.seat import seat  # noqa: F401
 from tests.swarm.test_cli import env, run  # noqa: F401
-from tests.swarm.test_intent_cli import started  # noqa: F401
 
+ME = "engineer@a1b2c3-0001"
 FIRST = "https://github.com/o/r/pull/9"
 SECOND = "https://github.com/o/r/pull/10"
 FINAL = "https://github.com/o/r/pull/11"
+
+
+@pytest.fixture
+def started(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    seat: Callable[..., AgentRecord],  # noqa: F811
+) -> tuple[RedisStore, Any, list[tuple[str, Any, Any]]]:
+    """Swarm ``sw`` running with an engineer on t1 and a ci agent on t2 seated through hub admission, their work
+    folders written, pull request body stamps recorded and the session acting as the engineer."""
+    store, ledger, _ = env
+    ledger.phases = [{"id": "p1", "title": "Gates", "description": "Stop failures."}]
+    ledger.rows["t1"].update(phase="p1", title="Intent", description="Refuse a failed merge.")
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", state="running")
+    for task_id in ("t1", "t2"):
+        seat(task_id)
+        ledger_workspace.scaffold("sw", ledger.task("sw", task_id), ledger.state("sw"))
+    stamped: list[tuple[str, Any, Any]] = []
+    monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: stamped.append((url, doc, task)) or True)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME)
+    return store, ledger, stamped
 
 
 def test_swarm_pr_records_the_scope_each_staged_or_prerequisite_pull_request_delivers(started):  # noqa: F811

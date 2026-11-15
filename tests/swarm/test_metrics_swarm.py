@@ -10,6 +10,7 @@ from scripts.swarm import metrics_outbox, metrics_swarm
 from scripts.swarm.host_budget import HostSample
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from tests.helpers import store_seed
 
 pytestmark = pytest.mark.unit
 SLUG = "scratch"
@@ -883,7 +884,7 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
     store.create(SwarmConfig(SLUG, ".", 0, 0))
     record = AgentRecord(**{**AGENT, "execution_id": ""})
     store.put_agent(SLUG, record)
-    store.record_launch(SLUG, record, "failed", "boom")
+    store_seed.record_launch(store, SLUG, record, "failed", "boom")
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
     monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))

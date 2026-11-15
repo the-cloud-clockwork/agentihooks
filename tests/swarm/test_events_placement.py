@@ -16,7 +16,7 @@ from scripts.hub import admission, slots
 from scripts.swarm import readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.probe import ROOT
-from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_readiness import NOW, SLUG, Clock, bus, clock, doc, snapshot, task  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
@@ -296,44 +296,6 @@ def test_under_events_the_tick_launches_no_workstation_task(store: RedisStore) -
     assert ledger.rows["t2"]["state"] == "open"
 
 
-def test_events_tick_does_not_run_placement_even_with_an_open_workstation_task(
-    store: RedisStore,  # noqa: F811
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from scripts.swarm import tick as tick_module
-
-    store.update("sw", engine="events")
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
-    ledger.rows["t2"]["workstation"] = True
-    spawn = Mock()
-    monkeypatch.setattr(tick_module, "_spawn", spawn)
-
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-
-    spawn.assert_not_called()
-    assert ledger.rows["t1"]["state"] == "open"
-
-
-def test_under_events_the_tick_collects_no_acknowledgement_for_a_workstation_launch(store: RedisStore) -> None:  # noqa: F811
-    from scripts.swarm.tick import _collect_acks
-    from tests.swarm.test_tick import HiveAcks
-
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), HiveAcks()
-    ledger.rows["t2"]["workstation"] = True
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    store.update("sw", engine="events")
-    doc = {"tasks": list(ledger.rows.values())}
-
-    _collect_acks("sw", store.config("sw"), store, ledger, runtime, doc, 2_000)
-
-    assert runtime.collected == []
-
-
-def test_only_engines_other_than_events_have_the_tick_launch() -> None:
-    assert readiness.tick_launches("legacy")
-    assert not readiness.tick_launches(EVENTS_ENGINE)
-
-
 @pytest.mark.feature("workstation-events-route")
 def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -369,5 +331,4 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
     [request] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert request.task["id"] == "desk"
     assert rig.store.claimant(SLUG, "desk") == request.name
-    assert not readiness.tick_launches(EVENTS_ENGINE)
     scoped.close()

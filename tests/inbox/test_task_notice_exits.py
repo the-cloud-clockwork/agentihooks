@@ -3,6 +3,7 @@ import pytest
 from scripts.inbox import exits
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore
+from tests.helpers import store_seed
 
 pytestmark = pytest.mark.unit
 
@@ -39,7 +40,7 @@ def test_task_mail_is_withdrawn_when_the_seat_holds_other_work(redis, address, r
     inbox, store = InboxStore(redis), RedisStore(redis)
     departed = AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw", state="finished")
     successor = AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat=departed.seat)
-    store.record_launch("sw", departed, "started")
+    store_seed.record_launch(store, "sw", departed, "started")
     store.put_agent("sw", departed)
     store.seats.occupy(departed.seat, departed.name, 1)
     item = inbox.send("sender", address, "Complete task t1.", task="t1")
@@ -66,7 +67,7 @@ def test_same_task_continuation_keeps_its_task_mail(redis, address):
     inbox, store = InboxStore(redis), RedisStore(redis)
     departed = AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw", state="finished")
     successor = AgentRecord(name="sw-eng-2", lane="eng", task="t1", seat=departed.seat)
-    store.record_launch("sw", departed, "started")
+    store_seed.record_launch(store, "sw", departed, "started")
     store.put_agent("sw", departed)
     store.seats.occupy(departed.seat, departed.name, 1)
     item = inbox.send("sender", address, "Complete task t1.", task="t1")

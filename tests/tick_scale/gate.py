@@ -1,4 +1,4 @@
-"""Runs whole tick passes on a production sized store and fails when a launch path step outruns its floor."""
+"""Runs whole tick passes on a production sized store and fails when a gated step outruns its floor."""
 
 import argparse
 import json
@@ -14,7 +14,7 @@ from scripts.tick.steps.budgets import SPAWN_NEEDS, floor_of
 from tests.swarm.test_tick import FakeRuntime
 from tests.tick_scale.seed import SLUG, ScaleLedger, seed_live, seed_store
 
-GATED = frozenset(SPAWN_NEEDS | {"spawn", "tick view"})
+GATED = frozenset(SPAWN_NEEDS | {"tick view"})
 PASSES = 3
 OK = "success"
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -89,9 +89,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the gate flushes its Redis database, so --redis must name a loopback host")
     now_ms = time.time_ns() // 1_000_000
     store = seed_store(redis.Redis.from_url(args.redis, decode_responses=True), now_ms)
-    launched = run_passes(store, now_ms)
+    run_passes(store, now_ms)
     records = step_records(store)
-    found = misses(records) + ([] if launched else ["no agent launched, so the passes measured no launch path"])
+    found = misses(records)
     gated = [record for record in records if record.get("step") in GATED]
     args.report.write_text(json.dumps({"gated": gated, "misses": found}, indent=2) + "\n")
     for record in gated:

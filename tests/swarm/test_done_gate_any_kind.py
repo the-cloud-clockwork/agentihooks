@@ -3,6 +3,7 @@ import pytest
 from scripts.swarm import cli, done_gate, prompt
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import ASSIST, DELEGATE, MANUAL
+from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 URL = "https://github.com/o/r/pull/9"
@@ -65,11 +66,12 @@ def test_a_code_task_keeps_its_own_refusal_and_ignores_filed():
 
 
 def _tune(env, monkeypatch, state):  # noqa: F811
-    _, ledger, _ = env
+    store, ledger, _ = env
     ledger.rows["t1"].update(kind="tune", pr_url=URL)
     ledger.pulls[URL] = PullRequest(state, None, 1, False)
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     return ledger
 
@@ -105,7 +107,8 @@ def test_swarm_done_closes_a_tune_task_whose_pull_request_merged(env, monkeypatc
 def test_an_ops_task_waits_for_its_queued_linked_pull_request_before_done(env, monkeypatch):  # noqa: F811
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     ledger.rows["t1"]["kind"] = "ops"
     ledger.pulls[URL] = PullRequest("OPEN", None, 1, False, queued=True)
