@@ -327,22 +327,22 @@ def _preflight_problems(
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    forms = [*_path_forms(baseline, PREFLIGHT_PATHS), *_path_forms(expanded, PREFLIGHT_PATHS)]
+    forms = [*_path_forms(baseline, "push", PREFLIGHT_PATHS), *_path_forms(expanded, "push", PREFLIGHT_PATHS)]
     if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
 
 
-def _path_forms(workflow: dict[Any, Any], paths: list[str]) -> list[dict[Any, Any]]:
-    """Return the workflow as given, then with its push or pull_request trigger unfiltered and filtered to the paths."""
+def _path_forms(workflow: dict[Any, Any], event: str, paths: list[str]) -> list[dict[Any, Any]]:
+    """Return the workflow as given, then with its event trigger unfiltered and filtered to the paths."""
     forms = [workflow]
     for kept in (None, paths):
         form = deepcopy(workflow)
         events: dict[str, Any] = form[True] if True in form else form["on"]
-        for event in {"push", "pull_request"} & set(events):
+        if event in events:
             trigger: dict[str, Any] = dict(events[event] or {})
             trigger.pop("paths", None)
-            events[event] = {**trigger, "paths": list(kept)} if kept else trigger or None
+            events[event] = {**trigger, "paths": list(kept)} if kept else (trigger or None)
         forms.append(form)
     return forms
 
@@ -399,7 +399,7 @@ def _equivalence_problems(
         or {key: value for key, value in head.items() if key != "jobs"}
         not in [
             {key: value for key, value in form.items() if key != "jobs"}
-            for form in _path_forms(base, EQUIVALENCE_PATHS)
+            for form in _path_forms(base, "pull_request", EQUIVALENCE_PATHS)
         ]
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
         != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}

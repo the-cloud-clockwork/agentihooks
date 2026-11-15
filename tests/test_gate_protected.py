@@ -4,6 +4,7 @@ import os
 import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -365,13 +366,21 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
 
 
-def _push_paths(preflight, paths):
+def _push_paths(preflight: dict[Any, Any], paths: list[str] | None) -> dict[Any, Any]:
     filtered = copy.deepcopy(preflight)
     if paths is None:
         filtered[True]["push"].pop("paths", None)
     else:
         filtered[True]["push"]["paths"] = paths
     return filtered
+
+
+def _grade_preflight(repo: Path, base: dict[Any, Any], head: dict[Any, Any]) -> int:
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": base}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "filter")
+    _git(repo, "checkout", "-q", "dev")
+    return gate_protected.main(["--root", str(repo), "--head", planted])
 
 
 @pytest.mark.parametrize(
@@ -382,16 +391,31 @@ def _push_paths(preflight, paths):
         *((dev_filtered, paths, 1) for dev_filtered in (False, True) for paths in (["docs/**"], [".github/**"])),
     ],
 )
-def test_the_branch_lane_preflight_may_run_only_for_workflow_changes(repo, capsys, dev_filtered, paths, verdict):
+def test_the_branch_lane_preflight_may_run_only_for_workflow_changes(
+    repo: Path, capsys: pytest.CaptureFixture[str], dev_filtered: bool, paths: list[str] | None, verdict: int
+) -> None:
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
     base = _push_paths(preflight, [".github/workflows/**"] if dev_filtered else None)
-    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": base}, {}, "trusted preflight")
-    _git(repo, "checkout", "-q", "-b", "pr")
-    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": _push_paths(preflight, paths)}, {}, "filter")
-    _git(repo, "checkout", "-q", "dev")
-    assert gate_protected.main(["--root", str(repo), "--head", planted]) == verdict
+    assert _grade_preflight(repo, base, _push_paths(preflight, paths)) == verdict
     refused = "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
     assert refused is bool(verdict)
+
+
+@pytest.mark.parametrize("fault", ["paths_ignore", "other_event", "dropped"])
+def test_the_branch_lane_preflight_refuses_any_other_trigger_filter(
+    repo: Path, capsys: pytest.CaptureFixture[str], fault: str
+) -> None:
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    push = preflight[True]["push"]
+    head = copy.deepcopy(preflight)
+    head[True] = {
+        "paths_ignore": {"push": {**push, "paths-ignore": [".github/workflows/**"]}},
+        "other_event": {"push": push, "pull_request": {"paths": [".github/workflows/**"]}},
+        "dropped": {"workflow_dispatch": None},
+    }[fault]
+    assert _grade_preflight(repo, preflight, head) == 1
+    assert "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
+    assert "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
 
 
 _SPARSE = "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
@@ -1987,12 +2011,17 @@ def test_a_dev_carrying_the_dev_parent_form_refuses_any_other_selection(repo, ca
 _LEDGER_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
 
 
-def _pull_request_paths(workflow, paths):
+def _pull_request_paths(workflow: dict[Any, Any], paths: list[str] | None) -> dict[Any, Any]:
     if paths is None:
         workflow[True]["pull_request"].pop("paths", None)
     else:
         workflow[True]["pull_request"]["paths"] = paths
     return workflow
+
+
+_EQUIVALENCE_REFUSED = (
+    "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+)
 
 
 @pytest.mark.parametrize(
@@ -2007,11 +2036,27 @@ def _pull_request_paths(workflow, paths):
         ),
     ],
 )
-def test_the_equivalence_grading_may_run_only_for_ledger_changes(repo, capsys, dev_filtered, paths, verdict):
+def test_the_equivalence_grading_may_run_only_for_ledger_changes(
+    repo: Path, capsys: pytest.CaptureFixture[str], dev_filtered: bool, paths: list[str] | None, verdict: int
+) -> None:
     base = _pull_request_paths(_equivalence(), _LEDGER_PATHS if dev_filtered else None)
     assert _grade_equivalence(repo, base, _pull_request_paths(_equivalence(), paths)) == verdict
-    refused = "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
-    assert (refused in capsys.readouterr().out.splitlines()) is bool(verdict)
+    assert (_EQUIVALENCE_REFUSED in capsys.readouterr().out.splitlines()) is bool(verdict)
+
+
+@pytest.mark.parametrize("fault", ["paths_ignore", "other_event", "dropped"])
+def test_the_equivalence_grading_refuses_any_other_trigger_filter(
+    repo: Path, capsys: pytest.CaptureFixture[str], fault: str
+) -> None:
+    head = _pull_request_paths(_equivalence(), None)
+    pull_request = head[True]["pull_request"]
+    head[True] = {
+        "paths_ignore": {"pull_request": {**pull_request, "paths-ignore": ["docs/**"]}},
+        "other_event": {"pull_request": pull_request, "push": {"paths": _LEDGER_PATHS}},
+        "dropped": {"workflow_dispatch": None},
+    }[fault]
+    assert _grade_equivalence(repo, _pull_request_paths(_equivalence(), None), head) == 1
+    assert _EQUIVALENCE_REFUSED in capsys.readouterr().out.splitlines()
 
 
 def _full_history(steps):
