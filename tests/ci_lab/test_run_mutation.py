@@ -463,22 +463,27 @@ def corpus_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPath
         }
 
 
-@pytest.mark.feature("lab-warm-mutant-runner")
-def test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does(corpus_run: dict[str, Any]) -> None:
+def assert_equivalent(corpus_run: dict[str, Any], graded: dict[str, Any]) -> None:
+    """Hold graded to the status the selection gate's run_selected gave every corpus mutant."""
     reference = corpus_run["reference"]
     assert corpus_run["tests"], "stats reached no test of the planted function"
     assert sorted(reference) == sorted(corpus_run["names"])
-    assert statuses(corpus_run["graded"]["rows"]) == reference
+    assert statuses(graded["rows"]) == reference
+
+
+@pytest.mark.feature("lab-warm-mutant-runner")
+def test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does(corpus_run: dict[str, Any]) -> None:
+    assert_equivalent(corpus_run, corpus_run["graded"])
 
 
 @pytest.mark.parametrize("corpus_run", ["kill"], indirect=True)
 @pytest.mark.feature("lab-warm-mutant-runner")
 def test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence(corpus_run: dict[str, Any]) -> None:
-    reference = corpus_run["reference"]
-    planted = statuses(corpus_run["untrampolined"]["rows"])
-    assert set(reference.values()) == {"killed"}
-    assert set(planted.values()) == {"survived"}
-    assert planted != reference
+    planted = corpus_run["untrampolined"]
+    assert set(corpus_run["reference"].values()) == {"killed"}
+    assert set(statuses(planted["rows"]).values()) == {"survived"}
+    with pytest.raises(AssertionError):
+        assert_equivalent(corpus_run, planted)
 
 
 @pytest.mark.wall_clock
