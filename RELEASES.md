@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.897 · 2026-11-15
+
+### 2026-11-15 · 12e4fe6592ee · #11288 · @agenticore-app
+
+**Tick engine steps reference drops the removed spawn and preempt steps**
+
+This updates the tick-engine-steps reference doc to match the live step registry, removing the spawn, preempt and spawn-due steps that were already deleted from the code in #11141. It corrects the floors, lanes, groups and placement tables, rewrites the spawn-prerequisites section around budgets.SPAWN_NEEDS and the forty-second bound, and fixes the WriteStep example and troubleshooting rows. The result is documentation that actually reflects what the registry holds on dev, verified against the generated step catalogue and docs sanity checks, so readers aren't misled by stale references to removed engine steps.
+
 ## v2.17.896 · 2026-11-15
 
 ### 2026-11-15 · 7df66604a400 · #11209 · @agenticore-app
