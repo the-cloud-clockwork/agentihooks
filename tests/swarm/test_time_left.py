@@ -158,7 +158,7 @@ def test_the_client_carries_the_tick_focus(monkeypatch):
 @pytest.mark.feature("ledger-stats-lab")
 def test_refresh_sends_the_lab_reading_once_the_tick_has_read_one(store: Any) -> None:
     observe(store)
-    ledger = Ledger()
+    ledger: Any = Ledger()
     time_left.refresh("sw", store, ledger, OBSERVED, PLAIN, {})
     block = {"url": "http://lab:8080", "at": 5, "capacity": {"classes": {}}, "error": "", "error_at": 0}
     store.redis.set(store.key("sw", lab_capacity.KEY), json.dumps(block))
@@ -168,9 +168,14 @@ def test_refresh_sends_the_lab_reading_once_the_tick_has_read_one(store: Any) ->
 
 def test_the_client_carries_the_lab_reading_only_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[Any] = []
-    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: calls.append((slug, ops)))
-    LedgerClient().time_left("sw", 3, None, lab={"url": "http://lab:8080"})
-    LedgerClient().time_left("sw", 3, None)
+
+    def record(self: LedgerClient, slug: str, ops: Any = None) -> None:
+        calls.append((slug, ops))
+
+    monkeypatch.setattr(LedgerClient, "_call", record)
+    client: Any = LedgerClient()
+    client.time_left("sw", 3, None, lab={"url": "http://lab:8080"})
+    client.time_left("sw", 3, None)
     [(_, [sent]), (_, [plain])] = calls
     assert sent["lab"] == {"url": "http://lab:8080"}
     assert "lab" not in plain
