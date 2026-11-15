@@ -125,6 +125,31 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     json.dumps(admitted)
 
 
+@pytest.mark.feature("admission-launch-carries-admitted-execution")
+def test_the_admitted_task_carries_its_launch_execution_identity(rig):
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    [agent] = rig.store.agents(SLUG)
+    spawned = admitted["task"]
+    assert spawned["admitted_execution_id"] == agent.execution_id
+    assert spawned["execution_id"] == agent.execution_id
+
+
+@pytest.mark.feature("admission-launch-carries-admitted-execution")
+def test_the_admitted_task_launch_arguments_pass_the_admitted_execution(rig):
+    from dataclasses import replace
+
+    from scripts.swarm_v2.runtime import codex
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    spawned = admitted["task"]
+    config = replace(rig.store.config(SLUG), codex_inbox_transport="app_server")
+    argv = codex.arguments(config, "codex", spawned)
+    assert argv[:4] == ["--codex-transport", "app_server", "--seat", "eng-1@sw"]
+    assert argv[argv.index("--execution") + 1] == spawned["admitted_execution_id"]
+
+
 LAUNCH = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
 HUB_CHECK = {"task": "t1", "at": 7_000, "relaunch": True, "owner": "hub"}
 
