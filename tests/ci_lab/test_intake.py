@@ -160,6 +160,17 @@ def test_the_lab_intake_publishes_each_envelope_on_its_type() -> None:
     assert [delivery.event for delivery in consumer.fetch(10, 0)] == envelopes
 
 
+def test_a_resent_head_keeps_its_envelope_id_so_the_bus_drops_it() -> None:
+    event = head("pull_request", "nestorcolt", "synchronize")
+    first, again = webhooks.envelope(event), webhooks.envelope(event)
+    assert first.id == again.id
+    assert webhooks.envelope(head("pull_request", "nestorcolt", "reopened")).id != first.id
+    bus = open_bus(BusConfig())
+    consumer = bus.events.consumer("lab", "ci.lab.head.>")
+    webhooks.LabIntake(bus.events, b"notice-secret").publish([first, again])
+    assert [delivery.event for delivery in consumer.fetch(10, 0)] == [first]
+
+
 def test_the_lab_intake_refuses_to_run_without_a_notice_secret() -> None:
     with pytest.raises(ValueError, match=webhooks.NOTICE_SECRET_ENV):
         webhooks.LabIntake(open_bus(BusConfig()).events, b"")

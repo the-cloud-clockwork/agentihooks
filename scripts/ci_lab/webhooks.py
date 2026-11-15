@@ -5,8 +5,9 @@ notice the agents' push path sends to `/lab/head`, and `LabIntake` publishes eac
 envelope whose type is its bus subject, `ci.lab.head.<event>`.
 """
 
+import hashlib
+import json
 import time
-import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
@@ -94,9 +95,9 @@ def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
 
 
 def envelope(event: HeadEvent) -> Envelope:
-    """Return the envelope recording a head, typed with its bus subject `ci.lab.head.<event>`."""
+    """Return the envelope recording a head, typed with its bus subject; one head event always has one id, so a resend is dropped."""
     return Envelope(
-        id=uuid.uuid4().hex,
+        id=hashlib.sha256(json.dumps(asdict(event), sort_keys=True).encode()).hexdigest(),
         type=f"{HEAD_SUBJECT}.{event.event}",
         swarm=LAB,
         entity=ENTITY,

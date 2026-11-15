@@ -9,6 +9,7 @@ import traceback
 from collections.abc import Mapping
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake, envelope, head_events, notice_event
 from scripts.events.bus import Bus
@@ -82,10 +83,19 @@ class Ingress:
         try:
             payload = json.loads(body)
             seen = observations(name, payload)
-            heads = [] if self._lab is None else [envelope(head) for head in head_events(name, payload)]
         except (ValueError, KeyError, TypeError):
             return 400
-        return self._record(seen, heads)
+        heads = self._heads(name, payload)
+        status = self._record(seen, heads or [])
+        return 400 if heads is None and status == 200 else status
+
+    def _heads(self, name: str | None, payload: Any) -> list[Envelope] | None:
+        if self._lab is None:
+            return []
+        try:
+            return [envelope(head) for head in head_events(name, payload)]
+        except (ValueError, KeyError, TypeError):
+            return None
 
     def notice(self, headers: Mapping[str, str], body: bytes) -> int:
         """Answer a lab head notice from the agents' push path: 404 without the lab, 401 unless the lab secret signed it."""
