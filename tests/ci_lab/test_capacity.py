@@ -38,6 +38,7 @@ def test_utilisation_is_busy_over_total(total: int, busy: int, expected: float) 
     assert capacity.utilisation(Load({}, {}, slots_total=total, slots_busy=busy)) == expected
 
 
+@pytest.mark.feature("lab-capacity-verdict-cache-hits")
 def test_capacity_document_reports_every_class() -> None:
     load = Load(
         pending={"pull_request": (300.0, 100.0), "backfill": (600.0,)},
@@ -78,3 +79,34 @@ def test_load_defaults_to_a_full_budget_and_nothing_shed() -> None:
     body = capacity.document(Load({}, {}, slots_total=1, slots_busy=0))
     assert body["budget_fraction"] == 1.0
     assert body["shed"] == []
+
+
+@pytest.mark.feature("lab-capacity-verdict-cache-hits")
+@pytest.mark.parametrize(
+    ("hits", "misses", "expected"),
+    [(0, 0, None), (1, 0, 1.0), (0, 4, 0.0), (3, 1, 0.75), (1, 4, 0.2)],
+)
+def test_hit_ratio_is_hits_over_lookups(hits: int, misses: int, expected: float | None) -> None:
+    assert capacity.hit_ratio(hits, misses) == expected
+
+
+@pytest.mark.feature("lab-capacity-verdict-cache-hits")
+def test_capacity_document_reports_the_verdict_cache_hit_ratio_per_class() -> None:
+    load = Load(
+        {},
+        {},
+        slots_total=2,
+        slots_busy=0,
+        cache_hits={"pull_request": 3, "queue": 2, "unknown": 9},
+        cache_misses={"pull_request": 1, "promotion": 5, "unknown": 1},
+    )
+    body = capacity.document(load)
+    ratios = {name: entry["verdict_cache_hit_ratio"] for name, entry in body["classes"].items()}  # type: ignore[union-attr]
+    assert ratios == {"hotfix": None, "pull_request": 0.75, "queue": 1.0, "promotion": 0.0, "backfill": None}
+    json.dumps(body, allow_nan=False)
+
+
+@pytest.mark.feature("lab-capacity-verdict-cache-hits")
+def test_load_defaults_to_no_verdict_cache_lookups() -> None:
+    load = Load({}, {}, slots_total=1, slots_busy=0)
+    assert (load.cache_hits, load.cache_misses) == ({}, {})
