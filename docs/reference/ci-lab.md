@@ -157,7 +157,10 @@ key; the builders are pure and read no file, clock or network.
 - A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
   which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
-  pytest invocation, which a workflow used to define, is the test input instead.
+  pytest invocation, which a workflow used to define, is the test input instead. This replaces the
+  manifest's `.github/` prefix invalidation, as the lab's test expansion design specifies; the
+  plan's earlier rule that any change under `.github/` invalidates every test fingerprint does not
+  apply to lab keys.
 - The test expander applies the manifest's fallbacks before it builds `tests` and `opened`: a test
   that reaches code by dynamic import, starts a process the tracer cannot follow or opens a file
   outside the manifest is fingerprinted on the whole measured source tree, and each file opened
