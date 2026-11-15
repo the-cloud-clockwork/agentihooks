@@ -37,7 +37,8 @@ written pass.
 Every `CallStep` runs in lane `tick` unless it is given `lane=SLOW`
 (`scripts.tick.engine.SLOW`), with a declared budget and interval from
 `scripts.tick.steps.budgets.timing_of(name)`. Dependencies default to empty;
-spawn declares the prerequisites described below. Its constructor takes the step name, group and the
+`settle`, `fleet red notice` and `retire idle master` declare the
+[judge prerequisites](#the-judge-prerequisites-and-the-forty-second-bound). Its constructor takes the step name, group and the
 call, `call(tick_module, get)`, where `get(key)` reads one value of the pass
 state. The call looks up the tick module's functions at run time, so tests
 that patch a function on `scripts.swarm.tick` still reach it. An operation only
@@ -62,16 +63,15 @@ minutes. The stream stays the record.
 | Step example | Floor | Declared interval |
 | --- | --- | --- |
 | `reap` | 22 s | 60 s |
-| `preempt` | 18 s | 60 s |
-| `spawn` | 33 s | 60 s |
 | `night watch` | 22 s | 120 s |
 | `metrics record` | 29 s | 600 s |
 | [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 30 s | 60 s |
 
-The six heavy rows keep their earlier measured budgets as floors. Every row that
+The four heavy rows keep their earlier measured budgets as floors. Every row that
 measured under one second, and every row that was never measured, has a two
-second floor. `scripts.tick.registry.latest_start` adds floors, so the spawn
-start bound does not move with live budgets.
+second floor. The [Tick step catalogue](tick-step-catalogue.md) lists the floor
+and interval of every registered step. `scripts.tick.registry.latest_start` adds
+floors, so the forty second start bound does not move with live budgets.
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
 seconds. `scripts.tick.engine.interval_s(step, cadence)` gives a step in lane
@@ -285,32 +285,36 @@ These steps declare the slow lane:
 
 | Module | Group | Slow lane steps |
 | --- | --- | --- |
-| `scripts.tick.steps.report` | `wrapper events` | ledger event pass, done recheck, progress checks, waits end, merge pass, doc report, priorities sweep, health findings, findings pass |
-| `scripts.tick.steps.report` | `wrapper metrics` | metrics record, bottleneck status |
-| `scripts.tick.steps.tasks` | `reopen passes` | [fleet red notice](fleet-red-notice.md#the-slow-lane) |
+| `scripts.tick.steps.observe` | `observe` | pane evidence, lab capacity |
+| `scripts.tick.steps.agents` | `agents` | strays, failed panes |
+| `scripts.tick.steps.masters` | `masters` | retire idle master, master stall, prompt stall |
+| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane) |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
+| `scripts.tick.steps.masters` | `master watch` | night watch, master alarm |
+| `scripts.tick.steps.agents` | `close` | conversations, session models |
+| `scripts.tick.steps.host` | `wrapper probes` | hive ledger |
+| `scripts.tick.steps.host` | `wrapper health` | host pressure, ledger watchdog, ledger probe, prompt backlog, hive sweep |
+| `scripts.tick.steps.workflows` | `wrapper phases` | workflow runner |
+| `scripts.tick.steps.report` | `wrapper events` | ledger event pass, done recheck, progress checks, progress heads, doc items map, doc report, priorities sweep, health findings, findings pass |
+| `scripts.tick.steps.report` | `wrapper metrics` | metrics record, bottleneck status, inbox wake |
+| `scripts.tick.steps.knowledge` | `wrapper metrics` | knowledge warm |
 
-Last tick, heartbeat and status publish declare the closing lane. The other
-report steps (stall watch, overrun pass, quiet pass, inbox wake, snapshot job)
-and every other step stay critical. The command runner and the quota notice run
-before spawn and stay critical. The quota notice step reads cached quota and
-runs no Claude or Codex quota probe; the quota prober service writes those
-caches once a minute ([Quota prober](quota-prober.md)).
+Last tick, heartbeat, status publish and step starvation declare the closing
+lane. The other report steps (stall watch, overrun pass, quiet pass, waits end,
+merge pass, snapshot job) and every other step stay critical. The command
+runner and the quota notice stay critical. The quota notice step reads cached
+quota and runs no Claude or Codex quota probe; the quota prober service writes
+those caches once a minute ([Quota prober](quota-prober.md)).
 
-Before spawn, the slow lane steps are the ones no placement step waits on, or
-whose wait is bounded by their own budget. `lost runner` and `time left` have
-no dependents, so the pass moves from `placement notices` straight to
-`placement acks` while they run. `fleet red notice` is in `PREEMPT_NEEDS`, so
-`preempt` and `spawn`, which needs `preempt`, wait for it: in a parallel pass
-they are handed off behind it and start the moment it ends, while the rest of
-`reopen passes`, all of `task passes`, the placement acks, the master seats,
-`rank pass` and `bottleneck remedy` run without waiting. The notice step's
-budget is 30 seconds, so `preempt` waits at most about 30 seconds after the
-notice step started. When the notice step is abandoned at that budget,
-`preempt` and `spawn` are dropped for the pass and recorded late, and the
-next pass places; the `spawn-due` marker then makes the `spawn due` step place
-first. `preempt` and `spawn` keep the critical deadline: when the critical
-lane expires first they are dropped and recorded late too.
+No step needs a slow lane step of `reopen passes` or `placement notices`.
+`lost runner` and `time left` have no dependents, so the pass moves from
+`placement notices` straight to `placement acks` while they run. `fleet red
+notice` has none either: in a parallel pass it is handed off and starts once
+its [judge prerequisites](#the-judge-prerequisites-and-the-forty-second-bound)
+end, while the rest of `reopen passes`, all of `task passes`, the placement
+acks, the master seats, `rank pass` and `bottleneck remedy` run without
+waiting. When the notice step is abandoned at its 30 second budget, only its
+own writes are dropped.
 
 The move took these three steps off the critical chain. Its measured effect
 on the pass is not recorded in this document; read it with
@@ -366,6 +370,7 @@ lane `tick`:
 
 ```python
 from scripts.tick.engine import SLOW
+from scripts.tick.steps import budgets
 from scripts.tick.steps.tasks import WriteStep
 
 WriteStep(
@@ -373,7 +378,7 @@ WriteStep(
     REOPENS,
     held(_fleet_red_notice),
     writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
-    needs=frozenset({"spawn due"}),
+    needs=budgets.SPAWN_NEEDS,
     reads=pass_domains("rows"),
     lane=SLOW,
 )
@@ -638,26 +643,30 @@ CallStep("example", CLOSING_GROUP, held(_example), lane=CLOSING)
 Read `get("ended")` in its action to tell the endings apart; it is `None` when
 the pass raised or returned before its end.
 
-### Spawn prerequisites and the forty second bound
+### The judge prerequisites and the forty second bound
 
-Spawn declares only these prerequisites:
+`budgets.SPAWN_NEEDS` holds the judge steps of `budgets.JUDGE` (`verify`,
+`reap`, `launch checks`, `track outages`, `overrun pass` and `quiet pass`)
+plus `orphans`. Three steps need exactly that set:
 
-- The judge steps: `verify`, `reap`, `launch checks`, `track outages`,
-  `overrun pass` and `quiet pass`.
-- `orphans` and `preempt`.
+- `settle`, in the `close` group.
+- `fleet red notice`, in `reopen passes`, on the slow lane.
+- `retire idle master`, in `masters`, on the slow lane.
 
-`registry.latest_start("spawn", steps)` follows the longest prerequisite
-path and sums the declared budgets on that path. The delivered registry
-computes 22 seconds, below `SPAWN_START_S` of 40 seconds. This bounds when
-spawn can start once execution follows prerequisites and each prerequisite
-finishes or is left behind by its budget; it does not bound spawn completion.
-Spawn itself has a 33 second budget.
+`registry.latest_start(name, steps)` follows the longest needs path to a step
+and sums the floors on that path, or the budget of a step that declares no
+floor. `SPAWN_START_S` is 40 seconds, `CRITICAL_S` less
+`scripts.tick.pool.SPAWN_RESERVE_S`. `tests/tick/test_budgets.py` builds
+`settle` with only its seven prerequisites and asserts a latest start of 22
+seconds, the `reap` floor, below `SPAWN_START_S` whatever the live budgets.
+This bounds when a step that needs the set can start once each prerequisite
+finishes or is left behind by its budget; it does not bound that step's
+completion.
 
 The flat pass graph keeps a barrier between each site and the next (see
 [The flat pass graph](#the-flat-pass-graph)), so unrelated earlier sites can
 still add waiting time. Forty seconds is a prerequisite graph bound, not a
 measured wall time guarantee for the pass.
-The existing spawn conditions and placing lock continue to apply.
 
 ### The flat pass graph
 
@@ -759,7 +768,7 @@ Tick sites not listed have no hook.
 | 5 | `wrapper refresh` | None |
 | 6 | `wrapper intent` | Reads the pass state and config the intent check judges against |
 | 7 | `wrapper reboot` | None |
-| 8 | `start` (tick) | Loads the master move modules, starts the pass process scan in `run_tick`, sets `now_ms` and `due`, adds the task appliers |
+| 8 | `start` (tick) | Loads the master move modules, starts the pass process scan in `run_tick`, sets `now_ms`, adds the task appliers |
 | 11 | `agents` (tick) | Shuts the site and every later tick site when observation left `config`, `doc` or `rows` out of the box |
 | 14 | `tasks` (tick) | Shuts the site and every later tick site when the drained resume left `config` out of the box |
 | 25 | `wrapper relay` | Ends the tick's process scan, raises what the intent check held and keeps its view and checked actions |
@@ -796,8 +805,7 @@ ledger values after the `observe` group reads them. Every group site receives it
 | `slug`, `store`, `ledger`, `runtime` | The swarm and its collaborators |
 | `rows` | The ledger tasks keyed by id, from the `observe` group |
 | `doc` | The ledger state, from the `observe` group |
-| `now_ms` | The pass time |
-| `due` | The Redis key of the swarm's `spawn-due` marker, added by the `start` site hook |
+| `now_ms` | The pass time, set by the `start` site hook |
 | `box` | The exception holder described under [Exceptions](#exceptions), shared by every site of the pass graph |
 | `config` | The swarm config, passed at each site because a pass can change it |
 | `sleeping` | Passed only at the acks site |
@@ -831,7 +839,7 @@ The delivered writers of each key:
 | --- | --- | --- |
 | `config` | `config load`, then `stopped branch` and `drained resume` | `master wake`, `master stall`, `strays`, `orphans`, placement notices |
 | `finished` | `stopped branch` | The `start` group site in `scripts.swarm.tick`, which ends the pass |
-| `doc`, `rows` | `ledger state`; `spawn due` and `spawn` rewrite `rows` | `automated cleanup`, `launch checks`, `sleeping`, `preempt`, `spawn` |
+| `doc`, `rows` | `ledger state` | `automated cleanup`, `launch checks`, `sleeping`, `orphans`, `fleet red notice` |
 | `sleeping` | `sleeping` | `drained resume`, `dispatch seat`, `night watch`, `codex hook order` |
 | `agents` | `page relay` | `stall watch`, `inbox wake` |
 | `view` | `tick view` | The slow lane event steps, `health findings`, `metrics record`, `status publish` |
@@ -842,8 +850,8 @@ The delivered writers of each key:
 Because the readers of `config` need `drained resume`, that step carries
 `DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
 that reads `config` before it, so the rewritten config is ordered after them.
-`preempt` needs `PREEMPT_NEEDS` in `scripts.tick.steps.place`, which includes
-`drained resume`, so it reads the rewritten config.
+The placement notices and `rank pass` need `drained resume`, so they read the
+rewritten config.
 
 A new step that reads a pass box value declares it like this:
 
@@ -895,7 +903,7 @@ and placement steps are in bold; the others hold steps from other changes.
 | --- | --- | --- | --- |
 | 1 | `start` | First line of the pass | config load, stopped branch |
 | 2 | `pass setup` | After `start`, unless the stopped branch ended the pass | spawn hold clear, pass budget |
-| 3 | `observe` | After `pass setup` | pane evidence through verify, including **spawn due** |
+| 3 | `observe` | After `pass setup` | pane evidence through verify, then lab capacity (slow lane) |
 | 4 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |
 | 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 6 | `drained resume` | After the masters | sleeping, drained resume |
@@ -904,10 +912,10 @@ and placement steps are in bold; the others hold steps from other changes.
 | 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
 | 10 | `place` | First line inside the placing lock | |
 | 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner (slow lane), time left (slow lane) |
-| 12 | **`placement acks`** | After `placement notices`, inside the placing lock | collect acks, codex hook order |
+| 12 | **`placement acks`** | After `placement notices`, inside the placing lock | codex hook order |
 | 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
 | 14 | `dispatch seat` | After the master seats, inside the placing lock, ahead of lane placement so a pending dispatcher trigger takes the next free hive slot | dispatch seat |
-| 15 | **`placement`** | Last site inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
+| 15 | **`placement`** | Last site inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy |
 | 16 | `master watch` | After the placing lock | night watch, master alarm |
 | 17 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
 
@@ -918,7 +926,7 @@ The group order and the context each site hands its steps are covered in
 
 Each step makes the same call with the same arguments, through `skip_refused`,
 as the hand written line it replaced. The call looks the module up on the tick
-module (`tick.claim_hold`, `tick.bottleneck_remedy`, `tick.panic`), so a test
+module (`tick.claim_hold`, `tick.bottleneck_remedy`), so a test
 that patches one of those names on `scripts.swarm.tick` reaches the step. Where the old line carried a condition,
 the step checks it and returns no actions when it does not hold.
 
@@ -936,21 +944,12 @@ the step checks it and returns no actions when it does not hold.
 
 | Group | Step | Call and condition |
 | --- | --- | --- |
-| `placement acks` | collect acks | `_collect_acks`, every pass |
 | `placement acks` | codex hook order | `_codex_hook_order`, skipped while the swarm sleeps |
 | `placement` | rank pass | `tasks.rank_writes` returns `dispatcher.rank_decision` as one `rank` write; the rank applier takes it with `dispatcher.apply_ranking` only while the saved claim queue heads it read still hold, else drops it for the next pass |
 | `placement` | bottleneck remedy | `bottleneck_remedy.step` |
-| `placement` | preempt | `preempt.run` with the seats view, only when the swarm is `running`, not on the events engine and no panic is set |
-| `placement` | spawn | `_spawn` under the placement pass, only when the swarm is `running`, `readiness.tick_launches` allows the engine to launch (never under events) and no panic is set. After it spawns, it deletes the `spawn-due` marker |
 
-The `spawn-due` marker pairs the spawn step with the `spawn due` step of the
-`observe` group (`step_spawn_due` in `scripts.tick.steps.observe`).
-When the swarm is `running`, not on the events engine and not sleeping, the
-spawn due step runs `_spawn` under the `PLACING` lock and the placement pass if
-the marker exists, then sets the marker to the pass time. The spawn step
-deletes it after it spawns. A marker still present at the next pass means the
-previous pass never reached its spawn, so the spawn due step places first,
-before the agents and task groups can use up the pass.
+No placement step launches an agent: hives pull work from the hub and the hub
+admits each launch, see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub).
 
 ### Close (`scripts.tick.steps.tasks`)
 
@@ -1424,15 +1423,16 @@ at once, after both are fixed.
 ## Tests
 
 The feature map entry `swarm-tick-step-isolation` links the measured timing,
-bounded group wait and spawn prerequisite behavior to the isolation tests.
+bounded group wait and longest needs path start bound to the isolation tests.
 The delivered proof and limitations are recorded in
 [pull request 9278](https://github.com/the-cloud-clockwork/agentihooks/pull/9278).
 
 | Test | What it holds |
 | --- | --- |
-| `tests/tick/test_step_isolation.py` | The 300 second predecessor scenario, completed results, abandoned wall time and daemon worker, budget calculation, undeclared timing refusal, registered timings, spawn prerequisites and longest path start bound |
+| `tests/tick/test_step_isolation.py` | The 300 second predecessor scenario, completed results, abandoned wall time and daemon worker, budget calculation, undeclared timing refusal, registered timings, longest needs path start bound, slow lane declarations and site barriers holding no critical step on a slow step |
+| `tests/tick/test_budgets.py` | Live budgets from the p95 with headroom above each floor, the four heavy floors and two seconds elsewhere, and `settle` starting by the forty second bound on floors whatever the live budgets |
 | `tests/tick/test_tasks.py` | The task passes and close steps make the old calls in order, a held exception skips the rest and is raised at the site, `fleet red notice` sits in lane `slow` with every other task step in lane `tick`, and a `WriteStep` keeps the lane it is given |
-| `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; acks with and without sleep; preempt and spawn conditions for paused, events engine, panic and `tick_launches`; the `spawn-due` delete; a held exception skipping every placement step |
+| `tests/tick/test_place.py` | Group membership and orders; `lost runner` and `time left` in lane `slow` and every other placement step in lane `tick`; the placement notices calls with the pass state; rank pass and bottleneck remedy running under a panic; a held exception skipping every placement step |
 | `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget, and one abandoned when its lane expired, each journal one `swarm_tick_step_abandoned` line with the swarm, step, budget and sorted write domains; a call step abandoned with only its actions domain journals nothing |
 | `tests/tick/test_apply.py` | The dropped write and its recompute, sequential and parallel; writes without an applier pass through; both appliers write while their guard holds, drop a moved guard and turn a refused ledger call into a conflict; appliers need a ledger and a swarm; the size pass and grouping release return guarded writes and leave the document as read; a write step keeps every attribute of its call step |
 | `tests/tick/test_apply_rank.py` | The rank pass returns one write guarded on the heads it read; the applier takes it while the saved heads hold, takes a proposing pass whatever the heads, drops moved heads, and the engine keeps applied actions after the step actions and beside a later dropped write |
@@ -1440,7 +1440,7 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_apply_fleet_red.py` | Guarded hold writes, lifted and listing writes; the applier posts while the task stays open and unclaimed, drops a moved or claimed task, and forgets a failed notice so the next pass posts it again |
 | `tests/tick/test_apply_stall.py` | The stall pass decides and writes nothing; the applier drops a stall once another master holds the seat, recomputed on the next pass |
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
-| `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
+| `tests/tick/test_observe.py` | The `start`, `pass setup` and `observe` steps in their groups and orders, the stopped branch endings, the observe calls with the pass state, and a raising step holding its exception and stopping the later steps |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
 | `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
 | `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
@@ -1458,7 +1458,7 @@ The delivered proof and limitations are recorded in
 | --- | --- |
 | `Undeclared step timing` at import | Declare that exact step name in `FLOORS` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
-| Spawn takes longer than forty seconds to start | Check the site barriers of the [flat pass graph](#the-flat-pass-graph) first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
+| `settle`, `fleet red notice` or `retire idle master` takes longer than forty seconds to start | Check the site barriers of the [flat pass graph](#the-flat-pass-graph) first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Only intervals above 60 seconds rest a step, and only while the pass records to the swarm store. Read the stored ends with `timing.step_ends`; a step that ends `late` or `held` stores no end and stays due every pass. See [Interval enforcement](#interval-enforcement) |
 | `Interval of <step> above 60s writes pass:<key>` at registration | The step writes the pass state, which every later step of the pass reads; declare it at `CRITICAL_S` |
 | A wide or slow step runs on every pass | Its last run never ended `ok` or `failed`, the store or swarm is missing from the pass, or reading `tick:step-ran` fails. Read `timing.step_ends` for the swarm and the step's outcome rows in `tick-report` |
@@ -1468,7 +1468,6 @@ The delivered proof and limitations are recorded in
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
 | `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
 | A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |
-| Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
 | No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
 | `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
 | `Dependency cycle: <names>` from `run_group` | The named steps of one group are unplaced: they sit on or behind a `needs` cycle among the group's steps. Remove the need that closes the cycle |
@@ -1479,8 +1478,7 @@ The delivered proof and limitations are recorded in
 | `AttributeError: module 'scripts.swarm.tick' has no attribute ...` from a common helper | A moved helper names a tick module attribute that no longer exists there; import it back into the tick module or reference its new home |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
-| Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
-| Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_launches` refused; rank pass and bottleneck remedy still run |
+| No agent launches after the placement sites run | Expected: no tick step launches agents. Hives take offers from the hub and the hub admits each launch; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |
