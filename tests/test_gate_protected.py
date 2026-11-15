@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -1554,7 +1555,7 @@ def test_a_merged_mutation_stage_ignores_the_base_declaration_date(stage: str) -
     assert problems == []
 
 
-def _separate_summary(head, steps) -> ci_wiring.Wiring:
+def _separate_summary(head: dict[str, Any], steps: list[Any]) -> ci_wiring.Wiring:
     head["jobs"]["test-summary"] = {
         "needs": ["unit", "unit-selected"],
         "if": "${{ always() }}",
