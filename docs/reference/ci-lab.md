@@ -86,11 +86,12 @@ A worker started with any `GITHUB_APP_*` variable in its environment refuses to 
 
 The PriorityClass `ci-lab-worker` ranks lab worker pods below every CI runner
 (`arc-runners-oss-checks`, 200) and above the unused `arc-runners-oss-batch-priority` class (100).
-When the nodes are full, new pods wait in Pending and the scheduler places them in priority order as
-capacity frees, so a pending lab worker never takes a freed node from a pending pull request check
-or merge queue runner. Priority orders only pods that wait: neither class preempts, so a running
-worker keeps its node until it ends, and a check can still wait for a node a worker took first. A
-pod gets this rank only when its spec names the class;
+When the nodes are full, new pods wait in Pending and the scheduler tries them in priority order as
+capacity frees, so a pending pull request check or merge queue runner gets each freed node it fits
+before a pending lab worker does. A worker can still take a node too small for the waiting runner.
+`ci-lab-worker` and `arc-runners-oss-checks` do not preempt, so a running worker keeps its node
+until it ends, and a check can still wait for a node a worker took first. A pod gets this rank only
+when its spec names the class;
 [Use it from a worker pod](#use-it-from-a-worker-pod) shows how.
 
 | PriorityClass | Value | `preemptionPolicy` | Pods that name it |
@@ -98,7 +99,7 @@ pod gets this rank only when its spec names the class;
 | `qitp-trading` | 1000 | can preempt lower priority pods | Trading workers |
 | `arc-runners-oss-checks` | 200 | `Never` | Every CI runner: pull request checks, image builds, merge queue groups and batch mutation runners |
 | `ci-lab-worker` | 150 | `Never` | Lab workers |
-| `arc-runners-oss-batch-priority` | 100 | `Never` | None in the runner charts; the runner chart keeps it defined until no pod names it |
+| `arc-runners-oss-batch-priority` | 100 | `Never` | None; it stays defined in `runner-priority-classes.yaml` until no pod names it |
 | none | 0 | `PreemptLowerPriority`, the Kubernetes default | Every pod that names no class |
 
 The class is defined as:
@@ -119,9 +120,9 @@ description: ci-lab workers schedule after pull request and merge queue runners 
   a running worker.
 - `globalDefault: false`: the class applies only to pods that name it. A pod that names no class
   keeps priority 0.
-- The `description` text, which the cluster holds as written, and the manifest's header comment
-  call the 100 class the batch runners' class. Batch mutation runners name
-  `arc-runners-oss-checks` instead, so a lab worker waits behind them too.
+- The `description` and the manifest's header comment say lab workers rank ahead of batch runners
+  at 100. No pod names that class; batch runners name `arc-runners-oss-checks`, so a lab worker
+  waits behind them too.
 
 ### Where it lives and how it reaches the cluster
 
@@ -132,9 +133,9 @@ syncs `k8s/manifests/cluster` recursively from that repository's `dev` branch wi
 and self heal, so a change to the class reaches the cluster when it merges into `dev`, with no
 promotion step.
 
-The deployment repository's `tests/unit/ci_lab/test_priority.py` holds the file to this one class,
-the value to 150 between the batch class at 100 and the checks class at 200, both read from the
-runner file, and below trading, which the test pins as the constant 1000. It also holds the class to
+The deployment repository's `tests/unit/ci_lab/test_priority.py` holds the file to this one class.
+It holds the value to 150, between the batch class (100) and the checks class (200) read from the
+runner file, and below `qitp-trading` (1000, pinned as a constant). It also holds the class to
 `scheduling.k8s.io/v1`, `Never` and `globalDefault: false`. A re-rank changes that test in the same
 pull request. The runner classes keep their own test, `tests/unit/arc_runners_oss/test_priority.py`,
 which this class leaves untouched.
