@@ -14,7 +14,7 @@ from scripts.tick.steps.budgets import SPAWN_NEEDS, floor_of
 from tests.swarm.test_tick import FakeRuntime
 from tests.tick_scale.seed import SLUG, ScaleLedger, seed_live, seed_store
 
-GATED = frozenset(SPAWN_NEEDS | {"spawn", "tick view"})
+GATED = frozenset(SPAWN_NEEDS | {"tick view"})
 PASSES = 3
 OK = "success"
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})

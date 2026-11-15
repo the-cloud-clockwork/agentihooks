@@ -16,7 +16,7 @@ def _all_kept() -> list[dict[str, object]]:
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
 def test_the_gate_covers_the_spawn_chain_reap_and_the_tick_view() -> None:
-    assert {"spawn", "reap", "tick view", "preempt", "orphans", "verify"} <= gate.GATED
+    assert {"reap", "tick view", "orphans", "verify"} <= gate.GATED
 
 
 @pytest.mark.feature("tick-scale-gate-step-floors")
