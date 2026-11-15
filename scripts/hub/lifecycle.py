@@ -202,8 +202,9 @@ class Lifecycle:
         if row.get("awaiting") == "merge" or row.get("claim_generation", 0) != event.data["task_generation"]:
             return
         fields = {"state": "done"} if row.get("done") else {"state": "open", "claimed_by": ""}
-        live: dict[str, object] = (
-            self.ledger.update_task(
+        ledger: Any = self.ledger
+        live: dict[str, Any] = (
+            ledger.update_task(
                 event.swarm,
                 agent.task,
                 fields,
