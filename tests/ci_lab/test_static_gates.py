@@ -122,6 +122,13 @@ REGISTRY: dict[str, Any] = {
 
 FIELDS = ("name", "job", "step", "tools", "modules", "paths", "base_paths")
 
+STEPPED: dict[str, Any] = {
+    "name": "Rule exceptions only shrink",
+    "if": "${{ !cancelled() && steps.plan.outputs.changed == 'true' }}",
+    "env": {"BASE": "${{ inputs.base }}", "RULES": ".semgrep", "TIMEOUT": 30},
+    "run": 'python -m scripts.rule_exceptions --base "$BASE"',
+}
+
 EXPECTED = (
     ("lint/lint-check", "lint", "Lint check", ("ruff check",), (), ("hooks", "scripts"), ("scripts/size_limits.py",)),
     ("lint/format-check", "lint", "Format check", ("ruff format",), (), WHOLE_TREE, WHOLE_TREE),
@@ -382,9 +389,47 @@ def test_the_command_prints_one_json_line_per_gate(
     assert static_gates.main([]) == 0
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert lines == [
-        {field: (list(value) if isinstance(value, tuple) else value) for field, value in zip(FIELDS, gate)}
+        {
+            **{field: (list(value) if isinstance(value, tuple) else value) for field, value in zip(FIELDS, gate)},
+            "env": {},
+            "condition": "",
+        }
         for gate in EXPECTED
     ]
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_a_gate_carries_its_step_env_and_if_condition() -> None:
+    gates = static_gates.discover(_edited(WORKFLOW, "type-gate", [STEPPED]), REGISTRY, REUSABLE)
+    stepped = [gate for gate in gates if gate.job == "type-gate"]
+    assert [gate.name for gate in stepped] == ["type-gate/rule-exceptions-only-shrink"]
+    assert stepped[0].env == (("BASE", "${{ inputs.base }}"), ("RULES", ".semgrep"), ("TIMEOUT", "30"))
+    assert stepped[0].condition == "${{ !cancelled() && steps.plan.outputs.changed == 'true' }}"
+    assert {(gate.env, gate.condition) for gate in gates if gate.job != "type-gate"} == {((), "")}
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_the_command_prints_each_gate_step_env_and_if_condition(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository = _repository(tmp_path / "repo")
+    (repository / static_gates.WORKFLOW).write_text(_edited(WORKFLOW, "type-gate", [STEPPED]))
+    assert static_gates.main(["--root", str(repository)]) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    stepped = [line for line in lines if line["job"] == "type-gate"]
+    assert [(line["env"], line["condition"]) for line in stepped] == [
+        ({"BASE": "${{ inputs.base }}", "RULES": ".semgrep", "TIMEOUT": "30"}, STEPPED["if"])
+    ]
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = {gate.name: gate for gate in static_gates.discover(workflow, registry, ci_wiring.load(ROOT))}
+    assert ("RULES", ".semgrep") in gates["semgrep/scan/own-rules-hold-on-their-fixtures-and-the-code"].env
+    assert ("BASE", "${{ inputs.base }}") in gates["semgrep/scan/rule-exceptions-only-shrink"].env
+    assert gates["lint/lint-check"].condition == "${{ !cancelled() }}"
 
 
 def test_the_command_adds_each_gate_closure_digest_at_the_grader_tree(
