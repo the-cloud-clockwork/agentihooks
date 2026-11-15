@@ -328,3 +328,62 @@ def test_a_pull_request_workflow_without_jobs_needs_no_declaration() -> None:
     workflows = {"test.yml": _gate_workflow(), "bare.yml": {"on": "pull_request"}}
 
     assert _check(workflows, {}) == []
+
+
+def _lab_gate(replaces: str = "test.yml/lint", reason: str = "why", owner: str = "eng-1@swarm") -> dict[str, str]:
+    return {"reason": reason, "owner": owner, "replaces": replaces}
+
+
+def test_an_authoritative_flag_without_a_declared_lab_gate_is_red() -> None:
+    workflows = {"test.yml": _gate_workflow()}
+    lab = {"authoritative": ["lint", "unit"]}
+    assert ci_wiring.check(workflows, {"lab_gates": {"lab/lint": _lab_gate()}}, _TODAY, lab) == [
+        "lab.authoritative names unit, but .github/gate-wiring.json declares no lab/unit lab gate."
+    ]
+    declared = {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}
+    assert ci_wiring.check(workflows, {"lab_gates": declared}, _TODAY, lab) == []
+
+
+def test_a_planted_undeclared_flag_is_red_through_main(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write(tmp_path, {"test.yml": _gate_workflow()}, {"lab_gates": {"lab/unit": _lab_gate("test.yml/unit")}})
+    (tmp_path / "delivery.yaml").write_text(yaml.safe_dump({"lab": {"authoritative": ["lint"]}}))
+    assert ci_wiring.main(["--root", str(tmp_path)]) == 1
+    assert capsys.readouterr().out == (
+        "1 workflows, 3 jobs, 1 wiring problems\n"
+        "::error::lab.authoritative names lint, but .github/gate-wiring.json declares no lab/lint lab gate.\n"
+    )
+
+
+@pytest.mark.parametrize("field", ["reason", "owner", "replaces"])
+def test_a_lab_gate_missing_a_field_is_red(field: str) -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate(**{field: ""})}}
+    assert _check({"test.yml": _gate_workflow()}, config) == [f"lab/lint is declared without its {field}."]
+
+
+def test_a_lab_gate_named_outside_the_lab_prefix_is_red() -> None:
+    config = {"lab_gates": {"lint": _lab_gate()}}
+    assert _check({"test.yml": _gate_workflow()}, config) == [
+        "lint is declared a lab gate but is not named lab/<gate>."
+    ]
+
+
+def test_a_lab_gate_replacing_no_workflow_job_is_red() -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate("test.yml/gone"), "lab/unit": _lab_gate("other.yml/unit")}}
+    assert _check({"test.yml": _gate_workflow()}, config) == [
+        "lab/lint replaces test.yml/gone, which is no workflow job.",
+        "lab/unit replaces other.yml/unit, which is no workflow job.",
+    ]
+
+
+def test_the_lab_gate_required_flag_lifts_only_the_pull_request_trigger() -> None:
+    workflow = _gate_workflow()
+    del workflow[True]["pull_request"]
+    lab = {"authoritative": [], "gate_required": True}
+    assert ci_wiring.check({"test.yml": workflow}, {}, _TODAY, lab) == []
+    assert ci_wiring.check({"test.yml": workflow}, {}, _TODAY, {**lab, "gate_required": False}) == [
+        "test.yml holds Gate — Required but does not run on pull_request."
+    ]
+    del workflow[True]["merge_group"]
+    assert ci_wiring.check({"test.yml": workflow}, {}, _TODAY, lab) == [
+        "test.yml holds Gate — Required but does not run on merge_group."
+    ]
