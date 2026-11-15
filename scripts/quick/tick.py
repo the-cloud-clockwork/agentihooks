@@ -19,7 +19,7 @@ NUDGE = "Quick swarm nudge: continue the next open stage of your plan, or tell t
 ROOM = "Quick swarm room: {count} message(s) for you; read them with `agentihooks quick room`."
 NUDGE_EVERY_S = 600
 READY_STATES = ("idle", "done")
-SIGNED_OUT = re.compile(r"Not logged in · Run /login")
+SIGNED_OUT = re.compile(r"Not logged in · Run /login|Login reached its time limit")
 Relaunch = Callable[[Path, str], str]
 Row = dict[str, Any]
 

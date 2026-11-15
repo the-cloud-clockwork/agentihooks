@@ -386,15 +386,17 @@ def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while
 RULE = "─" * 40
 SIGNED_OUT_SCREEN = f"Login reached its time limit · Please run /login\n{RULE}\n❯ \n{RULE}\n  account:default  Not logged in · Run /login\n"
 QUOTED_SCREEN = f"the notice reads Not logged in · Run /login\n{RULE}\n❯ \n{RULE}\n  account:alpha\n"
+TIMED_OUT_SCREEN = f"{RULE}\n❯ \n{RULE}\n  account:default  Login reached its time limit · Please run /login\n"
 
 
 @pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("screen", [SIGNED_OUT_SCREEN, TIMED_OUT_SCREEN])
 @pytest.mark.parametrize("state", [registry.READY, registry.PENDING])
 def test_an_engineer_whose_agent_is_signed_out_is_started_again_and_the_master_never_is(
-    tmp_path: Path, state: str
+    tmp_path: Path, state: str, screen: str
 ) -> None:
     _swarm(tmp_path, eng_state=state)
-    herdr = FakeHerdr(screen=SIGNED_OUT_SCREEN)
+    herdr = FakeHerdr(screen=screen)
     outcomes = _round(tmp_path, herdr)
     assert {row["seat"]: row["outcome"] for row in outcomes if "seat" in row} == {
         "master": "idle",

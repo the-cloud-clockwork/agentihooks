@@ -1477,7 +1477,11 @@ def test_a_launch_routes_over_the_operator_token_block_its_shell_never_loaded(
     held = {"HOME": "/home/operator", "AH_CC_TOKEN_beta": "caller-beta", **({marker: "x"} if marker else {})}
     with pytest.raises(balancer.RoutingError, match="^stop$"):
         balancer.select_launch_credential(held)
-    assert seen == {"AH_CC_TOKEN_alpha": "block-token", "AH_CC_TOKEN_beta": "caller-beta"}
+    assert seen == {"AH_CC_TOKEN_alpha": "block-token", "AH_CC_TOKEN_beta": "block-beta"}
+    filled = dict(held)
+    monkeypatch.setattr(balancer.operator_env, "values", lambda environ: {})
+    balancer.operator_env.fill(filled)
+    assert {name: value for name, value in filled.items() if name.startswith(balancer.TOKEN_PREFIX)} == seen
 
 
 def _window_result(
