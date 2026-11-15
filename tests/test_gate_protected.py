@@ -1012,7 +1012,7 @@ def test_a_head_switching_to_a_lab_aggregation_is_green(form: dict[str, bool]) -
     from scripts import ci_reuse
 
     base, head = _aggregators()
-    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, lab=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.lab_verdict(ci_reuse.gate_steps(**form))
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
@@ -1041,7 +1041,7 @@ def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
     from scripts import ci_reuse
 
     base, head = _aggregators()
-    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, lab=True)
+    [step] = ci_reuse.lab_verdict(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
     assert edit[0] in step["run"]
     head["jobs"]["gate-required"]["steps"] = [{**step, "run": step["run"].replace(*edit)}]
     assert _grade({"test.yml": head}, base={"test.yml": base}) == [

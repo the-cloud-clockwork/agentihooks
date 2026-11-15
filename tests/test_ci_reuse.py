@@ -1057,7 +1057,7 @@ def test_the_lab_aggregation_reads_authoritative_gates_from_the_lab_verdict(
 ) -> None:
     from scripts import ci_reuse
 
-    result = _gate(ci_reuse.gate_steps(lab=True), _lab_needs(lint, verdict, outputs), event=event)
+    result = _gate(ci_reuse.lab_verdict(ci_reuse.gate_steps()), _lab_needs(lint, verdict, outputs), event=event)
     assert (result.returncode == 0) == passed, result.stdout + result.stderr
 
 
@@ -1066,7 +1066,9 @@ def test_a_refused_lab_verdict_names_the_lab_verdict_job(outputs: dict[str, str]
     from scripts import ci_reuse
 
     verdict = "success" if outputs else "failure"
-    result = _gate(ci_reuse.gate_steps(lab=True), _lab_needs("success", verdict, outputs), event="pull_request")
+    result = _gate(
+        ci_reuse.lab_verdict(ci_reuse.gate_steps()), _lab_needs("success", verdict, outputs), event="pull_request"
+    )
     assert result.returncode == 1
     assert result.stdout.endswith(
         "::error::The lab verdict job must succeed on pull requests and publish its authoritative gates"
@@ -1090,7 +1092,8 @@ def test_the_lab_queue_aggregation_drops_its_verdict_job_and_keeps_unselected_ga
     if lab_lint is not None:
         outputs["lab_lint"] = lab_lint
     needs["lab-verdict"] = {"result": "success", "outputs": outputs}
-    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, lab=True), needs, event="pull_request")
+    steps = ci_reuse.lab_verdict(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    result = _gate(steps, needs, event="pull_request")
     assert (result.returncode == 0) == (lab_lint == "success"), result.stdout + result.stderr
 
 
@@ -1098,11 +1101,10 @@ def test_the_lab_aggregation_only_prefixes_the_reviewed_aggregation() -> None:
     from scripts import ci_reuse
 
     form = {"queue_tier": True, "consolidated": True, "summary": True, "docs": True, "watcher_loss": True}
-    [lab, *lab_rest] = ci_reuse.gate_steps(**form, lab=True)
+    [lab, *lab_rest] = ci_reuse.lab_verdict(ci_reuse.gate_steps(**form))
     [plain, *rest] = ci_reuse.gate_steps(**form)
     assert lab_rest == rest
     assert lab == {**plain, "run": ci_reuse.LAB_VERDICT + plain["run"]}
-    assert ci_reuse.gate_steps(**form, lab=False) == ci_reuse.gate_steps(**form)
 
 
 _LOST_RERUN_FORM = {"queue_tier": True, "promotion": True, "consolidated": True, "watcher_loss": True}
