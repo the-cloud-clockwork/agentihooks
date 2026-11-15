@@ -636,6 +636,7 @@ def queued_at_now(merging):
     assert merging.run() == [f"queued {URL} for task t1"]
 
 
+@pytest.mark.feature("merge-pass-batched-pull-request-prefetch")
 def test_merge_pass_reads_every_pull_request_in_one_batch_not_per_task():
     urls = [f"https://github.com/o/r/pull/{i}" for i in range(30)]
     rows = {
