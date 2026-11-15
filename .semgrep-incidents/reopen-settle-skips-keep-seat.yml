@@ -1,0 +1,33 @@
+rules:
+  - id: reopen-settle-skips-keep-seat
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A reclaim reopens a task and settles the leaver's exit, which moves its mail to its seat, without saving that
+      seat for the task. The next life then takes the lowest free seat and the mail is stranded. Call keep_seat with
+      the leaver's seat in the same function whenever the task reopens.
+    paths:
+      include:
+        - /scripts/hub/
+        - /scripts/tick/
+        - /scripts/swarm/
+        - reopen-settle-skips-keep-seat.py
+    patterns:
+      - pattern-either:
+          - pattern: $T._reopen(...)
+          - pattern: _reopen(...)
+          - pattern: '$L.update_task($S, $K, {"state": "open", ...}, ...)'
+      - pattern-either:
+          - pattern-inside: |
+              def $F(...):
+                  ...
+                  $X.settle(...)
+          - pattern-inside: |
+              def $F(...):
+                  ...
+                  _settle_exit(...)
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              $STORE.keep_seat(...)
+              ...

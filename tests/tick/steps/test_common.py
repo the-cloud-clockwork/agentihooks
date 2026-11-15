@@ -273,6 +273,9 @@ class _DropStore:
     def drop_agent(self, slug: str, name: str) -> None:
         self.calls.append(("drop_agent", slug, name))
 
+    def keep_seat(self, slug: str, task: str, seat: str) -> None:
+        self.calls.append(("keep_seat", slug, task, seat))
+
 
 class _DropLedger(_Ledger):
     """Ledger fake that also answers the live task read with a fixed row."""
@@ -326,6 +329,8 @@ def test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task(
     if refunded:
         calls.append(("refund", "slug", "t1", "a", 5))
     calls += [("release", "slug", "t1", "a"), ("drop_agent", "slug", "a")]
+    if reopened:
+        calls.append(("keep_seat", "slug", "t1", "eng-1@slug"))
     assert store.calls == calls
     ledger_calls: list[tuple[object, ...]] = [("task", "slug", "t1")] if refund and held and claims > 0 else []
     if held:

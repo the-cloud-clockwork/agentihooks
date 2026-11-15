@@ -486,6 +486,10 @@ class RedisStore:
     def handoff_seat(self, slug, task):
         return self.redis.get(self.key(slug, "handoff-seat", task)) or ""
 
+    def keep_seat(self, slug: str, task: str, seat: str) -> None:
+        """Save the seat a reclaimed task's mail moved to, so the task's next life takes that seat."""
+        self.redis.set(self.key(slug, "handoff-seat", task), seat)
+
     def clear_handoff(self, slug, task):
         self.redis.delete(
             self.key(slug, "handoff", task),

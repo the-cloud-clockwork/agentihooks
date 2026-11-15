@@ -202,10 +202,18 @@ class Lifecycle:
         if row.get("awaiting") == "merge" or row.get("claim_generation", 0) != event.data["task_generation"]:
             return
         fields = {"state": "done"} if row.get("done") else {"state": "open", "claimed_by": ""}
-        self.ledger.update_task(
-            event.swarm,
-            agent.task,
-            fields,
-            if_state=("claimed", "pr"),
-            if_match={"claimed_by": agent.name, "claim_generation": event.data["task_generation"]},
+        ledger: Any = self.ledger
+        live: dict[str, Any] = (
+            ledger.update_task(
+                event.swarm,
+                agent.task,
+                fields,
+                if_state=("claimed", "pr"),
+                if_match={"claimed_by": agent.name, "claim_generation": event.data["task_generation"]},
+            )
+            or {}
         )
+        if live.get("state") == "open" and agent.seat:
+            held: Any = self.store
+            store: RedisStore = held
+            store.keep_seat(event.swarm, agent.task, agent.seat)
