@@ -6473,6 +6473,17 @@
       ]
     },
     {
+      "id": "events-legacy-free-sends-no-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-free-stop-guards",
+      "behaviour": "When the agents reap step frees a legacy launched agent, one whose hive recorded no start, for a revoked account, repeated content refusals or a stuck provider error, the agent is retired and dropped as before and no execution stop is sent to any hive.",
+      "seam": "_free_revoked, _free_refused and _free_stuck on an agent the hub reconciler counts as legacy",
+      "rules": ["tick-free-skips-execution-stop"],
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired"
+      ]
+    },
+    {
       "id": "events-parked-retirement-after-release-refunds-nothing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refund-tests",
