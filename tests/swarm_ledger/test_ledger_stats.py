@@ -424,6 +424,7 @@ class TestStatsSyncEvent:
                 "gap": "",
                 "frozen": 0,
                 "frozen_work": 0,
+                "lab": None,
             },
         }
         assert d["time_left_minutes"] == 60

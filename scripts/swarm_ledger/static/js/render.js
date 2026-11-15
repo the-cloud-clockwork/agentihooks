@@ -336,9 +336,9 @@ function labLine(entry) {
 }
 
 function labStat(lab) {
-  const age = !lab ? "" : lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
-  const lines = lab ? lab.classes.map((entry) => h("li", { text: labLine(entry) })) : [h("li", { text: "—" })];
-  const failed = lab && lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];
+  const age = lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
+  const lines = lab.classes.map((entry) => h("li", { text: labLine(entry) }));
+  const failed = lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];
   return h("div", { class: "stat lab-capacity", "data-stat": statKey("Lab") },
     h("dt", {}, statGrip("Lab"), `Lab${age}`),
     h("dd", {}, h("ul", { class: "lab-list" }, ...lines, ...failed)));
@@ -377,7 +377,7 @@ export function renderStats() {
     row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
-    labStat(calc && calc.lab),
+    ...(calc && calc.lab ? [labStat(calc.lab)] : []),
     bottleneckStat(withRefusals(swarm && swarm.top_bottleneck, swarm && swarm.admission)));
   document.dispatchEvent(new Event("stats"));
 }

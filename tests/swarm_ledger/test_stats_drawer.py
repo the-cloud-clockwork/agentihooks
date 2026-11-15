@@ -169,13 +169,13 @@ def test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the
     assert row.evaluate("e => e.scrollWidth <= e.clientWidth")
 
 
-def test_a_failed_lab_read_names_its_error_and_no_reading_reads_unavailable(lab_page: Any) -> None:
+def test_a_failed_lab_read_names_its_error_and_no_reading_shows_no_lab_row(lab_page: Any) -> None:
     now = int(time.time() * 1000)
     page = lab_page({"at": None, "error": "connection refused", "error_at": now - 60_000, "classes": []})
     row = page.locator("#stats .lab-capacity")
     assert row.locator("dt").inner_text() == "LAB · NEVER"
     assert row.locator("li.lab-error").all_inner_texts() == ["Read failed 1m ago: connection refused"]
     assert row.locator("li").count() == 1
-    row = lab_page(None).locator("#stats .lab-capacity")
-    assert row.locator("dt").inner_text() == "LAB"
-    assert row.locator("li").all_inner_texts() == ["—"]
+    empty = lab_page(None)
+    assert empty.locator("#stats .lab-capacity").count() == 0
+    assert empty.locator("#stats > .stat").last.get_attribute("data-stat") == "top-bottleneck"
