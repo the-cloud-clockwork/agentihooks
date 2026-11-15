@@ -52,9 +52,10 @@ class Store:
         """Store a verdict once; return False and change nothing when its key is already stored."""
         report_path = unit_path(verdict.kind, verdict.key, "report")
         log_path = unit_path(verdict.kind, verdict.key, "log")
-        self.objects.write_once(log_path, log)
         document = {"report": dict(report), "verdict": asdict(verdict)}
         written = self.objects.write_once(report_path, _json(document).encode())
+        if written:
+            self.objects.write_once(log_path, log)
         stored = verdict if written else _stored(self.objects.read(report_path))
         self._index(stored, replace=written)
         return written
