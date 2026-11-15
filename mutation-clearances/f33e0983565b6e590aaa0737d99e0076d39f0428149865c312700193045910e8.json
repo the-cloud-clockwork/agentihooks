@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/expand_mutation.py:scripts.ci_lab.expand_mutation.x_stats_units:a4acd0979113ace992cace8e7e5a13eca3a996da9bba494809e67d966a726508": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: stats_units calls only StoredStats.identity and StoredStats.scope, which read only self.context and self.changes, never self.root or self.folder."
+  }
+}
