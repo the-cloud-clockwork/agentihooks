@@ -2052,7 +2052,7 @@
       "id": "hive-listed-agent-no-local-process-fact",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-binding-no-process",
-      "behaviour": "The runtime binding pass reports no process for a validated agent with no session on its host only when no live hive report lists the agent's name; an agent another live hive lists has no binding fact on that host, so the tick verify step never retires a live hive agent idle past its heartbeat window for a process mismatch.",
+      "behaviour": "The runtime binding pass reports no process for a validated agent with no session on its host only when no other live hive's report lists the agent's name; an agent another live hive lists has no binding fact on that host while its own hive's listing still counts as no process, so the tick verify step never retires a live hive agent idle past its heartbeat window for a process mismatch.",
       "seam": "scripts.swarm.runtime.HerdrRuntime.bindings and scripts.tick.steps.observe._verify through it",
       "tests": [
         "tests/swarm/test_live_binding.py::test_a_validated_agent_a_live_hive_lists_has_no_process_fact_on_a_host_without_its_session",

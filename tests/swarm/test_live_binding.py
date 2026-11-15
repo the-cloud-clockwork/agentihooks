@@ -1135,29 +1135,32 @@ def test_unbound_absent_process_has_no_live_report(monkeypatch):
 
 @pytest.mark.feature("hive-listed-agent-no-local-process-fact")
 @pytest.mark.parametrize(
-    ("names", "expected"),
+    ("hive", "names", "expected"),
     [
-        (["engineer@zz"], {}),
-        (["other@zz"], {"engineer@zz": {"process": False}}),
-        ([], {"engineer@zz": {"process": False}}),
+        ("hive-a", ["engineer@zz"], {}),
+        ("hive-a", ["other@zz"], {"engineer@zz": {"process": False}}),
+        ("hive-a", [], {"engineer@zz": {"process": False}}),
+        ("controller", ["engineer@zz"], {"engineer@zz": {"process": False}}),
     ],
 )
 def test_a_validated_agent_a_live_hive_lists_has_no_process_fact_on_a_host_without_its_session(
-    ticking: tuple, monkeypatch: pytest.MonkeyPatch, names: list[str], expected: dict
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, hive: str, names: list[str], expected: dict
 ) -> None:
     from scripts import terminate_agent
     from scripts.hive import reports
+    from scripts.swarm import commands
     from scripts.swarm.runtime import HerdrRuntime
 
     store, _, _ = ticking
+    monkeypatch.setattr(commands, "hive_id", lambda: "controller")
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
-    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["hive-a"])
-    store.redis.set(reports.key("hive-a"), json.dumps({"names": names, "executions": {}, "panes": {}}))
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: [hive])
+    store.redis.set(reports.key(hive), json.dumps({"names": names, "executions": {}, "panes": {}}))
     controller = HerdrRuntime()
     monkeypatch.setattr(controller, "hive", reports.Reports(store.redis))
     agent = AgentRecord("engineer@zz", "eng", "one", hive="hive-a", profile_decision={"validation": {"pid": 99}})
     assert controller.bindings([agent]) == expected
-    assert controller._binding_pids == ({} if not expected else {"engineer@zz": None})
+    assert controller._binding_pids == {"engineer@zz": None}
 
 
 @pytest.mark.feature("hive-listed-agent-no-local-process-fact")
@@ -1186,7 +1189,7 @@ def test_tick_keeps_an_idle_hive_agent_a_live_hive_report_lists_past_its_heartbe
     idle.beat(store.redis, "sw", agent.name, idle.IDLE, now - reports.LOST_MS - 1)
     controller = HerdrRuntime()
     monkeypatch.setattr(controller, "hive", reports.Reports(store.redis))
-    runtime.bindings = controller.bindings
+    monkeypatch.setattr(runtime, "bindings", controller.bindings)
     tick("sw", store, ledger, runtime, now)
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), agent.name))
     assert agent.name not in runtime.killed

@@ -5,8 +5,8 @@ rules:
     message: >-
       The swarm controller scans only its own processes, so a validated hive agent it found no session for was
       reported with no process, and once the agent sat idle past its heartbeat window the tick verify step retired it
-      live through the mismatch drop. Report no process only when no live hive report lists the agent's name; an
-      agent another hive lists has no binding fact on this host.
+      live through the mismatch drop. Report no process only when no other live hive lists the agent's name, through
+      HerdrRuntime._listed_elsewhere; an agent another hive lists has no binding fact on this host.
     paths:
       include:
         - /scripts/swarm/runtime.py
@@ -15,5 +15,5 @@ rules:
       - pattern: |
           $FACTS[$AGENT.name] = {"process": False}
       - pattern-not-inside: |
-          if <... $AGENT.name not in $LISTED ...>:
+          if not $SELF._listed_elsewhere($AGENT.name):
               ...

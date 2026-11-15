@@ -1228,7 +1228,6 @@ class HerdrRuntime:
         from scripts.terminate_agent import sessions
 
         items, facts = sessions(), {}
-        listed = self.hive.names() if self.hive is not None else set()
         self._binding_pids = {}
         for agent in agents:
             if agent.runtime_backend != "local":
@@ -1250,8 +1249,9 @@ class HerdrRuntime:
                 self._binding_pids[agent.name] = str(session.process.pid)
                 if validated and validated != session.process.pid and facts[agent.name].get("process") is not False:
                     facts[agent.name]["rebound"] = session.process.pid
-            elif validated and agent.name not in listed:
-                facts[agent.name] = {"process": False}
+            elif validated:
+                if not self._listed_elsewhere(agent.name):
+                    facts[agent.name] = {"process": False}
                 self._binding_pids[agent.name] = None
         return facts
 
