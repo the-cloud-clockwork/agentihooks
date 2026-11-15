@@ -6343,6 +6343,19 @@
       ]
     },
     {
+      "id": "lab-full-pool-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-full-pool-wait",
+      "behaviour": "The CI lab predicts each class's queue wait by draining its pending estimates across the pool, each free slot working from now and each busy slot from when its running unit frees it, so a pool with every slot busy reports a positive pull request wait in the capacity document, the queue wait gauge and the swarm lab reading whose pull request wait the lab behind claim hold reads; a full pool with no known free time still reports no wait.",
+      "seam": "scripts.ci_lab.capacity.predicted_wait with Load.frees_in, through scripts.ci_lab.capacity.document, scripts.ci_lab.metrics.observe_load and scripts.swarm.lab_capacity.capture",
+      "tests": [
+        "tests/ci_lab/test_capacity.py::test_predicted_wait_drains_pending_work_as_running_units_free_their_slots",
+        "tests/ci_lab/test_capacity.py::test_a_full_pool_predicts_its_wait_from_when_running_units_free_their_slots",
+        "tests/ci_lab/test_metrics.py::test_the_queue_wait_gauge_predicts_a_full_pool_from_when_running_units_free_their_slots",
+        "tests/swarm/test_lab_capacity.py::test_a_full_lab_reading_carries_the_pull_request_wait_the_claim_hold_reads"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
