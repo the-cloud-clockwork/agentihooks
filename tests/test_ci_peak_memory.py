@@ -87,7 +87,7 @@ def test_refuses_a_call_without_label_and_command(tmp_path: Path, arguments: lis
             "mutation-plan",
             '-I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py"',
             "./.workflow-revision/.github/actions/retry-upload",
-            "steps.reuse.outputs.reused != 'true'",
+            "'pull_request'",
         ),
     ],
 )
@@ -108,7 +108,7 @@ def test_pull_request_tests_record_and_upload_the_step_peak(
     assert upload["uses"] == action
     assert upload["if"].endswith(guard)
     if job == "mutation-plan":
-        assert measured["if"] == "steps.reuse.outputs.reused != 'true'"
+        assert "if" not in measured
         extract = names.index("Take the helper scripts from the workflow revision")
         assert extract < names.index(step)
-        assert steps[extract]["if"] == measured["if"]
+        assert "if" not in steps[extract]
