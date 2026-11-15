@@ -39,6 +39,8 @@ TESTS_GROUPS = tuple(
     for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
 )
 PATH_FILTERS = ("paths", "paths-ignore")
+DEV_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+OWN = r"[a-z0-9-]+"
 
 
 def git(*args: str) -> str:
@@ -166,6 +168,46 @@ def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: 
     )
 
 
+def dev_push_only(workflow: dict[Any, Any]) -> bool:
+    found = events(workflow)
+    if len(found) != 1 or not isinstance(found[0], dict) or set(cast(dict[Any, Any], found[0])) != {"push"}:
+        return False
+    push = cast(dict[Any, Any], found[0])["push"]
+    return (
+        isinstance(push, dict)
+        and set(cast(dict[Any, Any], push)) <= {"branches", *PATH_FILTERS}
+        and cast(dict[Any, Any], push).get("branches") == ["dev"]
+    )
+
+
+def dev_push_group(block: object, workflow: dict[Any, Any]) -> bool:
+    if not isinstance(block, dict) or cast(dict[str, Any], block).get("cancel-in-progress") not in (None, False):
+        return False
+    group = " ".join(str(cast(dict[str, Any], block).get("group")).split())
+    queue = cast(dict[str, Any], block).get("queue")
+    if dev_push_only(workflow) and queue in (None, "single"):
+        return (
+            re.fullmatch(
+                OWN + r"-\$\{\{ github\.ref \}\}|\$\{\{ format\('" + OWN + r"-\{0\}', github\.ref\) \}\}", group
+            )
+            is not None
+        )
+    return (
+        re.fullmatch(
+            r"\$\{\{ "
+            + re.escape(DEV_PUSH)
+            + r" && format\('"
+            + OWN
+            + r"-\{0\}', github\.ref\) \|\| "
+            + re.escape(LANE)
+            + r" \}\}",
+            group,
+        )
+        is not None
+        and queue == f"${{{{ {DEV_PUSH} && 'single' || 'max' }}}}"
+    )
+
+
 def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
@@ -197,7 +239,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
         if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
-        if per_run_mutation_group(name, block, job, trusted):
+        if per_run_mutation_group(name, block, job, trusted) or dev_push_group(block, cast(dict[Any, Any], workflow)):
             continue
         if (
             trusted.get("name") == "Tests"
