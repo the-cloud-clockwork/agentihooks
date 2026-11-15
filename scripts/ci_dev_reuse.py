@@ -8,10 +8,12 @@ from typing import Any, cast
 
 from scripts import ci_reuse
 
+PUSH_LEGS = 20
 
-def artifact_names() -> set[str]:
+
+def artifact_names(shards: int = PUSH_LEGS) -> set[str]:
     names = {f"{kind}-3.12" for kind in ("split", "collected")}
-    for shard in range(1, 21):
+    for shard in range(1, shards + 1):
         names.update(f"{kind}-3.12-{shard}" for kind in ("durations", "flakes", "coverage"))
     return names
 
@@ -47,18 +49,27 @@ def _usable(run: dict[str, Any], repository: str, event: str) -> bool:
     )
 
 
+def shard_count(folder: Path) -> int:
+    """The queue's unit shard count when shards 1 to that count all passed, at most twenty; else 0."""
+    jobs = ci_reuse._lines(folder / "jobs.jsonl")
+    units = {job["name"]: job["conclusion"] for job in jobs if job["name"].startswith("unit (")}
+    shards = len(units)
+    expected = {f"unit (3.12, {shard})" for shard in range(1, shards + 1)}
+    if not 1 <= shards <= PUSH_LEGS or set(units) != expected or set(units.values()) != {"success"}:
+        return 0
+    return shards
+
+
 def _complete(evidence: Path, run: dict[str, Any]) -> bool:
     folder = evidence / str(run["id"])
     artifacts = ci_reuse._lines(folder / "artifacts.jsonl")
     if any(item["name"].startswith("reused-branch-") for item in artifacts):
         return False
     kept = {item["name"] for item in artifacts if not item["expired"]}
-    jobs = ci_reuse._lines(folder / "jobs.jsonl")
-    expected = {f"unit (3.12, {shard})" for shard in range(1, 21)}
-    passed = {job["name"] for job in jobs if job["conclusion"] == "success"}
     if any(name.startswith("reused-tests-") for name in kept):
         return False
-    return artifact_names() <= kept and expected == {name for name in passed if name.startswith("unit (")}
+    shards = shard_count(folder)
+    return bool(shards) and artifact_names(shards) <= kept
 
 
 def select_source(evidence: Path, head: str, repository: str) -> int | None:

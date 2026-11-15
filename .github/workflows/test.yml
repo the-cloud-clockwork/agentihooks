@@ -747,6 +747,34 @@ jobs:
           key: durations-merged-${{ github.event.pull_request.base.sha }}
           restore-keys: durations-merged-
 
+      - name: Hold the heavy legs until the head stops moving
+        if: github.event_name == 'pull_request' && vars.AGENTIHOOKS_CI_QUIET_SECONDS != ''
+        env:
+          QUIET: ${{ vars.AGENTIHOOKS_CI_QUIET_SECONDS }}
+          PULL: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          whole='^(0|[1-9][0-9]?)$'
+          if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 60 ]]; then
+            echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 60, not $QUIET"
+            exit 1
+          fi
+          deadline=$((SECONDS + QUIET))
+          while [[ "$SECONDS" -lt "$deadline" ]]; do
+            pause=$((deadline - SECONDS))
+            [[ "$pause" -le 5 ]] || pause=5
+            sleep "$pause"
+            if ! head="$(timeout 20 git -C "$GITHUB_WORKSPACE" ls-remote origin "refs/pull/$PULL/head")"; then
+              echo "::error::Cannot read the head of pull request $PULL from origin"
+              exit 1
+            fi
+            head="${head%%[[:space:]]*}"
+            if [[ -n "$head" && "$head" != "$HEAD_SHA" ]]; then
+              echo "::error::The head moved to $head inside the quiet window; the run for that head grades it"
+              exit 1
+            fi
+          done
+
       - name: Select the tests the change reaches
         id: select
         env:
@@ -1116,6 +1144,7 @@ jobs:
       run: ${{ steps.plan.outputs.run }}
       commit: ${{ steps.plan.outputs.commit }}
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
+      queue_legs: ${{ steps.queue-legs.outputs.queue_legs }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1167,7 +1196,7 @@ jobs:
 
       - name: Mint the token that reads the collection job
         id: app-token
-        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: (github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) || needs.select.outputs.source != ''
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -1259,15 +1288,24 @@ jobs:
           python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
           cat queue-plan.txt >> "$GITHUB_OUTPUT"
 
-      - name: Mint the token that restores queue unit artifacts
-        id: unit-token
+      - name: Map each push leg onto a queue shard
+        id: queue-legs
         if: needs.select.outputs.source != ''
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          for attempt in 1 2; do
+            if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$UNIT_SOURCE/artifacts?per_page=100" \
+              --jq '.artifacts[] | select((.expired | not) and (.name | test("^durations-3\\.12-[0-9]+$"))) | .name' > durations-names.txt; then
+              break
+            fi
+            [[ "$attempt" == 2 ]] && exit 1
+            echo "::warning::Listing the queue run's artifacts failed; retrying it once in 30 seconds."
+            sleep 30
+          done
+          shards=$(sort -u durations-names.txt | wc -l)
+          legs=$(jq -nc --argjson shards "$shards" '[range(1; 21) | {key: tostring, value: ((. - 1) % $shards + 1)}] | from_entries')
+          echo "queue_legs=$legs" >> "$GITHUB_OUTPUT"
 
       - name: Restore the queue split inputs
         if: needs.select.outputs.source != ''
@@ -1277,7 +1315,7 @@ jobs:
         with: &split-restore-the-queue-split-inputs
           name: split-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
-          github-token: ${{ steps.unit-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Restore the queue split inputs, wait before attempt 2
         if: steps.restore-the-queue-split-inputs.outcome == 'failure'
@@ -1299,7 +1337,7 @@ jobs:
         with: &split-restore-the-queue-collected-tests
           name: collected-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
-          github-token: ${{ steps.unit-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Restore the queue collected tests, wait before attempt 2
         if: steps.restore-the-queue-collected-tests.outcome == 'failure'
@@ -1555,7 +1593,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-durations
-          name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
+          name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1572,7 +1610,7 @@ jobs:
         with: *unit-restore-queue-shard-durations
 
       - name: Restore queue shard flakes
-        if: needs.split.outputs.source != ''
+        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
         id: restore-queue-shard-flakes
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1599,7 +1637,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-coverage
-          name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
+          name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1614,6 +1652,12 @@ jobs:
         if: steps.restore-queue-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *unit-restore-queue-shard-coverage
+
+      - name: Empty the test reports of a leg above the queue's shard count
+        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
+        run: |
+          echo '{}' > durations.json
+          rm -f elapsed.json
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
