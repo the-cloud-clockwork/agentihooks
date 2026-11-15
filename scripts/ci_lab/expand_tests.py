@@ -1,7 +1,7 @@
 """Test units from the dependency manifest: a content fingerprint per test and file sized test batches.
 
 A test's fingerprint covers the hashes of the units it executed, every repository file it opened, its own test
-module, and a part every test shares: the dependency pins, the test support modules, every Python file outside the
+module and every test module that module imports, and a part every test shares: the dependency pins, the test support modules, every Python file outside the
 measured trees, and the pytest invocation, which replaces the manifest's invalidation by workflow files. A broad
 test, whose closure escaped the tracer or that opened files outside the manifest, is keyed on every file under the
 measured trees and the test trees instead of its own units.
@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
+from scripts.ci_mutation import scope
 from tests import dep_manifest
 
 PYTEST_INVOCATION = (
@@ -39,17 +40,44 @@ def _blob(tree: Mapping[str, bytes], path: str) -> str | None:
     return hashlib.sha256(content).hexdigest() if content is not None else None
 
 
+def _text(content: bytes) -> str:
+    """Return a source file's text the way the manifest's change reader decodes it."""
+    return content.decode("utf-8", "replace")
+
+
+def _test_module(path: str) -> bool:
+    """Return whether a path is a pytest test module under the test tree."""
+    return path.startswith("tests/") and path.endswith(".py") and PurePosixPath(path).name.startswith("test_")
+
+
 def _shared(path: str) -> bool:
     """Return whether a Python file outside the measured trees and the test modules keys every test."""
-    if not path.endswith(".py") or path.startswith(dep_manifest.MEASURED):
-        return False
-    return not path.startswith("tests/") or not PurePosixPath(path).name.startswith("test_")
+    return path.endswith(".py") and not path.startswith(dep_manifest.MEASURED) and not _test_module(path)
+
+
+def _reached(tree: Mapping[str, bytes], path: str, reached: set[str]) -> set[str]:
+    """Return the test modules a test module reaches through its imports, added to the modules already reached.
+
+    The manifest records no test module another test module imports, since an import's own read is not a test read.
+    """
+    if path in reached or path not in tree:
+        return reached
+    reached.add(path)
+    try:
+        names = scope.imported_names(_text(tree[path]), PurePosixPath(path).parent.parts)
+    except SyntaxError:
+        return reached
+    for name in names:
+        module = f"{name.replace('.', '/')}.py"
+        if _test_module(module):
+            _reached(tree, module, reached)
+    return reached
 
 
 def _unit_keys(units: Sequence[str], tree: Mapping[str, bytes]) -> list[str | None]:
     """Return the hash of every manifest unit in the tree, None for a unit the tree no longer holds."""
     sources = {name.partition("::")[0] for name in units}
-    hashes = {path: dep_manifest.unit_hashes(tree[path].decode("utf-8", "replace")) for path in sources if path in tree}
+    hashes = {path: dep_manifest.unit_hashes(_text(tree[path])) for path in sources if path in tree}
     return [hashes.get(path, {}).get(unit) for path, _, unit in (name.partition("::") for name in units)]
 
 
@@ -79,6 +107,8 @@ def fingerprints(
     measured = _digest({path: _blob(tree, path) for path in tree if path.startswith(BROAD_TREES)})
     names: list[str] = manifest["units"]
     units = _unit_keys(names, tree)
+    owns = {dep_manifest.node(test).partition("::")[0] for test in manifest["tests"]}
+    reached = {own: _reached(tree, own, set()) for own in owns}
     keys: dict[str, str] = {}
     for test, record in manifest["tests"].items():
         opened: list[str] = record["files"]
@@ -86,7 +116,7 @@ def fingerprints(
         found: dict[str, object] = {
             "test": test,
             "shared": shared,
-            "files": {path: _blob(tree, path) for path in {*opened, own}},
+            "files": {path: _blob(tree, path) for path in {*opened, own, *reached[own]}},
         }
         if broad(record):
             found["tree"] = measured

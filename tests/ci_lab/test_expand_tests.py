@@ -121,6 +121,8 @@ def test_lockfile_removal_rekeys_every_test(repository: Path) -> None:
             FILES["tests/test_alpha.py"] + "\n\ndef test_third():\n    pass\n",
             {FIRST, SECOND, SPAWN},
         ),
+        ("tests/test_alpha.py", "def broken(:\n", {FIRST, SECOND, SPAWN}),
+        ("tests/test_group.py", None, {ONE, SPAWN}),
         ("tests/conftest.py", "import os\n", EVERY_TEST),
         ("tests/helpers.py", "VALUE = 2\n", EVERY_TEST),
         ("tests/fixtures/sample.txt", "changed\n", {SPAWN}),
@@ -138,6 +140,21 @@ def test_rekeyed_tests_match_the_manifest_invalidation(
     rekeyed = _plant(repository, path, planted)
     assert rekeyed == expected
     assert dep_manifest.invalidated(MANIFEST, dep_manifest.changes(repository, "HEAD^", "HEAD"))[0] == expected
+
+
+def test_a_change_to_an_imported_test_module_rekeys_the_importing_tests(repository: Path) -> None:
+    (repository / "tests/test_import.py").write_text(
+        "from tests.test_alpha import test_first as reused\n\n\ndef test_reuse():\n    pass\n"
+    )
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["tests"]["tests/test_import.py::test_reuse"] = {"units": [], "files": [], "escapes": False}
+    cycle = FILES["tests/test_alpha.py"] + "\n\nfrom tests.test_import import test_reuse\n"
+    assert _plant(repository, "tests/test_alpha.py", cycle.encode(), manifest) == {
+        FIRST,
+        SECOND,
+        SPAWN,
+        "tests/test_import.py::test_reuse",
+    }
 
 
 def test_workflow_change_rekeys_nothing_while_the_invocation_rekeys_every_test(repository: Path) -> None:
