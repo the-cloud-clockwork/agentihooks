@@ -196,7 +196,7 @@ def fixture_files():
 
 
 @pytest.fixture
-def narrow(tmp_path, monkeypatch):
+def narrow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     served = sanity.assets()
     styles = tmp_path / "ledger.css"
     source = served["css/ledger.css"].read_text()

@@ -3127,7 +3127,8 @@ jobs:
       - name: Artifact sanity checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         run: |
-          if grep -qs -- '"--pages"' "$RUNNER_TEMP/grader/scripts/swarm_ledger/artifact_sanity.py"; then
+          checker="$RUNNER_TEMP/grader/scripts/swarm_ledger/artifact_sanity.py"
+          if [[ -f "$checker" ]] && grep -q -- '"--pages"' "$checker"; then
             cd "$RUNNER_TEMP/grader"
             python -m scripts.swarm_ledger.artifact_sanity --pages "$GITHUB_WORKSPACE/scripts/swarm_ledger" "$GITHUB_WORKSPACE"/tests/fixtures/artifacts/*
           else
