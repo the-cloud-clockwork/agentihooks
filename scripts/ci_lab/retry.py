@@ -17,25 +17,34 @@ class Policy:
 
 @dataclass(frozen=True)
 class UnitResult:
-    """One run of a unit: its outcome and how many times the unit already ran again."""
+    """One run of a unit: its outcome and how many times the unit already ran again.
+
+    Outcomes: passed; lost (an expired lease) and crash (a crashed worker) are losses; failed (a test failure),
+    gate_failed (a static gate failure), survived (a survived mutant) and any other outcome are failures.
+    """
 
     outcome: str
     attempts: int
 
 
 DEFAULT = Policy()
+PASSED = "passed"
+LOST = frozenset({"lost", "crash"})
 
 
 def decide(result: UnitResult, rules: Policy = DEFAULT) -> str:
     """Return retry while the result's kind has retries left under the rules, else final."""
-    raise NotImplementedError((result, rules))
+    if result.outcome == PASSED:
+        return "final"
+    allowed = rules.lost if result.outcome in LOST else rules.failed
+    return "retry" if result.attempts < allowed else "final"
 
 
 def red(result: UnitResult) -> bool:
     """Return whether the result, once final, makes its unit's grade red."""
-    raise NotImplementedError(result)
+    return result.outcome != PASSED
 
 
 def policy(lab: Mapping[str, Any]) -> Policy:
     """Return the retry counts of a validated lab block, the defaults for any count lab.retry leaves out."""
-    raise NotImplementedError(lab)
+    return Policy(**lab.get("retry", {}))
