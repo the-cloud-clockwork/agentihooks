@@ -50,11 +50,11 @@ def test_capacity_document_reports_every_class() -> None:
     body = capacity.document(load)
     assert body == {
         "classes": {
-            "hotfix": {"pending": 0, "running": 0, "predicted_wait_s": 0.0},
-            "pull_request": {"pending": 2, "running": 3, "predicted_wait_s": 200.0},
-            "queue": {"pending": 0, "running": 1, "predicted_wait_s": 0.0},
-            "promotion": {"pending": 0, "running": 0, "predicted_wait_s": 0.0},
-            "backfill": {"pending": 1, "running": 0, "predicted_wait_s": 300.0},
+            "hotfix": {"pending": 0, "running": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": None},
+            "pull_request": {"pending": 2, "running": 3, "predicted_wait_s": 200.0, "verdict_cache_hit_ratio": None},
+            "queue": {"pending": 0, "running": 1, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": None},
+            "promotion": {"pending": 0, "running": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": None},
+            "backfill": {"pending": 1, "running": 0, "predicted_wait_s": 300.0, "verdict_cache_hit_ratio": None},
         },
         "slots": {"total": 6, "busy": 4, "free": 2},
         "utilisation": 4 / 6,
