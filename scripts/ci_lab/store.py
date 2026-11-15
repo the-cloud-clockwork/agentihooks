@@ -1,10 +1,11 @@
 """The lab verdict store: a write once Redis index over the content addressed report and log objects."""
 
+import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from scripts.ci_lab.objects import Objects
+from scripts.ci_lab.objects import ROOT, Objects, is_report, unit_path
 
 __all__ = ["DISABLED", "INDEX", "PREFIX", "Store", "Verdict"]
 
@@ -22,6 +23,14 @@ class Verdict:
     seconds: float
 
 
+def _json(document: Mapping[str, object]) -> str:
+    return json.dumps(document, sort_keys=True)
+
+
+def _stored(report: bytes) -> Verdict:
+    return Verdict(**json.loads(report)["verdict"])
+
+
 class Store:
     """Verdicts by unit key: a write once Redis index over the report and log objects it rebuilds from."""
 
@@ -31,20 +40,36 @@ class Store:
 
     def get(self, kind: str, key: str, *, bypass_negative: bool = False) -> Verdict | None:
         """Return the stored verdict, or None for an unknown key, a disabled kind or a bypassed negative verdict."""
-        raise NotImplementedError
+        if self.client.sismember(DISABLED, kind):
+            return None
+        raw = self.client.get(f"{INDEX}{kind}:{key}")
+        if raw is None:
+            return None
+        verdict = Verdict(**json.loads(raw))
+        return None if bypass_negative and not verdict.passed else verdict
 
     def put(self, verdict: Verdict, report: Mapping[str, object], log: bytes) -> bool:
         """Store a verdict once; return False and change nothing when its key is already stored."""
-        raise NotImplementedError
+        report_path = unit_path(verdict.kind, verdict.key, "report")
+        log_path = unit_path(verdict.kind, verdict.key, "log")
+        self.objects.write_once(log_path, log)
+        document = {"report": dict(report), "verdict": asdict(verdict)}
+        written = self.objects.write_once(report_path, _json(document).encode())
+        stored = verdict if written else _stored(self.objects.read(report_path))
+        return self._index(stored) and written
 
     def disable(self, kind: str) -> None:
         """Stop reuse of a kind: every get of it misses until enable."""
-        raise NotImplementedError
+        self.client.sadd(DISABLED, kind)
 
     def enable(self, kind: str) -> None:
         """Resume reuse of a kind."""
-        raise NotImplementedError
+        self.client.srem(DISABLED, kind)
 
     def reindex(self) -> int:
         """Rebuild the index from the stored report objects; return how many entries it added."""
-        raise NotImplementedError
+        reports = [path for path in self.objects.keys(ROOT) if is_report(path)]
+        return sum(self._index(_stored(self.objects.read(path))) for path in reports)
+
+    def _index(self, verdict: Verdict) -> bool:
+        return bool(self.client.set(f"{INDEX}{verdict.kind}:{verdict.key}", _json(asdict(verdict)), nx=True))
