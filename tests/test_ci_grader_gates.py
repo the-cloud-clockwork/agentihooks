@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts import ci_marker_vectors
+
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,6 +152,17 @@ def test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy(
     (head / ".marker-kernel" / VECTORS).write_text('{"head": 1}\n')
     matched = _run(step, head, tmp_path / "runner")
     assert matched.returncode == 0, matched.stdout + matched.stderr
+
+
+@pytest.mark.feature("lint-gates-grade-from-grader")
+def test_the_marker_check_reads_the_vectors_under_the_root_it_names(tmp_path: Path) -> None:
+    (tmp_path / "tests/fixtures").mkdir(parents=True)
+    (tmp_path / VECTORS).write_text('{"head": 1}\n')
+    kernel = tmp_path / "kernel.json"
+    kernel.write_text('{"head": 1}\n')
+    assert ci_marker_vectors.main(["--root", str(tmp_path), str(kernel)]) == 0
+    kernel.write_text('{"kernel": 1}\n')
+    assert ci_marker_vectors.main(["--root", str(tmp_path), str(kernel)]) == 1
 
 
 @pytest.mark.feature("lint-gates-grade-from-grader")
