@@ -51,6 +51,7 @@ def test_scope_provisions_dedupe_and_buckets_then_reuses_owned_resources(monkeyp
         _config=config,
         _loop=SimpleNamespace(run=asyncio.run),
         _js=SimpleNamespace(add_stream=AsyncMock(), stream_info=AsyncMock(side_effect=NotFoundError())),
+        lab_heads=object(),
     )
     view = nats_scope.NatsScopedBus(root, "rig")
     assert view.events._log._swarm == "rig"

@@ -75,6 +75,7 @@ class Bus(Protocol):
     events: EventLog
     dead: EventLog
     stops: EventLog
+    lab_heads: EventLog
 
     def queue(self, name: str, policy: QueuePolicy) -> WorkQueue: ...
 
