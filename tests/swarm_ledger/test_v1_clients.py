@@ -3,6 +3,7 @@ import json
 import sys
 import urllib.error
 import uuid
+from typing import Any
 
 import chat_ledger  # noqa: E402
 import ledger_hook  # noqa: E402
@@ -13,6 +14,7 @@ from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger as ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
 from scripts.swarm_ledger.api import client as api_client  # noqa: E402
+from scripts.tick.adapters import database_ledger
 from tests.swarm_ledger.ledger_front import Front
 from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
 from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger
@@ -144,8 +146,8 @@ class Recorder:
     def __init__(self, reply=None, error=None):
         self.calls, self.reply, self.error = [], reply, error
 
-    def __call__(self, slug, ops, service=False, **options):
-        self.calls.append((slug, [dict(op) for op in ops], service))
+    def __call__(self, slug: str, ops: list[dict[str, Any]], **options: Any) -> Any:
+        self.calls.append((slug, [dict(op) for op in ops], database_ledger.ACTING.get() == ""))
         self.options = options
         if self.error is not None:
             raise self.error

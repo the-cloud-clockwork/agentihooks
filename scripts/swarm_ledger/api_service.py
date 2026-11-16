@@ -520,7 +520,7 @@ def adopt_disk_files() -> None:
 
 def services() -> Services:
     """The ledger API services with every write hook, over the shared repository."""
-    built: Services = server.api_services(
+    hooks = server.WriteHooks(
         bin_ledger=ledger_bin.delete,
         write_layout=ledger_layout.write,
         write_gate=write_gate,
@@ -533,6 +533,7 @@ def services() -> Services:
         control_argv=control_argv,
         doctor_phrase=doctor_phrase,
     )
+    built: Services = server.api_services(hooks)
     return built
 
 

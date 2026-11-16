@@ -138,6 +138,11 @@ class LedgerClient:
         if ops is not None and (epoch := lease.epoch_for(slug)) is not None:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
+        if service:
+            from scripts.swarm_ledger.authority_context import REMOTE_SERVICE, service_refused
+
+            if service_refused(slug):
+                raise SwarmError(f"ledger {slug}: {REMOTE_SERVICE}")
         ledger = _ledger()
         held_offline = offline()
         if held_offline and not ops:

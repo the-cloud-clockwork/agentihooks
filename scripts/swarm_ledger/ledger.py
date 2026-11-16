@@ -155,7 +155,7 @@ def base(slug=""):
 
 
 def credentials(slug, service=False):
-    from scripts.swarm_ledger.authority_context import tick_headers
+    from scripts.swarm_ledger.authority_context import REMOTE_SERVICE, tick_headers
 
     who = Who.from_env()
     if ledger_link.remote(slug=slug):
@@ -166,7 +166,7 @@ def credentials(slug, service=False):
         if controller and not who.pinned:
             return {"X-Controller-Credential": controller}
         if service:
-            sys.exit("a remote ledger client cannot make service writes; the operator credential stays on its host")
+            sys.exit(REMOTE_SERVICE)
         if not who.pinned:
             raise unauthenticated(
                 "a remote ledger client needs a pinned agent identity; the operator credential stays on its host"

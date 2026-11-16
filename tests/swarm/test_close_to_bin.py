@@ -45,7 +45,7 @@ def test_the_client_bins_a_closed_ledger_and_reopen_takes_it_out(monkeypatch):
     from scripts.swarm_ledger import storage
     from scripts.swarm_ledger.repository import bin_storage
 
-    storage.default().create("sw", {"title": "t", "overview": "o", "phases": []})
+    storage.default().create("sw", {"title": "t", "overview": "o", "phases": [{"title": "p"}]})
     calls, client = [], LedgerClient()
     monkeypatch.setattr(client, "_call", lambda slug, ops=None: calls.append(ops[0]["op"]) or {})
     monkeypatch.setattr(bin_storage, "bin_closed", lambda slug, closed_at: calls.append(("bin", slug, closed_at)))

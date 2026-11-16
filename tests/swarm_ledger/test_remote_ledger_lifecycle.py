@@ -85,7 +85,14 @@ def test_remote_local_storage_calls_name_the_server_route(mode, operation):
 
 def test_remote_lifecycle_refusals_use_swarm_errors(live):
     with (
-        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_AGENT_NAME": WORKER}),
+        patch.dict(
+            os.environ,
+            {
+                "AGENTIHOOKS_DEPLOYMENT": "compose",
+                "AGENTIHOOKS_SWARM": "rig-grade-swarm",
+                "AGENTIHOOKS_AGENT_NAME": WORKER,
+            },
+        ),
         pytest.raises(LedgerRefused, match="403"),
     ):
         LedgerClient().bin_closed(SLUG, 1)

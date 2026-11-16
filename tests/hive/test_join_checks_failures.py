@@ -134,7 +134,7 @@ def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monke
     assert reported["unreachable"] == {
         "error": "LedgerUnreachable",
         "status": None,
-        "message": "ledger sw: ledger server not answering on http://ledger.example: "
+        "message": f"ledger sw: ledger server not answering on {ledger.base('sw')}: "
         "<urlopen error [Errno 111] Connection refused>",
     }
     assert reported["credential"] == {

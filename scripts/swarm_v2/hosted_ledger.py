@@ -4,6 +4,7 @@ holds every task and applies every write."""
 import json
 import time
 import urllib.error
+from typing import Any
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger
@@ -52,7 +53,11 @@ class HostedLedger:
         """The ledger API client run in this process over the shared database, judged as the swarm's service."""
         from scripts.tick.adapters import database_ledger
 
-        return database_ledger.client(self.base, ledger.REQUEST_TIMEOUT)
+        def served(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+            with database_ledger.acting(""):
+                return database_ledger.request(slug, path, payload)
+
+        return hub_client.ResourceClient(self.base, {}, ledger.REQUEST_TIMEOUT, transport=served)
 
     def fetch(self, slug: str, key: str) -> tuple[dict | None, str | None]:
         try:

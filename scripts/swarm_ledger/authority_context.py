@@ -2,7 +2,9 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any, cast
 
+REMOTE_SERVICE = "a remote ledger client cannot make service writes; the operator credential stays on its host"
 _current = None
 
 
@@ -21,6 +23,16 @@ def tick_headers(slug: str) -> dict[str, str]:
     if not _current:
         return {}
     return {"X-Ledger-Tick": tick_token(_current, slug, int(time.time()) + TICK_TTL)}
+
+
+def service_refused(slug: str) -> bool:
+    """Whether this process is a pinned agent on a remote host acting as the swarm's own service on ledger ``slug``
+    without the tick's credential: the operator's service credential stays on its host."""
+    from scripts.gates import Who
+    from scripts.swarm_ledger.ledger_link import remote
+
+    who: Any = cast(Any, Who).from_env()
+    return bool(who.pinned) and remote(slug=slug) and not tick_headers(slug)
 
 
 def _hosted_secret(server_secret) -> str | None:
