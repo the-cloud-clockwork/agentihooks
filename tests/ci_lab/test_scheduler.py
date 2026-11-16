@@ -8,8 +8,9 @@ import fakeredis
 import pytest
 
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import scheduler
+from scripts.ci_lab import evidence, scheduler
 from scripts.ci_lab.checks import Output
+from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import StaticInputs, Toolchain, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
@@ -183,6 +184,56 @@ def test_a_fully_cached_head_enqueues_nothing_and_completes_at_once(lab: Callabl
     assert f"grading {grade.run} with 0 of 2 units enqueued" in actions
     assert f"completed {grade.run} success" in actions
     assert run.lab.repos == [SLUG]
+
+
+@pytest.mark.feature("lab-scheduler-evidence")
+def test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head(lab: Callable[..., Run]) -> None:
+    units = (unit(1), unit(2))
+    run = lab({HEAD_A: plan({"lint": units})})
+    for item in units:
+        run.cache(item)
+    run.push(HEAD_A)
+    run.tick(1000)
+    grade = run.grade(HEAD_A)
+    text, missing = evidence.show(run.lab.objects, [grade.run])
+    paths = [unit_path(item.kind, item.key, name) for item in units for name in ("report", "log")]
+    assert missing == []
+    assert text == "\n".join(
+        [
+            f"grade {grade.run}",
+            f"repository {grade.repo}",
+            f"head {HEAD_A}",
+            f"base {BASE}",
+            f"tier {CLASSES[grade.tier]}",
+            f"grader {BASE}",
+            "kinds static:2",
+            f"unit static {units[0].key} run {grade.run}",
+            f"  report {paths[0]}",
+            f"  log {paths[1]}",
+            f"unit static {units[1].key} run {grade.run}",
+            f"  report {paths[2]}",
+            f"  log {paths[3]}",
+            "",
+        ]
+    )
+    assert run.lab.objects.keys(evidence.head_prefix(HEAD_A)) == [evidence.head_prefix(HEAD_A) + grade.run]
+
+
+@pytest.mark.feature("lab-scheduler-evidence")
+def test_a_grade_is_recorded_only_once_its_last_unit_is_final(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grade = run.grade(HEAD_A)
+    assert evidence.show(run.lab.objects, [grade.run]) == ("", [evidence.grade_path(grade.run)])
+    assert run.lab.objects.keys(evidence.head_prefix(HEAD_A)) == []
+    run.finish(run.lease()[0], "passed", {"seconds": 2.0})
+    run.tick(1100)
+    text, missing = evidence.show(run.lab.objects, [grade.run])
+    assert missing == []
+    assert f"\nunit static {item.key} run {grade.run}\n" in text
+    assert run.lab.objects.keys(evidence.head_prefix(HEAD_A)) == [evidence.head_prefix(HEAD_A) + grade.run]
 
 
 @pytest.mark.feature("lab-scheduler-grade")
