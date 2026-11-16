@@ -774,7 +774,7 @@ class WriteHandler(BaseHandler, Writes):
         """Answer the health probe; the ledger server serves every read."""
         if self.refused():
             return None
-        if self.path.split("?", 1)[0] == "/healthz":
+        if self.path.partition("?")[0] == "/healthz":
             return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
         return self.send(404, "the ledger API service takes writes; read from the ledger server", "text/plain")
 

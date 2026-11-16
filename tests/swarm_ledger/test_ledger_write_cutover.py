@@ -2,6 +2,7 @@
 claim and its release land in the store with no request to the ledger server, the ledger server answers every write
 method as unsupported, and a hosted hub without the shared database refuses to start."""
 
+import dataclasses
 import http.server
 import threading
 import urllib.error
@@ -131,6 +132,23 @@ def test_the_ledger_server_answers_every_write_method_as_unsupported(method: str
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_every_write_hook_of_the_read_only_ledger_server_refuses_with_405() -> None:
+    from scripts.swarm_ledger.api.errors import APIError
+
+    hooks = ledger_server.WriteHooks()
+    writes = [hook for hook in (getattr(hooks, field.name) for field in dataclasses.fields(hooks)) if callable(hook)]
+    assert len(writes) == 10
+    for write in writes:
+        with pytest.raises(APIError) as refused:
+            write(SLUG, {"op": "task_set"})
+        assert (refused.value.status, refused.value.code, str(refused.value), refused.value.details) == (
+            405,
+            "method_not_allowed",
+            "The ledger server only reads; the ledger API service takes writes",
+            None,
+        )
 
 
 @pytest.mark.feature("swarm-ledger-api-writes")

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import sqlite3
 import threading
@@ -505,6 +506,82 @@ def test_a_failed_api_service_still_releases_the_lease(serving: Path) -> None:
     with pytest.raises(OSError, match="disk full"):
         api_service.serve()
     ledger_writer.WriterLease(serving).acquire(OTHER).release()
+
+
+def answered(monkeypatch: pytest.MonkeyPatch, path: str, refused: bool = False) -> list[tuple[int, str, str]]:
+    """What the API service's GET handler sends for path, as status, body and content type."""
+    from scripts.swarm_ledger import api_service
+
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
+    sent: list[tuple[int, str, str]] = []
+
+    def refuse() -> bool:
+        return refused
+
+    def send(code: int, body: str, ctype: str) -> None:
+        sent.append((code, body, ctype))
+
+    handler.path = path
+    monkeypatch.setattr(handler, "refused", refuse)
+    monkeypatch.setattr(handler, "send", send)
+    handler.do_GET()
+    return sent
+
+
+@pytest.mark.parametrize("path", ["/healthz", "/healthz?probe=1?again=2"])
+def test_the_api_service_health_probe_names_its_ledger_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, path: str
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    monkeypatch.setattr(api_service.core, "LEDGER_DIR", tmp_path)
+    assert answered(monkeypatch, path) == [(200, json.dumps({"dir": str(tmp_path)}), "application/json")]
+
+
+def test_the_api_service_sends_reads_to_the_ledger_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert answered(monkeypatch, "/api/v1/ledgers/rig/tasks") == [
+        (404, "the ledger API service takes writes; read from the ledger server", "text/plain")
+    ]
+
+
+def test_a_refused_health_probe_sends_nothing_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert answered(monkeypatch, "/healthz", refused=True) == []
+
+
+def test_the_api_service_command_wires_the_services_and_then_serves(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger import api_service, composition
+
+    steps: list[str] = []
+    monkeypatch.setattr(composition, "wire", lambda: steps.append("wire"))
+    monkeypatch.setattr(api_service, "serve", lambda: steps.append("serve"))
+    api_service.main(["--serve"])
+    assert steps == ["wire", "serve"]
+
+
+def test_the_api_service_command_refuses_to_run_without_serve(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm_ledger import api_service, composition
+
+    steps: list[str] = []
+    monkeypatch.setattr(composition, "wire", lambda: steps.append("wire"))
+    monkeypatch.setattr(api_service, "serve", lambda: steps.append("serve"))
+    with pytest.raises(SystemExit) as stopped:
+        api_service.main([])
+    assert stopped.value.code == 2
+    assert capsys.readouterr().err.endswith(": error: --serve is the only mode\n")
+    assert steps == []
+
+
+def test_the_api_service_command_help_names_the_service_and_its_one_mode(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm_ledger import api_service
+
+    with pytest.raises(SystemExit) as stopped:
+        api_service.main(["--help"])
+    assert stopped.value.code == 0
+    shown = capsys.readouterr().out
+    assert "\nThe ledger API service: every ledger write over HTTP.\n" in shown
+    assert re.search(r"^  --serve +run in the foreground$", shown, re.MULTILINE)
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
