@@ -444,8 +444,10 @@ prep=$!
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
 bash "$chart/ci/hive-drain-proof.sh" "$image" "$release" &
 drain_proof=$!
+bash "$chart/ci/stale-replica-plant.sh" "$release" plant
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
+bash "$chart/ci/stale-replica-plant.sh" "$release" measure
 hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
 if [[ -z $hive ]]; then
   printf 'the controller deployment sets no SWARM_HIVE_ID\n' >&2
