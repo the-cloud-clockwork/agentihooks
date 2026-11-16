@@ -5,8 +5,8 @@ rules:
     message: >-
       Ordered 2026-11-07, the tick reads and writes the shared database instead of the ledger server: the tick route
       runs its pass inside database_ledger.scoped() or as the swarm's own service through database_ledger.acting(""),
-      and the tick ledger port builds the database client while database_ledger.serving() or always through
-      ledger.client, which runs the ledger API route code in process.
+      the tick ledger port builds the database client while database_ledger.serving() or through ledger.client and
+      builds no ResourceClient of its own outside that branch, and ledger.client returns the database client.
     patterns:
       - pattern-either:
           - patterns:
@@ -38,8 +38,33 @@ rules:
                     ...
                     $BUILT: ResourceClient = ledger.client(...)
                     return $BUILT
+          - patterns:
+              - pattern-inside: |
+                  def build(remaining: float) -> ResourceClient:
+                    ...
+              - pattern: ResourceClient(...)
+              - pattern-not-inside: |
+                  if database_ledger.serving():
+                    return database_ledger.client(...)
+                  ...
+                  return ResourceClient(...)
+          - patterns:
+              - pattern: |
+                  def client(...):
+                    ...
+              - pattern-not: |
+                  def client(...):
+                    ...
+                    if database_ledger.serving():
+                      return database_ledger.client(...)
+                    ...
+              - pattern-not: |
+                  def client(...):
+                    ...
+                    return database_ledger.client(...)
     paths:
       include:
         - /scripts/swarm_ledger/ledger_route.py
+        - /scripts/swarm_ledger/ledger.py
         - /scripts/tick/adapters/ledger.py
         - '*.test.py'
