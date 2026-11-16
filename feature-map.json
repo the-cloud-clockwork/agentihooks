@@ -7368,6 +7368,19 @@
         "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
         "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
       ]
+    },
+    {
+      "id": "hub-admission-earlier-lives-launched-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admission-branch-heads-after-answer",
+      "behaviour": "Hub admission reads branch heads only for the earlier lives of a reclaimed task that launched: an agent retired while still starting with no pane, such as one the hub freed because no hive started it, ran nothing and pushed no branch, so it adds no branch to the GitHub query and a task whose earlier lives all never launched reads no branch heads; those lives never count toward the claim cap either.",
+      "seam": "RedisStore.earlier_lives over the swarm history, Admission.admit through its branch heads read, and the claim cap after Admission.free",
+      "tests": [
+        "tests/swarm/test_store.py::test_earlier_lives_leave_out_an_agent_retired_while_starting_with_no_pane",
+        "tests/hub/test_admission.py::test_the_branch_heads_query_asks_only_for_earlier_lives_that_launched",
+        "tests/hub/test_admission.py::test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission",
+        "tests/hub/test_admission_claim_cap.py::test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap"
+      ]
     }
   ],
   "unmapped_rules": [
