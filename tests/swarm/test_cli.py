@@ -1,3 +1,4 @@
+import hashlib
 import json
 import multiprocessing
 import subprocess
@@ -829,7 +830,9 @@ def test_as_equals_is_not_mistaken_for_set(env, seat, monkeypatch):
     assert run("sw", "--as=engineer@a1b2c3-0001", "issue", "https://github.com/o/r/issues/1") == 0
 
 
+@pytest.mark.feature("review-state-on-ledger")
 def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkeypatch, capsys, tmp_path):
+    _, ledger, _ = env
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     run("sw", "create", "--repo", "/repo")
     started(env, seat)
@@ -841,39 +844,25 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkey
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": 3, "notice": cli.review_rounds.CLOSED}
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
+    assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": 3}
 
 
-@pytest.mark.parametrize("legacy,register_first", [(False, False), (True, False), (True, True)])
-def test_review_budget_keeps_each_pull_requests_rounds(
-    env, seat, monkeypatch, capsys, tmp_path, legacy, register_first
-):
+@pytest.mark.feature("review-state-on-ledger")
+def test_review_spends_the_rounds_the_ledger_task_holds_for_each_pull_request(env, seat, monkeypatch, capsys, tmp_path):
     _, ledger, _ = env
-    read_task = ledger.task
-    monkeypatch.setattr(ledger, "task", lambda slug, task: read_task(slug, task) if slug == "sw" else None)
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     run("sw", "create", "--repo", "/repo")
     started(env, seat)
     capsys.readouterr()
-    first = "https://github.com/o/r/pull/1"
-    second = "https://github.com/o/r/pull/2"
-    if legacy:
-        for _ in range(3):
-            cli.review_rounds.Budget("sw", "reviews").spend("t1", "rounds", 3)
-    else:
-        ledger.rows["t1"]["pr_url"] = first
-        for n in (1, 2, 3):
-            assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
-            assert json.loads(capsys.readouterr().out)["round"] == n
-    if legacy and register_first:
-        ledger.rows["t1"]["pr_url"] = first
-        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
-        assert "no fourth review round" in capsys.readouterr().err
-    ledger.rows["t1"].update(pr_url=second, split_pulls=[first, second])
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
-    assert json.loads(capsys.readouterr().out)["round"] == 1
-    ledger.rows["t1"]["pr_url"] = first
+    first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    spent = f"rounds-{hashlib.sha256(first.encode()).hexdigest()}"
+    ledger.rows["t1"].update(pr_url=first, review_rounds={spent: 3})
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert "no fourth review round" in capsys.readouterr().err
+    ledger.rows["t1"]["pr_url"] = second
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+    assert json.loads(capsys.readouterr().out)["round"] == 1
+    assert ledger.rows["t1"]["review_rounds"] == {spent: 3, f"rounds-{hashlib.sha256(second.encode()).hexdigest()}": 1}
 
 
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):

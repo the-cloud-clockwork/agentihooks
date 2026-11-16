@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm.status import findings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.helpers import store_seed
@@ -41,24 +43,20 @@ def test_restarts_that_each_start_on_a_new_pull_request_head_raise_no_proof_loop
     assert findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], []) == []
 
 
-def test_proof_loop_reads_each_pull_requests_review_budget(monkeypatch, tmp_path):
+@pytest.mark.feature("review-state-on-ledger")
+def test_proof_loop_reads_each_pull_requests_review_rounds_from_the_task_row(monkeypatch, tmp_path):
     import fakeredis
 
     from scripts.gates import log as gate_log
-    from scripts.swarm import review_rounds
 
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_REVIEW_ROUNDS", "1")
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
-    tasks = [{"id": "t1", "title": "Review split task"}]
-    first = "https://github.com/o/r/pull/1"
-    second = "https://github.com/o/r/pull/2"
-    review_rounds.start("sw", "t1", pr_url=first)
-    review_rounds.start("sw", "t1", pr_url=second)
-    assert findings(store, "sw", store.config("sw"), tasks, []) == []
-    review_rounds.start("sw", "t1", pr_url=first)
-    found = findings(store, "sw", store.config("sw"), tasks, [])
+    task = {"id": "t1", "title": "Review split task", "review_rounds": {"rounds-a": 1, "rounds-b": 1}}
+    assert findings(store, "sw", store.config("sw"), [task], []) == []
+    task["review_rounds"]["rounds-a"] = 2
+    found = findings(store, "sw", store.config("sw"), [task], [])
     assert [(row["kind"], row["subject"]) for row in found] == [("proof loop", "t1")]
     assert "2 review rounds" in found[0]["evidence"]
 

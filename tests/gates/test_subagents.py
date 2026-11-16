@@ -1,10 +1,14 @@
 import io
 import json
 
+import pytest
+
 from scripts.gates import Call, Gate, Who, entry, modes
 from scripts.gates.budget import Budget
 from scripts.gates.subagents import SubagentBudget, refusal
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm.store import SwarmError
+from tests.swarm.review_ledger import ReviewLedger
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
 
@@ -105,3 +109,55 @@ def test_the_refusal_names_the_spend_the_cap_and_the_way_out():
         "the sub-agent budget for task t1 is spent: 8 of 8 launches. Merge with the ruled findings, file the spec "
         'finding as a follow-up, or block with agentihooks swarm demo block "<why>"'
     )
+
+
+class Unreachable:
+    def task(self, slug: str, task_id: str) -> dict:
+        raise OSError("connection refused")
+
+
+class Refusing(ReviewLedger):
+    def update_task(self, *args: object, **kwargs: object) -> dict:
+        raise SwarmError("ledger demo: server refused: task_update may set only")
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter(tmp_path, monkeypatch):
+    ledger = ReviewLedger(slug="demo")
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    gate = SubagentBudget()
+    gate.decide(Call("Agent", {"name": "standards-reader", "prompt": "go"}), ME, state(tmp_path))
+    gate.decide(Call("Task", {"subagent_type": "spec-reader"}), ME, state(tmp_path))
+    gate.decide(launch(), ME, state(tmp_path))
+    assert ledger.rows["t1"]["review_readers"] == ["spec-reader", "standards-reader"]
+    assert [(write["by"], write["if_match"]) for write in ledger.writes] == [
+        (ME.name, {"review_readers": []}),
+        (ME.name, {"review_readers": ["standards-reader"]}),
+    ]
+    budget = Budget("demo", "subagents", tmp_path)
+    assert (budget.spent("t1", "standards-reader"), budget.spent("t1", "spec-reader")) == (1, 1)
+
+
+@pytest.mark.parametrize("ledger", [Unreachable(), Refusing(slug="demo")])
+def test_a_ledger_that_cannot_take_the_reader_leaves_it_counted_here_and_the_launch_allowed(
+    tmp_path, monkeypatch, ledger
+):
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    decision = SubagentBudget().decide(Call("Agent", {"name": "spec-reader", "prompt": "go"}), ME, state(tmp_path))
+    assert decision.allowed
+    assert Budget("demo", "subagents", tmp_path).spent("t1", "spec-reader") == 1
+    assert [r["kind"] for r in rows(tmp_path)] == ["count"]
+
+
+def test_a_refused_reader_launch_is_not_recorded_on_the_ledger(tmp_path, monkeypatch):
+    ledger = ReviewLedger(slug="demo")
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    decision = SubagentBudget(launches=0).decide(Call("Agent", {"name": "spec-reader"}), ME, state(tmp_path))
+    assert (decision.allowed, ledger.writes) == (False, [])
+
+
+def test_a_launch_naming_no_reader_never_reaches_the_ledger(tmp_path, monkeypatch):
+    made: list[ReviewLedger] = []
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: made.append(ReviewLedger()) or made[-1])
+    assert SubagentBudget().decide(launch(), ME, state(tmp_path)).allowed
+    assert made == []
