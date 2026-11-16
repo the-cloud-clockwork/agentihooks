@@ -2188,35 +2188,25 @@ jobs:
       - *python
 
       - name: Download collected tests
-        id: shard-data
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &shard-check-download-collected-tests
-          pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
-          path: shard-data
+        uses: ./.github/actions/retry-download
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected-data
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' collected-data/collected.json
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
-      - name: Download collected tests, wait before attempt 2
-        if: steps.shard-data.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download collected tests failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download collected tests, attempt 2
-        if: steps.shard-data.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *shard-check-download-collected-tests
-
-      - name: Arrange shard verification data
-        shell: bash
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-          REUSED: ${{ needs.split.outputs.reused }}
-        run: |
-          mv "shard-data/collected-$PYTHON_VERSION" collected-data
-          if [[ -n "$REUSED" && "$REUSED" != '0' ]]; then
-            mv "shard-data/reused-tests-$PYTHON_VERSION" reused-plan
-          fi
+      - name: Download the tests this run reuses
+        if: needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
+        uses: ./.github/actions/retry-download
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-plan
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' reused-plan/reused-tests.json
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Mint the tcc main ci App token
         id: app-token
