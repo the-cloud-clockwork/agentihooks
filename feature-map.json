@@ -4977,6 +4977,17 @@
       ]
     },
     {
+      "id": "hive-join-report-tool-repair",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2451",
+      "behaviour": "A swarm session whose hive join report write failed at session start, such as on a Redis connection error, writes the report on its next tool call when its execution has none, so the launch check grades the report instead of failing the launch on a missing one; a tool call leaves a report another session of the execution wrote in place and only retries its ledger checks.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_a_tool_call_writes_the_join_report_a_failed_start_left_missing",
+        "tests/test_hive_join_hook.py::test_a_tool_call_leaves_the_join_report_of_another_session_in_place"
+      ]
+    },
+    {
       "id": "hive-join-session-identity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-launch-check-misses",
