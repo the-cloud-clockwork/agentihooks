@@ -6570,6 +6570,16 @@
       ]
     },
     {
+      "id": "artifact-downloads-retry-a-stalled-blob",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-download-artifact-retry",
+      "behaviour": "Every artifact download in the workflows, composite actions and reviewed test summary steps uses actions/download-artifact@v8.0.2, which fetches a blob again when its stream stalls for thirty seconds, so a stalled download never passes with a partial file the way v4.3.0 did.",
+      "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
+      ]
+    },
+    {
       "id": "lab-full-pool-wait",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-full-pool-wait",

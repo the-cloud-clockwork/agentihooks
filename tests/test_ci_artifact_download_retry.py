@@ -98,7 +98,9 @@ def _download_steps(node: object) -> list[str]:
 
 
 def test_every_download_step_uses_the_release_that_retries_a_stalled_blob() -> None:
-    files = [*(ROOT / ".github").rglob("*.yml"), ROOT / "scripts/ci_gate_summary_steps.yml"]
+    github = ROOT / ".github"
+    files = [*github.rglob("*.yml"), *github.rglob("*.yaml"), ROOT / "scripts/ci_gate_summary_steps.yml"]
     refs = {str(path.relative_to(ROOT)): _download_steps(yaml.safe_load(path.read_text())) for path in files}
-    assert sum(len(found) for found in refs.values()) >= 100
+    written = sum(path.read_text().count("actions/download-artifact@") for path in files)
+    assert written and sum(len(found) for found in refs.values()) >= written
     assert {path: found for path, found in refs.items() if set(found) - {"actions/download-artifact@v8.0.2"}} == {}
