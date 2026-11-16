@@ -1014,14 +1014,15 @@
       "id": "hive-spoke-own-claimed-leftover-asked-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2583",
-      "behaviour": "A hive spoke whose pending admission points at a claim its own hive still holds as claimed answers busy while that claim may still be inside an admission wait, and once the claim has kept the same pending reservation for a whole admit ask timeout since the spoke first saw it, the wait that wrote it has ended without settling it and the spoke asks the hub again as it does for an asked claim, instead of answering busy on every poll: the hub's kept admission launches with no wait for a redelivery of the offer, a held answer frees the claim to ready and a refusal withdraws it, and either clears the pending admission so the spoke takes offers again. A claim another hive holds still keeps the spoke busy.",
-      "seam": "Spoke._recover and Spoke._wait_ended on the hive, through Spoke._ask_again",
+      "behaviour": "A hive spoke whose pending admission points at a claim its own hive still holds as claimed answers busy while that claim may still be inside an admission wait, and once the claim has kept the same pending reservation for a whole admit ask timeout since the spoke first saw it, the wait that wrote it has ended without settling it and the spoke asks the hub again as it does for an asked claim, instead of answering busy on every poll: the hub's kept admission launches with no wait for a redelivery of the offer, a held answer frees the claim to ready and a refusal withdraws it, and either clears the pending admission so the spoke takes offers again, while a repeat ask left unanswered turns it into an asked claim asked again on the next poll. A claimed claim another hive holds still keeps the spoke busy past the timeout.",
+      "seam": "Spoke._recover and Spoke._first_seen on the hive, through Spoke._ask_again",
       "rules": [
         "hive-spoke-recovery-keeps-own-claimed-busy"
       ],
       "tests": [
         "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_timeout_later",
-        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_is_freed_when_the_hub_holds_or_refuses_it"
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_settles_like_an_asked_claim_on_the_repeat_ask",
+        "tests/hive/test_spoke.py::test_a_claimed_claim_another_hive_holds_keeps_the_spoke_busy_past_the_admit_ask_timeout"
       ]
     },
     {

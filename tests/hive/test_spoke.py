@@ -588,17 +588,29 @@ def test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_ti
 
 @pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
 @pytest.mark.parametrize(
-    ("answer", "outcome", "state"),
-    [("held", "held", {"state": "ready"}), ("refused", "withdrawn", {"state": "withdrawn"})],
+    ("answer", "outcome", "state", "kept"),
+    [
+        ("held", "held", {"state": "ready"}, False),
+        ("refused", "withdrawn", {"state": "withdrawn"}, False),
+        ("unanswered", "asked", {"state": "asked", "owner": "hive-a"}, True),
+    ],
 )
-def test_a_claim_its_own_ended_admission_wait_left_is_freed_when_the_hub_holds_or_refuses_it(
-    rig: SimpleNamespace, answer: str, outcome: str, state: dict[str, str]
+def test_a_claim_its_own_ended_admission_wait_left_settles_like_an_asked_claim_on_the_repeat_ask(
+    rig: SimpleNamespace, answer: str, outcome: str, state: dict[str, str], kept: bool
 ) -> None:
+    import json
+
     from scripts.hive import account_slots, admission
 
     pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"})
-    rig.tasks.request.side_effect = [admission.Held("2 of 2 agents on the hive") if answer == "held" else None]
-    rig.spoke.measure = lambda: None
+    assert rig.queue.withdraw(lambda event: True) == 1
+    rig.tasks.request.side_effect = [
+        {
+            "held": admission.Held("2 of 2 agents on the hive"),
+            "refused": None,
+            "unanswered": admission.Unanswered("no responders for 'slots.rig.hive-a'"),
+        }[answer]
+    ]
     rig.spoke.clock = lambda: rig.clock.now
     assert rig.spoke.poll() == "busy"
     rig.clock.now = account_slots.REQUEST_TIMEOUT_MS
@@ -606,8 +618,28 @@ def test_a_claim_its_own_ended_admission_wait_left_is_freed_when_the_hub_holds_o
     assert rig.spoke.poll() == outcome
 
     assert claim(rig) == state
-    assert pending.get(rig.spoke._pending_key).value == b"{}"
+    assert (json.loads(pending.get(rig.spoke._pending_key).value) != {}) is kept
     rig.tasks.request.assert_called_once_with(rig.event)
+    rig.runtime.spawn.assert_not_called()
+
+
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+def test_a_claimed_claim_another_hive_holds_keeps_the_spoke_busy_past_the_admit_ask_timeout(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import account_slots
+
+    pending = seed_pending(rig, {"owner": "hive-b", "state": "claimed"})
+    before = pending.get(rig.spoke._pending_key)
+    rig.spoke.clock = lambda: rig.clock.now
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = account_slots.REQUEST_TIMEOUT_MS
+
+    assert rig.spoke.poll() == "busy"
+
+    assert claim(rig) == {"owner": "hive-b", "state": "claimed"}
+    assert pending.get(rig.spoke._pending_key).revision == before.revision
+    rig.tasks.request.assert_not_called()
     rig.runtime.spawn.assert_not_called()
 
 
