@@ -1788,8 +1788,7 @@ names how many it left for the next pass.
 Before [pull request #11464](https://github.com/the-cloud-clockwork/agentihooks/pull/11464) nothing sent that
 stop, so a finished agent kept its seat, its launch slot and its place under its hive's max agents until its pane
 was closed by hand, and a hive full of finished agents admitted no new work. The controller cannot close such a
-pane itself: it runs in its own pod, where a pane lookup fails with
-`herdr pane list: no herdr server is running at <socket>`.
+pane itself: it runs in its own pod, where its pane lookups fail with `no herdr server is running`.
 
 #### What counts as ended
 
@@ -1806,7 +1805,7 @@ Otherwise the agent's work has ended when any of these holds:
 | The agent record reads `finished`, as after the agent's own `swarm done` or `swarm ready` | Every lane, masters included |
 | The task row has `done` set, or its state is `done`, `blocked` or `handoff` | Every lane except the master |
 | The task awaits verify and has no claimant | Every lane except the master |
-| The task's claimant is no longer this agent, because it is empty or names another agent | Every lane except the master, for an agent run by another hive or by a runtime that is not local |
+| The task's claimant is no longer this agent, because it is empty or names another agent | Every lane except the master, for an agent run by another hive, by a runtime that is not local, or with a recorded host |
 
 An agent whose work has not ended and whose pane the controller lists as live goes through the same idle and revoked
 seat watch as an agent the tick launched. One whose pane the controller cannot list gets no action from the reap
@@ -1823,7 +1822,7 @@ nothing and tries again on its next pass.
 |---|---|---|
 | `sent` | `sent the stop for <agent> to its hive: its work ended` | The hive reaps the agent. |
 | `pending` | None | The same stop went out less than 120 seconds ago, the bus dedupe window. A pass after the window sends it again while the agent is still seated. |
-| `ended` | None | The execution already ended: its exit is out, or its spoke claim is gone or has left the `started` state it launched under. Nothing is sent. |
+| `ended` | None | The execution already ended: its exit is out, or its spoke claim is gone, has left the `started` state it launched under or carries another claim revision. Nothing is sent. |
 | `unknown` | None | No started event on the bus matches the agent's current execution. |
 | `failed (<error>)` | `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The bus refused the stop. The next pass judges the agent again and sends a new stop. |
 
@@ -1844,8 +1843,9 @@ For each stop it reads, the hive:
    `hive execution stop for <agent> in swarm <slug> could not reap it; retrying`, and the stop comes back after 30
    seconds until the reap succeeds, up to 100,000 deliveries;
 3. publishes `execution.exited` with id `exited:<started event id>`, `reason` `stopped` and `stop_reason` `ended`.
-   When the execution already ended, because its exit is out or its spoke claim is gone or has left the `started`
-   state it launched under, the hive still reaps the agent and publishes nothing more.
+   When the execution already ended, because its exit is out or its spoke claim is gone, has left the `started`
+   state it launched under or carries another claim revision, the hive still reaps the agent and publishes nothing
+   more.
 
 The hub's `lifecycle` reactor then acts on that exit for the claim and generation the execution started:
 
