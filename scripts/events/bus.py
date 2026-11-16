@@ -63,6 +63,11 @@ class WorkQueue(Protocol):
         many it removed."""
         ...
 
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        """Returns ``delivery`` to the queue after ``delay_ms`` without spending one of its deliveries, so its next
+        delivery comes at the attempt this one had."""
+        ...
+
 
 @runtime_checkable
 class StateStore(Protocol):

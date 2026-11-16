@@ -200,15 +200,24 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
     """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
-    withdraws the stale offers there before the fresh ones join them."""
+    withdraws the stale offers there before the fresh ones join them; an offer still queued is not offered again, so
+    one that waits past the dedupe window stays a single copy."""
     events = offers(view, now_ms)
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
+    queued: set[str] = set()
+
+    def swept(event: Envelope) -> bool:
+        if stale(event, view):
+            return True
+        queued.add(event.id)
+        return False
+
     for queue in queues.values():
-        queue.withdraw(lambda event: stale(event, view))
+        queue.withdraw(swept)
     placed = []
     for event in events:
-        if queues[event.data["lane"]].offer(event):
+        if event.id not in queued and queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
 
@@ -243,10 +252,10 @@ def take(
     fit: Callable[[Envelope], bool] = anywhere,
 ) -> Delivery | None:
     """A view that yields no snapshot leaves the recheck to the hub, which admits the offer; an offer this hive may
-    not take goes back to the queue for another hive."""
+    not take goes back to the queue for another hive without spending one of its deliveries."""
     while (delivery := queue.take(timeout_ms)) is not None:
         if not fit(delivery.event):
-            delivery.nak(UNFIT_NAK_MS)
+            queue.release(delivery, UNFIT_NAK_MS)
             continue
         current = view() if callable(view) else view
         if current is None or not withdrawal(delivery.event, current):

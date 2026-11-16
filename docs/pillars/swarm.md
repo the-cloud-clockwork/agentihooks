@@ -106,9 +106,9 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    task's `claim_generation` goes up by one.
 2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm on every pass. The
    offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
-   `swarm.<slug>.ready.<lane>`. The bus drops a repeat of the same id that arrives within 120 seconds, so a task
-   nobody claims is offered again after that window. Each work queue is its own
-   stream on `agentihooks.queue.<name>`.
+   `swarm.<slug>.ready.<lane>`. The hub offers no event still on the queue, and the bus drops a repeat of the same
+   id that arrives within 120 seconds, so a task whose offer left the queue unclaimed is offered again after that
+   window. Each work queue is its own stream on `agentihooks.queue.<name>`.
 3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, the offer is checked against a
    fresh ledger read: by a master spoke itself, and by the hub when it admits an eng, ci or plan offer. A stale offer
    is terminated: the task is gone, claimed, no longer open, on a different
@@ -119,6 +119,8 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    presence expires, the hub treats the hive as lost and ends the claim.
 6. **Redelivery.**
    - An offer that is not acknowledged within 30 seconds comes back, up to 5 deliveries.
+   - An offer a hive may not take, pinned to another hive or needing a capability it lacks, goes back to the queue
+     after 5 seconds without spending a delivery.
    - A claim conflict, or another live hive holding the claim, sends the offer back for later.
    - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS-DEAD` and reopens the task.
 7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
