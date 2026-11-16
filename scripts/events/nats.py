@@ -26,7 +26,7 @@ from nats.js.errors import (
 )
 from nats.js.kv import KeyValue
 
-from . import nats_batch, nats_payload, nkey
+from . import nats_batch, nats_payload, nats_replicas, nkey
 from .bus import SERVE_WAITED_MS, Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
@@ -349,23 +349,30 @@ async def provision_queue(js: JetStreamContext, names: QueueNames, config: BusCo
             pass
         else:
             return
-    await js.add_stream(
-        name=names.stream,
+    await nats_replicas.create(
+        js,
+        config.replicas,
+        names.stream,
         subjects=[names.filter],
         retention=api.RetentionPolicy.WORK_QUEUE,
         duplicate_window=_seconds(config.dedupe_window_ms),
     )
 
 
-async def provision_state(js: JetStreamContext, bucket: str) -> KeyValue:
+async def provision_state(js: JetStreamContext, bucket: str, replicas: int = 1) -> KeyValue:
     limits = STATE_LIMITS.get(bucket, {"history": KV_HISTORY})
-    try:
-        return await js.create_key_value(bucket=bucket, **limits)
-    except APIError as exc:
-        if exc.err_code != 10058 or bucket not in STATE_LIMITS:
-            raise
     stream = f"KV_{bucket}"
-    info = await js.stream_info(stream)
+    try:
+        return await js.create_key_value(bucket=bucket, replicas=replicas, **limits)
+    except APIError as exc:
+        if exc.err_code != nats_replicas.NAME_IN_USE:
+            raise
+        info = await js.stream_info(stream)
+        if bucket not in STATE_LIMITS and nats_replicas.held(info) == replicas:
+            raise
+    info = await nats_replicas.raised(js, info, replicas)
+    if bucket not in STATE_LIMITS:
+        return await js.create_key_value(bucket=bucket, replicas=nats_replicas.held(info), **limits)
     await js.update_stream(config=replace(info.config, max_msgs_per_subject=limits["history"]))
     await nats_payload.reclaim_all(js, stream, f"$KV.{bucket}.")
     bounded = replace(info.config, max_msgs_per_subject=limits["history"], max_bytes=limits["max_bytes"])
@@ -447,12 +454,12 @@ class NatsWorkQueue:
 
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool, replicas: int = 1) -> None:
         self._loop = loop
         self._js = js
         self._bucket = bucket
         self._swept = None
-        self._kv = loop.run(provision_state(js, bucket) if provision else js.key_value(bucket))
+        self._kv = loop.run(provision_state(js, bucket, replicas) if provision else js.key_value(bucket))
 
     async def _create_chunk(self, key: str, value: bytes) -> None:
         try:
@@ -560,7 +567,7 @@ async def _first_connect(url: str, config: BusConfig) -> Client:
 
 
 class NatsBus:
-    def __init__(self, config: BusConfig, url: str):
+    def __init__(self, config: BusConfig, url: str) -> None:
         self._config = config
         self._loop = _Loop()
         self._lock = threading.Lock()
@@ -578,17 +585,13 @@ class NatsBus:
                 )
                 dead_stream = self._loop.run(root_stream(self._js, DEAD_STREAM, "AGENTIHOOKS_DEAD", config.credentials))
             if config.provision:
-                self._loop.run(provision_events(self._js, event_stream, _seconds(config.dedupe_window_ms)))
-                self._loop.run(
-                    self._js.add_stream(
-                        name=dead_stream, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
+                window = _seconds(config.dedupe_window_ms)
+                self._loop.run(nats_replicas.raise_all(self._js, config.replicas))
+                self._loop.run(provision_events(self._js, event_stream, window, config.replicas))
+                for name, subject in ((dead_stream, DEAD_SUBJECT), (LAB_STREAM, LAB_SUBJECT)):
+                    self._loop.run(
+                        nats_replicas.create(self._js, config.replicas, name, subjects=[subject], duplicate_window=window)
                     )
-                )
-                self._loop.run(
-                    self._js.add_stream(
-                        name=LAB_STREAM, subjects=[LAB_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
-                    )
-                )
         except BaseException:
             self._loop.close()
             raise
@@ -666,7 +669,9 @@ class NatsBus:
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
-                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
+                store = self._buckets[bucket] = NatsStateStore(
+                    self._loop, self._js, bucket, self._config.provision, self._config.replicas
+                )
             return store
 
     def serve(

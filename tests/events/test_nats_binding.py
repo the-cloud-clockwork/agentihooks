@@ -11,6 +11,7 @@ from scripts.events.config import BusConfig
 def test_bus_provisions_only_when_requested(monkeypatch, provision):
     js = SimpleNamespace(
         stream_info=AsyncMock(side_effect=nats.NotFoundError()),
+        streams_info=AsyncMock(return_value=[]),
         add_stream=AsyncMock(),
         create_key_value=AsyncMock(),
         key_value=AsyncMock(),
@@ -25,13 +26,14 @@ def test_bus_provisions_only_when_requested(monkeypatch, provision):
         if provision:
             assert js.add_stream.await_args_list[2].kwargs == {
                 "name": "AGENTIHOOKS-CI-LAB-HEADS",
+                "num_replicas": 1,
                 "subjects": ["ci.lab.head.>"],
                 "duplicate_window": 120.0,
             }
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
         if provision:
-            js.create_key_value.assert_awaited_once_with(bucket="hub-github", history=nats.KV_HISTORY)
+            js.create_key_value.assert_awaited_once_with(bucket="hub-github", replicas=1, history=nats.KV_HISTORY)
             js.key_value.assert_not_awaited()
             assert state._kv is js.create_key_value.return_value
         else:

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from nats.js import JetStreamContext
 
+from . import nats_replicas
 from .bus import StateStore, WorkQueue
 from .config import SCOPED_STATE_BUCKETS, QueuePolicy
 from .nats import NatsEventLog, NatsWorkQueue, _seconds
@@ -34,7 +35,7 @@ async def discover_swarms(js: JetStreamContext) -> list[str]:
 
 
 class NatsScopedBus:
-    def __init__(self, root: "NatsBus", swarm: str):
+    def __init__(self, root: "NatsBus", swarm: str) -> None:
         self._root, self._swarm = root, swarm
         self._queues: dict[str, NatsWorkQueue] = {}
         self._buckets: dict[str, ScopedStateStore] = {}
@@ -48,15 +49,19 @@ class NatsScopedBus:
         if root._config.provision:
             for resource, family in [("EVENTS", "events"), ("DEAD", "dead")]:
                 root._loop.run(
-                    root._js.add_stream(
-                        name=streams[resource],
+                    nats_replicas.create(
+                        root._js,
+                        root._config.replicas,
+                        streams[resource],
                         subjects=[f"{subject(swarm, family)}.>"],
                         duplicate_window=_seconds(root._config.dedupe_window_ms),
                     )
                 )
             root._loop.run(
-                root._js.add_stream(
-                    name=stream_name(swarm, STOPS),
+                nats_replicas.create(
+                    root._js,
+                    root._config.replicas,
+                    stream_name(swarm, STOPS),
                     subjects=[f"{subject(swarm, STOPS.lower())}.>"],
                     duplicate_window=_seconds(root._config.dedupe_window_ms),
                 )

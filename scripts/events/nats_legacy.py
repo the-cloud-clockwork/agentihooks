@@ -3,6 +3,7 @@ from dataclasses import replace
 from nats.js import JetStreamContext
 from nats.js.errors import APIError
 
+from . import nats_replicas
 from .memory import subject_matches
 from .subjects import PREFIX
 
@@ -11,10 +12,12 @@ EVENTS_MAX_AGE_S = 7 * 24 * 3600.0
 EVENTS_MAX_BYTES = 1 << 30
 
 
-async def provision_events(js: JetStreamContext, name: str, dedupe_window: float) -> None:
+async def provision_events(js: JetStreamContext, name: str, dedupe_window: float, replicas: int = 1) -> None:
     limits = {"max_age": EVENTS_MAX_AGE_S, "max_bytes": EVENTS_MAX_BYTES}
     try:
-        await js.add_stream(name=name, subjects=LEGACY_EVENTS, duplicate_window=dedupe_window, **limits)
+        await nats_replicas.create(
+            js, replicas, name, subjects=LEGACY_EVENTS, duplicate_window=dedupe_window, **limits
+        )
     except APIError as exc:
         if exc.err_code != 10058:
             raise

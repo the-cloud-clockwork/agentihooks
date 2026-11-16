@@ -142,6 +142,7 @@ def test_new_state_stream_records_history_and_import_barrier(importing):
         subjects=["swarm.rig.state.work.>"],
         max_msgs_per_subject=64,
         metadata={IMPORT_PENDING: "true"} if importing else None,
+        num_replicas=1,
     )
 
 
