@@ -277,7 +277,8 @@ def test_main_verdict_polls_the_head(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     def recorded(checks: dict[str, str], fetch: Any, app: str, wait: float) -> dict[str, str]:
         waits.append((app, wait))
-        return real(checks, fetch, app, wait)
+        clock = Clock()
+        return real(checks, fetch, app, wait, clock, clock.sleep)
 
     monkeypatch.setattr(verdict, "fetcher", fetcher)
     monkeypatch.setattr(verdict, "verdicts", recorded)
