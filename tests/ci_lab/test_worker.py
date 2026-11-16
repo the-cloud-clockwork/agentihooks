@@ -234,42 +234,44 @@ def test_stop_lets_running_units_finish_within_the_termination_grace(
 ) -> None:
     jobs.enqueue([UNIT_A], "h1", {})
     release = threading.Event()
+    executors: dict[str, worker.Executor] = {}
+    stopping = pod(scheduler, executors, slots=2, grace_s=10)
 
     def held(lease: worker.Lease) -> worker.Finished:
+        stopping.stop()
         release.wait(10)
         return finished(tmp_path, lease)
 
-    stopping = pod(scheduler, {"test": held}, grace_s=10)
-    [lease] = stopping.run_once()
-    stopping.stop()
-    threading.Timer(0.1, release.set).start()
+    executors["test"] = held
+    threading.Timer(0.2, release.set).start()
 
     assert stopping.run() == []
-    assert found(jobs, lease.job).outcome == "passed"
+    assert found(jobs, "h1:test:a").outcome == "passed"
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_unit_past_the_termination_grace_is_left_to_reap(scheduler: str, jobs: queue.Queue, tmp_path: Path) -> None:
     jobs.enqueue([UNIT_A], "h1", {})
     release = threading.Event()
+    executors: dict[str, worker.Executor] = {}
+    late = pod(scheduler, executors, slots=2, grace_s=0.05)
 
     def held(lease: worker.Lease) -> worker.Finished:
+        late.stop()
         release.wait(10)
         return finished(tmp_path, lease)
 
-    late = pod(scheduler, {"test": held}, grace_s=0.05)
-    [lease] = late.run_once()
-    late.stop()
+    executors["test"] = held
     timer = threading.Timer(2, release.set)
     timer.start()
 
-    assert late.run() == [lease]
-    assert found(jobs, lease.job).state == "leased"
+    assert [lease.job for lease in late.run()] == ["h1:test:a"]
+    assert found(jobs, "h1:test:a").state == "leased"
     release.set()
     timer.cancel()
     late.grace_s = 10
     assert late.drain() == []
-    assert found(jobs, lease.job).outcome == "passed"
+    assert found(jobs, "h1:test:a").outcome == "passed"
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
