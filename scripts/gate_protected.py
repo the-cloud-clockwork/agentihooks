@@ -39,6 +39,8 @@ UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
 LAB_VERDICT_JOB = "lab-verdict"
+LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative)"
+LAB_UPSTREAM = frozenset({"reuse", LAB_VERDICT_JOB})
 LAB_GRADER_REF = "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}"
 
 
@@ -180,20 +182,20 @@ def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
 
 def lab_clause(condition: str | None, gate: str) -> str:
     """Return the gate condition with the clause that skips the gate in Actions while the lab grades it."""
-    clause = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative)['{gate}'] != true"
+    clause = f"{LAB_CLAUSE_PREFIX}['{gate}'] != true"
     if condition is None:
         return f"${{{{ {clause} }}}}"
     if condition.startswith("${{") and condition.endswith("}}"):
-        return f"{condition.removesuffix('}}').rstrip()} && {clause} }}}}"
-    return f"{condition} && {clause}"
+        return f"${{{{ ({condition.removeprefix('${{').removesuffix('}}').strip()}) && {clause} }}}}"
+    return f"({condition}) && {clause}"
 
 
-def lab_verdict_jobs(gates: frozenset[str] | set[str], policy: object = None) -> list[dict[str, Any]]:
+def lab_verdict_jobs(gates: set[str], policy: object = None) -> list[dict[str, Any]]:
     """Every rendering of the lab verdict job the protected branch accepts for the aggregator's gates."""
     outputs = {"authoritative": "${{ steps.verdict.outputs.authoritative }}"} | {
-        f"lab_{gate}": f"${{{{ steps.verdict.outputs.lab_{gate} }}}}" for gate in sorted(gates)
+        f"lab_{gate}": f"${{{{ steps.verdict.outputs.lab_{gate} }}}}" for gate in sorted(gates - LAB_UPSTREAM)
     }
-    steps = [
+    steps: list[dict[str, Any]] = [
         {
             "uses": "actions/checkout@v4",
             "with": {"ref": LAB_GRADER_REF, "path": "lab-grader", "persist-credentials": False},
@@ -243,8 +245,12 @@ def lab_verdict_jobs(gates: frozenset[str] | set[str], policy: object = None) ->
 
 
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any], policy: object = None) -> list[str]:
-    """Refuse a lab verdict job off its reviewed rendering and, with the lab form in play, a gate condition off base."""
-    gates = ci_wiring.needs_of(gate) - {LAB_VERDICT_JOB}
+    """Refuse a lab verdict job off its reviewed rendering and, with the lab form in play, a gate condition off base.
+
+    With the lab verdict job present each gate condition must carry its lab clause, kept as the base wrote it once
+    the base carries it; with only the lab aggregation each gate condition must equal the base's.
+    """
+    gates = ci_wiring.needs_of(gate) - LAB_UPSTREAM
     steps: list[dict[str, Any]] = gate.get("steps") or []
     problems: list[str] = []
     if LAB_VERDICT_JOB in head and head[LAB_VERDICT_JOB] not in lab_verdict_jobs(gates, policy):
@@ -253,12 +259,17 @@ def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, An
         )
     if LAB_VERDICT_JOB not in head and not any(ci_reuse.LAB_VERDICT in str(step.get("run")) for step in steps):
         return problems
+
+    def expected(need: str) -> str | None:
+        condition: str | None = base[need].get("if")
+        if LAB_VERDICT_JOB not in head or LAB_CLAUSE_PREFIX in str(condition):
+            return condition
+        return lab_clause(condition, need)
+
     return problems + [
-        f"The head's {need} condition is neither the base condition nor the base condition with its lab clause."
+        f"The head's {need} condition differs from the reviewed lab rendering of its base condition."
         for need in sorted(gates)
-        if need in base
-        and need in head
-        and head[need].get("if") not in (base[need].get("if"), lab_clause(base[need].get("if"), need))
+        if need in base and need in head and head[need].get("if") != expected(need)
     ]
 
 

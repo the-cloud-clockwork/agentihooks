@@ -1138,6 +1138,10 @@ def test_a_forged_lab_verdict_job_is_red() -> None:
         "outputs": {"authoritative": '{"lint": true}', "lab_lint": "success"},
         "steps": [{"run": "true"}],
     }
+    for gate in ci_wiring.needs_of(jobs["gate-required"]) - {"reuse"}:
+        jobs[gate]["if"] = (
+            f"${{{{ ({jobs[gate]['if'][3:-2].strip()}) && fromJSON(needs.lab-verdict.outputs.authoritative)['{gate}'] != true }}}}"
+        )
     jobs["gate-required"]["needs"].append("lab-verdict")
     assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
         "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
@@ -1149,20 +1153,27 @@ def test_a_gate_condition_off_its_lab_clause_is_red() -> None:
     lint = head["test.yml"]["jobs"]["lint"]
     lint["if"] = lint["if"].removesuffix(" }}") + " && false }}"
     assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
-        "The head's lint condition is neither the base condition nor the base condition with its lab clause."
+        "The head's lint condition differs from the reviewed lab rendering of its base condition."
     ]
 
 
 @pytest.mark.parametrize("clauses", [False, True])
-def test_the_canonical_lab_verdict_job_and_lab_clauses_grade_green(clauses: bool) -> None:
+def test_the_canonical_lab_verdict_job_requires_every_lab_clause(clauses: bool) -> None:
     workflows, head, config, actors = _repository_lab_form()
     jobs = head["test.yml"]["jobs"]
-    gates = ci_wiring.needs_of(jobs["gate-required"])
-    jobs["lab-verdict"] = gate_protected.lab_verdict_jobs(gates, actors)[1]
+    gates = sorted(ci_wiring.needs_of(jobs["gate-required"]) - gate_protected.LAB_UPSTREAM)
+    jobs["lab-verdict"] = gate_protected.lab_verdict_jobs(set(gates), actors)[1]
     jobs["gate-required"]["needs"].append("lab-verdict")
-    for gate in sorted(gates - {"reuse"}) if clauses else ():
+    for gate in gates if clauses else ():
         jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
-    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == []
+    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == (
+        []
+        if clauses
+        else [
+            f"The head's {gate} condition differs from the reviewed lab rendering of its base condition."
+            for gate in gates
+        ]
+    )
 
 
 @pytest.mark.parametrize(
@@ -1171,11 +1182,15 @@ def test_the_canonical_lab_verdict_job_and_lab_clauses_grade_green(clauses: bool
         (None, "${{ fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}"),
         (
             "${{ !cancelled() }}",
-            "${{ !cancelled() && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}",
+            "${{ (!cancelled()) && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}",
+        ),
+        (
+            "${{ always() || github.event_name == 'push' }}",
+            "${{ (always() || github.event_name == 'push') && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}",
         ),
         (
             "github.event_name != 'push'",
-            "github.event_name != 'push' && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true",
+            "(github.event_name != 'push') && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true",
         ),
     ],
 )
