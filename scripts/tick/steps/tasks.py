@@ -28,6 +28,7 @@ from scripts.tick.steps import (
     Left,
     actions_of,
     budgets,
+    hold,
     pass_domains,
 )
 
@@ -83,18 +84,16 @@ RAISED = "raised"
 
 
 def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Wrap ``call`` to skip once a step held an exception and to hold the exception it raises."""
+    """Wrap ``call`` to hold the exception it raises, so only the steps that need it stay shut."""
 
     def run(tick: Any, get: Get) -> Any:
         box = get("box")
-        if RAISED in box:
-            return []
         try:
             return call(tick, get)
         except (Left, LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
-            box[RAISED] = exc
+            hold(box, exc)
             return []
 
     return run

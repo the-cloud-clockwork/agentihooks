@@ -212,10 +212,11 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
     assert found == ["ran rank_writes", "ran bottleneck remedy"]
 
 
-def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_held_exception_of_an_earlier_step_leaves_every_placement_step_running(
+    calm: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     state = _pass(calm, box={tasks.RAISED: RuntimeError("earlier")})
-    assert _run(place.PLACEMENT, _tick(calm), state, monkeypatch) == []
-    assert calm == []
+    assert _run(place.PLACEMENT, _tick(calm), state, monkeypatch) == ["ran rank_writes", "ran bottleneck remedy"]
 
 
 SPAWN_CLUSTER = (
