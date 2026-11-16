@@ -38,10 +38,6 @@ def release_key(text: str) -> Version | None:
         return None
 
 
-class LateAdmission(RuntimeError):
-    """An admission finished after the asking hive stopped waiting for its answer."""
-
-
 class _StepTimer:
     """Milliseconds since the previous mark, one instance per admit call so concurrent calls on one Admission
     never share timing state."""
@@ -147,17 +143,16 @@ class Admission:
     def _answered(
         self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any], timer: _StepTimer
     ) -> dict[str, Any]:
-        """The admission the asking hive is still waiting for; one finished past its wait is released and refused."""
+        """The admission for the asking hive; one finished past the answer budget keeps its claim, so a hive still
+        waiting gets it and a hive that stopped waiting gets the same admission when it asks again for the offer."""
         elapsed = self.clock() - started
-        if elapsed < ANSWER_MS:
-            return admitted
-        self.reopen(slug, request)
-        print(
-            f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} late: "
-            f"finished after {elapsed} ms, the hive stopped waiting at {ANSWER_MS} ms {timer.line()}",
-            file=sys.stderr,
-        )
-        raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
+        if elapsed >= ANSWER_MS:
+            print(
+                f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} late: "
+                f"finished after {elapsed} ms, past the {ANSWER_MS} ms answer budget, claim kept {timer.line()}",
+                file=sys.stderr,
+            )
+        return admitted
 
     def _outdated(self, hive: str) -> str:
         """The member release below the hub release it is refused for; empty when either release is unreported."""
