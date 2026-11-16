@@ -333,37 +333,30 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
 
 
 @pytest.mark.feature("bus-request-error-text")
-def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout() -> None:
+@pytest.mark.parametrize(
+    ("error", "text"),
+    [
+        ("TimeoutError", "^request to 'swarm.rig.silent' timed out after 300 ms$"),
+        ("NoRespondersError", "^no responders for 'swarm.rig.silent'$"),
+    ],
+    ids=["late answer", "missing responder"],
+)
+def test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder(
+    error: str, text: str
+) -> None:
     import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from nats.errors import TimeoutError as NatsTimeout
+    from nats import errors as nats_errors
 
     bus = object.__new__(nats.NatsBus)
-    silent = AsyncMock(side_effect=NatsTimeout)
+    silent = AsyncMock(side_effect=getattr(nats_errors, error))
     bus._loop = SimpleNamespace(run=asyncio.run)
     bus._nc = SimpleNamespace(request=silent, max_payload=1048576)
-    with pytest.raises(TimeoutError, match="^request to 'swarm.rig.silent' timed out after 300 ms$"):
+    with pytest.raises(TimeoutError, match=text):
         bus.request("swarm.rig.silent", b"", 300)
     silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
-
-
-@pytest.mark.feature("bus-request-error-text")
-def test_a_nats_request_nobody_serves_names_the_missing_responder() -> None:
-    import asyncio
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-
-    from nats.errors import NoRespondersError
-
-    bus = object.__new__(nats.NatsBus)
-    unserved = AsyncMock(side_effect=NoRespondersError)
-    bus._loop = SimpleNamespace(run=asyncio.run)
-    bus._nc = SimpleNamespace(request=unserved, max_payload=1048576)
-    with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.unserved'$"):
-        bus.request("swarm.rig.unserved", b"", 300)
-    unserved.assert_awaited_once_with("swarm.rig.unserved", b"", timeout=0.3)
 
 
 def test_scoped_members_open_no_root_state_including_the_hub_owned_account_buckets(hub, signer):
