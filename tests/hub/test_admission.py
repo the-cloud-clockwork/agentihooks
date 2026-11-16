@@ -125,6 +125,14 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     json.dumps(admitted)
 
 
+@pytest.mark.feature("hub-admission-carries-runtime-target")
+def test_a_hub_admitted_execution_carries_its_requesting_hive_as_runtime_target(rig: Any) -> None:
+    rig.admitter.admit(SLUG, ask())
+
+    [agent] = rig.store.agents(SLUG)
+    assert agent.runtime_target == {"host_id": "hive-a"}
+
+
 @pytest.mark.feature("admission-launch-carries-admitted-execution")
 def test_the_admitted_task_carries_its_launch_execution_identity(rig: Any) -> None:
     admitted = rig.admitter.admit(SLUG, ask())

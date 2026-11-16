@@ -205,7 +205,16 @@ class Admission:
         saved = cast(Any, self.store).redis.hget(self.store.key(slug, "launch-assignments"), task_id)
         preferred = cast(str, json.loads(saved)["seat"] if saved else self.store.handoff_seat(slug, task_id))
         seat = tick._free_seat(slug, lane, taken, preferred)
-        record = AgentRecord(name, lane, task_id, seat=seat, state="starting", started_at=now, hive=request["hive"])
+        record = AgentRecord(
+            name,
+            lane,
+            task_id,
+            seat=seat,
+            state="starting",
+            started_at=now,
+            hive=request["hive"],
+            runtime_target={"host_id": request["hive"]},
+        )
         previous = self.store.execution_occupants(slug).get(seat)
         try:
             agent = self.store.start_execution(slug, record, previous.execution_id if previous else "")

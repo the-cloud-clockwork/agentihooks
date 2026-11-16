@@ -1160,6 +1160,15 @@
       ]
     },
     {
+      "id": "hub-admission-carries-runtime-target",
+      "origin": "inventory",
+      "behaviour": "A hub admitted execution carries its requesting hive as its runtime target host id so the Codex launch logs wrapper and serve start",
+      "seam": "scripts.hub.admission.Admission._claim building the AgentRecord for request[\"hive\"]",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_hub_admitted_execution_carries_its_requesting_hive_as_runtime_target"
+      ]
+    },
+    {
       "id": "admission-launch-carries-admitted-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-working-retired",
