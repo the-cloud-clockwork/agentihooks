@@ -170,14 +170,47 @@ securityContext:
     drop: [ALL]
 {{- end -}}
 
-{{- define "swarm.healthz" -}}
+{{- define "swarm.healthzFor" -}}
 httpGet:
   path: /healthz
   port: http
-  scheme: {{ if .Values.ledger.tls.secretName }}HTTPS{{ else }}HTTP{{ end }}
+  scheme: {{ if .tls }}HTTPS{{ else }}HTTP{{ end }}
   httpHeaders:
     - name: Host
-      value: {{ printf "127.0.0.1:%v" .Values.ledger.port | quote }}
+      value: {{ printf "127.0.0.1:%v" .port | quote }}
+{{- end -}}
+
+{{- define "swarm.healthz" -}}
+{{- include "swarm.healthzFor" (dict "port" .Values.ledger.port "tls" (not (empty .Values.ledger.tls.secretName))) -}}
+{{- end -}}
+
+{{- define "swarm.databaseEnv" -}}
+{{- $root := .root -}}
+{{- $env := .env | default dict -}}
+{{- $secretEnv := .secretEnv | default list -}}
+{{- $skip := .skip | default false -}}
+{{- if not $skip -}}
+{{- $ownNames := list -}}
+{{- range $secretEnv }}{{ $ownNames = append $ownNames .name }}{{ end -}}
+{{- if and (not (hasKey $env "AGENTIHOOKS_SWARM_DATABASE_URL")) (not (has "AGENTIHOOKS_SWARM_DATABASE_URL" $ownNames)) -}}
+{{- $ledgerEnv := $root.Values.ledger.env | default dict -}}
+{{- $ledgerSecret := dict -}}
+{{- range $root.Values.ledger.secretEnv }}{{ if eq .name "AGENTIHOOKS_SWARM_DATABASE_URL" }}{{ $ledgerSecret = . }}{{ end }}{{ end -}}
+{{- if $ledgerSecret.name -}}
+- name: AGENTIHOOKS_SWARM_DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ $ledgerSecret.secretName }}
+      key: {{ $ledgerSecret.key }}
+      {{- if $ledgerSecret.optional }}
+      optional: true
+      {{- end }}
+{{- else if hasKey $ledgerEnv "AGENTIHOOKS_SWARM_DATABASE_URL" -}}
+- name: AGENTIHOOKS_SWARM_DATABASE_URL
+  value: {{ get $ledgerEnv "AGENTIHOOKS_SWARM_DATABASE_URL" | quote }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "swarm.homeSource" -}}

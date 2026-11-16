@@ -4300,12 +4300,10 @@
         "tick-report"
       ],
       "tests": [
-        "tests/tick/test_database_ledger.py::test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set",
         "tests/tick/test_database_ledger.py::test_the_port_exports_the_ledger_with_the_ledger_server_down",
         "tests/tick/test_database_ledger.py::test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down",
         "tests/tick/test_database_ledger.py::test_a_stale_controller_write_is_refused_as_the_server_refuses_it",
         "tests/tick/test_database_ledger.py::test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down",
-        "tests/tick/test_database_ledger.py::test_outside_a_database_pass_the_port_still_calls_the_ledger_server",
         "tests/tick/test_database_ledger_routes.py::test_a_missing_ledger_answers_the_server_404_body",
         "tests/tick/test_database_ledger_routes.py::test_a_storage_failure_answers_the_server_500_body_and_logs_it",
         "tests/tick/test_database_ledger_routes.py::test_a_read_is_bounded_and_encoded_as_ascii_json",
@@ -4319,10 +4317,7 @@
         "tests/tick/test_database_ledger_routes.py::test_a_refused_request_raises_the_server_http_error",
         "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
         "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
-        "tests/tick/test_database_ledger_routes.py::test_the_ledger_client_is_the_database_client_inside_a_database_pass",
-        "tests/tick/test_database_ledger_routes.py::test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal",
-        "tests/tick/test_database_ledger_routes.py::test_a_tick_routed_call_keeps_its_own_ledger_route",
-        "tests/tick/test_database_ledger_routes.py::test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout"
+        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left"
       ]
     },
     {

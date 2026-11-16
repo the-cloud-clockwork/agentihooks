@@ -13,7 +13,7 @@ from scripts.swarm import cli, status
 from scripts.swarm.run_window import GATE as WINDOW
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.trace_plan import GATE as TRACE_PLAN
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service
 from tests.gates.test_runtime import SLUG, SWARM_ENV, Stub
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -173,11 +173,11 @@ class TestSwarmSet:
 
 class TestServerControl:
     def test_the_page_sends_gate_modes_as_swarm_set_pairs(self):
-        argv = ledger_server.control_argv({"action": "set", "gates": {"talk": "enforce", "claims": "observe"}})
+        argv = api_service.control_argv({"action": "set", "gates": {"talk": "enforce", "claims": "observe"}})
         assert argv == ["set", "talk-gate=enforce", "claims-gate=observe"]
 
     def test_gate_modes_ride_with_the_other_settings_in_one_set(self):
-        argv = ledger_server.control_argv({"action": "set", "autonomy": "full", "gates": {"talk": "off"}})
+        argv = api_service.control_argv({"action": "set", "autonomy": "full", "gates": {"talk": "off"}})
         assert argv == ["set", "autonomy=full", "talk-gate=off"]
 
     @pytest.mark.parametrize(
@@ -186,13 +186,13 @@ class TestServerControl:
     def test_an_unknown_gate_or_mode_is_refused(self, gates):
         refusal = f"gates maps a gate of {', '.join(catalog.defaults())} to deny, log only, skip"
         with pytest.raises(ValueError) as caught:
-            ledger_server.control_argv({"action": "set", "gates": gates})
+            api_service.control_argv({"action": "set", "gates": gates})
         assert str(caught.value) == refusal
 
 
 @pytest.mark.parametrize("mode", ["deny", "log only", "skip"])
 def test_page_gate_control_accepts_new_mode_names(mode):
-    assert ledger_server.control_argv({"action": "set", "gates": {"watch": mode}}) == ["set", f"watch-gate={mode}"]
+    assert api_service.control_argv({"action": "set", "gates": {"watch": mode}}) == ["set", f"watch-gate={mode}"]
 
 
 @pytest.mark.parametrize(
