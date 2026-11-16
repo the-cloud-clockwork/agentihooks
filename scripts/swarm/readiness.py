@@ -45,7 +45,7 @@ class Source:
     def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None) -> None:
         self._store = store
         self._ledger = ledger or LedgerClient(service=True)
-        self._exported: dict[str, tuple[int, dict]] = {}
+        self._exported: dict[str, tuple[int, dict[str, Any]]] = {}
         self._fetching: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
 
@@ -56,18 +56,19 @@ class Source:
             self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
         return found
 
-    def state(self, slug: str) -> dict:
-        """The export of ``slug`` at its current revision, fetched once per revision for every thread that asks."""
-        rev = self._ledger.metadata(slug)["_meta"]["rev"]
+    def state(self, slug: str) -> dict[str, Any]:
+        """The export of ``slug`` at the revision read while holding the swarm's lock, fetched again only when that
+        revision is newer than the kept one, with task rows of the caller's own so no reader changes the kept copy."""
         with self._guard:
             fetching = self._fetching.setdefault(slug, threading.Lock())
         with fetching:
+            rev = self._ledger.metadata(slug)["_meta"]["rev"]
             kept = self._exported.get(slug)
-            if kept is None or kept[0] != rev:
+            if kept is None or kept[0] < rev:
                 kept = (rev, self._ledger.state(slug))
                 with self._guard:
                     self._exported[slug] = kept
-            return kept[1]
+        return {**kept[1], "tasks": [dict(row) for row in kept[1]["tasks"]]}
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
