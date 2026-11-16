@@ -1114,6 +1114,42 @@ def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
     ]
 
 
+def _repository_lab_form() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return the repository workflows, a head copy with the lab aggregation, the wiring config and the actors."""
+    from scripts import ci_reuse, ci_runner_trust
+
+    workflows = ci_wiring.load(_ROOT)
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
+    head = copy.deepcopy(workflows)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
+    return workflows, head, config, actors
+
+
+def test_a_forged_lab_verdict_job_is_red() -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    jobs = head["test.yml"]["jobs"]
+    jobs["lab-verdict"] = {
+        "runs-on": "ubuntu-latest",
+        "outputs": {"authoritative": '{"lint": true}', "lab_lint": "success"},
+        "steps": [{"run": "true"}],
+    }
+    jobs["gate-required"]["needs"].append("lab-verdict")
+    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
+        "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+    ]
+
+
+def test_a_gate_condition_off_its_lab_clause_is_red() -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    lint = head["test.yml"]["jobs"]["lint"]
+    lint["if"] = lint["if"].removesuffix(" }}") + " && false }}"
+    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
+        "The head's lint condition is neither the base condition nor the base condition with its lab clause."
+    ]
+
+
 @pytest.mark.parametrize("docs", [False, True])
 @pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
 def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:
