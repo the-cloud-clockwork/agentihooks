@@ -1138,10 +1138,8 @@ def test_a_forged_lab_verdict_job_is_red() -> None:
         "outputs": {"authoritative": '{"lint": true}', "lab_lint": "success"},
         "steps": [{"run": "true"}],
     }
-    for gate in ci_wiring.needs_of(jobs["gate-required"]) - {"reuse"}:
-        jobs[gate]["if"] = (
-            f"${{{{ ({jobs[gate]['if'][3:-2].strip()}) && fromJSON(needs.lab-verdict.outputs.authoritative)['{gate}'] != true }}}}"
-        )
+    for gate in ci_wiring.needs_of(jobs["gate-required"]) - gate_protected.LAB_UPSTREAM:
+        jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
     jobs["gate-required"]["needs"].append("lab-verdict")
     assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
         "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
