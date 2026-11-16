@@ -2,9 +2,12 @@
 ledger server running; which repository the database URL selects is the storage module's seam."""
 
 import importlib
+import io
+import json
 import sys
 import urllib.error
 from collections.abc import Iterator
+from email.message import Message
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -17,6 +20,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import api_service, ledger_server
 from scripts.swarm_ledger.api.client import kept_exports
+from scripts.tick.adapters import database_ledger
 from scripts.tick.adapters.ledger import ClientLedger, resource_client
 from scripts.tick.deadline import Deadline
 
@@ -108,3 +112,60 @@ def test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down(stored: li
     assert [row["id"] for row in state["tasks"]] == ["t1"]
     assert task is not None
     assert task["state"] == "claimed"
+
+
+def naming(agent: str | None) -> database_ledger.Exchange:
+    """An in process operations request that names ``agent`` in its agent header, or names none."""
+    headers = Message()
+    if agent is not None:
+        headers["X-Ledger-Agent"] = agent
+    return database_ledger.Exchange("POST", f"/api/v1/ledgers/{SLUG}/operations", headers, io.BytesIO(b""))
+
+
+def test_a_process_acting_as_one_agent_refuses_a_request_naming_another() -> None:
+    exchange = naming("eng@b")
+    with database_ledger.acting("eng@a"):
+        assert exchange.refused() is True
+    assert (exchange.principal, exchange.status) == ("eng@a", 403)
+    assert json.loads(exchange.reply) == {
+        "error": {"code": "forbidden", "message": "this process acts as eng@a, not eng@b"}
+    }
+
+
+@pytest.mark.parametrize(("acting", "agent"), [("eng@a", "eng@a"), ("eng@a", None), ("", "eng@b")])
+def test_a_request_naming_the_acting_agent_or_no_agent_or_sent_as_the_service_is_admitted(
+    acting: str, agent: str | None
+) -> None:
+    exchange = naming(agent)
+    with database_ledger.acting(acting):
+        assert exchange.refused() is False
+    assert (exchange.principal, exchange.status, exchange.reply) == (acting, 200, b"")
+
+
+def test_an_exchange_the_route_refuses_raises_its_status_body_and_request(stored: list[tuple[str, int]]) -> None:
+    token = api_service.services().repository.token(SLUG)
+    path = f"/api/v1/ledgers/{SLUG}/tasks?limit=many"
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        database_ledger.exchanged("GET", path, None, {"X-Ledger-Token": token})
+    error = refused.value
+    assert (error.code, error.filename, error.msg, error.hdrs["X-Ledger-Token"]) == (400, path, "ledger refused", token)
+    assert json.loads(error.read()) == {"error": {"code": "schema_invalid", "message": "Limit must be an integer"}}
+
+
+def test_an_exchange_the_route_answers_itself_returns_that_answer(stored: list[tuple[str, int]]) -> None:
+    token = api_service.services().repository.token(SLUG)
+    exported = database_ledger.exchanged("POST", f"/api/v1/ledgers/{SLUG}/export", {}, {"X-Ledger-Token": token})
+    assert "data" in exported
+
+
+def test_an_empty_upload_raises_the_route_status_body_and_request(stored: list[tuple[str, int]]) -> None:
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        database_ledger.upload(SLUG, "media", b"", {"Content-Type": "application/octet-stream"})
+    error = refused.value
+    assert (error.code, error.filename, error.msg, error.hdrs["Content-Length"]) == (
+        400,
+        f"/api/v1/ledgers/{SLUG}/uploads/media",
+        "ledger refused",
+        "0",
+    )
+    assert json.loads(error.read())["error"]["code"] == "schema_invalid"
