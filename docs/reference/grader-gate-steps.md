@@ -141,10 +141,7 @@ the old scripts.
 ### Stale base on the marker vector step
 
 A lint step that runs the grader's module grades with the base sha its pull
-request event carries. Steps that compare against the base checkout at
-`$RUNNER_TEMP/base` use the merge base of the head with the event base
-instead, which is `origin/dev` for a pull request into `dev`.
-On an older pull request the event sha can predate current `dev`. When it
+request event carries. On an older pull request the event sha can predate current `dev`. When it
 predates pull request 11361, the marker step fails with exit 2 although the
 head is correct. GitHub
 [re-runs a workflow](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/re-running-workflows-and-jobs)
