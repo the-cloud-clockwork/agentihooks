@@ -274,6 +274,7 @@ def test_a_stats_rerun_passes_a_class_based_property_test_on_its_fresh_instance(
     monkeypatch.chdir(work)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", os.environ.get("PY_IGNORE_IMPORTMISMATCH", ""))
     monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
     engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
     outputs: list[str] = []
@@ -288,7 +289,7 @@ def test_a_stats_rerun_passes_a_class_based_property_test_on_its_fresh_instance(
                 env=dict(os.environ),
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=30,
             )
             outputs.append(done.stdout + done.stderr)
             return done.returncode
