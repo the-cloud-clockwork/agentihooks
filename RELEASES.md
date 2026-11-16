@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.949 · 2026-11-16
+
+### 2026-11-16 · 30277210e1c9 · #11584 · @agenticore-app
+
+**Ask again after an activity question closes unanswered; fresh refs for master backstops and retire asks**
+
+This change fixes a bug where several automated swarm messages—activity check questions, master backstops, and retire handoff asks—reused the same reference ID across sends. Because the inbox marks any later message with an already-seen ref as closed, this caused recipients to silently stop receiving these notices after the first send, including cases where an activity question closed without being answered. Each send now gets a unique, time-stamped ref, so follow-up questions and alerts are properly delivered. A Semgrep rule and regression tests were added to catch this class of bug going forward.
+
 ## v2.17.947 · 2026-11-16
 
 ### 2026-11-16 · 87aecfa3d041 · #11554 · @nestorcolt
