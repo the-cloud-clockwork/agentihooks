@@ -7239,6 +7239,16 @@
         "tests/hive/test_master_placement.py::test_a_secondary_master_ignores_a_hive_interactive_login",
         "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot"
       ]
+    },
+    {
+      "id": "agent-number-past-four-digits",
+      "origin": "inventory",
+      "behaviour": "scripts.swarm.naming.build accepts any engineer, ci or master counter of 1 or more with no upper bound instead of refusing at 10000 with a NamingError, and every agent-name matcher built from _BASE (NAME_RE, the pane, worktree, tmp, scratch and small_slug patterns) matches four or more digits with no maximum instead of exactly four, so a swarm whose engineer counter passes 10000 still spawns, its name still parses, and NameRegistry.names still lists it instead of raising.",
+      "seam": "scripts.swarm.naming.build and scripts.swarm.naming.parse for an agent number of 10000 or more, naming.PATTERNS[\"pane\"] over that name, and scripts.swarm.naming.NameRegistry.names once its counter has passed 9999",
+      "tests": [
+        "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
+        "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
+      ]
     }
   ],
   "unmapped_rules": [
