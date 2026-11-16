@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.918 · 2026-11-16
+
+### 2026-11-16 · a5b80e163423 · #11442 · @agenticore-app
+
+**Announce the protected grader blob that pins the lab verdict job and gate conditions**
+
+This change registers the exact blob hash of `scripts/gate_protected.py` from #11440 with the frozen gate registry, formally pinning the lab verdict job and gate job conditions used by Gate Protected. Because the registry only accepts changes to protected grading logic through this explicit announcement step, #11440 cannot pass Gate Protected until the registry approves this specific blob via its own pull request, ensuring the grader's integrity checks stay auditable and tamper-resistant as the lab takes over gating responsibilities from GitHub Actions.
+
 ## v2.17.916 · 2026-11-16
 
 ### 2026-11-16 · 493f847a2439 · #11428 · @agenticore-app
