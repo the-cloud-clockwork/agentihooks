@@ -1184,6 +1184,72 @@ def test_the_lab_clause_extends_the_base_condition(condition: str | None, render
     assert gate_protected.lab_clause(condition, "lint") == rendered
 
 
+@pytest.mark.parametrize(
+    ("condition", "rendered"),
+    [
+        ("${{ always()", "(${{ always()) && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true"),
+        ("always() }}", "(always() }}) && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true"),
+    ],
+)
+def test_a_half_wrapped_condition_takes_the_plain_lab_clause(condition: str, rendered: str) -> None:
+    assert gate_protected.lab_clause(condition, "lint") == rendered
+
+
+def test_the_lab_verdict_job_runs_the_protected_grader_copy_with_a_check_reader_token() -> None:
+    assert gate_protected.lab_verdict_jobs({"lint", "reuse", "lab-verdict"}) == [
+        {
+            "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
+            "needs": ["reuse", "admission"],
+            "runs-on": "ubuntu-latest",
+            "timeout-minutes": 30,
+            "permissions": {"contents": "read"},
+            "outputs": {
+                "authoritative": "${{ steps.verdict.outputs.authoritative }}",
+                "lab_lint": "${{ steps.verdict.outputs.lab_lint }}",
+            },
+            "steps": [
+                {
+                    "uses": "actions/checkout@v4",
+                    "with": {
+                        "ref": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}",
+                        "path": "lab-grader",
+                        "persist-credentials": False,
+                    },
+                },
+                {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
+                {
+                    "name": "Mint the lab check reader App token",
+                    "id": "app-token",
+                    "if": "github.event_name == 'pull_request'",
+                    "uses": "actions/create-github-app-token@v3.2.0",
+                    "with": {
+                        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+                        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+                        "repositories": "${{ github.event.repository.name }}",
+                        "permission-checks": "read",
+                    },
+                },
+                {
+                    "name": "Read the lab verdict from the protected grader",
+                    "id": "verdict",
+                    "shell": "bash",
+                    "working-directory": "${{ github.workspace }}/lab-grader",
+                    "env": {
+                        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+                        "EVENT": "${{ github.event_name }}",
+                        "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
+                        "AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}",
+                        "PYTHONNOUSERSITE": "1",
+                    },
+                    "run": 'python -m pip install "pyyaml>=6.0" "jsonschema>=4"\n'
+                    'python -m scripts.ci_lab_verdict --grader . --event "$EVENT" --head "$HEAD" '
+                    '--repository "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"\n',
+                },
+            ],
+        }
+    ]
+
+
 @pytest.mark.parametrize("docs", [False, True])
 @pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
 def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:
