@@ -372,7 +372,10 @@ def test_a_failed_reboot_pass_ends_the_pass_failed_before_the_tick_runs(
     swarm, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     calls: list[str] = []
-    _with(monkeypatch, _Marker("tick marker", "start", _recorder(calls, lambda get: "start")))
+    _with(
+        monkeypatch,
+        _Marker("tick marker", "start", _recorder(calls, lambda get: "start"), needs=frozenset({"reboot pass"})),
+    )
 
     def failed(*args: Any) -> list[str]:
         raise RuntimeError("reboot failed")
