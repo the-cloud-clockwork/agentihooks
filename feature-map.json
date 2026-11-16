@@ -1160,12 +1160,12 @@
       ]
     },
     {
-      "id": "hub-admission-carries-runtime-target",
+      "id": "hive-launch-logs-key-by-hive",
       "origin": "inventory",
-      "behaviour": "A hub admitted execution carries its requesting hive as its runtime target host id so the Codex launch logs wrapper and serve start",
-      "seam": "scripts.hub.admission.Admission._claim building the AgentRecord for request[\"hive\"]",
+      "behaviour": "The hive launch logs wrapper keys a launch receipt by the execution's hive, so hub admitted Codex launches with no runtime target start serve",
+      "seam": "scripts.hive.launch_logs.main reading agent.hive for Orders(...).launch_receipt(...)",
       "tests": [
-        "tests/hub/test_admission.py::test_a_hub_admitted_execution_carries_its_requesting_hive_as_runtime_target"
+        "tests/hive/test_launch_logs.py::test_a_hub_admitted_execution_with_no_runtime_target_still_keys_its_receipt_by_hive"
       ]
     },
     {
