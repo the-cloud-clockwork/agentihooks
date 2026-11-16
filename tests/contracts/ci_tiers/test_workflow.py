@@ -1,4 +1,6 @@
+import json
 import re
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,6 +38,7 @@ PULL_REQUEST = (
         "mutation-shard",
         "mutation",
         "writer-lock",
+        "lab-verdict",
     }
     | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
 )
@@ -53,6 +56,7 @@ PROMOTION = (
         "lint",
         "semgrep",
         "test-count",
+        "lab-verdict",
     }
 ) | {
     "queue-fail-fast",
@@ -81,7 +85,7 @@ PROMOTION = (
 }
 
 
-def enabled(condition, event, needs, base_ref="dev"):
+def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace], base_ref: str = "dev") -> bool:
     if isinstance(condition, bool):
         return condition
     expression = condition.removeprefix("${{").removesuffix("}}").strip()
@@ -100,12 +104,14 @@ def enabled(condition, event, needs, base_ref="dev"):
                 "needs": needs,
                 "always": lambda: True,
                 "cancelled": lambda: False,
+                "fromJSON": lambda text: defaultdict(lambda: None, json.loads(text)),
+                "true": True,
             },
         )
     )
 
 
-def jobs_for(event, base_ref="dev", scope="full"):
+def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritative: str = "") -> set[str]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     completed = {}
     pending = dict(jobs)
@@ -136,6 +142,7 @@ def jobs_for(event, base_ref="dev", scope="full"):
                     sonar="run",
                     probe="true",
                     probe_shards="[0, 1]",
+                    authoritative=authoritative if runs else "",
                 ),
             )
             del pending[name]
@@ -194,6 +201,41 @@ def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards() -> 
     assert jobs_for("pull_request", scope="selected") == SELECTED | _planned_jobs("pull_request")
 
 
+LAB_GATES = (
+    "lint",
+    "type-gate",
+    "docs",
+    "semgrep",
+    "writer-lock",
+    "test-count",
+    "unit-selected",
+    "unit",
+    "shard-check",
+    "sonar",
+    "mutation",
+)
+
+
+@pytest.mark.parametrize("gate", LAB_GATES)
+def test_an_authoritative_gate_skips_only_on_pull_requests(gate: str) -> None:
+    held = json.dumps({gate: True})
+    scope = "selected" if gate == "unit-selected" else "full"
+    assert jobs_for("pull_request", scope=scope, authoritative=held) == jobs_for("pull_request", scope=scope) - {gate}
+    assert gate in jobs_for("pull_request", scope=scope, authoritative=json.dumps({gate: False}))
+    for event in ("merge_group", "push"):
+        assert jobs_for(event, authoritative=held) == jobs_for(event)
+
+
+def test_every_lab_gate_needs_the_lab_verdict_and_reads_its_authority() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "lab-verdict" in jobs["gate-required"]["needs"]
+    for gate in LAB_GATES:
+        assert "lab-verdict" in jobs[gate]["needs"]
+        assert jobs[gate]["if"].endswith(
+            f" && fromJSON(needs.lab-verdict.outputs.authoritative || '{{}}')['{gate}'] != true }}}}"
+        )
+
+
 def test_main_pull_requests_keep_their_nonmutation_checks() -> None:
     expected = PULL_REQUEST | _planned_jobs("pull_request")
     assert jobs_for("pull_request", "main") == expected - {
@@ -226,12 +268,14 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
                             rerun(
                                 ci_reuse.inline_mutation(
                                     ci_reuse.postgres_required(
-                                        ci_reuse.gate_steps(
-                                            queue_tier=True,
-                                            promotion=True,
-                                            **options,
-                                            summary=summary,
-                                            watcher_loss=True,
+                                        lab(
+                                            ci_reuse.gate_steps(
+                                                queue_tier=True,
+                                                promotion=True,
+                                                **options,
+                                                summary=summary,
+                                                watcher_loss=True,
+                                            )
                                         )
                                     )
                                 )
@@ -245,6 +289,7 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
         for summary in (False, True)
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)
+        for lab in (list, ci_reuse.lab_verdict)
     ]
 
 
