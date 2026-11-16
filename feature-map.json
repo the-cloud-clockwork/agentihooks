@@ -6123,6 +6123,18 @@
       ]
     },
     {
+      "id": "inbox-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2563",
+      "behaviour": "Automated swarm notices keep reaching their recipient through the seen claim: an automated agent's activity question closed without a reply, by the agent, through the ledger, blocked or cancelled, is cleared and asked again on the next probe, and every master backstop and every master retire handoff ask carries its own ref followed by its send time, so the recipient's seen marks never close a later backstop or ask as already shown through the ledger.",
+      "seam": "scripts.swarm.automated_gc.run over a question closed with InboxStore.close, scripts.swarm.master_wake.run sending repeated backstops and scripts.swarm.master_retire.hold sending repeated asks, each delivered by scripts.inbox.seen.claim",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_a_question_closed_without_a_reply_is_asked_again_on_the_next_probe",
+        "tests/swarm/test_master_wake.py::test_each_backstop_passes_the_seen_claim",
+        "tests/swarm/test_master_retire.py::test_each_retire_ask_passes_the_seen_claim"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",

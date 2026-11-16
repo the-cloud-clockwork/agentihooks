@@ -133,6 +133,29 @@ def test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_
     ledger.notify.assert_called_once_with(SLUG, "An automated agent ended after three nothing to do answers.")
 
 
+@pytest.mark.parametrize(
+    ("kind", "detail"),
+    [("done", ""), ("done", "already shown through the ledger"), ("blocked", "a review"), ("cancel", "")],
+)
+@pytest.mark.feature("inbox-notices-pass-the-seen-claim")
+def test_a_question_closed_without_a_reply_is_asked_again_on_the_next_probe(
+    world: tuple[RedisStore, InboxStore, AgentRecord, Mock, Mock], kind: str, detail: str
+) -> None:
+    from scripts.inbox import seen
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, _, _ = world
+    sweep(world, START + LIMIT)
+    (closed,) = seen.claim(inbox, agent.name)
+    inbox.close(closed.id, agent.name, kind, detail)
+    assert sweep(world, START + LIMIT + 1) == []
+    assert sweep(world, START + 2 * LIMIT) == [f"asked automated agent {agent.name} what it is doing"]
+    (again,) = seen.claim(inbox, agent.name)
+    assert again.text == automated_gc.TEXT
+    assert again.id != closed.id
+    assert automated_gc.state(store, SLUG, agent)["request"] == again.id
+
+
 @pytest.mark.parametrize("text", ["working: reviewing a pull request", "I have work", "NOTHING TO DO later"])
 def test_other_answers_reset_idle_passes(world, text):
     from scripts.swarm import automated_gc
