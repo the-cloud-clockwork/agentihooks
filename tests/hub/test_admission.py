@@ -742,31 +742,32 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
 
     @contextmanager
     def turn(hive: str) -> Iterator[str]:
-        now[0] += 800
+        now[0] += 1600
         with original_turn(hive) as busy:
             yield busy
 
-    monkeypatch.setattr(rig.admitter, "_outdated", bump(100, rig.admitter._outdated))
-    monkeypatch.setattr(rig.admitter, "_key", bump(200, rig.admitter._key))
-    monkeypatch.setattr(admission.run_window, "claims_stopped", bump(300, admission.run_window.claims_stopped))
-    monkeypatch.setattr(rig.admitter.source, "snapshot", bump(400, rig.admitter.source.snapshot))
-    monkeypatch.setattr(admission.readiness, "withdrawal", bump(500, admission.readiness.withdrawal))
-    monkeypatch.setattr(rig.admitter, "_unplaceable", bump(600, rig.admitter._unplaceable))
-    monkeypatch.setattr(tick_module, "_lives_spent", bump(700, tick_module._lives_spent))
+    monkeypatch.setattr(rig.admitter, "_outdated", bump(200, rig.admitter._outdated))
+    monkeypatch.setattr(rig.admitter, "_key", bump(400, rig.admitter._key))
+    monkeypatch.setattr(admission.run_window, "claims_stopped", bump(600, admission.run_window.claims_stopped))
+    monkeypatch.setattr(rig.admitter.source, "snapshot", bump(800, rig.admitter.source.snapshot))
+    monkeypatch.setattr(admission.readiness, "withdrawal", bump(1000, admission.readiness.withdrawal))
+    monkeypatch.setattr(rig.admitter, "_unplaceable", bump(1200, rig.admitter._unplaceable))
+    monkeypatch.setattr(tick_module, "_lives_spent", bump(1400, tick_module._lives_spent))
     monkeypatch.setattr(rig.admitter, "_turn", turn)
-    monkeypatch.setattr(rig.admitter, "_full", bump(900, rig.admitter._full))
-    monkeypatch.setattr(rig.store, "claim", bump(1000, rig.store.claim))
-    monkeypatch.setattr(tick_module, "_free_seat", bump(1100, tick_module._free_seat))
-    monkeypatch.setattr(rig.store, "start_execution", bump(1200, rig.store.start_execution))
-    monkeypatch.setattr(rig.ledger, "update_task", bump(1300, rig.ledger.update_task))
+    monkeypatch.setattr(rig.admitter, "_full", bump(1800, rig.admitter._full))
+    monkeypatch.setattr(rig.store, "claim", bump(2000, rig.store.claim))
+    monkeypatch.setattr(tick_module, "_free_seat", bump(2200, tick_module._free_seat))
+    monkeypatch.setattr(rig.store, "start_execution", bump(2400, rig.store.start_execution))
+    monkeypatch.setattr(rig.ledger, "update_task", bump(2600, rig.ledger.update_task))
 
     with pytest.raises(admission.LateAdmission):
         rig.admitter.admit(SLUG, ask())
 
     assert capsys.readouterr().err.splitlines() == [
-        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 9100 ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms release=100 held=200 stopped=300 snapshot=400 "
-        f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 ledger=1300"
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 18200 ms, "
+        f"the hive stopped waiting at {admission.ANSWER_MS} ms release=200 held=400 stopped=600 snapshot=800 "
+        f"withdrawal=1000 placement=1200 cap=1400 turn=1600 full=1800 claim=2000 seat=2200 execution=2400 "
+        f"ledger=2600"
     ]
 
 
