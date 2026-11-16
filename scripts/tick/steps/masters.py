@@ -27,7 +27,7 @@ from scripts.tick.engine import SLOW
 from scripts.tick.ports.contracts import Coordination
 from scripts.tick.ports.tools import Tools
 from scripts.tick.step import Domain
-from scripts.tick.steps import CallStep, Left, budgets, pass_domains, tasks
+from scripts.tick.steps import CallStep, Left, budgets, hold, pass_domains, tasks
 
 __all__ = [
     "DISPATCH",
@@ -60,18 +60,16 @@ SEAT: Any = SimpleNamespace(
 
 
 def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Wrap ``call`` to skip once a step held an exception and to hold the exception it raises."""
+    """Wrap ``call`` to hold the exception it raises, so only the steps that need it stay shut."""
 
     def run(tick: Any, get: Get) -> Any:
         box = get(BOX)
-        if RAISED in box:
-            return []
         try:
             return call(tick, get)
         except (Left, LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
-            box[RAISED] = exc
+            hold(box, exc)
             return []
 
     return run

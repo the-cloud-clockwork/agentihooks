@@ -1,0 +1,16 @@
+rules:
+  - id: panic-sweep-keeps-fix-heads-everywhere
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The panic cancel sweep once kept the head branch of every registered fix pull request in every repository it
+      swept, so a run in antoncore or agentihooks-bundle on a branch named like an agentihooks fix escaped the
+      cancel. Keep a fix pull request's head branch only for the repository its reference names, as a fix branch
+      link keeps its branch only in the repository the link names.
+    paths:
+      include:
+        - /scripts/swarm/panic.py
+        - panic-sweep-keeps-fix-heads-everywhere.py
+    patterns:
+      - pattern: "{$CHANGE.head_branch for $CHANGE in $CHANGES}"
+      - pattern-not: "{$CHANGE.head_branch for $CHANGE in $CHANGES if $CHANGE.reference.repository == $REPO}"

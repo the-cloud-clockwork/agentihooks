@@ -21,3 +21,11 @@ rules:
           ...
           if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
               return $DEFAULT
+      - pattern-not: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... foreign($HARNESS, $DEFAULT.model) ...>:
+              $DEFAULT = replace($DEFAULT, model=$MODEL)
+          ...
+          if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
+              return $DEFAULT

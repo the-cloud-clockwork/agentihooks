@@ -1,0 +1,25 @@
+rules:
+  - id: tick-held-exception-shuts-every-step
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step or shut check skips because any step of the pass held an exception, so one raising step shuts every
+      later step of the pass. On 16 November the inbox exits sweep raised in every pass for two hours, and reap never
+      retired a finished agent and the master step never spawned the front door successor. Hold the exception with
+      scripts.tick.steps.hold and let the tick sites shut only the steps that need the raising step, through
+      scripts.tick.steps.fell.
+    paths:
+      include:
+        - /scripts/tick/
+        - /scripts/swarm/
+        - tick-held-exception-shuts-every-step.py
+    pattern-either:
+      - pattern: |
+          if RAISED in $BOX:
+              return ...
+      - pattern: |
+          if $MODULE.RAISED in $BOX:
+              return ...
+      - pattern: |
+          if "raised" in $BOX:
+              return ...
