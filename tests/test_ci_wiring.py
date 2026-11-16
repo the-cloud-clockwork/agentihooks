@@ -1,5 +1,5 @@
+import inspect
 import json
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +9,6 @@ import yaml
 from scripts import ci_wiring
 
 _ROOT = Path(__file__).resolve().parents[1]
-_TODAY = date(2026, 10, 8)
 pytestmark = pytest.mark.unit
 
 
@@ -34,7 +33,7 @@ def _declared(*keys):
 
 
 def _check(workflows, config):
-    return ci_wiring.check(workflows, config, _TODAY)
+    return ci_wiring.check(workflows, config)
 
 
 def _write(root: Path, workflows: dict, config: dict) -> None:
@@ -66,19 +65,8 @@ def test_main_ignores_declaration_dates(tmp_path: Path, capsys: pytest.CaptureFi
     assert capsys.readouterr().out == "1 workflows, 5 jobs, 0 wiring problems\n"
 
 
-def test_main_ignores_declaration_dates_across_utc_midnight(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    class Clock:
-        @staticmethod
-        def now(tz: object) -> datetime:
-            assert tz is UTC
-            return datetime(2026, 10, 9, 0, 30, tzinfo=UTC)
-
-    monkeypatch.setattr(ci_wiring, "datetime", Clock)
-    _write(tmp_path, {"test.yml": _gate_workflow(x={})}, {"not_gates": {"test.yml/x": _entry(expires="2026-10-08")}})
-    assert ci_wiring.main(["--root", str(tmp_path)]) == 0
-    assert capsys.readouterr().out == "1 workflows, 4 jobs, 0 wiring problems\n"
+def test_the_check_takes_no_date() -> None:
+    assert "today" not in inspect.signature(ci_wiring.check).parameters
 
 
 def test_help_names_what_the_check_enforces(capsys):
@@ -328,7 +316,7 @@ def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs() 
         'python -m scripts.ci_wiring --root "$GITHUB_WORKSPACE"',
     ]
     assert check["if"] == "${{ !cancelled() }}"
-    assert lint["needs"] in (["reuse"], ["reuse", "admission"])
+    assert lint["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
 
 
 def test_a_pull_request_workflow_without_jobs_needs_no_declaration() -> None:

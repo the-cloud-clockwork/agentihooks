@@ -631,11 +631,16 @@ def test_api_and_git_read_their_commands(monkeypatch):
     ]
 
 
-def test_the_workflow_grades_every_branch_push_with_the_dev_grader():
+def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_dev_grader():
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert workflow[True] in (
-        {"push": {"branches-ignore": ["dev", "main", "gh-readonly-queue/**", "diffcheck/**"]}},
-        {"push": {"branches-ignore": ["dev", "main", "gh-readonly-queue/**"]}},
+        {
+            "push": {
+                "branches-ignore": ["dev", "main", "gh-readonly-queue/**", "diffcheck/**"],
+                "paths": [".github/workflows/**"],
+            }
+        },
+        {"push": {"branches-ignore": ["dev", "main", "gh-readonly-queue/**"], "paths": [".github/workflows/**"]}},
     )
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["permissions"] == {"contents": "read", "actions": "write"}

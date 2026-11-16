@@ -487,6 +487,23 @@ def test_the_notice_step_budget_outlasts_the_live_listing_so_its_save_is_kept() 
     assert step.budget_s > LIVE_LISTING_S
 
 
+@pytest.mark.feature("fleet-red-notice-starts-with-its-group")
+def test_the_notice_step_waits_on_no_spawn_chain_step_so_a_slow_pass_cannot_cut_its_live_listing() -> None:
+    from scripts.tick import registry
+    from scripts.tick.steps import budgets
+
+    steps = {step.name: step for wave in registry.waves() for step in wave}
+    waits: set[str] = set()
+    pending = set(steps["fleet red notice"].needs)
+    while pending:
+        name = pending.pop()
+        waits.add(name)
+        pending |= set(steps[name].needs) - waits
+
+    assert steps["fleet red notice"].needs == steps["promotion refresh"].needs == tasks.RESUMED
+    assert waits & (budgets.SPAWN_NEEDS | {"reap"}) == set()
+
+
 def test_the_tick_hands_the_notice_pass_its_store_ledger_rows_and_clock(store, monkeypatch):
     from scripts.swarm import tick
     from tests.swarm.test_tick import FakeLedger, FakeRuntime

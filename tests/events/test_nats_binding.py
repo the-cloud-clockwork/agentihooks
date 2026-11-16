@@ -21,7 +21,13 @@ def test_bus_provisions_only_when_requested(monkeypatch, provision):
     bus = nats.NatsBus(BusConfig(provision=provision), "nats://localhost:4222")
     try:
         assert bus._config.provision is provision
-        assert js.add_stream.await_count == (2 if provision else 0)
+        assert js.add_stream.await_count == (3 if provision else 0)
+        if provision:
+            assert js.add_stream.await_args_list[2].kwargs == {
+                "name": "AGENTIHOOKS-CI-LAB-HEADS",
+                "subjects": ["ci.lab.head.>"],
+                "duplicate_window": 120.0,
+            }
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
         if provision:

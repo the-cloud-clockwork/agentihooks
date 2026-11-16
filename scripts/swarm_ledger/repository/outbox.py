@@ -7,12 +7,13 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from scripts.events import catalogue, envelope, subjects
-from scripts.events.bus import PayloadTooLarge
+from scripts.events.bus import NoStream, PayloadTooLarge
 
 ENTITIES = {"tasks": "task", "phases": "phase"}
 INSERT = "INSERT INTO outbox VALUES (?, ?, ?, ?, ?)"
+SLUGS = "SELECT DISTINCT slug FROM outbox WHERE id NOT IN (SELECT id FROM outbox_sent) ORDER BY slug"
 PENDING = (
-    "SELECT id, subject, value FROM outbox WHERE id NOT IN (SELECT id FROM outbox_sent)"
+    "SELECT id, subject, value FROM outbox WHERE slug = ? AND id NOT IN (SELECT id FROM outbox_sent)"
     " ORDER BY revision, subject LIMIT ?"
 )
 SENT = "INSERT OR IGNORE INTO outbox_sent (id, sent_at) VALUES (?, ?)"
@@ -74,19 +75,29 @@ def now_ms() -> int:
 
 
 def relay(repository: Any, events: Publisher, batch: int = BATCH, clock: Callable[[], int] = now_ms) -> int:
-    """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window.
+    """Publish up to a batch of each ledger's unsent rows under their row id, which the bus dedupes within its window.
 
     A row the bus refuses as too large is marked sent and reported, so it never holds back the rows after it.
+    A ledger whose events no stream takes keeps its rows unsent and never holds back another ledger's rows.
     """
     with repository.connect() as connection:
-        pending = connection.execute(PENDING, (batch,)).fetchall()
-        for row_id, subject, value in pending:
-            try:
-                events.publish(subject, slim(envelope.Envelope.decode(value.encode())))
-            except PayloadTooLarge as error:
-                sys.stderr.write(f"ledger outbox: row {row_id} skipped: {error}\n")
-            with connection:
-                connection.execute(SENT, (row_id, clock()))
+        return sum(
+            relay_ledger(connection, slug, events, batch, clock) for (slug,) in connection.execute(SLUGS).fetchall()
+        )
+
+
+def relay_ledger(connection: Any, slug: str, events: Publisher, batch: int, clock: Callable[[], int]) -> int:
+    """Publish up to a batch of one ledger's unsent rows in revision order, stopping at a row no stream takes."""
+    pending = connection.execute(PENDING, (slug, batch)).fetchall()
+    for published, (row_id, subject, value) in enumerate(pending):
+        try:
+            events.publish(subject, slim(envelope.Envelope.decode(value.encode())))
+        except PayloadTooLarge as error:
+            sys.stderr.write(f"ledger outbox: row {row_id} skipped: {error}\n")
+        except NoStream:
+            return published
+        with connection:
+            connection.execute(SENT, (row_id, clock()))
     return len(pending)
 
 

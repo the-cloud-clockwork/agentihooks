@@ -74,7 +74,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():

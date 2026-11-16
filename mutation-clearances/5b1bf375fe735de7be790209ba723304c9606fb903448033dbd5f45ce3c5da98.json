@@ -1,0 +1,6 @@
+{
+  "scripts/gates/claim_stop.py:scripts.gates.claim_stop.x\u01c1ClaimStop\u01c1grade:14f4fb65559949c2a025ce084a213e3a52d2e2ac7dbf0ccb26594e93d2b752cf": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. grade is called only from decide. The pull it returns is read only after 'if live or not owed: return Decision()', and a non-empty named target requires live, so decide returns before pull or owed is used. checks is empty on this branch, so no wait is declared."
+  }
+}

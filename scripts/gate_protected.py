@@ -1,8 +1,8 @@
 import argparse
 import json
 import subprocess
+from collections.abc import Mapping
 from copy import deepcopy
-from datetime import UTC, date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -49,7 +49,7 @@ def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
     ]
 
 
-def _protected_config(base: dict, head: dict) -> dict:
+def _protected_config(base: Mapping[str, Any], head: Mapping[str, Any]) -> dict:
     return {
         section: {key: entry for key, entry in base.get(section, {}).items() if key in head.get(section, {})}
         for section in ("not_gates", "outside_gate")
@@ -233,7 +233,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
 
 
 def _mutation_stage_entries(
-    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: dict[str, Any]
+    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Return the head's non gate entries for mutation stages whose results the required mutation job merges."""
     needs = ci_wiring.needs_of
@@ -248,21 +248,33 @@ def _mutation_stage_entries(
     }
 
 
+def _pinned_names(base_workflows: dict[str, dict[str, Any]], head_workflows: dict[str, dict[str, Any]]) -> list[str]:
+    from scripts import ci_gate_queue
+
+    return [
+        f"The head changes or removes the reviewed name of {file}/{job_id}; the protected branch pins it."
+        for file, workflow in base_workflows.items()
+        for job_id, job in (workflow.get("jobs") or {}).items()
+        if job.get("name") in (ci_gate_queue.GATE_NAME, ci_gate_queue.SUMMARY_NAME)
+        and (((head_workflows.get(file) or {}).get("jobs") or {}).get(job_id) or {}).get("name") != job["name"]
+    ]
+
+
 def grade(
     base_workflows: dict[str, dict[str, Any]],
-    base_config: dict[str, Any],
+    base_config: ci_wiring.Wiring,
     head_workflows: dict[str, dict[str, Any]],
-    head_config: dict[str, Any],
-    today: date,
+    head_config: ci_wiring.Wiring,
     policy: object = None,
 ) -> list[str]:
     from scripts import ci_gate_queue
 
+    pinned = _pinned_names(base_workflows, head_workflows)
     try:
         base_workflows = ci_gate_queue.normalize(base_workflows)
         head_workflows = ci_gate_queue.normalize(head_workflows)
     except ValueError as error:
-        return [str(error)]
+        return pinned + [str(error)]
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
@@ -310,7 +322,7 @@ def grade(
                 config["not_gates"].setdefault(key, head_config["not_gates"][key])
     for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
         config["not_gates"].setdefault(key, entry)
-    return problems + ci_wiring.check(head_workflows, config, today)
+    return pinned + problems + ci_wiring.check(head_workflows, config)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -482,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     if ci_runner_trust.ACTORS in _git(root, "ls-tree", "-r", "--name-only", args.base).splitlines():
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
-    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    problems = grade(base_workflows, base_config, head_workflows, head_config, actors)
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     governed |= _filtered_equivalence(base_workflows, head_workflows)

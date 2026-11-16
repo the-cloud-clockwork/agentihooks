@@ -491,7 +491,7 @@ def test_queue_capacity_admission_precedes_the_unit_matrix():
     step = next(step for step in split["steps"] if step.get("name") == "Size queue shards from median durations")
     assert step["run"].index("combine --from-output") < step["run"].index('cat queue-plan.txt >> "$GITHUB_OUTPUT"')
     assert "queue-plan" not in jobs
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
     assert "split" in jobs["gate-required"]["needs"]
 
 
