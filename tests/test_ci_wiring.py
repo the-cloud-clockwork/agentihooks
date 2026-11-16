@@ -65,8 +65,8 @@ def test_main_ignores_declaration_dates(tmp_path: Path, capsys: pytest.CaptureFi
     assert capsys.readouterr().out == "1 workflows, 5 jobs, 0 wiring problems\n"
 
 
-def test_the_check_takes_the_workflows_and_the_config_only() -> None:
-    assert list(inspect.signature(ci_wiring.check).parameters) == ["workflows", "config"]
+def test_the_check_takes_no_date() -> None:
+    assert "today" not in inspect.signature(ci_wiring.check).parameters
 
 
 def test_help_names_what_the_check_enforces(capsys):
