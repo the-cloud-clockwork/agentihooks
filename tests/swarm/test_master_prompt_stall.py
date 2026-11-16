@@ -100,9 +100,8 @@ def test_master_held_on_a_prompt_with_an_operator_item_is_woken_then_recycled(
     assert run(store, runtime, START + 10 * MINUTE) == [
         f"asked {agent.name} for a handoff before retiring it: {reason}"
     ]
-    assert [i.ref for i in InboxStore(store.redis).pending_items(agent.seat) if i.ref == master_retire.REF] == [
-        master_retire.REF
-    ]
+    asks = [i.ref for i in InboxStore(store.redis).pending_items(agent.seat) if i.ref.startswith(master_retire.REF)]
+    assert asks == [f"{master_retire.REF}:{START + 10 * MINUTE}"]
     assert run(store, runtime, START + 14 * MINUTE) == [
         f"waiting on {agent.name}'s handoff before retiring it: {reason}"
     ]
@@ -133,7 +132,11 @@ def test_recycle_comes_at_fifteen_minutes_whatever_the_handoff_wait(
     operator_says(store, START)
     run(store, runtime, START)
     run(store, runtime, START + 10 * MINUTE)
-    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
+    [ask] = [
+        item
+        for item in InboxStore(store.redis).pending_items(agent.seat)
+        if item.ref.startswith(f"{master_retire.REF}:")
+    ]
     assert run(store, runtime, START + 15 * MINUTE) == [
         f"recycled master {agent.name} in its seat after 15 minutes held on the prompt waiting on input"
         " with operator items waiting"
@@ -208,7 +211,11 @@ def test_leaving_the_prompt_after_the_ask_withdraws_it(store: RedisStore) -> Non
     operator_says(store, START)
     run(store, runtime, START)
     run(store, runtime, START + 10 * MINUTE)
-    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
+    [ask] = [
+        item
+        for item in InboxStore(store.redis).pending_items(agent.seat)
+        if item.ref.startswith(f"{master_retire.REF}:")
+    ]
     runtime.panes[agent.name] = PaneObservation("working")
     assert run(store, runtime, START + 16 * MINUTE) == []
     assert master_retire.reason(store, "sw", agent.name) == ""
@@ -452,7 +459,11 @@ def test_a_login_limit_recycle_marks_the_slots_the_master_holds(
 def test_a_login_limit_recycle_closes_the_retire_ask_and_stamps_its_window(store: RedisStore) -> None:
     agent, runtime = master(store, INTERRUPTED)
     master_retire.hold(store, "sw", agent, "a handoff was asked", True, START - MINUTE)
-    [ask] = [item for item in InboxStore(store.redis).pending_items(agent.seat) if item.ref == master_retire.REF]
+    [ask] = [
+        item
+        for item in InboxStore(store.redis).pending_items(agent.seat)
+        if item.ref.startswith(f"{master_retire.REF}:")
+    ]
     runtime.tails[agent.pane_id] = LOGIN_LIMIT
     assert run(store, runtime, START) == [
         f"recycled master {agent.name} in its seat: {master_prompt_stall.LOGIN_LIMITED}"

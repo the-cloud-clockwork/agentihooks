@@ -306,7 +306,7 @@ default `agentihooks`). Each field holds:
 |---|---|
 | `at` | When the tick sent the ask, in epoch milliseconds; the deadline is `at` plus `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` |
 | `reason` | Why the tick retires the master, such as `its launch check failed on model` or `the swarm is stopping` |
-| `item` | The id of the ask item, sent from `swarm` to the master with ref `master-retire-handoff` |
+| `item` | The id of the ask item, sent from `swarm` to the master with ref `master-retire-handoff:<at>`; each ask has its own ref, so the master's seen marks never close a later ask as already shown |
 | `world` | The inbox the ask was written to: the hive member whose keys hold the master's inbox, or empty for the controller's own inbox |
 
 Every tick that would retire the master reads its request:
@@ -357,7 +357,7 @@ AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0 agentihooks swarm <slug> tick
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| A retired master's inbox still lists a pending `master-retire-handoff` ask | Three close attempts lost a race with another writer | None needed: the request is gone and the master is no longer held; only the ask item remains in the inbox |
+| A retired master's inbox still lists a pending `master-retire-handoff:<at>` ask | Three close attempts lost a race with another writer | None needed: the request is gone and the master is no longer held; only the ask item remains in the inbox |
 | The controller exits with `InboxError: no message <id>` while retiring a master | A release older than this behaviour | Upgrade; the tick then counts a missing ask as already forgotten |
 | A master stays held past the wait | No tick that would retire it has run since the deadline; a held master keeps its first request and its `at` until it is forgotten | Read `at` and `reason` in the request; the next such tick past `at` plus the wait retires it |
 

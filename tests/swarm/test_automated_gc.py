@@ -135,7 +135,12 @@ def test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_
 
 @pytest.mark.parametrize(
     ("kind", "detail"),
-    [("done", ""), ("done", "already shown through the ledger"), ("blocked", "a review"), ("cancel", "")],
+    [
+        ("done", "answered on the ledger"),
+        ("done", "already shown through the ledger"),
+        ("blocked", "a review"),
+        ("cancel", ""),
+    ],
 )
 @pytest.mark.feature("inbox-notices-pass-the-seen-claim")
 def test_a_question_closed_without_a_reply_is_asked_again_on_the_next_probe(
@@ -154,6 +159,22 @@ def test_a_question_closed_without_a_reply_is_asked_again_on_the_next_probe(
     assert again.text == automated_gc.TEXT
     assert again.id != closed.id
     assert automated_gc.state(store, SLUG, agent)["request"] == again.id
+
+
+@pytest.mark.parametrize("closed", [True, False])
+@pytest.mark.feature("inbox-notices-pass-the-seen-claim")
+def test_only_a_question_closed_without_a_reply_leaves_an_empty_request(
+    world: tuple[RedisStore, InboxStore, AgentRecord, Mock, Mock], closed: bool
+) -> None:
+    from scripts.swarm import automated_gc
+
+    _, inbox, agent, _, _ = world
+    asked = inbox.send("swarm", agent.name, "still there?")
+    if closed:
+        inbox.close(asked.id, agent.name, "done", "answered on the ledger")
+    record = {"request": asked.id, "answers": [], "idle_answers": 0}
+    assert automated_gc._answer(inbox, agent, record, START) is False
+    assert record == {"request": "" if closed else asked.id, "answers": [], "idle_answers": 0}
 
 
 @pytest.mark.parametrize("text", ["working: reviewing a pull request", "I have work", "NOTHING TO DO later"])

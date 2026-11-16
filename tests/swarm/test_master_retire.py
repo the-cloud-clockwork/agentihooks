@@ -39,7 +39,11 @@ def mismatch(runtime, name, **wrong):
 
 
 def asks(store: RedisStore, name: str) -> list[Item]:
-    return [i for i in InboxStore(store.redis).inbox(store.seats.seat_of(name) or name) if i.ref == master_retire.REF]
+    return [
+        i
+        for i in InboxStore(store.redis).inbox(store.seats.seat_of(name) or name)
+        if i.ref.startswith(f"{master_retire.REF}:")
+    ]
 
 
 def current(store, name):
@@ -386,7 +390,7 @@ def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inb
     )
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     hive = InboxStore(store.redis, world="hive-a")
-    (ask,) = [i for i in hive.inbox(master.seat) if i.ref == master_retire.REF]
+    (ask,) = [i for i in hive.inbox(master.seat) if i.ref.startswith(f"{master_retire.REF}:")]
     assert asks(store, master.name) == []
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert hive.get(ask.id).state == "done"
@@ -402,7 +406,7 @@ def test_a_hold_made_from_a_hive_member_closes_its_ask_in_that_member_world(
     monkeypatch.setattr(scope, "member", lambda: "hive-b")
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     member = InboxStore(store.redis, world="hive-b")
-    (ask,) = [i for i in member.inbox(master.seat) if i.ref == master_retire.REF]
+    (ask,) = [i for i in member.inbox(master.seat) if i.ref.startswith(f"{master_retire.REF}:")]
     monkeypatch.setattr(scope, "member", lambda: "")
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert member.get(ask.id).state == "done"

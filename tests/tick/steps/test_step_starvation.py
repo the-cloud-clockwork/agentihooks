@@ -333,6 +333,26 @@ def test_a_step_already_alarmed_never_hides_the_next_starved_step(store: RedisSt
     ]
 
 
+@pytest.mark.feature("inbox-notices-pass-the-seen-claim")
+def test_each_starvation_of_a_step_passes_the_seen_claim(store: RedisStore) -> None:
+    """A step that starves, completes and starves again alarms the master twice, each alarm passing the seen claim."""
+    from scripts.inbox import seen
+
+    inbox = InboxStore(store.redis)
+    replay(store, 4)
+    (first,) = seen.claim(inbox, MASTER)
+    at = START + 5 * MINUTE
+    journal(store, at, WAITS, engine.OK)
+    for index in range(1, 5):
+        journal(store, at + index * MINUTE, WAITS, engine.LATE, abandoned=True)
+    assert step_starvation.step(store, SLUG, at + 4 * MINUTE + 1_000, WINDOWS) == [
+        f"step starvation: alarmed {MASTER}: Tick step waits end has not completed for 4 minutes"
+    ]
+    (second,) = seen.claim(inbox, MASTER)
+    assert second.id != first.id
+    assert second.text.startswith("URGENT: Tick step waits end has not completed for 4 minutes on swarm sw.")
+
+
 @pytest.mark.feature("tick-step-starvation")
 def test_reading_again_with_no_new_records_counts_nothing_twice(store: RedisStore) -> None:
     """The record at the cursor was already counted; a read with nothing newer leaves every step as it was."""
