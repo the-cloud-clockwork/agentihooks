@@ -6565,6 +6565,32 @@
       ]
     },
     {
+      "id": "lab-worker-pod-loop",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
+      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
+      "seam": "scripts.ci_lab.worker Worker.run_once, run, stop, drain and free, Client, environment, slots and build, against scripts.ci_lab.lease_api.serve",
+      "tests": [
+        "tests/ci_lab/test_worker.py::test_units_from_two_heads_run_concurrently_on_one_pod",
+        "tests/ci_lab/test_worker.py::test_every_slot_runs_a_unit_at_once",
+        "tests/ci_lab/test_worker.py::test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs",
+        "tests/ci_lab/test_worker.py::test_a_crash_stops_the_heartbeat_and_the_lease_reaps",
+        "tests/ci_lab/test_worker.py::test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery",
+        "tests/ci_lab/test_worker.py::test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_delivered",
+        "tests/ci_lab/test_worker.py::test_a_refused_upload_url_ends_the_units_delivery",
+        "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
+        "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
+        "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
+        "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
+        "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
+        "tests/ci_lab/test_worker.py::test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer",
+        "tests/ci_lab/test_worker.py::test_the_worker_environment_refuses_github_app_and_redis_variables",
+        "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
+        "tests/ci_lab/test_worker.py::test_slots_come_from_the_cpu_quota_capped_by_ci_lab_slots",
+        "tests/ci_lab/test_worker.py::test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis"
+      ]
+    },
+    {
       "id": "lab-warm-mutant-runner",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-run-mutation",
