@@ -6902,6 +6902,35 @@
       ]
     },
     {
+      "id": "review-state-on-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-state-on-ledger",
+      "behaviour": "Review rounds and reader launches live on the ledger task, so a successor on another hive spends the rounds its predecessor left and is refused a fourth on the same pull request, and may open or mark ready the pull request whose standards and spec readers its predecessor ran; each round adds its own stamp under a guard on the rounds it read, so two rounds started at once both count; a reader launch lands on the task beside this machine's counter even when two readers race, and one the ledger cannot take is reported and stays counted on this machine; swarm status counts each task's rounds from its ledger row.",
+      "seam": "scripts.swarm.review_rounds start and record_reader over the ledger task fields review_rounds and review_readers that scripts.swarm_ledger.ledger_tasks accepts, validates and guards, read by scripts.gates.one_push.OnePush.opening, written by scripts.gates.subagents.SubagentBudget.decide and scripts.swarm.cli review, and counted by scripts.swarm.status findings",
+      "tests": [
+        "tests/swarm/test_review_rounds.py::test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_the_ledger",
+        "tests/swarm/test_review_rounds.py::test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_on_this_machine",
+        "tests/swarm/test_review_rounds.py::test_rounds_before_a_pull_request_and_on_each_pull_request_count_apart",
+        "tests/swarm/test_review_rounds.py::test_a_reader_is_recorded_once_on_the_ledger_task_under_a_guard_on_the_readers_read",
+        "tests/swarm/test_review_rounds.py::test_two_readers_racing_on_the_same_task_both_land",
+        "tests/swarm/test_review_rounds.py::test_a_round_racing_another_on_the_same_counter_counts_after_it",
+        "tests/swarm/test_review_rounds.py::test_a_round_that_loses_the_third_round_to_a_race_is_refused",
+        "tests/swarm_ledger/test_task_review_fields.py::test_a_task_update_records_the_review_round_counts_and_readers",
+        "tests/swarm_ledger/test_task_review_fields.py::test_review_rounds_that_are_not_counter_names_to_round_stamps_are_refused",
+        "tests/swarm_ledger/test_task_review_fields.py::test_review_readers_that_are_not_a_list_of_names_are_refused",
+        "tests/swarm_ledger/test_task_review_fields.py::test_a_reader_write_lands_only_while_the_readers_it_read_still_hold",
+        "tests/swarm_ledger/test_task_review_fields.py::test_a_round_write_lands_only_while_the_rounds_it_read_still_hold",
+        "tests/gates/test_subagents.py::test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter",
+        "tests/gates/test_subagents.py::test_a_reader_launch_the_ledger_cannot_take_is_counted_here_reported_and_allowed",
+        "tests/gates/test_subagents.py::test_one_launch_naming_both_readers_records_the_second_when_the_first_fails",
+        "tests/gates/test_one_push.py::test_a_successor_opens_the_pull_request_its_predecessor_reviewed_on_another_hive",
+        "tests/gates/test_one_push.py::test_a_reader_neither_this_machine_nor_the_ledger_task_records_still_refuses_the_open",
+        "tests/swarm/test_status.py::test_proof_loop_reads_each_pull_requests_review_rounds_from_the_task_row",
+        "tests/swarm/test_cli.py::test_review_closes_on_the_third_round_and_refuses_a_fourth",
+        "tests/swarm/test_cli.py::test_review_spends_the_rounds_the_ledger_task_holds_for_each_pull_request"
+      ]
+    },
+    {
       "id": "ledger-task-update-takes-confirmed-pull-request",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",

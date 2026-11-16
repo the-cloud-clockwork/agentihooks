@@ -1982,15 +1982,9 @@ def cmd_resolve(store, args):
     resolve.run(store, args, _me(store, args).name, LedgerClient())
 
 
-def cmd_review(store, args):
+def cmd_review(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
-    row = LedgerClient().task(args.slug, agent.task) or {}
-    pulls = row.get("split_pulls") or []
-    print(
-        json.dumps(
-            review_rounds.start(args.slug, agent.task, pr_url=row.get("pr_url"), first_pr=pulls[0] if pulls else "")
-        )
-    )
+    print(json.dumps(review_rounds.start(args.slug, agent.task, LedgerClient(), agent.name)))
 
 
 def _git(run, *args):
