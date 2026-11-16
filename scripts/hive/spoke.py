@@ -150,7 +150,7 @@ class Spoke:
         state = json.loads(entry.value)
         status = state["state"]
         if status == ASKED and state.get("owner") == self.config.hive:
-            return self._ask_again(event, record, entry.revision, pending.revision, heartbeat)  # pyright: ignore[reportOptionalMemberAccess]
+            return self._ask_again(event, record["attempt"], entry.revision, pending.revision, heartbeat)  # pyright: ignore[reportOptionalMemberAccess]
         if status == "launching" and state.get("owner") == self.config.hive:
             if not self._end_leftover(state["name"]):
                 return "uncertain"
@@ -227,34 +227,16 @@ class Spoke:
         return "started"
 
     def _ask_again(
-        self,
-        event: Envelope,
-        record: dict[str, Any],
-        revision: int,
-        pending_revision: int,
-        heartbeat: presence.Heartbeat,
+        self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
     ) -> str:
         """Asks the hub again for the admission an unanswered admit ask left pending and launches it, with no wait for
-        a redelivery of the offer the hub readiness pass withdraws once that admission claims the task. Each ask still
-        unanswered counts as a delivery of the offer, which is dead lettered and reopened at the last one; a held
-        answer returns the offer and a refusal withdraws it."""
+        a redelivery of the offer the hub readiness pass withdraws once that admission claims the task; an ask still
+        unanswered keeps the offer pending for the next poll, a held answer returns it and a refusal withdraws it."""
         key = claim_key(event)
-        attempt: int = record["attempt"]
-        if attempt >= self.config.policy.max_deliver:
-            self.bus.state("spoke-work").update(key, json.dumps({"state": "ready"}).encode(), revision)
-            self._finish_dead(event, attempt)
-            self._clear_pending(pending_revision)
-            return "dead"
         try:
             spawned = self._spawn(event, key, revision, heartbeat)
-        except admission.Unanswered:
-            self._failed()
-            asked = json.dumps({**record, "attempt": attempt + 1}).encode()
-            self.bus.state("spoke-pending").update(self._pending_key, asked, pending_revision)
-            return ASKED
-        except admission.Held:
-            self._clear_pending(pending_revision)
-            return admission.HELD
+        except (admission.Unanswered, admission.Held) as unsettled:
+            return self._unsettled(unsettled, pending_revision)
         except Exception:
             self._give_back(event, key, pending_revision, attempt)
             raise

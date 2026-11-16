@@ -533,22 +533,18 @@ def test_a_pending_admission_another_hive_now_asks_for_is_dropped(rig: SimpleNam
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
-def test_an_admission_left_unanswered_through_every_delivery_is_dead_lettered_and_reopened(
-    rig: SimpleNamespace,
-) -> None:
+def test_an_admission_the_hub_leaves_unanswered_keeps_asking_past_the_delivery_cap(rig: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     rig.tasks.request.side_effect = admission.Unanswered("no responders for 'slots.rig.hive-a'")
-    assert [rig.spoke.poll() for _ in range(3)] == ["asked", "asked", "asked"]
+    polls = rig.config.policy.max_deliver + 2
 
-    assert rig.spoke.poll() == "dead"
+    assert [rig.spoke.poll() for _ in range(polls)] == ["asked"] * polls
 
-    assert rig.tasks.request.call_count == 3
-    rig.tasks.reopen.assert_called_once_with(rig.event)
-    assert claim(rig) == {"state": "dead"}
-    assert rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value == b"{}"
-    letter = rig.bus.dead.consumer("audit", "dead.>").fetch(1, 0)[0].event
-    assert letter.data["attempts"] == 3
+    assert rig.tasks.request.call_count == polls
+    rig.tasks.reopen.assert_not_called()
+    assert claim(rig) == {"state": "asked", "owner": "hive-a"}
+    assert rig.bus.dead.consumer("audit", "dead.>").fetch(1, 0) == []
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
