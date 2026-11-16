@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.926 · 2026-11-16
+
+### 2026-11-16 · 61a7e07aa532 · #11401 · @nestorcolt
+
+**Hub admission: name each step's elapsed milliseconds in the late line**
+
+This change breaks down the hub's slow-admission log line into named per-step timings instead of a single total, using a `_StepTimer` that records elapsed milliseconds between marks across the admission path: release check, held lookup, stopped check, readiness snapshot, withdrawal, placement, claim cap, hive turn, hive cap, Redis claim, seat choice, execution start, and ledger write. Each step appears as `step=ms` appended to the existing late-admission line, so when admission is slow (as on 13 November, ~21s), you can see exactly which step is responsible rather than only knowing the total elapsed time.
+
 ## v2.17.922 · 2026-11-16
 
 ### 2026-11-16 · e5da92ad7b75 · #11453 · @agenticore-app
