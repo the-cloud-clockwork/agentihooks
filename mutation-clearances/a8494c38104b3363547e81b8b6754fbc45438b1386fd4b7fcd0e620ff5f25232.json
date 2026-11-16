@@ -1,0 +1,6 @@
+{
+  "scripts/gates/claim_stop.py:scripts.gates.claim_stop.x\u01c1ClaimStop\u01c1decide:e97aad34f74b92745ee8fca08f1cb1569d4fc22dca28e200cbe24326eb2814ab": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. run_wait is read only in 'checks and kind not in KEPT and not run_wait'. A live checks wait on a run url makes named return that url, so grade takes the named branch and returns checks empty unless the task pull is MERGED. For MERGED, ruling returns empty checks in every path: the checks contract branch needs the waiting target to equal the PR url, which fails, so the code falls to 'if waiting: return empty'. With checks empty the conjunction is false whatever run_wait holds, so every mutant of the kind key, comparison, value or None assignment declares the same (no) wait and returns the same Decision."
+  }
+}

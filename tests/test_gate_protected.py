@@ -1,8 +1,8 @@
 import copy
+import inspect
 import json
 import os
 import subprocess
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,6 @@ import yaml
 from scripts import ci_wiring, gate_protected
 
 _ROOT = Path(__file__).resolve().parents[1]
-_TODAY = date(2026, 10, 9)
 pytestmark = pytest.mark.unit
 
 
@@ -38,7 +37,7 @@ def _workflow():
 
 def _grade(head, base=None, head_config=None, base_config=None):
     base = base or {"test.yml": _workflow()}
-    return gate_protected.grade(base, base_config or {}, head, head_config or {}, _TODAY)
+    return gate_protected.grade(base, base_config or {}, head, head_config or {})
 
 
 def _entry():
@@ -255,19 +254,8 @@ def test_main_needs_a_head():
         gate_protected.main([])
 
 
-def test_main_grades_expiry_on_the_utc_date(repo, monkeypatch):
-    _commit(repo, {"test.yml": _workflow()}, {}, "base")
-    zones = []
-
-    class Clock(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            zones.append(tz)
-            return datetime(2026, 10, 9, tzinfo=tz)
-
-    monkeypatch.setattr(gate_protected, "datetime", Clock)
-    assert gate_protected.main(["--root", str(repo), "--head", "HEAD"]) == 0
-    assert zones == [UTC]
+def test_the_grade_takes_no_date() -> None:
+    assert "today" not in inspect.signature(gate_protected.grade).parameters
 
 
 def test_main_refuses_an_unknown_head(repo):
@@ -282,7 +270,7 @@ def test_the_repository_grades_itself_green():
     workflows = ci_wiring.load(_ROOT)
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
-    assert gate_protected.grade(workflows, config, workflows, config, _TODAY, actors) == []
+    assert gate_protected.grade(workflows, config, workflows, config, actors) == []
 
 
 def _protected_workflow():
@@ -572,7 +560,7 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
     if weakened:
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert bool(problems) == weakened, problems
 
 
@@ -606,7 +594,7 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
         }
     for field, values in change.items():
         checkout[field] = checkout.get(field, {}) | values
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert problems == (["The head skips reuse without protected durations provenance."] if change else [])
 
 
@@ -634,7 +622,7 @@ def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, boun
             "GIT_HTTP_LOW_SPEED_TIME": "60",
         }
     head["jobs"]["select"]["steps"][-1]["uses"] = uses
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     admitted = uses == "./provenance-grader/.github/actions/retry-upload"
     assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
 
@@ -677,7 +665,7 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or
     for key in change.get("drop", ()):
         del outputs[key]
     outputs.update(change.get("set", {}))
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert problems == (["The head changes the durations provenance context outputs."] if red else [])
 
 
@@ -694,7 +682,7 @@ def test_protected_durations_outputs_may_not_drop_the_unused_select_file_outputs
     head = copy.deepcopy(base)
     head["jobs"]["durations"] = {"outputs": {}, "steps": ci_reuse.duration_provenance_steps()}
     head["jobs"]["gate"]["needs"].append("durations")
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert "The head changes the durations provenance context outputs." in problems
 
 
@@ -718,7 +706,7 @@ def test_selection_permissions_accept_the_current_or_compatible_grader(previous,
     base = _provenance_workflow(permissions=previous)
     head = copy.deepcopy(base)
     head["jobs"]["select"]["permissions"] = permissions
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     legacy = ["The head changes the durations provenance context permissions."]
     assert problems in ([[]] if previous == permissions else [[], legacy])
 
@@ -729,7 +717,7 @@ def test_selection_provenance_accepts_exactly_both_read_permission_forms(previou
     base = _provenance_workflow(permissions=previous)
     head = copy.deepcopy(base)
     head["jobs"]["select"]["permissions"] = permissions
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == []
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == []
 
 
 @pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
@@ -751,7 +739,7 @@ def test_selection_permissions_reject_every_other_form(previous, permissions):
     base = _provenance_workflow(permissions=previous)
     head = copy.deepcopy(base)
     head["jobs"]["select"]["permissions"] = permissions
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == [
         "The head changes the durations provenance context permissions."
     ]
 
@@ -762,7 +750,7 @@ def test_selection_permissions_do_not_rewrite_an_unreviewed_base_form(previous, 
     base = _provenance_workflow(permissions=previous)
     head = copy.deepcopy(base)
     head["jobs"]["select"]["permissions"] = permissions
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == [
         "The head changes the durations provenance context permissions."
     ]
 
@@ -786,7 +774,7 @@ def test_selection_permission_compatibility_preserves_other_provenance_context(j
     base = _provenance_workflow(job, permissions)
     head = copy.deepcopy(base)
     head["jobs"][job][field] = value
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == [
         f"The head changes the durations provenance context {field}."
     ]
 
@@ -795,7 +783,7 @@ def test_selection_permission_compatibility_does_not_expand_the_durations_job():
     base = _provenance_workflow("durations")
     head = copy.deepcopy(base)
     head["jobs"]["durations"]["permissions"] = {"contents": "read", "actions": "read"}
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == [
         "The head changes the durations provenance context permissions."
     ]
 
@@ -821,7 +809,7 @@ def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened
             if step.get("name") == "Fetch the evidence of recent passed runs"
         ]
         step["run"] = step["run"].replace("--page-size 5", "--page-size 100")
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, policy)
     assert bool(problems) == weakened, problems
 
 
@@ -843,7 +831,7 @@ def test_the_protected_grader_admits_only_the_retried_evidence_upload(uses, anto
         step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Publish protected tested tree evidence"
     ]
     publish["uses"] = uses
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, policy)
     assert bool(problems) == (uses != "./.github/actions/retry-upload"), problems
 
 
@@ -856,7 +844,7 @@ def test_a_head_cannot_replace_the_protected_reuse_decision():
     base["jobs"]["gate-required"]["needs"].append("reuse")
     head = copy.deepcopy(base)
     head["jobs"]["reuse"]["steps"] = [{"run": "echo reused=true"}]
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert "The head changes the protected reuse job; the protected branch grades with its own." in problems
 
 
@@ -864,7 +852,7 @@ def test_an_unchanged_protected_reuse_producer_stays_accepted():
     base = _workflow()
     base["jobs"]["reuse"] = {"runs-on": "ubuntu-latest", "steps": [{"run": "echo legacy"}]}
     base["jobs"]["gate"]["needs"].append("reuse")
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": copy.deepcopy(base)}, {}, _TODAY) == []
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": copy.deepcopy(base)}, {}) == []
 
 
 def test_removing_the_protected_reuse_producer_names_the_violation():
@@ -875,7 +863,7 @@ def test_removing_the_protected_reuse_producer_names_the_violation():
     base["jobs"]["gate"]["needs"].append("reuse")
     head = copy.deepcopy(base)
     del head["jobs"]["reuse"]
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert "The head removes the protected reuse job." in problems
 
 
@@ -885,7 +873,7 @@ def test_a_head_moving_the_gate_away_from_the_protected_reuse_job_is_named_not_c
     base = _workflow()
     base["jobs"]["reuse"] = ci_reuse.reuse_job()
     base["jobs"]["gate"]["needs"].append("reuse")
-    problems = gate_protected.grade({"test.yml": base}, {}, {"other.yml": copy.deepcopy(base)}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"other.yml": copy.deepcopy(base)}, {})
     assert "The head removes the protected reuse job." in problems
 
 
@@ -931,8 +919,8 @@ def test_the_reuse_job_and_the_gate_may_move_behind_the_runner_trust_selector():
     base, head = _protected_pair()
     head["jobs"]["reuse"] = _anton_reuse()
     head["jobs"]["gate-required"]["runs-on"] = _anton()
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY) == []
-    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _POLICY) == []
+    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _POLICY) == []
 
 
 def test_the_reuse_job_and_gate_accept_trusted_queue_rerun_selectors():
@@ -945,8 +933,8 @@ def test_the_reuse_job_and_gate_accept_trusted_queue_rerun_selectors():
     head["jobs"]["reuse"] = _anton_reuse()
     head["jobs"]["reuse"]["runs-on"] = runner
     head["jobs"]["gate-required"]["runs-on"] = runner
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY) == []
-    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _POLICY) == []
+    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _POLICY) == []
 
 
 @pytest.mark.parametrize(
@@ -955,7 +943,7 @@ def test_the_reuse_job_and_gate_accept_trusted_queue_rerun_selectors():
 def test_the_gate_takes_no_other_runner(runner):
     base, head = _protected_pair()
     head["jobs"]["gate-required"]["runs-on"] = runner
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _POLICY)
     assert problems == ["The head's Gate — Required changes its runs-on; the protected branch grades with its own."]
 
 
@@ -979,7 +967,7 @@ def _other_pool(job):
 def test_the_reuse_job_moves_only_in_its_canonical_anton_form(weaken):
     base, head = _protected_pair()
     head["jobs"]["reuse"] = weaken(_anton_reuse())
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _POLICY)
     assert problems == ["The head changes the protected reuse job; the protected branch grades with its own."]
 
 
@@ -987,12 +975,12 @@ def test_without_a_dict_policy_only_the_hosted_runner_is_accepted():
     base, head = _protected_pair()
     head["jobs"]["reuse"] = _anton_reuse()
     head["jobs"]["gate-required"]["runs-on"] = _anton()
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, list(_POLICY["actors"]))
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, list(_POLICY["actors"]))
     assert problems == [
         "The head's Gate — Required changes its runs-on; the protected branch grades with its own.",
         "The head changes the protected reuse job; the protected branch grades with its own.",
     ]
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == problems
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == problems
 
 
 def _trusted_base(repo, actors=None):
@@ -1091,7 +1079,7 @@ def test_the_repository_aggregator_rendered_for_the_lab_grades_green() -> None:
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
     assert step["run"].count(_QUEUE_TIER_OPENING) == 1
     step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
-    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == []
+    assert gate_protected.grade(workflows, config, head, config, actors) == []
 
 
 @pytest.mark.parametrize(
@@ -1204,7 +1192,7 @@ def test_feature_suite_requires_both_promotion_dependencies(missing: str | None)
             "runs-on": "ubuntu-latest",
             "needs": [] if job_id == missing else ["feature-suite"],
         }
-    problems = ci_wiring.check({"test.yml": workflow}, {}, _TODAY)
+    problems = ci_wiring.check({"test.yml": workflow}, {})
     assert problems == ([] if missing is None else [f"test.yml/feature-suite is not a need of {missing}."])
 
 
@@ -1261,7 +1249,7 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
     assert '"sonar", "writer-lock"]' in gate["steps"][0]["run"]
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
-    assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
+    assert gate_protected.grade(base, config, head, config, policy) == []
 
 
 @pytest.mark.parametrize("weakened", [False, True])
@@ -1281,7 +1269,7 @@ def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_tes
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
-    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    problems = gate_protected.grade(base, config, head, config, policy)
     assert bool(problems) == weakened, problems
 
 
@@ -1297,8 +1285,8 @@ def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_dr
     step["run"] = step["run"].replace(ci_reuse.POSTGRES_REQUIRED[1], ci_reuse.POSTGRES_REQUIRED[0])
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
-    assert gate_protected.grade(base, config, base, config, _TODAY, policy) == []
-    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    assert gate_protected.grade(base, config, base, config, policy) == []
+    problems = gate_protected.grade(base, config, head, config, policy)
     assert any("changes its steps" in problem for problem in problems), problems
 
 
@@ -1450,7 +1438,7 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
         step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
-    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+    assert gate_protected.grade(base, config, head, config, actors) == []
 
 
 @pytest.mark.parametrize("diagnostic", [False, True])
@@ -1546,7 +1534,7 @@ def test_the_reviewed_summary_may_run_outside_required_grading(separate, declare
     base, head = _aggregators()
     base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=True)
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=not separate)
-    config = {}
+    config: ci_wiring.Wiring = {}
     if separate:
         head["jobs"]["test-summary"] = {
             "needs": ["unit", "unit-selected"],
@@ -1564,7 +1552,7 @@ def test_the_reviewed_summary_may_run_outside_required_grading(separate, declare
         if not separate or declared
         else ["test.yml/test-summary runs on pull requests but is not a need of Gate — Required."]
     )
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _POLICY) == expected
 
 
 @pytest.mark.parametrize("shell", [None, "bash", "sh", "pwsh"])
@@ -1585,13 +1573,12 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
     }
     head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"].append("unit-selected")
-    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    config: ci_wiring.Wiring = {"not_gates": {"test.yml/test-summary": _entry()}}
     problems = gate_protected.grade(
         {"test.yml": base},
         config if declared_on_base else {},
         {"test.yml": head},
         config,
-        _TODAY,
         _POLICY,
     )
     if shell in (None, "bash"):
@@ -1613,10 +1600,10 @@ def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_m
         head["jobs"]["gate-required"]["needs"].append("mutation")
     else:
         head["jobs"]["mutation"]["if"] = "github.event_name == 'push'"
-    config = {"not_gates": {f"test.yml/{stage}": _entry()}}
+    config: ci_wiring.Wiring = {"not_gates": {f"test.yml/{stage}": _entry()}}
     accepted = gated and merged and stage != "audit"
     expected = [] if accepted else [f"test.yml/{stage} runs on pull requests but is not a need of Gate — Required."]
-    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _POLICY) == expected
 
 
 @pytest.mark.parametrize("stage", ["mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"])
@@ -1626,13 +1613,13 @@ def test_a_merged_mutation_stage_ignores_the_base_declaration_date(stage: str) -
     head["jobs"]["mutation"] = {"needs": [stage], "runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"].append("mutation")
     key = f"test.yml/{stage}"
-    base_config = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
-    head_config = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
-    problems = gate_protected.grade({"test.yml": base}, base_config, {"test.yml": head}, head_config, _TODAY, _POLICY)
+    base_config: ci_wiring.Wiring = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
+    head_config: ci_wiring.Wiring = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
+    problems = gate_protected.grade({"test.yml": base}, base_config, {"test.yml": head}, head_config, _POLICY)
     assert problems == []
 
 
-def _separate_summary(head, steps):
+def _separate_summary(head: dict[str, Any], steps: list[Any]) -> ci_wiring.Wiring:
     head["jobs"]["test-summary"] = {
         "needs": ["unit", "unit-selected"],
         "if": "${{ always() }}",
@@ -1654,7 +1641,7 @@ def test_the_separate_summary_may_retry_each_download_once(pipefail):
     if pipefail:
         steps = ci_reuse.pipefail_summary(steps)
     config = _separate_summary(head, steps)
-    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
 
 
 def test_the_retried_summary_waits_and_downloads_each_report_once_more():
@@ -1705,7 +1692,7 @@ def test_a_separate_summary_cannot_weaken_its_download_retry(change):
     else:
         steps[1] = {key: value for key, value in steps[1].items() if key != "continue-on-error"}
     config = _separate_summary(head, steps)
-    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY)
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY)
     assert "The test summary must use the reviewed reporting job." in problems
 
 
@@ -1780,7 +1767,7 @@ def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, w
         head["jobs"]["gate-required"]["steps"] = ci_reuse.lost_rerun(head["jobs"]["gate-required"]["steps"])
     if weakened:
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
-    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert bool(problems) == weakened, problems
 
 
@@ -2212,7 +2199,7 @@ def test_the_current_required_gate_accepts_the_forwarded_statistics_form():
     step["run"] = _with_forwarded_stats(step["run"])
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
-    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+    assert gate_protected.grade(base, config, head, config, actors) == []
 
 
 @pytest.mark.parametrize(

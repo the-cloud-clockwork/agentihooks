@@ -1,6 +1,5 @@
 import copy
 import json
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -70,7 +69,7 @@ def combined(base, promotion=True):
 def grade(base, head):
     config = json.loads((ROOT / ci_wiring.CONFIG).read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
-    return gate_protected.grade(base, config, head, config, date(2026, 10, 16), policy)
+    return gate_protected.grade(base, config, head, config, policy)
 
 
 def test_protected_grading_accepts_separate_duration_admission():
