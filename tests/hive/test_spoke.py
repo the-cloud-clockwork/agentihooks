@@ -561,9 +561,21 @@ def test_an_admission_asked_again_launches_without_measuring_room_again(rig: Sim
 
 
 @pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
-def test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_and_launches(rig: SimpleNamespace) -> None:
+def test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_timeout_later(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import account_slots
+
     pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"}, attempt=2)
     assert rig.queue.withdraw(lambda event: True) == 1
+    rig.spoke.clock = lambda: rig.clock.now
+    rig.clock.now = 5_000
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = 5_000 + account_slots.REQUEST_TIMEOUT_MS - 1
+    assert rig.spoke.poll() == "busy"
+    assert claim(rig) == {"owner": "hive-a", "state": "claimed"}
+    rig.tasks.request.assert_not_called()
+    rig.clock.now = 5_000 + account_slots.REQUEST_TIMEOUT_MS
 
     assert rig.spoke.poll() == "started"
 
@@ -582,11 +594,14 @@ def test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_and_launch
 def test_a_claim_its_own_ended_admission_wait_left_is_freed_when_the_hub_holds_or_refuses_it(
     rig: SimpleNamespace, answer: str, outcome: str, state: dict[str, str]
 ) -> None:
-    from scripts.hive import admission
+    from scripts.hive import account_slots, admission
 
     pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"})
     rig.tasks.request.side_effect = [admission.Held("2 of 2 agents on the hive") if answer == "held" else None]
     rig.spoke.measure = lambda: None
+    rig.spoke.clock = lambda: rig.clock.now
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = account_slots.REQUEST_TIMEOUT_MS
 
     assert rig.spoke.poll() == outcome
 
