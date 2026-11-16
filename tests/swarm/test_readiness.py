@@ -179,6 +179,15 @@ def test_a_new_claim_generation_is_offered_again(bus):
     assert queued(bus, "eng", reopened) == ["a"]
 
 
+@pytest.mark.feature("unfit-refusal-spends-no-delivery")
+def test_an_offer_still_queued_past_the_dedupe_window_is_not_offered_again(bus: Bus, clock: Clock) -> None:
+    view = snapshot(doc([task("a")]))
+    assert readiness.publish(bus, view, NOW) == ["ready:sw:a:0"]
+    clock.now += BusConfig().dedupe_window_ms
+    assert readiness.publish(bus, view, clock.now) == []
+    assert queued(bus, "eng", view) == ["a"]
+
+
 def test_an_unfrozen_task_is_offered_again_once_the_dedupe_window_from_its_first_offer_passes(bus, clock):
     found = doc([task("a")])
     readiness.publish(bus, snapshot(found), NOW)
