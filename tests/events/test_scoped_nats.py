@@ -2,6 +2,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from nats import errors as nats_errors
 
 from scripts.events import nats
 from scripts.events.bus import StateConflict
@@ -336,22 +337,20 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
 @pytest.mark.parametrize(
     ("error", "text"),
     [
-        ("TimeoutError", "^request to 'swarm.rig.silent' timed out after 300 ms$"),
-        ("NoRespondersError", "^no responders for 'swarm.rig.silent'$"),
+        (nats_errors.TimeoutError, "^request to 'swarm.rig.silent' timed out after 300 ms$"),
+        (nats_errors.NoRespondersError, "^no responders for 'swarm.rig.silent'$"),
     ],
     ids=["late answer", "missing responder"],
 )
 def test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder(
-    error: str, text: str
+    error: type[nats_errors.Error], text: str
 ) -> None:
     import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from nats import errors as nats_errors
-
     bus = object.__new__(nats.NatsBus)
-    silent = AsyncMock(side_effect=getattr(nats_errors, error))
+    silent = AsyncMock(side_effect=error)
     bus._loop = SimpleNamespace(run=asyncio.run)
     bus._nc = SimpleNamespace(request=silent, max_payload=1048576)
     with pytest.raises(TimeoutError, match=text):
