@@ -332,12 +332,15 @@ function withRefusals(top, counts) {
 
 function labLine(entry) {
   const wait = entry.predicted_wait_s === null ? "no free slot" : `${span(entry.predicted_wait_s * 1000)} wait`;
-  return `${entry.class.replace(/_/g, " ")} · ${entry.pending} pending · ${wait}`;
+  const ratio = entry.verdict_cache_hit_ratio;
+  const hits = typeof ratio === "number" ? `${Math.round(ratio * 100)}% cache hits` : "no cache lookups";
+  const parts = [entry.class.replace(/_/g, " "), `${entry.pending} pending`, wait, hits].map((part, i, all) => (i < all.length - 1 ? `${part} ·` : part));
+  return h("li", { title: parts.join(" ") }, ...parts.flatMap((part, i) => [i ? " " : "", h("span", { class: "lab-part", text: part })]));
 }
 
 function labStat(lab) {
   const age = lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
-  const lines = lab.classes.map((entry) => h("li", { text: labLine(entry) }));
+  const lines = lab.classes.map(labLine);
   const failed = lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];
   return h("div", { class: "stat lab-capacity", "data-stat": statKey("Lab") },
     h("dt", {}, statGrip("Lab"), `Lab${age}`),
