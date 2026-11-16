@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.953 · 2026-11-16
+
+### 2026-11-16 · c3ba8940d67d · #11619 · @agenticore-app
+
+**Reuse the runner Semgrep and bound the install in the Semgrep feature job**
+
+The feature-tests Semgrep job now reuses the scan job's version-check logic instead of unconditionally pip-installing Semgrep 1.177.0 on every run. Since the runner image already ships that version, the install step typically skips pip entirely, cutting the step from 22-42 seconds down to 2-11 seconds. The install step also now has a 2 minute timeout, well under the job's 5 minute limit, so a stalled download fails fast with a clear error instead of silently hanging until the whole job times out and turns the pull request red.
+
 ## v2.17.949 · 2026-11-16
 
 ### 2026-11-16 · 30277210e1c9 · #11584 · @agenticore-app
