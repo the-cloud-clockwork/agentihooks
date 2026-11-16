@@ -3674,7 +3674,10 @@
         "tests/swarm/test_runtime.py::test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model",
         "tests/swarm/test_runtime.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_launches_the_claude_model",
         "tests/swarm/test_runtime.py::test_a_successor_never_launches_a_saved_model_of_the_other_harness",
-        "tests/swarm/test_default_models.py::test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model"
+        "tests/swarm/test_default_models.py::test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_successor_saved_model_of_the_other_harness_falls_back_to_the_swarm_harness_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_takes_the_swarm_claude_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_resumed_model_of_the_other_harness_falls_back_to_the_swarm_harness_model"
       ]
     },
     {
