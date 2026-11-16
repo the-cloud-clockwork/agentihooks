@@ -63,6 +63,13 @@ def refused(slug: str, request: dict[str, Any], reason: str) -> None:
     )
 
 
+def turn_key(hive: str) -> str:
+    """The Redis key every hub pod holds while it admits a launch for the hive."""
+    from scripts.hive import registry
+
+    return f"{registry.key(hive)}:admitting"
+
+
 class Admission:
     def __init__(
         self,
@@ -89,9 +96,9 @@ class Admission:
             refused(slug, request, older)
             return None
         timer.mark("release")
-        held = self.store.redis.get(self._key(slug, request))
-        if held:
-            admitted = json.loads(held)
+        offer = self._key(slug, request)
+        admitted = self._held(offer)
+        if admitted:
             live = admitted["name"] in self.store.listed(slug)
             if live and admitted["hive"] == request["hive"]:
                 return admitted
@@ -109,8 +116,7 @@ class Admission:
         if withdrawn := readiness.withdrawal(
             SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
         ):
-            refused(slug, request, f"the offer is withdrawn, {withdrawn}")
-            return None
+            return self._withdrawn(slug, request, offer, withdrawn)
         timer.mark("withdrawal")
         if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]):
             print(
@@ -127,8 +133,10 @@ class Admission:
             )
             return None
         timer.mark("cap")
-        with self._turn(request["hive"]) as busy:
+        with self._turn(request["hive"], offer) as busy:
             timer.mark("turn")
+            if not busy and (kept := self._kept(slug, request, offer)):
+                return kept
             if full := busy or self._full(request["hive"]):
                 refused(slug, request, full)
                 held: dict[str, str] = {hive_admission.HELD: full}
@@ -139,6 +147,31 @@ class Admission:
             refused(slug, request, "another holder took the claim")
             return None
         return self._answered(slug, request, started, admitted, timer)
+
+    def _held(self, offer: str) -> dict[str, Any] | None:
+        """The admission kept for the offer, whichever hive asked for it; None when none is kept."""
+        held: str | None = self.store.redis.get(offer)  # pyright: ignore[reportUnknownMemberType]
+        return json.loads(held) if held else None
+
+    def _kept(self, slug: str, request: dict[str, Any], offer: str) -> dict[str, Any] | None:
+        """The admission the asking hive's own ask of the offer kept while its agent is still listed; None otherwise."""
+        admitted = self._held(offer)
+        if admitted and admitted["hive"] == request["hive"] and admitted["name"] in self.store.listed(slug):
+            return admitted
+        return None
+
+    def _withdrawn(self, slug: str, request: dict[str, Any], offer: str, withdrawn: str) -> dict[str, Any] | None:
+        """A repeat ask from the hive whose own admission claimed the offer: answered with that admission once it
+        leaves the hive's turn and held while it outlasts the turn wait; any other ask is refused for the withdrawal."""
+        if self._admitting(request["hive"], offer):
+            with self._turn(request["hive"], offer) as busy:
+                if busy == hive_admission.ADMITTING:
+                    held: dict[str, str] = {hive_admission.HELD: busy}
+                    return held
+        if kept := self._kept(slug, request, offer):
+            return kept
+        refused(slug, request, f"the offer is withdrawn, {withdrawn}")
+        return None
 
     def _answered(
         self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any], timer: _StepTimer
@@ -176,24 +209,28 @@ class Admission:
         return ""
 
     @contextmanager
-    def _turn(self, hive: str) -> Iterator[str]:
+    def _turn(self, hive: str, offer: str) -> Iterator[str]:
         """Holds the hive's admission key in Redis, shared by every hub pod, while its cap is counted and the task
-        claimed; yields BUSY when another admission for the hive keeps it past the wait."""
-        from scripts.hive import registry
-
-        key, token = f"{registry.key(hive)}:admitting", uuid.uuid4().hex
+        claimed, naming the offer it admits; yields ADMITTING when the hive's own admission of the same offer keeps it
+        past the wait and BUSY when another admission for the hive does."""
+        key, token = turn_key(hive), f"{offer} {uuid.uuid4().hex}"
         for _ in range(TURN_TRIES):
             if self.store.redis.set(key, token, nx=True, px=TURN_MS):
                 break
             time.sleep(TURN_WAIT_S)
         else:
-            yield BUSY
+            yield hive_admission.ADMITTING if self._admitting(hive, offer) else BUSY
             return
         try:
             yield ""
         finally:
             if self.store.redis.get(key) == token:
                 self.store.redis.delete(key)
+
+    def _admitting(self, hive: str, offer: str) -> bool:
+        """True while the hive's admission key is held by an admission of this same offer."""
+        holder: object = self.store.redis.get(turn_key(hive))  # pyright: ignore[reportUnknownMemberType]
+        return str(holder).startswith(f"{offer} ")
 
     def _full(self, hive: str) -> str:
         """The hive's live worker executions across every swarm against its registry max agents; empty below the cap

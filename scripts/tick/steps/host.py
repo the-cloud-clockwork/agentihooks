@@ -26,7 +26,7 @@ from scripts.tick import pool, registry
 from scripts.tick import view as ledger_view
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep, Left, hook_domains, pass_domains
+from scripts.tick.steps import CallStep, Left, hold, hook_domains, pass_domains
 from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
@@ -41,19 +41,17 @@ _KEEPING = Lock()
 
 
 def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Get], Any]:
-    """Run ``call`` with the swarm command module, skipping once a step held an exception in the pass value ``box``
-    and holding the one it raises there."""
+    """Run ``call`` with the swarm command module, holding the exception it raises in the pass value ``box``, so
+    only the steps that need it stay shut."""
 
     def run(tick: Any, get: Get) -> Any:
         found = get(box)
-        if "raised" in found:
-            return []
         try:
             return call(import_module("scripts.swarm.cli"), get)
         except (Left, ledger_client.LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
-            found["raised"] = exc
+            hold(found, exc)
             return []
 
     return run
