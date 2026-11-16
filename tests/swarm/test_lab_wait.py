@@ -69,6 +69,7 @@ def test_a_lab_wait_refuses_anything_but_a_check_run_url(target: str) -> None:
     assert waits.target_problem("lab", target, "t1", {}, None) == f"wait on lab needs a check run url, not {target}"
 
 
+@pytest.mark.feature("swarm-lab-wait")
 def test_the_cli_records_a_lab_wait_on_a_check_run(
     started: tuple[Any, Any],  # noqa: F811
     capsys: pytest.CaptureFixture[str],
@@ -138,6 +139,7 @@ def test_the_tick_ends_a_red_lab_wait_naming_the_gate_and_conclusion(
     assert tick.told() == [notice(outcome)]
 
 
+@pytest.mark.feature("swarm-lab-wait")
 def test_an_unreachable_github_holds_the_lab_wait(tick: Any, github: dict[str, Any]) -> None:  # noqa: F811
     github["code"], github["stderr"] = 1, b"HTTP 502: Bad Gateway"
     hold_check(tick)
@@ -145,6 +147,7 @@ def test_an_unreachable_github_holds_the_lab_wait(tick: Any, github: dict[str, A
     assert (idle.wait(tick.store.redis, "sw", ME) or {})["on"]["target"] == CHECK
 
 
+@pytest.mark.feature("swarm-lab-wait")
 def test_a_missing_check_run_ends_the_lab_wait_with_that_reason(tick: Any, github: dict[str, Any]) -> None:  # noqa: F811
     github["code"], github["stderr"] = 1, b"gh: Not Found (HTTP 404)"
     hold_check(tick)
