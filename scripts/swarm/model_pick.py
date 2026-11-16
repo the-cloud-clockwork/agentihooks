@@ -13,6 +13,8 @@ SONNET = "sonnet"
 SONNET_EFFORT = "xhigh"
 FRONTIER_EFFORT = "high"
 CLAUDE_PREFIXES = ("claude", "opus", SONNET, "haiku", "fable")
+CODEX_PREFIXES = ("gpt", "codex", "o1", "o3", "o4")
+FOREIGN = {"claude": CODEX_PREFIXES, "codex": CLAUDE_PREFIXES}
 KEYS = ("lower", "higher")
 STEPS = ((SONNET, SONNET_EFFORT), ("", "medium"), ("", "high"), ("", "xhigh"))
 STARTS = {"S": 0, "M": 1, "L": 2}
@@ -57,6 +59,16 @@ def floor(options: tuple[ModelPick, ...]) -> ModelPick:
 def described(option: ModelPick) -> str:
     fit = FITS[SONNET if option.model == SONNET else option.effort]
     return f"{LABELS.get(option.model, option.model)} at {EFFORT_WORDS[option.effort]}: {fit}"
+
+
+def foreign(harness: str, model: str) -> bool:
+    """Whether the model belongs to the other harness: a Claude model on Codex or a Codex model on Claude."""
+    return model.startswith(FOREIGN.get(harness, ()))
+
+
+def suited(harness: str, model: str, fallback: str) -> str:
+    """The model when the harness runs it, else the fallback, so a launch never asks for the other harness's model."""
+    return fallback if foreign(harness, model) else model
 
 
 def pick(
