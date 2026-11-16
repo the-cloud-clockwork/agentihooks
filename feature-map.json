@@ -69,7 +69,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-saved-account-pin",
       "behaviour": "A hive spoke launch keeps the account saved in a task's exit handoff or relaunch assignment only while the hub account slot holds or takes a worker seat on it for the launching execution; when the slot refuses, the launch passes no account route and the normal account choice runs, so a successor is never pinned to a full account that refuses every launch with no account slot available.",
       "seam": "HerdrRuntime.spawn for a task with an account slot hive and a saved account, through account_slots.room",
-      "rules": ["hive-saved-account-route-unchecked"],
+      "rules": [
+        "hive-saved-account-route-unchecked"
+      ],
       "tests": [
         "tests/swarm/test_runtime_account_slots.py::test_a_saved_handoff_account_routes_a_hive_launch_only_while_its_account_slot_has_a_worker_seat",
         "tests/swarm/test_runtime_account_slots.py::test_a_quota_repick_routes_its_own_account_without_taking_a_slot_for_the_saved_one",
@@ -5566,7 +5568,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -6801,7 +6803,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-free-stop-guards",
       "behaviour": "When the agents reap step frees a legacy launched agent, one whose hive recorded no start, for a revoked account, repeated content refusals or a stuck provider error, the agent is retired and dropped as before and no execution stop is sent to any hive.",
       "seam": "_free_revoked, _free_refused and _free_stuck on an agent the hub reconciler counts as legacy",
-      "rules": ["tick-free-skips-execution-stop"],
+      "rules": [
+        "tick-free-skips-execution-stop"
+      ],
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired"
       ]
@@ -7237,6 +7241,16 @@
       "tests": [
         "tests/hive/test_master_placement.py::test_a_secondary_master_ignores_a_hive_interactive_login",
         "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot"
+      ]
+    },
+    {
+      "id": "lane-model-harness-compatibility",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
+      "behaviour": "A Claude only lane model resolves to the configured Codex default before an explicit effort returns; Claude and compatible Codex choices retain their model and effort.",
+      "seam": "model_pick.pick for Codex and Claude lanes with an explicit effort",
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns"
       ]
     }
   ],

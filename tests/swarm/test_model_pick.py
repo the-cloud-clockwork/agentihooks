@@ -219,6 +219,25 @@ def test_an_explicit_lane_effort_never_calls_the_classifier(monkeypatch):
     assert picked == ModelPick("opus", "high")
 
 
+@pytest.mark.feature("lane-model-harness-compatibility")
+@pytest.mark.parametrize(
+    ("harness", "lane_model", "expected"),
+    [
+        ("codex", "opus", "gpt-6-sol"),
+        ("claude", "opus", "opus"),
+        ("codex", "gpt-6.1-sol", "gpt-6.1-sol"),
+    ],
+)
+def test_lane_model_matches_harness_before_explicit_effort_returns(
+    harness: str, lane_model: str, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
+    picked = model_pick.pick(
+        harness, {"model": lane_model, "effort": "xhigh"}, {}, {}, default_model="gpt-6-sol"
+    )
+    assert picked == ModelPick(expected, "xhigh")
+
+
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("missing lane called classifier"))
     assert model_pick.pick("claude", {}, {}, {}) == ModelPick("", "")
