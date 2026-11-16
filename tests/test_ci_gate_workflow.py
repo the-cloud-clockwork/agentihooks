@@ -986,6 +986,7 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
         "mutation-replan",
         "mutation-shard",
         "admission",
+        "lab-verdict",
     ]
     assert workflow["jobs"]["mutation-stats"]["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
     assert workflow["jobs"]["mutation-plan"].get("needs", []) in ([], ["admission"])
