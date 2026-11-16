@@ -32,6 +32,8 @@ from .subjects import subject as event_subject
 
 DEFAULT_URL = "nats://127.0.0.1:4222"
 EVENT_STREAM = "AGENTIHOOKS-EVENTS"
+LAB_STREAM = "AGENTIHOOKS-CI-LAB-HEADS"
+LAB_SUBJECT = "ci.lab.head.>"
 QUEUE_SUBJECT = "agentihooks.queue"
 MSG_ID = "Nats-Msg-Id"
 KV_HISTORY = 64
@@ -583,6 +585,7 @@ class NatsBus:
             if config.scoped
             else self._legacy_dead
         )
+        self.lab_heads = self._legacy_events
         self._legacy_stops = self._legacy_events
         self.stops = (
             RoutedLog(lambda swarm: self.for_swarm(swarm).stops, lambda: self._logs("stops"), config.queue)

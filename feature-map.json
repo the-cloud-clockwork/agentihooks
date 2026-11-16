@@ -7007,6 +7007,19 @@
         "tests/ci_lab/test_expressions.py::test_syntax_outside_the_subset_is_refused",
         "tests/ci_lab/test_expressions.py::test_a_condition_holds_when_its_expression_is_truthy"
       ]
+    },
+    {
+      "id": "lab-head-own-stream",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
+      "behaviour": "CI lab heads live in their own JetStream stream, AGENTIHOOKS-CI-LAB-HEADS with ci.lab.head.>, which every provisioning bus open creates after the events stream, so the events provisioning that resets the legacy stream's subjects on each controller start never wipes the lab head subjects and a restart keeps the stored heads; the bus exposes it as lab_heads and the GitHub webhook receiver publishes lab heads there by stream name, failing rather than falling back to the legacy events stream when it is missing.",
+      "seam": "scripts.events.nats NatsBus provisioning and NatsBus.lab_heads on LAB_STREAM, and scripts.hub.github_webhooks main wiring LabIntake to bus.lab_heads",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_provisioning_keeps_the_lab_head_subjects_across_a_controller_restart",
+        "tests/events/test_nats_lab_stream.py::test_the_receiver_publishes_lab_heads_to_the_lab_stream_by_name",
+        "tests/events/test_nats_lab_stream.py::test_a_lab_head_publish_without_the_lab_stream_fails_instead_of_falling_back",
+        "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
     }
   ],
   "unmapped_rules": [
