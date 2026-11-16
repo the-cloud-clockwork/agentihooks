@@ -11,6 +11,7 @@ BAND = "band"
 SONNET = "sonnet"
 SONNET_EFFORT = "xhigh"
 FRONTIER_EFFORT = "high"
+CLAUDE_ONLY = ("claude", "opus", SONNET, "haiku", "fable")
 KEYS = ("lower", "higher")
 STEPS = ((SONNET, SONNET_EFFORT), ("", "medium"), ("", "high"), ("", "xhigh"))
 STARTS = {"S": 0, "M": 1, "L": 2}
@@ -63,6 +64,8 @@ def pick(
     from scripts.init_agent import model_effort
 
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
+    if harness == "codex" and default.model.startswith(CLAUDE_ONLY):
+        default = replace(default, model=default_model or model_effort(harness, [], environ)[0])
     if default.effort != AUTO or harness not in EFFORTS:
         return default
     difficulty = task.get("difficulty") if task.get("difficulty") in STARTS else "M"

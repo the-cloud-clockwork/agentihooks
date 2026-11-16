@@ -236,6 +236,19 @@ def test_lane_model_matches_harness_before_explicit_effort_returns(
     assert picked == ModelPick(expected, "xhigh")
 
 
+@pytest.mark.feature("lane-model-harness-compatibility")
+@pytest.mark.parametrize(
+    ("effort", "expected"),
+    [("high", ModelPick("gpt-6.1-sol", "high")), ("auto", ModelPick("gpt-6.1-sol", "medium", "band"))],
+)
+def test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model(
+    effort: str, expected: ModelPick, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a one option band asked the classifier"))
+    picked = model_pick.pick("codex", {"model": "claude-opus-5-5", "effort": effort}, {"difficulty": "S"}, {})
+    assert picked == expected
+
+
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("missing lane called classifier"))
     assert model_pick.pick("claude", {}, {}, {}) == ModelPick("", "")
