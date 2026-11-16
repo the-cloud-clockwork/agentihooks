@@ -732,6 +732,7 @@ body.reordering, body.reordering .stat-grip { cursor: grabbing; user-select: non
 #stats .bottleneck-list li::marker, #stats .lab-list li::marker { color: var(--accent); }
 #stats .top-bottleneck dd, #stats .lab-capacity dd { text-align: left; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 #stats .lab-error { color: var(--signal); }
+#stats .lab-part { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #stats .bottleneck-stage { font-weight: 600; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 * { scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }

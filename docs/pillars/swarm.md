@@ -123,7 +123,9 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS-DEAD` and reopens the task.
 7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
    generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
-   claimant.
+   claimant. A finished agent stays at its prompt and never exits on its own, so the tick's reap step sends its hive
+   an execution stop with reason `ended`, and the hive reaps the agent and publishes the exit; see
+   [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended).
 8. **Reopen.** A reopen clears the claimant, which raises the claim generation. The next offer and claim therefore
    carry new ids, and nothing from the old generation can block them.
 
@@ -132,9 +134,13 @@ When a hive disappears its agents end as if they had exited; see
 
 ### What the minute tick still does
 
-For an `events` swarm the tick spawns no lane agent, reaps no lane agent and collects no acknowledgement: those
-moved to the hub and the hives. It still runs master failover and recovery, the orphan pass that reopens a claimed
-task whose claimant has no agent record and no claim, pane evidence, exits, verification, the dispatcher, master
+For an `events` swarm the tick spawns no lane agent, reaps no lane agent through its own runtime and collects no
+acknowledgement: those moved to the hub and the hives. Its reap step still judges every agent the hub admitted. It
+sends the execution stop to the hive of an agent whose work ended, and the hive reaps the agent's session (see
+[Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)). An agent whose work has not
+ended and whose pane is live goes through the same idle and revoked seat watch as any other agent. The tick still
+runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
+and no claim, pane evidence, exits, verification, the dispatcher, master
 scaling and the promotion and release watches for both engines. Master agents are reaped by the tick under either engine.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
@@ -3885,7 +3891,9 @@ unavailable: <error type>: <message>`, and its other detectors still report.
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
 blocked. The prompt walks it through a fixed order: open an issue where the repo has issues, create a worktree, red test then green,
 pull request into `dev`, queue on green checks with `agentihooks swarm <slug> merge queue <url>`, then `done`. An agent that cannot finish pushes a draft pull request
-and calls `block`. A finished agent is retired on the next tick and its pane closed.
+and calls `block`. A finished agent is retired on the next tick and its pane closed. On an `events` swarm the
+tick sends the execution stop for a finished hub admitted agent to the hive that started it, and that hive reaps
+the agent's session (see [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)).
 
 That order is for a task of kind `code` (the default) or `ci`. A task's kind (`ledger task add --kind`)
 picks its prompt and the proof `done` must carry, and the ledger refuses `done` without it:

@@ -499,7 +499,8 @@ def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     assert selected.account == Account("claude", "login", "room", 0, None, None, kind="master-login")
 
 
-def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_master_login(setup):
+@pytest.mark.feature("master-interactive-login-without-front-gate")
+def test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot(setup: Any) -> None:
     task = {**master(setup), "seat": "master-2@fixture"}
     master_login_hive(setup)
     write_hive(
@@ -511,7 +512,7 @@ def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_maste
         slots=[{"harness": "claude", "account": "login", "kind": "subscription", "cap": 4}],
     )
     selected = setup.launcher.select(setup.config, "master", task)
-    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "interactive", 1)
+    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "subscription", 4)
 
 
 def test_a_front_door_master_on_a_native_hive_reserves_one_launch_while_another_hive_has_a_master_login(setup):
@@ -765,7 +766,7 @@ def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check
 
 
 @pytest.mark.feature("hive-master-refused-account-retry")
-def test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_slot(
+def test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot(
     setup: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import json
@@ -773,7 +774,7 @@ def test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_
     from scripts.hive import launch
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
-    task = {**master(setup), "id": "master-2", "seat": "master-2@fixture", "controller_epoch": setup.held.epoch}
+    task = {**master(setup), "seat": "master@fixture", "controller_epoch": setup.held.epoch}
     write_hive(
         setup,
         excluded=[],
@@ -796,7 +797,7 @@ def test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_
     request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
     assert setup.launcher.spawn(request) == "pending"
     assert tries == [frozenset({"claude:native"})]
-    order = setup.launcher.orders_for("master-2")
+    order = setup.launcher.orders_for("master")
     assert (order.slot, order.route_kind) == ("account", "subscription")
     records = sorted(setup.store.execution_registry.records("fixture"), key=lambda record: record.generation)
     assert [(record.account, record.state) for record in records] == [("native", "ended"), ("account", "launching")]
