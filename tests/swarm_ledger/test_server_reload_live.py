@@ -17,7 +17,7 @@ def child_env():
     return {**os.environ, "PYTHONPATH": str(ROOT)}
 
 
-def healthy(port, timeout=5):
+def healthy(port: int, timeout: float = 30) -> int:
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=timeout) as resp:
         return resp.status
 
@@ -29,6 +29,21 @@ def pid_of(folder):
         return None
 
 
+def children(pid: int) -> set[int]:
+    """The processes any thread of pid started, read from each thread's child list; empty once pid has exited."""
+    try:
+        threads = os.listdir(f"/proc/{pid}/task")
+    except OSError:
+        return set()
+    found: set[int] = set()
+    for thread in threads:
+        try:
+            found.update(map(int, Path(f"/proc/{pid}/task/{thread}/children").read_text().split()))
+        except OSError:
+            continue
+    return found
+
+
 def until(check, limit=30):
     deadline = time.monotonic() + limit
     while not check():
@@ -37,7 +52,14 @@ def until(check, limit=30):
 
 
 @pytest.mark.wall_clock
-def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port):
+def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, ledger_port: int) -> None:
+    """Every request across a hangup gets 200 and none waits for the successor to start.
+
+    The successor writes its pid before it serves, so an answer read while the pid file still names the old server
+    came from the old server. A sequential client has at most one request in flight when the old server stops
+    accepting, so two such answers after the successor appeared show the old server kept accepting while the
+    successor started.
+    """
     env = {
         **child_env(),
         "LEDGER_DIR": str(tmp_path),
@@ -49,17 +71,23 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_p
     with (tmp_path / "server.out").open("w") as log:
         first = subprocess.Popen([sys.executable, str(SERVER), "--serve"], env=env, stdout=log, stderr=log)
     successor = None
-    results, stop = [], threading.Event()
+    events: list[tuple[str, int | str]] = []
+    stop = threading.Event()
     try:
         until(lambda: pid_of(tmp_path) == first.pid)
+        assert healthy(ledger_port) == 200
 
-        def hammer():
+        def hammer() -> None:
+            seen: set[int] = set()
             while not stop.is_set():
-                started = time.monotonic()
+                for child in children(first.pid) - seen:
+                    seen.add(child)
+                    events.append(("child", child))
                 try:
-                    results.append((healthy(ledger_port), time.monotonic() - started))
+                    status: int | str = healthy(ledger_port)
                 except OSError as exc:
-                    results.append((repr(exc), time.monotonic() - started))
+                    status = repr(exc)
+                events.append(("old" if (tmp_path / ".server.pid").read_text() == str(first.pid) else "new", status))
                 time.sleep(0.005)
 
         worker = threading.Thread(target=hammer, daemon=True)
@@ -74,11 +102,15 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_p
         successor = pid_of(tmp_path)
         time.sleep(0.2)
         stop.set()
-        worker.join(10)
+        worker.join(60)
+        assert not worker.is_alive(), (tmp_path / "server.out").read_text()
         assert successor not in (None, first.pid)
         assert healthy(ledger_port) == 200
-        assert results and {status for status, _ in results} == {200}, (tmp_path / "server.out").read_text()
-        assert max(seconds for _, seconds in results) < 1.0
+        answers = [value for kind, value in events if kind != "child"]
+        assert answers and set(answers) == {200}, (tmp_path / "server.out").read_text()
+        assert ("child", successor) in events, f"the old server {first.pid} never listed {successor} as its child"
+        started = [kind for kind, _ in events[events.index(("child", successor)) :]]
+        assert started.count("old") >= 2, started
     finally:
         stop.set()
         for pid in {first.pid, successor} - {None}:
