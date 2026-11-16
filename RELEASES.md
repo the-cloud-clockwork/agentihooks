@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.913 · 2026-11-16
+
+### 2026-11-16 · 0a4e7bc36894 · #11417 · @agenticore-app
+
+**Admit a lost test whose deleted workflow is only partly kept in the head**
+
+This change fixes the test count floor's logic for deleted workflow files: it previously refused to admit a lost test if any single run step from the deleted file survived anywhere in a head file, which meant `mutation-preflight.yml`'s deletion stayed blocked just because 16 of its 31 steps happened to overlap with `test.yml`. Now a deleted file only counts as "kept" when one head file contains its entire executable content, so partial overlaps are correctly admitted while true moves or copies still correctly stay red. This unblocks PR #11335 by bringing the floor back in sync after #11369.
+
 ## v2.17.912 · 2026-11-16
 
 ### 2026-11-16 · 4890f12636ea · #11319 · @agenticore-app
