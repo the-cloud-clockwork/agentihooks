@@ -1,0 +1,18 @@
+rules:
+  - id: unfit-refusal-spends-a-delivery
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An offer this hive may not take was refused with a counted nak. Every hive takes offers from one shared durable
+      consumer per lane, so each refusal by a hive outside the offer's pin or needs spent one of its five deliveries,
+      and offers pinned to the root hive died in the dead letters before the root hive took them. Hand the offer back
+      with the queue's release, which spends no delivery.
+    paths:
+      include:
+        - /scripts/swarm/readiness.py
+        - unfit-refusal-spends-a-delivery.py
+    patterns:
+      - pattern-inside: |
+          if not $FIT($DELIVERY.event):
+              ...
+      - pattern: $DELIVERY.nak(...)

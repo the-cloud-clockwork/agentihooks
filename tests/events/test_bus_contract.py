@@ -181,6 +181,30 @@ def test_a_settled_final_attempt_is_not_dead_lettered(channel, harness, settleme
     assert harness.bus.dead.consumer("dead-reader", "dead.>").fetch(1, harness.poll_ms) == []
 
 
+@pytest.mark.feature("unfit-refusal-spends-no-delivery")
+def test_a_released_delivery_comes_back_after_its_delay_at_its_own_attempt_and_never_dies(harness: Harness) -> None:
+    queue = harness.bus.queue("contract", harness.policy)
+    queue.offer(event())
+    for attempt in range(1, harness.policy.max_deliver):
+        counted = queue.take(harness.poll_ms)
+        assert counted is not None and counted.attempt == attempt
+        counted.nak()
+    delay = harness.policy.ack_wait_ms // 2
+    for _ in range(harness.policy.max_deliver + 1):
+        delivery = queue.take(harness.poll_ms)
+        assert delivery is not None
+        assert (delivery.event.id, delivery.attempt) == ("e1", harness.policy.max_deliver)
+        queue.release(delivery, delay)
+        assert queue.take(harness.poll_ms) is None
+        harness.advance(delay + harness.margin_ms)
+    final = queue.take(harness.poll_ms)
+    assert final is not None and final.attempt == harness.policy.max_deliver
+    final.ack()
+    harness.advance(2 * harness.policy.ack_wait_ms)
+    assert queue.take(harness.poll_ms) is None
+    assert harness.bus.dead.consumer("dead-reader", "dead.>").fetch(1, harness.poll_ms) == []
+
+
 def test_a_nak_holds_the_event_until_its_delay_passes(channel, harness):
     delay = 2 * harness.policy.ack_wait_ms
     channel.offer(event())

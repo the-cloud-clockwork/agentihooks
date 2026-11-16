@@ -6,9 +6,9 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Coroutine, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 import nats as nats_client
 from nats.aio.client import Client
@@ -27,7 +27,7 @@ from nats.js.errors import (
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nats_replicas, nkey
-from .bus import SERVE_WAITED_MS, Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
+from .bus import SERVE_WAITED_MS, Bus, Delivery, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -113,6 +113,11 @@ def connect_options(config: BusConfig) -> dict[str, Any]:
     }
 
 
+def _logged(future: Future[Any]) -> None:
+    if not future.cancelled() and (error := future.exception()) is not None:
+        _log.error("bus call failed: %s", error)
+
+
 class _Loop:
     def __init__(self):
         self.closed = False
@@ -130,6 +135,13 @@ class _Loop:
             coro.close()
             raise RuntimeError("bus is closed")
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    def submit(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Runs ``coro`` on the bus loop without waiting for it, logging the error it ends with."""
+        if self.closed:
+            coro.close()
+            raise RuntimeError("bus is closed")
+        asyncio.run_coroutine_threadsafe(coro, self._loop).add_done_callback(_logged)
 
     def close(self) -> None:
         if self.closed:
@@ -182,6 +194,15 @@ def _attempt(message: Msg) -> int:
     return message.metadata.num_delivered + int((message.headers or {}).get(ATTEMPT_BASE, "0"))
 
 
+async def _release(js: JetStreamContext, msg: Msg, subject: str, stream: str, attempt: int, delay_ms: int) -> None:
+    """Holds ``msg`` in flight for ``delay_ms``, then queues a copy whose first delivery counts as ``attempt`` and acks
+    the original; the copy's id names the original's sequence, so a second hand back of it stays one copy."""
+    await asyncio.sleep(_seconds(delay_ms))
+    headers = {MSG_ID: f"release:{msg.metadata.sequence.stream}", ATTEMPT_BASE: str(attempt - 1)}
+    await nats_payload.publish(js, subject, msg.data, stream=stream, headers=headers)
+    await msg.ack()
+
+
 class NatsDelivery:
     def __init__(self, loop: _Loop, msg: Msg):
         self._loop = loop
@@ -197,6 +218,9 @@ class NatsDelivery:
 
     def term(self) -> None:
         self._loop.run(self._msg.term())
+
+    def release(self, js: JetStreamContext, subject: str, stream: str, delay_ms: int) -> None:
+        self._loop.submit(_release(js, self._msg, subject, stream, self.attempt, delay_ms))
 
 
 class NatsConsumer:
@@ -451,6 +475,11 @@ class NatsWorkQueue:
             return await self._js.get_msg(self._stream, sequence)
         except NotFoundError:
             return None
+
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        """Hands the delivery back on the bus loop, so the caller takes its next offer at once; a delay past the ack
+        wait lets the server redeliver the original, counted, before its copy is queued."""
+        cast(NatsDelivery, delivery).release(self._js, self._subject, self._stream, delay_ms)
 
 
 class NatsStateStore:
