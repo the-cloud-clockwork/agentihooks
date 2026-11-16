@@ -1,0 +1,22 @@
+rules:
+  - id: controller-standby-unguarded-redis-call
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A controller replica stands by behind the replica lock or releases it outside a store_errors() handler. A Redis
+      error then leaves main, the release in its finally raises again and the standby exits into restart back off;
+      when the leader fences itself about twenty seconds into the outage no replica is left to take the lead. On 15
+      November a Redis restart did this in production. Catch store_errors() around the standby and the release.
+    paths:
+      include:
+        - /scripts/swarm/controller.py
+        - controller-standby-unguarded-redis-call.py
+    patterns:
+      - pattern-either:
+          - pattern: $LOCK.lead(...)
+          - pattern: $LOCK.release()
+      - pattern-not-inside: |
+          try:
+              ...
+          except store_errors() as $EXC:
+              ...

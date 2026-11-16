@@ -676,20 +676,38 @@ def _lead(
     store: RedisStore,
     environ: Mapping[str, str],
     lock: replica.ReplicaLock,
-    wait: Callable[[float], None] = scheduled_wait,
+    wait: Callable[[float], None] = _tick_wait,
 ) -> None:
-    """Stand by behind the replica leading this hive's passes, then take the lead and keep it renewed."""
+    """Stand by behind the replica leading this hive's passes, through any Redis outage, then take the lead and keep
+    it renewed."""
     from scripts.swarm_v2 import control_service
 
     servers = control_service.stand_by(environ, store)
     try:
-        if not lock.take():
-            print(f"controller: replica {lock.owner} stands by while {lock.holder()} leads", flush=True)
-            lock.lead(wait)
+        while not _took_the_lead(lock, wait):
+            pass
     finally:
         control_service.close(servers)
     print(f"controller: replica {lock.owner} leads the passes", flush=True)
     lock.beat(_lost, STOPPING)
+
+
+def _took_the_lead(lock: replica.ReplicaLock, wait: Callable[[float], None]) -> bool:
+    """Stand by until this replica takes the lock; on a Redis error wait one stand by poll and answer False, so a Redis
+    outage keeps the standby standing by instead of ending it into restart back off while no replica leads."""
+    try:
+        if not lock.take():
+            print(f"controller: replica {lock.owner} stands by while {lock.holder()} leads", flush=True)
+            lock.lead(wait)
+    except store_errors() as exc:
+        print(
+            f"controller: replica {lock.owner} stands by through a Redis error, "
+            f"trying again after {replica.POLL_S:.0f}s: {exc}",
+            file=sys.stderr,
+        )
+        wait(replica.POLL_S)
+        return False
+    return True
 
 
 def _lost(end: Callable[[int], None] = os._exit) -> None:
@@ -811,7 +829,10 @@ def main(argv: list[str]) -> int:
         if service is not None:
             service.stop()
         if lock is not None:
-            lock.release()
+            try:
+                lock.release()
+            except store_errors() as exc:
+                print(f"controller: releasing the replica lock failed, it lapses on its own: {exc}", file=sys.stderr)
         if bus is not None:
             bus.close()
         for number, handler in previous.items():
