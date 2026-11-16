@@ -1,6 +1,7 @@
 """A lane successor spawned from a saved launch with no model or effort takes the lane model and a range effort."""
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -78,6 +79,33 @@ def test_a_lane_effort_is_kept_and_a_codex_launch_names_its_own_level() -> None:
 def test_a_master_bound_lifts_a_lane_effort_below_high() -> None:
     lifted = swarm({"master": {"effort": "medium"}}, "medium", "high").config("sw")
     assert successor_fill.filled(SAVED, lifted, "master")["effort"] == "high"
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "lane_model", "expected"),
+    [("codex", "opus", "gpt-6-sol"), ("claude", "gpt-6.1-sol", "sonnet"), ("codex", "gpt-6-luna", "gpt-6-luna")],
+)
+def test_a_successor_with_no_saved_model_never_takes_the_other_harness_lane_model(
+    harness: str, lane_model: str, expected: str
+) -> None:
+    config = replace(swarm({"eng": {"model": lane_model}}).config("sw"), codex_model="gpt-6-sol", claude_model="sonnet")
+    assert successor_fill.filled({**SAVED, "harness": harness}, config, "eng")["model"] == expected
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+def test_hub_admission_fills_a_codex_successor_with_the_codex_model_on_a_claude_pinned_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    held = swarm({"eng": {"model": "opus"}})
+    saved = {**SAVED, "harness": "codex"}
+    held.redis.set(held.key("sw", "handoff-envelope", "t1"), json.dumps({"reason": "context", "launch": saved}))
+    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+    seat_agent(held, tasks(("t1", "eng")), "sw", "t1", clock=lambda: 1_000)
+    admitted = json.loads(held.redis.get(held.key("sw", admission.ADMITTED, "t1", "0")))["task"]
+    launch = admitted["handoff_envelope"]["launch"]
+    assert (launch["harness"], launch["model"]) == ("codex", held.config("sw").codex_model)
 
 
 def test_present_keys_stay_and_an_unknown_harness_is_left_alone() -> None:

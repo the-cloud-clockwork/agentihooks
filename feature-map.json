@@ -3654,6 +3654,26 @@
       ]
     },
     {
+      "id": "launch-model-suits-harness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
+      "behaviour": "Every launch path that takes a model from lane config or a filled saved launch chooses it through model_pick.suited, so a Codex launch never asks for a Claude model and a Claude launch never asks for a Codex model: the hive orders launch assignment, the successor fill at hub admission, the runtime lane default for spawns outside eng and ci and for the resume fallback, and the model pick.",
+      "seam": "model_pick.suited through Consumer.launch, successor_fill.filled, runtime._lane_default via HerdrRuntime.spawn and resume, and model_pick.pick",
+      "rules": [
+        "launch-model-skips-harness-choice"
+      ],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_a_claude_launch_on_a_codex_pinned_lane_takes_the_claude_model",
+        "tests/hive/test_orders.py::test_a_hive_order_never_launches_the_other_harness_lane_model",
+        "tests/hive/test_orders.py::test_a_hive_order_keeps_a_lane_model_its_harness_runs",
+        "tests/tick/steps/test_successor_fill.py::test_a_successor_with_no_saved_model_never_takes_the_other_harness_lane_model",
+        "tests/tick/steps/test_successor_fill.py::test_hub_admission_fills_a_codex_successor_with_the_codex_model_on_a_claude_pinned_lane",
+        "tests/swarm/test_runtime.py::test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model",
+        "tests/swarm/test_default_models.py::test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",

@@ -260,6 +260,14 @@ def test_only_the_claude_default_model_carries_a_claude_prefix(defaults: dict[st
     assert prefixed == {"claude": True, "codex": False}
 
 
+@pytest.mark.feature("launch-model-suits-harness")
+def test_a_claude_launch_on_a_codex_pinned_lane_takes_the_claude_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
+    lane = {"model": "gpt-6.1-sol", "effort": "high"}
+    assert model_pick.pick("claude", lane, {}, {}, default_model="sonnet") == ModelPick("sonnet", "high")
+    assert model_pick.pick("claude", lane, {}, {}) == ModelPick(MODEL_DEFAULTS["claude"], "high")
+
+
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("missing lane called classifier"))
     assert model_pick.pick("claude", {}, {}, {}) == ModelPick("", "")

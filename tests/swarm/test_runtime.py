@@ -857,6 +857,43 @@ def test_resume_preserves_the_recorded_resolved_model_and_effort(tmp_path):
     assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "sonnet", "--effort", "medium"]
 
 
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "pinned", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "medium"]),
+    ],
+)
+def test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, pinned: str, launch: list[str]
+) -> None:
+    from dataclasses import replace
+
+    for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
+        monkeypatch.delenv(f"AGENTIHOOKS_{key}", raising=False)
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
+    config.lanes = {"eng": {"model": pinned, "effort": "medium"}}
+    runtime.resume(config, replace(agent, model="", effort=""), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", *launch]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "pinned", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "medium"]),
+    ],
+)
+def test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, pinned: str, launch: list[str]
+) -> None:
+    task = {"id": "t1", "title": "Slice the phase", "difficulty": "S", "rank": "normal"}
+    lanes = {"plan": {"model": pinned, "effort": "medium"}}
+    assert _launched(tmp_path, monkeypatch, "plan", task, lanes=lanes, harness=harness) == launch
+
+
 def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", env=None):
     for key in ("MODEL", "EFFORT"):
         for agent in ("CLAUDE", "CODEX"):
