@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.938 · 2026-11-16
+
+### 2026-11-16 · 0d56f1fee4c5 · #11553 · @agenticore-app
+
+**Restore a queue shard durations or flakes download again when it ends before finishing**
+
+This change extends the fix already applied to coverage restores so that a queue shard's durations and flakes artifact downloads are retried and verified the same way: if the first download attempt ends without setting its download-path output, a second "restore again" step runs, and a follow-up check step fails the job if that retry also ends unfinished. This closes a gap where a torn durations.json or flakes.jsonl could silently pass the step and break downstream jobs like test-summary, refresh-durations, and flaky test recording, matching the protection coverage restores already had.
+
 ## v2.17.936 · 2026-11-16
 
 ### 2026-11-16 · 78abc135d0b3 · #11535 · @nestorcolt
