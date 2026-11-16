@@ -602,14 +602,13 @@ def _stopped(signum: int, frame: object) -> None:
 
 
 def _tick_wait(seconds: float) -> None:
-    """Wait ``seconds`` on the scheduler timer, finishing on the local clock when Redis refuses the timer, so the pass
-    loop's Redis grace window and not the wait decides whether a Redis outage ends the controller."""
-    until = monotonic() + seconds
+    """Wait ``seconds`` on the scheduler timer, or on the local clock when Redis refuses the timer, so the pass loop's
+    Redis grace window and not the wait decides whether a Redis outage ends the controller."""
     try:
         scheduled_wait(seconds)
     except store_errors() as exc:
-        print(f"controller: the scheduled wait failed, finishing it on the local clock: {exc}", file=sys.stderr)
-        sleep(max(0.0, until - monotonic()))
+        print(f"controller: the scheduled wait failed, waiting on the local clock: {exc}", file=sys.stderr)
+        sleep(seconds)
 
 
 def _cadence_wait(started: float) -> None:

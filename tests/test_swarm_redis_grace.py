@@ -270,7 +270,7 @@ def test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes(
     assert len(calls) == 3
     assert len(slept) == 2
     assert all(0 < seconds <= lease.tick_ms() / 1000 for seconds in slept)
-    assert capsys.readouterr().err.count("finishing it on the local clock") == 2
+    assert capsys.readouterr().err.count("waiting on the local clock") == 2
 
 
 @pytest.mark.feature("controller-waits-ride-out-redis-outage")
