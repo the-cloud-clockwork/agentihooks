@@ -47,6 +47,8 @@ class LaneTasks:
             raise admission.Unanswered(str(error)) from error
         if admitted is None:
             return None
+        if admitted.get(admission.HELD) == admission.ADMITTING:
+            raise admission.Unanswered(admission.ADMITTING)
         if admission.HELD in admitted:
             raise admission.Held(admitted[admission.HELD])
         config = self.configs(event.swarm)
