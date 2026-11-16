@@ -388,6 +388,37 @@ def test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot(
     assert re.search(dropped, capsys.readouterr().err, re.MULTILINE)
 
 
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_queued_ones(hub: Any) -> None:
+    """Nine held requests leave one queued behind the bus's eight serve threads; closing the bus returns while all eight
+    are held and cancels the queued one, so freeing the threads afterwards starts nothing more."""
+    import threading
+    import time
+
+    gate = threading.Event()
+    entered: list[bytes] = []
+
+    def held(subject: str, data: bytes) -> bytes:
+        entered.append(data)
+        gate.wait(30)
+        return data
+
+    hub.serve("swarm.rig.held", "workers", held)
+    try:
+        for n in range(9):
+            with pytest.raises(TimeoutError):
+                hub.request("swarm.rig.held", str(n).encode(), 20)
+        time.sleep(0.1)
+        closing = threading.Thread(target=hub.close)
+        closing.start()
+        closing.join(5)
+        assert not closing.is_alive()
+    finally:
+        gate.set()
+    hub._serving.shutdown(wait=True)
+    assert sorted(entered) == [str(n).encode() for n in range(8)]
+
+
 def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
     client = member(signer)
     try:

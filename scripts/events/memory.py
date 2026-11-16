@@ -349,7 +349,9 @@ class MemoryBus:
             self._runtime.require_open()
             return self._buckets.setdefault(bucket, MemoryStateStore(self._runtime))
 
-    def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
+    def serve(
+        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+    ) -> None:
         with self._runtime.cond:
             self._runtime.require_open()
             self._runtime.handlers.append((subject, handler))

@@ -1,7 +1,9 @@
 import asyncio
 import random
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -60,6 +62,7 @@ def test_publish_preserves_stream_and_counts_its_exact_wire_header():
 def test_requests_and_replies_report_the_refused_subject_before_sending(caplog: pytest.LogCaptureFixture) -> None:
     opened = object.__new__(nats.NatsBus)
     opened._loop = SimpleNamespace(run=asyncio.run)
+    opened._serving = ThreadPoolExecutor(1)
     opened._nc = SimpleNamespace(max_payload=10, subscribe=AsyncMock(), flush=AsyncMock(), request=AsyncMock())
     with pytest.raises(ValueError, match="request.subject: payload 11 exceeds server limit 10"):
         opened.request("request.subject", b"x" * 11, 100)
@@ -68,10 +71,37 @@ def test_requests_and_replies_report_the_refused_subject_before_sending(caplog: 
     callback = opened._nc.subscribe.await_args.kwargs["cb"]
     message = SimpleNamespace(subject="service", data=b"", reply="reply.subject", respond=AsyncMock())
     asyncio.run(callback(message))
+    opened._serving.shutdown(wait=True)
     assert [record.getMessage() for record in caplog.records if record.name == nats.__name__] == [
         "reply.subject: payload 11 exceeds server limit 10"
     ]
     message.respond.assert_not_awaited()
+
+
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_that_did_not(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    opened: Any = object.__new__(nats.NatsBus)
+    opened._loop = SimpleNamespace(run=asyncio.run)
+    queued: list[tuple[Any, ...]] = []
+    opened._serving = SimpleNamespace(submit=lambda *call: queued.append(call))
+    opened._nc = SimpleNamespace(max_payload=100, subscribe=AsyncMock(), flush=AsyncMock())
+    monkeypatch.setattr(nats, "time", SimpleNamespace(monotonic=lambda: 20.6))
+    opened.serve("slots.rig.m1", "hub-slots", lambda subject, data: data, wait_ms=600)
+    callback = opened._nc.subscribe.await_args.kwargs["cb"]
+    stale, fresh = (SimpleNamespace(subject="slots.rig.m1", data=b"x", reply="r", respond=AsyncMock()) for _ in "ab")
+    asyncio.run(callback(stale))
+    answer, message, received = queued[0]
+    assert (message, received) == (stale, 20.6)
+    answer(stale, 20.0)
+    answer(fresh, 20.001)
+    stale.respond.assert_not_awaited()
+    fresh.respond.assert_awaited_once_with(b"x")
+    assert capsys.readouterr().err == (
+        "bus: dropped a request on 'slots.rig.m1' after it waited 600 ms in the serve queue, "
+        "past its requester's 600 ms wait\n"
+    )
 
 
 def test_serve_returns_only_after_the_server_holds_the_subscription():

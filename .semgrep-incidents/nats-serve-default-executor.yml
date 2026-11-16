@@ -1,0 +1,20 @@
+rules:
+  - id: nats-serve-default-executor
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A NATS request callback hands its handler to the event loop's default executor, whose queue is unbounded and never
+      asks how long a request waited, so a request queues past its requester's wait and still runs; hub slot takes and
+      lane admissions claimed for hives that had stopped waiting this way. Serve on the bus's own bounded pool and drop a
+      request once it waited as long as its requester waits, timed from when it arrived.
+    paths:
+      include:
+        - /scripts/events/nats.py
+        - nats-serve-default-executor.py
+    patterns:
+      - pattern-inside: |
+          async def $CALLBACK(...):
+              ...
+          ...
+          <... $CLIENT.subscribe(..., cb=$CALLBACK, ...) ...>
+      - pattern: $LOOP.run_in_executor(None, ...)
