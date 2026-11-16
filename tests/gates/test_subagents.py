@@ -165,6 +165,34 @@ def test_a_reader_launch_the_ledger_cannot_take_is_counted_here_reported_and_all
     )
 
 
+class RefusingStandards(ReviewLedger):
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict,
+        by: str = "swarm",
+        if_state: tuple[str, ...] = (),
+        if_match: dict | None = None,
+    ) -> dict:
+        if "standards-reader" in fields.get("review_readers", []):
+            raise SwarmError("ledger demo: server refused: standards-reader")
+        return super().update_task(slug, task_id, fields, by, if_state, if_match)
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_one_launch_naming_both_readers_records_the_second_when_the_first_fails(tmp_path, monkeypatch, capsys):
+    ledger = RefusingStandards(slug="demo")
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    call = Call("Agent", {"name": "spec-reader", "subagent_type": "standards-reader", "prompt": "go"})
+    assert SubagentBudget().decide(call, ME, state(tmp_path)).allowed
+    assert ledger.rows["t1"]["review_readers"] == ["spec-reader"]
+    assert capsys.readouterr().err == (
+        "reader launch counted on this machine only, the ledger task did not take it: "
+        "ledger demo: server refused: standards-reader\n"
+    )
+
+
 def test_a_refused_reader_launch_is_not_recorded_on_the_ledger(tmp_path, monkeypatch):
     ledger = ReviewLedger(slug="demo")
     monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)

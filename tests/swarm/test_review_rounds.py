@@ -141,10 +141,14 @@ class Unlisted(ReviewLedger):
         return None if self.reads in self.missed else super().task(slug, task_id)
 
 
-def test_a_task_the_ledger_does_not_return_starts_at_round_one(tmp_path):
-    ledger = Unlisted(missed={1})
-    assert start(ledger, tmp_path, task="t9") == {"task": "t9", "round": 1}
-    assert (ledger.reads, review_rounds.counts(ledger.rows["t9"])) == (2, {"rounds-before-pr": 1})
+def test_a_task_the_ledger_does_not_hold_is_refused_before_any_review_write(tmp_path):
+    rounds_ledger, readers_ledger = Unlisted(missed={1}), Unlisted(missed={1})
+    with pytest.raises(SwarmError) as refused:
+        start(rounds_ledger, tmp_path, task="t9")
+    with pytest.raises(SwarmError) as unrecorded:
+        review_rounds.record_reader("sw", "t9", "spec-reader", readers_ledger, ME)
+    assert str(refused.value) == str(unrecorded.value) == "task t9 is not on ledger sw"
+    assert (rounds_ledger.reads, rounds_ledger.writes, readers_ledger.writes) == (1, [], [])
 
 
 def test_a_reread_that_misses_the_task_does_not_count_the_round_twice(tmp_path):

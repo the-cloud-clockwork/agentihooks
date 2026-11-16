@@ -6864,6 +6864,7 @@
         "tests/swarm_ledger/test_task_review_fields.py::test_a_round_write_lands_only_while_the_rounds_it_read_still_hold",
         "tests/gates/test_subagents.py::test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter",
         "tests/gates/test_subagents.py::test_a_reader_launch_the_ledger_cannot_take_is_counted_here_reported_and_allowed",
+        "tests/gates/test_subagents.py::test_one_launch_naming_both_readers_records_the_second_when_the_first_fails",
         "tests/gates/test_one_push.py::test_a_successor_opens_the_pull_request_its_predecessor_reviewed_on_another_hive",
         "tests/gates/test_one_push.py::test_a_reader_neither_this_machine_nor_the_ledger_task_records_still_refuses_the_open",
         "tests/swarm/test_status.py::test_proof_loop_reads_each_pull_requests_review_rounds_from_the_task_row",

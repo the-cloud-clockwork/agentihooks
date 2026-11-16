@@ -49,11 +49,19 @@ def readers(row: dict[str, Any]) -> list[str]:
     return list(row.get("review_readers") or [])
 
 
+def held_row(slug: str, task: str, ledger: Ledger) -> dict[str, Any]:
+    """The task's ledger row, refusing a task the ledger does not hold before any review write is spent on it."""
+    row = ledger.task(slug, task)
+    if not row:
+        raise SwarmError(f"task {task} is not on ledger {slug}")
+    return row
+
+
 def start(slug: str, task: str, ledger: Ledger, by: str, home: Path | None = None) -> dict[str, str | int]:
     """Spend one review round of the task on its ledger row, refusing a fourth on the same counter. The round adds a
     stamp of its own under a guard on the rounds it read, so a round racing it lands first and this one counts after
     it, at most five writes."""
-    stamp, row = uuid.uuid4().hex, ledger.task(slug, task) or {}
+    stamp, row = uuid.uuid4().hex, held_row(slug, task, ledger)
     for _ in range(WRITES):
         name, held = counter(row.get("pr_url") or ""), rounds(row)
         spent = len(held.get(name, [])) + 1
@@ -75,7 +83,7 @@ def start(slug: str, task: str, ledger: Ledger, by: str, home: Path | None = Non
 def record_reader(slug: str, task: str, reader: str, ledger: Ledger, by: str) -> None:
     """Add the reader to the task's review readers on the ledger, guarded on the readers it read, and write again while
     a racing writer changes them first, at most five writes."""
-    held = readers(ledger.task(slug, task) or {})
+    held = readers(held_row(slug, task, ledger))
     for _ in range(WRITES):
         if reader in held:
             return

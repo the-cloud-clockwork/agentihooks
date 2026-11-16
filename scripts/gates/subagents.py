@@ -54,15 +54,17 @@ class SubagentBudget:
 
 
 def record_on_ledger(who: Who, readers: list[str]) -> None:
-    """Record each reader launch on the ledger task so a successor on another hive sees it ran; a ledger that cannot
-    take the write leaves only this machine's counter and says so on stderr."""
+    """Record each reader launch on the ledger task so a successor on another hive sees it ran; a reader the ledger
+    cannot take stays counted only on this machine, says so on stderr, and leaves the next reader still tried."""
     from scripts.swarm import review_rounds
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import SwarmError
 
     ledger = LedgerClient()
-    try:
-        for reader in readers:
+    for reader in readers:
+        try:
             review_rounds.record_reader(who.swarm, who.task, reader, ledger, who.name)
-    except (SwarmError, OSError) as exc:
-        print(f"reader launch counted on this machine only, the ledger task did not take it: {exc}", file=sys.stderr)
+        except (SwarmError, OSError) as exc:
+            print(
+                f"reader launch counted on this machine only, the ledger task did not take it: {exc}", file=sys.stderr
+            )
