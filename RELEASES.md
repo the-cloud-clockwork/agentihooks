@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.941 · 2026-11-16
+
+### 2026-11-16 · 5809af1b8b86 · #11546 · @nestorcolt
+
+**Let the protected grader accept the test summary on download artifact 8.0.2**
+
+This change updates the protected grader so it accepts the test-summary job when it matches either `actions/download-artifact@v4` or `@v8.0.2`, instead of only v4, by building the reviewed summary once per entry in `SUMMARY_DOWNLOADS`. This lets pull requests already migrated to v8.0.2 pass review while open pull requests still on v4 continue passing too; mixed releases, `v8`, `main`, and other actions remain refused. It must merge after the frozen-gate announcement PR and before the workflow-move PR, since `gate_protected.py` is frozen and its new blob hash needs registering first.
+
 ## v2.17.940 · 2026-11-16
 
 ### 2026-11-16 · 53e910a210ea · #11540 · @nestorcolt
