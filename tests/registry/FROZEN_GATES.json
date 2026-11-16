@@ -1,5 +1,6 @@
 {
   "scripts/gate_protected.py": [
+    "547067200c944721fc33bffb44899a14432b6ac1",
     "83bc84176ac9882b9cc69deb41f95e27a3e54faf",
     "eb647d68d10805f68a7bb9ac7d495010a76840b9",
     "1435b89cc781f9db3b1f954e78397eb0eb749f67",
@@ -30,7 +31,8 @@
     "38e54a849d0b05fbf482170236f29c520caf5d4b",
     "c02a83a058033a06cc659012dddaba458b3243ac",
     "7536512cb2c93dc6c40f8a89cd77255b588725fd",
-    "b2004fa98c2aefb9efd4a7e7e03110d34558ef4b"
+    "b2004fa98c2aefb9efd4a7e7e03110d34558ef4b",
+    "096800ce6c3c5c61267d4a8b77ae41f301443c82"
   ],
   ".github/workflows/gate-protected.yml": [
     "d794eee5a317a353e437e19ff2c64498a86d6c5f",
