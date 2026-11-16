@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.942 · 2026-11-16
+
+### 2026-11-16 · 3aef44200190 · #11552 · @nestorcolt
+
+**Move every artifact download to download artifact 8.0.2**
+
+This change replaces every `actions/download-artifact@v4` reference (111 `uses` lines across workflows, the retry-download and await-download actions, and the reviewed summary steps) with `@v8.0.2`, because v4.3.0's stall timer destroys a stalled blob stream without rejecting the download promise, letting steps exit 0 with a partial file; v8.0.2 bundles an artifact client that properly retries and fails on digest mismatch. A new test walks all workflow and action files to catch any leftover `@v4` pins. This depends on two prior merges (#11549, #11546) for the grader to accept the summary, so Gate Protected stays red until those land first.
+
 ## v2.17.941 · 2026-11-16
 
 ### 2026-11-16 · 5809af1b8b86 · #11546 · @nestorcolt
