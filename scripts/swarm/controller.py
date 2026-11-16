@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from time import monotonic, time
+from time import monotonic, sleep, time
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -601,11 +601,21 @@ def _stopped(signum: int, frame: object) -> None:
     _halt()
 
 
+def _tick_wait(seconds: float) -> None:
+    """Wait ``seconds`` on the scheduler timer, finishing on the local clock when Redis refuses the timer, so the pass
+    loop's Redis grace window and not the wait decides whether a Redis outage ends the controller."""
+    until = monotonic() + seconds
+    try:
+        scheduled_wait(seconds)
+    except (Unreachable, *store_errors()):
+        sleep(max(0.0, until - monotonic()))
+
+
 def _cadence_wait(started: float) -> None:
     """Wait out the rest of one tick from the pass start, so passes start one tick apart."""
     left = lease.tick_ms() / 1000 - (monotonic() - started)
     if left > 0:
-        scheduled_wait(left)
+        _tick_wait(left)
 
 
 def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
@@ -650,7 +660,7 @@ def _reached(outage: redis_grace.Outage) -> RedisStore:
             if not outage.tolerated():
                 raise
             print(f"controller: {exc}; retrying after one tick inside the Redis grace window", file=sys.stderr)
-            scheduled_wait(lease.tick_ms() / 1000)
+            _tick_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
         return store
@@ -722,7 +732,7 @@ def _passes(
             _journal_pass(number, "ledger_unreachable")
             if once:
                 return 1
-            scheduled_wait(lease.tick_ms() / 1000)
+            _tick_wait(lease.tick_ms() / 1000)
             continue
         except store_errors() as exc:
             if not outage.tolerated():
@@ -734,7 +744,7 @@ def _passes(
             _journal_pass(number, "redis_grace")
             if once:
                 return 1
-            scheduled_wait(lease.tick_ms() / 1000)
+            _tick_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
         redis_grace.cleared(redis_grace.marker(os.environ))
