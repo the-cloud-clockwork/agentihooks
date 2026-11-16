@@ -7340,6 +7340,22 @@
         "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
         "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
       ]
+    },
+    {
+      "id": "swarm-tick-step-failure-isolated",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-step-failure-isolated",
+      "behaviour": "A tick step that raises holds its exception for the pass to end on and shuts only the steps that need it, directly or through another, while every other step of the pass runs; an inbox exits sweep that raises in every pass still lets reap retire finished agents and the master step spawn the front door successor, and the pass still ends failed on the first exception a step raised.",
+      "seam": "scripts.tick.steps.hold and fell, the held step wrappers of the observe, masters, tasks and host steps, and scripts.tick.sites.TickSites.shut, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick",
+      "rules": ["tick-held-exception-shuts-every-step"],
+      "tests": [
+        "tests/tick/test_step_failure.py::test_a_raising_exits_sweep_still_runs_reap_and_the_master_step",
+        "tests/tick/test_step_failure.py::test_a_fenced_pass_with_a_raising_exits_sweep_runs_reap_and_the_master_step_and_ends_failed",
+        "tests/tick/test_step_failure.py::test_a_raised_step_shuts_only_the_steps_that_need_it_directly_or_through_another",
+        "tests/tick/test_step_failure.py::test_a_pass_without_a_raise_shuts_no_step_for_its_needs",
+        "tests/tick/test_step_failure.py::test_the_first_held_exception_stays_the_one_the_pass_ends_on",
+        "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step"
+      ]
     }
   ],
   "unmapped_rules": [

@@ -39,10 +39,10 @@ def _tick_sites(box: dict[str, Any], **state: Any) -> sites.TickSites:
     return sites.TickSites(state, box, {}, lambda: 7)
 
 
-def test_tick_sites_shut_every_step_once_a_step_held_an_exception() -> None:
+def test_tick_sites_shut_no_step_for_a_held_exception_its_needs_do_not_name() -> None:
     found = _tick_sites({task_steps.RAISED: RuntimeError("held")})
     for group in ("start", "observe", "wrapper relay"):
-        assert found.shut(_Marker("m", group))
+        assert not found.shut(_Marker("m", group))
 
 
 def test_tick_sites_shut_tick_sites_past_the_start_when_finished_or_left() -> None:
