@@ -140,7 +140,8 @@ def frozen(doc: dict, pending: dict, inputs: dict) -> set:
 
 def lab_block(lab: dict[str, Any] | None) -> dict[str, Any] | None:
     """The lab capacity the tick last read: read time, last read error, and per scheduling class in the lab's order
-    the pending units and predicted wait in seconds; None when the tick sent no reading."""
+    the pending units, predicted wait in seconds and verdict cache hit ratio (None where the document has none);
+    None when the tick sent no reading."""
     if not lab:
         return None
     capacity: dict[str, Any] = lab.get("capacity") or {}
@@ -148,7 +149,12 @@ def lab_block(lab: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         **{key: lab.get(key) for key in ("at", "error", "error_at")},
         "classes": [
-            {"class": name, "pending": entry["pending"], "predicted_wait_s": entry["predicted_wait_s"]}
+            {
+                "class": name,
+                "pending": entry["pending"],
+                "predicted_wait_s": entry["predicted_wait_s"],
+                "verdict_cache_hit_ratio": entry.get("verdict_cache_hit_ratio"),
+            }
             for name, entry in classes.items()
         ],
     }
