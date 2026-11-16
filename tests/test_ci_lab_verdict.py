@@ -153,13 +153,10 @@ def test_unknown_step_is_refused(tmp_path: Path, extra: list[str]) -> None:
         verdict.main(args, {"GITHUB_OUTPUT": str(tmp_path / "out")})
 
 
-@pytest.mark.parametrize("app", ["", "github-actions"])
-def test_verdict_refuses_an_untrusted_app_before_polling(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, app: str
-) -> None:
+def test_verdict_refuses_an_unnamed_app_before_polling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(verdict, "fetcher", lambda repo, sha: pytest.fail("polled"))
-    args = ["verdict", str(tree(tmp_path, ["lint"])), '{"lint": true}', "org/repo", "abc", app]
-    with pytest.raises(ValueError, match=f"the lab App {app!r} cannot be trusted; set AGENTIHOOKS_LAB_APP"):
+    args = ["verdict", str(tree(tmp_path, ["lint"])), '{"lint": true}', "org/repo", "abc", ""]
+    with pytest.raises(ValueError, match="no lab App is named; set AGENTIHOOKS_LAB_APP to the lab App slug"):
         verdict.main(args, {"GITHUB_OUTPUT": str(tmp_path / "out")})
     assert not (tmp_path / "out").exists()
 
@@ -311,7 +308,7 @@ def test_the_job_reads_authority_only_from_the_protected_base() -> None:
     job = jobs()["lab-verdict"]
     assert job["if"] == "github.event_name == 'pull_request'"
     assert "needs" not in job
-    assert job["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "checks": "read"}
     [checkout, *_] = job["steps"]
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
     assert checkout["with"]["persist-credentials"] is False
@@ -322,10 +319,9 @@ def test_the_job_reads_authority_only_from_the_protected_base() -> None:
     assert "ci_lab_verdict authority . pull_request\n" in graded[0]["run"]
     assert graded[1]["run"].endswith('verdict . "$AUTHORITATIVE" "$GITHUB_REPOSITORY" "$HEAD" "$LAB_APP"')
     assert graded[1]["env"]["HEAD"] == "${{ github.event.pull_request.head.sha }}"
-    token = next(step for step in job["steps"] if step.get("id") == "app-token")
-    assert {key for key in token["with"] if key.startswith("permission-")} == {"permission-checks"}
-    assert token["with"]["permission-checks"] == "read"
-    assert token["if"] == graded[1]["if"] == "steps.authority.outputs.authoritative != '{}'"
+    assert not any("create-github-app-token" in step.get("uses", "") for step in job["steps"])
+    assert graded[1]["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert graded[1]["if"] == "steps.authority.outputs.authoritative != '{}'"
 
 
 def test_the_job_publishes_a_result_for_every_declared_lab_gate() -> None:

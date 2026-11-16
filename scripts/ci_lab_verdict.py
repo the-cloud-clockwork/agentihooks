@@ -23,7 +23,6 @@ from scripts.ci_lab.delivery import OUTPUT, cutover, lab
 gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budget.rate_limit.gh_api)
 
 PULL_REQUEST = "pull_request"
-UNTRUSTED = "github-actions"
 COMPLETED = "completed"
 PASSED = ("success", "skipped")
 FAILURE = "failure"
@@ -116,8 +115,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str] = os.environ) -> int:
         outputs = authority(Path(grader), event, environ)
     elif step == "verdict":
         authoritative, repo, sha, app = rest
-        if app in ("", UNTRUSTED):
-            raise ValueError(f"the lab App {app!r} cannot be trusted; set AGENTIHOOKS_LAB_APP to the lab App slug")
+        if not app:
+            raise ValueError("no lab App is named; set AGENTIHOOKS_LAB_APP to the lab App slug")
         outputs = lab_outputs(Path(grader), authoritative, fetcher(repo, sha), app, WAIT_S)
     else:
         raise ValueError(f"unknown step {step!r}; expected authority or verdict")
