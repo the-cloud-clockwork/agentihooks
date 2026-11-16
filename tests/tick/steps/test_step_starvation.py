@@ -309,7 +309,7 @@ def test_the_alarm_item_carries_its_id_ref_and_every_evidence_line(store: RedisS
     replay(store, 4)
     [item] = items(store)
     digest = hashlib.sha256(f"step-starvation:{SLUG}:{WAITS}:{START + MINUTE}".encode()).hexdigest()[:12]
-    assert (item.id, item.ref) == (digest, f"step-starvation:{SLUG}:{WAITS}")
+    assert (item.id, item.ref) == (digest, f"step-starvation:{SLUG}:{WAITS}:{START + MINUTE}")
     assert item.text == (
         "URGENT: Tick step waits end has not completed for 3 minutes on swarm sw. Evidence: "
         "Last completed run: never since the watch began; "
@@ -328,8 +328,8 @@ def test_a_step_already_alarmed_never_hides_the_next_starved_step(store: RedisSt
         journal(store, at + 1, WAITS, engine.OK if index < 5 else engine.FAILED)
         step_starvation.step(store, SLUG, at + 1_000, WINDOWS)
     assert sorted(item.ref for item in items(store)) == [
-        f"step-starvation:{SLUG}:spawn",
-        f"step-starvation:{SLUG}:{WAITS}",
+        f"step-starvation:{SLUG}:spawn:{START + MINUTE}",
+        f"step-starvation:{SLUG}:{WAITS}:{START + 5 * MINUTE + 1}",
     ]
 
 
