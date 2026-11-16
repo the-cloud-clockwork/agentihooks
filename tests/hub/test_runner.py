@@ -531,6 +531,7 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_cr
     renewed = []
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("LEDGER_URL", "https://ledger.example")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://ledger@shared/ledger")
     monkeypatch.setattr(runner, "_renewal", lambda redis, credential: renewed.append((redis, credential)))
     monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
     with pytest.raises(Stop):

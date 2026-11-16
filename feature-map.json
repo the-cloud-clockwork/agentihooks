@@ -4309,8 +4309,8 @@
       "operator_words": "Isnt the tick or controller to be reading the db instead of the ledger? We had work for decoupling this, it is the main reason why we did the tick rework the ledger should be a presentation layer only no more.",
       "ordered_at": "2026-11-07",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
-      "behaviour": "While the database URL setting names the shared ledger database, a tick pass serves its ledger export, resource reads and operations in process through the ledger server's own route code over the shared ledger repository, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; without the setting the tick calls the ledger server.",
-      "seam": "scripts.tick.adapters.database_ledger.client, chosen by scripts.swarm_ledger.ledger_route.tick for the tick ledger port adapter and the pass LedgerClient",
+      "behaviour": "A tick pass serves its ledger export, resource reads and operations in process through the ledger API route code over the shared ledger store, judged as the swarm's own service, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; no setting or fallback sends a tick read or write to the ledger server.",
+      "seam": "scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
       "semgrep_rule": "feature-tick-database-ledger",
       "live_check": [
         "python",
@@ -4344,6 +4344,30 @@
         "tests/tick/test_database_ledger_routes.py::test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal",
         "tests/tick/test_database_ledger_routes.py::test_a_tick_routed_call_keeps_its_own_ledger_route",
         "tests/tick/test_database_ledger_routes.py::test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout"
+      ]
+    },
+    {
+      "id": "swarm-ledger-api-writes",
+      "origin": "operator",
+      "operator_words": "finish the API to database path so it works, shift every swarm write onto it, and remove the old ledger write path completely. No fallback, no switch, no dual mode, no allowlist, no workaround left behind.",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-cutover",
+      "behaviour": "Every swarm ledger read and write, the hub admission claim and its release included, runs the ledger API route code in process over the shared ledger store, judged as the acting name, a pinned agent or the swarm's own service, with no request to the ledger server; page writes reach the ledger API service, which migrates the shared schema and runs the write upkeep, while the ledger server answers every write method as unsupported; a hosted hub without the shared database setting refuses to start.",
+      "seam": "scripts.tick.adapters.database_ledger.client and request for every swarm client, scripts.swarm_ledger.api_service.WriteHandler for HTTP writes, and scripts.hub.runner.main for the hosted hub database check",
+      "semgrep_rule": "feature-ledger-api-writes",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.install",
+        "swarm",
+        "rig-grade-swarm",
+        "tick-report"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_the_hub_admission_claim_lands_in_the_ledger_store_with_no_ledger_server_request",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_a_stale_hub_claim_is_refused_by_the_route_with_no_ledger_server_request",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_the_ledger_server_answers_every_write_method_as_unsupported",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_a_hosted_hub_without_the_shared_database_refuses_to_start"
       ]
     },
     {

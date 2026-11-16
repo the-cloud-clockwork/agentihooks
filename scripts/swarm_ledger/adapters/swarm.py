@@ -172,9 +172,3 @@ class Swarm:
         from scripts.swarm_v2 import authority
 
         return authority
-
-    @property
-    def ledger_cutover(self):
-        from scripts.swarm import ledger_cutover
-
-        return ledger_cutover

@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TypedDict
 
-from scripts.swarm_ledger import hosted_probe, ledger_route
+from scripts.swarm_ledger import hosted_probe
 
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
@@ -35,7 +35,7 @@ class Cleartext(SystemExit):
 
 
 def base(environ=os.environ, slug="") -> str:
-    if selected := ledger_route.url(slug) or hosted_probe.hosted(environ):
+    if selected := hosted_probe.hosted(environ):
         return selected
     if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
@@ -132,8 +132,7 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
 
 def remote(environ=os.environ, slug="") -> bool:
     return bool(
-        ledger_route.url(slug)
-        or hosted_probe.hosted(environ)
+        hosted_probe.hosted(environ)
         or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
     ) or not local_mode(environ)
 
