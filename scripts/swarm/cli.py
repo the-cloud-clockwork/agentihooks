@@ -112,6 +112,7 @@ from scripts.swarm import (
     ledger_events,
     master_launch,
     master_move,
+    master_queue,
     merge_queue,
     naming,
     outage,
@@ -137,7 +138,6 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
-    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -2177,7 +2177,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
         master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
-        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
+        stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
