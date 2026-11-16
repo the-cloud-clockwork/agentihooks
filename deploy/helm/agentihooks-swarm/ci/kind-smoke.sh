@@ -419,34 +419,7 @@ kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt"
 rm -rf "$ledger_tls"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
-diag="$(mktemp -d)"
-diag_hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
-kubectl logs -f "deployment/$release-controller" -c controller --timestamps > "$diag/old-controller.log" 2>&1 &
-follow=$!
-(
-  for _ in $(seq 45); do
-    printf '%s ' "$(date -u +%T)"
-    kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*]}{.metadata.name} restarts={.status.containerStatuses[0].restartCount} state={.status.containerStatuses[0].state} last={.status.containerStatuses[0].lastState}{" "}{end}' 2>/dev/null || true
-    kubectl exec "deployment/$release-controller" -c controller -- sh -c 'printf "mem=%s pids=%s procs=%s" "$(cat /sys/fs/cgroup/memory.current)" "$(cat /sys/fs/cgroup/pids.current)" "$(ls -d /proc/[0-9]* | wc -l)"' 2>/dev/null || true
-    kubectl exec "$ledger_pod" -- env HIVE="$diag_hive" python -c 'import os; from scripts.swarm import replica; from scripts.swarm.store import connect; r = connect().redis; k = replica.PREFIX + ":" + os.environ["HIVE"]; print(" lock", r.get(k), "pttl", r.pttl(k), end="")' 2>/dev/null || true
-    printf '\n'
-    sleep 1
-  done
-) > "$diag/statuses.txt" 2>&1 &
-watch=$!
 bash "$chart/ci/redis-readiness-proof.sh" "$release"
-sleep 4
-kill "$watch" "$follow" 2>/dev/null || true
-printf '=== DIAG controller statuses through the Redis outage ===\n'
-cat "$diag/statuses.txt" || true
-printf '=== DIAG old controller log tail ===\n'
-grep -v -E '"event": "swarm_tick_step"|^\S+\s+[\^~]+\s*$' "$diag/old-controller.log" || true
-printf '=== DIAG previous controller log ===\n'
-kubectl logs "${controller[@]}" -c controller --previous --tail 60 --timestamps || true
-printf '=== DIAG controller last state ===\n'
-kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].lastState}{"\n"}{end}' || true
-printf '=== DIAG controller events ===\n'
-kubectl get events --sort-by=.lastTimestamp | grep -F "$release-controller" | tail -30 || true
 
 ca_dir="$(mktemp -d)"
 (
