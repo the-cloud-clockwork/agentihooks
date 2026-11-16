@@ -257,6 +257,7 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
         assert any("context pair" in error.lower() for error in errors)
 
 
+@pytest.mark.feature("protected-grader-pins-gate-names")
 @pytest.mark.parametrize("plain", [False, True])
 def test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take(plain: bool) -> None:
     from datetime import date
@@ -276,7 +277,8 @@ def test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_nam
         jobs["gate-required"]["name"] = "Gate — Required"
         jobs["queue-fail-fast"]["name"] = "queue-fail-fast"
     jobs["gate-required"]["needs"].append("new-required-check")
-    assert gate_protected.grade(workflows, config, head, config, today, policy)
+    errors = gate_protected.grade(workflows, config, head, config, today, policy)
+    assert any(("pins it" if plain else "inventory") in error for error in errors), errors
 
 
 def test_api_waiting_shard_verification_remains_a_unit_dependent_for_lost_runner_recovery():

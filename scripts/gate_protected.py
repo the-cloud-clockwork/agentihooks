@@ -248,6 +248,18 @@ def _mutation_stage_entries(
     }
 
 
+def _pinned_names(base_workflows: dict[str, dict[str, Any]], head_workflows: dict[str, dict[str, Any]]) -> list[str]:
+    from scripts import ci_gate_queue
+
+    return [
+        f"The head changes or removes the reviewed name of {file}/{job_id}; the protected branch pins it."
+        for file, workflow in base_workflows.items()
+        for job_id, job in (workflow.get("jobs") or {}).items()
+        if job.get("name") in (ci_gate_queue.GATE_NAME, ci_gate_queue.SUMMARY_NAME)
+        and (((head_workflows.get(file) or {}).get("jobs") or {}).get(job_id) or {}).get("name") != job["name"]
+    ]
+
+
 def grade(
     base_workflows: dict[str, dict[str, Any]],
     base_config: dict[str, Any],
@@ -258,11 +270,12 @@ def grade(
 ) -> list[str]:
     from scripts import ci_gate_queue
 
+    pinned = _pinned_names(base_workflows, head_workflows)
     try:
         base_workflows = ci_gate_queue.normalize(base_workflows)
         head_workflows = ci_gate_queue.normalize(head_workflows)
     except ValueError as error:
-        return [str(error)]
+        return pinned + [str(error)]
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
@@ -310,7 +323,7 @@ def grade(
                 config["not_gates"].setdefault(key, head_config["not_gates"][key])
     for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
         config["not_gates"].setdefault(key, entry)
-    return problems + ci_wiring.check(head_workflows, config, today)
+    return pinned + problems + ci_wiring.check(head_workflows, config, today)
 
 
 def _git(root: Path, *args: str) -> str:
