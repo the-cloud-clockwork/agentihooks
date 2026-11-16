@@ -244,7 +244,7 @@ def test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head(lab: Callab
 
 
 @pytest.mark.feature("lab-scheduler-evidence")
-def test_a_grade_is_recorded_only_once_its_last_unit_is_final(lab: Callable[..., Run]) -> None:
+def test_a_grade_is_recorded_only_when_its_last_unit_is_final(lab: Callable[..., Run]) -> None:
     item = unit(1)
     run = lab({HEAD_A: plan({"lint": (item,)})})
     run.push(HEAD_A)
@@ -256,6 +256,22 @@ def test_a_grade_is_recorded_only_once_its_last_unit_is_final(lab: Callable[...,
     run.tick(1100)
     text, missing = evidence.show(run.lab.objects, [grade.run])
     assert missing == []
+    assert f"\nunit static {item.key} run {grade.run}\n" in text
+    assert run.lab.objects.keys(evidence.head_prefix(HEAD_A)) == [evidence.head_prefix(HEAD_A) + grade.run]
+
+
+@pytest.mark.feature("lab-scheduler-evidence")
+def test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})}, retries=Policy(lost=0))
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lease(ttl_ms=100)
+    run.tick(1100)
+    grade = run.grade(HEAD_A)
+    text, missing = evidence.show(run.lab.objects, [grade.run])
+    assert grade.conclusion == "failure"
+    assert missing == [unit_path(item.kind, item.key, "report"), unit_path(item.kind, item.key, "log")]
     assert f"\nunit static {item.key} run {grade.run}\n" in text
     assert run.lab.objects.keys(evidence.head_prefix(HEAD_A)) == [evidence.head_prefix(HEAD_A) + grade.run]
 

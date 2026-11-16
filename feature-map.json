@@ -6526,7 +6526,8 @@
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, read back through scripts.ci_lab.evidence.show and scripts.ci_lab.evidence.head_prefix",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head",
-        "tests/ci_lab/test_scheduler.py::test_a_grade_is_recorded_only_once_its_last_unit_is_final"
+        "tests/ci_lab/test_scheduler.py::test_a_grade_is_recorded_only_when_its_last_unit_is_final",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects"
       ]
     },
     {
