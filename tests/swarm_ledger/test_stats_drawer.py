@@ -149,18 +149,25 @@ def lab_page(browser: Any) -> Iterator[Callable[[dict | None], Any]]:
 def test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck(lab_page: Any) -> None:
     now = int(time.time() * 1000)
     classes = [
-        {"class": "pull_request", "pending": 3, "predicted_wait_s": 240.0},
-        {"class": "queue", "pending": 0, "predicted_wait_s": 0.0},
-        {"class": "backfill", "pending": 2, "predicted_wait_s": None},
+        {"class": "pull_request", "pending": 3, "predicted_wait_s": 240.0, "verdict_cache_hit_ratio": 0.75},
+        {"class": "queue", "pending": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": None},
+        {"class": "backfill", "pending": 2, "predicted_wait_s": None, "verdict_cache_hit_ratio": 2 / 3},
+        {"class": "promotion", "pending": 0, "predicted_wait_s": 0.0},
     ]
     page = lab_page({"at": now - 2 * 60_000, "error": "", "error_at": 0, "classes": classes})
     row = page.locator("#stats .lab-capacity")
     assert row.locator("dt").inner_text() == "LAB · 2M AGO"
     assert row.locator("li").all_inner_texts() == [
-        "pull request · 3 pending · 4m wait",
-        "queue · 0 pending · 0m wait",
-        "backfill · 2 pending · no free slot",
+        "pull request · 3 pending · 4m wait · 75% cache hits",
+        "queue · 0 pending · 0m wait · no cache lookups",
+        "backfill · 2 pending · no free slot · 67% cache hits",
+        "promotion · 0 pending · 0m wait · no cache lookups",
     ]
+    parts = row.locator("li").first.locator(".lab-part")
+    assert parts.all_inner_texts() == ["pull request ·", "3 pending ·", "4m wait ·", "75% cache hits"]
+    assert parts.evaluate_all("spans => spans.map(s => getComputedStyle(s).whiteSpace)") == ["nowrap"] * 4
+    assert parts.evaluate_all("spans => spans.map(s => getComputedStyle(s).textOverflow)") == ["ellipsis"] * 4
+    assert row.locator("li").first.get_attribute("title") == "pull request · 3 pending · 4m wait · 75% cache hits"
     assert row.locator(".lab-error").count() == 0
     keys = page.eval_on_selector_all("#stats > .stat", "rows => rows.map(r => r.dataset.stat)")
     assert keys[-2:] == ["lab", "top-bottleneck"]

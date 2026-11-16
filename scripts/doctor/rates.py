@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from statistics import mean
+from typing import Any
 
 from scripts.doctor import inbox
 from scripts.swarm import naming
@@ -302,15 +303,15 @@ def report(records, wins):
     }
 
 
-def _when(ms):
+def _when(ms: float | None) -> str:
     return "none" if ms is None else datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
 
-def _cell(value):
+def _cell(value: object) -> str:
     return "none" if value is None else str(value)
 
 
-def table(found):
+def table(found: dict[str, Any]) -> str:
     names = list(found["windows"])
     lines = [f"window {n} {_when(w['start'])} to {_when(w['end'])}" for n, w in found["windows"].items()]
     lines.append(f"ledger events kept from {_when(found['events from'])}")

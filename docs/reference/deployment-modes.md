@@ -68,7 +68,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
 | `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
 | `claim-lives` | `swarm.*.execution.started` | Counts each successful spoke launch once toward the task's three started lives cap. |
-| `lifecycle` | `swarm.*.execution.exited` | Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. |
+| `lifecycle` | `swarm.*.execution.exited` | Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. An exit a hive reports after an execution stop carries reason `stopped` and the stop's `stop_reason`, such as `ended` for an agent whose work ended (see [Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended)). |
 | `reconciler` | A five minute poll; it also subscribes to `swarm.*.reconcile.requested`, which nothing publishes yet | Rebuilds missing starts and ends executions that are gone. |
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the legacy tick does. |

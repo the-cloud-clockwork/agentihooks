@@ -4687,6 +4687,18 @@
       ]
     },
     {
+      "id": "protected-lint-grades-the-pull-request-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2550",
+      "behaviour": "The Tests lint step that runs the protected gate grades the pull request head against its merge base with the trusted event base, and the run revision outside a pull request, so frozen registry and grader changes that landed on dev after the event base are never blamed on a pull request behind dev, while a pull request that edits a frozen file still fails.",
+      "seam": "The Tests lint step run text that invokes scripts.gate_protected, executed over a planted repository with a grader worktree at the event base",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request"
+      ]
+    },
+    {
       "id": "hive-rollout-lease-failed-sync",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
@@ -6540,13 +6552,14 @@
       "id": "ledger-stats-lab",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-ledger-stats-lab",
-      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units and predicted wait; the Stats panel shows one Lab row before the top bottleneck.",
+      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units, predicted wait and verdict cache hit ratio; the Stats panel shows one Lab row before the top bottleneck, each class line ending with its cache hits as a whole percent or no cache lookups.",
       "seam": "scripts.swarm.time_left.refresh, LedgerClient.time_left, ledger_time_left.check and apply, ledger_stats.calculate, renderStats Lab row",
       "tests": [
         "tests/swarm/test_time_left.py::test_refresh_sends_the_lab_reading_once_the_tick_has_read_one",
         "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block",
         "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_check_accepts_every_optional_key_at_once",
         "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_each_class_verdict_cache_hit_ratio_and_none_where_the_document_has_none",
         "tests/swarm_ledger/test_ledger_stats.py::test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs",
         "tests/swarm_ledger/test_stats_drawer.py::test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck"
       ]
@@ -7237,6 +7250,16 @@
       "tests": [
         "tests/hive/test_master_placement.py::test_a_secondary_master_ignores_a_hive_interactive_login",
         "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot"
+      ]
+    },
+    {
+      "id": "agent-number-past-four-digits",
+      "origin": "inventory",
+      "behaviour": "scripts.swarm.naming.build accepts any engineer, ci or master counter of 1 or more with no upper bound instead of refusing at 10000 with a NamingError, and every agent-name matcher built from _BASE (NAME_RE, the pane, worktree, tmp, scratch and small_slug patterns) matches four or more digits with no maximum instead of exactly four, so a swarm whose engineer counter passes 10000 still spawns, its name still parses, and NameRegistry.names still lists it instead of raising.",
+      "seam": "scripts.swarm.naming.build and scripts.swarm.naming.parse for an agent number of 10000 or more, naming.PATTERNS[\"pane\"] over that name, and scripts.swarm.naming.NameRegistry.names once its counter has passed 9999",
+      "tests": [
+        "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
+        "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
       ]
     },
     {
