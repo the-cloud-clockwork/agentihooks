@@ -4,8 +4,9 @@ rules:
     severity: ERROR
     message: >-
       Ordered 2026-11-07, the tick reads and writes the shared database instead of the ledger server: the tick route
-      must run its pass inside database_ledger.scoped(), and the tick ledger port must build the database client
-      while database_ledger.serving().
+      runs its pass inside database_ledger.scoped() or as the swarm's own service through database_ledger.acting(""),
+      and the tick ledger port builds the database client while database_ledger.serving() or always through
+      ledger.client, which runs the ledger API route code in process.
     patterns:
       - pattern-either:
           - patterns:
@@ -17,6 +18,11 @@ rules:
                     ...
                     with $ROUTE, database_ledger.scoped():
                       ...
+              - pattern-not: |
+                  def routed(store, slug, *args, **kwargs):
+                    ...
+                    with database_ledger.acting(""):
+                      ...
           - patterns:
               - pattern: |
                   def build(remaining: float) -> ResourceClient:
@@ -27,6 +33,11 @@ rules:
                     if database_ledger.serving():
                       return database_ledger.client(...)
                     ...
+              - pattern-not: |
+                  def build(remaining: float) -> ResourceClient:
+                    ...
+                    $BUILT: ResourceClient = ledger.client(...)
+                    return $BUILT
     paths:
       include:
         - /scripts/swarm_ledger/ledger_route.py

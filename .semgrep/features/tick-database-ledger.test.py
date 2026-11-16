@@ -26,3 +26,19 @@ def build(remaining: float) -> ResourceClient:
     if database_ledger.serving():
         return database_ledger.client(base, timeout)
     return ResourceClient(base, ledger.credentials(slug, service), timeout)
+
+
+# ok: feature-tick-database-ledger
+def routed(store: object, slug: str, *args: object, **kwargs: object) -> object:
+    from scripts.tick.adapters import database_ledger
+
+    with database_ledger.acting(""):
+        return function(store, slug, *args, **kwargs)
+
+
+# ok: feature-tick-database-ledger
+def build(remaining: float) -> ResourceClient:
+    if offline():
+        raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
+    built: ResourceClient = ledger.client(slug, min(ledger.REQUEST_TIMEOUT, remaining))
+    return built
