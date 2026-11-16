@@ -144,6 +144,7 @@ def test_a_request_naming_the_acting_agent_or_no_agent_or_sent_as_the_service_is
 
 def test_an_exchange_the_route_refuses_raises_its_status_body_and_request(stored: list[tuple[str, int]]) -> None:
     token = api_service.services().repository.token(SLUG)
+    assert token is not None
     path = f"/api/v1/ledgers/{SLUG}/tasks?limit=many"
     with pytest.raises(urllib.error.HTTPError) as refused:
         database_ledger.exchanged("GET", path, None, {"X-Ledger-Token": token})
@@ -154,6 +155,7 @@ def test_an_exchange_the_route_refuses_raises_its_status_body_and_request(stored
 
 def test_an_exchange_the_route_answers_itself_returns_that_answer(stored: list[tuple[str, int]]) -> None:
     token = api_service.services().repository.token(SLUG)
+    assert token is not None
     exported = database_ledger.exchanged("POST", f"/api/v1/ledgers/{SLUG}/export", {}, {"X-Ledger-Token": token})
     assert "data" in exported
 
