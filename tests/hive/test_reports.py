@@ -124,6 +124,73 @@ def test_runtime_observes_a_remote_worker_its_hive_reports_gone_as_exited(remote
     assert runtime.status(agent) == "exited"
 
 
+@pytest.mark.feature("swarm-reap-reads-hub-admitted-panes-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_runs_it(
+    remote: SimpleNamespace,
+) -> None:
+    from scripts.hive import daemon
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import AgentRecord
+
+    elsewhere = remote.store.start_execution(
+        "fixture",
+        AgentRecord(remote.store.next_name("fixture", "eng"), "eng", "other", seat="eng-2@fixture", hive="other"),
+    )
+    remote.store.put_agent("fixture", elsewhere)
+    herdr = Mock()
+    herdr.live_names.return_value = {remote.agent.name}
+    herdr.observe.return_value = PaneObservation("done")
+    report = daemon.execution_report(remote.redis, HIVE, herdr)
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert list(report["admitted"]) == [remote.agent.execution_id]
+    assert report["admitted"][remote.agent.execution_id]["generation"] == remote.agent.generation
+    assert report["executions"] == {}
+    assert remote.runtime.observe(remote.agent).state == "done"
+
+
+@pytest.mark.feature("swarm-reap-reads-hub-admitted-panes-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unknown(remote: SimpleNamespace) -> None:
+    from dataclasses import asdict
+
+    from scripts.swarm.pane import PaneObservation
+
+    agent = remote.agent
+    stale = {"generation": agent.generation - 1, "pane": asdict(PaneObservation("done"))}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: stale}}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert remote.runtime.observe(agent).state == "unknown"
+
+
+@pytest.mark.feature("swarm-reap-reads-hub-admitted-panes-from-their-hive")
+@pytest.mark.parametrize("target", [{}, {"host_id": "controller"}])
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr(
+    remote: SimpleNamespace, target: dict[str, str]
+) -> None:
+    from dataclasses import asdict
+
+    from scripts.swarm.pane import PaneObservation
+
+    agent = replace(remote.agent, hive="controller", runtime_target=target)
+    entry = {"generation": agent.generation, "pane": asdict(PaneObservation("done"))}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key("controller"), json.dumps(report), ex=45)
+
+    def herdr(args: list[str]) -> dict[str, object]:
+        """Answer this hive's own herdr: the agent's pane is working and shows nothing."""
+        if args[:2] == ["agent", "get"]:
+            return {"agent": {"pane_id": PANE, "name": agent.name, "agent_status": "working"}}
+        return {"text": ""}
+
+    remote.runtime.herdr = herdr
+
+    assert remote.runtime.observe(agent).state == "working"
+
+
 def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
     from scripts.swarm.store import AgentRecord
     from scripts.tick.steps import agents as agent_steps
@@ -1624,6 +1691,7 @@ def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_c
     monkeypatch.setattr(process, "started_ms", lambda: LAUNCHED + pod_started_after)
     herdr = Mock()
     herdr.live_names.return_value = {agent.name} if listed else set()
+    herdr.observe.return_value = PaneObservation("unknown")
     report = daemon.execution_report(remote.redis, HIVE, herdr)
     assert report["executions"] == {}
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)

@@ -306,6 +306,19 @@
       ]
     },
     {
+      "id": "swarm-reap-reads-hub-admitted-panes-from-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-reap-reads-hive-panes",
+      "behaviour": "A worker the hub admitted to another hive, which carries no host target, is judged by the pane its hive reports for its execution and generation instead of the controller's own herdr, so a finished worker reads idle or done and reaches the idle retire; each hive reports the pane of every hub admitted execution it runs, a pane reported for another generation reads unknown, and a worker admitted to this hive is still read from its own herdr.",
+      "seam": "scripts.hive.daemon.execution_report writes the admitted panes, read through scripts.hive.reports.Reports.admitted_pane by scripts.swarm.runtime.HerdrRuntime.observe for scripts.tick.steps.agents._watch_idle",
+      "tests": [
+        "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
