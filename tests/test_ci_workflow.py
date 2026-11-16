@@ -978,6 +978,48 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert names.index("Check out the protected grader") < names.index(changed["name"])
 
 
+@pytest.mark.parametrize("gate_change", [False, True])
+def test_self_plant_selects_committed_gate_changes_only(tmp_path: Path, gate_change: bool) -> None:
+    repo = tmp_path / "head"
+    repo.mkdir()
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    git = ["git", "-c", "user.name=test", "-c", "user.email=test@example.test"]
+    subprocess.run([*git, "init", "-q", str(repo)], check=True)
+    gate = repo / "scripts/ci_mutation"
+    gate.mkdir(parents=True)
+    (gate / "planner.py").write_text("value = 1\n")
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("Before\n")
+    subprocess.run([*git, "-C", str(repo), "add", "."], check=True)
+    subprocess.run([*git, "-C", str(repo), "commit", "-qm", "Base"], check=True)
+    subprocess.run(
+        [*git, "-C", str(repo), "worktree", "add", "--detach", str(runner / "base"), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    (docs / "guide.md").write_text("After\n")
+    if gate_change:
+        (gate / "planner.py").write_text("value = 2\n")
+    subprocess.run([*git, "-C", str(repo), "add", "."], check=True)
+    subprocess.run([*git, "-C", str(repo), "commit", "-qm", "Head"], check=True)
+    cache = gate / "__pycache__"
+    cache.mkdir()
+    (cache / "planner.cpython-312.pyc").write_bytes(b"generated")
+    output = runner / "output"
+    [step] = [step for step in _workflow()["jobs"]["lint"]["steps"] if step.get("id") == "self-plant"]
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=repo,
+        env={**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(output)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert output.read_text() == f"changed={str(gate_change).lower()}\n", result.stdout
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
