@@ -3342,7 +3342,25 @@
         "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_ledger_whose_events_no_stream_takes_never_holds_back_another_ledgers_rows",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_row_no_stream_takes_keeps_the_later_rows_of_its_ledger_unsent_in_order",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_each_ledger_takes_its_own_batch_of_rows",
+        "tests/events/test_nats_no_stream.py::test_a_publish_no_stream_answers_is_refused_as_no_stream",
+        "tests/events/test_nats_no_stream.py::test_a_bound_scoped_relay_publishes_the_ledgers_with_a_stream_past_one_without"
+      ]
+    },
+    {
+      "id": "ledger-write-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-api-timeouts",
+      "behaviour": "A ledger command line write waits the server's whole writer lock budget plus the request timeout before it gives up, so a write the server queues behind other writers and then commits is never reported as a server that is not answering; a read keeps the request timeout and an explicit timeout wins.",
+      "seam": "scripts.swarm_ledger.ledger.request with a recording client",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_write_waits_past_the_server_writer_lock_budget",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_empty_operation_list_is_still_a_write",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_read_keeps_the_request_timeout",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_explicit_timeout_wins_for_a_write"
       ]
     },
     {

@@ -14,11 +14,18 @@ from nats.aio.msg import Msg
 from nats.errors import NoRespondersError, NoServersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
-from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError, ServerError
+from nats.js.errors import (
+    APIError,
+    KeyNotFoundError,
+    KeyWrongLastSequenceError,
+    NoStreamResponseError,
+    NotFoundError,
+    ServerError,
+)
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nkey
-from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
+from .bus import Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -230,7 +237,10 @@ class NatsConsumer:
 
 
 async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
-    ack = await nats_payload.publish(js, subject, event.encode(), stream=stream, headers={MSG_ID: event.id})
+    try:
+        ack = await nats_payload.publish(js, subject, event.encode(), stream=stream, headers={MSG_ID: event.id})
+    except NoStreamResponseError as error:
+        raise NoStream(subject) from error
     return not ack.duplicate
 
 
