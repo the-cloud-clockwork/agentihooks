@@ -1,0 +1,23 @@
+rules:
+  - id: admitted-ended-agent-unstopped
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A reap judge for agents whose hive recorded their start returns no action for an agent whose work ended. The hub
+      lifecycle settles only an execution exited event, and a finished agent idles at its prompt, so nothing ever
+      ended it: on 15 and 16 November finished agents sat seated for hours on every hive and filled root hive
+      admission. Send the execution stop to the hive that started it through _stop_ended.
+    patterns:
+      - pattern-inside: |
+          def $JUDGE(...):
+              ...
+      - metavariable-regex:
+          metavariable: $JUDGE
+          regex: .*reap.*admitted.*
+      - pattern-either:
+          - pattern: |
+              if <... $TICK._ended(...) ...>:
+                  return []
+          - pattern: |
+              if <... _ended(...) ...>:
+                  return []

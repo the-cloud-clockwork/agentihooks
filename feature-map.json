@@ -6669,7 +6669,7 @@
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
-        "tests/swarm/test_events_claim_refunds.py::test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and_settled"
+        "tests/swarm/test_events_claim_refunds.py::test_the_reap_step_judges_an_admitted_agent_by_its_pane_and_whether_its_work_ended"
       ]
     },
     {
@@ -6691,6 +6691,19 @@
         "tests/swarm/test_events_claim_refunds.py::test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop",
         "tests/swarm/test_events_claim_refunds.py::test_an_unreachable_agent_is_stopped_before_its_drop_and_stays_seated_when_the_store_refuses_it",
         "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement"
+      ]
+    },
+    {
+      "id": "events-ended-agent-stopped",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-finished-not-retired",
+      "behaviour": "When the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. The tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
+      "seam": "the agents reap step judging an ended hub admitted agent through reconciler.stop_admitted, then execution_stop.Stopper and the hub lifecycle on the hive exit",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_whose_work_ended_gets_the_stop_from_its_hive_in_one_reap_pass",
+        "tests/swarm/test_events_claim_refunds.py::test_a_reap_pass_inside_the_stop_dedupe_window_sends_no_second_stop",
+        "tests/swarm/test_events_claim_refunds.py::test_an_ended_admitted_agent_whose_stop_the_bus_refused_is_stopped_on_the_next_pass",
+        "tests/swarm/test_events_claim_refunds.py::test_a_finished_admitted_agent_leaves_its_seat_and_launch_slot_once_its_hive_honors_the_stop"
       ]
     },
     {
