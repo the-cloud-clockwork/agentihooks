@@ -191,6 +191,31 @@ def test_a_successor_without_a_carry_refreshes_every_view_it_warmed(monkeypatch,
     assert [t["args"] for t in threads if t["target"] is server.refresh_streams] == [(["demo", "other"],)]
 
 
+@pytest.mark.parametrize(("drained", "carried"), [(True, [{"demo": 6}]), (False, [])])
+def test_a_drained_server_writes_the_carry_its_successor_asked_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, drained: bool, carried: list[dict[str, int]]
+) -> None:
+    written: list[dict[str, int]] = []
+    monkeypatch.setattr(server.server_handoff, "inherited", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "listening",
+        lambda held: SimpleNamespace(
+            serve_forever=lambda poll: None, drained=lambda timeout: drained, server_close=lambda: None
+        ),
+    )
+    monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
+    monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
+    monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
+    monkeypatch.setattr(server, "HANDOFF", {"since": {"demo": 6}})
+    monkeypatch.setattr(server, "write_carry", written.append)
+    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
+    server.serve()
+    assert written == carried
+
+
 def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):
     slept = []
 
