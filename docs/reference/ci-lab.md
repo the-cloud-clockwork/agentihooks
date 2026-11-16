@@ -318,8 +318,9 @@ key; the builders are pure and read no file, clock or network.
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step.
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
-   units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree
-   a merge group grade completed carries that grade's gates. The rest is enqueued.
+   units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
+   merge group grade completed carries that grade's units for every gate both grades hold: the unit
+   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is enqueued.
 5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
 6. Finished jobs are collected: a graded outcome with an uploaded report becomes a verdict in the

@@ -4,7 +4,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-import fakeredis
 import jsonschema
 import pytest
 
@@ -35,6 +34,12 @@ TREE = "d" * 40
 OTHER_TREE = "e" * 40
 
 Post = tuple[str, str, str, str | None, Output, bool]
+
+
+def fake_redis() -> Any:
+    import fakeredis
+
+    return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
 def key(kind: str, number: int) -> str:
@@ -178,7 +183,7 @@ class Run:
 @pytest.fixture
 def lab(tmp_path: Path) -> Callable[..., Run]:
     def make(plans: dict[str, scheduler.Plan], quiet_ms: int = 0, retries: Policy = Policy()) -> Run:
-        client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+        client = fake_redis()
         state = Lab(client, LocalObjects(tmp_path / "objects"), Inbox(), Expander(plans))
         return Run(state, state.build(quiet_ms, retries))
 
@@ -247,8 +252,8 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     run.push(HEAD_A)
     run.tick(1000)
     first = run.lease(ttl_ms=100)[0]
-    assert run.tick(1100) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
-    assert f"reaped {first.job} pending" in run.tick(1101)
+    assert run.tick(1099) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
+    assert run.tick(1100) == [f"reaped {first.job} pending"]
     job = run.engine.queue.job(first.job)
     assert job is not None and (job.state, job.attempts) == ("pending", 1)
     second = run.lease(ttl_ms=100)[0]
@@ -426,6 +431,26 @@ def test_a_dev_push_grade_reuses_the_merge_group_grade_of_the_same_tree(lab: Cal
     run.push(BASE, lane="dev")
     run.tick(1300)
     assert run.engine.queue.pending() == [scheduler.job_id(BASE, other)]
+
+
+def test_a_framed_push_grade_carries_the_unit_suite_its_merge_group_grade_graded(lab: Callable[..., Run]) -> None:
+    suite, pushed_suite, lint = unit(1, "test"), unit(2, "test"), unit(3)
+    run = lab(
+        {
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (suite,), "lint": (lint,)}),
+            HEAD_B: scheduler.frame(Priority.PROMOTION, TREE, BASE, {"unit": (pushed_suite,), "lint": (lint,)}),
+        }
+    )
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, suite)]
+    run.finish(run.lease()[0], "passed", {})
+    run.tick(1100)
+    assert run.grade(HEAD_A).conclusion == "success"
+    run.push(HEAD_B, lane="dev")
+    run.tick(1200)
+    assert run.grade(HEAD_B).gates["unit"] == [ref(suite)]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, lint)]
 
 
 def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., Run]) -> None:
@@ -672,7 +697,7 @@ def test_panic_fixes_name_the_fix_branches_while_panic_is_on(monkeypatch: pytest
     from scripts.swarm import panic
     from scripts.swarm.store import RedisStore, SwarmError
 
-    client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    client = fake_redis()
     fixes = scheduler.PanicFixes(client)
     assert fixes() == frozenset()
     panic.engage(RedisStore(client), "outage", False, ["first", "second"], 1)
@@ -701,7 +726,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
         scheduler.REPOSITORY: "repository",
         scheduler.IMAGE: "image",
     }
-    client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    client = fake_redis()
     consumer = Consumer([])
     built = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), consumer, None)
     assert built.settings.trusted == frozenset({"repository"})
@@ -727,7 +752,7 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     from scripts.events import config, factory
 
     calls: dict[str, Any] = {}
-    client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    client = fake_redis()
 
     def from_url(url: str, **options: Any) -> Any:
         calls["redis"] = (url, options)
