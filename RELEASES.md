@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.931 · 2026-11-16
+
+### 2026-11-16 · 3b0a9616373c · #11423 · @agenticore-app
+
+**Ledger Stats show the lab verdict cache hit ratio per class**
+
+The ledger Stats page now shows the CI lab's verdict cache hit ratio for each scheduling class alongside existing pending, wait, and lookup counts, pulling the figure from the stored lab capacity document and falling back to "no cache lookups" when absent. Each Lab row segment wraps cleanly at its separator and truncates with a title tooltip when too wide for its column. This gives the operator visibility into cache effectiveness per class, which matters as the lab's verdicts become authoritative and cache performance affects wait times and routing decisions during the shadow and cutover phase.
+
+### 2026-11-16 · 6ba792fc0ac1 · #11483 · @agenticore-app
+
+**Fail the artifact sanity step when the grader copy lacks the pages option**
+
+The Artifact sanity checks lint step now fails closed: if the protected grader copy of artifact_sanity.py is missing or lacks the --pages option (added on dev in #11372), it prints an ::error:: line and exits 1 without ever running the head checker, matching the pattern used by the Hold the mapped feature tests step. Tests cover both the missing-option and missing-file cases, and the existing grader-with-option test's output assertion is preserved exactly, closing #11480.
+
 ## v2.17.928 · 2026-11-16
 
 ### 2026-11-16 · 206ee495f2cc · #11335 · @agenticore-app
