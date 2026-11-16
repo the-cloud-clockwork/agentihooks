@@ -106,6 +106,7 @@ def test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_t
     stale.respond.assert_not_awaited()
     fresh.respond.assert_awaited_once_with(b"x")
     assert waits == [599]
+    assert SERVE_WAITED_MS.get() == 0
     assert capsys.readouterr().err == (
         "bus: dropped a request on 'slots.rig.m1' after it waited 600 ms in the serve queue, "
         "past its requester's 600 ms wait\n"

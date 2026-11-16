@@ -686,13 +686,15 @@ class NatsBus:
                     file=sys.stderr,
                 )
                 return
-            SERVE_WAITED_MS.set(waited)
+            token = SERVE_WAITED_MS.set(waited)
             try:
                 reply = handler(msg.subject, msg.data)
                 nats_payload.validate(self._nc, msg.reply, reply)
                 self._loop.run(msg.respond(reply))
             except Exception as error:
                 self._loop.run(_unreported(error))
+            finally:
+                SERVE_WAITED_MS.reset(token)
 
         async def respond(msg: Msg) -> None:
             self._serving.submit(answer, msg, time.monotonic_ns())
