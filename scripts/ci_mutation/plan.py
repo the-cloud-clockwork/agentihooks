@@ -48,7 +48,6 @@ STATEMENT_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
 TEST_WORKFLOW = ".github/workflows/test.yml"
 COLLECTING_JOBS = {
     TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
-    ".github/workflows/mutation-preflight.yml": ("stats",),
 }
 SCHEDULING_KEYS = {"needs", "if", "timeout-minutes", "outputs"}
 RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)

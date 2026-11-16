@@ -669,71 +669,38 @@ def test_inherited_lines_are_regraded_once_the_branch_weakens_the_tests_that_sel
     assert discover_changes(tmp_path, pinned, "HEAD") == (own | {"hooks/dev.py": {3, 4, 5, 6}} if regraded else own)
 
 
-@pytest.mark.parametrize(
-    ("runs", "jobs", "asked", "expected"),
-    [
-        ((0, "7\n"), {"7": (0, "1\n")}, ["7"], True),
-        ((0, "7\n8\n"), {"7": (0, "0\n"), "8": (0, "1\n")}, ["7", "8"], True),
-        ((0, "7\n8\n"), {"7": (0, "2\n"), "8": (0, "0\n")}, ["7"], True),
-        ((0, "7\n"), {"7": (0, "0\n")}, ["7"], False),
-        ((0, "7\n"), {"7": (0, "")}, ["7"], False),
-        ((0, "7\n"), {"7": (1, "1\n")}, ["7"], False),
-        ((1, "7\n"), {"7": (0, "1\n")}, [], False),
-        ((0, ""), {}, [], False),
-    ],
-)
-def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
-    monkeypatch, runs, jobs, asked, expected
-):
+def test_a_commit_is_graded_only_by_its_pull_request_tests_run(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
     from scripts.ci_mutation import scope
 
-    calls = []
+    calls: list[str] = []
 
-    def run(command, **kwargs):
-        if "test.yml" in command[4]:
-            return subprocess.CompletedProcess(command, 0, "", "")
-        calls.append((command, kwargs))
-        code, out = jobs[command[4].split("/")[5]] if len(calls) > 1 else runs
-        return subprocess.CompletedProcess(command, code, out, "")
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command[4])
+        return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(scope.subprocess, "run", run)
-    assert scope.graded_green("abc") is expected
-    api = ["gh", "api", "-X", "GET"]
-    green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
-    listed = [
-        *api,
-        "repos/{owner}/{repo}/actions/workflows/mutation-preflight.yml/runs",
-        "-f",
-        "head_sha=abc",
-        "-f",
-        "event=push",
-        "--jq",
-        ".workflow_runs[].id",
-    ]
-    expected_calls = [listed] + [
-        [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "--jq", green] for run in asked
-    ]
-    assert calls == [(command, {"capture_output": True, "text": True}) for command in expected_calls]
+    assert scope.graded_green("abc") is False
+    assert calls == ["repos/{owner}/{repo}/actions/workflows/test.yml/runs"]
 
 
 @pytest.mark.parametrize(
-    ("preflight", "runs", "jobs", "expected"),
+    ("runs", "jobs", "expected"),
     [
-        ("", "9\n", {"9": "success\nsuccess\n"}, True),
-        ("5\n", "9\n", {"9": "success\n"}, True),
-        ("", "9\n", {"9": "success\nfailure\n"}, False),
-        ("", "9\n", {"9": "failure\nsuccess\n"}, False),
-        ("", "9\n", {"9": "success\nskipped\n"}, False),
-        ("", "9\n", {"9": ""}, False),
-        ("", "8\n9\n", {"8": "cancelled\n", "9": "success\n"}, True),
-        ("", "", {}, False),
+        ("9\n", {"9": "success\nsuccess\n"}, True),
+        ("9\n", {"9": "success\n"}, True),
+        ("9\n", {"9": "success\nfailure\n"}, False),
+        ("9\n", {"9": "failure\nsuccess\n"}, False),
+        ("9\n", {"9": "success\nskipped\n"}, False),
+        ("9\n", {"9": ""}, False),
+        ("8\n9\n", {"8": "cancelled\n", "9": "success\n"}, True),
+        ("", {}, False),
     ],
 )
-def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_push_preflight_skipped(
-    monkeypatch, preflight, runs, jobs, expected
-):
+def test_a_branch_is_graded_by_its_pull_request_mutation_shards(
+    monkeypatch: pytest.MonkeyPatch, runs: str, jobs: dict[str, str], expected: bool
+) -> None:
     import subprocess
 
     from scripts.ci_mutation import scope
@@ -743,12 +710,8 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
     def run(command, **kwargs):
         calls.append(command)
         path = command[4]
-        if "mutation-preflight.yml" in path:
-            out = preflight
-        elif "test.yml" in path:
+        if "test.yml" in path:
             out = runs
-        elif "--paginate" not in command:
-            out = "0\n"
         else:
             out = jobs[path.split("/")[5]]
         return subprocess.CompletedProcess(command, 0, out, "")
@@ -767,14 +730,13 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
         "--jq",
         ".workflow_runs[].id",
     ]
-    checked = len(preflight.split())
-    assert calls[checked + 1] == listed
+    assert calls[0] == listed
     asked = runs.split()[: runs.split().index("9") + 1] if expected else runs.split()
     jobs_listed = [
         [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards]
         for run in asked
     ]
-    assert calls[checked + 2 :] == jobs_listed
+    assert calls[1:] == jobs_listed
 
 
 _INLINE = "Mutate the only shard in the statistics job"
