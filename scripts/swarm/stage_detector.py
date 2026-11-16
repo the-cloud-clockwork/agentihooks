@@ -2,9 +2,10 @@ import json
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from scripts.swarm import bottleneck, metrics_outbox, stages
-from scripts.swarm.health import standing
+from scripts.swarm import bottleneck, claim_hold, lab_capacity, metrics_outbox, stages
+from scripts.swarm.health import findings, standing
 from scripts.swarm.store import RedisStore
 
 THRESHOLD_HOURS = {
@@ -15,9 +16,12 @@ THRESHOLD_HOURS = {
     "merge_queue": 1.0,
     "intent_fix": 1.0,
     "ci_queue": 1.0,
+    "lab_wait": 1.0,
     "ci_overrun": 0.25,
     "launch_failure": 0.25,
 }
+LAB_UNIT = "minutes behind on pull request grading"
+LAB_HELD = "eng claims are held: {hold}"
 
 
 @dataclass(frozen=True)
@@ -100,6 +104,22 @@ def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> N
         standing.clear_detector(store.redis, slug, stage)
 
 
+def lab_finding(store: Any, slug: str, reading: dict[str, Any] | None, limit: int, now_ms: int) -> None:
+    """Fire the standing lab wait finding while the reading holds eng claims, and clear it once the reading falls
+    back; a lab wait row the detector measured in task hours is left to the detector."""
+    minutes = claim_hold.lab_minutes(reading, now_ms)
+    row: dict[str, Any] = standing.read(store.redis, slug).get(stages.LAB_WAIT, {})
+    mine = row.get("unit") == LAB_UNIT
+    if minutes <= limit:
+        if mine:
+            standing.clear(store.redis, slug, stages.LAB_WAIT)
+        return
+    episode = str(row["episodes"][-1]) if mine else f"{stages.LAB_WAIT}:{now_ms}"
+    held = LAB_HELD.format(hold=claim_hold.LAB_BEHIND.format(minutes=minutes))
+    found = standing.Reading(minutes, limit, LAB_UNIT, episode, held)
+    standing.fire(store.redis, slug, stages.LAB_WAIT, found, now_ms)
+
+
 def record(
     box: metrics_outbox.Outbox,
     store: RedisStore,
@@ -110,6 +130,7 @@ def record(
     ready: Callable[[dict], bool] | None = None,
 ) -> dict:
     config = settings(environ)
+    lab_finding(store, slug, lab_capacity.status(store, slug), findings.ci_behind_minutes(environ), now_ms)
     count = store.redis.incr(store.key(slug, "stage-detector-ticks"))
     if (count - 1) % config.ticks:
         return stages.read(store, slug)

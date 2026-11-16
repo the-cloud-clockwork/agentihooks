@@ -267,10 +267,15 @@ def test_claim_view_holds_active_territories_and_marks_owned_or_claimed_tasks(
         built.append(("unshared", saved))
         return lambda task: task["id"] != "f"
 
+    def lab(store: object, slug: str, fix: str) -> Any:
+        built.append(("lab", store, slug, fix))
+        return lambda task: "the lab is 30 minutes behind on pull request grading" if task["id"] == "l" else ""
+
     monkeypatch.setattr(tick.release_wait, "checker", released)
     monkeypatch.setattr(tick.apply_wait, "checker", applied)
     monkeypatch.setattr(tick.fleet_red, "saved_reader", reader)
     monkeypatch.setattr(tick.fleet_red, "checker", unshared)
+    monkeypatch.setattr(tick.claim_hold, "lab_reason", lab)
     monkeypatch.setattr(tick.readiness, "Snapshot", lambda *args: snapshots.append(args) or "snapshot")
     rows = {
         "open1": _task("open1", state="open", order=3),
@@ -287,10 +292,11 @@ def test_claim_view_holds_active_territories_and_marks_owned_or_claimed_tasks(
     slug, seen_rows, doc, graph, fix, owned, passes = snapshots[0]
     assert (slug, seen_rows, doc, graph, fix) == ("sw", rows, {"doc": 1}, "graph", "fix config")
     assert [owned(t) for t in ("owned", "held", "open1")] == [True, True, False]
-    assert [passes({"id": t}) for t in ("ok", "r", "a", "f")] == [True, False, False, False]
+    assert [passes({"id": t}) for t in ("ok", "r", "a", "f", "l")] == [True, False, False, False, False]
     assert built == [
         ("released", "config"),
         ("applied", "config", rows),
         ("reader", store, "sw"),
         ("unshared", "reader"),
+        ("lab", store, "sw", "fix config"),
     ]

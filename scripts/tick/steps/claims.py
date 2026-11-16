@@ -172,6 +172,7 @@ def claim_view(
     graph, fix = tick.hierarchy.project(doc)[0], tick.freeze.fix_phase(config)
     released, applied = tick.release_wait.checker(config), tick.apply_wait.checker(config, rows)
     unshared = tick.fleet_red.checker(tick.fleet_red.saved_reader(store, slug))
+    lab = tick.claim_hold.lab_reason(store, slug, fix)
     view = tick.readiness.Snapshot(
         slug,
         rows,
@@ -179,7 +180,7 @@ def claim_view(
         graph,
         fix,
         lambda task_id: task_id in awaiting or task_id in claimed,  # pyright: ignore[reportUnknownLambdaType]
-        lambda task: released(task) and applied(task) and unshared(task),  # pyright: ignore[reportUnknownLambdaType]
+        lambda task: released(task) and applied(task) and unshared(task) and not lab(task),  # pyright: ignore[reportUnknownLambdaType]
     )
     return tick.Claims(view, held, sorted(rows.values(), key=dispatched or tick.claim_order.key(rows)))
 

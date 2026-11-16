@@ -82,6 +82,22 @@ def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):
     assert rows["phase"]["why"] == "its phase later is waiting on an earlier phase"
 
 
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_an_urgent_eng_task_the_lab_holds_names_the_lab_and_raises_no_finding(store, monkeypatch):
+    from scripts.swarm.health import urgent_hold
+    from tests.swarm.test_claim_hold import lab
+
+    store.redis.set(store.key(SLUG, "lab-capacity"), json.dumps(lab(35 * 60)))
+    found = doc([task("held", rank="urgent"), task("grading", rank="urgent", lane="ci")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/grading"]
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows["held"]["why"] == "the lab is 35 minutes behind on pull request grading"
+    monkeypatch.setattr("scripts.swarm.freeze.fix_phase", lambda _: "p1")
+    assert not urgent_hold.observe(store, SLUG, found, 12 * MINUTE)["held"]["why"]
+
+
 @pytest.mark.feature("swarm-claim-dependencies")
 def test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits(store):
     from scripts.swarm.health import urgent_hold
