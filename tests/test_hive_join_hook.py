@@ -154,7 +154,7 @@ def test_a_tool_call_writes_the_join_report_a_failed_start_left_missing(
 
 
 @pytest.mark.feature("hive-join-report-tool-repair")
-def test_a_tool_call_leaves_the_join_report_of_another_session_in_place(
+def test_only_a_session_start_replaces_the_join_report_of_another_session(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from unittest.mock import Mock
@@ -169,6 +169,9 @@ def test_a_tool_call_leaves_the_join_report_of_another_session_in_place(
     hive_join.run({**payload, "session_id": "other"}, "tool")
     assert join_report.read(client.redis, agent)["session_id"] == "session"
     assert startup.call_count == 1
+    hive_join.run({**payload, "session_id": "other"}, "start")
+    assert join_report.read(client.redis, agent)["session_id"] == "other"
+    assert startup.call_count == 2
 
 
 def test_hive_reports_are_dispatched_at_start_and_end(
