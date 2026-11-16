@@ -462,6 +462,67 @@ def test_an_admission_asked_again_keeps_asking_returns_a_held_offer_and_drops_a_
     rig.runtime.spawn.assert_not_called()
 
 
+@pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("failure", ["unavailable", "ambiguous"])
+def test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch(
+    rig: SimpleNamespace, failure: str
+) -> None:
+    import json
+
+    from scripts.hive import admission
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.hive-a'"), rig.request]
+    if failure == "unavailable":
+        rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    else:
+        rig.runtime.spawn.side_effect = RuntimeError("response lost")
+    assert rig.spoke.poll() == "asked"
+
+    assert rig.spoke.poll() == "retry"
+
+    pending = json.loads(rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value)
+    if failure == "unavailable":
+        assert claim(rig) == {"state": "ready"}
+        assert pending == {}
+        rig.tasks.reopen.assert_called_once_with(rig.event)
+    else:
+        assert claim(rig) == {"state": "launching", "owner": "hive-a", "name": "agent-a"}
+        assert pending["event"] == rig.event.to_dict()
+        rig.tasks.reopen.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import admission
+
+    unanswered = admission.Unanswered("no responders for 'slots.rig.hive-a'")
+    rig.tasks.request.side_effect = [unanswered, unanswered]
+    assert rig.spoke.poll() == "asked"
+    assert rig.queue.take(0) is None
+    rig.queue.offer(replace(rig.event, id="ready-b", key="task-b"))
+
+    assert rig.spoke.poll() == "asked"
+
+    assert rig.tasks.request.call_args_list == [((rig.event,),)] * 2
+    line = "hive spoke for swarm rig lane eng poll failed (Unanswered: no responders for 'slots.rig.hive-a')"
+    assert capsys.readouterr().err.count(line) == 2
+    assert rig.queue.take(0).event.key == "task-b"
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_pending_admission_another_hive_now_asks_for_keeps_the_spoke_busy(rig: SimpleNamespace) -> None:
+    pending = seed_pending(rig, {"state": "asked", "owner": "hive-b"})
+    before = pending.get(rig.spoke._pending_key)
+
+    assert rig.spoke.poll() == "busy"
+
+    assert pending.get(rig.spoke._pending_key) == before
+    rig.tasks.request.assert_not_called()
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
 def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):

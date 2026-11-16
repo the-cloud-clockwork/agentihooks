@@ -954,6 +954,9 @@
       "tests": [
         "tests/hive/test_spoke.py::test_a_late_kept_admission_launches_on_the_next_poll_after_the_hub_withdrew_its_offer",
         "tests/hive/test_spoke.py::test_an_admission_asked_again_keeps_asking_returns_a_held_offer_and_drops_a_refused_one",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch",
+        "tests/hive/test_spoke.py::test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer",
+        "tests/hive/test_spoke.py::test_a_pending_admission_another_hive_now_asks_for_keeps_the_spoke_busy",
         "tests/hive/test_spoke.py::test_lost_hive_work_redelivers_and_changes_the_old_claim_fence",
         "tests/hive/test_spoke.py::test_a_fresh_hive_keeps_its_claim_until_presence_expires",
         "tests/hive/test_lanes.py::test_a_held_answer_naming_the_hives_own_admission_in_progress_raises_unanswered",

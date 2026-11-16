@@ -73,7 +73,8 @@ class Held(RuntimeError):
 
 
 class Unanswered(TimeoutError):
-    """The hub did not answer an admit ask inside the hive's wait; it may hold an admission the next ask receives."""
+    """The hub did not answer an admit ask inside the hive's wait, or held its answer while the hive's own admission of
+    the offer was still in progress; it may hold an admission the next ask receives."""
 
 
 def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:

@@ -15,6 +15,8 @@ from scripts.hive import account_slots, admission, execution_events, headroom, p
 from scripts.swarm import launch_check, readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
+ASKED = "asked"
+
 
 class Tasks(Protocol):
     def request(self, event: Envelope) -> SpawnRequest | None:
@@ -82,8 +84,8 @@ class Spoke:
         return "retry"
 
     def _poll(self, timeout_ms: int, heartbeat: presence.Heartbeat) -> str:
-        recovered = self._recover()
-        if recovered in ("busy", "uncertain"):
+        recovered = self._recover(heartbeat)
+        if recovered in ("busy", "uncertain", ASKED):
             return recovered
         heartbeat.check()
         if admission.room(self.measure()).room < 1:
@@ -129,7 +131,7 @@ class Spoke:
 
     def _waiting(self, prior: dict) -> str | None:
         state = prior.get("state")
-        if state not in ("claimed", "launching"):
+        if state not in ("claimed", "launching", ASKED):
             return None
         if presence.lost(self.bus, prior.get("owner"), self.clock()):
             return None
@@ -139,7 +141,7 @@ class Spoke:
         found = self.runtime.find(name)
         return found.ok and (found.value is None or self.runtime.reap(name).ok)
 
-    def _recover(self) -> str | None:
+    def _recover(self, heartbeat: presence.Heartbeat) -> str | None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
         if pending is None or not (record := json.loads(pending.value)):
             return None
@@ -147,6 +149,8 @@ class Spoke:
         entry = self.bus.state("spoke-work").get(claim_key(event))
         state = json.loads(entry.value)
         status = state["state"]
+        if status == ASKED and state.get("owner") == self.config.hive:
+            return self._ask_again(event, record["attempt"], entry.revision, pending.revision, heartbeat)  # pyright: ignore[reportOptionalMemberAccess]
         if status == "launching" and state.get("owner") == self.config.hive:
             if not self._end_leftover(state["name"]):
                 return "uncertain"
@@ -164,7 +168,7 @@ class Spoke:
             status = "dead"
         elif status == "launching":
             return "uncertain"
-        elif status == "claimed":
+        elif status in ("claimed", ASKED):
             return "busy"
         self._clear_pending(pending.revision)
         return None if status == "ready" else status
@@ -189,7 +193,7 @@ class Spoke:
             return prior["state"]
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
-        if entry and prior["state"] not in ("ready", "claimed", "launching"):
+        if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED):
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
         value = json.dumps({"owner": self.config.hive, "state": "claimed"}).encode()
@@ -205,15 +209,11 @@ class Spoke:
             raise
         try:
             spawned = self._spawn(event, key, revision, heartbeat)
-        except admission.Held:
-            self._clear_pending(pending_revision)
+        except (admission.Unanswered, admission.Held) as unsettled:
             delivery.nak(self.config.policy.ack_wait_ms)
-            return admission.HELD
-        except Exception as error:
-            current = json.loads(claims.get(key).value)
-            if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
-                self._clear_pending(pending_revision)
-                self._return_offer(event, error)
+            return self._unsettled(unsettled, pending_revision)
+        except Exception:
+            self._give_back(event, key, pending_revision, delivery.attempt)
             raise
         if spawned is None:
             self._clear_pending(pending_revision)
@@ -226,10 +226,44 @@ class Spoke:
         self._report_launch(event, launch)
         return "started"
 
-    def _return_offer(self, event: Envelope, error: Exception) -> None:
-        """Ask the hub to reopen an offer this hive failed to start, unless the admit ask timed out: the next delivery
-        asks again and receives the admission the hub kept."""
-        if not isinstance(error, admission.Unanswered):
+    def _ask_again(
+        self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
+    ) -> str:
+        """Asks the hub again for the admission an unanswered admit ask left pending and launches it, with no wait for
+        a redelivery of the offer the hub readiness pass withdraws once that admission claims the task; an ask still
+        unanswered keeps the offer pending, a held answer returns it and a refusal withdraws it."""
+        key = claim_key(event)
+        try:
+            spawned = self._spawn(event, key, revision, heartbeat)
+        except (admission.Unanswered, admission.Held) as unsettled:
+            return self._unsettled(unsettled, pending_revision)
+        except Exception:
+            self._give_back(event, key, pending_revision, attempt)
+            raise
+        if spawned is None:
+            self._clear_pending(pending_revision)
+            return "withdrawn"
+        started, launch = spawned
+        self._publish(started)
+        self._clear_pending(pending_revision)
+        self._report_launch(event, launch)
+        return "started"
+
+    def _unsettled(self, unsettled: admission.Unanswered | admission.Held, pending_revision: int) -> str:
+        """An admit ask the hub left unanswered keeps the offer as this hive's pending admission, asked again on the
+        next poll; a held answer drops it so another hive may take the offer."""
+        if isinstance(unsettled, admission.Held):
+            self._clear_pending(pending_revision)
+            return admission.HELD
+        self._failed()
+        return ASKED
+
+    def _give_back(self, event: Envelope, key: str, pending_revision: int, attempt: int) -> None:
+        """Asks the hub to reopen an offer whose launch failed and left its claim ready while the offer has deliveries
+        left; the final delivery is dead lettered instead."""
+        current = json.loads(self.bus.state("spoke-work").get(key).value)
+        if current["state"] == "ready" and attempt < self.config.policy.max_deliver:
+            self._clear_pending(pending_revision)
             self.tasks.reopen(event)
 
     def _report_launch(self, event: Envelope, launch: dict[str, Any] | None) -> None:
@@ -257,8 +291,10 @@ class Spoke:
                 generation = request.task["execution_generation"]
                 task_generation = request.task["claim_generation"]
             heartbeat.check()
-        except Exception:
-            claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
+        except Exception as error:
+            asked = isinstance(error, admission.Unanswered)
+            unsettled = {"state": ASKED, "owner": self.config.hive} if asked else {"state": "ready"}
+            claims.update(key, json.dumps(unsettled).encode(), revision)
             raise
         if request is None:
             claims.update(key, json.dumps({"state": "withdrawn"}).encode(), revision)
