@@ -133,6 +133,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint() -> None:
             "stage-budget",
             "select",
             "unit-selected",
+            "lab-verdict",
             "docs",
             "type-gate",
         }
@@ -990,10 +991,12 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
     ]
     assert workflow["jobs"]["mutation-stats"]["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
     assert workflow["jobs"]["mutation-plan"].get("needs", []) in ([], ["admission"])
-    assert job["if"] in (
+    lab = " && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['mutation'] != true"
+    assert job["if"].replace(lab, "") in (
         "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
         "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
     )
+    assert job["if"].endswith(" && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['mutation'] != true }}")
     dispatch = workflow[True]["workflow_dispatch"]["inputs"]["base"]
     assert dispatch["required"] is True
     assert dispatch["default"] == "origin/dev"
