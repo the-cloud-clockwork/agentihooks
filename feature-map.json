@@ -113,6 +113,22 @@
       ]
     },
     {
+      "id": "hub-slot-serve-drops-abandoned-requests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-serve-bounded",
+      "behaviour": "A hub pod serves account slot requests on the bus's own bounded thread pool and drops, unanswered and unrun, a request that waited in that pool's queue as long as the hive waits for its answer, timed from when the hub received it, so a slot take or lane admission the hive already gave up on never claims an account slot or a task, and lane admission times its answer budget from that receipt.",
+      "seam": "NatsBus.serve with wait_ms for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": [
+        "nats-serve-default-executor"
+      ],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot",
+        "tests/events/test_scoped_nats.py::test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_queued_ones",
+        "tests/events/test_nats_payload_safety.py::test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_that_did_not",
+        "tests/hub/test_admission.py::test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_queue"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",

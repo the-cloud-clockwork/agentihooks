@@ -887,6 +887,26 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
     ]
 
 
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_queue(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.events.bus import SERVE_WAITED_MS
+
+    rig.admitter.clock = lambda: 7_000
+    waited = SERVE_WAITED_MS.set(admission.ANSWER_MS)
+    try:
+        rig.admitter.admit(SLUG, ask())
+    finally:
+        SERVE_WAITED_MS.reset(waited)
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS} ms, "
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=0 held=0 stopped=0 "
+        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
+    ]
+
+
 @pytest.mark.feature("hub-admission-step-timing")
 def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
