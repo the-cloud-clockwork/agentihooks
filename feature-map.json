@@ -6405,6 +6405,22 @@
       ]
     },
     {
+      "id": "unfit-refusal-spends-no-delivery",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2584",
+      "behaviour": "An offer a hive may not take, because it is pinned to another hive, is a workstation task off the root hive or needs a capability the hive lacks, goes back to its lane queue after five seconds without spending one of its five deliveries, so offers pinned to one hive no longer die in the dead letters while other hives refuse them and reach their own hive at the attempt they had. On the memory bus the released message keeps its attempt; on NATS the original stays in flight for the delay and a copy carrying the delivery base header takes its place. The hub readiness pass offers no event still on its queue, so an offer that waits past the dedupe window stays a single copy.",
+      "seam": "WorkQueue.release on the memory bus, the NATS bus and the scoped queue, called by scripts.swarm.readiness.take, and scripts.swarm.readiness.publish skipping offers its withdraw sweep keeps",
+      "rules": [
+        "unfit-refusal-spends-a-delivery"
+      ],
+      "tests": [
+        "tests/events/test_bus_contract.py::test_a_released_delivery_comes_back_after_its_delay_at_its_own_attempt_and_never_dies",
+        "tests/swarm/test_events_placement.py::test_refusals_by_hives_outside_its_pin_spend_none_of_an_offers_deliveries",
+        "tests/swarm/test_events_placement.py::test_a_skipped_offer_is_released_for_another_hive_not_terminated",
+        "tests/swarm/test_readiness.py::test_an_offer_still_queued_past_the_dedupe_window_is_not_offered_again"
+      ]
+    },
+    {
       "id": "root-hive-lane-spokes",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-root-hive-spokes",

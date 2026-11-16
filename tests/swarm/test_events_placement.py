@@ -169,13 +169,32 @@ def test_a_hive_leaves_an_offer_pinned_elsewhere_in_the_queue_for_its_own_hive(b
     assert held.event.key == "pinned"
 
 
+@pytest.mark.feature("unfit-refusal-spends-no-delivery")
+def test_refusals_by_hives_outside_its_pin_spend_none_of_an_offers_deliveries(bus: Bus, clock: Clock) -> None:  # noqa: F811
+    readiness.publish(bus, snapshot(doc([task("pinned", hive="hive-b")])), NOW)
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+
+    for _ in range(QueuePolicy().max_deliver + 1):
+        assert (
+            readiness.take(queue, lambda: None, 0, lambda event: readiness.fits(event, "hive-a", no_capabilities))
+            is None
+        )
+        clock.now += readiness.UNFIT_NAK_MS
+
+    held = readiness.take(queue, lambda: None, 0, lambda event: readiness.fits(event, "hive-b", no_capabilities))
+    assert held is not None
+    assert (held.event.key, held.attempt) == ("pinned", 1)
+
+
+@pytest.mark.feature("unfit-refusal-spends-no-delivery")
 def test_a_skipped_offer_is_released_for_another_hive_not_terminated() -> None:
     delivery = SimpleNamespace(event=SimpleNamespace(key="pinned"), nak=Mock(), term=Mock())
-    queue = SimpleNamespace(take=Mock(side_effect=[delivery, None]))
+    queue = SimpleNamespace(take=Mock(side_effect=[delivery, None]), release=Mock())
 
     assert readiness.take(cast(WorkQueue, queue), lambda: None, 0, lambda event: False) is None
 
-    delivery.nak.assert_called_once_with(readiness.UNFIT_NAK_MS)
+    queue.release.assert_called_once_with(delivery, readiness.UNFIT_NAK_MS)
+    delivery.nak.assert_not_called()
     delivery.term.assert_not_called()
 
 
