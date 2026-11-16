@@ -193,13 +193,14 @@ class Worker:
         return list(self.running.values())
 
     def _unit(self, lease: Lease) -> None:
-        """Run one unit while its lease heartbeats, then deliver it; an executor that raises leaves it to reap."""
+        """Run one unit while its lease heartbeats, then deliver it; an executor that raises leaves it to reap, and
+        a heartbeat that fails or hangs only ends the heartbeats."""
         beat = Interval(functools.partial(self._beat, lease), every=self.heartbeat_s)
         beat.start()
         try:
             finished = self.executors[lease.unit.kind](lease)
         finally:
-            with contextlib.suppress(Lost):
+            with contextlib.suppress(OSError, RuntimeError):
                 beat.close()
         self._deliver(lease, finished)
 

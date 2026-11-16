@@ -6467,6 +6467,7 @@
         "tests/ci_lab/test_worker.py::test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs",
         "tests/ci_lab/test_worker.py::test_a_crash_stops_the_heartbeat_and_the_lease_reaps",
         "tests/ci_lab/test_worker.py::test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery",
+        "tests/ci_lab/test_worker.py::test_a_heartbeat_that_cannot_reach_the_scheduler_still_delivers_the_unit",
         "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
         "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
         "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",

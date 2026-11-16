@@ -299,6 +299,30 @@ def test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery(
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
+def test_a_heartbeat_that_cannot_reach_the_scheduler_still_delivers_the_unit(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    beaten = threading.Event()
+
+    class Unreachable(worker.Client):
+        def heartbeat(self, job: str, token: str) -> int | None:
+            beaten.set()
+            raise urllib.error.URLError("scheduler unreachable")
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        beaten.wait(10)
+        return finished(tmp_path, lease)
+
+    unreachable = worker.Worker(Unreachable(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
+    unreachable.run_once()
+
+    assert unreachable.drain() == []
+    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
 def test_stop_lets_running_units_finish_within_the_termination_grace(
     scheduler: str, jobs: queue.Queue, tmp_path: Path
 ) -> None:
@@ -314,8 +338,11 @@ def test_stop_lets_running_units_finish_within_the_termination_grace(
 
     executors["test"] = held
     threading.Timer(0.2, release.set).start()
+    guard = threading.Timer(10, stopping.stop)
+    guard.start()
 
     assert stopping.run() == []
+    guard.cancel()
     assert found(jobs, "h1:test:a").outcome == "passed"
 
 
@@ -334,8 +361,11 @@ def test_a_unit_past_the_termination_grace_is_left_to_reap(scheduler: str, jobs:
     executors["test"] = held
     timer = threading.Timer(2, release.set)
     timer.start()
+    guard = threading.Timer(10, late.stop)
+    guard.start()
 
     assert [lease.job for lease in late.run()] == ["h1:test:a"]
+    guard.cancel()
     assert found(jobs, "h1:test:a").state == "leased"
     release.set()
     timer.cancel()
