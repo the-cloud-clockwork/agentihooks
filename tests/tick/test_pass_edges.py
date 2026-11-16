@@ -1,4 +1,4 @@
-"""Every pass box value a tick step reads is declared, with a need on the step that wrote it, over the twelve scenarios."""
+"""Every pass box value a tick step reads is declared, with a need on the step that wrote it, in each tick scenario."""
 
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -19,6 +19,7 @@ tick_sites = import_module("scripts.tick.sites")
 cli_module = import_module("scripts.swarm.cli")
 STEP: ContextVar[str | None] = ContextVar("pass edge step", default=None)
 ENTRIES = ("tick", "run_tick")
+COVERING = ("running",)
 HELD = "raised"
 KEYS = frozenset({"config", "finished", "doc", "rows", "sleeping", "agents", "view", "judged", "live", "found", "stop"})
 WRAPPER = ""
@@ -193,14 +194,22 @@ def replayed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runs: tuple[tuple[
 
 
 @pytest.mark.feature("swarm-tick-pass-edges")
+@pytest.mark.parametrize("scenario", SCENARIOS)
 def test_every_pass_box_read_is_declared_with_a_need_on_its_writer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    scenario: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    rec = replayed(monkeypatch, tmp_path, tuple((scenario, entry) for scenario in SCENARIOS for entry in ENTRIES))
+    rec = replayed(monkeypatch, tmp_path, tuple((scenario, entry) for entry in ENTRIES))
     broken = violations(rec)
     assert not broken, (
         f"{len(broken)} broken of {len(rec.reads)} pass box reads and {len(rec.written)} writes:\n" + "\n".join(broken)
     )
+
+
+@pytest.mark.feature("swarm-tick-pass-edges")
+def test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rec = replayed(monkeypatch, tmp_path, tuple((scenario, entry) for scenario in COVERING for entry in ENTRIES))
     assert {key for _, key in rec.written} >= WRITTEN
     assert {seen.key for seen in rec.reads} >= WRITTEN - {"judged"}
     skipped = sorted({step.name for step in registry.steps()} - rec.ran)

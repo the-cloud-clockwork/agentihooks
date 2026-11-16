@@ -165,8 +165,8 @@ def test_the_lab_intake_publishes_each_envelope_on_its_type() -> None:
     webhooks.LabIntake(published, b"notice-secret").publish(envelopes)
     assert published.entries == [("ci.lab.head.push", envelopes[0]), ("ci.lab.head.notice", envelopes[1])]
     bus = open_bus(BusConfig())
-    consumer = bus.events.consumer("lab", "ci.lab.head.>")
-    webhooks.LabIntake(bus.events, b"notice-secret").publish(envelopes)
+    consumer = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+    webhooks.LabIntake(bus.lab_heads, b"notice-secret").publish(envelopes)
     assert [delivery.event for delivery in consumer.fetch(10, 0)] == envelopes
 
 
@@ -176,8 +176,8 @@ def test_a_resent_head_keeps_its_envelope_id_so_the_bus_drops_it() -> None:
     assert first.id == again.id
     assert webhooks.envelope(head("pull_request", "nestorcolt", "reopened")).id != first.id
     bus = open_bus(BusConfig())
-    consumer = bus.events.consumer("lab", "ci.lab.head.>")
-    webhooks.LabIntake(bus.events, b"notice-secret").publish([first, again])
+    consumer = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+    webhooks.LabIntake(bus.lab_heads, b"notice-secret").publish([first, again])
     assert [delivery.event for delivery in consumer.fetch(10, 0)] == [first]
 
 

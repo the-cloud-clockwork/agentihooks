@@ -1,7 +1,6 @@
 import argparse
 import json
 import re
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
@@ -143,7 +142,7 @@ def _lab_problems(workflows: dict[str, dict[Any, Any]], declared: dict[str, dict
     ]
 
 
-def check(workflows: dict[str, dict[Any, Any]], config: Wiring, today: date, lab: Lab | None = None) -> list[str]:
+def check(workflows: dict[str, dict[Any, Any]], config: Wiring, lab: Lab | None = None) -> list[str]:
     from scripts import ci_gate_queue
 
     lab = lab or Lab()
@@ -188,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     config = json.loads((args.root / CONFIG).read_text())
     delivery = args.root / DELIVERY
     lab: Lab | None = yaml.safe_load(delivery.read_text())["lab"] if delivery.is_file() else None
-    problems = check(workflows, config, datetime.now(UTC).date(), lab)
+    problems = check(workflows, config, lab)
     jobs = sum(len(workflow.get("jobs") or cast(dict[Any, Any], {})) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:
