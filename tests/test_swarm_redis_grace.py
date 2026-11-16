@@ -269,12 +269,15 @@ def test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes(
         controller._passes(STORE, None, PROOF, False, redis_grace.Outage(30, Clock()))
     assert len(calls) == 3
     assert len(slept) == 2
-    assert all(0 < seconds <= lease.tick_ms() / 1000 for seconds in slept)
+    assert 0 < slept[0] <= lease.tick_ms() / 1000
+    assert slept[1] == lease.tick_ms() / 1000
     assert capsys.readouterr().err.count("waiting on the local clock") == 2
 
 
 @pytest.mark.feature("controller-waits-ride-out-redis-outage")
-def test_startup_rides_out_redis_refusing_its_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_startup_rides_out_redis_refusing_its_retry_wait(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     attempts: list[int] = []
     slept: list[float] = []
 
@@ -290,4 +293,5 @@ def test_startup_rides_out_redis_refusing_its_retry_wait(monkeypatch: pytest.Mon
 
     assert controller._reached(redis_grace.Outage(30, Clock())) == "store"
     assert len(attempts) == 2
-    assert len(slept) == 1
+    assert slept == [lease.tick_ms() / 1000]
+    assert "waiting on the local clock" in capsys.readouterr().err
