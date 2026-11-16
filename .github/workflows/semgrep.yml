@@ -202,18 +202,10 @@ jobs:
       - name: A chart version bump leaves every pod template unchanged
         run: |
           script=tests/ci_charts/chart_pod_templates.py
-          if grep -q 'tree(argv)' "$RUNNER_TEMP/grader/$script"; then
-            python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
-          else
-            python "$script"
-          fi
+          python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
 
       # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
       - name: Charts render no CronJob outside the scheduler
         run: |
           script=tests/ci_charts/chart_timers.py
-          if grep -q 'tree(argv)' "$RUNNER_TEMP/grader/$script"; then
-            python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
-          else
-            python "$script"
-          fi
+          python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
