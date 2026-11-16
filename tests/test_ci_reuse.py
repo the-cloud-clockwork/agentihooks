@@ -298,6 +298,9 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)
     ]
+    [collected, *collected_rest] = ci_reuse.collected_stats(steps)
+    assert collected == {**steps[0], "run": ci_reuse.COLLECTED_STATS + steps[0]["run"]}
+    assert collected_rest == steps[1:]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
