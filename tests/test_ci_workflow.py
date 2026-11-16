@@ -967,7 +967,7 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
         listed
     )
-    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    assert 'if ! git diff --quiet "$base" HEAD -- "$path"; then' in changed["run"]
     [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
     assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
     assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
