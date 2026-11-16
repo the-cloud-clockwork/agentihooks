@@ -2,8 +2,9 @@
 
 `authority` reads the gates the lab grades from the protected grader's delivery.yaml, so a pull request head can
 never widen them, and AGENTIHOOKS_LAB_OFF empties them; off pull request events it publishes nothing. `verdict` waits
-for the head's completed `lab/<gate>` check run from the trusted App and publishes `lab_<gate>`, success only for a
-successful run; an authoritative gate whose verdict is absent or still pending at the deadline publishes failure.
+for the head's completed `lab/<gate>` check run from the lab App named by AGENTIHOOKS_LAB_APP and publishes
+`lab_<gate>` only for gates the lab graded: success or skipped as posted, any other conclusion as failure. A gate with
+no verdict at the deadline keeps its skipped Actions result, which Gate Required refuses for a required gate.
 """
 
 import json
@@ -23,7 +24,7 @@ gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budg
 PULL_REQUEST = "pull_request"
 UNTRUSTED = "github-actions"
 COMPLETED = "completed"
-SUCCESS = "success"
+PASSED = ("success", "skipped")
 FAILURE = "failure"
 POLL_S = 15.0
 WAIT_S = 1200.0
@@ -40,14 +41,17 @@ def authority(grader_root: Path, event: str, environ: Mapping[str, str]) -> dict
 
 
 def conclusion(runs: Sequence[Mapping[str, Any]], app: str) -> str | None:
-    """Return the newest trusted run's verdict: success, failure, or None while absent or not completed."""
-    trusted = [run for run in runs if run["app"]["slug"] != UNTRUSTED and (not app or run["app"]["slug"] == app)]
+    """Return the newest run of the trusted App: success or skipped as posted, any other conclusion as failure.
+
+    None while no run of that App exists or the newest one has not completed.
+    """
+    trusted = [run for run in runs if run["app"]["slug"] == app]
     if not trusted:
         return None
     newest = max(trusted, key=lambda run: run["id"])
     if newest["status"] != COMPLETED:
         return None
-    return SUCCESS if newest["conclusion"] == SUCCESS else FAILURE
+    return newest["conclusion"] if newest["conclusion"] in PASSED else FAILURE
 
 
 def verdicts(
@@ -58,7 +62,7 @@ def verdicts(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, str]:
-    """Poll each gate's check run until every verdict is complete or the wait ends; a missing verdict is a failure."""
+    """Poll each gate's check run until every verdict is complete or the wait ends; a gate with no verdict is left out."""
     deadline = clock() + wait
     results: dict[str, str] = {}
     while True:
@@ -68,7 +72,7 @@ def verdicts(
                 if found is not None:
                     results[gate] = found
         if len(results) == len(checks) or clock() >= deadline:
-            return {gate: results.get(gate, FAILURE) for gate in checks}
+            return {gate: results[gate] for gate in checks if gate in results}
         sleep(POLL_S)
 
 
@@ -111,6 +115,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str] = os.environ) -> int:
         outputs = authority(Path(grader), event, environ)
     else:
         authoritative, repo, sha, app = rest
+        if app in ("", UNTRUSTED):
+            raise ValueError(f"the lab App {app!r} cannot be trusted; set AGENTIHOOKS_LAB_APP to the lab App slug")
         outputs = lab_outputs(Path(grader), authoritative, fetcher(repo, sha), app, WAIT_S)
     publish(outputs, environ)
     return 0

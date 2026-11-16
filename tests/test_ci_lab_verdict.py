@@ -103,9 +103,9 @@ def test_pending_run_has_no_verdict() -> None:
 
 @pytest.mark.parametrize(
     ("result", "expected"),
-    [("success", "success"), ("failure", "failure"), ("neutral", "failure"), ("skipped", "failure"), (None, "failure")],
+    [("success", "success"), ("skipped", "skipped"), ("failure", "failure"), ("neutral", "failure"), (None, "failure")],
 )
-def test_only_a_successful_run_passes(result: str | None, expected: str) -> None:
+def test_only_success_and_skipped_pass_through(result: str | None, expected: str) -> None:
     assert verdict.conclusion([run(1, "completed", result)], LAB) == expected
 
 
@@ -115,15 +115,11 @@ def test_newest_trusted_run_decides() -> None:
     assert verdict.conclusion([run(9, "in_progress"), run(8, "completed", "success")], LAB) is None
 
 
-def test_actions_runs_are_never_trusted() -> None:
-    assert verdict.conclusion([run(5, "completed", "success", "github-actions")], "") is None
-    assert verdict.conclusion([run(5, "completed", "success", "github-actions")], "github-actions") is None
-
-
 def test_named_app_is_the_only_trusted_one() -> None:
     runs = [run(5, "completed", "failure", LAB), run(6, "completed", "success", "other-app")]
     assert verdict.conclusion(runs, LAB) == "failure"
-    assert verdict.conclusion(runs, "") == "success"
+    assert verdict.conclusion(runs, "other-app") == "success"
+    assert verdict.conclusion(runs, "") is None
 
 
 def test_pending_then_success_polls_until_complete() -> None:
@@ -146,7 +142,7 @@ def test_failure_is_published() -> None:
 def test_runs_from_other_apps_never_satisfy_the_poll() -> None:
     clock = Clock()
     fetch, asked = scripted({"lab/lint": [[run(1, "completed", "success", "other-app")]]})
-    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 15, clock, clock.sleep) == {"lint": "failure"}
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 15, clock, clock.sleep) == {}
     assert len(asked) == 2
 
 
@@ -155,18 +151,29 @@ def test_unknown_step_is_refused(tmp_path: Path) -> None:
         verdict.main(["grade", str(tree(tmp_path, ["lint"])), "pull_request"], {"GITHUB_OUTPUT": str(tmp_path / "out")})
 
 
-def test_absent_verdict_fails_at_the_deadline() -> None:
+@pytest.mark.parametrize("app", ["", "github-actions"])
+def test_verdict_refuses_an_untrusted_app_before_polling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, app: str
+) -> None:
+    monkeypatch.setattr(verdict, "fetcher", lambda repo, sha: pytest.fail("polled"))
+    args = ["verdict", str(tree(tmp_path, ["lint"])), '{"lint": true}', "org/repo", "abc", app]
+    with pytest.raises(ValueError, match=f"the lab App {app!r} cannot be trusted; set AGENTIHOOKS_LAB_APP"):
+        verdict.main(args, {"GITHUB_OUTPUT": str(tmp_path / "out")})
+    assert not (tmp_path / "out").exists()
+
+
+def test_absent_verdict_is_left_out_at_the_deadline() -> None:
     clock = Clock()
     fetch, asked = scripted({"lab/lint": [[]]})
-    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 30, clock, clock.sleep) == {"lint": "failure"}
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 30, clock, clock.sleep) == {}
     assert clock.slept == [15.0, 15.0]
     assert len(asked) == 3
 
 
-def test_pending_verdict_fails_at_the_deadline() -> None:
+def test_pending_verdict_is_left_out_at_the_deadline() -> None:
     clock = Clock()
     fetch, _ = scripted({"lab/lint": [[run(1, "in_progress")]]})
-    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 20, clock, clock.sleep) == {"lint": "failure"}
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 20, clock, clock.sleep) == {}
     assert clock.slept == [15.0, 15.0]
 
 
@@ -202,12 +209,19 @@ def test_fetch_reads_latest_runs_through_the_rate_limited_helper(monkeypatch: py
     ]
 
 
-def test_lab_outputs_name_checks_by_the_base_prefix(tmp_path: Path) -> None:
+def test_lab_outputs_publish_only_gates_the_lab_graded(tmp_path: Path) -> None:
     grader = tree(tmp_path, ["lint"], prefix="grade")
-    fetch, asked = scripted({"grade/lint": [[run(1, "completed", "success")]], "grade/unit": [[]]})
-    outputs = verdict.lab_outputs(grader, '{"unit": true, "lint": true, "docs": false}', fetch, LAB, 0)
-    assert outputs == {"lab_lint": "success", "lab_unit": "failure"}
-    assert asked == ["grade/lint", "grade/unit"]
+    fetch, asked = scripted(
+        {
+            "grade/lint": [[run(1, "completed", "success")]],
+            "grade/unit": [[]],
+            "grade/type-gate": [[run(2, "completed", "skipped")]],
+        }
+    )
+    authoritative = '{"unit": true, "lint": true, "type-gate": true, "docs": false}'
+    outputs = verdict.lab_outputs(grader, authoritative, fetch, LAB, 0)
+    assert outputs == {"lab_lint": "success", "lab_type-gate": "skipped"}
+    assert asked == ["grade/lint", "grade/type-gate", "grade/unit"]
 
 
 @pytest.mark.parametrize("authoritative", ["", "{}"])
