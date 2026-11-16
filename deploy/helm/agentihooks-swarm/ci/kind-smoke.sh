@@ -440,7 +440,7 @@ kill "$watch" "$follow" 2>/dev/null || true
 printf '=== DIAG controller statuses through the Redis outage ===\n'
 cat "$diag/statuses.txt" || true
 printf '=== DIAG old controller log tail ===\n'
-tail -60 "$diag/old-controller.log" || true
+grep -v -E '"event": "swarm_tick_step"|^\S+\s+[\^~]+\s*$' "$diag/old-controller.log" || true
 printf '=== DIAG previous controller log ===\n'
 kubectl logs "${controller[@]}" -c controller --previous --tail 60 --timestamps || true
 printf '=== DIAG controller last state ===\n'
