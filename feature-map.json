@@ -1931,6 +1931,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-held-to-pass-end",
       "behaviour": "An intent check that raises in a tick pass holds its exception for the pass end: the wrapper relay hook leaves the verdict view and checked actions it never got unset, every step that never needed them still runs in that pass, at the relay site and after it, and the pass still ends failed on the intent failure.",
       "seam": "the wrapper relay hook scripts.swarm.cli._Wrapper._judged and the end of scripts.swarm.cli.run_tick, with the intent check step of scripts.tick.steps.host",
+      "rules": ["tick-site-hook-raises-held-step"],
       "tests": [
         "tests/tick/test_intent_failure.py::test_a_raising_intent_check_still_runs_the_steps_that_never_needed_it"
       ]
