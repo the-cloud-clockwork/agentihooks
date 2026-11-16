@@ -162,13 +162,15 @@ def test_a_command_without_the_separator_is_never_run(tmp_path):
     assert not (tmp_path / "calls").exists()
 
 
-def _hang(tmp_path: Path, hangs: int, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str], list[int], str]:
+def _hang(
+    tmp_path: Path, hangs: int, trap: str = "", **env: str
+) -> tuple[subprocess.CompletedProcess[str], list[str], list[int], str]:
     bin_dir = _bin(tmp_path)
     command = bin_dir / "install"
     command.write_text(
         "#!/usr/bin/env bash\n"
         f'echo "$*" >> "{tmp_path}/calls"\n'
-        f'(($(wc -l < "{tmp_path}/calls") > {hangs})) || exec {shutil.which("sleep")} 600\n'
+        f'(($(wc -l < "{tmp_path}/calls") > {hangs})) || {{ {trap}exec {shutil.which("sleep")} 600; }}\n'
         'echo "Installed 90 packages" >&2\n'
     )
     command.chmod(0o755)
@@ -177,8 +179,9 @@ def _hang(tmp_path: Path, hangs: int, **env: str) -> tuple[subprocess.CompletedP
 
 
 @pytest.mark.feature("pypi-retry-attempt-timeout")
-def test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried(tmp_path: Path) -> None:
-    result, calls, sleeps, summary = _hang(tmp_path, 1, PYPI_RETRY_ATTEMPT_SECONDS="1")
+@pytest.mark.parametrize("trap", ["", "trap '' TERM; "], ids=["ends-on-term", "ignores-term"])
+def test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried(tmp_path: Path, trap: str) -> None:
+    result, calls, sleeps, summary = _hang(tmp_path, 1, trap, PYPI_RETRY_ATTEMPT_SECONDS="1")
     assert result.returncode == 0, result.stdout + result.stderr
     assert calls == ["-e .[dev,all]"] * 2
     assert sleeps == [5]
@@ -189,14 +192,17 @@ def test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried(tmp_path: Path)
 
 
 @pytest.mark.feature("pypi-retry-attempt-timeout")
-def test_an_attempt_that_keeps_hanging_doubles_its_limit_then_names_the_timeout(tmp_path: Path) -> None:
-    result, calls, sleeps, summary = _hang(tmp_path, 9, PYPI_RETRY_ATTEMPT_SECONDS="1", PYPI_RETRY_SECONDS="5")
-    assert result.returncode == 137, result.stdout + result.stderr
-    assert len(calls) == 2
-    assert sleeps == [5]
-    assert "Install dependencies attempt 1: did not finish within 1s; retrying in 5s" in result.stderr
+def test_an_attempt_that_keeps_hanging_doubles_its_limit_up_to_four_times_the_first_then_names_the_timeout(
+    tmp_path: Path,
+) -> None:
+    result, calls, sleeps, summary = _hang(tmp_path, 9, PYPI_RETRY_ATTEMPT_SECONDS="1", PYPI_RETRY_SECONDS="35")
+    assert result.returncode == 124, result.stdout + result.stderr
+    assert len(calls) == 4
+    assert sleeps == [5, 10, 20]
+    for attempt, limit in ((1, 1), (2, 2), (3, 4)):
+        assert f"Install dependencies attempt {attempt}: did not finish within {limit}s;" in result.stderr
     message = result.stderr.split(LABEL)[1]
-    assert "Install dependencies failed after 2 attempts and 5s of backoff: did not finish within 2s" in message
+    assert "Install dependencies failed after 4 attempts and 35s of backoff: did not finish within 4s" in message
     assert "not a code verdict" in message
     assert "Python package index unavailable" in summary
 
@@ -273,7 +279,7 @@ def test_a_real_uv_install_against_an_index_that_never_answers_is_stopped_and_re
         connection, _ = index.accept()
         with connection:
             assert b"GET /simple/setuptools/" in connection.recv(4096)
-    assert result.returncode == 137, result.stdout + result.stderr
+    assert result.returncode == 124, result.stdout + result.stderr
     assert sleeps == [5]
     assert "Install dependencies failed after 2 attempts and 5s of backoff: did not finish within 4s" in result.stderr
     assert "Python package index unavailable" in summary
