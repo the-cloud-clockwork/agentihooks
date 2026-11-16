@@ -855,14 +855,14 @@
       "id": "hub-admission-claim-continuity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-continuity",
-      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened or late admission detaches the transfer for the next successor without a second row, and a refused attach releases the claim, the agent and the ledger row.",
+      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened admission detaches the transfer for the next successor without a second row, a late admission keeps it with its admitted successor, and a refused attach releases the claim, the agent and the ledger row.",
       "seam": "Admission.admit and Admission.reopen against the stored handoff transfers",
       "tests": [
         "tests/hub/test_admission.py::test_an_events_successor_attaches_the_transfer_its_predecessor_left",
         "tests/hub/test_admission.py::test_an_events_successor_with_no_transfer_left_carries_none",
         "tests/hub/test_admission.py::test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor",
         "tests/hub/test_admission.py::test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was",
-        "tests/hub/test_admission.py::test_a_late_events_admission_hands_its_transfer_back",
+        "tests/hub/test_admission.py::test_a_late_events_admission_keeps_its_transfer_with_the_admitted_successor",
         "tests/hub/test_admission.py::test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_row"
       ]
     },
@@ -896,14 +896,29 @@
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
-      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, and the hub releases an admission that finished after the hive stopped waiting, so no claimed agent waits for the controller retire.",
-      "seam": "Spoke failure and own launching recovery paths, and Admission.admit answer window",
+      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, so no claimed agent waits for the controller retire.",
+      "seam": "Spoke failure and own launching recovery paths",
       "tests": [
         "tests/hive/test_spoke.py::test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry",
         "tests/hive/test_spoke.py::test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness",
-        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work",
-        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused",
-        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept"
+        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work"
+      ]
+    },
+    {
+      "id": "hub-admission-late-answer-keeps-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
+      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, and the offer's claim generation is not raised; a hive whose admit ask the hub did not answer inside its wait asks again for the same offer on its next delivery instead of asking the hub to reopen it, and receives the held admission, while every other failure still reopens.",
+      "seam": "Admission.admit and Admission._answered on the hub, and LaneTasks.request and Spoke._apply on the hive",
+      "rules": [
+        "hub-admission-late-answer-releases-claim"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive",
+        "tests/hub/test_admission.py::test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live_claimant",
+        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept",
+        "tests/hive/test_spoke.py::test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer",
+        "tests/hive/test_lanes.py::test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing"
       ]
     },
     {
@@ -4684,6 +4699,18 @@
         "tests/test_ci_grader_gates.py::test_a_head_chart_check_that_passes_itself_stays_red_under_the_grader_copy",
         "tests/test_ci_grader_gates.py::test_each_semgrep_job_checks_out_the_caller_base_as_the_grader",
         "tests/test_ci_grader_gates.py::test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules"
+      ]
+    },
+    {
+      "id": "protected-lint-grades-the-pull-request-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2550",
+      "behaviour": "The Tests lint step that runs the protected gate grades the pull request head against its merge base with the trusted event base, and the run revision outside a pull request, so frozen registry and grader changes that landed on dev after the event base are never blamed on a pull request behind dev, while a pull request that edits a frozen file still fails.",
+      "seam": "The Tests lint step run text that invokes scripts.gate_protected, executed over a planted repository with a grader worktree at the event base",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request"
       ]
     },
     {

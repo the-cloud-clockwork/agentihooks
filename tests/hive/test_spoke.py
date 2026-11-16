@@ -391,6 +391,20 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
     assert rig.runtime.spawn.call_count == (1 if failure == "request" else 2)
 
 
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer(rig: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.one'"), rig.request]
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.reopen.assert_not_called()
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "started"
+    assert rig.tasks.request.call_count == 2
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
 def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):

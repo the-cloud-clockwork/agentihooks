@@ -41,7 +41,10 @@ class LaneTasks:
         return ask(request)
 
     def request(self, event: Envelope) -> SpawnRequest | None:
-        admitted = self._ask("admit", event)
+        try:
+            admitted = self._ask("admit", event)
+        except TimeoutError as error:
+            raise admission.Unanswered(str(error)) from error
         if admitted is None:
             return None
         if admission.HELD in admitted:
