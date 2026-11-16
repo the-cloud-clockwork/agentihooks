@@ -880,6 +880,26 @@ def test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_mo
 
 @pytest.mark.feature("launch-model-suits-harness")
 @pytest.mark.parametrize(
+    ("harness", "recorded", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "high"]),
+    ],
+)
+def test_a_resume_never_relaunches_a_recorded_model_of_the_other_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, recorded: str, launch: list[str]
+) -> None:
+    from dataclasses import replace
+
+    for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
+        monkeypatch.delenv(f"AGENTIHOOKS_{key}", raising=False)
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
+    runtime.resume(config, replace(agent, model=recorded), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", *launch]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
     ("harness", "pinned", "launch"),
     [
         ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),

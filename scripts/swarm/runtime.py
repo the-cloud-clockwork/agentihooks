@@ -924,7 +924,7 @@ class HerdrRuntime:
         )
         return placed
 
-    def resume(self, config, agent, text):
+    def resume(self, config: Any, agent: AgentRecord, text: str) -> Placed:
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if live_binding.managed(agent):
             raise SpawnError(MANAGED_RESUME, "unsupported")
@@ -953,7 +953,7 @@ class HerdrRuntime:
         argv += title
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
-            agent.model or defaults.model,
+            model_pick.suited(agent.harness, agent.model or defaults.model, defaults.model),
             agent.effort or defaults.effort,
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
