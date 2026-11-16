@@ -1592,13 +1592,13 @@ def test_unit_shards_upload_their_durations_for_the_refresh() -> None:
     names = [step["name"] for step in between]
     assert names in ([], restores, [*restores, "Empty the test reports of a leg above the queue's shard count"])
     own = "fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
-    again = {
+    torn_gates = {
         name: _unfinished_queue_restore(kind)
         for kind in _QUEUE_RESTORE_GATES
         for name in (f"Restore torn queue shard {kind} again", f"Check the queue shard {kind} restored again")
     }
     for step in between:
-        expected = again.get(step["name"], "needs.split.outputs.source != ''")
+        expected = torn_gates.get(step["name"], "needs.split.outputs.source != ''")
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
         if step["name"] == "Restore queue shard flakes" and names != restores:
@@ -1634,10 +1634,15 @@ def _unfinished_queue_restore(kind: str) -> str:
     )
 
 
+_QUEUE_RESTORE_CONSUMERS = {
+    "durations": "Upload durations",
+    "flakes": "Record flaky tests",
+    "coverage": "Check the coverage database",
+}
+
+
 @pytest.mark.parametrize(
-    ("kind", "consumer"),
-    [("durations", "Upload durations"), ("flakes", "Record flaky tests"), ("coverage", "Check the coverage database")],
-    ids=["durations", "flakes", "coverage"],
+    ("kind", "consumer"), list(_QUEUE_RESTORE_CONSUMERS.items()), ids=list(_QUEUE_RESTORE_CONSUMERS)
 )
 @pytest.mark.parametrize(
     ("restored", "code", "said"),
@@ -1683,6 +1688,12 @@ def test_a_queue_restore_that_stopped_before_it_finished_is_restored_again(
     assert result.returncode == code
     assert result.stdout.startswith(said)
     assert f"queue shard {kind}" in result.stdout
+
+
+def test_the_restore_again_test_covers_every_queue_shard_restore() -> None:
+    names = [step["name"] for step in _workflow()["jobs"]["unit"]["steps"]]
+    kinds = [name.removeprefix("Restore queue shard ") for name in names if name.startswith("Restore queue shard ")]
+    assert [kind for kind in kinds if "," not in kind] == list(_QUEUE_RESTORE_GATES) == list(_QUEUE_RESTORE_CONSUMERS)
 
 
 def test_unit_shards_retry_coverage_upload_without_changing_the_artifact():
