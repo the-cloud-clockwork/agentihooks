@@ -2991,3 +2991,34 @@ def test_lint_keeps_the_pinned_archive_on_the_same_antoncore_app():
     check = next(s for s in steps if s.get("name", "").startswith("Run every Swarm Ledger dashboard query"))
     assert check["env"]["ANTONCORE_REVISION"] == "${{ steps.antoncore-checkout.outputs.revision }}"
     assert 'echo "$ANTONCORE_REVISION"' in check["run"]
+
+
+def test_the_lab_verdict_job_reads_authority_only_from_the_protected_base() -> None:
+    jobs = _workflow()["jobs"]
+    job = jobs["lab-verdict"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert "needs" not in job
+    assert job["permissions"] == {"contents": "read"}
+    [checkout, *_] = job["steps"]
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    graded = [step for step in job["steps"] if step.get("id") in ("authority", "verdict")]
+    assert [step["id"] for step in graded] == ["authority", "verdict"]
+    assert all(step["working-directory"] == "${{ github.workspace }}/" + checkout["with"]["path"] for step in graded)
+    assert graded[0]["env"] == {"AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}"}
+    assert "--event pull_request" in graded[0]["run"]
+    assert graded[1]["env"]["HEAD"] == "${{ github.event.pull_request.head.sha }}"
+    token = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert token["with"]["permission-checks"] == "read"
+    assert {key for key in token["with"] if key.startswith("permission-")} == {"permission-checks"}
+    held = "steps.authority.outputs.authoritative != '{}'"
+    assert token["if"] == graded[1]["if"] == held
+
+
+def test_the_lab_verdict_job_publishes_a_result_for_every_declared_lab_gate() -> None:
+    jobs = _workflow()["jobs"]
+    outputs = jobs["lab-verdict"]["outputs"]
+    lab_gates = json.loads((_ROOT / ".github/gate-wiring.json").read_text())["lab_gates"]
+    gates = {entry.removeprefix("lab/") for entry in lab_gates}
+    assert outputs.pop("authoritative") == "${{ steps.authority.outputs.authoritative }}"
+    assert outputs == {f"lab_{gate}": f"${{{{ steps.verdict.outputs['lab_{gate}'] }}}}" for gate in gates}

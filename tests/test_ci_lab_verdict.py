@@ -1,0 +1,261 @@
+"""Tests for the lab-verdict job: base controlled authority, the lab off switch and the lab App verdict poll."""
+
+import json
+import runpy
+import subprocess
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+from scripts import ci_lab_verdict as verdict
+
+WORKFLOW = {"on": "push", "jobs": {"lint": {}, "type-gate": {}, "unit": {}}}
+LAB = "agenticore-app"
+
+
+def tree(root: Path, authoritative: list[str], prefix: str = "lab") -> Path:
+    """Write a repository tree holding one workflow and a delivery.yaml naming the authoritative gates."""
+    (root / ".github/workflows").mkdir(parents=True)
+    (root / ".github/workflows/test.yml").write_text(yaml.safe_dump(WORKFLOW))
+    lab = {
+        "authoritative": authoritative,
+        "mutation": {"run_on": "every_push", "mutants_per_changed_line": "all", "arid": []},
+        "check_prefix": prefix,
+    }
+    (root / "delivery.yaml").write_text(yaml.safe_dump({"lab": lab}))
+    return root
+
+
+def run(run_id: int, status: str, result: str | None = None, app: str = LAB) -> dict[str, Any]:
+    """Return one check run as the GitHub API lists it."""
+    return {"id": run_id, "status": status, "conclusion": result, "app": {"slug": app}}
+
+
+class Clock:
+    """A fake monotonic clock that advances only when the poll sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def scripted(answers: dict[str, list[list[dict[str, Any]]]]) -> tuple[Callable[[str], list[dict[str, Any]]], list[str]]:
+    """Return a fetch that answers each check name with its next scripted listing, and the names it was asked."""
+    asked: list[str] = []
+
+    def fetch(check: str) -> list[dict[str, Any]]:
+        asked.append(check)
+        listings = answers[check]
+        return listings.pop(0) if len(listings) > 1 else listings[0]
+
+    return fetch, asked
+
+
+def test_head_cannot_widen_authority(tmp_path: Path) -> None:
+    grader = tree(tmp_path / "grader", [])
+    tree(tmp_path / "head", ["lint", "unit"])
+    assert verdict.authority(grader, "pull_request", {}) == {"authoritative": "{}"}
+
+
+def test_authority_publishes_the_base_gates_as_an_object(tmp_path: Path) -> None:
+    grader = tree(tmp_path, ["unit", "lint"])
+    assert verdict.authority(grader, "pull_request", {}) == {"authoritative": '{"lint": true, "unit": true}'}
+
+
+def test_lab_off_keeps_every_actions_gate(tmp_path: Path) -> None:
+    grader = tree(tmp_path, ["lint"])
+    assert verdict.authority(grader, "pull_request", {"AGENTIHOOKS_LAB_OFF": "true"}) == {"authoritative": "{}"}
+
+
+@pytest.mark.parametrize("value", ["", "false", "1", "TRUE"])
+def test_only_true_switches_the_lab_off(tmp_path: Path, value: str) -> None:
+    grader = tree(tmp_path, ["lint"])
+    assert verdict.authority(grader, "pull_request", {"AGENTIHOOKS_LAB_OFF": value}) == {
+        "authoritative": '{"lint": true}'
+    }
+
+
+@pytest.mark.parametrize("event", ["push", "merge_group", "workflow_dispatch", "pull_request_target", ""])
+def test_authority_is_published_only_on_pull_requests(tmp_path: Path, event: str) -> None:
+    assert verdict.authority(tree(tmp_path, ["lint"]), event, {}) == {}
+
+
+def test_absent_runs_have_no_verdict() -> None:
+    assert verdict.conclusion([], LAB) is None
+
+
+def test_pending_run_has_no_verdict() -> None:
+    assert verdict.conclusion([run(1, "in_progress")], LAB) is None
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [("success", "success"), ("failure", "failure"), ("neutral", "failure"), ("skipped", "failure"), (None, "failure")],
+)
+def test_only_a_successful_run_passes(result: str | None, expected: str) -> None:
+    assert verdict.conclusion([run(1, "completed", result)], LAB) == expected
+
+
+def test_newest_trusted_run_decides() -> None:
+    runs = [run(7, "completed", "failure"), run(9, "completed", "success"), run(8, "completed", "failure")]
+    assert verdict.conclusion(runs, LAB) == "success"
+    assert verdict.conclusion([run(9, "in_progress"), run(8, "completed", "success")], LAB) is None
+
+
+def test_actions_runs_are_never_trusted() -> None:
+    assert verdict.conclusion([run(5, "completed", "success", "github-actions")], "") is None
+    assert verdict.conclusion([run(5, "completed", "success", "github-actions")], "github-actions") is None
+
+
+def test_named_app_is_the_only_trusted_one() -> None:
+    runs = [run(5, "completed", "failure", LAB), run(6, "completed", "success", "other-app")]
+    assert verdict.conclusion(runs, LAB) == "failure"
+    assert verdict.conclusion(runs, "") == "success"
+
+
+def test_pending_then_success_polls_until_complete() -> None:
+    clock = Clock()
+    fetch, asked = scripted(
+        {"lab/lint": [[run(1, "queued")], [run(1, "in_progress")], [run(1, "completed", "success")]]}
+    )
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 60, clock, clock.sleep) == {"lint": "success"}
+    assert asked == ["lab/lint"] * 3
+    assert clock.slept == [15.0, 15.0]
+
+
+def test_failure_is_published() -> None:
+    clock = Clock()
+    fetch, _ = scripted({"lab/lint": [[run(1, "completed", "failure")]]})
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 60, clock, clock.sleep) == {"lint": "failure"}
+    assert clock.slept == []
+
+
+def test_absent_verdict_fails_at_the_deadline() -> None:
+    clock = Clock()
+    fetch, asked = scripted({"lab/lint": [[]]})
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 30, clock, clock.sleep) == {"lint": "failure"}
+    assert clock.slept == [15.0, 15.0]
+    assert len(asked) == 3
+
+
+def test_pending_verdict_fails_at_the_deadline() -> None:
+    clock = Clock()
+    fetch, _ = scripted({"lab/lint": [[run(1, "in_progress")]]})
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 20, clock, clock.sleep) == {"lint": "failure"}
+    assert clock.slept == [15.0, 15.0]
+
+
+def test_completed_gates_are_not_asked_again() -> None:
+    clock = Clock()
+    fetch, asked = scripted(
+        {"lab/lint": [[run(1, "completed", "success")]], "lab/unit": [[], [run(2, "completed", "failure")]]}
+    )
+    checks = {"lint": "lab/lint", "unit": "lab/unit"}
+    assert verdict.verdicts(checks, fetch, LAB, 60, clock, clock.sleep) == {"lint": "success", "unit": "failure"}
+    assert asked == ["lab/lint", "lab/unit", "lab/unit"]
+
+
+def test_no_gates_needs_no_poll() -> None:
+    clock = Clock()
+    fetch, asked = scripted({})
+    assert verdict.verdicts({}, fetch, LAB, 60, clock, clock.sleep) == {}
+    assert asked == []
+    assert clock.slept == []
+
+
+def test_fetch_reads_latest_runs_through_the_rate_limited_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], float, bool]] = []
+
+    def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess.CompletedProcess:
+        calls.append((args, timeout, text))
+        return subprocess.CompletedProcess(args, 0, json.dumps({"total_count": 1, "check_runs": [run(3, "queued")]}))
+
+    monkeypatch.setattr(verdict, "gh_api", gh_api)
+    assert verdict.fetcher("org/repo", "abc")("lab/type-gate") == [run(3, "queued")]
+    assert calls == [
+        (["repos/org/repo/commits/abc/check-runs?check_name=lab%2Ftype-gate&filter=latest&per_page=100"], 30.0, True)
+    ]
+
+
+def test_lab_outputs_name_checks_by_the_base_prefix(tmp_path: Path) -> None:
+    grader = tree(tmp_path, ["lint"], prefix="grade")
+    fetch, asked = scripted({"grade/lint": [[run(1, "completed", "success")]], "grade/unit": [[]]})
+    outputs = verdict.lab_outputs(grader, '{"unit": true, "lint": true, "docs": false}', fetch, LAB, 0)
+    assert outputs == {"lab_lint": "success", "lab_unit": "failure"}
+    assert asked == ["grade/lint", "grade/unit"]
+
+
+@pytest.mark.parametrize("authoritative", ["", "{}"])
+def test_lab_outputs_publish_nothing_without_authority(tmp_path: Path, authoritative: str) -> None:
+    fetch, asked = scripted({})
+    assert verdict.lab_outputs(tree(tmp_path, []), authoritative, fetch, LAB, 60) == {}
+    assert asked == []
+
+
+def test_main_authority_writes_the_step_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    grader = tree(tmp_path / "grader", ["lint"])
+    output = tmp_path / "output"
+    output.write_text("before=1\n")
+    environ = {"GITHUB_OUTPUT": str(output)}
+    args = ["authority", "--grader-root", str(grader), "--event", "pull_request"]
+    assert verdict.main(args, environ) == 0
+    assert output.read_text() == 'before=1\nauthoritative={"lint": true}\n'
+    assert capsys.readouterr().out == 'authoritative={"lint": true}\n'
+
+
+def test_main_authority_honours_lab_off(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    environ = {"GITHUB_OUTPUT": str(output), "AGENTIHOOKS_LAB_OFF": "true"}
+    args = ["authority", "--grader-root", str(tree(tmp_path / "grader", ["lint"])), "--event", "pull_request"]
+    assert verdict.main(args, environ) == 0
+    assert output.read_text() == "authoritative={}\n"
+
+
+def test_main_verdict_polls_the_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    grader = tree(tmp_path / "grader", ["lint"])
+    output = tmp_path / "output"
+    seen: list[tuple[str, str]] = []
+    waits: list[tuple[str, float]] = []
+
+    def fetcher(repo: str, sha: str) -> Callable[[str], list[dict[str, Any]]]:
+        seen.append((repo, sha))
+        return lambda check: [run(1, "completed", "failure")]
+
+    real = verdict.verdicts
+
+    def recorded(checks: dict[str, str], fetch: Any, app: str, wait: float) -> dict[str, str]:
+        waits.append((app, wait))
+        return real(checks, fetch, app, wait)
+
+    monkeypatch.setattr(verdict, "fetcher", fetcher)
+    monkeypatch.setattr(verdict, "verdicts", recorded)
+    args = ["verdict", "--grader-root", str(grader), "--authoritative", '{"lint": true}']
+    args += ["--repo", "org/repo", "--sha", "abc", "--app", LAB]
+    assert verdict.main(args, {"GITHUB_OUTPUT": str(output)}) == 0
+    assert output.read_text() == "lab_lint=failure\n"
+    assert seen == [("org/repo", "abc")]
+    assert waits == [(LAB, 1200.0)]
+
+
+def test_module_entry_exits_with_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    output = tmp_path / "output"
+    grader = tree(tmp_path / "grader", ["lint"])
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.delenv("AGENTIHOOKS_LAB_OFF", raising=False)
+    monkeypatch.setattr(sys, "argv", ["scripts.ci_lab_verdict", "authority", "--grader-root", str(grader)])
+    monkeypatch.delitem(sys.modules, "scripts.ci_lab_verdict", raising=False)
+    with pytest.raises(SystemExit) as stopped:
+        runpy.run_module("scripts.ci_lab_verdict", run_name="__main__")
+    assert stopped.value.code == 0
+    assert output.read_text() == ""

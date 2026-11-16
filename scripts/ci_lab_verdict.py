@@ -1,0 +1,126 @@
+"""The lab-verdict job: the base branch's lab authority and the lab App's verdict on each authoritative gate.
+
+`authority` reads the gates the lab grades from the protected grader's delivery.yaml, so a pull request head can
+never widen them, and AGENTIHOOKS_LAB_OFF empties them; off pull request events it publishes nothing. `verdict` waits
+for the head's completed `lab/<gate>` check run from the trusted App and publishes `lab_<gate>`, success only for a
+successful run; an authoritative gate whose verdict is absent or still pending at the deadline publishes failure.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+from scripts.ci_budget.rate_limit import gh_api
+from scripts.ci_lab.delivery import OUTPUT, cutover, lab
+
+PULL_REQUEST = "pull_request"
+UNTRUSTED = "github-actions"
+COMPLETED = "completed"
+SUCCESS = "success"
+FAILURE = "failure"
+POLL_S = 15.0
+WAIT_S = 1200.0
+TIMEOUT_S = 30.0
+
+Fetch = Callable[[str], list[dict[str, Any]]]
+
+
+def authority(grader_root: Path, event: str, environ: Mapping[str, str]) -> dict[str, str]:
+    """Return the authoritative output: the base's gates as a JSON object on pull requests, nothing elsewhere."""
+    if event != PULL_REQUEST:
+        return {}
+    return {"authoritative": json.dumps({gate: True for gate in cutover(grader_root, environ)}, sort_keys=True)}
+
+
+def conclusion(runs: Sequence[Mapping[str, Any]], app: str) -> str | None:
+    """Return the newest trusted run's verdict: success, failure, or None while absent or not completed."""
+    trusted = [run for run in runs if run["app"]["slug"] != UNTRUSTED and (not app or run["app"]["slug"] == app)]
+    if not trusted:
+        return None
+    newest = max(trusted, key=lambda run: run["id"])
+    if newest["status"] != COMPLETED:
+        return None
+    return SUCCESS if newest["conclusion"] == SUCCESS else FAILURE
+
+
+def verdicts(
+    checks: Mapping[str, str],
+    fetch: Fetch,
+    app: str,
+    wait: float,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, str]:
+    """Poll each gate's check run until every verdict is complete or the wait ends; a missing verdict is a failure."""
+    deadline = clock() + wait
+    results: dict[str, str] = {}
+    while True:
+        for gate, check in checks.items():
+            if gate not in results:
+                found = conclusion(fetch(check), app)
+                if found is not None:
+                    results[gate] = found
+        if len(results) == len(checks) or clock() >= deadline:
+            return {gate: results.get(gate, FAILURE) for gate in checks}
+        sleep(POLL_S)
+
+
+def fetcher(repo: str, sha: str) -> Fetch:
+    """Return a reader of one head's latest check runs by name through the rate limited GitHub API helper."""
+
+    def fetch(check: str) -> list[dict[str, Any]]:
+        """Return the latest check runs named check on the head."""
+        done = gh_api(
+            [f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(check, safe='')}&filter=latest&per_page=100"],
+            timeout=TIMEOUT_S,
+            text=True,
+        )
+        return json.loads(done.stdout)["check_runs"]
+
+    return fetch
+
+
+def lab_outputs(grader_root: Path, authoritative: str, fetch: Fetch, app: str, wait: float) -> dict[str, str]:
+    """Return lab_<gate> for every authoritative gate, named by the base's check prefix."""
+    gates = sorted(gate for gate, held in json.loads(authoritative or "{}").items() if held is True)
+    prefix = lab(grader_root)["check_prefix"]
+    results = verdicts({gate: f"{prefix}/{gate}" for gate in gates}, fetch, app, wait)
+    return {f"lab_{gate}": result for gate, result in results.items()}
+
+
+def publish(outputs: Mapping[str, str], environ: Mapping[str, str]) -> None:
+    """Append each output to the step output file and print it."""
+    lines = "".join(f"{key}={value}\n" for key, value in outputs.items())
+    with Path(environ[OUTPUT]).open("a") as handle:
+        handle.write(lines)
+    print(lines, end="")
+
+
+def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.environ) -> int:
+    """Run the authority or the verdict step of the lab-verdict job."""
+    parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab_verdict")
+    parser.add_argument("step", choices=("authority", "verdict"))
+    parser.add_argument("--grader-root", type=Path, required=True)
+    parser.add_argument("--event", default="")
+    parser.add_argument("--authoritative", default="")
+    parser.add_argument("--repo", default="")
+    parser.add_argument("--sha", default="")
+    parser.add_argument("--app", default="")
+    parser.add_argument("--wait", type=float, default=WAIT_S)
+    args = parser.parse_args(argv)
+    if args.step == "authority":
+        publish(authority(args.grader_root, args.event, environ), environ)
+    else:
+        fetch = fetcher(args.repo, args.sha)
+        publish(lab_outputs(args.grader_root, args.authoritative, fetch, args.app, args.wait), environ)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
