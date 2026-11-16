@@ -883,6 +883,16 @@
       ]
     },
     {
+      "id": "hub-admission-step-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admission-step-timing",
+      "behaviour": "A late hub admission's printed line also names the elapsed milliseconds of each step from the release check through the ledger claim write.",
+      "seam": "Admission.admit on the hub",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step"
+      ]
+    },
+    {
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
@@ -1157,6 +1167,15 @@
         "tests/hub/test_admission.py::test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_claimed",
         "tests/hub/test_admission.py::test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent",
         "tests/hub/test_admission.py::test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent"
+      ]
+    },
+    {
+      "id": "hive-launch-logs-key-by-hive",
+      "origin": "inventory",
+      "behaviour": "The hive launch logs wrapper keys a launch receipt by the execution's hive, so hub admitted Codex launches with no runtime target start serve",
+      "seam": "scripts.hive.launch_logs.main reading agent.hive for Orders(...).launch_receipt(...)",
+      "tests": [
+        "tests/hive/test_launch_logs.py::test_a_hub_admitted_execution_with_no_runtime_target_still_keys_its_receipt_by_hive"
       ]
     },
     {
@@ -2340,6 +2359,22 @@
       ]
     },
     {
+      "id": "swarm-lab-wait",
+      "origin": "inventory",
+      "behaviour": "A lab wait on a check run url is recorded by the cli, holds while the check runs or GitHub cannot answer, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, ends as missing when GitHub has no such check run, and refuses any target that is not a check run url.",
+      "seam": "agentihooks swarm wait --on lab and the tick wait pass",
+      "tests": [
+        "tests/swarm/test_lab_wait.py::test_a_lab_wait_refuses_anything_but_a_check_run_url",
+        "tests/swarm/test_lab_wait.py::test_the_cli_records_a_lab_wait_on_a_check_run",
+        "tests/swarm/test_lab_wait.py::test_a_lab_check_still_running_holds_the_wait",
+        "tests/swarm/test_lab_wait.py::test_an_unreachable_github_holds_the_lab_wait",
+        "tests/swarm/test_lab_wait.py::test_a_missing_check_run_ends_the_lab_wait_with_that_reason",
+        "tests/swarm/test_lab_wait.py::test_a_stored_lab_wait_on_a_bad_target_ends_without_reading_github",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_green_lab_wait_with_the_inbox_notice",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_red_lab_wait_naming_the_gate_and_conclusion"
+      ]
+    },
+    {
       "id": "swarm-push-wait",
       "origin": "inventory",
       "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge.",
@@ -3342,7 +3377,25 @@
         "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_ledger_whose_events_no_stream_takes_never_holds_back_another_ledgers_rows",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_row_no_stream_takes_keeps_the_later_rows_of_its_ledger_unsent_in_order",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_each_ledger_takes_its_own_batch_of_rows",
+        "tests/events/test_nats_no_stream.py::test_a_publish_no_stream_answers_is_refused_as_no_stream",
+        "tests/events/test_nats_no_stream.py::test_a_bound_scoped_relay_publishes_the_ledgers_with_a_stream_past_one_without"
+      ]
+    },
+    {
+      "id": "ledger-write-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-api-timeouts",
+      "behaviour": "A ledger command line write waits the server's whole writer lock budget plus the request timeout before it gives up, so a write the server queues behind other writers and then commits is never reported as a server that is not answering; a read keeps the request timeout and an explicit timeout wins.",
+      "seam": "scripts.swarm_ledger.ledger.request with a recording client",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_write_waits_past_the_server_writer_lock_budget",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_empty_operation_list_is_still_a_write",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_read_keeps_the_request_timeout",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_explicit_timeout_wins_for_a_write"
       ]
     },
     {
@@ -4603,6 +4656,16 @@
       ]
     },
     {
+      "id": "protected-grader-pins-gate-names",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-pin-gate-names",
+      "behaviour": "The protected grader refuses a head that changes the reviewed name of the required gate pair, so an added need on the required gate is refused whether the head writes the gate names as expressions or plain text, and the canonical head still grades green.",
+      "seam": "gate_protected.grade",
+      "tests": [
+        "tests/test_ci_gate_queue.py::test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take"
+      ]
+    },
+    {
       "id": "lint-gates-grade-from-grader",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
@@ -4875,6 +4938,16 @@
         "tests/swarm/test_fleet_red.py::test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live",
         "tests/swarm/test_fleet_red.py::test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live",
         "tests/swarm/test_fleet_red.py::test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm"
+      ]
+    },
+    {
+      "id": "fleet-red-notice-starts-with-its-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2517",
+      "behaviour": "The fleet red notice step needs only the drained resume step, like its slow lane siblings promotion refresh and release alert, and waits on no spawn chain step, so it starts early in a slow pass and the live listing it runs once the ten minute listing save expires ends before the slow deadline; a cut would drop the listing save and make every later pass list live again and be cut again.",
+      "seam": "the needs of the fleet red notice step in scripts.tick.steps.tasks, read through the registry waves",
+      "tests": [
+        "tests/swarm/test_fleet_red.py::test_the_notice_step_waits_on_no_spawn_chain_step_so_a_slow_pass_cannot_cut_its_live_listing"
       ]
     },
     {
@@ -5459,6 +5532,21 @@
         "tests/swarm/test_merge_queue.py::test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task",
         "tests/swarm/test_merge_queue.py::test_the_stall_route_never_opens_a_dequeue_for_the_master",
         "tests/swarm/test_merge_queue.py::test_a_phase_focus_admits_only_the_urgent_tasks_of_its_phase_to_the_stall_route"
+      ]
+    },
+    {
+      "id": "master-freeze-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-subagent-queue-refused",
+      "behaviour": "swarm merge queue accepts the master seat for a pull request on a master sub agent branch when a task naming that pull request is not done and a master seat froze that task by name, and records the master freeze route and the task in the queue journal; a freeze set by anyone but a master, a freeze on the task's phase only, a focus, a done task, a pull request no task names or a branch that is not a master's leaves the master refused, the route never opens a dequeue, and the freeze records are read as the ledger's whole freeze collection.",
+      "seam": "swarm merge queue through cli.cmd_merge and master_queue.route against ledger.tasks_targeting, LedgerClient.freezes and pull_head.pull_branch",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_the_master_seat_queues_a_sub_agent_pull_request_for_a_task_a_master_froze",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_takes_the_frozen_task_among_the_tasks_naming_the_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open",
+        "tests/swarm/test_ledger_client_task.py::test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection"
       ]
     },
     {
@@ -6428,6 +6516,27 @@
       ]
     },
     {
+      "id": "swarm-lab-behind-hold",
+      "origin": "inventory",
+      "behaviour": "While a fresh lab reading predicts pull request grading more than AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES behind, the tick and the events readiness hold every eng task outside the fix phase from a claim, the urgent hold names the lab, claim wait in those stretches is lab wait, and the standing finding bottleneck-stage/lab_wait carries the hold until the reading falls back, when claims resume and the finding clears; its remedy proposes one ci task titled Lab capacity.",
+      "seam": "scripts.swarm.claim_hold.ci_behind through the tick claim view and readiness snapshot, scripts.swarm.health.urgent_hold.observe, scripts.swarm.stages.report, scripts.swarm.stage_detector.lab_finding and record, and scripts.swarm.bottleneck_remedy.remedy_pass",
+      "tests": [
+        "tests/swarm/test_claim_hold.py::test_the_lab_holds_eng_claims_outside_the_fix_phase_while_pull_request_grading_runs_behind",
+        "tests/swarm/test_claim_hold.py::test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds",
+        "tests/swarm/test_claim_hold.py::test_the_lab_threshold_reads_its_environment_variable",
+        "tests/swarm/test_claim_hold.py::test_the_tick_claims_no_eng_task_while_the_lab_is_behind_and_resumes_below_the_threshold",
+        "tests/hub/test_readiness.py::test_the_events_snapshot_holds_eng_offers_while_the_lab_is_behind",
+        "tests/swarm/test_urgent_hold.py::test_an_urgent_eng_task_the_lab_holds_names_the_lab_and_raises_no_finding",
+        "tests/swarm/test_stages.py::test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait",
+        "tests/swarm/test_stages.py::test_a_claimed_task_charges_lab_wait_only_before_its_claim",
+        "tests/swarm/test_stages.py::test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples",
+        "tests/swarm/test_stages.py::test_a_lab_stretch_that_ends_as_the_claim_wait_opens_adds_no_lab_wait",
+        "tests/swarm/test_stage_detector.py::test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below",
+        "tests/swarm/test_stage_detector.py::test_record_updates_the_lab_wait_finding_from_the_stored_reading_on_every_pass",
+        "tests/swarm/test_bottleneck_remedy.py::test_a_lab_wait_finding_proposes_one_ci_task_for_lab_capacity"
+      ]
+    },
+    {
       "id": "ledger-stats-lab",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-ledger-stats-lab",
@@ -6633,7 +6742,7 @@
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
-        "tests/swarm/test_events_claim_refunds.py::test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and_settled"
+        "tests/swarm/test_events_claim_refunds.py::test_the_reap_step_judges_an_admitted_agent_by_its_pane_and_whether_its_work_ended"
       ]
     },
     {
@@ -6655,6 +6764,19 @@
         "tests/swarm/test_events_claim_refunds.py::test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop",
         "tests/swarm/test_events_claim_refunds.py::test_an_unreachable_agent_is_stopped_before_its_drop_and_stays_seated_when_the_store_refuses_it",
         "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement"
+      ]
+    },
+    {
+      "id": "events-ended-agent-stopped",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-finished-not-retired",
+      "behaviour": "When the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. The tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
+      "seam": "the agents reap step judging an ended hub admitted agent through reconciler.stop_admitted, then execution_stop.Stopper and the hub lifecycle on the hive exit",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_whose_work_ended_gets_the_stop_from_its_hive_in_one_reap_pass",
+        "tests/swarm/test_events_claim_refunds.py::test_a_reap_pass_inside_the_stop_dedupe_window_sends_no_second_stop",
+        "tests/swarm/test_events_claim_refunds.py::test_an_ended_admitted_agent_whose_stop_the_bus_refused_is_stopped_on_the_next_pass",
+        "tests/swarm/test_events_claim_refunds.py::test_a_finished_admitted_agent_leaves_its_seat_and_launch_slot_once_its_hive_honors_the_stop"
       ]
     },
     {
@@ -7044,6 +7166,22 @@
         "tests/test_count_floor.py::test_a_deleted_workflow_file_explains_only_its_own_lost_test",
         "tests/test_count_floor.py::test_moving_a_workflow_file_keeps_its_lost_test_red",
         "tests/test_count_floor.py::test_a_deleted_workflow_stays_counted_only_while_one_head_file_keeps_all_its_steps"
+      ]
+    },
+    {
+      "id": "count-floor-admits-local-reads-ids-and-retirements",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2518",
+      "behaviour": "The test count floor admits a lost test that reads a deleted workflow or step fixture through a function-local variable bound once, a lost parametrized case whose id names a file the head deletes, by its path or by a file name with an extension no head file shares, when its bytes survive in no head file and the head adds no file sharing its extension or stem, and a lost test the head newly lists in test-retirements under the hash of its node id with a ruling whose reader starts with Standards and that gives a reason; a local name bound twice, an id naming a retained or moved file or only a fragment of a name, and an unlisted, unsigned, misnamed or inherited retirement keep the lost test counted.",
+      "seam": "tests.count_floor._admitted: _fixture_subject local bindings, _case_files and retirements",
+      "tests": [
+        "tests/test_count_floor.py::test_a_deleted_workflow_read_through_a_local_variable_is_admitted",
+        "tests/test_count_floor.py::test_a_lost_case_whose_id_names_a_deleted_file_is_admitted",
+        "tests/test_count_floor.py::test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red",
+        "tests/test_count_floor.py::test_only_a_tracked_head_file_can_read_as_a_rename",
+        "tests/test_count_floor.py::test_a_lost_test_is_admitted_only_by_a_new_signed_retirement",
+        "tests/test_count_floor.py::test_a_symlinked_retirement_admits_nothing",
+        "tests/test_count_floor.py::test_the_retire_command_writes_only_a_signed_retirement_the_floor_admits"
       ]
     },
     {

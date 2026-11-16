@@ -95,6 +95,7 @@
 /tests/test_design_rules.py @nestorcolt
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
+/test-retirements/ @nestorcolt
 /delivery.yaml @nestorcolt
 /.github/workflows/trusted-actors.json @nestorcolt
 /deploy/helm/agentihooks-swarm/charts/ @nestorcolt

@@ -612,6 +612,24 @@ def test_a_ci_overrun_proposal_names_its_own_unit(store, home, shipped):
     assert run(store) == [proposed(targeted, bottleneck_remedy.UNMECHANICAL)]
 
 
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_a_lab_wait_finding_proposes_one_ci_task_for_lab_capacity(store, home, shipped):
+    fire(store, "lab_wait", value=35, threshold=20, unit="minutes behind on pull request grading")
+    targeted = "lab wait at 35 minutes behind on pull request grading, over its 20 threshold"
+    why = bottleneck_remedy.UNMECHANICAL
+    assert run(store) == [proposed(targeted, why)]
+    ask = "If the operator agrees, add a ci task titled Lab capacity and the next window raises it to urgent."
+    text = bottleneck_remedy.PROPOSE.format(
+        label="lab wait", targeted=targeted, fired=1, times="time", why=why, ask=ask
+    )
+    assert master_items(store) == [text]
+    assert run(store, at=NOW + HOUR) == []
+    fire(store, "lab_wait", value=35, threshold=20, unit="minutes behind on pull request grading", at=LATER)
+    ledger, doc = FakeLedger(), {"tasks": [{"id": "c1", "title": "Lab capacity", "state": "open", "lane": "ci"}]}
+    assert run(store, ledger, doc, LATER) == [bottleneck_remedy.RAISED.format(task="c1", targeted=targeted)]
+    assert ledger.ranks == [(SLUG, "c1", "urgent", "dispatcher", True)]
+
+
 def test_the_step_runs_the_remedies_on_its_ledger_state_and_clock(store, home, shipped):
     fire(store, "seat_wait", value=7.5)
     fire(store, "review")

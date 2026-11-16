@@ -59,6 +59,14 @@ def test_a_targeting_read_asks_the_ledger_for_the_tasks_naming_one_pull(monkeypa
     assert reads == [("demo", "tasks?targets=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F7", False, False)]
 
 
+@pytest.mark.feature("master-freeze-queue")
+def test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [{"verb": "freeze", "target": "tasks/t2", "by": "master@a1b2c3-0001"}]
+    reads = served(monkeypatch, rows)
+    assert ledger_client.LedgerClient().freezes("demo") == rows
+    assert reads == [("demo", "freezes", False, True)]
+
+
 def test_a_ledger_without_targeting_falls_back_to_filtering_its_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://github.com/o/r/pull/7"
     rows = [{"id": "t1", "pr_url": url}, {"id": "t2", "pr_url": url + "0"}, {"id": "t3", "split_pulls": [url]}]

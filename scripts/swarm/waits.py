@@ -8,15 +8,17 @@ import json
 import re
 import subprocess
 from collections.abc import Callable
+from typing import Any
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.hive import scope
-from scripts.inbox.store import CLOSED, Gone, InboxError
-from scripts.swarm import idle, merge_queue, run_wait
+from scripts.inbox.store import CLOSED, Gone, InboxError, InboxStore
+from scripts.swarm import idle, lab_wait, merge_queue, run_wait
+from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import SwarmError
 
-KINDS = ("checks", "merge", "reply", "task", "intent")
+KINDS = ("checks", "merge", "reply", "task", "intent", "lab")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
 FINISH_TURN = (
@@ -104,13 +106,17 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
     return redis.transaction(update, key, value_from_callable=True)
 
 
-def target_problem(kind, target, mine, rows, get):
+def target_problem(
+    kind: str, target: str, mine: str, rows: dict[str, dict[str, Any]], get: Callable[[str], object] | None
+) -> str:
     """Why the target cannot be waited on, or '' when the tick can check it."""
     if kind == "checks":
         known = PULL_URL.fullmatch(target) or run_wait.RUN_URL.fullmatch(target)
         return "" if known else f"wait on checks needs a pull request url or an Actions run url, not {target}"
     if kind == "merge":
         return "" if PULL_URL.fullmatch(target) else f"wait on merge needs a pull request url, not {target}"
+    if kind == "lab":
+        return "" if lab_wait.CHECK_URL.fullmatch(target) else f"wait on lab needs a check run url, not {target}"
     if kind == "intent":
         own = rows.get(mine, {}).get("pr_url")
         return (
@@ -171,13 +177,23 @@ def intent_resolution(held, record, github):
     return f"the intent verdict on {held['target']}, now {record['verdict']}: {record['reason']}"
 
 
-def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
+def resolution(
+    held: dict[str, Any],
+    rows: dict[str, dict[str, Any]],
+    inbox: InboxStore | None,
+    github: Callable[[str], PullRequest | None],
+    reread: Callable[[str], PullRequest | None],
+    fresh: bool,
+    verdicts: Verdicts | None = None,
+) -> str:
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
     if kind not in KINDS:
         return f"{kind} {target}, now ended; wait on one of: {', '.join(KINDS)}"
     if kind == "intent":
         return intent_resolution(held, verdicts.read(held["task"]), github)
+    if kind == "lab":
+        return lab_wait.resolution(target)
     if kind == "checks" and run_wait.RUN_URL.fullmatch(target):
         return run_wait.run_resolution(target)
     if kind == "checks":
