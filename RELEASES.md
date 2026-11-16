@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.940 · 2026-11-16
+
+### 2026-11-16 · 53e910a210ea · #11540 · @nestorcolt
+
+**Leave never launched lives out of the admission branch heads query**
+
+`RedisStore.earlier_lives` now skips history rows for agents retired while still `starting` with no pane, since those lives never launched anything and never pushed a branch. Previously every such row still added a branch to admission's GitHub GraphQL branch heads query, and a task whose only earlier lives never launched ran the query needlessly, costing up to 1733 ms of a 1790 ms admission tail. Rows that launched, reached any other state, or carry no state are still kept, so no life that actually ran is ever dropped.
+
 ## v2.17.938 · 2026-11-16
 
 ### 2026-11-16 · 0d56f1fee4c5 · #11553 · @agenticore-app
