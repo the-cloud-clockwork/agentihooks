@@ -702,7 +702,7 @@ def test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_a
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
-def test_a_repeat_ask_that_waited_for_the_hives_turn_answers_the_admission_its_own_ask_kept(
+def test_a_repeat_ask_whose_own_ask_was_kept_before_its_turn_answers_that_admission(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
@@ -723,6 +723,38 @@ def test_a_repeat_ask_that_waited_for_the_hives_turn_answers_the_admission_its_o
     assert [agent.name for agent in rig.store.agents(SLUG)] == [again["name"]]
     assert len(rig.ledger.writes) == 1
     assert other.admit(SLUG, ask(hive="hive-b")) is None
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_it_leaves_the_turn(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    turn, offer = admission.turn_key("hive-a"), rig.admitter._key(SLUG, ask())
+    write = rig.admitter._mark
+    holders: list[str] = []
+
+    def marking(*args: Any) -> dict[str, Any] | None:
+        holders.append(rig.store.redis.get(turn))
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", marking)
+    admitted = rig.admitter.admit(SLUG, ask())
+    kept = rig.store.redis.get(offer)
+    rig.store.redis.delete(offer)
+    rig.store.redis.set(turn, holders[0])
+
+    def leave(seconds: float) -> None:
+        rig.store.redis.set(offer, kept)
+        rig.store.redis.delete(turn)
+
+    monkeypatch.setattr(admission, "time", SimpleNamespace(sleep=leave))
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+
+    assert other.admit(SLUG, ask()) == admitted
+    assert other.admit(SLUG, ask(hive="hive-b")) is None
+    assert rig.store.redis.get(turn) is None
+    assert len(rig.ledger.writes) == 1
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
@@ -751,6 +783,7 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
 ) -> None:
     from unittest.mock import Mock
 
+    from scripts.events.config import QueuePolicy
     from scripts.hive import lanes
     from scripts.hive.spoke import Spoke, SpokeConfig
     from scripts.swarm import readiness
@@ -777,15 +810,25 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
     tasks = lanes.LaneTasks(bus, "hive-a", rig.store.config)
     config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
     spoke = Spoke(config, bus, runtime, tasks, lambda: reading, view=Mock(return_value=None))
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    offered: list[str] = []
+
+    def unsettled(event: Any) -> bool:
+        offered.append(event.key)
+        return False
+
     try:
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
         assert spoke.poll() == "asked"
         name = rig.store.claimant(SLUG, "t1")
+        queue.withdraw(unsettled)
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
+        queue.withdraw(unsettled)
         assert spoke.poll() == "started"
     finally:
         bus.close()
 
+    assert offered == ["t1"]
     assert "late: finished after" in capsys.readouterr().err
     [launched] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert launched.name == name
@@ -867,9 +910,9 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     original_turn = rig.admitter._turn
 
     @contextmanager
-    def turn(hive: str) -> Iterator[str]:
+    def turn(hive: str, offer: str) -> Iterator[str]:
         now[0] += 800
-        with original_turn(hive) as busy:
+        with original_turn(hive, offer) as busy:
             yield busy
 
     monkeypatch.setattr(rig.admitter, "_outdated", bump(100, rig.admitter._outdated))

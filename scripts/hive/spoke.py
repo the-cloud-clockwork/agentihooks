@@ -168,10 +168,10 @@ class Spoke:
             status = "dead"
         elif status == "launching":
             return "uncertain"
-        elif status in ("claimed", ASKED):
+        elif status == "claimed":
             return "busy"
         self._clear_pending(pending.revision)
-        return None if status == "ready" else status
+        return None if status in ("ready", ASKED) else status
 
     def _apply(self, delivery: Delivery, heartbeat: presence.Heartbeat) -> str:
         event = delivery.event

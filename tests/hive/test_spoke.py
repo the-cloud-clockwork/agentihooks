@@ -513,14 +513,28 @@ def test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer(
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
-def test_a_pending_admission_another_hive_now_asks_for_keeps_the_spoke_busy(rig: SimpleNamespace) -> None:
+def test_a_pending_admission_another_hive_now_asks_for_is_dropped(rig: SimpleNamespace) -> None:
     pending = seed_pending(rig, {"state": "asked", "owner": "hive-b"})
-    before = pending.get(rig.spoke._pending_key)
+    rig.spoke.measure = lambda: None
 
-    assert rig.spoke.poll() == "busy"
+    assert rig.spoke.poll() == "held"
 
-    assert pending.get(rig.spoke._pending_key) == before
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+    assert claim(rig) == {"state": "asked", "owner": "hive-b"}
     rig.tasks.request.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_an_admission_asked_again_launches_without_measuring_room_again(rig: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.hive-a'"), rig.request]
+    assert rig.spoke.poll() == "asked"
+    rig.spoke.measure = lambda: None
+
+    assert rig.spoke.poll() == "started"
+
+    rig.runtime.spawn.assert_called_once()
 
 
 @pytest.mark.feature("events-failed-launch-releases-admission")

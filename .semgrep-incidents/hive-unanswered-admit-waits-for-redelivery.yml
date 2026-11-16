@@ -5,9 +5,8 @@ rules:
     message: >-
       A hive spoke whose admit ask the hub left unanswered only skipped the reopen: it dropped its pending admission
       and waited for a redelivery of the offer, which the hub readiness pass deletes once the late admission the hub
-      kept claims the task. On 16 November the kept agent for the branch heads task waited six minutes for the hub
-      launch check to free it and the task's claim generation rose by two. Keep the offer as the hive's pending
-      admission and ask the hub again on the next poll.
+      kept claims the task, so the kept agent waits for the hub launch check to free it and the task's claim
+      generation rises by two. Keep the offer as the hive's pending admission and ask the hub again on the next poll.
     paths:
       include:
         - /scripts/hive/spoke.py
