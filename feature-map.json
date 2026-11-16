@@ -4268,6 +4268,18 @@
       ]
     },
     {
+      "id": "panic-fix-triggered-workflow-run",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2582",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running a workflow run event run, such as the Gate Required status run that posts a pull request's required status, whose run name names the head branch of a registered fix in its repository, and still cancels every other workflow run event run, including one whose run name names no branch.",
+      "seam": "The Gate Required status run name and the panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered",
+        "tests/swarm/test_panic.py::test_the_gate_required_run_name_names_the_branch_the_sweep_keeps"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",

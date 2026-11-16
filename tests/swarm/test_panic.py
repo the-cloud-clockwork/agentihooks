@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from hooks.context import blocker_window, master_coding
 from hooks.observability import otel
@@ -516,6 +517,66 @@ def test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged(monk
         "o/a run 8 on dev",
         "o/a run 9 on None",
         "o/b run 11 on dev",
+    ]
+
+
+def _github_runs(monkeypatch: pytest.MonkeyPatch, rows: dict[str, list[dict[str, object]]]) -> None:
+    from scripts.tick.adapters import github
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        path = args[1].removeprefix("repos/")
+        listing = {"workflow_runs": rows[path.partition("/actions/runs?")[0]]}
+        return subprocess.CompletedProcess(args, 0, "" if path.endswith("/cancel") else json.dumps(listing), "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+
+
+def _api_run(run_id: int, title: str, event: str = "workflow_run") -> dict[str, object]:
+    return {"id": run_id, "head_branch": "main", "event": event, "status": "queued", "display_title": title}
+
+
+@pytest.mark.feature("panic-fix-triggered-workflow-run")
+def test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    here, there = "the-cloud-clockwork/agentihooks", "the-cloud-clockwork/antoncore"
+    _github_runs(
+        monkeypatch,
+        {
+            here: [
+                _api_run(1, "Gate Required status for fix-branch"),
+                _api_run(2, "Gate Required status for hotfix"),
+                _api_run(3, "Gate Required status for feature"),
+                _api_run(4, "Gate Required status"),
+                _api_run(5, "Gate Required status for fix-branch-2"),
+                _api_run(6, "Spare the sweep for fix-branch", event="push"),
+            ],
+            there: [_api_run(7, "Gate Required status for hotfix")],
+        },
+    )
+    fixes = [FIX, f"https://github.com/{here}/tree/hotfix"]
+    assert panic.cancel_runs(fixes, [here, there], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
+        f"{here} run 3 on main",
+        f"{here} run 4 on main",
+        f"{here} run 5 on main",
+        f"{here} run 6 on main",
+        f"{there} run 7 on main",
+    ]
+
+
+@pytest.mark.feature("panic-fix-triggered-workflow-run")
+def test_the_gate_required_run_name_names_the_branch_the_sweep_keeps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/gate-required.yml").read_text())
+    branch = "${{ github.event.workflow_run.head_branch }}"
+    assert workflow["run-name"] == f"Gate Required status for {branch}"
+    titles = [workflow["run-name"].replace(branch, name) for name in ("fix-branch", "feature")]
+    _github_runs(monkeypatch, {"o/a": [_api_run(number, title) for number, title in enumerate(titles, 1)]})
+    assert panic.cancel_runs([FIX], ["o/a"], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
+        "o/a run 2 on main"
     ]
 
 
