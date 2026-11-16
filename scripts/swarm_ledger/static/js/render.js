@@ -332,7 +332,9 @@ function withRefusals(top, counts) {
 
 function labLine(entry) {
   const wait = entry.predicted_wait_s === null ? "no free slot" : `${span(entry.predicted_wait_s * 1000)} wait`;
-  return `${entry.class.replace(/_/g, " ")} · ${entry.pending} pending · ${wait}`;
+  const ratio = entry.verdict_cache_hit_ratio;
+  const hits = typeof ratio === "number" ? `${Math.round(ratio * 100)}% cache hits` : "no cache lookups";
+  return `${entry.class.replace(/_/g, " ")} · ${entry.pending} pending · ${wait} · ${hits}`;
 }
 
 function labStat(lab) {
