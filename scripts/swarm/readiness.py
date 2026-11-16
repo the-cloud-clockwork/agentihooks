@@ -3,6 +3,7 @@
 An offer's id carries the task's claim generation, so the bus drops a repeat only inside its dedupe window.
 """
 
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -41,23 +42,32 @@ def _on_events(store: RedisStore, slug: str) -> bool:
 
 
 class Source:
-    def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
+    def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None) -> None:
         self._store = store
         self._ledger = ledger or LedgerClient(service=True)
         self._exported: dict[str, tuple[int, dict]] = {}
+        self._fetching: dict[str, threading.Lock] = {}
+        self._guard = threading.Lock()
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
         found = [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
-        self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
+        with self._guard:
+            self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
         return found
 
     def state(self, slug: str) -> dict:
+        """The export of ``slug`` at its current revision, fetched once per revision for every thread that asks."""
         rev = self._ledger.metadata(slug)["_meta"]["rev"]
-        kept = self._exported.get(slug)
-        if kept is None or kept[0] != rev:
-            kept = self._exported[slug] = (rev, self._ledger.state(slug))
-        return kept[1]
+        with self._guard:
+            fetching = self._fetching.setdefault(slug, threading.Lock())
+        with fetching:
+            kept = self._exported.get(slug)
+            if kept is None or kept[0] != rev:
+                kept = (rev, self._ledger.state(slug))
+                with self._guard:
+                    self._exported[slug] = kept
+            return kept[1]
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
