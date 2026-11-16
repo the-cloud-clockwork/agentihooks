@@ -5,7 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from nats.errors import NoRespondersError
+from nats.js.errors import NoStreamResponseError
 
 from scripts.events import nats
 from scripts.events.bus import NoStream
@@ -32,7 +32,7 @@ class Unanswered:
 
     async def publish(self, subject: str, data: bytes, stream: str, headers: dict[str, str]) -> None:
         self.sent.append((subject, stream))
-        raise NoRespondersError
+        raise NoStreamResponseError
 
 
 @pytest.mark.feature("ledger-event-relay")
@@ -41,7 +41,7 @@ def test_a_publish_no_stream_answers_is_refused_as_no_stream() -> None:
     event = create(type="task.changed", swarm="alpha", entity="task", key="t1", version=1, author="ledger", data={})
     with pytest.raises(NoStream, match=r"^swarm\.alpha\.events\.task\.t1$") as refused:
         asyncio.run(nats._publish(js, "swarm.alpha.events.task.t1", "AGENTIHOOKS-a-EVENTS", event))
-    assert isinstance(refused.value.__cause__, NoRespondersError)
+    assert isinstance(refused.value.__cause__, NoStreamResponseError)
     assert js.sent == [("swarm.alpha.events.task.t1", "AGENTIHOOKS-a-EVENTS")]
 
 
