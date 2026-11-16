@@ -224,6 +224,9 @@ def test_an_explicit_lane_effort_never_calls_the_classifier(monkeypatch):
     ("harness", "lane_model", "expected"),
     [
         ("codex", "opus", "gpt-6-sol"),
+        ("codex", "sonnet", "gpt-6-sol"),
+        ("codex", "haiku", "gpt-6-sol"),
+        ("codex", "fable", "gpt-6-sol"),
         ("claude", "opus", "opus"),
         ("codex", "gpt-6.1-sol", "gpt-6.1-sol"),
     ],

@@ -7,7 +7,17 @@ rules:
       include:
         - /scripts/swarm/model_pick.py
         - lane-model-before-harness.py
-    pattern: |
-      $DEFAULT = ModelPick(...)
-      if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
-          return $DEFAULT
+    patterns:
+      - pattern: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
+              return $DEFAULT
+      - pattern-not: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... $DEFAULT.model ...>:
+              $DEFAULT = replace($DEFAULT, model=$MODEL)
+          ...
+          if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
+              return $DEFAULT

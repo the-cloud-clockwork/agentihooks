@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from typing import Any
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm.effort_range import DEFAULT as DEFAULT_RANGE
@@ -11,7 +12,7 @@ BAND = "band"
 SONNET = "sonnet"
 SONNET_EFFORT = "xhigh"
 FRONTIER_EFFORT = "high"
-CLAUDE_ONLY = ("claude", "opus", SONNET, "haiku", "fable")
+CLAUDE_PREFIXES = ("claude", "opus", SONNET, "haiku", "fable")
 KEYS = ("lower", "higher")
 STEPS = ((SONNET, SONNET_EFFORT), ("", "medium"), ("", "high"), ("", "xhigh"))
 STARTS = {"S": 0, "M": 1, "L": 2}
@@ -60,16 +61,16 @@ def described(option: ModelPick) -> str:
 
 def pick(
     harness: str,
-    lane: dict,
-    task: dict,
+    lane: dict[str, str],
+    task: dict[str, Any],
     environ: dict[str, str],
-    bounds: tuple = DEFAULT_RANGE,
+    bounds: tuple[str, str] = DEFAULT_RANGE,
     default_model: str = "",
 ) -> ModelPick:
     from scripts.init_agent import model_effort
 
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
-    if harness == "codex" and default.model.startswith(CLAUDE_ONLY):
+    if harness == "codex" and default.model.startswith(CLAUDE_PREFIXES):
         default = replace(default, model=default_model or model_effort(harness, [], environ)[0])
     if default.effort != AUTO or harness not in EFFORTS:
         return default
