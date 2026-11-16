@@ -138,9 +138,8 @@ class _Pending:
         """Hands the delivery back without counting it, so the next take delivers ``attempt`` again."""
         with self._runtime.cond:
             if message.attempt == attempt and not message.settled:
+                self.retry(message, attempt, delay_ms)
                 message.attempt -= 1
-                message.ready_at = self._runtime.clock() + delay_ms
-                self._runtime.cond.notify_all()
 
     def _ready(self, taken: list[_Message] = ()) -> _Message | None:
         for event in self._source():
