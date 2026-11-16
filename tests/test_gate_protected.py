@@ -1345,14 +1345,14 @@ _REVIEWED_SUMMARY = """
 
 - name: Download this run's test durations
   if: ${{ always() }}
-  uses: actions/download-artifact@v4
+  uses: actions/download-artifact@v8.0.2
   with:
     pattern: durations-3.*
     path: test-reports
 
 - name: Download this run's test flakes
   if: ${{ always() }}
-  uses: actions/download-artifact@v4
+  uses: actions/download-artifact@v8.0.2
   with:
     pattern: flakes-3.*
     path: test-reports
