@@ -106,8 +106,8 @@ def limits(environ=None):
 def ci_behind_minutes(environ: Mapping[str, str] | None = None) -> int:
     """Whole minutes the lab may run behind on pull request grading before eng claims wait, from its environment
     variable when that holds a positive whole number."""
-    raw = (os.environ if environ is None else environ).get(ENV["ci_behind_minutes"], str(CI_BEHIND_MINUTES))
-    return int(raw) if raw.isdigit() and int(raw) > 0 else CI_BEHIND_MINUTES
+    raw = (os.environ if environ is None else environ).get(ENV["ci_behind_minutes"])
+    return int(raw) if raw and raw.isdigit() and int(raw) > 0 else CI_BEHIND_MINUTES
 
 
 def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozenset(), talk=None):
