@@ -68,7 +68,7 @@ jobs:
           enable-cache: false
       - name: Install dependencies
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: mutation-replay-input
           path: .mutation-replay
@@ -105,14 +105,14 @@ jobs:
           enable-cache: false
       - name: Install dependencies
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: mutation-replay-input
           path: .mutation-replay
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: mutation-replay-grade-*
-          path: .mutation-replay/grades
+          path: ${{ needs.plan.outputs.shards == '[0]' && '.mutation-replay/grades/mutation-replay-grade-0' || '.mutation-replay/grades' }}
       - name: Verify complete grading and retained survivor failures
         run: python -m scripts.ci_mutation.replay verify
       - uses: actions/upload-artifact@v4
