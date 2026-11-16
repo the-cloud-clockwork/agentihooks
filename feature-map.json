@@ -4769,6 +4769,26 @@
       ]
     },
     {
+      "id": "bus-request-error-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus request that no subscriber serves fails with no responders for its subject, and a request whose answer does not arrive within its timeout fails with a timeout naming its subject and wait, so a late answer never reads as a missing responder.",
+      "seam": "NatsBus.request mapping the nats client's NoRespondersError and request TimeoutError",
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder"
+      ]
+    },
+    {
+      "id": "bus-connect-timeout-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus open whose server accepts the connection but does not finish the connect handshake within the first connect bound fails with a timeout naming the server and the wait, never a bare timeout with no text.",
+      "seam": "The first connect of NatsBus mapping the nats client's handshake timeout",
+      "tests": [
+        "tests/events/test_nats.py::test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait"
+      ]
+    },
+    {
       "id": "codex-join-report-ends-before-home-removal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2256",
