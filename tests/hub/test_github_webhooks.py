@@ -371,8 +371,8 @@ NOTICE = {"repo": REPO, "head": "a1", "base": "b0", "actor": "agenticore-app[bot
 
 
 def lab_setup():
-    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.events, NOTICE_SECRET))
-    return ingress, swarm, bus.events.consumer("lab", "ci.lab.head.>")
+    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.lab_heads, NOTICE_SECRET))
+    return ingress, swarm, bus.lab_heads.consumer("lab", "ci.lab.head.>")
 
 
 def merge_group(action="checks_requested"):
