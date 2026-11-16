@@ -4,6 +4,7 @@ import os
 import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -363,6 +364,70 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     out = capsys.readouterr().out
     assert "::error::The head changes or removes the trusted branch lane preflight." in out.splitlines()
     assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
+
+
+def _push_paths(preflight: dict[Any, Any], paths: list[str] | None) -> dict[Any, Any]:
+    filtered = copy.deepcopy(preflight)
+    if paths is None:
+        filtered[True]["push"].pop("paths", None)
+    else:
+        filtered[True]["push"]["paths"] = paths
+    return filtered
+
+
+def _grade_preflight(repo: Path, base: dict[Any, Any], head: dict[Any, Any]) -> int:
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": base}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    planted = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": head}, {}, "filter")
+    _git(repo, "checkout", "-q", "dev")
+    return gate_protected.main(["--root", str(repo), "--head", planted])
+
+
+@pytest.mark.parametrize(
+    ("dev_filtered", "paths", "verdict"),
+    [
+        (False, [".github/workflows/**"], 0),
+        (True, None, 0),
+        *((dev_filtered, paths, 1) for dev_filtered in (False, True) for paths in (["docs/**"], [".github/**"])),
+    ],
+)
+def test_the_branch_lane_preflight_may_run_only_for_workflow_changes(
+    repo: Path, capsys: pytest.CaptureFixture[str], dev_filtered: bool, paths: list[str] | None, verdict: int
+) -> None:
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    base = _push_paths(preflight, [".github/workflows/**"] if dev_filtered else None)
+    assert _grade_preflight(repo, base, _push_paths(preflight, paths)) == verdict
+    refused = "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
+    assert refused is bool(verdict)
+
+
+@pytest.mark.parametrize("cover_proofs", [False, True])
+def test_a_preflight_that_ignored_proofs_may_gain_the_workflow_filter_with_or_without_covering_them(
+    repo: Path, cover_proofs: bool
+) -> None:
+    preflight = _push_paths(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()), None)
+    ignored = [branch for branch in preflight[True]["push"]["branches-ignore"] if branch != "diffcheck/**"]
+    preflight[True]["push"]["branches-ignore"] = [*ignored, "diffcheck/**"]
+    head = _push_paths(preflight, [".github/workflows/**"])
+    if cover_proofs:
+        head[True]["push"]["branches-ignore"] = ignored
+    assert _grade_preflight(repo, preflight, head) == 0
+
+
+@pytest.mark.parametrize("fault", ["paths_ignore", "other_event", "dropped"])
+def test_the_branch_lane_preflight_refuses_any_other_trigger_filter(
+    repo: Path, capsys: pytest.CaptureFixture[str], fault: str
+) -> None:
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    push = preflight[True]["push"]
+    head = copy.deepcopy(preflight)
+    head[True] = {
+        "paths_ignore": {"push": {**push, "paths-ignore": [".github/workflows/**"]}},
+        "other_event": {"push": push, "pull_request": {"paths": [".github/workflows/**"]}},
+        "dropped": {"workflow_dispatch": None},
+    }[fault]
+    assert _grade_preflight(repo, preflight, head) == 1
+    assert "::error::The head changes or removes the trusted branch lane preflight." in capsys.readouterr().out
 
 
 _SPARSE = "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
@@ -999,6 +1064,54 @@ def test_a_head_switching_to_either_canonical_aggregation_is_green(selected):
     base, head = _aggregators()
     head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(selected=selected)
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+_QUEUE_TIER_OPENING = 'if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then\n'
+
+
+@pytest.mark.parametrize(
+    "form",
+    [{}, {"selected": True}, {"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True}],
+)
+def test_a_head_switching_to_a_lab_aggregation_is_green(form: dict[str, bool]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.lab_verdict(ci_reuse.gate_steps(**form))
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+def test_the_repository_aggregator_rendered_for_the_lab_grades_green() -> None:
+    from scripts import ci_reuse, ci_runner_trust
+
+    workflows = ci_wiring.load(_ROOT)
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
+    head = copy.deepcopy(workflows)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    assert step["run"].count(_QUEUE_TIER_OPENING) == 1
+    step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
+    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        ('if $event != "pull_request" then . else', "if false then . else"),
+        ('($verdict.outputs["lab_" + .key] // "") != ""', "true"),
+        ('error("authoritative is not a JSON object")', "{}"),
+    ],
+)
+def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    [step] = ci_reuse.lab_verdict(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    assert edit[0] in step["run"]
+    head["jobs"]["gate-required"]["steps"] = [{**step, "run": step["run"].replace(*edit)}]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        f"The head's {gate_protected.GATE} changes its steps; the protected branch grades with its own."
+    ]
 
 
 @pytest.mark.parametrize("docs", [False, True])
@@ -1955,6 +2068,57 @@ def test_a_dev_carrying_the_dev_parent_form_refuses_any_other_selection(repo, ca
     )
 
 
+_LEDGER_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
+
+
+def _pull_request_paths(workflow: dict[Any, Any], paths: list[str] | None) -> dict[Any, Any]:
+    if paths is None:
+        workflow[True]["pull_request"].pop("paths", None)
+    else:
+        workflow[True]["pull_request"]["paths"] = paths
+    return workflow
+
+
+_EQUIVALENCE_REFUSED = (
+    "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+)
+
+
+@pytest.mark.parametrize(
+    ("dev_filtered", "paths", "verdict"),
+    [
+        (False, _LEDGER_PATHS, 0),
+        (True, None, 0),
+        *(
+            (dev_filtered, paths, 1)
+            for dev_filtered in (False, True)
+            for paths in (_LEDGER_PATHS[:2], ["scripts/**"], [*_LEDGER_PATHS, "docs/**"])
+        ),
+    ],
+)
+def test_the_equivalence_grading_may_run_only_for_ledger_changes(
+    repo: Path, capsys: pytest.CaptureFixture[str], dev_filtered: bool, paths: list[str] | None, verdict: int
+) -> None:
+    base = _pull_request_paths(_equivalence(), _LEDGER_PATHS if dev_filtered else None)
+    assert _grade_equivalence(repo, base, _pull_request_paths(_equivalence(), paths)) == verdict
+    assert (_EQUIVALENCE_REFUSED in capsys.readouterr().out.splitlines()) is bool(verdict)
+
+
+@pytest.mark.parametrize("fault", ["paths_ignore", "other_event", "dropped"])
+def test_the_equivalence_grading_refuses_any_other_trigger_filter(
+    repo: Path, capsys: pytest.CaptureFixture[str], fault: str
+) -> None:
+    head = _pull_request_paths(_equivalence(), None)
+    pull_request = head[True]["pull_request"]
+    head[True] = {
+        "paths_ignore": {"pull_request": {**pull_request, "paths-ignore": ["docs/**"]}},
+        "other_event": {"pull_request": pull_request, "push": {"paths": _LEDGER_PATHS}},
+        "dropped": {"workflow_dispatch": None},
+    }[fault]
+    assert _grade_equivalence(repo, _pull_request_paths(_equivalence(), None), head) == 1
+    assert _EQUIVALENCE_REFUSED in capsys.readouterr().out.splitlines()
+
+
 def _full_history(steps):
     steps[0]["with"]["fetch-depth"] = 0
 
@@ -2223,3 +2387,59 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     assert set(registry) in (expected, expected | {"scripts/ci_reuse.py"})
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
+
+
+def test_the_repository_registry_leaves_the_delivery_config_unfrozen() -> None:
+    assert "delivery.yaml" not in json.loads((_ROOT / gate_protected.FROZEN).read_text())
+
+
+def test_a_head_editing_the_delivery_config_under_the_repository_registry_grades_green(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    registry = (_ROOT / gate_protected.FROZEN).read_text()
+    _put(repo, {"delivery.yaml": "lab:\n  authoritative: []\n", gate_protected.FROZEN: registry}, "freeze")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _put(repo, {"delivery.yaml": "lab:\n  authoritative: [lint]\n"}, "flip lint")
+    code, out = _frozen_grade(repo, head, capsys)
+    assert (code, out.count("::error::")) == (0, 0), out
+
+
+def test_the_accepted_steps_renderings_are_built_once_per_combination() -> None:
+    from scripts import ci_reuse
+
+    gate_protected._accepted_steps_renderings.cache_clear()
+    calls = {"n": 0}
+    original = ci_reuse.gate_steps
+
+    def counting(
+        selected: bool = False,
+        queue_tier: bool = False,
+        promotion: bool = False,
+        consolidated: bool = False,
+        summary: bool = False,
+        docs: bool = False,
+        watcher_loss: bool = False,
+    ) -> list[dict[str, object]]:
+        calls["n"] += 1
+        return original(
+            selected=selected,
+            queue_tier=queue_tier,
+            promotion=promotion,
+            consolidated=consolidated,
+            summary=summary,
+            docs=docs,
+            watcher_loss=watcher_loss,
+        )
+
+    ci_reuse.gate_steps = counting
+    try:
+        base, head = _aggregators()
+        head["jobs"]["gate-required"]["steps"] = [{"run": "echo not a recognised rendering"}]
+        _grade({"test.yml": head}, base={"test.yml": base})
+        first = calls["n"]
+        assert first > 0
+        _grade({"test.yml": head}, base={"test.yml": base})
+        assert calls["n"] == first
+    finally:
+        ci_reuse.gate_steps = original

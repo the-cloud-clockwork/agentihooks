@@ -438,7 +438,7 @@ def test_a_restored_venv_skips_uv_and_the_install():
         lambda s: s.get("name") == "Install dependencies",
     ):
         _, step = _unit_step_index(predicate)
-        assert step["if"] in (hit, f"env.UNIT_SOURCE == '' && {hit}")
+        assert step["if"] == hit
 
 
 def test_unit_tests_run_from_the_venv():
@@ -757,7 +757,7 @@ def _browser_setup_steps(steps):
 def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     steps = _workflow()["jobs"]["lint"]["steps"]
     install = _browser_install(steps)
-    check = next(s for s in steps if s.get("run", "").endswith(".artifact_sanity tests/fixtures/artifacts/*"))
+    check = next(s for s in steps if s.get("name") == "Artifact sanity checks")
     assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
@@ -949,14 +949,17 @@ def _equivalence_group(name: str) -> str:
     return _EQUIVALENCE.read_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
 
 
-def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
+def test_equivalence_runs_only_on_ledger_pull_requests_without_a_body_marker():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
     job = workflow["jobs"]["ledger-equivalence"]
     assert "if" not in job
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    assert "paths" not in workflow[True]["pull_request"]
+    assert workflow[True]["pull_request"] == {
+        "branches": ["dev"],
+        "paths": ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"],
+    }
 
 
 def test_mutation_gate_plants_itself_whenever_its_code_changes():
@@ -967,7 +970,7 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
         listed
     )
-    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    assert 'if ! git diff --quiet "$base" HEAD -- "$path"; then' in changed["run"]
     [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
     assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
     assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
@@ -1079,7 +1082,8 @@ def test_a_fork_split_waits_for_the_collection_instead_of_polling_without_a_toke
     upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == "Upload the early collection")
     mint = next(step for step in steps if step.get("id") == "app-token")
     same = " && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
-    assert guard["if"] == mint["if"] and guard["if"].endswith(same)
+    assert mint["if"] in (guard["if"], f"({guard['if']}) || needs.select.outputs.source != ''")
+    assert guard["if"].endswith(same)
     assert fork["if"] == guard["if"].replace(
         same,
         " && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository",
@@ -1573,19 +1577,23 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         for step in job["steps"][run_index + 1 : upload_index]
         if not step["name"].endswith((", wait before attempt 2", ", attempt 2"))
     ]
-    assert [step["name"] for step in between] in (
-        [],
-        [
-            "Mint the token that restores queue unit artifacts",
-            "Restore queue shard durations",
-            "Restore queue shard flakes",
-            "Restore queue shard coverage",
-        ],
-    )
+    restores = [
+        "Mint the token that restores queue unit artifacts",
+        "Restore queue shard durations",
+        "Restore queue shard flakes",
+        "Restore queue shard coverage",
+    ]
+    names = [step["name"] for step in between]
+    assert names in ([], restores, [*restores, "Empty the test reports of a leg above the queue's shard count"])
+    own = "fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
     for step in between:
         expected = "needs.split.outputs.source != ''"
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
+        if step["name"] == "Restore queue shard flakes" and names != restores:
+            expected += f" && {own}"
+        if step["name"].startswith("Empty the test reports"):
+            expected += f" && {own.replace(' == ', ' != ')}"
         assert step["if"] == expected
     assert upload.get("if") in (None, "${{ !cancelled() && hashFiles('durations.json') != '' }}")
     assert upload["uses"] == "./.github/actions/retry-upload" or upload["uses"].startswith("actions/upload-artifact@")

@@ -852,7 +852,6 @@ jobs:
 
       - &python
         name: Set up Python ${{ matrix.python-version }}
-        if: env.UNIT_SOURCE == ''
         id: python
         uses: actions/setup-python@v5
         with:
@@ -863,7 +862,6 @@ jobs:
       # scan modules loaded from the repo root.
       - &day
         name: Stamp the day
-        if: env.UNIT_SOURCE == ''
         id: day
         uses: ./.github/actions/test-env-key
         with:
@@ -871,7 +869,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_SOURCE == '' && (env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted')
+        if: env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted'
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -882,7 +880,7 @@ jobs:
 
       - &uv
         name: Set up uv
-        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
+        if: steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -896,7 +894,7 @@ jobs:
       # resolved to "command not found" while the packages were installed fine.
       - &install
         name: Install dependencies
-        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
+        if: steps.venv.outputs.cache-hit != 'true'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
@@ -908,7 +906,6 @@ jobs:
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
       - &use-venv
         name: Use the test environment
-        if: env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Check out the base revision
@@ -1144,6 +1141,7 @@ jobs:
       run: ${{ steps.plan.outputs.run }}
       commit: ${{ steps.plan.outputs.commit }}
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
+      queue_legs: ${{ steps.queue-legs.outputs.queue_legs }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1195,7 +1193,7 @@ jobs:
 
       - name: Mint the token that reads the collection job
         id: app-token
-        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: (github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) || needs.select.outputs.source != ''
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -1287,15 +1285,24 @@ jobs:
           python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
           cat queue-plan.txt >> "$GITHUB_OUTPUT"
 
-      - name: Mint the token that restores queue unit artifacts
-        id: unit-token
+      - name: Map each push leg onto a queue shard
+        id: queue-legs
         if: needs.select.outputs.source != ''
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          for attempt in 1 2; do
+            if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$UNIT_SOURCE/artifacts?per_page=100" \
+              --jq '.artifacts[] | select((.expired | not) and (.name | test("^durations-3\\.12-[0-9]+$"))) | .name' > durations-names.txt; then
+              break
+            fi
+            [[ "$attempt" == 2 ]] && exit 1
+            echo "::warning::Listing the queue run's artifacts failed; retrying it once in 30 seconds."
+            sleep 30
+          done
+          shards=$(sort -u durations-names.txt | wc -l)
+          legs=$(jq -nc --argjson shards "$shards" '[range(1; 21) | {key: tostring, value: ((. - 1) % $shards + 1)}] | from_entries')
+          echo "queue_legs=$legs" >> "$GITHUB_OUTPUT"
 
       - name: Restore the queue split inputs
         if: needs.select.outputs.source != ''
@@ -1305,7 +1312,7 @@ jobs:
         with: &split-restore-the-queue-split-inputs
           name: split-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
-          github-token: ${{ steps.unit-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Restore the queue split inputs, wait before attempt 2
         if: steps.restore-the-queue-split-inputs.outcome == 'failure'
@@ -1327,7 +1334,7 @@ jobs:
         with: &split-restore-the-queue-collected-tests
           name: collected-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
-          github-token: ${{ steps.unit-token.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Restore the queue collected tests, wait before attempt 2
         if: steps.restore-the-queue-collected-tests.outcome == 'failure'
@@ -1583,7 +1590,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-durations
-          name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
+          name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1600,7 +1607,7 @@ jobs:
         with: *unit-restore-queue-shard-durations
 
       - name: Restore queue shard flakes
-        if: needs.split.outputs.source != ''
+        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
         id: restore-queue-shard-flakes
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1627,7 +1634,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with: &unit-restore-queue-shard-coverage
-          name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
+          name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
@@ -1642,6 +1649,12 @@ jobs:
         if: steps.restore-queue-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *unit-restore-queue-shard-coverage
+
+      - name: Empty the test reports of a leg above the queue's shard count
+        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
+        run: |
+          echo '{}' > durations.json
+          rm -f elapsed.json
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
@@ -2798,19 +2811,6 @@ jobs:
       - name: Install the comment gate grammars
         run: python -m pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css
 
-      - name: Check out kernel marker vector authority
-        if: ${{ !cancelled() }}
-        uses: actions/checkout@v4
-        with:
-          repository: the-cloud-clockwork/agentibrain-kernel
-          ref: dev
-          path: .marker-kernel
-          persist-credentials: false
-
-      - name: Refuse marker key vector drift from kernel dev
-        if: ${{ !cancelled() }}
-        run: python -m scripts.ci_marker_vectors .marker-kernel/tests/fixtures/marker-idempotency-vectors.json
-
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -2830,18 +2830,38 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
+      - name: Check out kernel marker vector authority
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v4
+        with:
+          repository: the-cloud-clockwork/agentibrain-kernel
+          ref: dev
+          path: .marker-kernel
+          persist-credentials: false
+
+      - name: Refuse marker key vector drift from kernel dev
+        if: ${{ !cancelled() }}
+        run: |
+          vectors="$GITHUB_WORKSPACE/.marker-kernel/tests/fixtures/marker-idempotency-vectors.json"
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
+
       # Each control grades even after an earlier one is red, so one run reports every red control.
       - name: Lint check
         if: ${{ !cancelled() }}
-        run: python -m ruff check hooks/ scripts/ tests/
+        run: |
+          python -P -m ruff check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
+          python -P -m ruff check hooks/ scripts/ tests/
 
       - name: Format check
         if: ${{ !cancelled() }}
-        run: python -m ruff format --check hooks/ scripts/ tests/
+        run: python -P -m ruff format --check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
 
       - name: Check every pull request job is a need of Gate Required
         if: ${{ !cancelled() }}
-        run: python -m scripts.ci_wiring
+        run: |
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_wiring --root "$GITHUB_WORKSPACE"
 
       - name: Keep internal addresses, identifiers and private keywords out of public docs
         if: ${{ !cancelled() }}
@@ -3126,16 +3146,24 @@ jobs:
 
       - name: Artifact sanity checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
-        run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
+        run: |
+          checker="$RUNNER_TEMP/grader/scripts/swarm_ledger/artifact_sanity.py"
+          if [[ -f "$checker" ]] && grep -q -- '"--pages"' "$checker"; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.swarm_ledger.artifact_sanity --pages "$GITHUB_WORKSPACE/scripts/swarm_ledger" "$GITHUB_WORKSPACE"/tests/fixtures/artifacts/*
+          else
+            python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
+          fi
 
       - name: Plant only when the mutation gate or an input it reads changed
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         id: self-plant
         run: |
           changed=false
+          base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)"
           for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
             pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
-            if [[ -e "$RUNNER_TEMP/base/$path" || -e "$path" ]] && ! diff -rq "$RUNNER_TEMP/base/$path" "$path" >/dev/null 2>&1; then
+            if ! git diff --quiet "$base" HEAD -- "$path"; then
               echo "Changed: $path"
               changed=true
             fi
