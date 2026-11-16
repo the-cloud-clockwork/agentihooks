@@ -454,11 +454,13 @@ def _deleted_fixtures(base: Path, head: Path, referenced: set[tuple[str, str]]) 
     candidates = {subject for subject in referenced if subject[0] == "@fixture" and not (head / subject[1]).exists()}
     if not candidates:
         return set()
-    surviving: set[str] = set()
-    for path in head.rglob("*"):
-        if path.suffix in (".json", ".yml", ".yaml") and path.resolve().is_relative_to(head.resolve()):
-            surviving.update(_executable_code(path))
-    return {subject for subject in candidates if not _executable_code(base / subject[1]) & surviving}
+    kept = [
+        code
+        for path in head.rglob("*")
+        if path.suffix in (".json", ".yml", ".yaml") and path.resolve().is_relative_to(head.resolve())
+        if (code := _executable_code(path))
+    ]
+    return {subject for subject in candidates if not any(_executable_code(base / subject[1]) <= code for code in kept)}
 
 
 def _fixture_subject(
