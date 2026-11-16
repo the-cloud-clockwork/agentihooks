@@ -22,6 +22,13 @@ metadata:
     app.kubernetes.io/component: hub
 spec:
   replicas: {{ int $hub.replicas }}
+  {{- if gt (int $hub.replicas) 1 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "swarm.selector" (dict "root" . "component" "hub") | nindent 6 }}
