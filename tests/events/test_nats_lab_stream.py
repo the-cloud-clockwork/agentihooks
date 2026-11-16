@@ -92,5 +92,5 @@ def test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters()
     bus = memory.open_bus(BusConfig())
     assert bus.lab_heads.publish("ci.lab.head.push", envelope(HEAD))
     assert [subject for subject, _ in bus.lab_heads.entries] == ["ci.lab.head.push"]
-    assert bus.events.entries == []
+    assert bus._legacy_events.entries == []
     assert bus.lab_heads.dead is bus.dead
