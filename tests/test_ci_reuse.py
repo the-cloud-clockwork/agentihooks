@@ -277,7 +277,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
                             rerun(
                                 ci_reuse.inline_mutation(
                                     ci_reuse.postgres_required(
-                                        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                        lab(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))
                                     )
                                 )
                             )
@@ -296,6 +296,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         for watcher_loss in (False, True)
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)
+        for lab in (list, ci_reuse.lab_verdict)
     ]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
