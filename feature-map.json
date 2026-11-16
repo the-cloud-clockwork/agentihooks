@@ -317,6 +317,20 @@
       ]
     },
     {
+      "id": "swarm-reap-reads-hub-admitted-panes-from-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-reap-reads-hive-panes",
+      "behaviour": "A worker the hub admitted to another hive, which carries no host target, is judged by the pane its hive reports for its execution and generation instead of the controller's own herdr, so a finished worker reads idle or done and reaches the idle retire; each hive reports the pane of every hub admitted execution it runs, a pane reported for another generation reads unknown, and a worker admitted to this hive is still read from its own herdr.",
+      "seam": "scripts.hive.daemon.execution_report writes the admitted panes, read through scripts.hive.reports.Reports.admitted_pane by scripts.swarm.runtime.HerdrRuntime.observe for scripts.tick.steps.agents._watch_idle",
+      "tests": [
+        "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_pane_for_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
@@ -4187,6 +4201,20 @@
       ]
     },
     {
+      "id": "panic-fix-branch-first-push",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2558",
+      "behaviour": "While fleet panic is on, a fix registered as a branch link of a named repository lets a session on that branch in that repository make its first push, rerun or dispatch before any pull request exists, the panic cancel sweep spares that branch's runs in that repository without reading it as a pull request, and a push from any other branch or from the same branch name in another repository stays frozen.",
+      "seam": "The panic fix list branch link read by the blocker window hook and the panic cancel sweep",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_branch_link_names_its_repository_and_branch",
+        "tests/swarm/test_panic.py::test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository",
+        "tests/swarm/test_panic.py::test_panic_spares_the_first_push_of_a_registered_fix_branch",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_from_a_branch_no_fix_registers"
+      ]
+    },
+    {
       "id": "panic-merged-fix-dev-run",
       "origin": "regression",
       "ordered_at": "2026-11-07",
@@ -7339,6 +7367,19 @@
         "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
         "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
         "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
+      ]
+    },
+    {
+      "id": "hub-admission-earlier-lives-launched-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admission-branch-heads-after-answer",
+      "behaviour": "Hub admission reads branch heads only for the earlier lives of a reclaimed task that launched: an agent retired while still starting with no pane, such as one the hub freed because no hive started it, ran nothing and pushed no branch, so it adds no branch to the GitHub query and a task whose earlier lives all never launched reads no branch heads; those lives never count toward the claim cap either.",
+      "seam": "RedisStore.earlier_lives over the swarm history, Admission.admit through its branch heads read, and the claim cap after Admission.free",
+      "tests": [
+        "tests/swarm/test_store.py::test_earlier_lives_leave_out_an_agent_retired_while_starting_with_no_pane",
+        "tests/hub/test_admission.py::test_the_branch_heads_query_asks_only_for_earlier_lives_that_launched",
+        "tests/hub/test_admission.py::test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission",
+        "tests/hub/test_admission_claim_cap.py::test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap"
       ]
     },
     {

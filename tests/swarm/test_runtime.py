@@ -216,6 +216,7 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
             conversation_id=conversation,
             runtime_backend="local",
             runtime_target={},
+            hive="",
         )
 
     assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
