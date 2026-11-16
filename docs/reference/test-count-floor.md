@@ -304,6 +304,7 @@ The floor then grades by count alone.
 - An unrelated unchanged binding is tolerated; a new or changed same-name binding conservatively blocks admission, even when it serves another purpose. This applies to constants as much as to functions.
 - Keyword branches are found only in `if`, `elif`, conditional expression and `while` conditions. A parameter that only drives a `match`, a comprehension filter, an `assert` or a boolean expression outside such a condition, or is only passed on to another call, is not a branch, so its tests stay red.
 - The subject is matched by the module path the test imported it from. A name re-exported through a package (`from pkg import f` where `f` is defined in `pkg/impl.py`) does not match its definition, so its lost tests stay red.
+- A parametrized id admits through a file renamed with edits to a new name and a new extension at once, since the head then adds no file sharing either; and a head that adds any file of the same extension, such as a new `.py` module, keeps every deleted file of that extension from admitting by id, so those cases need a signed retirement.
 - Count masking is unchanged: an unrelated lost test passes when the head adds as many tests.
 
 ## Deleting dead code with its tests
