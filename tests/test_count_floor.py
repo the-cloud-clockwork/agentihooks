@@ -1013,3 +1013,107 @@ def test_a_head_file_that_hides_its_names_admits_no_deleted_branch(tmp_path):
     assert result.returncode == 1
     assert "hides its names in the head (unparseable or a star import), so no lost test is admitted" in result.stdout
     assert "tests/test_mod.py::test_queue is in the base and not in the head" in result.stdout
+
+
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_a_module_deleted_together_with_its_test_file_passes_the_floor(tmp_path):
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": SUBJECT_TESTS, "test_c.py": OTHER},
+        {"test_c.py": OTHER},
+        {"base": _package(mod=SUBJECT + "\n\n" + KEPT), "head": _package()},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "tests/test_mod.py::test_subject is admitted: its test file is deleted together with a module it imported"
+        in (result.stdout)
+    )
+    assert "tests/test_mod.py::test_other is admitted: its test file is deleted together with a module it imported" in (
+        result.stdout
+    )
+
+
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_a_deleted_test_file_whose_imported_module_survives_admits_nothing(tmp_path):
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": OTHER_TEST, "test_c.py": OTHER},
+        {"test_c.py": OTHER},
+        {"base": _package(mod=KEPT), "head": _package(mod=KEPT)},
+    )
+    assert result.returncode == 1
+    assert "tests/test_mod.py::test_other is in the base and not in the head" in result.stdout
+    assert "is deleted together with a module it imported" not in result.stdout
+
+
+WORKFLOW = "jobs:\n  build:\n    steps:\n      - run: printf retired\n"
+NON_WORKFLOW = "name: notes\n"
+
+
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("executable", [True, False], ids=["workflow", "plain-yaml"])
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_a_deleted_workflow_file_explains_only_its_own_lost_test(tmp_path, deleted, executable):
+    fixture = WORKFLOW if executable else NON_WORKFLOW
+    tests = (
+        "from pathlib import Path\n\n"
+        "_ROOT = Path(__file__).resolve().parents[1]\n\n"
+        "def fixture():\n    return (_ROOT / 'tests/fixtures/watch.yml').read_text()\n\n"
+        "def test_fixture():\n    assert fixture()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {
+            "base": {"tests/fixtures/watch.yml": fixture},
+            "head": {} if deleted else {"tests/fixtures/watch.yml": fixture},
+        },
+    )
+    admitted = deleted and executable
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_fixture is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_moving_a_workflow_file_keeps_its_lost_test_red(tmp_path):
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pathlib import Path\n\ndef test_fixture():\n    assert (Path(__file__).resolve().parent / 'fixtures/watch.yml').read_text()\n\ndef test_kept():\n    assert True\n"
+        },
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": {"tests/fixtures/watch.yml": WORKFLOW}, "head": {"tests/fixtures/moved.yml": WORKFLOW}},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_fixture is admitted" not in result.stdout
+
+
+SHARED_WORKFLOW = "jobs:\n  build:\n    steps:\n      - run: printf shared\n      - run: printf retired\n"
+KEEPER_WORKFLOW = "jobs:\n  keep:\n    steps:\n      - run: printf shared\n"
+
+
+@pytest.mark.parametrize(
+    ("kept", "admitted"), [(KEEPER_WORKFLOW, True), (SHARED_WORKFLOW, False)], ids=["partly-shared", "fully-kept"]
+)
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_a_deleted_workflow_stays_counted_only_while_one_head_file_keeps_all_its_steps(
+    tmp_path: Path, kept: str, admitted: bool
+) -> None:
+    tests = (
+        "from pathlib import Path\n\n"
+        "def test_fixture():\n    assert (Path(__file__).resolve().parent / 'fixtures/watch.yml').read_text()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {
+            "base": {"tests/fixtures/watch.yml": SHARED_WORKFLOW, "tests/fixtures/other.yml": kept},
+            "head": {"tests/fixtures/other.yml": kept},
+        },
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_fixture is admitted" in result.stdout) == admitted
