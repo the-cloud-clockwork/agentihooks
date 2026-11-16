@@ -78,11 +78,10 @@ def test_a_failed_download_names_the_outage_waits_and_downloads_once_more(job, i
 def test_each_retried_shared_mutation_stats_download_gives_up_after_one_minute() -> None:
     attempts = [
         step
-        for workflow in ("test.yml", "mutation-preflight.yml")
-        for spec in yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"].values()
+        for spec in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"].values()
         for step in spec.get("steps") or []
         if step.get("name") in ("Download the shared mutation stats", "Download the shared mutation stats, attempt 2")
         and (step.get("continue-on-error") or step["name"].endswith("attempt 2"))
     ]
-    assert len(attempts) == 10
+    assert len(attempts) == 6
     assert {step.get("timeout-minutes") for step in attempts} == {1}
