@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -1117,3 +1118,137 @@ def test_a_deleted_workflow_stays_counted_only_while_one_head_file_keeps_all_its
     )
     assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
     assert ("test_fixture is admitted" in result.stdout) == admitted
+
+
+LOCAL_READ = (
+    "from pathlib import Path\n\n"
+    "def test_fixture():\n"
+    "    root = Path(__file__).resolve().parents[1]\n"
+    "    workflow = root / 'tests/fixtures/watch.yml'\n"
+    "    assert workflow.read_text()\n\n"
+    "def test_kept():\n    assert True\n"
+)
+REBOUND_READ = (
+    "from pathlib import Path\n\n"
+    "def test_fixture():\n"
+    "    workflow = Path(__file__).resolve().parent / 'fixtures/kept.yml'\n"
+    "    workflow = Path(__file__).resolve().parent / 'fixtures/watch.yml'\n"
+    "    assert workflow.read_text()\n\n"
+    "def test_kept():\n    assert True\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("tests", "deleted", "admitted"),
+    [(LOCAL_READ, True, True), (LOCAL_READ, False, False), (REBOUND_READ, True, False)],
+    ids=["local-deleted", "local-retained", "rebound-deleted"],
+)
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_a_deleted_workflow_read_through_a_local_variable_is_admitted(
+    tmp_path: Path, tests: str, deleted: bool, admitted: bool
+) -> None:
+    kept = {"tests/fixtures/kept.yml": KEEPER_WORKFLOW}
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {
+            "base": {"tests/fixtures/watch.yml": WORKFLOW, **kept},
+            "head": kept if deleted else {"tests/fixtures/watch.yml": WORKFLOW, **kept},
+        },
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_fixture is admitted" in result.stdout) == admitted
+
+
+def _generated(*cases: str) -> str:
+    return (
+        f"import pytest\n\n@pytest.mark.parametrize('name', {list(cases)!r})\ndef test_case(name):\n    assert name\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "head", "admitted"),
+    [
+        ("watch.yml", {}, True),
+        ("tests/fixtures/watch.yml", {}, True),
+        ("watch.yml-build", {}, True),
+        ("rewatch.yml", {}, False),
+        ("watch.yml", {"tests/fixtures/watch.yml": WORKFLOW}, False),
+        ("watch.yml", {"tests/fixtures/moved.yml": WORKFLOW}, False),
+        ("watch.yml", {"tests/other/watch.yml": NON_WORKFLOW}, False),
+        ("tests/fixtures/watch.yml", {"tests/other/watch.yml": NON_WORKFLOW}, True),
+    ],
+    ids=["name", "path", "joined", "fragment", "retained", "moved", "shared-name", "path-beside-shared-name"],
+)
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_a_lost_case_whose_id_names_a_deleted_file_is_admitted(
+    tmp_path: Path, case: str, head: dict[str, str], admitted: bool
+) -> None:
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": _generated(case, "kept")},
+        {"test_mod.py": _generated("kept")},
+        {"base": {"tests/fixtures/watch.yml": WORKFLOW}, "head": head},
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert (f"test_case[{case}] is admitted" in result.stdout) == admitted
+
+
+RETIRED_NODE = "tests/test_mod.py::test_retired"
+RETIRING = "def test_kept():\n    assert True\n\ndef test_retired():\n    assert True\n"
+SIGNED = {"reader": "Standards reader", "reason": "the head removes the behaviour it held"}
+
+
+def _retirement(nodeid: str, ruling: object, name: str | None = None) -> dict[str, str]:
+    digest = hashlib.sha256(nodeid.encode()).hexdigest()
+    return {f"test-retirements/{name or digest}.json": json.dumps({nodeid: ruling})}
+
+
+@pytest.mark.parametrize(
+    ("base", "head", "admitted"),
+    [
+        ({}, _retirement(RETIRED_NODE, SIGNED), True),
+        ({}, {}, False),
+        ({}, _retirement("tests/test_mod.py::test_other", SIGNED), False),
+        ({}, _retirement(RETIRED_NODE, {**SIGNED, "reader": "engineer"}), False),
+        ({}, _retirement(RETIRED_NODE, {"reader": "Standards reader", "reason": " "}), False),
+        ({}, _retirement(RETIRED_NODE, SIGNED, name="0" * 64), False),
+        (_retirement(RETIRED_NODE, SIGNED), _retirement(RETIRED_NODE, SIGNED), False),
+    ],
+    ids=["signed", "unlisted", "other-test", "unsigned", "no-reason", "misnamed", "inherited"],
+)
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_a_lost_test_is_admitted_only_by_a_new_signed_retirement(
+    tmp_path: Path, base: dict[str, str], head: dict[str, str], admitted: bool
+) -> None:
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": RETIRING},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": base, "head": head},
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert (f"{RETIRED_NODE} is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.parametrize(("reader", "written"), [("Standards reader", True), ("engineer", False)])
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_the_retire_command_writes_only_a_signed_retirement_the_floor_admits(
+    tmp_path: Path, reader: str, written: bool
+) -> None:
+    head = _tree(tmp_path / "head", {})
+    command = [sys.executable, "-m", "tests.count_floor", "--retire", RETIRED_NODE, "--head", str(head)]
+    retire = subprocess.run(
+        [*command, "--reader", reader, "--reason", SIGNED["reason"]], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert retire.returncode == (0 if written else 1), retire.stdout + retire.stderr
+    files = {path.relative_to(head).as_posix(): path.read_text() for path in head.glob("test-retirements/*.json")}
+    assert sorted(files) == (sorted(_retirement(RETIRED_NODE, SIGNED)) if written else [])
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": RETIRING},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"head": files},
+    )
+    assert result.returncode == (0 if written else 1), result.stdout + result.stderr
