@@ -1568,7 +1568,7 @@ def test_unit_shards_store_the_durations_they_measure():
     assert "no:pytest-split" not in command
 
 
-def test_unit_shards_upload_their_durations_for_the_refresh():
+def test_unit_shards_upload_their_durations_for_the_refresh() -> None:
     upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     job = _workflow()["jobs"]["unit"]
@@ -1582,6 +1582,8 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         "Restore queue shard durations",
         "Restore queue shard flakes",
         "Restore queue shard coverage",
+        "Restore torn queue shard coverage again",
+        "Check the queue shard coverage restored again",
     ]
     names = [step["name"] for step in between]
     assert names in ([], restores, [*restores, "Empty the test reports of a leg above the queue's shard count"])
@@ -1590,6 +1592,8 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         expected = "needs.split.outputs.source != ''"
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
+        if step["name"] in restores[4:]:
+            expected = _UNFINISHED_QUEUE_COVERAGE
         if step["name"] == "Restore queue shard flakes" and names != restores:
             expected += f" && {own}"
         if step["name"].startswith("Empty the test reports"):
@@ -1602,6 +1606,59 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         ["durations.json", "durations.sha256"],
         ["durations.json", "durations.sha256", "elapsed.json"],
     )
+
+
+_UNFINISHED_QUEUE_COVERAGE = (
+    "needs.split.outputs.source != '' && matrix.python-version == '3.12'"
+    " && steps.restore-queue-shard-coverage.outputs.download-path == ''"
+    " && steps.restore-queue-shard-coverage-attempt-2.outputs.download-path == ''"
+)
+
+
+@pytest.mark.parametrize(
+    ("restored", "code", "said"),
+    [("", 1, "::error::"), ("/home/runner/_work/agentihooks/agentihooks", 0, "::warning::")],
+    ids=["unfinished-again", "restored-again"],
+)
+def test_a_queue_coverage_restore_that_stopped_before_it_finished_is_restored_again(
+    restored: str, code: int, said: str
+) -> None:
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    names = [step["name"] for step in steps]
+    first = steps[names.index("Restore queue shard coverage")]
+    retried = steps[names.index("Restore queue shard coverage, attempt 2")]
+    again = steps[names.index("Restore torn queue shard coverage again")]
+    again_retried = steps[names.index("Restore torn queue shard coverage again, attempt 2")]
+    check = steps[names.index("Check the queue shard coverage restored again")]
+    assert (
+        names.index(retried["name"])
+        < names.index(again["name"])
+        < names.index(again_retried["name"])
+        < names.index(check["name"])
+        < names.index("Check the coverage database")
+    )
+    assert (first["id"], retried["id"]) == ("restore-queue-shard-coverage", "restore-queue-shard-coverage-attempt-2")
+    assert again["if"] == check["if"] == _UNFINISHED_QUEUE_COVERAGE
+    assert again["continue-on-error"] is True
+    assert again["with"] == again_retried["with"] == first["with"]
+    assert (again["id"], again_retried["id"]) == (
+        "restore-torn-queue-shard-coverage",
+        "restore-torn-queue-shard-coverage-attempt-2",
+    )
+    assert "continue-on-error" not in check
+    assert check["env"] == {
+        "RESTORED": "${{ steps.restore-torn-queue-shard-coverage.outputs.download-path }}"
+        "${{ steps.restore-torn-queue-shard-coverage-attempt-2.outputs.download-path }}"
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-c", check["run"]],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "RESTORED": restored},
+    )
+    assert result.returncode == code
+    assert result.stdout.startswith(said)
 
 
 def test_unit_shards_retry_coverage_upload_without_changing_the_artifact():
