@@ -42,6 +42,16 @@ def test_build_and_parse_round_trip():
     assert naming.lane_of("operator") == ""
 
 
+@pytest.mark.feature("agent-number-past-four-digits")
+def test_an_agent_number_past_four_digits_builds_and_parses() -> None:
+    name = naming.build("engineer", "323133", 10_000)
+    assert name == "engineer@323133-10000"
+    parsed = naming.parse(name)
+    assert parsed is not None
+    assert (parsed.kind, parsed.code, parsed.number, parsed.lane) == ("engineer", "323133", 10_000, "eng")
+    assert naming.PATTERNS["pane"].fullmatch(naming.plain(name))
+
+
 def test_creating_a_swarm_mints_one_code_kept_on_its_record_and_in_the_registry(store):
     code = store.config("sw").code
     assert re.fullmatch(r"[0-9a-f]{6}", code)
