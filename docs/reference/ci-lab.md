@@ -8,8 +8,9 @@ nav_order: 90
 {: .no_toc }
 
 The CI lab runs as two services, the scheduler and the worker. This page lists what each one
-exposes and reads: its entry point, environment, ports, metric names and capacity document. Every name lives in
-`scripts.ci_lab.contract`; the services and the platform tests are to import these constants by
+exposes and reads: its entry point, environment, ports, metric names and capacity document.
+Every name lives in `scripts.ci_lab.contract`; the services and the platform tests are to
+import these constants by
 name, so a rename fails an import instead of dropping a series. The worker's PriorityClass is a
 cluster object outside that module; [Worker scheduling priority](#worker-scheduling-priority)
 covers it.
@@ -162,7 +163,7 @@ its own; a queued hotfix does not add to the pull request wait.
 
 | Pending seconds | Free slots | `frees_in` | Wait | How |
 |---|---|---|---|---|
-| 120, 60 | 0 | 300, 60 | 240 | The slot free at 60 takes all 180 seconds; adding the slot at 300 gives (180 + 360) / 2 = 270, later |
+| 120, 60 | 0 | 300, 60 | 240 | The slot free at 60 takes all 180 seconds; adding the slot at 300 gives (180 + 360) / 2 = 270, a longer wait |
 | 60 | 0 | 300, 100 | 160 | The slot free at 100 alone: 100 + 60 |
 | 600 | 0 | 300, 100 | 500 | Both slots share the work: (600 + 100 + 300) / 2 |
 | 90 | 1 | 30 | 60 | The free slot and the slot free at 30: (90 + 0 + 30) / 2 |
@@ -202,7 +203,7 @@ The capacity document needs no service to check: build a snapshot and print the 
 class.
 
 ```bash
-python -c 'import json; from scripts.ci_lab.capacity import Load, document; print(json.dumps(document(Load({"pull_request": (120.0, 60.0)}, {"queue": 2}, slots_total=2, slots_busy=2, frees_in=(300.0, 60.0)))["classes"]["pull_request"]))'
+python -c 'import json; from scripts.ci_lab.capacity import Load, document; print(json.dumps(document(Load(pending={"pull_request": (120.0, 60.0)}, running={"queue": 2}, slots_total=2, slots_busy=2, frees_in=(300.0, 60.0)))["classes"]["pull_request"]))'
 ```
 
 ```json

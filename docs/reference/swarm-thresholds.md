@@ -133,13 +133,11 @@ A missing reading, or one taken more than ten minutes ago, never holds a claim;
 a failed read keeps the last good reading and its time, so it holds only until
 that reading ages past ten minutes. A lab with every slot
 busy predicts its pull request wait from when its running units free their
-slots, so a full lab holds claims once that wait passes the threshold. Two
-busy slots freeing in 600 and 900 seconds, with 1800 and 1200 seconds of pull
-request work queued, predict 2250 seconds: the urgent hold reads "the lab is 37
-minutes behind on pull request grading". Only a reading with no wait, a full
-pool whose snapshot carries no free times, does not hold.
-[Capacity document](ci-lab.md#capacity-document) gives the rule, examples and
-how each surface shows a wait the lab cannot predict.
+slots, so a full lab holds claims once that wait passes the threshold: 2250
+seconds predicted is 37 whole minutes, and the urgent hold reads "the lab is 37
+minutes behind on pull request grading". Only a `null` wait, a full pool whose
+snapshot carries no free times, never holds.
+[Capacity document](ci-lab.md#capacity-document) gives the rule and examples.
 Set the threshold on the controller, the events hub and the status command
 alike; raising it to silence the finding hides a lab that cannot keep up.
 
