@@ -20,7 +20,7 @@ while true; do
   attempt=$((attempt + 1))
   status=0
   started=$SECONDS
-  timeout --kill-after=5 "$limit" "$@" > "$out" 2> "$err" || status=$?
+  timeout --kill-after=5 "$limit" bash -c '"$@"' bash "$@" > "$out" 2> "$err" || status=$?
   cat "$err" >&2
   cat "$out"
   ((status != 0)) || exit 0
