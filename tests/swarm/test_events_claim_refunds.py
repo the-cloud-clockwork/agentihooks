@@ -389,17 +389,22 @@ def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retire
 
 @pytest.mark.feature("events-retirement-refunds-claim-life")
 @pytest.mark.parametrize(
-    ("lane", "state", "live", "acknowledging", "ended", "watched"),
+    ("lane", "state", "live", "acknowledging", "ended", "judged"),
     [
-        ("eng", "working", True, False, False, True),
-        ("eng", "starting", True, False, False, True),
-        ("master", "working", True, False, False, True),
-        ("eng", "working", False, False, False, False),
-        ("eng", "awaiting-decision", True, False, False, False),
-        ("eng", "retiring", True, False, False, False),
-        ("master", "starting", True, False, False, False),
-        ("eng", "working", True, True, False, False),
-        ("eng", "working", True, False, True, False),
+        ("eng", "working", True, False, False, "watched"),
+        ("eng", "starting", True, False, False, "watched"),
+        ("master", "working", True, False, False, "watched"),
+        ("eng", "working", False, False, False, ""),
+        ("eng", "awaiting-decision", True, False, False, ""),
+        ("eng", "retiring", True, False, False, ""),
+        ("master", "starting", True, False, False, ""),
+        ("eng", "working", True, True, False, ""),
+        ("eng", "working", True, False, True, "stopped"),
+        ("eng", "working", False, False, True, "stopped"),
+        ("eng", "awaiting-decision", True, False, True, ""),
+        ("eng", "retiring", True, False, True, ""),
+        ("master", "starting", True, False, True, ""),
+        ("eng", "working", True, True, True, ""),
     ],
 )
 def test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and_settled(
@@ -409,20 +414,28 @@ def test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and
     live: bool,
     acknowledging: bool,
     ended: bool,
-    watched: bool,
+    judged: str,
 ) -> None:
     tick = agent_steps.tick
     agent = AgentRecord(name="a1", lane=tick.MASTER if lane == "master" else lane, task="t1", state=state)
+    stops: list[tuple[str, str, str]] = []
     monkeypatch.setattr(tick, "_acknowledging", lambda *_args: acknowledging)
     monkeypatch.setattr(tick, "_ended", lambda *_args: ended)
     monkeypatch.setattr(tick, "_watch_agent", lambda *args: [f"watched {args[-2].name}"])
+    monkeypatch.setattr(
+        reconciler,
+        "stop_admitted",
+        lambda slug, stopped, reason: stops.append((slug, stopped.name, reason)) or execution_stop.SENT,
+    )
     judging = SimpleNamespace(
         slug=SLUG, store=None, ledger=None, runtime=None, rows={}, live={"a1"} if live else set(), now_ms=NOW
     )
 
     actions = agent_steps._reap_admitted(cast(Any, judging), agent)
 
-    assert actions == (["watched a1"] if watched else [])
+    expected = {"watched": ["watched a1"], "stopped": [ENDED_STOP.format(name="a1")], "": []}
+    assert actions == expected[judged]
+    assert stops == ([(SLUG, "a1", "ended")] if judged == "stopped" else [])
 
 
 ENDED_STOP = "sent the stop for {name} to its hive: its work ended"
