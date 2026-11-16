@@ -100,7 +100,6 @@ def test_feature_fixture_command_runs_recursively():
 def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
     steps = [step for job in _jobs().values() for step in job.get("steps", [])]
     assert not any("scripts.feature_map" in step.get("run", "") for step in steps)
-    assert any(step.get("run") == "python -m pip install semgrep==1.177.0" for step in steps)
 
 
 def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
@@ -231,8 +230,14 @@ PYTHON_STUB = (
 )
 
 
-def _run_install(tmp_path, installed, pip_gives="1.177.0"):
-    install = next(step for step in _jobs()["charts"]["steps"] if step.get("name") == "Install PyYAML and Semgrep")
+def _run_install(
+    tmp_path: Path,
+    installed: str,
+    pip_gives: str = "1.177.0",
+    job: str = "charts",
+    name: str = "Install PyYAML and Semgrep",
+) -> tuple[int, list[str]]:
+    install = next(step for step in _jobs()[job]["steps"] if step.get("name") == name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "python").write_text(PYTHON_STUB)
@@ -259,6 +264,35 @@ def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_pa
 
 def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path):
     assert _run_install(tmp_path, "", pip_gives="1.176.0") == (1, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+
+
+def test_feature_tests_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path: Path) -> None:
+    assert _run_install(tmp_path, "1.177.0", job="feature-tests", name="Install Semgrep") == (0, [])
+
+
+@pytest.mark.parametrize("installed", ["", "1.176.0"])
+def test_feature_tests_install_the_pinned_semgrep_without_a_matching_runner_copy(
+    tmp_path: Path, installed: str
+) -> None:
+    install = _run_install(tmp_path, installed, job="feature-tests", name="Install Semgrep")
+    assert install == (0, ["-m pip install semgrep==1.177.0"])
+
+
+def test_feature_tests_fail_when_the_install_leaves_another_semgrep(tmp_path: Path) -> None:
+    install = _run_install(tmp_path, "", pip_gives="1.176.0", job="feature-tests", name="Install Semgrep")
+    assert install == (1, ["-m pip install semgrep==1.177.0"])
+
+
+def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None:
+    job = _jobs()["feature-tests"]
+    install = next(step for step in job["steps"] if step.get("name") == "Install Semgrep")
+    assert 0 < install.get("timeout-minutes", job["timeout-minutes"]) < job["timeout-minutes"]
+
+
+def test_feature_tests_install_semgrep_with_the_scan_check_and_pin() -> None:
+    steps = {(job, step.get("name")): step for job, spec in _jobs().items() for step in spec["steps"]}
+    feature, scan = steps["feature-tests", "Install Semgrep"], steps["scan", "Install Semgrep"]
+    assert (feature["run"], feature["env"]) == (scan["run"], scan["env"])
 
 
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
