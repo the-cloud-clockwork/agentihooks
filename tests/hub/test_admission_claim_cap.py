@@ -159,3 +159,17 @@ def test_the_refusal_dates_only_failures_within_the_counted_claims(
     )
     assert rig.rows["t1"]["state"] == "blocked"
     assert all(row in store.launches(SLUG) for row in original)
+
+
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap(rig: Any) -> None:
+    for generation in (0, 2, 4):
+        rig.admitter.admit(SLUG, ask(generation=generation))
+        [agent] = rig.store.agents(SLUG)
+        rig.admitter.free(SLUG, agent)
+    freed = rig.store.redis.llen(rig.store.key(SLUG, "history"))
+    admitted = rig.admitter.admit(SLUG, ask(generation=6))
+    claims.Claims(rig.store).handle(started(admitted))
+    assert (freed, rig.store.claims(SLUG, "t1")) == (3, 1)
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("claimed", admitted["name"])
+    assert gate_rows() == []
