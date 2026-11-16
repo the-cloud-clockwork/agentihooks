@@ -273,6 +273,7 @@ def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus)
     assert delivery.event.key == "a"
 
 
+@pytest.mark.feature("hub-shared-ledger-copy")
 def test_threads_asking_for_one_new_revision_fetch_the_export_once() -> None:
     began, second = threading.Event(), threading.Event()
 
