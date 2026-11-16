@@ -908,15 +908,16 @@
       "id": "hub-admission-late-answer-keeps-claim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
-      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, a hive that stopped waiting receives the same admission when it asks again for the same offer, and the offer's claim generation is not raised.",
-      "seam": "Admission.admit and Admission._answered on the hub",
+      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, and the offer's claim generation is not raised; a hive whose admit ask timed out asks again for the same offer on its next delivery instead of asking the hub to reopen it, and receives the held admission.",
+      "seam": "Admission.admit and Admission._answered on the hub, and Spoke._apply on the hive",
       "rules": [
         "hub-admission-late-answer-releases-claim"
       ],
       "tests": [
         "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive",
         "tests/hub/test_admission.py::test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live_claimant",
-        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept"
+        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept",
+        "tests/hive/test_spoke.py::test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer"
       ]
     },
     {

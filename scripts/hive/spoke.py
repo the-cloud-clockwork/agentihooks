@@ -209,11 +209,12 @@ class Spoke:
             self._clear_pending(pending_revision)
             delivery.nak(self.config.policy.ack_wait_ms)
             return admission.HELD
-        except Exception:
+        except Exception as error:
             current = json.loads(claims.get(key).value)
             if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
                 self._clear_pending(pending_revision)
-                self.tasks.reopen(event)
+                if not isinstance(error, TimeoutError):
+                    self.tasks.reopen(event)
             raise
         if spawned is None:
             self._clear_pending(pending_revision)

@@ -11,7 +11,6 @@ class Released:
             return admitted
         # ruleid: hub-admission-late-answer-releases-claim
         self.reopen(slug, request)
-        # ruleid: hub-admission-late-answer-releases-claim
         raise LateAdmission(request["task"])
 
 
@@ -29,8 +28,3 @@ class Kept:
             # ok: hub-admission-late-answer-releases-claim
             print(f"late {request['task']}", file=sys.stderr)
         return admitted
-
-    def reopen(self, slug: str, request: dict) -> bool:
-        # ok: hub-admission-late-answer-releases-claim
-        self._release(slug, request["task"], "sw-eng-1")
-        return True

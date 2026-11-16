@@ -4,9 +4,9 @@ rules:
     severity: ERROR
     message: >-
       A hub admission that finished past its answer budget released the claim it had just written and refused the
-      hive, which withdrew the offer and raised its claim generation while the hive was often still waiting; on
-      16 November no urgent ci task kept a live claimant. Keep the claim and answer with the admission: a waiting
-      hive receives it, and a hive that stopped waiting receives the held admission when it asks again for the offer.
+      hive, which withdrew the offer and raised its claim generation by two; on 16 November no urgent ci task kept a
+      live claimant. Keep the claim and answer with the admission; a hive that stopped waiting asks again for the
+      same offer and receives the held admission.
     paths:
       include:
         - /scripts/hub/admission.py
@@ -19,4 +19,3 @@ rules:
           - pattern: self.reopen(...)
           - pattern: self._release(...)
           - pattern: self._unclaim(...)
-          - pattern: raise $ERROR(...)

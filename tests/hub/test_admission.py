@@ -662,13 +662,16 @@ def test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live
 
 
 @pytest.mark.feature("hub-admission-late-answer-keeps-claim")
-def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleNamespace) -> None:
+def test_an_admission_finished_just_inside_the_hive_wait_is_kept(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     rig.admitter.clock = late_clock(-1)
 
     name = rig.admitter.admit(SLUG, ask())["name"]
 
     assert rig.store.claimant(SLUG, "t1") == name
     assert rig.rows["t1"]["state"] == "claimed"
+    assert "late:" not in capsys.readouterr().err
 
 
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
