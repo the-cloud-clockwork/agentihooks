@@ -1240,7 +1240,8 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left(
     spec = launch_spec(store, server, tmp_path)
     admitted = hub_admitted(store, spec)
     store.redis.hdel(store.key(SLUG, "agents"), admitted.name)
-    failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id)
     assert store.execution(SLUG, admitted.execution_id).transport == ""
     assert server.commands == []
 
@@ -1256,7 +1257,8 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_befor
     admitted = hub_admitted(store, spec)
     store.execution_registry.set_launch(SLUG, admitted.execution_id, {"state": "finished"})
     monkeypatch.setattr(store.execution_registry, "get", lambda slug, execution_id: admitted)
-    failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id)
     [current] = store.executions(SLUG, SEAT)
     assert (current.execution_id, current.state, current.transport) == (admitted.execution_id, "finished", "")
     assert server.commands == []
