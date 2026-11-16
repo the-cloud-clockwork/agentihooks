@@ -226,11 +226,13 @@ same answer. A plain GitHub enqueue mutation from any swarm session is refused b
 
 | Route | Admits the master when | Journal `route` and `task` |
 |---|---|---|
-| Hotfix window | The operator typed `allow-master-coding` or `troubleshooting mode` in the master pane and has not typed `deny-master-coding` or `disallow-master-coding` since, in the same session | neither field |
+| Hotfix window | The operator typed `allow-master-coding` or troubleshooting mode (`troubleshoot mode` or `troubleshooting mode`, with a space or a dash) in the master pane and has not typed `deny-master-coding` or `disallow-master-coding` since, in the same session | neither field |
 | `spawn stall` | A [spawn stall finding](#spawn-stall-findings) is open, and a task naming the pull request is `urgent`, not done, and inside the open focus or no focus has open work | `spawn stall` and the first such task |
 | `master freeze` | A task naming the pull request is not done, a master seat froze that task by name, and the pull request's head branch starts with `master-` | `master freeze` and the first task a master froze |
 
-A task names a pull request through its `pr_url`, a split half or a pull scope. A route only queues: the master
+A task names a pull request through its `pr_url`, a split half or a pull scope. The hotfix window reads no task and no
+head branch: while it is open the master may queue any pull request into `dev` that passes the queue checks listed
+under [The master freeze route](#the-master-freeze-route). A route only queues: the master
 still claims no task, `issue`, `pr`, `done` and `block` still refuse it, and `merge dequeue` refuses the master on
 every route. `merge state` answers any caller.
 
@@ -248,8 +250,9 @@ lane engineer claims it while the sub agent builds it. The route admits the mast
 3. The pull request's head branch starts with `master-`. GitHub is read for the branch only after the first two hold.
 
 The route reads the ledger's tasks naming the pull request and its `freezes` collection. Every route skips the checks
-a worker passes for its claimed task: the controller authority check, the check that the task names the pull request
-or the worker's own branch opened it, and the queue [intent check](#commands). Every other `queue` check still runs:
+a worker passes for its claimed task: the controller outcome check (`distributed final mutations require the
+controller outcome path`), the check that the task names the pull request or the worker's own branch opened it, and
+the `intent` gate at queue (`set intent-gate`, see [Commands](#commands)). Every other `queue` check still runs:
 the pull request must target `dev`, its required checks must have passed on the current head, a head whose last merge
 group run failed needs a new commit, and a staged pair needs its proof.
 
@@ -264,8 +267,9 @@ agentihooks swarm <id> merge queue <url>
 Below `full` autonomy the master writes a freeze only with `--quote` carrying the operator's recorded words (see
 [Freeze and focus](#freeze-and-focus)). The sub agent opens the pull request from its `master-` branch into `dev`
 between the first two commands. Once the required checks pass, `queue` prints the pull request state as JSON with
-`"queued": true` and appends a journal record carrying `"route": "master freeze"` and `"task": "<task>"`. List the
-master's routed queues on the machine that ran them:
+`"queued": true` and appends a journal record carrying `"route": "master freeze"` and `"task": "<task>"` to
+`merge-queue-events.jsonl` under `$AGENTIHOOKS_HOME` (default `~/.agentihooks`) on the machine that ran the command.
+List the master's routed queues there:
 
 ```bash
 jq -c 'select(.action == "queue" and .route != null) | {at, agent, pull, route, task}' \
