@@ -1153,6 +1153,36 @@ def test_a_gate_condition_off_its_lab_clause_is_red() -> None:
     ]
 
 
+@pytest.mark.parametrize("clauses", [False, True])
+def test_the_canonical_lab_verdict_job_and_lab_clauses_grade_green(clauses: bool) -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    jobs = head["test.yml"]["jobs"]
+    gates = ci_wiring.needs_of(jobs["gate-required"])
+    jobs["lab-verdict"] = gate_protected.lab_verdict_jobs(gates, actors)[1]
+    jobs["gate-required"]["needs"].append("lab-verdict")
+    for gate in sorted(gates - {"reuse"}) if clauses else ():
+        jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
+    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize(
+    ("condition", "rendered"),
+    [
+        (None, "${{ fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}"),
+        (
+            "${{ !cancelled() }}",
+            "${{ !cancelled() && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}",
+        ),
+        (
+            "github.event_name != 'push'",
+            "github.event_name != 'push' && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true",
+        ),
+    ],
+)
+def test_the_lab_clause_extends_the_base_condition(condition: str | None, rendered: str) -> None:
+    assert gate_protected.lab_clause(condition, "lint") == rendered
+
+
 @pytest.mark.parametrize("docs", [False, True])
 @pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
 def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:

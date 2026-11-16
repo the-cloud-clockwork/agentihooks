@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import UTC, date, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -38,6 +38,8 @@ EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".githu
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
+LAB_VERDICT_JOB = "lab-verdict"
+LAB_GRADER_REF = "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}"
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -176,6 +178,90 @@ def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     return []
 
 
+def lab_clause(condition: str | None, gate: str) -> str:
+    """Return the gate condition with the clause that skips the gate in Actions while the lab grades it."""
+    clause = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative)['{gate}'] != true"
+    if condition is None:
+        return f"${{{{ {clause} }}}}"
+    if condition.startswith("${{") and condition.endswith("}}"):
+        return f"{condition.removesuffix('}}').rstrip()} && {clause} }}}}"
+    return f"{condition} && {clause}"
+
+
+def lab_verdict_jobs(gates: frozenset[str] | set[str], policy: object = None) -> list[dict[str, Any]]:
+    """Every rendering of the lab verdict job the protected branch accepts for the aggregator's gates."""
+    outputs = {"authoritative": "${{ steps.verdict.outputs.authoritative }}"} | {
+        f"lab_{gate}": f"${{{{ steps.verdict.outputs.lab_{gate} }}}}" for gate in sorted(gates)
+    }
+    steps = [
+        {
+            "uses": "actions/checkout@v4",
+            "with": {"ref": LAB_GRADER_REF, "path": "lab-grader", "persist-credentials": False},
+        },
+        {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
+        {
+            "name": "Mint the lab check reader App token",
+            "id": "app-token",
+            "if": "github.event_name == 'pull_request'",
+            "uses": "actions/create-github-app-token@v3.2.0",
+            "with": {
+                "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+                "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+                "repositories": "${{ github.event.repository.name }}",
+                "permission-checks": "read",
+            },
+        },
+        {
+            "name": "Read the lab verdict from the protected grader",
+            "id": "verdict",
+            "shell": "bash",
+            "working-directory": "${{ github.workspace }}/lab-grader",
+            "env": {
+                "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+                "EVENT": "${{ github.event_name }}",
+                "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
+                "AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}",
+                "PYTHONNOUSERSITE": "1",
+            },
+            "run": 'python -m pip install "pyyaml>=6.0" "jsonschema>=4"\n'
+            'python -m scripts.ci_lab_verdict --grader . --event "$EVENT" --head "$HEAD" '
+            '--repository "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"\n',
+        },
+    ]
+    return [
+        {
+            "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
+            "needs": ["reuse", "admission"],
+            "runs-on": runner,
+            "timeout-minutes": 30,
+            "permissions": {"contents": "read"},
+            "outputs": outputs,
+            "steps": steps,
+        }
+        for runner in runners(policy)
+    ]
+
+
+def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any], policy: object = None) -> list[str]:
+    """Refuse a lab verdict job off its reviewed rendering and, with the lab form in play, a gate condition off base."""
+    gates = ci_wiring.needs_of(gate) - {LAB_VERDICT_JOB}
+    steps: list[dict[str, Any]] = gate.get("steps") or []
+    problems: list[str] = []
+    if LAB_VERDICT_JOB in head and head[LAB_VERDICT_JOB] not in lab_verdict_jobs(gates, policy):
+        problems.append(
+            "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+        )
+    if LAB_VERDICT_JOB not in head and not any(ci_reuse.LAB_VERDICT in str(step.get("run")) for step in steps):
+        return problems
+    return problems + [
+        f"The head's {need} condition is neither the base condition nor the base condition with its lab clause."
+        for need in sorted(gates)
+        if need in base
+        and need in head
+        and head[need].get("if") not in (base[need].get("if"), lab_clause(base[need].get("if"), need))
+    ]
+
+
 def _duration_problems(base: dict, head: dict) -> list[str]:
     if (
         head["jobs"].get("reuse", {}).get("if")
@@ -286,6 +372,12 @@ def grade(
         retired = retired | {"durations"}
     problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
+    problems += _lab_problems(
+        base_workflows[file]["jobs"],
+        cast("dict[str, Any]", head_jobs),
+        cast("dict[str, Any]", head_gates[0][2]),
+        policy,
+    )
     problems += duration_problems
     config = _protected_config(base_config, head_config)
     summary = head_jobs.get("test-summary")
