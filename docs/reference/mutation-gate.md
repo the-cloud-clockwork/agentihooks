@@ -1271,9 +1271,15 @@ still install `.[dev,all]`.
   [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
 - `pypi-retry.sh` comes from the workflow revision through **Take the helper
   scripts from the workflow revision**. It retries the install only when the
-  output names a package index or network outage, waiting 5 s and doubling to
-  at most 30 s, until `PYPI_RETRY_SECONDS` (default 150) of backoff has passed.
-  Any other failure fails the step at once.
+  output names a package index or network outage, or when an attempt is still
+  running at its time limit, `PYPI_RETRY_ATTEMPT_SECONDS` (default 60 s). Such
+  an attempt gets TERM, then KILL 5 s later, and each one doubles the limit for
+  the next attempt up to four times the first, so a slow download that keeps
+  progressing still finishes. It waits 5 s between attempts, doubling to at
+  most 30 s, and stops retrying once `PYPI_RETRY_SECONDS` (default 150) of that
+  waiting has passed. Time spent inside attempts does not count toward it, so
+  the job time limit bounds the whole step. Any other failure fails the step at
+  once.
 
 ### Adding a planner dependency
 

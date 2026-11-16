@@ -7,6 +7,8 @@ shift 2
 
 outage='^[[:space:]]*(cause|Caused by): .*(HTTP status server error|HTTP status client error \((408|429) |tcp connect error|Connection (refused|reset)|dns error|operation timed out|deadline has elapsed)'
 deadline="${PYPI_RETRY_SECONDS:-150}"
+limit="${PYPI_RETRY_ATTEMPT_SECONDS:-60}"
+cap=$((limit * 4))
 out=$(mktemp)
 err=$(mktemp)
 trap 'rm -f "$out" "$err"' EXIT
@@ -17,11 +19,17 @@ attempt=0
 while true; do
   attempt=$((attempt + 1))
   status=0
-  "$@" > "$out" 2> "$err" || status=$?
+  started=$SECONDS
+  timeout --kill-after=5 "$limit" "$@" > "$out" 2> "$err" || status=$?
   cat "$err" >&2
   cat "$out"
   ((status != 0)) || exit 0
-  reason=$(cat "$out" "$err" | grep -E "$outage" | tail -n1 | sed 's/^[[:space:]]*//' || true)
+  if (((status == 124 || status == 137) && SECONDS - started >= limit)); then
+    reason="did not finish within ${limit}s"
+    limit=$((limit * 2 > cap ? cap : limit * 2))
+  else
+    reason=$(cat "$out" "$err" | grep -E "$outage" | tail -n1 | sed 's/^[[:space:]]*//' || true)
+  fi
   [[ -n "$reason" ]] || exit "$status"
   if ((waited >= deadline)); then
     message="$label failed after $attempt attempts and ${waited}s of backoff: $reason. PyPI or the network did not answer; this is not a code verdict."
