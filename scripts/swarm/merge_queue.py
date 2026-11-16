@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
+from scripts.swarm import github_reads, ledger_events, run_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
 from scripts.tick import pool
 from scripts.tick.adapters.github import GitHubSourceControl
@@ -78,14 +78,14 @@ def graphql(
 
 def rest(path: str, run: Callable[..., Any]) -> Any:
     """Read one REST resource through the adapter's download tool, charged to the reader in force."""
-    if mutation_wait.backing_off():
+    if run_wait.backing_off():
         raise SwarmError(f"GitHub API rate limit backoff holds {path}")
     try:
         with github_reads.calling(github_reads.CALLER.get()):
             return json.loads(_port(run).download(path, deadline=Deadline.after(TIMEOUT)))
     except subprocess.CalledProcessError as exc:
-        if mutation_wait.rate_limited(_failure(exc)):
-            mutation_wait.hold(path)
+        if run_wait.rate_limited(_failure(exc)):
+            run_wait.hold(path)
         raise SwarmError(_failure(exc) or "GitHub API failed") from exc
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         raise SwarmError(f"GitHub API: {exc}") from exc

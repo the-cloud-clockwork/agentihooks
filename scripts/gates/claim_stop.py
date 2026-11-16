@@ -205,7 +205,7 @@ class ClaimStop:
         live = held if held and held["until"] > now else None
         task, pull, owed, checks = self.grade(ledger, who, task, live)
         held_on = (live or {}).get("on", {})
-        run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
+        run_wait = held_on.get("kind") == "checks" and waits.run_wait.RUN_URL.fullmatch(held_on["target"])
         if checks and held_on.get("kind") not in KEPT and not run_wait:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
@@ -232,7 +232,7 @@ class ClaimStop:
             task, pull = {**task, "pr_url": ""}, None
         target = named(live, task.get("pr_url"))
         if target and not (pull is not None and pull.state == "MERGED"):
-            pull = None if waits.mutation_wait.RUN_URL.fullmatch(target) else self.github()(target)
+            pull = None if waits.run_wait.RUN_URL.fullmatch(target) else self.github()(target)
             return {**task, "pr_url": target}, pull, named_ruling(pull), ""
         held = (live or {}).get("on", {})
         dependency = waits.dependency(held, task, dependency_rows(ledger, who.swarm, held), self.github())

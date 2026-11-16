@@ -485,8 +485,8 @@ Every builder except `stack.origin_source_control` uses the current folder as `r
 | Fleet red notice | `open_changes` on each repository with an open task pull request | 60 s | The listing cache keeps the failure for its ten minute window |
 | Ledger host facts | `merged_at` on the newest dev commit of the ledger checkout | 10 s | `None`; the age falls back to the reflog stamp |
 | CI speed sampler | `workflow_runs` on `test.yml` for one event, once per conclusion `success` and `failure`, in parallel | 60 s each | The error propagates to the sampler |
-| Mutation wait | `download` on a run or job endpoint under the caller's reader; `rate_limit` when GitHub answers with a rate limit, to time the backoff | 20 s each | `Unreachable("gh api <endpoint>: <stderr>")`, or `RateLimited` with the hold time on a rate limit |
-| Pull request check views (`ledger_events.view` and the batched checks reader) | `graph` under the readers `swarm.checks.fresh` and `swarm.checks` | 20 s | `None` or an empty answer; a rate limit starts the mutation wait backoff |
+| Run wait | `download` on a run or job endpoint under the caller's reader; `rate_limit` when GitHub answers with a rate limit, to time the backoff | 20 s each | `Unreachable("gh api <endpoint>: <stderr>")`, or `RateLimited` with the hold time on a rate limit |
+| Pull request check views (`ledger_events.view` and the batched checks reader) | `graph` under the readers `swarm.checks.fresh` and `swarm.checks` | 20 s | `None` or an empty answer; a rate limit starts the run wait backoff |
 | `swarm merge queue` and `swarm merge priority` | `graph` for the pull request state and the `enqueuePullRequest`, `dequeuePullRequest` or `mergePullRequest` mutation, `download` for REST reads | 20 s each | `SwarmError` carrying GitHub's message |
 | Panic cancel in the tick | `change` on each `--fix` pull request for its `head_branch`, then per fleet repository `latest_runs` and `cancel_run` on every run in `queued`, `in_progress`, `waiting`, `pending` or `requested` that is neither a `merge_group` run nor on a fix branch | 60 s each | The pass reports `panic cancel failed: <error>` and retries a minute later |
 
