@@ -5446,6 +5446,19 @@
       ]
     },
     {
+      "id": "merge-queue-task-pulls",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-task-prs",
+      "behaviour": "swarm merge queue admits every pull request the claimant's task names, final, split half, stage or prerequisite, and a pull request no task names whose head branch is one of the claimant's worktree branches, reading GitHub only for that case; it refuses another task's pull request and any other branch, and each queue journal record names the claimant's task.",
+      "seam": "swarm merge queue through cli.cmd_merge and done_gate.require_target",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_claimant_queues_two_pull_requests_of_its_task_in_order_and_a_third_party_one_is_refused",
+        "tests/swarm/test_done_gate.py::test_merge_target_accepts_every_declared_pull_and_refuses_other_pulls",
+        "tests/swarm/test_done_gate.py::test_merge_target_admits_an_unnamed_pull_only_on_a_claimant_worktree_branch",
+        "tests/swarm/test_done_gate.py::test_merge_target_reads_no_branch_for_another_tasks_pull_or_without_a_claimant"
+      ]
+    },
+    {
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",

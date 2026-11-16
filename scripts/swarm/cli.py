@@ -2157,13 +2157,14 @@ def _hotfix_master(store, args) -> bool:
     return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
-def _require_target(store: object, args: argparse.Namespace, task_id: str) -> None:
-    """Refuse a final integration this task does not target, reading only its own task and the tasks naming the pull
-    request, never the whole tasks collection."""
+def _require_target(store: object, args: argparse.Namespace, agent: AgentRecord) -> None:
+    """Refuse a final integration the claimant's task does not name and the claimant did not open, reading only its
+    own task and the tasks naming the pull request, never the whole tasks collection."""
     ledger = LedgerClient()
-    own = ledger.task(args.slug, task_id)
+    own = ledger.task(args.slug, agent.task)
     rows: list[dict[str, object]] = [own] if own else []
-    done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
+    targeting = rows + ledger.tasks_targeting(args.slug, args.url)
+    done_gate.require_target(store, args.slug, agent.task, args.url, targeting, agent.name)
 
 
 def cmd_merge(store: Any, args: argparse.Namespace) -> None:
@@ -2181,7 +2182,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
-            _require_target(store, args, agent.task)
+            _require_target(store, args, agent)
         if args.action == "queue":
             result = merge_queue.operate(
                 args.action,
@@ -2189,7 +2190,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 admit=lambda head: (
                     (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
                 ),
-                journal=queue_record.Journal(args.url, context=stalled),
+                journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
             )
         else:
