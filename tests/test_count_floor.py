@@ -1046,6 +1046,20 @@ def test_a_deleted_test_file_whose_imported_module_survives_admits_nothing(tmp_p
     assert "is deleted together with a module it imported" not in result.stdout
 
 
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_a_deleted_unrelated_import_never_excuses_a_different_tests_subject(tmp_path):
+    tests = "from pkg import helper, kept\n\n\ndef test_other():\n    assert kept.other() == 2\n"
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests, "test_c.py": OTHER},
+        {"test_c.py": OTHER},
+        {"base": _package(helper=SUBJECT, kept=KEPT), "head": _package(kept=KEPT)},
+    )
+    assert result.returncode == 1
+    assert "tests/test_mod.py::test_other is in the base and not in the head" in result.stdout
+    assert "is deleted together with a module it imported" not in result.stdout
+
+
 WORKFLOW = "jobs:\n  build:\n    steps:\n      - run: printf retired\n"
 NON_WORKFLOW = "name: notes\n"
 

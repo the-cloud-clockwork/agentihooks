@@ -6866,6 +6866,7 @@
       "tests": [
         "tests/test_count_floor.py::test_a_module_deleted_together_with_its_test_file_passes_the_floor",
         "tests/test_count_floor.py::test_a_deleted_test_file_whose_imported_module_survives_admits_nothing",
+        "tests/test_count_floor.py::test_a_deleted_unrelated_import_never_excuses_a_different_tests_subject",
         "tests/test_count_floor.py::test_a_deleted_workflow_file_explains_only_its_own_lost_test",
         "tests/test_count_floor.py::test_moving_a_workflow_file_keeps_its_lost_test_red"
       ]

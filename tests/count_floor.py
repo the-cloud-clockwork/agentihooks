@@ -639,8 +639,8 @@ def _emptied_test_files(base: Path, head: Path, tests: str) -> set[str]:
         relative = path.relative_to(base)
         if (head / relative).exists():
             continue
-        modules = _imported_modules(path)
-        if any(_project_module_path(base, module) and not _project_module_path(head, module) for module in modules):
+        named = (module for module in _imported_modules(path) if module.rsplit(".", 1)[-1] in path.stem)
+        if any(_project_module_path(base, module) and not _project_module_path(head, module) for module in named):
             emptied.add(relative.as_posix())
     return emptied
 
