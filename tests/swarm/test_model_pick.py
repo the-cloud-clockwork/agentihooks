@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, DecisionResult
-from scripts.swarm import model_pick
+from scripts.init_agent import MODEL_DEFAULTS
+from scripts.swarm import default_models, model_pick
 from scripts.swarm.model_pick import ModelPick
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _launched
@@ -250,6 +251,13 @@ def test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_laun
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a one option band asked the classifier"))
     picked = model_pick.pick("codex", {"model": "claude-opus-5-5", "effort": effort}, {"difficulty": "S"}, {})
     assert picked == expected
+
+
+@pytest.mark.feature("lane-model-harness-compatibility")
+@pytest.mark.parametrize("defaults", [MODEL_DEFAULTS, default_models.DEFAULTS], ids=["launch", "swarm"])
+def test_only_the_claude_default_model_carries_a_claude_prefix(defaults: dict[str, str]) -> None:
+    prefixed = {harness: model.startswith(model_pick.CLAUDE_PREFIXES) for harness, model in defaults.items()}
+    assert prefixed == {"claude": True, "codex": False}
 
 
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):

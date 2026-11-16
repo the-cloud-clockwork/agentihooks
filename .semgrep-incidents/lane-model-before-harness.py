@@ -30,6 +30,16 @@ def resolved_after_the_return(harness: str, lane: dict[str, str], default_model:
     return default
 
 
+def resolved_for_the_claude_harness(harness: str, lane: dict[str, str], default_model: str) -> ModelPick:
+    # ruleid: lane-model-before-harness
+    default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
+    if harness == "claude" and default.model.startswith(CLAUDE_PREFIXES):
+        default = replace(default, model=default_model)
+    if default.effort != AUTO or harness not in EFFORTS:
+        return default
+    return default
+
+
 def resolved_lane(harness: str, lane: dict[str, str], default_model: str) -> ModelPick:
     # ok: lane-model-before-harness
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))

@@ -16,7 +16,7 @@ rules:
       - pattern-not: |
           $DEFAULT = ModelPick(...)
           ...
-          if <... $DEFAULT.model ...>:
+          if <... $HARNESS == "codex" ...>:
               $DEFAULT = replace($DEFAULT, model=$MODEL)
           ...
           if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:

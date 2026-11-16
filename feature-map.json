@@ -7271,7 +7271,8 @@
       "rules": ["lane-model-before-harness"],
       "tests": [
         "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
-        "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model"
+        "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
+        "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
       ]
     }
   ],
