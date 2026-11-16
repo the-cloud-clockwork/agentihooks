@@ -680,7 +680,7 @@ jobs:
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         id: download-the-dev-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &select-download-the-dev-durations
           name: durations-merged
           path: ~/dev-durations
@@ -697,14 +697,14 @@ jobs:
 
       - name: Download the dev durations, attempt 2
         if: steps.download-the-dev-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *select-download-the-dev-durations
 
       - name: Download the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
         id: download-the-dispatched-bases-coverage-baseline
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &select-download-the-dispatched-bases-coverage-baseline
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -721,7 +721,7 @@ jobs:
 
       - name: Download the dispatched base's coverage baseline, attempt 2
         if: steps.download-the-dispatched-bases-coverage-baseline.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *select-download-the-dispatched-bases-coverage-baseline
 
       - name: Check out the upload action for artifact republishing
@@ -1377,7 +1377,7 @@ jobs:
         if: needs.select.outputs.source != ''
         id: restore-the-queue-split-inputs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &split-restore-the-queue-split-inputs
           name: split-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
@@ -1392,14 +1392,14 @@ jobs:
 
       - name: Restore the queue split inputs, attempt 2
         if: steps.restore-the-queue-split-inputs.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *split-restore-the-queue-split-inputs
 
       - name: Restore the queue collected tests
         if: needs.select.outputs.source != ''
         id: restore-the-queue-collected-tests
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &split-restore-the-queue-collected-tests
           name: collected-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
@@ -1414,7 +1414,7 @@ jobs:
 
       - name: Restore the queue collected tests, attempt 2
         if: steps.restore-the-queue-collected-tests.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *split-restore-the-queue-collected-tests
 
       - name: Upload the chosen durations
@@ -1570,7 +1570,7 @@ jobs:
         if: *reused-coverage
         id: download-this-shards-dev-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-download-this-shards-dev-coverage
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.run }}
@@ -1586,7 +1586,7 @@ jobs:
 
       - name: Download this shard's dev coverage, attempt 2
         if: steps.download-this-shards-dev-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-download-this-shards-dev-coverage
 
       # Sonar and the ratchet grade the whole suite, so the reused tests carry their dev coverage and page captures.
@@ -1657,7 +1657,7 @@ jobs:
         if: needs.split.outputs.source != ''
         id: restore-queue-shard-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-restore-queue-shard-durations
           name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1673,14 +1673,14 @@ jobs:
       - name: Restore queue shard durations, attempt 2
         if: steps.restore-queue-shard-durations.outcome == 'failure'
         id: restore-queue-shard-durations-attempt-2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-durations
 
       - name: Restore torn queue shard durations again
         if: &unfinished-queue-durations needs.split.outputs.source != '' && steps.restore-queue-shard-durations.outputs.download-path == '' && steps.restore-queue-shard-durations-attempt-2.outputs.download-path == ''
         id: restore-torn-queue-shard-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-durations
 
       - name: Restore torn queue shard durations again, wait before attempt 2
@@ -1693,7 +1693,7 @@ jobs:
       - name: Restore torn queue shard durations again, attempt 2
         if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
         id: restore-torn-queue-shard-durations-attempt-2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-durations
 
       - name: Check the queue shard durations restored again
@@ -1711,7 +1711,7 @@ jobs:
         if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
         id: restore-queue-shard-flakes
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-restore-queue-shard-flakes
           name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1727,14 +1727,14 @@ jobs:
       - name: Restore queue shard flakes, attempt 2
         if: steps.restore-queue-shard-flakes.outcome == 'failure'
         id: restore-queue-shard-flakes-attempt-2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-flakes
 
       - name: Restore torn queue shard flakes again
         if: &unfinished-queue-flakes needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard && steps.restore-queue-shard-flakes.outputs.download-path == '' && steps.restore-queue-shard-flakes-attempt-2.outputs.download-path == ''
         id: restore-torn-queue-shard-flakes
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-flakes
 
       - name: Restore torn queue shard flakes again, wait before attempt 2
@@ -1747,7 +1747,7 @@ jobs:
       - name: Restore torn queue shard flakes again, attempt 2
         if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
         id: restore-torn-queue-shard-flakes-attempt-2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-flakes
 
       - name: Check the queue shard flakes restored again
@@ -1765,7 +1765,7 @@ jobs:
         if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
         id: restore-queue-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-restore-queue-shard-coverage
           name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1781,14 +1781,14 @@ jobs:
       - name: Restore queue shard coverage, attempt 2
         if: steps.restore-queue-shard-coverage.outcome == 'failure'
         id: restore-queue-shard-coverage-attempt-2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-coverage
 
       - name: Restore torn queue shard coverage again
         if: &unfinished-queue-coverage needs.split.outputs.source != '' && matrix.python-version == '3.12' && steps.restore-queue-shard-coverage.outputs.download-path == '' && steps.restore-queue-shard-coverage-attempt-2.outputs.download-path == ''
         id: restore-torn-queue-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-coverage
 
       - name: Restore torn queue shard coverage again, wait before attempt 2
@@ -1801,7 +1801,7 @@ jobs:
       - name: Restore torn queue shard coverage again, attempt 2
         if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
         id: restore-torn-queue-shard-coverage-attempt-2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-coverage
 
       - name: Check the queue shard coverage restored again
@@ -2034,7 +2034,7 @@ jobs:
       - name: Download the selected legs
         id: download-the-selected-legs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-selected-download-the-selected-legs
           name: selection
           path: ${{ runner.temp }}/selection
@@ -2048,7 +2048,7 @@ jobs:
 
       - name: Download the selected legs, attempt 2
         if: steps.download-the-selected-legs.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-selected-download-the-selected-legs
 
       - name: Read this leg's test paths
@@ -2333,7 +2333,7 @@ jobs:
       - name: Download shard reports
         id: shard-reports
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &shard-check-download-shard-reports
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
           path: shard-reports
@@ -2347,7 +2347,7 @@ jobs:
 
       - name: Download shard reports, attempt 2
         if: steps.shard-reports.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *shard-check-download-shard-reports
 
       - name: Require every planned shard report
@@ -2369,7 +2369,7 @@ jobs:
         id: branch-plan
         if: needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &shard-check-download-the-pull-request-runs-test-plan
           name: reused-branch-${{ matrix.python-version }}
           path: branch-plan
@@ -2383,7 +2383,7 @@ jobs:
 
       - name: Download the pull request runs' test plan, attempt 2
         if: steps.branch-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *shard-check-download-the-pull-request-runs-test-plan
 
       - name: Check every collected test ran in exactly one shard
@@ -2466,7 +2466,7 @@ jobs:
         if: needs.select.outputs.scope != 'none'
         id: download-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &sonar-download-shard-coverage
           pattern: ${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}
           path: .coverage-shards
@@ -2480,7 +2480,7 @@ jobs:
 
       - name: Download shard coverage, attempt 2
         if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *sonar-download-shard-coverage
 
       - name: Take each selected leg's latest branch coverage
@@ -2516,7 +2516,7 @@ jobs:
         id: download-the-pull-request-runs-test-plan
         if: *branch-carry
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &sonar-download-the-pull-request-runs-test-plan
           pattern: "{reused-branch,reused}-3.12"
           path: ${{ runner.temp }}/branch-plan
@@ -2530,7 +2530,7 @@ jobs:
 
       - name: Download the pull request runs' test plan, attempt 2
         if: steps.download-the-pull-request-runs-test-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *sonar-download-the-pull-request-runs-test-plan
 
       # The protected base's code filters the earlier runs' coverage, so a change cannot move it onto its own lines.
@@ -2787,7 +2787,7 @@ jobs:
       - name: Download shard coverage
         id: download-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &dep-manifest-download-shard-coverage
           pattern: coverage-3.12-*
           path: .coverage-shards
@@ -2801,7 +2801,7 @@ jobs:
 
       - name: Download shard coverage, attempt 2
         if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *dep-manifest-download-shard-coverage
 
       - name: Check the shard coverage downloads
@@ -2817,7 +2817,7 @@ jobs:
         id: redownload-shard-coverage
         if: steps.check-shard-coverage.outcome == 'failure'
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *dep-manifest-download-shard-coverage
 
       - name: Download torn shard coverage again, wait before attempt 2
@@ -2829,7 +2829,7 @@ jobs:
 
       - name: Download torn shard coverage again, attempt 2
         if: steps.redownload-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *dep-manifest-download-shard-coverage
 
       - name: Check the shard coverage downloaded again
@@ -3526,7 +3526,7 @@ jobs:
         if: steps.base-run.outcome == 'success'
         id: download-the-base-baseline-its-run-published
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-the-base-baseline-its-run-published
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -3543,14 +3543,14 @@ jobs:
 
       - name: Download the base baseline its run published, attempt 2
         if: steps.download-the-base-baseline-its-run-published.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-the-base-baseline-its-run-published
 
       - name: Download the queue base coverage baseline
         if: github.event_name == 'workflow_dispatch'
         id: download-the-queue-base-coverage-baseline
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-the-queue-base-coverage-baseline
           name: queue-coverage-baseline
           path: ~/coverage-baseline
@@ -3564,7 +3564,7 @@ jobs:
 
       - name: Download the queue base coverage baseline, attempt 2
         if: steps.download-the-queue-base-coverage-baseline.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-the-queue-base-coverage-baseline
 
       - name: Check out the base grader
@@ -3587,7 +3587,7 @@ jobs:
         if: steps.grader.outputs.input == '--head-summaries'
         id: download-the-executed-lines-summaries
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-the-executed-lines-summaries
           pattern: executed-lines-3.12-*
           path: head-coverage
@@ -3601,14 +3601,14 @@ jobs:
 
       - name: Download the executed lines summaries, attempt 2
         if: steps.download-the-executed-lines-summaries.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-the-executed-lines-summaries
 
       - name: Download shard coverage
         if: steps.grader.outputs.input == '--head-shards'
         id: download-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-shard-coverage
           pattern: coverage-3.12-*
           path: head-coverage
@@ -3622,7 +3622,7 @@ jobs:
 
       - name: Download shard coverage, attempt 2
         if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-shard-coverage
 
       - name: Hold every line the base ran
@@ -3806,7 +3806,7 @@ jobs:
         if: ${{ always() }}
         id: download-this-runs-test-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &test-summary-download-this-runs-test-durations
           pattern: durations-3.*
           path: test-reports
@@ -3820,14 +3820,14 @@ jobs:
 
       - name: Download this run's test durations, attempt 2
         if: steps.download-this-runs-test-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *test-summary-download-this-runs-test-durations
 
       - name: Download this run's test flakes
         if: ${{ always() }}
         id: download-this-runs-test-flakes
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &test-summary-download-this-runs-test-flakes
           pattern: flakes-3.*
           path: test-reports
@@ -3841,7 +3841,7 @@ jobs:
 
       - name: Download this run's test flakes, attempt 2
         if: steps.download-this-runs-test-flakes.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *test-summary-download-this-runs-test-flakes
 
       - name: Summarize this run's tests
@@ -3885,7 +3885,7 @@ jobs:
       - name: Download this run's shard durations
         id: download-this-runs-shard-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &refresh-durations-download-this-runs-shard-durations
           pattern: durations-3.*
           path: ~/durations-samples/${{ github.run_id }}
@@ -3899,7 +3899,7 @@ jobs:
 
       - name: Download this run's shard durations, attempt 2
         if: steps.download-this-runs-shard-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *refresh-durations-download-this-runs-shard-durations
 
       - name: Refresh measured durations
@@ -4023,7 +4023,7 @@ jobs:
       - name: Download this run's flake reports
         id: download-this-runs-flake-reports
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &flake-budget-download-this-runs-flake-reports
           pattern: flakes-3.*
           path: ~/flake-reports
@@ -4037,7 +4037,7 @@ jobs:
 
       - name: Download this run's flake reports, attempt 2
         if: steps.download-this-runs-flake-reports.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *flake-budget-download-this-runs-flake-reports
 
       - name: Count flaky tests over seven days
@@ -4097,7 +4097,7 @@ jobs:
       - name: Download this run's measured coverage
         id: download-this-runs-measured-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-baseline-download-this-runs-measured-coverage
           pattern: coverage-3.12-*
           path: baseline-coverage
@@ -4111,7 +4111,7 @@ jobs:
 
       - name: Download this run's measured coverage, attempt 2
         if: steps.download-this-runs-measured-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-baseline-download-this-runs-measured-coverage
 
       - name: Compute the coverage baseline
@@ -4380,7 +4380,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         id: download-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-stats-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -4393,7 +4393,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-stats-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -4587,7 +4587,7 @@ jobs:
         if: needs.mutation-plan.outputs.selection == 'true'
         id: download-refine-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-refine-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -4600,14 +4600,14 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-refine-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-refine-download-planned-mutation-test-selection
 
       - name: Download the shared mutation stats
         timeout-minutes: 1
         id: download-refine-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-refine-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -4623,7 +4623,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-refine-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -4703,7 +4703,7 @@ jobs:
         if: needs.mutation-plan.outputs.selection == 'true'
         id: download-probe-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-probe-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -4716,7 +4716,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-probe-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-probe-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -4739,7 +4739,7 @@ jobs:
         timeout-minutes: 1
         id: download-probe-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-probe-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -4755,7 +4755,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-probe-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -4770,7 +4770,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-probe-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-probe-download-the-measured-mutation-plan
           name: mutation-measured-plan
           path: .mutation-stats
@@ -4784,7 +4784,7 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-probe-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-probe-download-the-measured-mutation-plan
 
       - name: Run each mutant's early tests once for every shard
@@ -4856,7 +4856,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-replan-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-replan-download-the-measured-mutation-plan
           name: mutation-measured-plan
           path: .mutation-stats
@@ -4870,13 +4870,13 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-replan-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-replan-download-the-measured-mutation-plan
 
       - name: Download the early mutation results
         id: download-replan-early-mutation-results
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-replan-download-the-early-mutation-results
           pattern: mutation-probe-*
           path: .mutation-stats
@@ -4891,7 +4891,7 @@ jobs:
 
       - name: Download the early mutation results, attempt 2
         if: steps.download-replan-early-mutation-results.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-replan-download-the-early-mutation-results
 
       - name: Size the shards from the mutants the early tests left
@@ -4944,7 +4944,7 @@ jobs:
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
         id: download-every-parts-test-stats-cache
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-every-parts-test-stats-cache
           pattern: mutation-test-stats-cache-*
           path: .mutation-stats-cache
@@ -4959,7 +4959,7 @@ jobs:
 
       - name: Download every part's test stats cache, attempt 2
         if: steps.download-every-parts-test-stats-cache.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-every-parts-test-stats-cache
 
       - uses: actions/setup-python@v5
@@ -5016,7 +5016,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         id: download-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -5029,7 +5029,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -5072,7 +5072,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -5088,7 +5088,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Check every mutation stats producer's part arrived
@@ -5103,7 +5103,7 @@ jobs:
         if: steps.stats-arrival.outputs.missing != ''
         id: download-the-missing-mutation-stats-parts
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Download the missing mutation stats parts, wait before attempt 2
@@ -5116,7 +5116,7 @@ jobs:
       - name: Download the missing mutation stats parts, attempt 2
         timeout-minutes: 1
         if: steps.download-the-missing-mutation-stats-parts.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Fail on a mutation stats producer whose part never arrived
@@ -5139,7 +5139,7 @@ jobs:
         if: needs.mutation-refine.result == 'success'
         id: download-the-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-measured-mutation-plan
           name: mutation-measured-plan
           path: .mutation-stats
@@ -5153,14 +5153,14 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-the-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-measured-mutation-plan
 
       - name: Download the probed mutation plan
         if: needs.mutation-replan.result == 'success'
         id: download-the-probed-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-probed-mutation-plan
           name: mutation-plan-probed
           path: .mutation-stats
@@ -5174,7 +5174,7 @@ jobs:
 
       - name: Download the probed mutation plan, attempt 2
         if: steps.download-the-probed-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-probed-mutation-plan
 
       # The protected copy grades the shard's rows, so a pull request cannot loosen how its own survivors grade.
@@ -5272,7 +5272,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-every-mutation-shard-report
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-every-mutation-shard-report
           pattern: mutation-report-*
           path: .mutation-shards
@@ -5287,7 +5287,7 @@ jobs:
 
       - name: Download every mutation shard report, attempt 2
         if: steps.download-every-mutation-shard-report.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-every-mutation-shard-report
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -5304,7 +5304,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-tests-that-killed-mutants
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-tests-that-killed-mutants
           pattern: mutation-killers-*
           path: .mutation-stats/killers
@@ -5319,7 +5319,7 @@ jobs:
 
       - name: Download the tests that killed mutants, attempt 2
         if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-tests-that-killed-mutants
 
       - name: Keep the tests that killed mutants for this branch's next plan
