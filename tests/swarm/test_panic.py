@@ -1240,6 +1240,8 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
         ("push.default", "simple", "git push", False),
         ("branch.fix-branch.remote", "origin", "git push", False),
         ("remote.pushDefault", "origin", "git push origin HEAD", False),
+        ("push.followTags", "true", "git push origin fix-branch", True),
+        ("push.followTags", "false", "git push origin fix-branch", False),
     ],
 )
 @pytest.mark.feature("panic-fix-spare-reads-target")
@@ -1476,21 +1478,21 @@ def _reads(monkeypatch: pytest.MonkeyPatch, answers: dict[tuple[str, ...], str])
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_no_directory_or_no_fix_reads_no_git(monkeypatch: pytest.MonkeyPatch, cwd: str, fixes: tuple[str, ...]) -> None:
     asked = _reads(monkeypatch, {})
-    assert blocker_window._on_fix_branch(cwd, fixes) is False
+    assert blocker_window._on_fix_branch(cwd, fixes, ()) is False
     assert asked == []
 
 
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_a_detached_checkout_reads_no_origin_and_stays_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = _reads(monkeypatch, {("branch", "--show-current"): ""})
-    assert blocker_window._on_fix_branch("/work", (FIX,)) is False
+    assert blocker_window._on_fix_branch("/work", (FIX,), ()) is False
     assert asked == [("branch", "--show-current")]
 
 
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_a_checkout_without_an_origin_stays_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = _reads(monkeypatch, {("branch", "--show-current"): "fix-branch", ("remote", "get-url", "origin"): ""})
-    assert blocker_window._on_fix_branch("/work", (FIX,)) is False
+    assert blocker_window._on_fix_branch("/work", (FIX,), ()) is False
     assert asked == [("branch", "--show-current"), ("remote", "get-url", "origin")]
 
 

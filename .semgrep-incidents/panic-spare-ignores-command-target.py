@@ -26,6 +26,13 @@ def _spared(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
     return _on_fix_branch(here, fixes, targets) and not (words[:2] == ["git", "push"] and _routed(here))
 
 
+def _spared_without_targets(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
+    words, options = _command(tokens)
+    here = _directory(cwd, [value for _, value in options])
+    # ruleid: panic-spare-ignores-command-target
+    return _on_fix_branch(here, fixes, ()) and not (words[:2] == ["git", "push"] and _routed(here))
+
+
 def _freezes(tokens: list[str]) -> bool:
     # ok: panic-spare-ignores-command-target
     words = _command(tokens)[0]

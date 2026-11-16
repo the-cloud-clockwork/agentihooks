@@ -51,6 +51,7 @@ _ROUTED = re.compile(
     r"|(remote\.pushdefault|branch\..+\.(remote|pushremote))=(?!origin$).*"
     r"|push\.default=(?!simple$|current$).*"
     r"|url\..+\.pushinsteadof=.*"
+    r"|push\.followtags(?!=(false|no|off|0)$).*"
 )
 
 
@@ -268,8 +269,8 @@ def _destinations(refspecs: list[str]) -> tuple[str, ...]:
 
 def _routed(cwd: str) -> bool:
     """Return whether git config may send a push from the checkout to another remote or ref: a push refspec, push url
-    or mirror on origin, a push url rewrite, a push or tracking remote other than origin, or a push default other than
-    simple or current; a config that cannot be read counts as routed."""
+    or mirror on origin, a push url rewrite, tag following, a push or tracking remote other than origin, or a push
+    default other than simple or current; a config that cannot be read counts as routed."""
     lines = _git(cwd, "config", "--list").splitlines()
     return not lines or any(_ROUTED.fullmatch(line) for line in lines)
 
@@ -294,7 +295,7 @@ def _fix_branch(url: str) -> str:
         return ""
 
 
-def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...] = ()) -> bool:
+def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -> bool:
     """Return whether the session works in the repository and on the branch of a registered fix, a fix branch link
     naming both or a fix pull request whose head branch it is, and every ref the command names is that branch."""
     from scripts.swarm import panic
