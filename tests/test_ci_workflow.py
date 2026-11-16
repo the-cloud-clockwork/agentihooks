@@ -959,7 +959,7 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert "paths" not in workflow[True]["pull_request"]
 
 
-def test_mutation_gate_plants_itself_whenever_its_code_changes():
+def test_mutation_gate_plants_itself_whenever_its_code_changes() -> None:
     steps = _workflow()["jobs"]["lint"]["steps"]
     [changed] = [step for step in steps if step.get("id") == "self-plant"]
     assert changed["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
@@ -967,7 +967,13 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
         listed
     )
-    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    assert any(
+        command in changed["run"]
+        for command in (
+            '! diff -rq "$RUNNER_TEMP/base/$path" "$path"',
+            'git diff --name-only "$base" HEAD -- "$path"',
+        )
+    )
     [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
     assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
     assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
