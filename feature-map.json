@@ -2350,6 +2350,7 @@
         "tests/swarm/test_lab_wait.py::test_a_lab_check_still_running_holds_the_wait",
         "tests/swarm/test_lab_wait.py::test_an_unreachable_github_holds_the_lab_wait",
         "tests/swarm/test_lab_wait.py::test_a_missing_check_run_ends_the_lab_wait_with_that_reason",
+        "tests/swarm/test_lab_wait.py::test_a_stored_lab_wait_on_a_bad_target_ends_without_reading_github",
         "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_green_lab_wait_with_the_inbox_notice",
         "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_red_lab_wait_naming_the_gate_and_conclusion"
       ]

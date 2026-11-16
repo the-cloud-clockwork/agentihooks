@@ -155,6 +155,7 @@ def test_a_missing_check_run_ends_the_lab_wait_with_that_reason(tick: Any, githu
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
 
 
+@pytest.mark.feature("swarm-lab-wait")
 def test_a_stored_lab_wait_on_a_bad_target_ends_without_reading_github(
     tick: Any,  # noqa: F811
     github: dict[str, Any],
