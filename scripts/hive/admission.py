@@ -71,6 +71,10 @@ class Held(RuntimeError):
     """The hub kept an offer pending because the asking hive is at its max agents; another hive may take it."""
 
 
+class Unanswered(TimeoutError):
+    """The hub did not answer an admit ask inside the hive's wait; it may hold an admission the next ask receives."""
+
+
 def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
     cpus, load5 = measured["cpus"], measured["load5"]
     held = _held(pending)

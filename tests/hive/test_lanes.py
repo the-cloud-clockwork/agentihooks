@@ -97,6 +97,20 @@ def test_an_offer_the_hub_holds_at_max_agents_raises_held_and_spawns_nothing(hub
     configs.assert_not_called()
 
 
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing() -> None:
+    from scripts.hive import admission
+
+    bus = open_bus(BusConfig(scoped=True))
+    configs = Mock()
+    try:
+        with pytest.raises(admission.Unanswered, match="^no responders for 'slots.rig.hive-a'$"):
+            lanes.LaneTasks(bus, "hive-a", configs).request(offer())
+    finally:
+        bus.close()
+    configs.assert_not_called()
+
+
 def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(lane="plan"))
     assert hub.hub.seen == [

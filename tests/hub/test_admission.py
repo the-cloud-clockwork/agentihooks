@@ -440,17 +440,16 @@ def test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was(rig: SimpleNam
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
-def test_a_late_events_admission_hands_its_transfer_back(rig: SimpleNamespace) -> None:
+def test_a_late_events_admission_keeps_its_transfer_with_the_admitted_successor(rig: SimpleNamespace) -> None:
     from scripts.handoff import transfers
 
     transfer = left_transfer(rig)
     rig.admitter.clock = late_clock(5)
 
-    with pytest.raises(admission.LateAdmission):
-        rig.admitter.admit(SLUG, ask())
+    name = rig.admitter.admit(SLUG, ask())["name"]
 
-    assert transfers.get(rig.store, SLUG, transfer["id"])["successor"] == ""
-    assert rig.store.claimant(SLUG, "t1") is None
+    assert transfers.get(rig.store, SLUG, transfer["id"])["successor"] == name
+    assert rig.store.claimant(SLUG, "t1") == name
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
@@ -622,27 +621,57 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
     assert rig.admitter.reopen(SLUG, ask()) is False
 
 
-@pytest.mark.feature("events-failed-launch-releases-admission")
-def test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     rig.admitter.clock = late_clock(0)
 
-    with pytest.raises(admission.LateAdmission, match="t1"):
-        rig.admitter.admit(SLUG, ask())
+    admitted = rig.admitter.admit(SLUG, ask())
 
-    assert rig.store.claimant(SLUG, "t1") is None
-    assert rig.store.agents(SLUG) == []
-    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
-    assert rig.store.redis.get(rig.admitter._key(SLUG, ask())) is None
+    assert f"late: finished after {admission.ANSWER_MS} ms" in capsys.readouterr().err
+
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [admitted["name"]]
+    row = rig.rows["t1"]
+    assert (row["state"], row["claimed_by"], row["claim_generation"]) == ("claimed", admitted["name"], 1)
+    assert rig.admitter.admit(SLUG, ask()) == admitted
+    assert len(rig.ledger.writes) == 1
 
 
-@pytest.mark.feature("events-failed-launch-releases-admission")
-def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live_claimant(
+    rig: SimpleNamespace,
+) -> None:
+    now = [7_000]
+    rig.admitter.clock = lambda: now[0]
+    write = rig.ledger.update_task
+
+    def slow(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        now[0] += 8_000
+        written: dict[str, Any] = write(*args, **kwargs)
+        return written
+
+    rig.ledger.update_task = slow
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["name"] in rig.store.listed(SLUG)
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert rig.rows["t1"]["claimed_by"] == admitted["name"]
+
+
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admission_finished_just_inside_the_hive_wait_is_kept(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     rig.admitter.clock = late_clock(-1)
 
     name = rig.admitter.admit(SLUG, ask())["name"]
 
     assert rig.store.claimant(SLUG, "t1") == name
     assert rig.rows["t1"]["state"] == "claimed"
+    assert "late:" not in capsys.readouterr().err
 
 
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
@@ -686,12 +715,11 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
 ) -> None:
     rig.admitter.clock = late_clock(5)
 
-    with pytest.raises(admission.LateAdmission):
-        rig.admitter.admit(SLUG, ask())
+    rig.admitter.admit(SLUG, ask())
 
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms release={admission.ANSWER_MS + 5} held=0 stopped=0 "
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release={admission.ANSWER_MS + 5} held=0 stopped=0 "
         f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
     ]
 
@@ -738,12 +766,11 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     monkeypatch.setattr(rig.store, "start_execution", bump(1200, rig.store.start_execution))
     monkeypatch.setattr(rig.ledger, "update_task", bump(1300, rig.ledger.update_task))
 
-    with pytest.raises(admission.LateAdmission):
-        rig.admitter.admit(SLUG, ask())
+    rig.admitter.admit(SLUG, ask())
 
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 9100 ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms release=100 held=200 stopped=300 snapshot=400 "
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=100 held=200 stopped=300 snapshot=400 "
         f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 ledger=1300"
     ]
 
