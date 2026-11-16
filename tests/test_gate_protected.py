@@ -1129,7 +1129,7 @@ def test_a_forged_lab_verdict_job_is_red() -> None:
     for gate in ci_wiring.needs_of(jobs["gate-required"]) - gate_protected.LAB_UPSTREAM:
         jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
     jobs["gate-required"]["needs"].append("lab-verdict")
-    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
         "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
     ]
 
@@ -1138,7 +1138,7 @@ def test_a_gate_condition_off_its_lab_clause_is_red() -> None:
     workflows, head, config, actors = _repository_lab_form()
     lint = head["test.yml"]["jobs"]["lint"]
     lint["if"] = lint["if"].removesuffix(" }}") + " && false }}"
-    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == [
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
         "The head's lint condition differs from the reviewed lab rendering of its base condition."
     ]
 
@@ -1152,7 +1152,7 @@ def test_the_canonical_lab_verdict_job_requires_every_lab_clause(clauses: bool) 
     jobs["gate-required"]["needs"].append("lab-verdict")
     for gate in gates if clauses else ():
         jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
-    assert gate_protected.grade(workflows, config, head, config, _TODAY, actors) == (
+    assert gate_protected.grade(workflows, config, head, config, actors) == (
         []
         if clauses
         else [
