@@ -2311,6 +2311,44 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     )
 
 
+_COLLECTED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and (."mutation-plan".outputs.forwarded == "true" or ."mutation-plan".outputs.collected == "true") and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
+
+def _with_collected_stats(run: str) -> str:
+    assert run.startswith(_SELECTION_DIAGNOSTIC)
+    return _SELECTION_DIAGNOSTIC + _COLLECTED_STATS + _without_forwarded_stats(run).removeprefix(_COLLECTED_STATS)
+
+
+def test_the_required_gate_accepts_a_stats_skip_when_the_plan_collected() -> None:
+    base = ci_wiring.load(_ROOT)
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_collected_stats(step["run"])
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, actors) == []
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (' or ."mutation-plan".outputs.collected == "true"', ' or ."mutation-plan".outputs.collected != "false"'),
+        ('."mutation-plan".outputs.collected == "true"', '."mutation-shard".result == "skipped"'),
+        ('."mutation-plan".result == "success" and ', ""),
+        ('."mutation-stats".result == "skipped"', '."mutation-stats".result != "success"'),
+    ],
+)
+def test_a_weakened_collected_statistics_form_is_red(before: str, after: str) -> None:
+    base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_collected_stats(step["run"]).replace(before, after, 1)
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
 @pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC], ids=["bare", "after_selection_diagnostic"])
 def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(prefix):
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())

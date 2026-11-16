@@ -128,24 +128,6 @@ def without_path_filters(workflow: dict[Any, Any]) -> dict[Any, Any]:
     return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
 
 
-def per_run_mutation_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
-    stages = {"stats": ("stats", "part"), "mutation-shard": ("shard", "shard")}
-    baseline = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
-    if trusted.get("name") != "Mutation preflight" or name not in stages or not isinstance(baseline, dict):
-        return False
-    if job.get("runs-on") != cast(dict[Any, Any], baseline).get("runs-on"):
-        return False
-    stage, index = stages[name]
-    group = f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
-    superseded = {
-        "group": f"${{{{ format('{{0}}-{stage}-{{1}}', github.workflow == 'Mutation preflight' && "
-        f"{LANE.replace('hosted-lane-', 'mutation-lane-')} || format('mutation-preflight-job-{{0}}', github.run_id), "
-        f"matrix.{index}) }}}}",
-        "queue": "${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}",
-    }
-    return block in ({"group": group}, superseded)
-
-
 def dedicated_chart_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
     return (
         trusted.get("name") == "Helm chart release"
@@ -234,8 +216,6 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         base_job = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name, cast(dict[Any, Any], {}))
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
         if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
-            continue
-        if per_run_mutation_group(name, block, job, trusted):
             continue
         if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate
             continue

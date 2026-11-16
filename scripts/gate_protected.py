@@ -117,6 +117,7 @@ def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> l
             (list, list),
             (ci_reuse.selection_diagnostic, list),
             (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+            (ci_reuse.selection_diagnostic, ci_reuse.collected_stats),
         )
         for form in (
             {},

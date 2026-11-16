@@ -11,13 +11,6 @@ on:
         description: Window length in hours
         required: false
         default: "24"
-      stats_prs:
-        description: Measure mutation stats across this many merged pull requests instead
-        required: false
-        default: "0"
-      since:
-        description: Only include pull requests merged after this UTC timestamp
-        required: false
       merge_path:
         description: Count the merge path and class each head Tests run by the push before it instead
         required: false
@@ -78,20 +71,12 @@ jobs:
           HOURS: ${{ inputs.hours || '24' }}
         run: python -m scripts.swarm.merge_path --hours "$HOURS" ${UNTIL:+--until "$UNTIL"} --out ci-minutes.json
       - name: Measure runner minutes per merged pull request
-        if: inputs.merge_path != 'true' && (inputs.stats_prs == '0' || inputs.stats_prs == '')
+        if: inputs.merge_path != 'true'
         env:
           GH_TOKEN: ${{ inputs.job_token == 'true' && github.token || steps.app-token.outputs.token }}
           UNTIL: ${{ inputs.until }}
           HOURS: ${{ inputs.hours || '24' }}
         run: python -m scripts.ci_minutes --repo "$GITHUB_REPOSITORY" --hours "$HOURS" ${UNTIL:+--until "$UNTIL"} --cache ci-minutes-jobs.json
-      - name: Measure mutation stats per merged pull request
-        if: inputs.stats_prs != '0' && inputs.stats_prs != ''
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          UNTIL: ${{ inputs.until }}
-          SINCE: ${{ inputs.since }}
-          COUNT: ${{ inputs.stats_prs }}
-        run: python -m scripts.ci_stats_minutes --repo "$GITHUB_REPOSITORY" --count "$COUNT" --until "$UNTIL" --since "$SINCE" --out ci-minutes.json
       - name: Keep the jobs of completed runs for the next dispatch
         if: ${{ always() }}
         uses: actions/cache/save@v4
