@@ -72,7 +72,7 @@ def test_thirty_minute_probe_records_real_inbox_answer_once(world):
     assert sweep(world, START + LIMIT)
     item = question(world)
     assert "nothing to do" in item.text
-    assert item.ref == "automated-activity"
+    assert item.ref == f"automated-activity:{START + LIMIT}"
     assert item.task == agent.task
     runtime.nudge.assert_called_once_with(
         agent,
