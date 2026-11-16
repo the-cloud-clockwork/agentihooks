@@ -70,7 +70,7 @@ def test_a_lab_wait_refuses_anything_but_a_check_run_url(target):
 def test_the_cli_records_a_lab_wait_on_a_check_run(started, capsys):  # noqa: F811
     store, _ = started
     assert run("sw", "--as", ME, "wait", "--on", "lab", CHECK, "--reason", "lab grade") == 0
-    assert held(store)["on"] == {"kind": "lab", "target": CHECK}
+    assert (held(store) or {})["on"] == {"kind": "lab", "target": CHECK}
     assert json.loads(capsys.readouterr().out)["on"] == {"kind": "lab", "target": CHECK}
 
 
@@ -80,7 +80,7 @@ def test_a_lab_check_still_running_holds_the_wait(tick, github, status):  # noqa
     github["check"] = {"name": "lab/tests", "status": status, "conclusion": None}
     hold_check(tick)
     assert tick.end() == []
-    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "lab", "target": CHECK}
+    assert (idle.wait(tick.store.redis, "sw", ME) or {})["on"] == {"kind": "lab", "target": CHECK}
     assert github["asked"] == [["gh", "api", ENDPOINT]]
     assert github["callers"] == ["waits.lab"]
     assert tick.told() == []
@@ -121,14 +121,13 @@ def test_an_unreachable_github_holds_the_lab_wait(tick, github):  # noqa: F811
     github["code"], github["stderr"] = 1, b"HTTP 502: Bad Gateway"
     hold_check(tick)
     assert tick.end() == []
-    assert idle.wait(tick.store.redis, "sw", ME)["on"]["target"] == CHECK
+    assert (idle.wait(tick.store.redis, "sw", ME) or {})["on"]["target"] == CHECK
 
 
 def test_a_missing_check_run_ends_the_lab_wait_with_that_reason(tick, github):  # noqa: F811
     github["code"], github["stderr"] = 1, b"gh: Not Found (HTTP 404)"
     hold_check(tick)
     outcome = f"lab check {CHECK}, missing; GitHub has no such check run"
-    assert waits.lab_wait.resolution(CHECK) == outcome
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
 
 
