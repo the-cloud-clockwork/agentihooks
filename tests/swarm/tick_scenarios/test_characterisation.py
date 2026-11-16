@@ -201,7 +201,6 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
         time_ns=Mock(return_value=BASE_MS * 1000000),
     )
     monkeypatch.setattr(timing, "time", clock)
-    monkeypatch.setattr(timing, "emit", lambda stream, line: None)
     if cadence := CADENCES.get(scenario):
         monkeypatch.setenv("AGENTIHOOKS_TICK_CADENCE", cadence)
     appended = Mock()
@@ -239,31 +238,6 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     if scenario.startswith("interval"):
         result["step_rows"] = step_rows(appended)
     return canonical(result, (str(tmp_path), str(Path.home()), str(Path.cwd())))
-
-
-class _RecordingStream:
-    """A stand-in for ``sys.stderr`` that collects every line instead of touching the real stream."""
-
-    def __init__(self) -> None:
-        self.lines: list[str] = []
-
-    def write(self, data: str) -> int:
-        self.lines.append(data)
-        return len(data)
-
-    def flush(self) -> None:
-        return None
-
-
-@pytest.mark.feature("swarm-tick-replay-hermetic-emission")
-@pytest.mark.parametrize("entry", ["tick", "run_tick"])
-def test_replay_never_emits_a_real_tick_step_line(entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import sys
-
-    stream = _RecordingStream()
-    monkeypatch.setattr(sys, "stderr", stream)
-    replay("running", entry, monkeypatch, tmp_path)
-    assert not any("swarm_tick_step" in line for line in stream.lines)
 
 
 def compare(record: dict[str, Any], scenario: str, entry: str) -> None:

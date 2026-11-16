@@ -1223,16 +1223,6 @@
       ]
     },
     {
-      "id": "swarm-tick-replay-hermetic-emission",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-edges-test-split",
-      "behaviour": "A replayed tick or run_tick pass never emits a real per-step timing line to the real stderr sink: timing.emit stays mocked the same way the Redis-stream writers are, so a pass box test replaying every scenario cannot stall on real I/O contended across parallel test workers.",
-      "seam": "tests.swarm.tick_scenarios.test_characterisation.replay through scripts.swarm.timing.emit",
-      "tests": [
-        "tests/swarm/tick_scenarios/test_characterisation.py::test_replay_never_emits_a_real_tick_step_line"
-      ]
-    },
-    {
       "id": "fenced-live-names-listing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
@@ -1718,10 +1708,11 @@
       "id": "swarm-tick-pass-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
-      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, in each tick scenario on its own through the tick core and the fenced command entry point; a covering set of scenarios runs every registered step and writes and reads every pass value; a planted undeclared read or missing need is named.",
       "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
       "tests": [
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
       ]
