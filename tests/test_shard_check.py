@@ -114,7 +114,7 @@ def test_a_shard_without_durations_is_red_and_named(tmp_path):
     assert f"::error::No shard durations at {missing}" in result.stdout
 
 
-def test_shard_check_grades_every_unit_shard_before_the_required_gate():
+def test_shard_check_grades_every_unit_shard_before_the_required_gate() -> None:
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["shard-check"]
     assert job["needs"] in (
@@ -137,10 +137,10 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
     if job["needs"][0] == "split":
-        assert download["with"] == {
-            "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
-            "path": "shard-data",
-        }
+        collected = next(step for step in steps if step.get("name") == "Download collected tests")
+        assert collected["uses"] == "./.github/actions/retry-download"
+        assert collected["with"]["name"] == "collected-${{ matrix.python-version }}"
+        assert collected["with"]["path"] == "collected-data"
         prefetch = next(step for step in steps if step.get("name") == "Wait for every planned shard")
         assert prefetch["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
         assert "python -m scripts.ci_gate_shards" in prefetch["run"]
