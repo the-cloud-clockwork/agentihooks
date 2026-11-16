@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from scripts.events.config import BIND_ENV, SCOPED_ENV, SCOPED_STATE_BUCKETS
 from scripts.events.dead import DEAD_STREAM
-from scripts.events.nats import EVENT_STREAM, queue_names
+from scripts.events.nats import EVENT_STREAM, LAB_STREAM, LAB_SUBJECT, queue_names
 from scripts.events.nats_legacy import LEGACY_EVENTS
 from scripts.events.nats_state import ScopedStateStore
 from scripts.events.scope import LANES
@@ -19,7 +19,16 @@ DOC = ROOT / "docs" / "reference" / "swarm-bus-scope.md"
 
 def test_doc_names_the_settings_buckets_lanes_and_streams_the_code_uses():
     text = DOC.read_text()
-    for name in (SCOPED_ENV, BIND_ENV, nats_grant.SIGNER_ENV, EVENT_STREAM, DEAD_STREAM, NATS_CREDS_FILE):
+    for name in (
+        SCOPED_ENV,
+        BIND_ENV,
+        nats_grant.SIGNER_ENV,
+        EVENT_STREAM,
+        DEAD_STREAM,
+        LAB_STREAM,
+        LAB_SUBJECT,
+        NATS_CREDS_FILE,
+    ):
         assert f"`{name}`" in text
     for name in (*SCOPED_STATE_BUCKETS, *slots.BUCKETS, slots.QUEUE, *LANES, *LEGACY_EVENTS):
         assert f"`{name}`" in text

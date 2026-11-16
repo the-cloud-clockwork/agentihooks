@@ -130,6 +130,7 @@ from scripts.gates.base import Who
 from scripts.inbox import outbox
 from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage, workflow_task
 from scripts.swarm_ledger.adapters import hive_ledger
+from scripts.swarm_ledger.repository import postgres
 
 repository = storage.default()
 
@@ -137,6 +138,7 @@ BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
+WRITE_TIMEOUT = postgres.LOCK_TRIES * postgres.LOCK_WAIT + REQUEST_TIMEOUT
 EXPORT_TIMEOUT = 30
 TALK_OPS = ("answer", "add_item", "relay")
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
@@ -186,10 +188,10 @@ def local_credentials(slug, agent, service):
     return {"X-Ledger-Token": authority.agent_token(token, slug, agent), "X-Ledger-Agent": agent}
 
 
-def replay(slug, ops, agent, service):
+def replay(slug: str, ops: list[Any], agent: str, service: bool) -> dict[str, Any]:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(base(slug), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+    return ResourceClient(base(slug), local_credentials(slug, agent, service), WRITE_TIMEOUT).mutate(slug, ops)
 
 
 def derived_token(slug, name):
@@ -230,8 +232,11 @@ def client(
 
 
 def request(
-    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float = REQUEST_TIMEOUT
+    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float | None = None
 ) -> dict[str, Any]:
+    """One ledger read or write; unless a timeout is given, a write waits out the server's writer lock budget."""
+    if timeout is None:
+        timeout = REQUEST_TIMEOUT if ops is None else WRITE_TIMEOUT
     found = client(slug, service, timeout)
     return found.snapshot(slug) if ops is None else found.mutate(slug, ops)
 

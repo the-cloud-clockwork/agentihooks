@@ -2,7 +2,6 @@ import copy
 import json
 import os
 import subprocess
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -177,7 +176,7 @@ def test_skipping_reuse_requires_protected_duration_provenance(forged):
         durations["steps"].insert(0, {"run": "echo required-tree-sha256=forged"})
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
-    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    problems = gate_protected.grade(base, config, head, config, policy)
     assert any("provenance" in problem for problem in problems), problems
 
 
@@ -202,7 +201,7 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
 
     def grade():
-        return gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+        return gate_protected.grade(base, config, head, config, policy)
 
     assert grade() == []
     head["test.yml"]["jobs"]["gate-required"]["steps"][0]["run"] += "exit 0\n"
@@ -242,7 +241,7 @@ def test_duration_provenance_keeps_the_protected_execution_context(field, value)
     head["test.yml"]["jobs"][DURATION_JOB][field] = value
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
-    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    problems = gate_protected.grade(base, config, head, config, policy)
     assert any("provenance context" in problem for problem in problems), problems
 
 
@@ -261,7 +260,7 @@ def test_duration_provenance_keeps_the_global_execution_context(field, value):
     head["test.yml"][field] = value
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
-    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    problems = gate_protected.grade(base, config, head, config, policy)
     assert any("global provenance context" in problem for problem in problems), problems
 
 
@@ -283,7 +282,7 @@ def test_missing_duration_definitions_are_reported_without_trusting_the_producer
         del head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
-    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    problems = gate_protected.grade(base, config, head, config, policy)
     assert any("provenance" in problem for problem in problems), problems
 
 
@@ -300,4 +299,4 @@ def test_duration_provenance_accepts_unchanged_global_execution_context(field, v
     )
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
-    assert gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy) == []
+    assert gate_protected.grade(base, config, head, config, policy) == []

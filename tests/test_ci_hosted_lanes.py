@@ -36,6 +36,7 @@ DIRECT = {
 }
 LANE_USERS = {
     "chaos.yml",
+    "queue-retry.yml:retry",
     "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",

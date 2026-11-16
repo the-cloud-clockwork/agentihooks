@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "grader-gates-fail-closed-on-stale-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
+      "behaviour": "The marker vector step and the two chart steps run only the protected grader's copy of their script with the head as root, so a pull request whose base predates root support fails closed and a head copy edited to pass never decides the verdict.",
+      "seam": "The lint marker vector step and the Semgrep chart step run text, executed over a stale grader tree and a planted head copy that exits 0",
+      "tests": [
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_never_runs",
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_runs"
+      ]
+    },
+    {
       "id": "hub-started-clears-launch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
@@ -1149,6 +1160,15 @@
       ]
     },
     {
+      "id": "hive-launch-logs-key-by-hive",
+      "origin": "inventory",
+      "behaviour": "The hive launch logs wrapper keys a launch receipt by the execution's hive, so hub admitted Codex launches with no runtime target start serve",
+      "seam": "scripts.hive.launch_logs.main reading agent.hive for Orders(...).launch_receipt(...)",
+      "tests": [
+        "tests/hive/test_launch_logs.py::test_a_hub_admitted_execution_with_no_runtime_target_still_keys_its_receipt_by_hive"
+      ]
+    },
+    {
       "id": "admission-launch-carries-admitted-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-working-retired",
@@ -1157,6 +1177,20 @@
       "tests": [
         "tests/hub/test_admission.py::test_the_admitted_task_carries_its_launch_execution_identity",
         "tests/hub/test_admission.py::test_the_admitted_task_launch_arguments_pass_the_admitted_execution"
+      ]
+    },
+    {
+      "id": "codex-adopts-hub-admitted-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-hub-admitted",
+      "behaviour": "The Codex session supervisor adopts the execution hub admission registered for its seat and hive, starting with no harness or transport, and binds harness codex and the chosen transport onto it while it is still starting, so a hub admitted Codex app-server launch serves its admitted execution, starts no second one, and leaves the move to working to the hub claims reactor; any other shape is refused.",
+      "seam": "scripts.hub.admission.Admission._claim writing the starting execution and scripts.codex_session.supervisor.adopt binding it",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_serves_the_execution_the_hub_admitted",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_it_does_not_serve",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_before_the_bind",
+        "tests/hub/test_admission.py::test_a_hub_admitted_codex_launch_adopts_the_admitted_execution"
       ]
     },
     {
@@ -1719,10 +1753,11 @@
       "id": "swarm-tick-pass-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
-      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, in each tick scenario on its own through the tick core and the fenced command entry point; a covering set of scenarios runs every registered step and writes and reads every pass value; a planted undeclared read or missing need is named.",
       "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
       "tests": [
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
       ]
@@ -2305,11 +2340,12 @@
     {
       "id": "swarm-run-wait",
       "origin": "inventory",
-      "behaviour": "A wait on an Actions run ends with its conclusion and a red run names its failed jobs.",
+      "behaviour": "A wait on an Actions run is a checks wait that ends with its conclusion, a red run names its failed jobs, and a mutation wait is refused with the kinds list.",
       "seam": "The run wait pass",
       "tests": [
         "tests/swarm/test_run_wait.py::test_the_tick_ends_a_run_wait_with_its_conclusion",
-        "tests/swarm/test_run_wait.py::test_a_red_run_names_its_failed_jobs_and_ends_the_wait"
+        "tests/swarm/test_run_wait.py::test_a_red_run_names_its_failed_jobs_and_ends_the_wait",
+        "tests/swarm/test_run_wait.py::test_a_mutation_wait_is_refused_with_the_kinds_list"
       ]
     },
     {
@@ -3315,7 +3351,25 @@
         "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_ledger_whose_events_no_stream_takes_never_holds_back_another_ledgers_rows",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_row_no_stream_takes_keeps_the_later_rows_of_its_ledger_unsent_in_order",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_each_ledger_takes_its_own_batch_of_rows",
+        "tests/events/test_nats_no_stream.py::test_a_publish_no_stream_answers_is_refused_as_no_stream",
+        "tests/events/test_nats_no_stream.py::test_a_bound_scoped_relay_publishes_the_ledgers_with_a_stream_past_one_without"
+      ]
+    },
+    {
+      "id": "ledger-write-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-api-timeouts",
+      "behaviour": "A ledger command line write waits the server's whole writer lock budget plus the request timeout before it gives up, so a write the server queues behind other writers and then commits is never reported as a server that is not answering; a read keeps the request timeout and an explicit timeout wins.",
+      "seam": "scripts.swarm_ledger.ledger.request with a recording client",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_write_waits_past_the_server_writer_lock_budget",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_empty_operation_list_is_still_a_write",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_read_keeps_the_request_timeout",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_explicit_timeout_wins_for_a_write"
       ]
     },
     {
@@ -4576,6 +4630,16 @@
       ]
     },
     {
+      "id": "protected-grader-pins-gate-names",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-pin-gate-names",
+      "behaviour": "The protected grader refuses a head that changes the reviewed name of the required gate pair, so an added need on the required gate is refused whether the head writes the gate names as expressions or plain text, and the canonical head still grades green.",
+      "seam": "gate_protected.grade",
+      "tests": [
+        "tests/test_ci_gate_queue.py::test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take"
+      ]
+    },
+    {
       "id": "lint-gates-grade-from-grader",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
@@ -4848,6 +4912,16 @@
         "tests/swarm/test_fleet_red.py::test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live",
         "tests/swarm/test_fleet_red.py::test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live",
         "tests/swarm/test_fleet_red.py::test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm"
+      ]
+    },
+    {
+      "id": "fleet-red-notice-starts-with-its-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2517",
+      "behaviour": "The fleet red notice step needs only the drained resume step, like its slow lane siblings promotion refresh and release alert, and waits on no spawn chain step, so it starts early in a slow pass and the live listing it runs once the ten minute listing save expires ends before the slow deadline; a cut would drop the listing save and make every later pass list live again and be cut again.",
+      "seam": "the needs of the fleet red notice step in scripts.tick.steps.tasks, read through the registry waves",
+      "tests": [
+        "tests/swarm/test_fleet_red.py::test_the_notice_step_waits_on_no_spawn_chain_step_so_a_slow_pass_cannot_cut_its_live_listing"
       ]
     },
     {
@@ -5432,6 +5506,34 @@
         "tests/swarm/test_merge_queue.py::test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task",
         "tests/swarm/test_merge_queue.py::test_the_stall_route_never_opens_a_dequeue_for_the_master",
         "tests/swarm/test_merge_queue.py::test_a_phase_focus_admits_only_the_urgent_tasks_of_its_phase_to_the_stall_route"
+      ]
+    },
+    {
+      "id": "master-freeze-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-subagent-queue-refused",
+      "behaviour": "swarm merge queue accepts the master seat for a pull request on a master sub agent branch when a task naming that pull request is not done and a master seat froze that task by name, and records the master freeze route and the task in the queue journal; a freeze set by anyone but a master, a freeze on the task's phase only, a focus, a done task, a pull request no task names or a branch that is not a master's leaves the master refused, the route never opens a dequeue, and the freeze records are read as the ledger's whole freeze collection.",
+      "seam": "swarm merge queue through cli.cmd_merge and master_queue.route against ledger.tasks_targeting, LedgerClient.freezes and pull_head.pull_branch",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_the_master_seat_queues_a_sub_agent_pull_request_for_a_task_a_master_froze",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_takes_the_frozen_task_among_the_tasks_naming_the_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open",
+        "tests/swarm/test_ledger_client_task.py::test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection"
+      ]
+    },
+    {
+      "id": "merge-queue-task-pulls",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-task-prs",
+      "behaviour": "swarm merge queue admits every pull request the claimant's task names, final, split half, stage or prerequisite, and a pull request no task names whose head branch is one of the claimant's worktree branches, reading GitHub only for that case; it refuses another task's pull request and any other branch, and each queue journal record names the claimant's task.",
+      "seam": "swarm merge queue through cli.cmd_merge and done_gate.require_target",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_claimant_queues_two_pull_requests_of_its_task_in_order_and_a_third_party_one_is_refused",
+        "tests/swarm/test_done_gate.py::test_merge_target_accepts_every_declared_pull_and_refuses_other_pulls",
+        "tests/swarm/test_done_gate.py::test_merge_target_admits_an_unnamed_pull_only_on_a_claimant_worktree_branch",
+        "tests/swarm/test_done_gate.py::test_merge_target_reads_no_branch_for_another_tasks_pull_or_without_a_claimant"
       ]
     },
     {
@@ -6567,7 +6669,7 @@
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_stop_refunds_the_claim_life_of_an_events_launched_agent",
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_refunds_the_claim_life_of_an_events_launched_agent",
-        "tests/swarm/test_events_claim_refunds.py::test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and_settled"
+        "tests/swarm/test_events_claim_refunds.py::test_the_reap_step_judges_an_admitted_agent_by_its_pane_and_whether_its_work_ended"
       ]
     },
     {
@@ -6589,6 +6691,19 @@
         "tests/swarm/test_events_claim_refunds.py::test_an_agent_its_runtime_cannot_reach_is_retired_through_the_hive_stop",
         "tests/swarm/test_events_claim_refunds.py::test_an_unreachable_agent_is_stopped_before_its_drop_and_stays_seated_when_the_store_refuses_it",
         "tests/swarm/test_events_claim_refunds.py::test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retirement"
+      ]
+    },
+    {
+      "id": "events-ended-agent-stopped",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-finished-not-retired",
+      "behaviour": "When the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. The tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
+      "seam": "the agents reap step judging an ended hub admitted agent through reconciler.stop_admitted, then execution_stop.Stopper and the hub lifecycle on the hive exit",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_whose_work_ended_gets_the_stop_from_its_hive_in_one_reap_pass",
+        "tests/swarm/test_events_claim_refunds.py::test_a_reap_pass_inside_the_stop_dedupe_window_sends_no_second_stop",
+        "tests/swarm/test_events_claim_refunds.py::test_an_ended_admitted_agent_whose_stop_the_bus_refused_is_stopped_on_the_next_pass",
+        "tests/swarm/test_events_claim_refunds.py::test_a_finished_admitted_agent_leaves_its_seat_and_launch_slot_once_its_hive_honors_the_stop"
       ]
     },
     {
@@ -6981,6 +7096,22 @@
       ]
     },
     {
+      "id": "count-floor-admits-local-reads-ids-and-retirements",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2518",
+      "behaviour": "The test count floor admits a lost test that reads a deleted workflow or step fixture through a function-local variable bound once, a lost parametrized case whose id names a file the head deletes, by its path or by a file name with an extension no head file shares, when its bytes survive in no head file and the head adds no file sharing its extension or stem, and a lost test the head newly lists in test-retirements under the hash of its node id with a ruling whose reader starts with Standards and that gives a reason; a local name bound twice, an id naming a retained or moved file or only a fragment of a name, and an unlisted, unsigned, misnamed or inherited retirement keep the lost test counted.",
+      "seam": "tests.count_floor._admitted: _fixture_subject local bindings, _case_files and retirements",
+      "tests": [
+        "tests/test_count_floor.py::test_a_deleted_workflow_read_through_a_local_variable_is_admitted",
+        "tests/test_count_floor.py::test_a_lost_case_whose_id_names_a_deleted_file_is_admitted",
+        "tests/test_count_floor.py::test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red",
+        "tests/test_count_floor.py::test_only_a_tracked_head_file_can_read_as_a_rename",
+        "tests/test_count_floor.py::test_a_lost_test_is_admitted_only_by_a_new_signed_retirement",
+        "tests/test_count_floor.py::test_a_symlinked_retirement_admits_nothing",
+        "tests/test_count_floor.py::test_the_retire_command_writes_only_a_signed_retirement_the_floor_admits"
+      ]
+    },
+    {
       "id": "lab-sandbox-read-only-trees",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-readonly-grader",
@@ -7007,6 +7138,21 @@
         "tests/ci_lab/test_expressions.py::test_an_expression_evaluates_as_github_actions_evaluates_it",
         "tests/ci_lab/test_expressions.py::test_syntax_outside_the_subset_is_refused",
         "tests/ci_lab/test_expressions.py::test_a_condition_holds_when_its_expression_is_truthy"
+      ]
+    },
+    {
+      "id": "lab-head-own-stream",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
+      "behaviour": "CI lab heads live in their own JetStream stream, AGENTIHOOKS-CI-LAB-HEADS with ci.lab.head.>, which every provisioning bus open creates after the events stream, so the events provisioning that resets the legacy stream's subjects on each controller start never wipes the lab head subjects and a restart keeps the stored heads; the bus exposes it as lab_heads and the GitHub webhook receiver publishes lab heads there by stream name, failing rather than falling back to the legacy events stream when it is missing.",
+      "seam": "scripts.events.nats NatsBus provisioning and NatsBus.lab_heads on LAB_STREAM, and scripts.hub.github_webhooks main wiring LabIntake to bus.lab_heads",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_provisioning_keeps_the_lab_head_subjects_across_a_controller_restart",
+        "tests/events/test_nats_lab_stream.py::test_the_receiver_publishes_lab_heads_to_the_lab_stream_by_name",
+        "tests/events/test_nats_lab_stream.py::test_a_lab_head_publish_without_the_lab_stream_fails_instead_of_falling_back",
+        "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
+        "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
+        "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
       ]
     }
   ],
