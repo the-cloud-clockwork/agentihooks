@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, cast
 
+from scripts.swarm import waits
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
 from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
@@ -501,20 +502,17 @@ def _watch_idle(
     return nudged
 
 
-WAITS_END = "waits end"
-
-
 def _holding_wait(store: Any, slug: str, found: Any, now_ms: int) -> Any:
-    """The declared wait ``found`` as the idle count reads it: a checked wait only while the waits end step, which
-    ends a checked wait once its target resolves, has run within the idle retirement window."""
+    """The declared wait ``found`` as the idle count reads it: a checked wait only while the last completed waits end
+    pass, which ends a checked wait once its target resolves, ran within the idle retirement window, or, before any
+    pass completed, within that window of the wait's declaration."""
     if not isinstance(found, dict):
         return found
     held = cast(dict[str, Any], found)
     if not held.get("on"):
         return held
-    ends: dict[str, float] = tick.timing.step_ends(store, slug)
-    ended = ends.get(WAITS_END)
-    if ended is None or now_ms - int(ended * 1000) < tick.IDLE_KILL_MS:
+    ended = waits.ended_at(store, slug)
+    if now_ms - (held["at"] if ended is None else ended) < tick.IDLE_KILL_MS:
         return held
     return None
 

@@ -53,9 +53,10 @@ class Spoke:
         measure: Callable[[], dict | None] | None = None,
         clock: Callable[[], int] | None = None,
         view: Callable[[], readiness.Snapshot] | None = None,
-    ):
+    ) -> None:
         self.config, self.bus, self.runtime, self.tasks = config, bus.for_swarm(config.swarm.slug), runtime, tasks
         self._previous = None
+        self._claimed_seen: tuple[int, int] | None = None
         self.measure = measure or self._measure
         self.clock = clock or presence.now_ms
         source = readiness.Source()
@@ -141,6 +142,14 @@ class Spoke:
         found = self.runtime.find(name)
         return found.ok and (found.value is None or self.runtime.reap(name).ok)
 
+    def _first_seen(self, revision: int) -> int:
+        """Records the clock time this spoke first sees its own claimed claim under a pending reservation and returns
+        it for every later sight of that reservation, so recovery can wait out one admit ask timeout, the bound on the
+        ask that wrote the claim, before it asks the hub again."""
+        if self._claimed_seen is None or self._claimed_seen[0] != revision:
+            self._claimed_seen = (revision, self.clock())
+        return self._claimed_seen[1]
+
     def _recover(self, heartbeat: presence.Heartbeat) -> str | None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
         if pending is None or not (record := json.loads(pending.value)):
@@ -149,7 +158,12 @@ class Spoke:
         entry = self.bus.state("spoke-work").get(claim_key(event))
         state = json.loads(entry.value)
         status = state["state"]
-        if status == ASKED and state.get("owner") == self.config.hive:
+        if status in (ASKED, "claimed") and state.get("owner") == self.config.hive:
+            if (
+                status == "claimed"
+                and self.clock() - self._first_seen(pending.revision) < account_slots.REQUEST_TIMEOUT_MS
+            ):
+                return "busy"
             return self._ask_again(event, record["attempt"], entry.revision, pending.revision, heartbeat)  # pyright: ignore[reportOptionalMemberAccess]
         if status == "launching" and state.get("owner") == self.config.hive:
             if not self._end_leftover(state["name"]):
@@ -229,9 +243,10 @@ class Spoke:
     def _ask_again(
         self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
     ) -> str:
-        """Asks the hub again for the admission an unanswered admit ask left pending and launches it, with no wait for
-        a redelivery of the offer the hub readiness pass withdraws once that admission claims the task; an ask still
-        unanswered keeps the offer pending for the next poll, a held answer returns it and a refusal withdraws it."""
+        """Asks the hub again for the admission an unanswered admit ask left pending, or an admission wait that ended
+        with its claim still claimed, and launches it, with no wait for a redelivery of the offer the hub readiness
+        pass withdraws once that admission claims the task; an ask still unanswered keeps the offer pending for the
+        next poll, a held answer returns it and a refusal withdraws it."""
         key = claim_key(event)
         try:
             spawned = self._spawn(event, key, revision, heartbeat)

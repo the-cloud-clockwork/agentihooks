@@ -1,0 +1,41 @@
+rules:
+  - id: hive-spoke-recovery-keeps-own-claimed-busy
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive spoke recovery answers busy for a claimed claim before asking the hub again for one its own hive holds.
+      On 16 November the root hive eng spoke held its own claimed reservation of a workstation task, left by an
+      admission wait that ended without settling the claim, and answered busy on every poll for hours: its presence
+      stayed live, so no other hive took the claim, the state buckets never expire it, and no workstation eng task was
+      claimed. Send a claimed claim its own hive holds into the ask again path with the asked claims.
+    paths:
+      include:
+        - /scripts/hive/spoke.py
+        - hive-spoke-recovery-keeps-own-claimed-busy.py
+    patterns:
+      - pattern-inside: |
+          def $RECOVER(self, ...):
+              ...
+      - pattern-either:
+          - pattern-inside: |
+              if $STATUS == "claimed":
+                  ...
+          - pattern-inside: |
+              if "claimed" == $STATUS:
+                  ...
+          - pattern-inside: |
+              if $STATUS in (..., "claimed", ...):
+                  ...
+      - pattern: return "busy"
+      - pattern-not-inside: |
+          def $RECOVER(self, ...):
+              ...
+              if $S in (..., "claimed", ...) and $STATE.get("owner") == self.config.hive:
+                  ...
+              ...
+      - pattern-not-inside: |
+          def $RECOVER(self, ...):
+              ...
+              if $S == "claimed" and $STATE.get("owner") == self.config.hive:
+                  ...
+              ...
