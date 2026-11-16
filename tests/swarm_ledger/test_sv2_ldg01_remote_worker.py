@@ -95,7 +95,7 @@ def test_a_remote_write_runs_once_through_an_outage_or_a_server_error(
     sleep.assert_not_called()
 
 
-def test_resource_and_export_reads_retry_a_storage_failure_with_a_fresh_client_and_bounded_timeouts(
+def test_remote_resource_and_export_reads_retry_with_fresh_credentials_and_bounded_timeouts(
     remote: None,
 ) -> None:
     built: list[float] = []
@@ -116,6 +116,74 @@ def test_resource_and_export_reads_retry_a_storage_failure_with_a_fresh_client_a
         assert ledger.export(SLUG) == {}
     assert built == [10, 10, 30, 30]
     assert sleep.call_count == 2
+
+
+def test_a_remote_read_retries_a_server_error_and_returns_the_next_answer(remote: None) -> None:
+    error, _ = refusal(503, "unavailable")
+    request = Mock(side_effect=[error, {"data": {"tasks": []}}])
+    with (
+        patch.object(ledger, "client", return_value=SimpleNamespace(request=request)),
+        patch.object(ledger.time, "sleep") as sleep,
+    ):
+        assert ledger.resource(SLUG, "metadata") == {"tasks": []}
+    assert request.call_count == 2
+    sleep.assert_called_once_with(0.5)
+
+
+def test_a_remote_read_gives_up_after_its_bounded_attempts(remote: None) -> None:
+    sleeps: list[float] = []
+    request = Mock(side_effect=ConnectionRefusedError("down"))
+    with (
+        patch.object(ledger, "client", return_value=SimpleNamespace(request=request)),
+        patch.object(ledger.time, "sleep", sleeps.append),
+        pytest.raises(ConnectionRefusedError, match="^down$"),
+    ):
+        ledger.resource(SLUG, "metadata")
+    assert request.call_count == 3
+    assert sleeps == [0.5, 1.0]
+
+
+def test_a_remote_read_gives_up_on_a_lasting_server_error(remote: None) -> None:
+    request = Mock(side_effect=[refusal(500, "broken")[0] for _ in range(3)])
+    with (
+        patch.object(ledger, "client", return_value=SimpleNamespace(request=request)),
+        patch.object(ledger.time, "sleep"),
+        pytest.raises(urllib.error.HTTPError) as raised,
+    ):
+        ledger.resource(SLUG, "metadata")
+    assert raised.value.code == 500
+    assert request.call_count == 3
+
+
+def test_a_refused_ledger_credential_is_unauthenticated_and_not_retried(remote: None) -> None:
+    before = ledger.ledger_remote_auth_failures_total()
+    reason = "the ledger server refused the credential"
+    counted = ledger.AUTH_FAILURES[reason]
+    for _ in range(2):
+        request = Mock(side_effect=refusal(403, "Missing or wrong ledger credential")[0])
+        with (
+            patch.object(ledger, "client", return_value=SimpleNamespace(request=request)),
+            pytest.raises(ledger.Unauthenticated, match=f"^unauthenticated: {reason}$"),
+        ):
+            ledger.resource(SLUG, "metadata")
+        assert request.call_count == 1
+    assert ledger.AUTH_FAILURES[reason] == counted + 2
+    assert ledger.ledger_remote_auth_failures_total() == before + 2
+
+
+def test_a_transient_outage_retries_reads_without_starting_a_server(remote: None) -> None:
+    request = Mock(side_effect=[ConnectionRefusedError("ledger outage"), {"data": {"title": "T"}}])
+    with (
+        patch.object(ledger, "client", return_value=SimpleNamespace(request=request)),
+        patch.object(ledger.time, "sleep") as sleep,
+        patch("subprocess.run") as run,
+        patch("subprocess.Popen") as popen,
+    ):
+        assert ledger.resource(SLUG, "metadata") == {"title": "T"}
+    assert request.call_count == 2
+    sleep.assert_called_once_with(0.5)
+    run.assert_not_called()
+    popen.assert_not_called()
 
 
 @pytest.mark.parametrize("code", [401, 403])

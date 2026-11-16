@@ -35,7 +35,7 @@ from scripts.swarm_ledger import ledger_alerts as alerts_module
 from scripts.swarm_ledger import ledger_blockers as blockers_module
 from scripts.swarm_ledger import ledger_server as served
 from scripts.swarm_ledger import ledger_task_duplicates as duplicates_module
-from scripts.swarm_ledger.api.services import HttpPolicy, Services
+from scripts.swarm_ledger.api.services import Services
 
 server: Any = cast(Any, served)
 core: Any = server.core
@@ -157,14 +157,13 @@ def effort_refusal(slug: str, body: dict[str, Any]) -> str | None:
         return None
     from redis import RedisError
 
-    swarm: Any = ports.swarm()
+    swarm = ports.swarm()
     try:
-        config: Any = server.swarm_store().config(slug)
+        config = server.swarm_store().config(slug)
     except (swarm.store.SwarmError, RedisError):
         return None
     bounds = (body.get("effort_min", config.effort_min), body.get("effort_max", config.effort_max))
-    refused: str | None = swarm.effort_range.refusal(bounds, config.lanes)
-    return refused
+    return swarm.effort_range.refusal(bounds, config.lanes)
 
 
 def scaling_pairs(body: dict[str, Any]) -> list[str]:
@@ -521,47 +520,20 @@ def adopt_disk_files() -> None:
 
 def services() -> Services:
     """The ledger API services with every write hook, over the shared repository."""
-    from scripts.swarm_ledger import services as built
-
-    ledger: Any = built.Ledger(
-        core=core,
-        authority=authority,
-        hub=server.HUB,
-        layout_rows=ledger_layout.ROWS,
-        layout_lists=ledger_layout.LISTS,
-        home_summaries=server.home_summaries,
-        bin_summaries=server.bin_summaries,
-        bin_entries=ledger_bin.entries,
+    built: Services = server.api_services(
         bin_ledger=ledger_bin.delete,
-        workspace_tails=server.workspace_tails,
-        stream_resources=server.stream_resources,
-        layout=ledger_layout.read,
         write_layout=ledger_layout.write,
         write_gate=write_gate,
         relay_to_inbox=relay_to_inbox,
         deliver_alerts=deliver_alerts,
-    )
-    swarm: Any = built.Swarm(
         doctor=DOCTOR,
-        store=server.swarm_store,
-        status=server.swarm_status,
-        models=server.swarm_models,
         control=swarm_control,
         lifecycle=lifecycle_control,
         refresh_quota=refresh_quota,
         control_argv=control_argv,
         doctor_phrase=doctor_phrase,
     )
-    media: Any = built.Media(
-        media_store=ledger_media,
-        artifact_store=ledger_artifacts,
-        resolve_media=ledger_media.resolve,
-        resolve_artifacts=ledger_artifacts.resolve,
-    )
-    policy = HttpPolicy(
-        allowed_hosts=server.ALLOWED_HOSTS, allowed_origins=server.ALLOWED_ORIGINS, max_body=server.MAX_BODY
-    )
-    return Services(repository=server.repository, ledger=ledger, swarm=swarm, media=media, policy=policy)
+    return built
 
 
 class Writes(ABC):

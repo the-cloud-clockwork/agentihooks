@@ -31,7 +31,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class WriteHandler(BaseHTTPRequestHandler):
-    # ok: ledger-server-write-route
+    # ruleid: ledger-server-write-route
     def do_POST(self) -> None:
         self.send_response(200)
 

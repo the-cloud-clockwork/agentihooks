@@ -3399,10 +3399,11 @@
     {
       "id": "ledger-outbox",
       "origin": "inventory",
-      "behaviour": "A ledger write a pass queues while the ledger database does not answer is held once and replays once through the ledger API route code when it answers again; a write the route refuses on replay is set aside and reported.",
+      "behaviour": "A ledger write a pass queues while the ledger database does not answer is held once and replays once, in the order it was queued, through the ledger API route code when it answers again; a write the route refuses on replay is set aside and reported.",
       "seam": "The ledger client outbox",
       "tests": [
         "tests/swarm_ledger/test_ledger_outbox.py::test_a_replayed_record_lands_once_even_when_it_is_replayed_again",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_records_queued_while_the_database_is_not_answering_land_once_in_order_when_it_answers",
         "tests/swarm_ledger/test_ledger_outbox.py::test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported",
         "tests/swarm_ledger/test_ledger_outbox.py::test_a_post_retried_while_the_server_is_down_waits_in_the_outbox_once"
       ]

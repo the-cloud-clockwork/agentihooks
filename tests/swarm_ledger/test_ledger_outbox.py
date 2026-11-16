@@ -95,6 +95,31 @@ def test_a_replayed_record_lands_once_even_when_it_is_replayed_again(server: Ser
 
 
 @pytest.mark.feature("ledger-outbox")
+def test_records_queued_while_the_database_is_not_answering_land_once_in_order_when_it_answers(server: Server) -> None:
+    phase = f"phases/{stored()['phases'][0]['id']}"
+    comment = {"op": "add", "thread": f"{phase}/comments", "id": "c-held", "text": "The branch builds", "by": ENG}
+    question = {"op": "add_item", "list": "questions", "id": "q-held", "text": "Which port", "by": ENG}
+    ledger.queue(SLUG, [comment], False)
+    say("Tests run in continuous integration now")
+    ledger.queue(SLUG, [question], False)
+    records = queued()
+    assert [record["op"] for record in records] == ["ledger"] * 3
+    assert [record["args"]["ops"][0]["op"] for record in records] == ["add", "add", "add_item"]
+    assert [record["item"] for record in records] == [record["args"]["ops"][0]["id"] for record in records]
+    server.stop()
+    assert outbox.flush(None).applied == []
+    assert queued() == records
+    server.start()
+    assert outbox.flush(None).applied == [record["item"] for record in records]
+    state = stored()
+    assert comments(state) == ["The branch builds"]
+    assert chat(state) == ["Tests run in continuous integration now"]
+    assert [entry["text"] for entry in state["questions"]] == ["Which port"]
+    assert queued() == []
+    assert not outbox.path().exists()
+
+
+@pytest.mark.feature("ledger-outbox")
 def test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported(
     server: Server, capsys: pytest.CaptureFixture[str]
 ) -> None:

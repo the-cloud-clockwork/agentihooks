@@ -74,9 +74,6 @@ ledger:
       memory: 2Gi
       ephemeral-storage: 256Mi
 
-# The ledger write API: every POST, PUT, PATCH and DELETE the page sends, migrating the shared database at
-# start. Needs ledger.env or ledger.secretEnv to carry AGENTIHOOKS_SWARM_DATABASE_URL, the same shared store
-# the ledger StatefulSet reads.
 api:
   enabled: false
   replicas: 1
@@ -84,13 +81,10 @@ api:
   tolerations: []
   port: 8766
   env: {}
-  # Secret env only the api container reads, on top of the ledger's own env and secretEnv, which it always gets.
   secretEnv: []
   podDisruptionBudget:
     enabled: false
     maxUnavailable: 1
-  # Traefik IngressRoute for POST, PUT, PATCH, DELETE and OPTIONS; rendered only once host is set. The networking.k8s.io
-  # Ingress above stays the GET/HEAD route to the ledger.
   publicRoute:
     host: ""
     priority: 1000

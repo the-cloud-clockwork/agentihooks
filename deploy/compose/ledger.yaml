@@ -51,7 +51,6 @@ services:
       LEDGER_API_PORT: ${LEDGER_API_PORT:-8766}
       AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
       AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-}
-      # The certificate and key must sit under a mounted folder, such as ~/.agentihooks.
       LEDGER_TLS_CERT: ${LEDGER_TLS_CERT:-}
       LEDGER_TLS_KEY: ${LEDGER_TLS_KEY:-}
       MALLOC_ARENA_MAX: "2"

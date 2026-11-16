@@ -39,7 +39,10 @@ import urllib.request
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import NoReturn, cast
+from typing import TYPE_CHECKING, Any, NoReturn, cast
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.api.services import Services
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
@@ -384,10 +387,14 @@ def refuse_write(*_: object) -> NoReturn:
     raise APIError(405, "method_not_allowed", "The ledger server only reads; the ledger API service takes writes")
 
 
-def api_services():
-    """The ledger API services this server reads through; every write hook refuses."""
+def api_services(**writes: Any) -> "Services":
+    """The ledger API services over the shared repository with the given write hooks; the ledger server passes none,
+    so every write hook refuses, and the ledger API service passes them all."""
     from scripts.swarm_ledger import services
     from scripts.swarm_ledger.api.services import HttpPolicy, LedgerService, MediaService, Services, SwarmService
+
+    def hook(name: str) -> Any:
+        return writes.get(name, refuse_write)
 
     ledger: LedgerService = services.Ledger(
         core=core,
@@ -398,25 +405,25 @@ def api_services():
         home_summaries=home_summaries,
         bin_summaries=bin_summaries,
         bin_entries=ledger_bin.entries,
-        bin_ledger=refuse_write,
+        bin_ledger=hook("bin_ledger"),
         workspace_tails=workspace_tails,
         stream_resources=stream_resources,
         layout=ledger_layout.read,
-        write_layout=refuse_write,
-        write_gate=refuse_write,
-        relay_to_inbox=refuse_write,
-        deliver_alerts=refuse_write,
+        write_layout=hook("write_layout"),
+        write_gate=hook("write_gate"),
+        relay_to_inbox=hook("relay_to_inbox"),
+        deliver_alerts=hook("deliver_alerts"),
     )
     swarm: SwarmService = services.Swarm(
-        doctor={},
+        doctor=writes.get("doctor", {}),
         store=swarm_store,
         status=swarm_status,
         models=swarm_models,
-        control=refuse_write,
-        lifecycle=refuse_write,
-        refresh_quota=refuse_write,
-        control_argv=refuse_write,
-        doctor_phrase=refuse_write,
+        control=hook("control"),
+        lifecycle=hook("lifecycle"),
+        refresh_quota=hook("refresh_quota"),
+        control_argv=hook("control_argv"),
+        doctor_phrase=hook("doctor_phrase"),
     )
     media: MediaService = services.Media(
         media_store=ledger_media,

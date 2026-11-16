@@ -243,7 +243,6 @@ SCALING_KEYS = {
 LAB_URL = "lab-url"
 ADDRESS_KEYS = {LAB_URL: "lab_url"}
 TOP_LEVEL = ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch", "spoke")
-NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 NO_LAB_ADDRESS = "lab-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
@@ -1317,7 +1316,7 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, {what}") from None
 
 
-def api_address(value: str, refusal: str = NO_API_ADDRESS) -> str:
+def api_address(value: str, refusal: str) -> str:
     try:
         parts = urlsplit(value)
         host = parts.hostname
@@ -1343,7 +1342,7 @@ def config_value(key, value):
         return int(value)
     if key == LAB_URL:
         return api_address(value, NO_LAB_ADDRESS)
-    return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
+    return scaling_value(key, value)
 
 
 def _engine_origin(config, changes):
