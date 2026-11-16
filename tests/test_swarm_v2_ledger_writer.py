@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import re
 import signal
 import socket
 import sqlite3
+import sys
 import threading
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -629,6 +631,29 @@ def test_the_api_service_binds_its_own_address_and_names_it_in_the_start_line(
         f"ledger API service on {scheme}://{api_service.HOST}:{api_service.PORT} answering "
         f"GET, POST, PUT, PATCH, OPTIONS, dir {nested}\n"
     )
+
+
+class Piped(io.StringIO):
+    """A standard output piped to a supervisor: it records what it held at each flush."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[str] = []
+
+    def flush(self) -> None:
+        self.flushed.append(self.getvalue())
+
+
+def test_the_api_service_flushes_its_start_line_to_a_supervisor_reading_a_pipe(
+    serving: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    piped = Piped()
+    monkeypatch.setattr(sys, "stdout", piped)
+    api_service.serve()
+    assert piped.flushed == [piped.getvalue()]
+    assert piped.flushed[0].startswith("ledger API service on ")
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

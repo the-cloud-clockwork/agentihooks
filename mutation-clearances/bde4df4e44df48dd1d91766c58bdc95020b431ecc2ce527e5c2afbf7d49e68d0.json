@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_overlay_pairs:77313999cdbe833872435210cf965ff5b5a61874e49ef22c12ca86354ffbcf40": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns overlays unchanged at run time; the value is the same object."
+  }
+}

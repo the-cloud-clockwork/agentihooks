@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x\u01c1Writes\u01c1put_swarm:bfe18196d9e1a6a302ee35f46f514b85b11ccf98e336010adf7de328e2413ace": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns loaded unchanged at run time; the isinstance guard is unchanged."
+  }
+}

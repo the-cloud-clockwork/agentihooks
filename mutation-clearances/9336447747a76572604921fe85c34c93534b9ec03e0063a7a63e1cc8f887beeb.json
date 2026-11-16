@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x\u01c1WriteHandler\u01c1do_OPTIONS:fb313ae6d1565df36562d7c161ebc33640bb4fba9f46dcae6d4c7427f4e7aa62": {
+    "reader": "standards-reader",
+    "reason": "self.headers is an HTTPMessage whose get ignores name case; the private-network header reads the same in lower case."
+  }
+}

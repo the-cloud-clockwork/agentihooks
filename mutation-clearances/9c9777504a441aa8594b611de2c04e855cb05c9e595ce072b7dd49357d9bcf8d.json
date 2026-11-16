@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x\u01c1WriteHandler\u01c1do_OPTIONS:e6d0f731e8c5ead610861747d01e2f41481e58f7e50cdefed804b9915088683f": {
+    "reader": "standards-reader",
+    "reason": "self.headers is an HTTPMessage whose get ignores name case; origin and Origin read the same header."
+  }
+}
