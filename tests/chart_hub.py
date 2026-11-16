@@ -120,6 +120,9 @@ def problems(chart: str) -> list[str]:
     if len(deployments) != 1:
         return [*found, f"an enabled hub renders {len(deployments)} hub Deployments, expected 1"]
     found += hub_problems(deployments[0])
+    single = render(chart, *ENABLED, "--set", "hub.replicas=1")
+    if single.returncode or any(d["spec"].get("strategy") for d in hubs(single.stdout)):
+        found.append("a single hub replica rolls out by taking the only hub down first")
     alone = render(chart, *ENABLED, "--set", "hiveOnly=true")
     if alone.returncode or hubs(alone.stdout):
         found.append("a hive only release renders the hub")
