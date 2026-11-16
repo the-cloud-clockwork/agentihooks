@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+from collections.abc import Mapping
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -32,6 +33,8 @@ EQUIVALENCE_DEV_PARENT = {
     "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
 }
 EQUIVALENCE_DEV_PARENT_REF = "${{ steps.comparison-base.outputs.sha }}"
+PREFLIGHT_PATHS = [".github/workflows/**"]
+EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
@@ -46,14 +49,10 @@ def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
     ]
 
 
-def _kept(base: ci_wiring.Declarations, head: ci_wiring.Declarations) -> ci_wiring.Declarations:
-    return {key: entry for key, entry in base.items() if key in head}
-
-
-def _protected_config(base: ci_wiring.Wiring, head: ci_wiring.Wiring) -> ci_wiring.Wiring:
+def _protected_config(base: Mapping[str, Any], head: Mapping[str, Any]) -> dict:
     return {
-        "not_gates": _kept(base.get("not_gates", {}), head.get("not_gates", {})),
-        "outside_gate": _kept(base.get("outside_gate", {}), head.get("outside_gate", {})),
+        section: {key: entry for key, entry in base.get(section, {}).items() if key in head.get(section, {})}
+        for section in ("not_gates", "outside_gate")
     }
 
 
@@ -234,7 +233,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
 
 
 def _mutation_stage_entries(
-    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: ci_wiring.Wiring
+    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Return the head's non gate entries for mutation stages whose results the required mutation job merges."""
     needs = ci_wiring.needs_of
@@ -306,11 +305,10 @@ def grade(
             problems.append("The test summary must use the reviewed reporting job.")
         else:
             key = f"{file}/test-summary"
-            declared = head_config.get("not_gates", {})
-            if key in declared:
-                config.setdefault("not_gates", {}).setdefault(key, declared[key])
+            if key in head_config.get("not_gates", {}):
+                config["not_gates"].setdefault(key, head_config["not_gates"][key])
     for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
-        config.setdefault("not_gates", {}).setdefault(key, entry)
+        config["not_gates"].setdefault(key, entry)
     return problems + ci_wiring.check(head_workflows, config)
 
 
@@ -329,7 +327,9 @@ def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
     return workflows, config
 
 
-def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+def _preflight_problems(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> list[str]:
     baseline = base_workflows.get("branch-lanes.yml")
     if baseline is None:
         return []
@@ -338,14 +338,24 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    if head_workflows.get("branch-lanes.yml") in (
-        baseline,
-        expanded,
-        *_checkout_forms(baseline),
-        *_checkout_forms(expanded),
-    ):
+    forms = [*_path_forms(baseline, "push", PREFLIGHT_PATHS), *_path_forms(expanded, "push", PREFLIGHT_PATHS)]
+    if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
+
+
+def _path_forms(workflow: dict[Any, Any], event: str, paths: list[str]) -> list[dict[Any, Any]]:
+    """Return the workflow as given, then with its event trigger unfiltered and filtered to the paths."""
+    forms = [workflow]
+    for kept in (None, paths):
+        form = deepcopy(workflow)
+        events: dict[str, Any] = form[True] if True in form else form["on"]
+        if event in events:
+            trigger: dict[str, Any] = dict(events[event] or {})
+            trigger.pop("paths", None)
+            events[event] = {**trigger, "paths": list(kept)} if kept else (trigger or None)
+        forms.append(form)
+    return forms
 
 
 def _checkout_forms(preflight: dict) -> list[dict]:
@@ -381,7 +391,9 @@ def _dev_parent_form(steps: list[dict]) -> list[dict]:
     return form
 
 
-def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+def _equivalence_problems(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> list[str]:
     file, job_id = EQUIVALENCE
     base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
     base_job, head_job = ((workflow.get("jobs") or {}).get(job_id) or {} for workflow in (base, head))
@@ -396,12 +408,26 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
         accepted is None
         or any(word in json.dumps(step) for step in head_steps[len(accepted) :] for word in EQUIVALENCE_WORDS)
         or {key: value for key, value in head.items() if key != "jobs"}
-        != {key: value for key, value in base.items() if key != "jobs"}
+        not in [
+            {key: value for key, value in form.items() if key != "jobs"}
+            for form in _path_forms(base, "pull_request", EQUIVALENCE_PATHS)
+        ]
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
         != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}
     ):
         return ["The head changes the ledger equivalence grading; the protected branch grades with its own."]
     return []
+
+
+def _filtered_equivalence(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> set[str]:
+    """Name the equivalence workflow when the head only adds or drops its ledger path filter, so lanes keep trusting it."""
+    file = EQUIVALENCE[0]
+    base = base_workflows.get(file)
+    if base is None or head_workflows.get(file) not in _path_forms(base, "pull_request", EQUIVALENCE_PATHS):
+        return set()
+    return {file}
 
 
 def _blob(root: Path, rev: str, path: str) -> str | None:
@@ -458,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
     problems = grade(base_workflows, base_config, head_workflows, head_config, actors)
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
+    governed |= _filtered_equivalence(base_workflows, head_workflows)
     problems += preflight
     problems += _equivalence_problems(tip_workflows, head_workflows)
     problems += _frozen_problems(root, merge_base, args.base, args.head)
