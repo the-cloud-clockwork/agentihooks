@@ -7444,6 +7444,23 @@
         "tests/hub/test_admission.py::test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission",
         "tests/hub/test_admission_claim_cap.py::test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap"
       ]
+    },
+    {
+      "id": "swarm-tick-step-failure-isolated",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-step-failure-isolated",
+      "behaviour": "A tick step that raises holds its exception for the pass to end on and shuts only the steps that need it, directly or through another, while every other step of the pass runs; an inbox exits sweep that raises in every pass still lets reap retire finished agents and the master step spawn the front door successor, and the pass still ends failed on the first exception a step raised.",
+      "seam": "scripts.tick.steps.hold and fell, the held step wrappers of the observe, masters, tasks and host steps, and scripts.tick.sites.TickSites.shut, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick",
+      "rules": ["tick-held-exception-shuts-every-step"],
+      "tests": [
+        "tests/tick/test_step_failure.py::test_a_raising_exits_sweep_still_runs_reap_and_the_master_step",
+        "tests/tick/test_step_failure.py::test_a_fenced_pass_with_a_raising_exits_sweep_runs_reap_and_the_master_step_and_ends_failed",
+        "tests/tick/test_step_failure.py::test_a_raised_step_shuts_only_the_steps_that_need_it_directly_or_through_another",
+        "tests/tick/test_step_failure.py::test_a_pass_without_a_raise_shuts_no_step_for_its_needs",
+        "tests/tick/test_step_failure.py::test_the_first_held_exception_stays_the_one_the_pass_ends_on",
+        "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step",
+        "tests/tick/test_step_failure.py::test_the_wrapper_asks_the_tick_sites_first_so_a_stopped_step_needing_a_raised_step_falls_too"
+      ]
     }
   ],
   "unmapped_rules": [

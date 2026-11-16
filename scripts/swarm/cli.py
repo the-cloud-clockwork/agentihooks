@@ -501,11 +501,13 @@ class _Wrapper:
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
         needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
-        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say, asked
+        first so a step needing a step that raised falls whatever else shuts it."""
+        ticked = self.ticks.shut(step)
         open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
         stopped = not open_past_stop and "stop" in self.box
         ended = self.ended is not None and step.group not in ENDS_AFTER
-        return stopped or ended or self.ticks.shut(step)
+        return ticked or stopped or ended
 
     def actions(self, records: Iterable[Any]) -> list[str]:
         """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
