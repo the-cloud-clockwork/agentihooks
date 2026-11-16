@@ -1,6 +1,5 @@
 """Pattern downloads leave a lone matched artifact where the step that reads it looks."""
 
-import ast
 import json
 import re
 import shlex
@@ -12,11 +11,11 @@ import pytest
 import yaml
 
 from scripts import ci_gate_summary
+from scripts.ci_lab.expressions import interpolate
 from scripts.ci_mutation import merge, replay
 
 ROOT = Path(__file__).resolve().parents[1]
 GITHUB = ROOT / ".github"
-TOKEN = re.compile(r"\b(?:github|inputs|matrix|needs|runner|steps)(?:\.[\w-]+)+")
 SHARDS = re.compile(r"\bneeds\.[\w-]+\.outputs\.shards\b")
 GREEN = {"files": [], "not_mutated": [], "failed": False}
 MUTATION = ("workflows/test.yml", "mutation", "mutation-report-*")
@@ -76,31 +75,6 @@ def _steps(file: str, job: str) -> dict[str, dict[str, Any]]:
     return {step["name"]: step for step in steps if "name" in step}
 
 
-def _value(node: ast.expr) -> object:
-    """Evaluate the constants, comparisons, and and or of a workflow expression with the runner's semantics."""
-    if isinstance(node, ast.Constant):
-        return node.value
-    if isinstance(node, ast.BoolOp):
-        result = _value(node.values[0])
-        for operand in node.values[1:]:
-            if bool(result) != isinstance(node.op, ast.And):
-                return result
-            result = _value(operand)
-        return result
-    if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Eq, ast.NotEq)):
-        equal = _value(node.left) == _value(node.comparators[0])
-        return equal if isinstance(node.ops[0], ast.Eq) else not equal
-    raise AssertionError(f"cannot evaluate {ast.dump(node)}")
-
-
-def _evaluate(value: str, contexts: dict[str, str]) -> str:
-    """Return a step input after the runner expands it, reading each context value from contexts or as empty."""
-    if not value.startswith("${{"):
-        return value
-    body = TOKEN.sub(lambda match: repr(contexts.get(match.group(0), "")), value.removeprefix("${{").removesuffix("}}"))
-    return str(_value(ast.parse(body.replace("&&", " and ").replace("||", " or ").strip(), mode="eval").body))
-
-
 def _download(
     step: dict[str, Any], artifacts: dict[str, dict[str, str]], workspace: Path, contexts: dict[str, str]
 ) -> None:
@@ -111,7 +85,7 @@ def _download(
     """
     assert step["uses"] == "actions/download-artifact@v8.0.2"
     settings = step["with"]
-    path = workspace / _evaluate(settings["path"], contexts)
+    path = workspace / interpolate(settings["path"], contexts)
     matched = [name for name in sorted(artifacts) if fnmatch(name, settings["pattern"])]
     for name in matched:
         folder = path if len(matched) == 1 or settings.get("merge-multiple") is True else path / name
@@ -133,8 +107,8 @@ def test_every_pattern_download_without_merge_multiple_says_where_a_lone_match_l
 def test_a_lone_shard_download_lands_in_a_folder_its_pattern_names(key: tuple[str, str, str]) -> None:
     path = _pattern_downloads()[key]["with"]["path"]
     outputs = set(SHARDS.findall(path))
-    lone = PurePosixPath(_evaluate(path, dict.fromkeys(outputs, "[0]")))
-    shared = PurePosixPath(_evaluate(path, dict.fromkeys(outputs, "[0, 1]")))
+    lone = PurePosixPath(interpolate(path, dict.fromkeys(outputs, "[0]")))
+    shared = PurePosixPath(interpolate(path, dict.fromkeys(outputs, "[0, 1]")))
     assert outputs
     assert lone.parent == shared
     assert fnmatch(lone.name, key[2])
@@ -147,11 +121,12 @@ def test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], count: int, source: str
 ) -> None:
     order = ["mutation-replan", "mutation-refine", "mutation-plan"]
-    contexts = {f"needs.{job}.outputs.shards": "[0, 1, 2, 3]" for job in order[order.index(source) + 1 :]}
+    lower = order[order.index(source) + 1 :]
+    contexts = {f"needs.{job}.outputs.shards": "[0, 1, 2, 3]" if job in lower else "" for job in order}
     contexts[f"needs.{source}.outputs.shards"] = json.dumps(list(range(count)))
     steps = _steps(MUTATION[0], MUTATION[1])
     merging = steps["Merge the shard reports"]
-    shards = json.loads(_evaluate(merging["env"]["SHARDS"], contexts))
+    shards = json.loads(interpolate(merging["env"]["SHARDS"], contexts))
     reports = {
         f"mutation-report-{shard}": {
             "report.json": json.dumps({**GREEN, "shard": {"index": shard, "expected": 0, "graded": 0}})
