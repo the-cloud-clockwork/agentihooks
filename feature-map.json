@@ -643,7 +643,7 @@
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
-      "behaviour": "A checked wait holds a claim holder's idle count only while the waits end step, which ends checked waits whose target resolved, has run within the idle retirement window; when that step is starved, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
+      "behaviour": "A checked wait holds a claim holder's idle count only while the last completed waits end pass, which ends checked waits whose target resolved, ran within the idle retirement window, or within that window of its declaration while no pass ever completed; when that pass is starved or failing, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
       "seam": "scripts.tick.steps.agents._watch_idle and _hive_lost, through _holding_wait",
       "tests": [
         "tests/tick/steps/test_idle_claim_retire.py::test_workstation_engineers_idle_under_an_unended_checked_wait_are_retired_within_25_ticks",
@@ -657,10 +657,22 @@
       "id": "tick-waits-end-records-its-end-every-run",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
-      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, so the waits end step, declared at sixty seconds on the tick lane, refreshes its end on every run and a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
-      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, read by scripts.tick.steps.agents._holding_wait",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, and each completed waits end pass records the time it ran, so while that pass keeps completing a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, and scripts.swarm.waits.end_pass through mark_ended, read by scripts.tick.steps.agents._holding_wait",
       "tests": [
         "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
+      "id": "tick-failing-waits-end-lets-checked-waits-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2564",
+      "behaviour": "The idle count trusts only a completed waits end pass. The registered waits end step reports ok even when its end pass raises, is skipped after an earlier step held an exception, finds no tick view or is refused, so the end a checked wait holds on is the time the last completed end pass ran; while the pass fails after a completion, a checked wait holds only within the idle retirement window after that time, with no completion ever recorded only within that window of its declaration, and engineers idle at their prompts under checked waits are retired within 25 ticks.",
+      "seam": "scripts.swarm.waits.end_pass recording its completion, read by scripts.tick.steps.agents._holding_wait in _watch_idle",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read",
+        "tests/tick/steps/test_idle_claim_retire.py::test_engineers_idle_under_a_checked_wait_are_retired_while_waits_end_fails_every_pass",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_holds_one_window_after_it_was_declared_when_waits_end_never_completed"
       ]
     },
     {
