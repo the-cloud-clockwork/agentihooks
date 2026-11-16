@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox import exits
-from scripts.inbox.store import Contended, InboxStore, Item
+from scripts.inbox.store import CLOSED, Contended, InboxStore, Item
 from scripts.swarm import launch_check, lifetime, live_binding, master_retire
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -38,8 +38,12 @@ def mismatch(runtime, name, **wrong):
     }
 
 
+def is_ask(item: Item) -> bool:
+    return item.ref.startswith(f"{master_retire.REF}:")
+
+
 def asks(store: RedisStore, name: str) -> list[Item]:
-    return [i for i in InboxStore(store.redis).inbox(store.seats.seat_of(name) or name) if i.ref == master_retire.REF]
+    return [i for i in InboxStore(store.redis).inbox(store.seats.seat_of(name) or name) if is_ask(i)]
 
 
 def current(store, name):
@@ -361,6 +365,22 @@ def test_forget_closes_an_open_request_once_and_reports_whether_one_existed(swar
     assert inbox.get(second.id).state == "done"
 
 
+@pytest.mark.feature("inbox-notices-pass-the-seen-claim")
+def test_each_retire_ask_passes_the_seen_claim(swarm: tuple[RedisStore, FakeRuntime, FakeLedger, AgentRecord]) -> None:
+    from scripts.inbox import seen
+
+    store, _, _, master = swarm
+    inbox = InboxStore(store.redis)
+    assert master_retire.hold(store, "sw", master, "a test", True, 200).startswith("asked")
+    (first,) = [item for item in seen.claim(inbox, master.name) if "retiring you: a test." in item.text]
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert master_retire.hold(store, "sw", master, "another test", True, 300).startswith("asked")
+    (second,) = [item for item in seen.claim(inbox, master.name) if "retiring you: another test." in item.text]
+    assert second.id != first.id
+    assert inbox.get(first.id).state == "done"
+    assert inbox.get(second.id).state not in CLOSED
+
+
 def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inbox(
     swarm: tuple[RedisStore, FakeRuntime, FakeLedger, AgentRecord], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -370,7 +390,7 @@ def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inb
     )
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     hive = InboxStore(store.redis, world="hive-a")
-    (ask,) = [i for i in hive.inbox(master.seat) if i.ref == master_retire.REF]
+    (ask,) = [i for i in hive.inbox(master.seat) if is_ask(i)]
     assert asks(store, master.name) == []
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert hive.get(ask.id).state == "done"
@@ -386,7 +406,7 @@ def test_a_hold_made_from_a_hive_member_closes_its_ask_in_that_member_world(
     monkeypatch.setattr(scope, "member", lambda: "hive-b")
     assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
     member = InboxStore(store.redis, world="hive-b")
-    (ask,) = [i for i in member.inbox(master.seat) if i.ref == master_retire.REF]
+    (ask,) = [i for i in member.inbox(master.seat) if is_ask(i)]
     monkeypatch.setattr(scope, "member", lambda: "")
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert member.get(ask.id).state == "done"
