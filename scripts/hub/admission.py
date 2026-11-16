@@ -230,7 +230,7 @@ class Admission:
     def _admitting(self, hive: str, offer: str) -> bool:
         """True while the hive's admission key is held by an admission of this same offer."""
         holder: object = self.store.redis.get(turn_key(hive))  # pyright: ignore[reportUnknownMemberType]
-        return str(holder).rpartition(" ")[0] == offer
+        return str(holder).startswith(f"{offer} ")
 
     def _full(self, hive: str) -> str:
         """The hive's live worker executions across every swarm against its registry max agents; empty below the cap
