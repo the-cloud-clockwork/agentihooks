@@ -171,9 +171,18 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     ci_gate_queue.normalize(announced)
     announced["test.yml"]["jobs"]["gate-required"]["needs"].append("dep-manifest")
     ci_gate_queue.normalize(announced)
+    for typed in (False, True):
+        lab = copy.deepcopy(announced)
+        lab["test.yml"]["jobs"]["gate-required"]["needs"] += ["type-gate"] * typed + ["lab-verdict"]
+        assert ci_gate_queue.normalize(lab)["test.yml"]["jobs"]["gate-required"]["name"] == "Gate — Required"
     announced["test.yml"]["jobs"]["gate-required"]["needs"].append("unannounced")
     with pytest.raises(ValueError):
         ci_gate_queue.normalize(announced)
+    unlabelled = copy.deepcopy(workflow)
+    unlabelled["test.yml"]["jobs"]["gate-required"]["needs"].remove("lint")
+    unlabelled["test.yml"]["jobs"]["gate-required"]["needs"].append("lab-verdict")
+    with pytest.raises(ValueError):
+        ci_gate_queue.normalize(unlabelled)
 
 
 @pytest.mark.parametrize("deferred", [False, True])

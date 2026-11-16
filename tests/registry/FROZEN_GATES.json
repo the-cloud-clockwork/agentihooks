@@ -29,6 +29,8 @@
     "f41f79ed38fb38451fb3dd1929cc378f47b583ae",
     "38e54a849d0b05fbf482170236f29c520caf5d4b",
     "c02a83a058033a06cc659012dddaba458b3243ac",
+    "7536512cb2c93dc6c40f8a89cd77255b588725fd",
+    "b2004fa98c2aefb9efd4a7e7e03110d34558ef4b",
     "096800ce6c3c5c61267d4a8b77ae41f301443c82"
   ],
   ".github/workflows/gate-protected.yml": [
