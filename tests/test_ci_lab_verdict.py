@@ -217,7 +217,7 @@ def test_lab_outputs_publish_every_authoritative_gate(tmp_path: Path) -> None:
     fetch, asked = scripted(
         {
             "grade/lint": [[run(1, "completed", "success")]],
-            "grade/unit": [[]],
+            "grade/unit": [[run(3, "completed", "cancelled")]],
             "grade/type-gate": [[run(2, "completed", "skipped")]],
         }
     )
