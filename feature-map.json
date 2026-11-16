@@ -946,7 +946,7 @@
       "id": "hub-admission-hive-asks-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
-      "behaviour": "A hive whose admit ask the hub leaves unanswered keeps the offer as its own pending admission, its claim asked by that hive, and asks the hub again on its next poll with no wait for a redelivery, so an admission the hub kept past the hive's wait launches even after the hub readiness pass withdrew the offer, without the hub launch check freeing it and raising the claim generation by two. It asks on every poll for as long as the hub leaves the ask unanswered, with no delivery cap, and launches without a second room reading because its take already passed one; a held answer to the repeat ask returns the offer, a refusal withdraws it, and a pending admission another hive now asks for is dropped. The hub answers a repeat ask from the same hive with that hive's own admission of the offer once the admission leaves the hive's turn, holds the answer while the admission outlasts the turn wait, and gives another hive none. An asked claim keeps other hives off the offer until its hive is lost.",
+      "behaviour": "A hive whose admit ask the hub leaves unanswered keeps the offer as its own pending admission, its claim asked by that hive, and asks the hub again on its next poll with no wait for a redelivery, so an admission the hub kept past the hive's wait launches even after the hub readiness pass withdrew the offer, without the hub launch check freeing it and raising the claim generation by two. Each ask the hub leaves unanswered counts as a delivery of the offer, which is dead lettered and reopened at the last one, and the launch needs no second room reading because its take already passed one; a held answer to the repeat ask returns the offer, a refusal withdraws it, and a pending admission another hive now asks for is dropped. The hub answers a repeat ask from the same hive with that hive's own admission of the offer once the admission leaves the hive's turn, holds the answer while the admission outlasts the turn wait, and gives another hive none. An asked claim keeps other hives off the offer until its hive is lost.",
       "seam": "Spoke.poll and LaneTasks.request on the hive, and Admission.admit on the hub",
       "rules": [
         "hive-unanswered-admit-waits-for-redelivery"
@@ -957,6 +957,7 @@
         "tests/hive/test_spoke.py::test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch",
         "tests/hive/test_spoke.py::test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer",
         "tests/hive/test_spoke.py::test_a_pending_admission_another_hive_now_asks_for_is_dropped",
+        "tests/hive/test_spoke.py::test_an_admission_left_unanswered_through_every_delivery_is_dead_lettered_and_reopened",
         "tests/hive/test_spoke.py::test_an_admission_asked_again_launches_without_measuring_room_again",
         "tests/hive/test_spoke.py::test_lost_hive_work_redelivers_and_changes_the_old_claim_fence",
         "tests/hive/test_spoke.py::test_a_fresh_hive_keeps_its_claim_until_presence_expires",
