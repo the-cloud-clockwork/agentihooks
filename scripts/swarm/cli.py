@@ -1855,9 +1855,13 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
-    """The panic button: on stops agent starts and cancels CI runs but the fixes, off clears it once stable."""
+    """The panic button: on, pressed by the master or the operator, stops agent starts and cancels CI runs but the
+    checked fixes, off clears it once stable."""
     now = now_ms()
     if args.action == "on":
+        _master_or_operator(store, args, "only the master or the operator presses panic on")
+        for fix in args.fix:
+            panic.check_fix(fix)
         found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
         cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
