@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.928 · 2026-11-16
+
+### 2026-11-16 · 206ee495f2cc · #11335 · @agenticore-app
+
+**Delete the branch mutation preflight**
+
+This change removes the branch mutation preflight workflow entirely, since the pull request Tests run is now the sole source of mutation testing. It drops the preflight job, the reuse logic that waited on earlier preflight reports, the token-minting and kill-memory-seeding steps tied to it, and the now-orphaned reuse.py module and preflight stats scripts. Kill memory for mutation stats now comes from this pull request's own Tests cache instead. The result is simpler CI with no cross-run waiting, and preflight runner minutes per merged pull request drop from 127 to zero.
+
 ## v2.17.927 · 2026-11-16
 
 ### 2026-11-16 · 2be57e9d9b6f · #11474 · @agenticore-app
