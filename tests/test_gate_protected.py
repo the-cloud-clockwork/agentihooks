@@ -1115,14 +1115,17 @@ def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
 
 
 def _repository_lab_form() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Return the repository workflows, a head copy with the lab aggregation, the wiring config and the actors."""
+    """Return the repository workflows, a head copy with the lab aggregation under static gate names, the wiring config and the actors."""
     from scripts import ci_reuse, ci_runner_trust
 
     workflows = ci_wiring.load(_ROOT)
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
     head = copy.deepcopy(workflows)
-    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    jobs = head["test.yml"]["jobs"]
+    jobs["gate-required"]["name"] = gate_protected.GATE
+    jobs["queue-fail-fast"]["name"] = "queue-fail-fast"
+    step = jobs["gate-required"]["steps"][0]
     step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
     return workflows, head, config, actors
 
