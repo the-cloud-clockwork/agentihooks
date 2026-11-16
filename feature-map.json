@@ -1149,6 +1149,17 @@
       ]
     },
     {
+      "id": "admission-launch-carries-admitted-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-working-retired",
+      "behaviour": "The hub claim's launch identity names the admitted execution under the same key scripts.swarm_v2.runtime.codex.arguments reads, so a hub-admitted Codex app-server launch always carries --execution for its admitted execution instead of self-admitting a second, untracked one that a 360 second hung launch check then frees while the real execution keeps working.",
+      "seam": "scripts.hub.admission.Admission._claim building admitted[\"task\"] and scripts.swarm_v2.runtime.codex.arguments reading it",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_admitted_task_carries_its_launch_execution_identity",
+        "tests/hub/test_admission.py::test_the_admitted_task_launch_arguments_pass_the_admitted_execution"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
