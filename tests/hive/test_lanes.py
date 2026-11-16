@@ -290,6 +290,64 @@ def test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_
     assert written == seeds
 
 
+@pytest.mark.feature("hive-spoke-launch-waits-for-serena-router")
+def test_a_lane_spoke_launches_no_agent_while_the_serena_router_does_not_come_up(
+    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import serena_router_daemon
+
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: False)
+    hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
+    runtime = Mock()
+
+    assert lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, "hive-a", ("eng",), 0, {}) == ["retry"]
+
+    runtime.spawn.assert_not_called()
+    assert [ask for ask, _, _ in hub.hub.seen] == ["admit", "reopen"]
+    claim = hub.bus.for_swarm("rig").state("spoke-work").get(spoke.claim_key(offer()))
+    assert json.loads(claim.value) == {"state": "ready"}
+    assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: spawn unavailable: serena)" in (
+        capsys.readouterr().err
+    )
+
+
+@pytest.mark.feature("hive-spoke-launch-waits-for-serena-router")
+def test_a_lane_spoke_ensures_the_serena_router_before_it_spawns_the_admitted_agent(
+    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import serena_router_daemon
+
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    calls: list[str] = []
+    placed = SimpleNamespace(
+        pane_id="pane-1",
+        harness="claude",
+        account="slot-a",
+        profile="engineer",
+        model="opus",
+        effort="high",
+        launched_at=0,
+    )
+
+    def ensure() -> bool:
+        calls.append("router")
+        return True
+
+    def spawn(request: object) -> Outcome:
+        calls.append("spawn")
+        return Outcome("spawn", Status.OK, "local", placed)
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", ensure)
+    runtime = Mock()
+    runtime.spawn.side_effect = spawn
+    hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
+
+    assert lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, "hive-a", ("eng",), 0, {}) == ["started"]
+
+    assert calls == ["router", "spawn"]
+
+
 def test_an_admitted_task_with_no_work_folder_is_spawned_unchanged(hub):
     from scripts.swarm.store import SwarmConfig
 

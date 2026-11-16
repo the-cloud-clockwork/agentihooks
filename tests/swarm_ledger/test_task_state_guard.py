@@ -227,8 +227,9 @@ def test_the_ledger_keeps_how_a_replacement_continued_and_from_which_watermark()
         "repository_branches",
         "pull_scopes",
         "watchdog",
+        "review_rounds",
     )
-    assert ledger_tasks.UPDATABLE[-1] == "recovery"
+    assert ledger_tasks.UPDATABLE[-3:] == ("recovery", "review_rounds", "review_readers")
 
 
 @pytest.mark.parametrize(
