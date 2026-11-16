@@ -580,15 +580,41 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
     ]
 
 
+@pytest.mark.parametrize(
+    ("fix", "named"),
+    [
+        (BRANCH_FIX, ("github.com/the-cloud-clockwork/agentihooks", "fix-branch")),
+        (
+            "https://github.com/The-Cloud-Clockwork/agentihooks/tree/Fix",
+            ("github.com/the-cloud-clockwork/agentihooks", "Fix"),
+        ),
+        ("https://github.com/o/r/tree/fix/nested", ("github.com/o/r", "fix/nested")),
+        ("https://github.com/o/tree/tree/b", ("github.com/o/tree", "b")),
+        (FIX, ("", "")),
+        ("o/r/tree/b", ("", "")),
+        ("https://github.com/o/r/tree", ("", "")),
+        ("https://github.com/o/r/tree/", ("", "")),
+        ("https://github.com//r/tree/b", ("", "")),
+    ],
+)
 @pytest.mark.feature("panic-fix-branch-first-push")
-def test_tick_pass_spares_a_registered_fix_branch_and_reads_no_pull_request_for_it(
+def test_a_branch_link_names_its_repository_and_branch(fix: str, named: tuple[str, str]) -> None:
+    assert panic.branch_fix(fix) == named
+
+
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asked = _branches(monkeypatch, {FIX: "pr-branch"})
     runs = Runs({repo: [_row(1, "busy"), _row(2, "fix-branch"), _row(3, "pr-branch")] for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [FIX, BRANCH_FIX], 0)
     assert panic.tick_pass(store, True, 1_000, runs) == [
-        f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS
+        "panic cancelled the-cloud-clockwork/agentihooks run 1 on busy",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 1 on busy",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 2 on fix-branch",
+        "panic cancelled the-cloud-clockwork/antoncore run 1 on busy",
+        "panic cancelled the-cloud-clockwork/antoncore run 2 on fix-branch",
     ]
     assert asked == [FIX]
 
