@@ -496,9 +496,12 @@ class RedisStore:
         return {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "reclaims")).items()}
 
     def earlier_lives(self, slug: str, task: str) -> list[str]:
+        """The task's earlier worker agents, last ended first, leaving out one retired while still starting with no
+        pane: no hive ever ran it, so it pushed no branch to continue."""
         rows = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1)]
         mine = [row for row in rows if row.get("task") == task and row.get("lane") != MASTER]
-        return [row["name"] for row in sorted(mine, key=lambda row: row.get("ended_at") or 0, reverse=True)]
+        ran = [row for row in mine if row.get("pane_id") or row.get("state") != "starting"]
+        return [row["name"] for row in sorted(ran, key=lambda row: row.get("ended_at") or 0, reverse=True)]
 
     def ensure_code(self, slug):
         config = self.config(slug)
