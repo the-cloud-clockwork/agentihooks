@@ -197,7 +197,7 @@ class TestInstructions:
             "or artifact=yes so its agent may publish it."
         ) in text
 
-    def test_packaged_toolbelt_carries_the_rule(self):
+    def test_packaged_toolbelt_skill_carries_the_rule(self):
         rule = Path(__file__).resolve().parents[2] / "profiles/package/skills/agentihooks-toolbelt/SKILL.md"
         text = rule.read_text()
         assert self.OLD not in text
