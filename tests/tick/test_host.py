@@ -305,8 +305,7 @@ def test_the_intent_check_holds_what_it_raises_in_its_judging_box(monkeypatch: p
 
     monkeypatch.setattr(host, "import_module", lambda name: "cli")
     assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
-    assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
-    assert calls == [("boom", "cli"), ("boom", "cli")]
+    assert calls == [("boom", "cli")]
     assert box == {}
     assert isinstance(judging["raised"], RuntimeError)
 

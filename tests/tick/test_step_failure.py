@@ -1,13 +1,15 @@
-"""A tick step that raises shuts only the steps that need it, directly or through another, and the pass runs the rest."""
+"""A tick step that raises shuts only the steps that need it, directly or through another; the pass runs the rest."""
 
 from collections.abc import Callable
 from functools import partial
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from scripts.swarm import cli
 from scripts.tick import registry
 from scripts.tick import sites as tick_sites
 from scripts.tick import steps as tick_steps
@@ -130,3 +132,15 @@ def test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step(
     assert wrapped(None, _declared(box, "exits sweep")) == []
     assert isinstance(box["raised"], RuntimeError)
     assert box["fallen"] == {"exits sweep"}
+
+
+@pytest.mark.feature("swarm-tick-step-failure-isolated")
+def test_the_wrapper_asks_the_tick_sites_first_so_a_stopped_step_needing_a_raised_step_falls_too() -> None:
+    box = tick_steps.PassBox({"stop": ["Ledger health probe failed"]})
+    tick_steps.hold(tick_steps.DeclaredBox(box, "ledger health", frozenset()), RuntimeError(SWEEP_DOWN))
+    wrapper = SimpleNamespace(box=box, ended=None, ticks=tick_sites.TickSites({}, box, {}, lambda: 0))
+    stopped = _Marker("command runner", "wrapper commands", needs=frozenset({"ledger health"}))
+    opened = _Marker("outbox migration", "wrapper relay", needs=frozenset({"command runner"}))
+    assert cli._Wrapper.shut(wrapper, stopped)  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    assert cli._Wrapper.shut(wrapper, opened)  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    assert box["fallen"] == {"ledger health", "command runner", "outbox migration"}

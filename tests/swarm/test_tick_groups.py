@@ -410,7 +410,7 @@ def _raise(message: str) -> Callable[[Get], list[str]]:
     return call
 
 
-def test_a_failed_tick_step_ends_the_tick_wrapper_pass_failed(
+def test_a_failed_tick_step_ends_the_tick_wrapper_pass_failed_and_the_sites_not_needing_it_run(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -425,7 +425,7 @@ def test_a_failed_tick_step_ends_the_tick_wrapper_pass_failed(
     groups = _groups(monkeypatch)
     actions = cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
     assert actions == ["pass failed: a step raised RuntimeError: tick failed"]
-    assert relayed == []
+    assert relayed == ["relay"]
     assert [name for name, _ in groups] == ["before", "closing"]
 
 
@@ -451,7 +451,7 @@ def test_a_tick_value_left_drops_the_tick_actions_and_the_wrapper_goes_on(
     assert [name for name, _ in groups][-1] == "closing"
 
 
-def test_a_failed_wrapper_step_ends_the_tick_wrapper_pass_failed(
+def test_a_failed_wrapper_step_ends_the_tick_wrapper_pass_failed_and_the_sites_not_needing_it_run(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -467,7 +467,7 @@ def test_a_failed_wrapper_step_ends_the_tick_wrapper_pass_failed(
     monkeypatch.setattr(command_runner, "consume", consume)
     actions = cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
     assert actions == ["pass failed: a step raised RuntimeError: consume failed"]
-    assert phased == []
+    assert phased == ["phases"]
     assert [name for name, _ in groups] == ["before", "closing"]
     assert dict(groups)["closing"].view.read(PASS, "ended") is None
 

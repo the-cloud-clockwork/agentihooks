@@ -124,6 +124,14 @@ def _run(
     return actions(engine.run_group(group, ctx))
 
 
+@pytest.fixture
+def calm(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    log: list[Any] = []
+    monkeypatch.setattr(panic, "state", lambda store: log.append("panic read") and None)
+    monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
+    return log
+
+
 def test_the_placement_steps_sit_at_their_sites_in_legacy_order() -> None:
     assert (place.ACKS, place.PLACEMENT) == ("placement acks", "placement")
     assert [step.name for step in engine.group_steps(place.ACKS)] == ["codex hook order"]
@@ -205,13 +213,10 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_a_held_exception_of_an_earlier_step_leaves_every_placement_step_running(
-    monkeypatch: pytest.MonkeyPatch,
+    calm: list[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    log: list[Any] = []
-    monkeypatch.setattr(panic, "state", lambda store: "halted")
-    monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
-    state = _pass(log, box={tasks.RAISED: RuntimeError("earlier")})
-    assert _run(place.PLACEMENT, _tick(log), state, monkeypatch) == ["ran rank_writes", "ran bottleneck remedy"]
+    state = _pass(calm, box={tasks.RAISED: RuntimeError("earlier")})
+    assert _run(place.PLACEMENT, _tick(calm), state, monkeypatch) == ["ran rank_writes", "ran bottleneck remedy"]
 
 
 SPAWN_CLUSTER = (

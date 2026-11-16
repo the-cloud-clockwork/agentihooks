@@ -7354,7 +7354,8 @@
         "tests/tick/test_step_failure.py::test_a_raised_step_shuts_only_the_steps_that_need_it_directly_or_through_another",
         "tests/tick/test_step_failure.py::test_a_pass_without_a_raise_shuts_no_step_for_its_needs",
         "tests/tick/test_step_failure.py::test_the_first_held_exception_stays_the_one_the_pass_ends_on",
-        "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step"
+        "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step",
+        "tests/tick/test_step_failure.py::test_the_wrapper_asks_the_tick_sites_first_so_a_stopped_step_needing_a_raised_step_falls_too"
       ]
     }
   ],
