@@ -1,16 +1,17 @@
-"""Stdout discipline test (P0.3).
+"""Stdout discipline test.
 
-Importing any hooks/* module must NOT write to stdout. Claude Code parses
-hook-process stdout as JSON; any module-level print/import-time warning
-silently corrupts the parse and drops `additionalContext`.
+Importing any hooks/* module must NOT write to stdout. Claude Code parses hook-process stdout as JSON; any
+module-level print or import-time warning corrupts the parse and drops `additionalContext`
+(https://code.claude.com/docs/en/hooks.md: exit 0 with invalid JSON applies no fields). A noisy import makes
+broadcast injection disappear; this test catches it in CI.
 
-Per upstream protocol (https://code.claude.com/docs/en/hooks.md):
-- exit 0 + valid JSON → fields applied
-- exit 0 + invalid JSON → harness logs error, fields NOT applied
-- exit 1/non-2 → non-blocking, stderr in transcript
+_ALLOWED_NOISY: Modules that legitimately print on import are quarantined here. Empty by design: every entry is a
+future bug, and each one added needs its justification in this docstring.
 
-A noisy import means our broadcast injection silently disappears. This
-test catches it at CI time before it ships.
+_PROBE_RUNNER: One interpreter loads the third-party dependencies once, then forks a child per module. Every child
+starts with none of the package loaded, so each module's import side effects are observed alone, as in a fresh
+process. The dependencies are read from the import statements that run at import time, so no first-party module
+executes outside its own child.
 """
 
 from __future__ import annotations
@@ -31,15 +32,8 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOKS_DIR = REPO_ROOT / "hooks"
 
-# Modules that legitimately print on import are quarantined here. Empty by
-# design — every entry is a future bug. Add ONLY with a justifying comment.
 _ALLOWED_NOISY: frozenset[str] = frozenset()
 
-# One interpreter loads the third-party dependencies once, then forks a child
-# per module. Every child starts with none of the package loaded, so each
-# module's import side effects are observed alone, as in a fresh process.
-# The dependencies are read from the import statements that run at import
-# time, so no first-party module executes outside its own child.
 _PROBE_RUNNER = r"""
 import ast, importlib, importlib.machinery, io, json, os, sys, tempfile, traceback
 
@@ -201,24 +195,21 @@ def _selected_hook_modules(items) -> tuple[str, ...]:
 
 @functools.cache
 def _hook_report(modules: tuple[str, ...]) -> dict:
-    # The suite-wide home-isolation fixture repoints $HOME. Where the
-    # interpreter installs into the user site (~/.local/lib/pythonX/
-    # site-packages — the layout on the self-hosted runner), that alone drops
-    # every dependency from the child's sys.path and the probe reports an
-    # import failure that says more about the fixture than the module. Hand
-    # the child the parent's resolved path so it imports exactly what pytest
-    # imported.
+    """The suite-wide home-isolation fixture repoints $HOME. Where the interpreter installs into the user site
+    (~/.local/lib/pythonX/ site-packages — the layout on the self-hosted runner), that alone drops every dependency
+    from the child's sys.path and the probe reports an import failure that says more about the fixture than the
+    module. Hand the child the parent's resolved path so it imports exactly what pytest imported.
+    """
     return _probe_modules("hooks", list(modules), _probe_env())
 
 
 @pytest.mark.xdist_group("import-probe")
 @pytest.mark.parametrize("module", _all_hook_modules())
 def test_module_import_does_not_write_to_stdout(module: str, request: pytest.FixtureRequest) -> None:
+    """Probe only what this worker's shard selected, so splitting the suite splits the probe too."""
     if module in _ALLOWED_NOISY:
         pytest.skip(f"{module} is in _ALLOWED_NOISY quarantine")
 
-    # Probe only what this worker's shard selected, so splitting the suite
-    # splits the probe too.
     report = _hook_report(_selected_hook_modules(request.session.items))
     noise = report["shared_stdout"] + report["process_stdout"]
     if noise:

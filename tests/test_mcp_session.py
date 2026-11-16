@@ -3,11 +3,13 @@
 The precedence here is what makes the tools correct under a shared network
 server: an explicit argument is the only identity a daemon serving many
 sessions from one process can trust.
+
+Pytestmark: build_server loads the MCP SDK, so hooks.mcp is imported inside the tests and one worker runs every file
+that loads it.
 """
 
 import pytest
 
-# build_server loads the MCP SDK, so hooks.mcp is imported inside the tests and one worker runs every file that loads it.
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 
 

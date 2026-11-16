@@ -94,9 +94,6 @@ def _run(*args):
     return SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
 
 
-# T-SV2-FND-04-A
-
-
 def test_a_plan_reader_returns_every_package_with_repository_gate_dependencies_and_cases():
     plan = vp.load_plan(ROOT / "Swarm-v2.md")
     assert len(plan["packages"]) == 150
@@ -223,9 +220,6 @@ def test_a_record_command_writes_the_registry_and_its_markdown(tmp_path):
     assert json.loads(result.stdout)["revision"] == 2
     index = vp.load_index(path)
     assert markdown.read_text() == vp.render(index, PLAN, _check(index))
-
-
-# T-SV2-FND-04-B
 
 
 def test_a_screenshot_named_for_the_recovery_case_still_does_not_satisfy_it():
@@ -463,9 +457,6 @@ def test_an_evidence_id_from_another_package_is_refused(tmp_path):
     )
 
 
-# T-SV2-FND-04-C
-
-
 def test_a_replayed_record_has_no_second_effect(tmp_path):
     path = _registry(tmp_path)
     change = _change(evidence=[_pull()], claim="complete")
@@ -684,9 +675,6 @@ def test_a_restore_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
 def test_a_reopen_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
     path = _registry(tmp_path)
     _waits_for_the_lock(tmp_path, vp.reopen, (path, "SV2-FND-03", "op-1"))
-
-
-# T-SV2-FND-04-B, plan and input boundaries
 
 
 def _plan(packages, invariants=()):

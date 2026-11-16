@@ -108,8 +108,8 @@ def _download(run: str, shards: int, into: Path) -> list[Path] | None:
 
 
 def dev_runs(repo: Path, base: str, shards: int, scratch: Path) -> Iterator[Measurement]:
+    """Reading coverage data holds the GIL, so threads only download and processes read."""
     commits = git("rev-list", "--first-parent", f"--max-count={SEARCH}", base, cwd=repo).split()
-    # Reading coverage data holds the GIL, so threads only download and processes read.
     with ThreadPoolExecutor(max_workers=WINDOW) as pool, ProcessPoolExecutor(max_workers=WINDOW) as readers:
         fetch = _fetcher(repo, shards, scratch, lambda files: readers.submit(executed, files).result())
 
@@ -127,7 +127,7 @@ def dev_runs(repo: Path, base: str, shards: int, scratch: Path) -> Iterator[Meas
 def _older(
     pool: ThreadPoolExecutor, measure: Callable[[str], tuple[bool, Measurement | None]], commits: list[str]
 ) -> Iterator[Measurement]:
-    # Each lookup and download spends the repository's shared Actions API quota: at most WINDOW run past the last pull.
+    """Each lookup and download spends the repository's shared Actions API quota: at most WINDOW run past the last pull."""
     pending = deque(pool.submit(measure, commit) for commit in commits[:WINDOW])
     queued = iter(commits[WINDOW:])
     attempted = 0

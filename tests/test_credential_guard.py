@@ -2,6 +2,10 @@
 
 These cases came from the bundle hook's own selftest, which ran only on Claude.
 The guard now runs on every target, so they run in CI instead of by hand.
+
+CASES: naming a credential file is not reading it.
+
+CASES: reads that the operand-aware rules must still catch.
 """
 
 import json
@@ -21,7 +25,6 @@ from hooks.context.credential_guard import (
 pytestmark = pytest.mark.unit
 
 CASES = [
-    # (label, payload, should_block)
     ("read dotenv", {"tool_name": "Read", "tool_input": {"file_path": "/srv/app/.env"}}, True),
     ("read .env.production", {"tool_name": "Read", "tool_input": {"file_path": ".env.production"}}, True),
     ("read stack env", {"tool_name": "Read", "tool_input": {"file_path": "runtime/tracker.env"}}, True),
@@ -258,7 +261,6 @@ CASES = [
         {"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\nprint('read the .env file')\nPY"}},
         False,
     ),
-    # naming a credential file is not reading it
     (
         "find names dotenv",
         {"tool_name": "Bash", "tool_input": {"command": 'find . -name ".env" | grep -v example'}},
@@ -287,7 +289,6 @@ CASES = [
     ("rg negative glob", {"tool_name": "Bash", "tool_input": {"command": "rg -g '!.env' X ."}}, False),
     ("git add dotenv", {"tool_name": "Bash", "tool_input": {"command": "git add .env"}}, False),
     ("docker env-file", {"tool_name": "Bash", "tool_input": {"command": "docker run --env-file .env img"}}, False),
-    # reads that the operand-aware rules must still catch
     ("cat redirect dotenv", {"tool_name": "Bash", "tool_input": {"command": "cat < .env"}}, True),
     ("cat attached redirect", {"tool_name": "Bash", "tool_input": {"command": "cat <.env"}}, True),
     ("grep in dotenv file", {"tool_name": "Bash", "tool_input": {"command": "grep TOKEN .env"}}, True),
@@ -534,8 +535,9 @@ class TestRecursiveRewrite:
         assert v.rewrite == {"command": "LC_ALL=C /usr/bin/grep " + GREP_EXCLUDES + " -R X src"}
 
     def test_excludes_never_name_a_denied_home_path(self):
-        # An option value is a file operand to the harness: --exclude=.bashrc
-        # matches Read(~/.bashrc) and prompts. Keep those basenames out.
+        """An option value is a file operand to the harness: --exclude=.bashrc matches Read(~/.bashrc) and prompts. Keep
+        those basenames out.
+        """
         from hooks.context.credential_guard import SHELL_RC
 
         for rc in SHELL_RC:
@@ -668,7 +670,7 @@ class TestRunsOnEveryTarget:
     """The whole point of the port: this reached Claude only before."""
 
     def test_copilot_normalized_payload_blocks(self):
-        # what hooks.targets.normalizer produces for copilot's `bash` tool
+        """What hooks.targets.normalizer produces for copilot's `bash` tool."""
         assert decide({"tool_name": "Bash", "tool_input": {"command": "cat .env"}}) is not None
 
     def test_template_files_still_readable(self):

@@ -67,8 +67,8 @@ def bounded(what, seconds=30):
     before = children()
     previous = signal.signal(signal.SIGALRM, expired)
 
-    # Ends the worker, which xdist reports as a crash in this test, when SIGALRM cannot interrupt the wait.
     def abort():
+        """Ends the worker, which xdist reports as a crash in this test, when SIGALRM cannot interrupt the wait."""
         faulthandler.dump_traceback()
         os._exit(1)
 

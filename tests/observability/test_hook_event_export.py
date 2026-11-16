@@ -1,3 +1,5 @@
+"""_HOOK_WITH_LOAD_PROOF_FLUSH: Under runner load the worker's SDK init alone outlasts the 1s production flush budget."""
+
 import json
 import os
 import subprocess
@@ -9,7 +11,6 @@ from pathlib import Path
 import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-# Under runner load the worker's SDK init alone outlasts the 1s production flush budget.
 _HOOK_WITH_LOAD_PROOF_FLUSH = (
     "import runpy\n"
     "from hooks.observability import otel\n"

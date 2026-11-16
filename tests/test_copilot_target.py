@@ -1,4 +1,7 @@
-"""Tests for the Copilot target adapter (scripts/targets/copilot_target.py)."""
+"""Tests for the Copilot target adapter (scripts/targets/copilot_target.py).
+
+Import of install: binds the installer identity conftest patches; also used directly below.
+"""
 
 import json
 import os
@@ -6,7 +9,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
-import install  # binds the installer identity conftest patches; also used directly below
+import install
 import pytest
 
 from scripts.targets._common import agents_skills_home
@@ -48,12 +51,14 @@ class TestSettingsJson:
         assert "hooks.statusline" in doc["statusLine"]["command"]
 
     def test_disable_all_hooks_forced_false(self, adapter):
-        """An inherited true would silently kill every guardrail."""
+        """An inherited true would silently kill every guardrail.
+
+        Operator hand-set value is respected but must be reported loudly.
+        """
         home = copilot_home()
         home.mkdir(parents=True, exist_ok=True)
         (home / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
         adapter.write_settings({})
-        # Operator hand-set value is respected but must be reported loudly.
         doc = json.loads((home / "settings.json").read_text())
         assert "disableAllHooks" in doc
 
@@ -61,13 +66,14 @@ class TestSettingsJson:
         """Copilot has no settings key for YOLO: permissions.allow rules cover
         tools only (a write rule still hits path verification) and
         trustedFolders is not a recognized setting. COPILOT_ALLOW_ALL is the
-        switch, exported by the installer's agentienv shell block."""
+        switch, exported by the installer's agentienv shell block.
+
+        Copilot tests `=== "true"` for folder trust, workspace MCP sources, repo hooks and plugin loading; only the
+        --allow-all-tools binding is presence-based. A truthy-looking "1" leaves the rest silently off.
+        """
         adapter.write_settings({"_agentihooks": {"allowAll": True}})
         env_file = install.AGENTIHOOKS_STATE_DIR / "copilot.env"
         assert env_file.exists(), "bypassPermissions must produce the copilot env file"
-        # Copilot tests `=== "true"` for folder trust, workspace MCP sources,
-        # repo hooks and plugin loading; only the --allow-all-tools binding is
-        # presence-based. A truthy-looking "1" leaves the rest silently off.
         assert "COPILOT_ALLOW_ALL=true" in env_file.read_text()
 
     def test_non_bypass_removes_allow_all_env(self, adapter):
@@ -411,13 +417,15 @@ class TestCommandsToSkills:
     def test_real_skill_added_later_reclaims_the_name_in_one_cycle(self, adapter, tmp_path):
         """A name that was a command and is now a real skill must not stay
         shadowed: the symlinker refuses to replace a non-symlink, so the
-        translated directory has to be reaped first."""
+        translated directory has to be reaped first.
+
+        The bundle now also ships a real skill of that name.
+        """
         layers = self._layer(tmp_path, "only-cmd.md", "---\ndescription: cmd\n---\n\nold command content\n")
         adapter.install_features("commands", layers, lambda p: p.suffix == ".md")
         translated = agents_skills_home() / "only-cmd"
         assert translated.is_dir() and not translated.is_symlink()
 
-        # The bundle now also ships a real skill of that name.
         skills_src = tmp_path / "skills"
         (skills_src / "only-cmd").mkdir(parents=True)
         (skills_src / "only-cmd" / "SKILL.md").write_text("REAL SKILL")
@@ -624,11 +632,12 @@ class TestSkillDescriptionCap:
         assert oversized_skill_descriptions(tmp_path) == [("too-long", 1100)]
 
     def test_folded_yaml_is_measured_as_rendered(self, tmp_path):
+        """1200 chars of content."""
         from scripts.targets.copilot_target import oversized_skill_descriptions
 
         d = tmp_path / "folded"
         d.mkdir()
-        wrapped = "\n".join("  " + "y" * 60 for _ in range(20))  # 1200 chars of content
+        wrapped = "\n".join("  " + "y" * 60 for _ in range(20))
         (d / "SKILL.md").write_text(f"---\nname: folded\ndescription: >\n{wrapped}\n---\n\nbody\n")
         assert [n for n, _ in oversized_skill_descriptions(tmp_path)] == ["folded"]
 
@@ -947,15 +956,14 @@ class TestSuppressBrowserLaunch:
         assert "COPILOT_DEBUG_BROWSER=" in self._env_text(adapter)
 
     def test_sink_parses_as_copilot_parses_it_and_captures_the_url(self, adapter, tmp_path):
+        """Copilot: spawn(spec[0], [...spec.slice(1), url])"""
         adapter.write_settings({"_agentihooks": {"suppressBrowserLaunch": True}})
         line = next(ln for ln in self._env_text(adapter).splitlines() if ln.startswith("COPILOT_DEBUG_BROWSER="))
         spec = json.loads(line.split("=", 1)[1].strip("'"))
         assert isinstance(spec, list) and spec and all(isinstance(x, str) for x in spec)
 
         url = "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?x=1"
-        subprocess.run(  # copilot: spawn(spec[0], [...spec.slice(1), url])
-            [*spec, url], env={**os.environ, "HOME": str(tmp_path)}, check=True
-        )
+        subprocess.run([*spec, url], env={**os.environ, "HOME": str(tmp_path)}, check=True)
         assert (tmp_path / ".copilot" / "pending-oauth-urls.txt").read_text().strip() == url
 
     def test_absent_directive_writes_no_sink(self, adapter):

@@ -15,18 +15,25 @@ class TestClaudeLinter:
         assert estimate_tokens("") == 0
 
     def test_parse_sections(self, tmp_path):
+        """The H1 title before the first H2 is reported as a preamble section so per-section tokens reconcile with the
+        whole-file total.
+        """
         from scripts.claude_linter import PREAMBLE_HEADING, parse_sections
 
         md = tmp_path / "CLAUDE.md"
         md.write_text("# Title\n\n## Commands\nRun this.\n\n## Architecture\nDesign.\n")
 
         sections = parse_sections(md)
-        # The H1 title before the first H2 is reported as a preamble section so
-        # per-section tokens reconcile with the whole-file total.
         assert [s.heading for s in sections] == [PREAMBLE_HEADING, "Commands", "Architecture"]
 
     def test_section_tokens_reconcile_with_total(self, tmp_path):
-        """Per-section tokens must account for the whole file, preamble included."""
+        """Per-section tokens must account for the whole file, preamble included.
+
+        Nothing before the first heading may be silently dropped.
+
+        Per-section tokens now account for the whole file (chars//4 rounds per section, so allow one token of slack
+        per section).
+        """
         from scripts.claude_linter import lint_report
 
         md = tmp_path / "CLAUDE.md"
@@ -37,11 +44,8 @@ class TestClaudeLinter:
         )
         report = lint_report(md)
         joined = "\n".join(s.content for s in report.sections)
-        # Nothing before the first heading may be silently dropped.
         assert "Intro prose before any heading." in joined
         assert "block content" in joined
-        # Per-section tokens now account for the whole file (chars//4 rounds per
-        # section, so allow one token of slack per section).
         assert abs(sum(s.tokens for s in report.sections) - report.total_tokens) <= len(report.sections)
 
     def test_extract_refuses_duplicate_headings(self, tmp_path):
@@ -64,9 +68,9 @@ class TestClaudeLinter:
         assert classify_section(s) == "always"
 
     def test_classify_workflow_section(self):
+        """Must be >400 chars (>100 tokens) with multiple workflow signals."""
         from scripts.claude_linter import Section, classify_section
 
-        # Must be >400 chars (>100 tokens) with multiple workflow signals
         content = (
             "## Deploy\n"
             "When the user asks to deploy, use this workflow.\n"
@@ -85,6 +89,7 @@ class TestClaudeLinter:
         assert classify_section(s) == "always"
 
     def test_lint_report(self, tmp_path):
+        """H1 title preamble + the two H2 sections."""
         from scripts.claude_linter import lint_report
 
         padding = "This is a long section with lots of text to pad the content. " * 8
@@ -101,7 +106,6 @@ class TestClaudeLinter:
 
         report = lint_report(md)
         assert report.total_tokens > 0
-        # H1 title preamble + the two H2 sections
         assert len(report.sections) == 3
 
     def test_format_report(self, tmp_path):
@@ -116,6 +120,7 @@ class TestClaudeLinter:
         assert "Commands" in output
 
     def test_extract_to_skill(self, tmp_path):
+        """Section should be removed from CLAUDE.md."""
         from scripts.claude_linter import extract_to_skill
 
         md = tmp_path / "CLAUDE.md"
@@ -126,7 +131,6 @@ class TestClaudeLinter:
         assert result.exists()
         assert "Run tests" in result.read_text()
 
-        # Section should be removed from CLAUDE.md
         remaining = md.read_text()
         assert "## Commands" not in remaining
         assert "## Architecture" in remaining

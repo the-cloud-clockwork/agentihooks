@@ -1,3 +1,7 @@
+"""WHEEL_INPUTS: Other workers write into the checkout while the suite runs, so the build copies only what the wheel
+reads.
+"""
+
 import os
 import shutil
 import subprocess
@@ -10,7 +14,6 @@ from uv import find_uv_bin
 
 REPO = Path(__file__).resolve().parents[1]
 WHEEL_VERSION = "0.0.0.dev4242"
-# Other workers write into the checkout while the suite runs, so the build copies only what the wheel reads.
 WHEEL_INPUTS = ("pyproject.toml", "README.md", "LICENSE", "hooks", "scripts", "profiles")
 
 

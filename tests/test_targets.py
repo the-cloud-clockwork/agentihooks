@@ -24,8 +24,9 @@ class TestResolveTarget:
         assert resolve_target(None, "claude", (), interactive_ok=False) == "codex"
 
     def test_stored_alone_no_longer_wins_noninteractive(self, monkeypatch):
-        # `stored` is now only the interactive prompt's default — with no
-        # installed-target match and no TTY, it must NOT hijack resolution.
+        """`stored` is now only the interactive prompt's default — with no installed-target match and no TTY, it must NOT
+        hijack resolution.
+        """
         monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
         assert resolve_target(None, "codex", (), interactive_ok=False) == DEFAULT_TARGET
 
@@ -75,6 +76,7 @@ class TestResolveTarget:
 
 class TestStateShapeMigration:
     def test_legacy_flat_record_rewrapped_under_claude(self):
+        """Idempotent: second pass is a no-op."""
         state = {
             "targets": {
                 "global": {
@@ -86,7 +88,6 @@ class TestStateShapeMigration:
         }
         assert install._migrate_targets_shape(state) is True
         assert state["targets"]["global"]["claude"]["profile"] == "anton"
-        # Idempotent: second pass is a no-op
         assert install._migrate_targets_shape(state) is False
 
     def test_new_shape_untouched(self):
@@ -107,9 +108,11 @@ class TestStateShapeMigration:
         assert on_disk["targets"]["global"]["claude"]["profile"] == "smith"
 
     def test_mixed_shape_preserves_codex_and_nests_claude_fields(self):
-        # A version-skewed pre-multi-target binary writes flat claude fields
-        # back onto an already-migrated targets.global that also holds a
-        # keyed codex record. The codex record must survive.
+        """A version-skewed pre-multi-target binary writes flat claude fields back onto an already-migrated
+        targets.global that also holds a keyed codex record. The codex record must survive.
+
+        Idempotent.
+        """
         state = {
             "targets": {
                 "global": {
@@ -124,7 +127,6 @@ class TestStateShapeMigration:
         assert state["targets"]["global"]["codex"]["profile"] == "smith"
         assert state["targets"]["global"]["claude"]["profile"] == "anton"
         assert state["targets"]["global"]["claude"]["path"] == "/home/x/.claude"
-        # Idempotent
         assert install._migrate_targets_shape(state) is False
 
 
@@ -172,8 +174,8 @@ class TestRegisterTargetGlobal:
         assert state["install_target"] == "claude"
 
     def test_second_target_does_not_clobber_first(self):
+        """Simulate a codex record landing next to it (adapter not needed)."""
         install._register_target_global("anton")
-        # Simulate a codex record landing next to it (adapter not needed).
         state = install._load_state()
         state["targets"]["global"]["codex"] = {"path": "/h/.codex", "profile": "smith"}
         install._save_state(state)
@@ -189,14 +191,16 @@ class TestRegisterTargetGlobal:
         return tuple(t for t, v in state.get("targets", {}).get("global", {}).items() if isinstance(v, dict))
 
     def test_bare_noninteractive_resolve_after_claude_then_codex_init_stays_claude(self, capsys):
-        # This is the HIGH-severity hijack: `init --target codex` used to
-        # make every later bare, non-interactive `init` silently reinstall
-        # codex via the unscoped `install_target` recall key.
+        """This is the HIGH-severity hijack: `init --target codex` used to make every later bare, non-interactive `init`
+        silently reinstall codex via the unscoped `install_target` recall key.
+
+        Last-used, as documented — see next test.
+        """
         install._register_target_global("anton")
         install._register_target_global("smith", target="codex")
         state = install._load_state()
         stored = state.get("install_target", "")
-        assert stored == "codex"  # last-used, as documented — see next test
+        assert stored == "codex"
         installed = self._installed(state)
         result = resolve_target(None, stored, installed, interactive_ok=False)
         assert result == "claude"
@@ -213,13 +217,15 @@ class TestRegisterTargetGlobal:
         assert result == "codex"
 
     def test_install_target_is_last_used_but_does_not_drive_noninteractive_resolution(self):
+        """Recall key is last-writer-wins, as documented at the write site.
+
+        But with both records present, resolution is ambiguous and falls to DEFAULT_TARGET rather than trusting
+        `install_target`.
+        """
         install._register_target_global("anton")
         install._register_target_global("smith", target="codex")
         state = install._load_state()
-        # Recall key is last-writer-wins, as documented at the write site.
         assert state["install_target"] == "codex"
-        # But with both records present, resolution is ambiguous and falls
-        # to DEFAULT_TARGET rather than trusting `install_target`.
         installed = self._installed(state)
         result = resolve_target(None, state["install_target"], installed, interactive_ok=False)
         assert result == "claude"

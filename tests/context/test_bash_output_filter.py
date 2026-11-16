@@ -9,18 +9,26 @@ class TestBashOutputFilter:
     """Tests for filter_bash_output and individual truncation helpers."""
 
     def test_docker_truncation(self):
-        """100-line docker output → ≤50 lines, includes truncation notice."""
+        """100-line docker output → ≤50 lines, includes truncation notice.
+
+        50 lines + 1 notice line.
+        """
         from hooks.context.bash_output_filter import filter_bash_output
 
         output = "\n".join(f"log line {i}" for i in range(100))
         result = filter_bash_output("Bash", {"command": "docker logs mycontainer"}, output)
         assert result is not None
         lines = result.splitlines()
-        assert len(lines) <= 51  # 50 lines + 1 notice line
+        assert len(lines) <= 51
         assert "truncated" in result
 
     def test_test_runner_truncation(self):
-        """pytest output with 20 failures → keeps summary + first 10 failures, strips PASSED lines."""
+        """pytest output with 20 failures → keeps summary + first 10 failures, strips PASSED lines.
+
+        Make it large enough to trigger filtering.
+
+        Should trigger test_runner path and return truncated output.
+        """
         from hooks.context.bash_output_filter import filter_bash_output
 
         lines = []
@@ -33,11 +41,9 @@ class TestBashOutputFilter:
         lines.append("20 failed, 30 passed in 1.23s")
         output = "\n".join(lines)
 
-        # Make it large enough to trigger filtering
         output = output * 3
 
         result = filter_bash_output("Bash", {"command": "pytest tests/"}, output)
-        # Should trigger test_runner path and return truncated output
         if result is not None:
             assert "truncated" in result or "FAILED" in result
 
@@ -94,13 +100,15 @@ class TestBashOutputFilter:
         assert result is None
 
     def test_truncate_docker_logs_helper(self):
-        """truncate_docker_logs: keeps last N lines."""
+        """truncate_docker_logs: keeps last N lines.
+
+        First line is notice, next 10 are content.
+        """
         from hooks.context.bash_output_filter import truncate_docker_logs
 
         output = "\n".join(f"line {i}" for i in range(100))
         result = truncate_docker_logs(output, max_lines=10)
         lines = result.splitlines()
-        # First line is notice, next 10 are content
         assert lines[0].startswith("[truncated")
         assert len(lines) == 11
         assert "line 99" in result

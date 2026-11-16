@@ -168,22 +168,34 @@ class TestPretoolEntry:
                 assert get_pretool_enforcements("sess-1") is None
 
     def test_fires_at_cadence(self):
+        """Count=1.
+
+        Count=2.
+
+        Count=3.
+
+        Count=4.
+
+        Count=5.
+
+        Count=6.
+        """
         from hooks.context.enforcement import add_enforcement, get_pretool_enforcements
 
         add_enforcement("no patches — code only", 3)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
-            first = get_pretool_enforcements("sess-1")  # count=1
+            first = get_pretool_enforcements("sess-1")
             assert first is not None
             assert "no patches — code only" in first
-            assert get_pretool_enforcements("sess-1") is None  # count=2
-            ctx = get_pretool_enforcements("sess-1")  # count=3
+            assert get_pretool_enforcements("sess-1") is None
+            ctx = get_pretool_enforcements("sess-1")
             assert ctx is not None
             assert "no patches — code only" in ctx
             assert "ENFORCEMENT" in ctx
             assert "IMPORTANT" in ctx
-            assert get_pretool_enforcements("sess-1") is None  # count=4
-            assert get_pretool_enforcements("sess-1") is None  # count=5
-            assert get_pretool_enforcements("sess-1") is not None  # count=6
+            assert get_pretool_enforcements("sess-1") is None
+            assert get_pretool_enforcements("sess-1") is None
+            assert get_pretool_enforcements("sess-1") is not None
 
     def test_disabled_returns_none(self):
         from hooks.context.enforcement import add_enforcement, get_pretool_enforcements
@@ -506,6 +518,7 @@ class TestThreeSourceMerge:
             assert len(entries) == 3
 
     def test_id_collision_runtime_wins(self, bundle_dir):
+        """Runtime also has same id — write directly to store."""
         from hooks.context.enforcement import load_all_enforcements
 
         (bundle_dir / "enforcements.json").write_text(
@@ -515,7 +528,6 @@ class TestThreeSourceMerge:
         (profile_dir / "enforcements.json").write_text(
             json.dumps({"enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]})
         )
-        # Runtime also has same id — write directly to store
         from hooks.context.enforcement import _save_store
 
         _save_store([{"id": "clash", "message": "from runtime", "cadence": 5, "tag": ""}])

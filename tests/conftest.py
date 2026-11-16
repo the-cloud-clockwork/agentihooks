@@ -77,8 +77,8 @@ REUSED_SOURCE = pytest.StashKey[str]()
 
 
 def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
+    """Nested pytest runs that tests start must collect their own targets, so the plan never stays in the environment."""
     if REUSED not in config.stash:
-        # Nested pytest runs that tests start must collect their own targets, so the plan never stays in the environment.
         source = getattr(config, "workerinput", {}).get("ci_reused") or os.environ.pop("CI_REUSED", "")
         config.stash[REUSED_SOURCE] = source
         path = Path(source or os.devnull)
@@ -89,8 +89,8 @@ def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node):
+    """A replacement worker gets a new id and no share, so it collects the whole shard and can run any test."""
     node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
-    # A replacement worker gets a new id and no share, so it collects the whole shard and can run any test.
     shares = node.config.stash.get(WORKER_FILES, None)
     if shares and node.gateway.id in shares:
         node.workerinput["owned_files"] = shares[node.gateway.id]
@@ -156,7 +156,7 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
-    # A cold import that a request thread interrupts drops redis.asyncio but keeps its submodules, breaking fakeredis.
+    """A cold import that a request thread interrupts drops redis.asyncio but keeps its submodules, breaking fakeredis."""
     importlib.import_module("redis.asyncio")
     importlib.import_module("fakeredis")
     _reused(config)
@@ -185,12 +185,13 @@ def _worker_files(config, workers: int) -> dict[str, list[str]]:
     return {f"gw{worker}": sorted(paths) for worker, paths in enumerate(owned)}
 
 
-# Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
-# tracing for the whole coverage run. Deadlines are traced after each fixture once Playwright is loaded, so a fixture
-# that imports it lazily is covered before the next fixture opens a page; a fixture or test that imports it and sets a
-# deadline in its own body sets that deadline unscaled.
 @pytest.hookimpl(hookwrapper=True)
 def pytest_fixture_setup(fixturedef, request):
+    """Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
+    tracing for the whole coverage run. Deadlines are traced after each fixture once Playwright is loaded, so a
+    fixture that imports it lazily is covered before the next fixture opens a page; a fixture or test that imports it
+    and sets a deadline in its own body sets that deadline unscaled.
+    """
     yield
     if "playwright.sync_api" in sys.modules:
         mutation_trace.trace_browser_deadlines(sys.modules["playwright.sync_api"])
@@ -239,6 +240,50 @@ def _isolate_real_user_paths(
 
     Autouse and suite-wide on purpose: opting in per file is how the gap
     reappeared last time.
+
+    Every swarm tick sweeps the launch run folder and the herdr server.
+
+    CI has no herdr; a test that needs one installs a fake.
+
+    CODEX_HOME is read BEFORE Path.home() by targets.codex_target.codex_home, so patching Path.home does not cover it.
+    Unset today on the developer's machine, which is luck, not isolation — an operator who exports it (the installer
+    supports a comma list) would have the whole suite writing into their real codex install.
+
+    Same for COPILOT_HOME, read first by targets.copilot_target.copilot_home.
+
+    AGENTIHOOKS_HOME drives the state dir, which the copilot adapter's managed env file lives in — and that path is
+    resolved INDEPENDENTLY of COPILOT_HOME. Isolating only the target home therefore still writes, and on the
+    no-directives branch DELETES, the operator's real ~/.agentihooks/copilot.env. That has already happened once.
+
+    A suite run from a swarm agent's shell inherits its swarm, seat, task and routed account.
+
+    Mutation stats collection runs this suite with its cache set; nested gate runs must not share it.
+
+    AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain keeps its own .env. hooks.config
+    adopts BRAIN_URL / KB_ROUTER_TOKEN from that file, and it does so at IMPORT, which happens at collection before
+    any fixture runs. An unisolated suite therefore reads the operator's live bearer into os.environ once and keeps it
+    for the whole session, where a single mismatched assertion renders it into the diff. Patching Path.home afterwards
+    is too late, so the keys are cleared per test as well.
+
+    Every PreToolUse delivers the running session's inbox from the swarm Redis. A missing socket file fails at once;
+    some hosts drop a connect to an unbound port until the timeout.
+
+    The workbench Redis on the default port holds live swarms and inboxes, and the shell's REDIS_URL names a remote
+    one; a test that reaches either can wipe real state.
+
+    The workbench shell and ~/.agentihooks/*.env carry the live collector and Langfuse settings; only real sessions
+    may report to them.
+
+    Hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run the operator's real condition scripts
+    and write the real cache and counters.
+
+    A stale stamp makes SessionStart spawn a detached `agentihooks deps ensure` that mutmut's runner then reaps.
+
+    Same reasoning for the env-var bundle: `_managed_roots()` takes it verbatim, so a developer with it exported would
+    run a different suite than CI.
+
+    Codex and copilot write through their own resolvers, not install.py globals, so the loop above cannot see them.
+    Assert the same refusal bar.
     """
     real_home = Path.home()
     fake_home = tmp_path / "_home"
@@ -251,7 +296,6 @@ def _isolate_real_user_paths(
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("LIFECYCLE_GC_ENABLED", "false")
     monkeypatch.setenv("MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS", "false")
-    # Every swarm tick sweeps the launch run folder and the herdr server.
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "_run"))
     monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "_run" / "herdr.sock"))
     monkeypatch.delenv("HERDR_CONFIG_PATH", raising=False)
@@ -259,15 +303,9 @@ def _isolate_real_user_paths(
     monkeypatch.setenv("KUBECONFIG", str(tmp_path / "_kube" / "config"))
     monkeypatch.delenv("VAULT_ROOT", raising=False)
     monkeypatch.setattr(swarm_v2_isolation, "FIXTURE_ROOT", tmp_path.resolve())
-    # CI has no herdr; a test that needs one installs a fake.
     monkeypatch.setattr("scripts.herdr_host.binary", lambda: None)
     monkeypatch.setattr("scripts.herdr_setup.binary", lambda: None)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
-    # CODEX_HOME is read BEFORE Path.home() by targets.codex_target.codex_home,
-    # so patching Path.home does not cover it. Unset today on the developer's
-    # machine, which is luck, not isolation — an operator who exports it (the
-    # installer supports a comma list) would have the whole suite writing into
-    # their real codex install.
     for name in (
         "CLAUDE_CONFIG_DIR",
         "CLAUDE_CODE_HOME_DIR",
@@ -277,35 +315,16 @@ def _isolate_real_user_paths(
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
-    # Same for COPILOT_HOME, read first by targets.copilot_target.copilot_home.
     monkeypatch.delenv("COPILOT_HOME", raising=False)
-    # AGENTIHOOKS_HOME drives the state dir, which the copilot adapter's managed
-    # env file lives in — and that path is resolved INDEPENDENTLY of COPILOT_HOME.
-    # Isolating only the target home therefore still writes, and on the
-    # no-directives branch DELETES, the operator's real ~/.agentihooks/copilot.env.
-    # That has already happened once.
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
-    # A suite run from a swarm agent's shell inherits its swarm, seat, task and routed account.
     for _inherited in [name for name in os.environ if name.startswith("AGENTIHOOKS_")]:
         monkeypatch.delenv(_inherited)
-    # Mutation stats collection runs this suite with its cache set; nested gate runs must not share it.
     monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
     monkeypatch.delenv("MUTATION_STATS_ROOT", raising=False)
-    # AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain
-    # keeps its own .env. hooks.config adopts BRAIN_URL / KB_ROUTER_TOKEN from that
-    # file, and it does so at IMPORT, which happens at collection before any fixture
-    # runs. An unisolated suite therefore reads the operator's live bearer into
-    # os.environ once and keeps it for the whole session, where a single mismatched
-    # assertion renders it into the diff. Patching Path.home afterwards is too late,
-    # so the keys are cleared per test as well.
     monkeypatch.setenv("AGENTIBRAIN_HOME", str(fake_home / ".agentibrain"))
     for _adopted in ("KB_ROUTER_TOKEN", "BRAIN_URL", "BRAIN_HTTP_TOKEN"):
         monkeypatch.delenv(_adopted, raising=False)
-    # Every PreToolUse delivers the running session's inbox from the swarm Redis.
-    # A missing socket file fails at once; some hosts drop a connect to an unbound port until the timeout.
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", f"unix://{tmp_path / 'no-swarm-redis.sock'}")
-    # The workbench Redis on the default port holds live swarms and inboxes, and the shell's
-    # REDIS_URL names a remote one; a test that reaches either can wipe real state.
     monkeypatch.setattr(socket.socket, "connect", _refuse_redis_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _refuse_redis_connect_ex)
     monkeypatch.delenv("REDIS_URL", raising=False)
@@ -321,8 +340,6 @@ def _isolate_real_user_paths(
         "hooks.observability.event_relay.STREAM_KEY_PREFIX",
     ):
         monkeypatch.setattr(_prefixed, swarm_v2_isolation.RUN_PREFIX)
-    # The workbench shell and ~/.agentihooks/*.env carry the live collector and
-    # Langfuse settings; only real sessions may report to them.
     for _telemetry in (
         "AGENTIHOOKS_OTLP_ENDPOINT",
         "AGENTIHOOKS_OTLP_PROTOCOL",
@@ -351,14 +368,11 @@ def _isolate_real_user_paths(
     ):
         monkeypatch.setattr(f"hooks.config.{_bound}", "")
 
-    # hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run
-    # the operator's real condition scripts and write the real cache and counters.
     fake_state_dir = fake_home / ".agentihooks"
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.voice_output._FLAG_DIR", fake_state_dir / "voice_flags")
     monkeypatch.setattr("hooks.context.voice_output._QUOTA_FLAG", fake_state_dir / "voice_flags" / "quota_exhausted")
     monkeypatch.setattr("hooks.context.voice_output._LAST_SPOKE_FLAG", fake_state_dir / "voice_flags" / "last_spoke_ts")
-    # A stale stamp makes SessionStart spawn a detached `agentihooks deps ensure` that mutmut's runner then reaps.
     (fake_state_dir / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
     monkeypatch.setattr("hooks.common.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
@@ -426,14 +440,10 @@ def _isolate_real_user_paths(
     monkeypatch.setattr(installer_isolation, "WRITE_ROOT", tmp_path.resolve())
     monkeypatch.setattr(installer_isolation, "PROTECTED_PATHS", swarm_v2_isolation.LIVE_ROOTS)
     monkeypatch.setattr("scripts.deps_preflight.manifest_path", lambda: None)
-    # Same reasoning for the env-var bundle: `_managed_roots()` takes it verbatim,
-    # so a developer with it exported would run a different suite than CI.
     monkeypatch.delenv("AGENTIHOOKS_BUNDLE_PATH", raising=False)
 
     assert Path.home() != real_home, "Path.home() still returns the real home — refusing to run"
 
-    # Codex and copilot write through their own resolvers, not install.py
-    # globals, so the loop above cannot see them. Assert the same refusal bar.
     from targets._common import agents_skills_home
     from targets.codex_target import codex_home
     from targets.copilot_target import CopilotAdapter, copilot_home
@@ -477,14 +487,14 @@ def _real_ledger_folder_guard():
 
 @pytest.fixture(autouse=True)
 def _no_runner_git_config(monkeypatch):
-    # CI jobs export maintenance.auto through these; tests that build git config environments start from none.
+    """CI jobs export maintenance.auto through these; tests that build git config environments start from none."""
     for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
         monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
 def _restore_item_node_id():
-    # The mutation worker's pytest 9.2 node id alias is process wide; a test that runs it in process takes it back.
+    """The mutation worker's pytest 9.2 node id alias is process wide; a test that runs it in process takes it back."""
     added = "_nodeid" not in vars(pytest.Item)
     yield
     if added and "_nodeid" in vars(pytest.Item):
@@ -493,7 +503,7 @@ def _restore_item_node_id():
 
 @pytest.fixture(autouse=True)
 def _production_redis_key_guard(monkeypatch):
-    # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
+    """The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back."""
     monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
     before = len(redis_key_guard.written)
     yield
@@ -508,11 +518,11 @@ def ledger_port():
 
 @contextmanager
 def memory_folder(settle_s=5.0):
+    """Children a test started can still write into its home while the folder is removed."""
     folder = tempfile.TemporaryDirectory(dir="/dev/shm")
     try:
         yield Path(folder.name)
     finally:
-        # Children a test started can still write into its home while the folder is removed.
         deadline = time.monotonic() + settle_s
         while True:
             try:

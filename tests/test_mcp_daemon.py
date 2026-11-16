@@ -20,12 +20,13 @@ from scripts import mcp_daemon  # noqa: E402
 
 @pytest.fixture
 def state_dir(tmp_path, monkeypatch):
-    """Repoint every path the module writes, so nothing touches the real home."""
+    """Repoint every path the module writes, so nothing touches the real home.
+
+    Paths resolve per call from AGENTIHOOKS_HOME / Path.home(), so redirecting those two redirects every file the
+    module touches — no module globals to patch, and nothing left bound to the real home.
+    """
     d = tmp_path / "agentihooks"
     d.mkdir()
-    # Paths resolve per call from AGENTIHOOKS_HOME / Path.home(), so redirecting
-    # those two redirects every file the module touches — no module globals to
-    # patch, and nothing left bound to the real home.
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(d))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     return d
@@ -94,6 +95,15 @@ class TestBackendSelection:
 
 
 class TestLiveness:
+    """A grep FOR the marker.
+
+    A path containing it.
+
+    A sibling module.
+
+    Right word, wrong flag.
+    """
+
     def test_dead_pid_is_not_running(self, state_dir):
         assert mcp_daemon.pid_alive(999999) is False
 
@@ -115,10 +125,10 @@ class TestLiveness:
     @pytest.mark.parametrize(
         "cmdline",
         [
-            b"/bin/grep\x00hooks.mcp\x00/var/log/x\x00",  # a grep FOR the marker
-            b"/bin/cat\x00/tmp/hooks.mcp.log\x00",  # a path containing it
-            b"/venv/bin/python\x00-m\x00hooks.mcp_reporter\x00",  # a sibling module
-            b"/venv/bin/python\x00-c\x00hooks.mcp\x00",  # right word, wrong flag
+            b"/bin/grep\x00hooks.mcp\x00/var/log/x\x00",
+            b"/bin/cat\x00/tmp/hooks.mcp.log\x00",
+            b"/venv/bin/python\x00-m\x00hooks.mcp_reporter\x00",
+            b"/venv/bin/python\x00-c\x00hooks.mcp\x00",
         ],
     )
     def test_substring_lookalikes_are_not_the_daemon(self, monkeypatch, cmdline):
@@ -379,12 +389,16 @@ class TestEnsureRunning:
 
         If liveness were checked after the port, a daemon we failed to stop would
         make a corpse look like a successful start.
+
+        Someone answers.
+
+        But not us.
         """
         monkeypatch.setenv("AGENTIHOOKS_MCP_SUPERVISOR", "pidfile")
         monkeypatch.setattr(mcp_daemon, "_stop_unlocked", lambda: False)
         monkeypatch.setattr(mcp_daemon, "_spawn_detached", lambda *a, **k: 777)
-        monkeypatch.setattr(mcp_daemon, "port_open", lambda *a, **k: True)  # someone answers
-        monkeypatch.setattr(mcp_daemon, "pid_alive", lambda pid: False)  # but not us
+        monkeypatch.setattr(mcp_daemon, "port_open", lambda *a, **k: True)
+        monkeypatch.setattr(mcp_daemon, "pid_alive", lambda pid: False)
 
         state = mcp_daemon.ensure_running("sse", "/venv/bin/python", "/repo")
 

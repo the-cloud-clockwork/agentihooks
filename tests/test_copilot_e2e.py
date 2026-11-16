@@ -38,13 +38,16 @@ def _run(payload: dict, env: dict) -> subprocess.CompletedProcess:
 
 
 def _assert_stdout_is_empty_or_one_json(stdout: str) -> None:
-    """The one-JSON-object contract: nothing, or exactly one parseable object."""
+    """The one-JSON-object contract: nothing, or exactly one parseable object.
+
+    Raises if not parseable — that IS the assertion.
+    """
     stripped = stdout.strip()
     if not stripped:
         return
     lines = stripped.splitlines()
     assert len(lines) == 1, f"copilot must receive AT MOST one stdout line, got {len(lines)}: {lines!r}"
-    json.loads(lines[0])  # raises if not parseable — that IS the assertion
+    json.loads(lines[0])
 
 
 def _env(tmp_path, **extra) -> dict:
@@ -61,9 +64,9 @@ def _env(tmp_path, **extra) -> dict:
 class TestCopilotSessionStartSingleEnvelope:
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
-        # A real git repo on main with a clean tree is what makes
-        # ensure_on_dev() actually produce a switch message — a second
-        # buffered source, which is what exercises the envelope contract.
+        """A real git repo on main with a clean tree is what makes ensure_on_dev() actually produce a switch message — a
+        second buffered source, which is what exercises the envelope contract.
+        """
         repo = tmp_path / "repo"
         repo.mkdir()
         run = lambda *args: subprocess.run(  # noqa: E731
@@ -117,10 +120,10 @@ class TestCopilotCiManifestoSingleEnvelope:
         self._manifesto_path = str(manifesto)
 
     def test_single_json_envelope_on_user_prompt_submit(self, tmp_path):
-        # Two buffered sources (the secret WARNING and the manifesto payload)
-        # is what actually exercises the two-envelope bug; with one, an empty
-        # buffer makes flush() a no-op and a stray raw print looks like a
-        # single line by coincidence.
+        """Two buffered sources (the secret WARNING and the manifesto payload) is what actually exercises the
+        two-envelope bug; with one, an empty buffer makes flush() a no-op and a stray raw print looks like a single
+        line by coincidence.
+        """
         key = "AKIA" + "TESTDUMMY0000000"
         result = _run(
             {

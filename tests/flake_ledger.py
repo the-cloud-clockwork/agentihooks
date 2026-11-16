@@ -21,11 +21,13 @@ WORKER_FILES = pytest.StashKey[dict[str, list[str]]]()
 
 
 class RefillingLoadGroupScheduling(LoadGroupScheduling):
-    # A worker runs a test only once it holds the next one or is shut down, and a replacement
-    # worker after a crash gets a single work unit, so keep every worker at two queued tests.
-    # Workers read pytest-rerunfailures' crash count from a controller thread, so a crashed test
-    # stays held until FlakeLedger.pytest_handlecrashitem runs after that count is recorded.
-    # A sharded run's workers collect only their owned files, so a worker gets only units it collected.
+    """Holding: A worker runs a test only once it holds the next one or is shut down, and a replacement worker after a
+    crash gets a single work unit, so keep every worker at two queued tests. Workers read pytest-rerunfailures' crash
+    count from a controller thread, so a crashed test stays held until FlakeLedger.pytest_handlecrashitem runs after
+    that count is recorded. A sharded run's workers collect only their owned files, so a worker gets only units it
+    collected.
+    """
+
     holding = False
 
     def _owned(self):
@@ -78,7 +80,7 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
         super()._assign_work_unit(node)
 
     def _reschedule(self, node):
-        # A replacement worker still collecting gets its work from schedule() once it has collected.
+        """A replacement worker still collecting gets its work from schedule() once it has collected."""
         if self.holding or node not in self.registered_collections:
             return
         super()._reschedule(node)
@@ -87,8 +89,9 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
 
 
 def pytest_xdist_make_scheduler(config, log):
-    # xdist's own load group scheduler requeues every unit a crashed worker completed and hands its
-    # replacement an empty one, so a run whose last test crashes its worker never ends.
+    """Xdist's own load group scheduler requeues every unit a crashed worker completed and hands its replacement an empty
+    one, so a run whose last test crashes its worker never ends.
+    """
     if config.getvalue("dist") == "loadgroup":
         return RefillingLoadGroupScheduling(config, log)
     return None
@@ -124,9 +127,9 @@ class FlakeLedger:
 
     @pytest.hookimpl(trylast=True)
     def pytest_handlecrashitem(self, crashitem, report, sched):
-        # A scope scheduler puts the crashed test back in its queue but refuses
-        # pytest-rerunfailures' mark_test_pending, so the report stays failed.
-        # Past xdist's restart limit the shard stops, so the crash must stay failed.
+        """A scope scheduler puts the crashed test back in its queue but refuses pytest-rerunfailures' mark_test_pending,
+        so the report stays failed. Past xdist's restart limit the shard stops, so the crash must stay failed.
+        """
         self.crashes[crashitem] = self.crashes.get(crashitem, 0) + 1
         self.crashing.add(crashitem)
         restarts = get_default_max_worker_restart(sched.config)

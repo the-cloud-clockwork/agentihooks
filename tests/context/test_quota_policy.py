@@ -1,4 +1,23 @@
-"""Tests for hooks.context.quota_policy — deterministic handoff / wait / stop."""
+"""Tests for hooks.context.quota_policy — deterministic handoff / wait / stop.
+
+Weekly limit: move to the best account with room.
+
+Weekly limit, every other account nearly spent: the least-used one still wins.
+
+5h limit, other account has 5h free but its week 90% used: waiting here is better.
+
+5h limit, other account healthy: hand off.
+
+5h limit, only one account, week has room: wait for the reset.
+
+5h limit, week nearly spent too: the least-used other account wins.
+
+5h limit, week nearly spent, nothing else: stop.
+
+Accounts at their own trigger are never targets.
+
+This session's own account in the cache is ignored.
+"""
 
 import time
 from unittest.mock import patch
@@ -74,25 +93,15 @@ def test_below_both_triggers_nothing_happens():
 @pytest.mark.parametrize(
     ("five", "week", "others", "action", "target"),
     [
-        # Weekly limit: move to the best account with room.
         (10, 98.5, [_c("beta", 10, 40)], "handoff", "beta"),
-        # Weekly limit, every other account nearly spent: the least-used one still wins.
         (10, 98.5, [_c("beta", 5, 90), _c("gamma", 5, 93)], "handoff", "beta"),
-        # Weekly limit, nothing else: stop.
         (10, 98.5, [], "stop", None),
-        # 5h limit, other account has 5h free but its week 90% used: waiting here is better.
         (99.2, 50, [_c("beta", 0, 90)], "wait", None),
-        # 5h limit, other account healthy: hand off.
         (99.2, 50, [_c("beta", 0, 30)], "handoff", "beta"),
-        # 5h limit, only one account, week has room: wait for the reset.
         (99.2, 50, [], "wait", None),
-        # 5h limit, week nearly spent too: the least-used other account wins.
         (99.2, 95, [_c("beta", 0, 90)], "handoff", "beta"),
-        # 5h limit, week nearly spent, nothing else: stop.
         (99.2, 95, [], "stop", None),
-        # Accounts at their own trigger are never targets.
         (10, 98.5, [_c("beta", 99.5, 10), _c("gamma", 10, 98.1)], "stop", None),
-        # This session's own account in the cache is ignored.
         (10, 98.5, [_c("alpha", 0, 0)], "stop", None),
     ],
 )

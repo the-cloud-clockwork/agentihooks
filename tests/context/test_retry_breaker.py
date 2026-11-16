@@ -1,10 +1,12 @@
-"""Tests for hooks.context.retry_breaker — Retry Circuit Breaker."""
+"""Tests for hooks.context.retry_breaker — Retry Circuit Breaker.
+
+Import module once so we can clear its state reliably.
+"""
 
 from unittest.mock import patch
 
 import pytest
 
-# Import module once so we can clear its state reliably
 import hooks.context.retry_breaker as _breaker_mod
 
 
@@ -142,9 +144,9 @@ class TestSubcommandGrouping:
         assert _compute_operation_key("Bash", {"command": "cargo build"}) == "bash:cargo"
 
     def test_subcommand_with_flags_only(self):
+        """No subcommand token (only flags) — falls back to base only."""
         from hooks.context.retry_breaker import _compute_operation_key
 
-        # No subcommand token (only flags) — falls back to base only
         assert _compute_operation_key("Bash", {"command": "terraform --version"}) == "bash:terraform"
 
 
@@ -215,6 +217,7 @@ class TestFailureTracking:
         assert state["count"] == 2
 
     def test_resets_on_different_error(self):
+        """Reset because different error."""
         from hooks.context.retry_breaker import _compute_operation_key, _get_state, on_post_tool_result
 
         payload1 = self._make_error_payload(error_text="ENOENT not found", session_id="diff-err")
@@ -226,7 +229,7 @@ class TestFailureTracking:
 
         op_key = _compute_operation_key("Bash", {"command": "npm install"})
         state = _get_state("diff-err", op_key)
-        assert state["count"] == 1  # Reset because different error
+        assert state["count"] == 1
 
     def test_resets_on_success(self):
         from hooks.context.retry_breaker import _compute_operation_key, _get_state, on_post_tool_result
@@ -243,17 +246,19 @@ class TestFailureTracking:
         assert state["count"] == 0
 
     def test_no_session_id_is_noop(self):
+        """Should not raise."""
         from hooks.context.retry_breaker import on_post_tool_result
 
         payload = self._make_error_payload(session_id="")
-        on_post_tool_result(payload)  # Should not raise
+        on_post_tool_result(payload)
 
     def test_no_tool_result_is_noop(self):
+        """Should not raise."""
         from hooks.context.retry_breaker import on_post_tool_result
 
         payload = self._make_error_payload(session_id="noop-session")
         del payload["tool_response"]
-        on_post_tool_result(payload)  # Should not raise
+        on_post_tool_result(payload)
 
 
 class TestBreakerTrip:
@@ -267,6 +272,7 @@ class TestBreakerTrip:
 
     @patch("hooks.context.retry_breaker._inject_breaker_message")
     def test_trips_at_threshold(self, mock_inject):
+        """5 — trips."""
         from hooks.context.retry_breaker import on_post_tool_result
 
         payload = self._make_error_payload(session_id="trip-thresh")
@@ -274,18 +280,18 @@ class TestBreakerTrip:
             on_post_tool_result(payload)
         assert mock_inject.call_count == 0
 
-        on_post_tool_result(payload)  # 5 — trips
+        on_post_tool_result(payload)
         assert mock_inject.call_count == 1
 
     @patch("hooks.context.retry_breaker._inject_breaker_message")
     def test_keeps_firing_after_threshold(self, mock_inject):
+        """Fires every time count >= 5 (at counts 5, 6, 7)"""
         from hooks.context.retry_breaker import on_post_tool_result
 
         payload = self._make_error_payload(session_id="trip-keeps")
         for _ in range(7):
             on_post_tool_result(payload)
 
-        # Fires every time count >= 5 (at counts 5, 6, 7)
         assert mock_inject.call_count == 3
 
     @patch("hooks.common.inject_banner")
@@ -330,6 +336,7 @@ class TestHardBlock:
         assert "bash:npm" in str(exc_info.value)
 
     def test_does_not_block_below_hard_max(self):
+        """Should not raise."""
         from hooks.context.retry_breaker import _set_state, check_hard_block
 
         _set_state(
@@ -349,7 +356,7 @@ class TestHardBlock:
             "session_id": "noblock-session",
         }
 
-        check_hard_block(payload)  # Should not raise
+        check_hard_block(payload)
 
 
 class TestClearState:

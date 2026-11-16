@@ -45,6 +45,7 @@ DOC = {
 
 @pytest.fixture
 def page(browser, request):
+    """The first server import inside the route handler can outlast the page load timeout on a loaded runner."""
     param = getattr(request, "param", [])
     setup = param if isinstance(param, dict) else {"freezes": param}
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
@@ -81,7 +82,6 @@ def page(browser, request):
         return ledger_server.page_view(ledger_state({**doc, "freezes": freezes}), "", False)
 
     context.route(is_events, lambda route: fulfill_events(route, view(), SWARM))
-    # The first server import inside the route handler can outlast the page load timeout on a loaded runner.
     view()
     tab = context.new_page()
     tab.set_default_timeout(3000)

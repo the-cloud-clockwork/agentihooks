@@ -36,7 +36,7 @@ class PassRecord:
             self.retried.add(report.nodeid)
 
     def flush(self, nodeid: str) -> None:
-        # The teardown context stays open until the next switch, so its arcs would die with a killed worker.
+        """The teardown context stays open until the next switch, so its arcs would die with a killed worker."""
         controller = getattr(self.config.pluginmanager.get_plugin("_cov"), "cov_controller", None)
         if controller and controller.started and self.config.pluginmanager.has_plugin("_cov_contexts"):
             controller.cov.switch_context(f"{nodeid}|record")
@@ -53,9 +53,9 @@ class PassRecord:
         self.flush(nodeid)
         self.write(nodeid, outcome)
 
-    # A worker killed during a test leaves only this line, and the record counts that as a failure.
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_logstart(self, nodeid):
+        """A worker killed during a test leaves only this line, and the record counts that as a failure."""
         self.write(nodeid, "started")
 
     def write(self, nodeid: str, outcome: str) -> None:

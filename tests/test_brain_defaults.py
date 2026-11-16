@@ -39,7 +39,10 @@ _BRAIN_KEYS = (
 
 @pytest.fixture
 def brain_env(tmp_path, monkeypatch):
-    """A throwaway AGENTIHOOKS_HOME with every brain key cleared."""
+    """A throwaway AGENTIHOOKS_HOME with every brain key cleared.
+
+    Hooks.config writes .env values into os.environ, which monkeypatch never recorded.
+    """
     saved = dict(os.environ)
     home = tmp_path / ".agentihooks"
     home.mkdir()
@@ -53,7 +56,6 @@ def brain_env(tmp_path, monkeypatch):
         return importlib.reload(config)
 
     yield home, _load
-    # hooks.config writes .env values into os.environ, which monkeypatch never recorded.
     os.environ.clear()
     os.environ.update(saved)
     monkeypatch.undo()
@@ -117,6 +119,7 @@ def test_explicit_false_beats_the_url_default(brain_env, monkeypatch, flag):
 
 
 def test_legacy_feed_directory_still_enables_the_reader(brain_env):
+    """No URL, so the writer has nowhere to POST and stays off."""
     home, load = brain_env
     feed = home / "brain-feed"
     feed.mkdir()
@@ -124,7 +127,6 @@ def test_legacy_feed_directory_still_enables_the_reader(brain_env):
 
     config = load()
     assert config.BRAIN_ENABLED is True
-    # No URL, so the writer has nowhere to POST and stays off.
     assert config.BRAIN_WRITER_ENABLED is False
 
 

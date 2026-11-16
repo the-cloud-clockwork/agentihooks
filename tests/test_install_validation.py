@@ -2,6 +2,8 @@
 
 Tests the full install pipeline: 3-layer symlinks, CLAUDE.md linking,
 MCP merging, settings generation, and profile structure conventions.
+
+Real-home isolation is suite-wide — see the autouse fixture in tests/conftest.py.
 """
 
 import json
@@ -16,17 +18,56 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-# Real-home isolation is suite-wide — see the autouse fixture in tests/conftest.py.
-
-
 @pytest.fixture
 def install_env(tmp_path):
-    """Build a complete fake install environment with all 3 layers."""
+    """Build a complete fake install environment with all 3 layers.
+
+    --- Layer 1: agentihooks built-in .claude/ ---.
+
+    Built-in agent.
+
+    Built-in command.
+
+    Built-in skill (directory with SKILL.md)
+
+    Built-in rule.
+
+    --- Layer 2: bundle ---.
+
+    Bundle agent.
+
+    Bundle command.
+
+    Bundle skill.
+
+    Bundle rule.
+
+    Bundle MCP.
+
+    --- Layer 3: profile (in bundle) ---.
+
+    Profile CLAUDE.md (at root, not inside .claude/)
+
+    Profile agent.
+
+    Profile command.
+
+    Profile skill.
+
+    Profile rule.
+
+    Profile settings overrides.
+
+    Profile .mcp.json.
+
+    Profile.yml.
+
+    --- Base settings ---.
+
+    State dir.
+
+    Claude.json (user MCP scope)
+    """
     claude_home = tmp_path / ".claude"
     claude_home.mkdir()
     for d in ("skills", "agents", "commands", "rules"):
@@ -35,24 +76,18 @@ def install_env(tmp_path):
     agentihooks_root = tmp_path / "agentihooks"
     agentihooks_root.mkdir()
 
-    # --- Layer 1: agentihooks built-in .claude/ ---
     ah_claude = agentihooks_root / ".claude"
     ah_claude.mkdir()
     for d in ("skills", "agents", "commands", "rules"):
         (ah_claude / d).mkdir()
 
-    # Built-in agent
     (ah_claude / "agents" / "error-researcher.md").write_text("# Error Researcher\n")
-    # Built-in command
     (ah_claude / "commands" / "status.md").write_text("# Status\n")
-    # Built-in skill (directory with SKILL.md)
     skill_dir = ah_claude / "skills" / "builtin-skill"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("# Built-in Skill\n")
-    # Built-in rule
     (ah_claude / "rules" / "builtin-rule.md").write_text("# Built-in Rule\n")
 
-    # --- Layer 2: bundle ---
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     bundle_claude = bundle / ".claude"
@@ -60,22 +95,16 @@ def install_env(tmp_path):
     for d in ("skills", "agents", "commands", "rules"):
         (bundle_claude / d).mkdir()
 
-    # Bundle agent
     (bundle_claude / "agents" / "code-reviewer.md").write_text("# Code Reviewer\n")
-    # Bundle command
     (bundle_claude / "commands" / "review.md").write_text("# Review\n")
-    # Bundle skill
     bskill = bundle_claude / "skills" / "bundle-skill"
     bskill.mkdir()
     (bskill / "SKILL.md").write_text("# Bundle Skill\n")
-    # Bundle rule
     (bundle_claude / "rules" / "python.md").write_text("# Python Rules\n")
-    # Bundle MCP
     (bundle_claude / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"bundle-server": {"type": "http", "url": "http://localhost:9090/mcp/"}}})
     )
 
-    # --- Layer 3: profile (in bundle) ---
     profile = bundle / "profiles" / "test-profile"
     profile.mkdir(parents=True)
     profile_claude = profile / ".claude"
@@ -83,30 +112,21 @@ def install_env(tmp_path):
     for d in ("skills", "agents", "commands", "rules"):
         (profile_claude / d).mkdir()
 
-    # Profile CLAUDE.md (at root, not inside .claude/)
     (profile / "CLAUDE.md").write_text("# Test Profile System Prompt\n")
-    # Profile agent
     (profile_claude / "agents" / "profile-agent.md").write_text("# Profile Agent\n")
-    # Profile command
     (profile_claude / "commands" / "deploy.md").write_text("# Deploy\n")
-    # Profile skill
     pskill = profile_claude / "skills" / "profile-skill"
     pskill.mkdir()
     (pskill / "SKILL.md").write_text("# Profile Skill\n")
-    # Profile rule
     (profile_claude / "rules" / "git-workflow.md").write_text("# Git Workflow\n")
-    # Profile settings overrides
     (profile_claude / "settings.overrides.json").write_text(json.dumps({"env": {"PROFILE_VAR": "test-value"}}))
-    # Profile .mcp.json
     (profile_claude / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"profile-server": {"type": "http", "url": "http://localhost:8080/mcp/"}}})
     )
-    # Profile.yml
     (profile / "profile.yml").write_text(
         "name: test-profile\ndescription: Test profile\nmcp_categories: all\notel:\n  enabled: false\n"
     )
 
-    # --- Base settings ---
     base_dir = agentihooks_root / "profiles" / "_base"
     base_dir.mkdir(parents=True)
     (base_dir / "settings.base.json").write_text(
@@ -118,7 +138,6 @@ def install_env(tmp_path):
         )
     )
 
-    # State dir
     state_dir = tmp_path / ".agentihooks"
     state_dir.mkdir()
     (state_dir / "state.json").write_text(
@@ -130,7 +149,6 @@ def install_env(tmp_path):
         )
     )
 
-    # Claude.json (user MCP scope)
     claude_json = tmp_path / ".claude.json"
     claude_json.write_text(json.dumps({"mcpServers": {}}))
 
@@ -144,11 +162,6 @@ def install_env(tmp_path):
         "state_dir": state_dir,
         "claude_json": claude_json,
     }
-
-
-# ---------------------------------------------------------------------------
-# Profile structure convention tests
-# ---------------------------------------------------------------------------
 
 
 class TestProfileStructureConvention:
@@ -198,11 +211,6 @@ class TestBuiltinProfileStructure:
         profiles = self._real_profiles()
         if not profiles:
             pytest.skip("No profiles with profile.yml found — bundle profiles live externally")
-
-
-# ---------------------------------------------------------------------------
-# 3-layer symlink merge tests
-# ---------------------------------------------------------------------------
 
 
 class TestSymlinkMerge:
@@ -282,23 +290,18 @@ class TestSymlinkMerge:
         assert sum(1 for p in agents_dir.iterdir() if p.is_symlink()) == 3
 
 
-# ---------------------------------------------------------------------------
-# CLAUDE.md linking tests
-# ---------------------------------------------------------------------------
-
-
 class TestClaudeMdLinking:
     """Test CLAUDE.md is copied from profile root to ~/.claude/."""
 
     def test_copies_from_profile_root(self, install_env):
+        """Single-profile installs carry the same `<!-- profile: name -->` marker the chain writer uses, so the init-loss
+        guard can sniff the installed profile regardless of chain length.
+        """
         profile = install_env["profile"]
         dst = install_env["claude_home"] / "CLAUDE.md"
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._install_system_prompt(profile, "test-profile")
         assert dst.exists() and not dst.is_symlink()
-        # Single-profile installs carry the same `<!-- profile: name -->`
-        # marker the chain writer uses, so the init-loss guard can sniff the
-        # installed profile regardless of chain length.
         assert dst.read_text() == f"<!-- profile: test-profile -->\n{(profile / 'CLAUDE.md').read_text()}"
 
     def test_idempotent(self, install_env):
@@ -345,11 +348,6 @@ class TestClaudeMdLinking:
         assert dst.is_symlink(), "cleanup removed a CLAUDE.md symlink agentihooks never created"
 
 
-# ---------------------------------------------------------------------------
-# Bundle-level shared CLAUDE.md tests
-# ---------------------------------------------------------------------------
-
-
 class TestBundleClaudeMdPrepend:
     """Test <bundle>/.claude/CLAUDE.md is prepended ahead of all profile content."""
 
@@ -367,6 +365,7 @@ class TestBundleClaudeMdPrepend:
         return install_env["claude_home"] / "CLAUDE.md"
 
     def test_prepends_ahead_of_profile_content(self, install_env):
+        """Profile content must come AFTER the bundle block so it still wins."""
         dst = self._install_profile(install_env)
         self._write_bundle_md(install_env, "# Shared\nshared directive\n")
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
@@ -375,7 +374,6 @@ class TestBundleClaudeMdPrepend:
         text = dst.read_text()
         assert text.startswith(install._BUNDLE_CLAUDE_MD_BEGIN)
         assert "shared directive" in text
-        # Profile content must come AFTER the bundle block so it still wins.
         assert text.index(install._BUNDLE_CLAUDE_MD_END) < text.index("<!-- profile: test-profile -->")
 
     def test_idempotent_no_marker_stacking(self, install_env):
@@ -406,9 +404,9 @@ class TestBundleClaudeMdPrepend:
         assert "<!-- profile: test-profile -->" in text
 
     def test_absent_bundle_claude_md_is_noop(self, install_env):
+        """Bundle exists (fixture builds it) but has no .claude/CLAUDE.md."""
         dst = self._install_profile(install_env)
         before = dst.read_text()
-        # Bundle exists (fixture builds it) but has no .claude/CLAUDE.md
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._prepend_bundle_claude_md(install_env["bundle"])
         assert dst.read_text() == before
@@ -441,14 +439,16 @@ class TestBundleClaudeMdPrepend:
 
         The second _install_system_prompt call takes its 'already up to date'
         early return, so the bundle block must not depend on that write happening.
+
+        Second call: content identical -> early return, dst untouched.
+
+        Bundle file appears only now.
         """
         dst = self._install_profile(install_env)
-        # Second call: content identical -> early return, dst untouched
         unchanged = dst.read_text()
         dst2 = self._install_profile(install_env)
         assert dst2.read_text() == unchanged
 
-        # Bundle file appears only now
         self._write_bundle_md(install_env, "# Shared\nlate arrival\n")
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._prepend_bundle_claude_md(install_env["bundle"])
@@ -467,9 +467,11 @@ class TestBundleClaudeMdPrepend:
         assert matches == ["test-profile"]
 
     def test_chain_mode_gets_bundle_prefix_exactly_once(self, install_env):
-        """Chained install: one bundle block at the top, ahead of every profile."""
+        """Chained install: one bundle block at the top, ahead of every profile.
+
+        Reproduce the chain writer's output (install_global is not unit-tested)
+        """
         dst = install_env["claude_home"] / "CLAUDE.md"
-        # Reproduce the chain writer's output (install_global is not unit-tested)
         parts = [
             "<!-- profile: alpha -->\n# Alpha\n",
             "<!-- profile: beta -->\n# Beta\n",
@@ -508,12 +510,13 @@ class TestBundleClaudeMdPrepend:
 
         Byte-identical output makes this invisible to content assertions, so
         assert on the write itself.
+
+        Second call with nothing changed must not touch the file at all.
         """
         self._install_profile(install_env)
         self._write_bundle_md(install_env, "# Shared\nshared directive\n")
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._prepend_bundle_claude_md(install_env["bundle"])
-            # Second call with nothing changed must not touch the file at all.
             with patch.object(Path, "write_text", autospec=True) as spy:
                 install._prepend_bundle_claude_md(install_env["bundle"])
             assert spy.call_count == 0
@@ -534,12 +537,13 @@ class TestBundleClaudeMdPrepend:
 
         Passing bundle content in through a new default argument would keep the
         unit tests green while changing what real installs write.
+
+        It may *mention* the bundle in prose, but must never read from it.
         """
         import inspect
 
         params = inspect.signature(install._install_system_prompt).parameters
         assert list(params) == ["profile_dir", "profile_name"]
-        # It may *mention* the bundle in prose, but must never read from it.
         src = inspect.getsource(install._install_system_prompt)
         assert "bundle_dir" not in src
         assert "_BUNDLE_CLAUDE_MD_BEGIN" not in src
@@ -549,23 +553,26 @@ class TestBundleClaudeMdPrepend:
 
         Catches a dropped call, a call placed inside the per-profile chain loop
         (which would duplicate the block), or the wrong argument being threaded.
+
+        The persona steps live in _install_claude_persona (reached from install_global via the claude target adapter).
+
+        Must sit between the profile writer and the manifesto appender.
+
+        Exactly one call site — never inside the chain loop.
+
+        And the install flow routes persona through the target adapter.
         """
         import inspect
 
-        # The persona steps live in _install_claude_persona (reached from
-        # install_global via the claude target adapter).
         src = inspect.getsource(install._install_claude_persona)
         assert "_prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)" in src
-        # Must sit between the profile writer and the manifesto appender.
         assert src.index("_install_system_prompt") < src.index(
             "_prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)"
         )
         assert src.index("_prepend_bundle_claude_md(bundle_dir, user_dir, shared_dir)") < src.index(
             "_append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs, user_dir, shared_dir)"
         )
-        # Exactly one call site — never inside the chain loop.
         assert src.count("_prepend_bundle_claude_md(") == 1
-        # And the install flow routes persona through the target adapter.
         outer = inspect.getsource(install._install_global_inner)
         assert "adapter.install_persona(" in outer
 
@@ -581,14 +588,15 @@ class TestBundleClaudeMdPrepend:
             assert install._CLAUDE_MD_MANAGED_MARKER not in marker
 
     def test_hand_authored_file_is_backed_up_before_prepend(self, install_env):
-        """Never mutate an unmanaged file without capturing the original."""
+        """Never mutate an unmanaged file without capturing the original.
+
+        An original must now be recorded, so uninstall restores rather than deletes.
+        """
         dst = install_env["claude_home"] / "CLAUDE.md"
         dst.write_text("# My own hand-written CLAUDE.md\nDo not touch this.\n")
         self._write_bundle_md(install_env, "# Shared\nshared directive\n")
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._prepend_bundle_claude_md(install_env["bundle"])
-            # An original must now be recorded, so uninstall restores rather
-            # than deletes.
             assert install._load_state().get("claude_md_original_backup")
             backups = list(install_env["claude_home"].glob("CLAUDE.md.bak.*"))
             assert backups, "no backup taken before mutating an unmanaged file"
@@ -605,14 +613,16 @@ class TestBundleClaudeMdPrepend:
             assert dst.read_text() == before, f"not refused for {marker!r}"
 
     def test_stale_block_removed_when_bundle_goes_away(self, install_env):
-        """Unlinking the bundle must retract its directives, not strand them."""
+        """Unlinking the bundle must retract its directives, not strand them.
+
+        Bundle unlinked.
+        """
         dst = self._install_profile(install_env)
         profile_only = dst.read_text()
         self._write_bundle_md(install_env, "# Shared\nshared directive\n")
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._prepend_bundle_claude_md(install_env["bundle"])
             assert install._BUNDLE_CLAUDE_MD_BEGIN in dst.read_text()
-            # Bundle unlinked
             install._prepend_bundle_claude_md(None)
 
         text = dst.read_text()
@@ -625,6 +635,8 @@ class TestBundleClaudeMdPrepend:
 
         Otherwise every `agentihooks init` takes the backup+overwrite path and
         drops another CLAUDE.md.bak.<timestamp> into ~/.claude, forever.
+
+        Simulate four `agentihooks init` runs.
         """
         import hooks.config as cfg
 
@@ -637,7 +649,7 @@ class TestBundleClaudeMdPrepend:
             patch.object(cfg, "CI_MANIFESTO_ENABLED", True),
             patch.object(cfg, "_resolve_manifesto_paths", return_value=[str(manifesto)]),
         ):
-            for _ in range(4):  # simulate four `agentihooks init` runs
+            for _ in range(4):
                 install._install_system_prompt(install_env["profile"], "test-profile")
                 install._prepend_bundle_claude_md(install_env["bundle"])
                 install._append_ci_manifesto_to_claude_md()
@@ -651,6 +663,8 @@ class TestBundleClaudeMdPrepend:
         The profile writer replaces CLAUDE.md wholesale; agentibridge and friends
         append their own BEGIN/END block and only their own installer can put it
         back.
+
+        Profile content was still refreshed from source.
         """
         dst = install_env["claude_home"] / "CLAUDE.md"
         foreign = "<!-- BEGIN agentibridge -->\nthird-party docs\n<!-- END agentibridge -->"
@@ -662,7 +676,6 @@ class TestBundleClaudeMdPrepend:
         assert "<!-- BEGIN agentibridge -->" in text
         assert "third-party docs" in text
         assert text.count("<!-- BEGIN agentibridge -->") == 1
-        # Profile content was still refreshed from source.
         assert (install_env["profile"] / "CLAUDE.md").read_text().strip() in text
 
     def test_foreign_block_extraction_ignores_owned_blocks(self, install_env, tmp_path):
@@ -753,6 +766,10 @@ class TestBundleClaudeMdPrepend:
 
         Then change the bundle and re-prepend; the manifesto block at the tail
         must survive intact and unduplicated.
+
+        Bundle content changes; re-run the prepend as a re-install would.
+
+        Order: bundle block -> profile -> manifesto.
         """
         import hooks.config as cfg
 
@@ -768,7 +785,6 @@ class TestBundleClaudeMdPrepend:
         ):
             install._prepend_bundle_claude_md(install_env["bundle"])
             install._append_ci_manifesto_to_claude_md()
-            # Bundle content changes; re-run the prepend as a re-install would.
             self._write_bundle_md(install_env, "# Shared\nversion two\n")
             install._prepend_bundle_claude_md(install_env["bundle"])
 
@@ -777,7 +793,6 @@ class TestBundleClaudeMdPrepend:
         assert text.count("<!-- END CI MANIFESTO -->") == 1
         assert "doctrine body" in text
         assert "version two" in text and "version one" not in text
-        # Order: bundle block -> profile -> manifesto
         assert text.index(install._BUNDLE_CLAUDE_MD_END) < text.index("<!-- profile: test-profile -->")
         assert text.index("<!-- profile: test-profile -->") < text.index("<!-- BEGIN CI MANIFESTO")
 
@@ -808,11 +823,6 @@ class TestBundleClaudeMdPrepend:
         assert "directory docs" not in text
 
 
-# ---------------------------------------------------------------------------
-# Settings override tests
-# ---------------------------------------------------------------------------
-
-
 class TestSettingsOverrides:
     """Test settings.overrides.json is loaded from .claude/ inside profile."""
 
@@ -824,20 +834,18 @@ class TestSettingsOverrides:
         assert overrides["env"]["PROFILE_VAR"] == "test-value"
 
     def test_fallback_to_root(self, install_env):
-        """If .claude/settings.overrides.json doesn't exist, check root."""
+        """If .claude/settings.overrides.json doesn't exist, check root.
+
+        Move overrides to root.
+
+        The install code should find it at root.
+        """
         profile = install_env["profile"]
-        # Move overrides to root
         (profile / ".claude" / "settings.overrides.json").rename(profile / "settings.overrides.json")
-        # The install code should find it at root
         overrides_path = profile / ".claude" / "settings.overrides.json"
         if not overrides_path.exists():
             overrides_path = profile / "settings.overrides.json"
         assert overrides_path.exists()
-
-
-# ---------------------------------------------------------------------------
-# MCP merge tests
-# ---------------------------------------------------------------------------
 
 
 class TestMcpMerge:
@@ -856,14 +864,17 @@ class TestMcpMerge:
         assert "profile-server" in data["mcpServers"]
 
     def test_merge_to_user_scope(self, install_env):
-        """Both bundle and profile MCPs merge into claude.json."""
+        """Both bundle and profile MCPs merge into claude.json.
+
+        Merge bundle MCPs.
+
+        Merge profile MCPs.
+        """
         claude_json = install_env["claude_json"]
         with patch.object(install, "_CLAUDE_JSON", claude_json):
-            # Merge bundle MCPs
             bundle_mcp = json.loads((install_env["bundle"] / ".claude" / ".mcp.json").read_text())
             install._merge_mcp_to_user_scope(bundle_mcp["mcpServers"])
 
-            # Merge profile MCPs
             profile_mcp = json.loads((install_env["profile"] / ".claude" / ".mcp.json").read_text())
             install._merge_mcp_to_user_scope(profile_mcp["mcpServers"])
 
@@ -1048,6 +1059,12 @@ class TestEnvScanParity:
 
     @pytest.mark.parametrize("content", CASES)
     def test_scan_matches_hooks_config_parser(self, tmp_path, content):
+        """_parse_env_file mutates os.environ directly via setdefault, which monkeypatch cannot track or undo — snapshot
+        and restore by hand or the resolved value leaks into every later test in the session.
+
+        Install.py no longer carries its own copy of this parser — it delegates to scripts/mcp_daemon.py, so there are
+        two implementations to keep in step rather than three.
+        """
         import os
 
         from hooks.config import _parse_env_file
@@ -1055,9 +1072,6 @@ class TestEnvScanParity:
         env_file = tmp_path / ".env"
         env_file.write_text(content)
 
-        # _parse_env_file mutates os.environ directly via setdefault, which
-        # monkeypatch cannot track or undo — snapshot and restore by hand or the
-        # resolved value leaks into every later test in the session.
         saved = os.environ.copy()
         try:
             os.environ.pop("MCP_TRANSPORT", None)
@@ -1067,9 +1081,6 @@ class TestEnvScanParity:
             os.environ.clear()
             os.environ.update(saved)
 
-        # install.py no longer carries its own copy of this parser — it delegates
-        # to scripts/mcp_daemon.py, so there are two implementations to keep in
-        # step rather than three.
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from scripts import mcp_daemon
 
@@ -1123,7 +1134,11 @@ class TestSystemdUnit:
 
     @pytest.fixture(autouse=True)
     def _no_real_systemctl(self, monkeypatch):
-        """Never touch the machine's actual systemd."""
+        """Never touch the machine's actual systemd.
+
+        Conftest repoints AGENTIHOOKS_ROOT at a temp tree for home isolation; the real template lives in the checkout.
+        The unit is written under the patched Path.home, so this reads the template without escaping isolation.
+        """
         calls = []
 
         def _fake_run(cmd, *a, **kw):
@@ -1136,9 +1151,6 @@ class TestSystemdUnit:
 
         monkeypatch.setattr("subprocess.run", _fake_run)
         monkeypatch.setattr(install, "_resolve_hooks_python", lambda: Path("/venv/bin/python"))
-        # conftest repoints AGENTIHOOKS_ROOT at a temp tree for home isolation;
-        # the real template lives in the checkout. The unit is written under the
-        # patched Path.home, so this reads the template without escaping isolation.
         monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", Path(__file__).parent.parent)
         self.systemctl_calls = calls
 
@@ -1256,7 +1268,10 @@ class TestSystemdUnit:
         assert not [d for d in sections["Service"] if d.startswith("StartLimit")]
 
     def test_unit_passes_systemd_analyze_verify(self, tmp_path):
-        """Real systemd parser, when one is available. Skipped where it is not."""
+        """Real systemd parser, when one is available. Skipped where it is not.
+
+        Subprocess.run is faked by the autouse fixture; reach the real one.
+        """
         import shutil
         import subprocess as real_subprocess
 
@@ -1266,7 +1281,6 @@ class TestSystemdUnit:
         unit_file = tmp_path / install._SYSTEMD_UNIT_NAME
         unit_file.write_text(self._render())
 
-        # subprocess.run is faked by the autouse fixture; reach the real one.
         proc = real_subprocess.Popen(
             ["systemd-analyze", "verify", str(unit_file)],
             stdout=real_subprocess.PIPE,
@@ -1297,8 +1311,11 @@ class TestManagedMcpChainCollection:
     """
 
     def test_collect_walks_full_chain(self, install_env):
+        """A second bundle profile with its own MCP server.
+
+        Both profiles' servers present — NOT collapsed to just agentihooks.
+        """
         bundle = install_env["bundle"]
-        # A second bundle profile with its own MCP server.
         p2_mcp = bundle / "profiles" / "second-profile" / ".claude"
         p2_mcp.mkdir(parents=True)
         (p2_mcp / ".mcp.json").write_text(
@@ -1315,7 +1332,6 @@ class TestManagedMcpChainCollection:
             patch.object(install, "_build_mcp_config", return_value={"mcpServers": {"agentihooks": {"command": "x"}}}),
         ):
             managed = set(install._collect_all_managed_mcp_servers().keys())
-        # Both profiles' servers present — NOT collapsed to just agentihooks.
         assert managed == {"agentihooks", "bundle-server", "profile-server", "second-server"}
 
 
@@ -1341,6 +1357,7 @@ class TestManagedMcpLedger:
         )
 
     def test_removes_dropped_keeps_handadded(self, tmp_path):
+        """Dropped gone, hand-added preserved."""
         claude_json, state_json = self._env(
             tmp_path, ledger=["managed-a", "dropped-b"], claude_servers=["managed-a", "dropped-b", "hand-c"]
         )
@@ -1349,7 +1366,7 @@ class TestManagedMcpLedger:
             removed = install._reconcile_managed_mcp_ledger({"managed-a"})
         assert removed == ["dropped-b"]
         servers = json.loads(claude_json.read_text())["mcpServers"]
-        assert set(servers) == {"managed-a", "hand-c"}  # dropped gone, hand-added preserved
+        assert set(servers) == {"managed-a", "hand-c"}
         assert json.loads(state_json.read_text())["managed_mcp_servers"] == ["managed-a"]
 
     def test_idempotent_second_run_removes_nothing(self, tmp_path):
@@ -1361,7 +1378,7 @@ class TestManagedMcpLedger:
         assert set(json.loads(claude_json.read_text())["mcpServers"]) == {"managed-a", "hand-c"}
 
     def test_first_run_seeds_ledger_without_removal(self, tmp_path):
-        # No ledger key yet (fresh install) — nothing is pruned, ledger is seeded.
+        """No ledger key yet (fresh install) — nothing is pruned, ledger is seeded."""
         claude_json, state_json = self._env(tmp_path, ledger=None, claude_servers=["managed-a", "hand-c"])
         p1, p2, p3 = self._patches(claude_json, state_json)
         with p1, p2, p3:
@@ -1369,11 +1386,6 @@ class TestManagedMcpLedger:
         assert removed == []
         assert set(json.loads(claude_json.read_text())["mcpServers"]) == {"managed-a", "hand-c"}
         assert json.loads(state_json.read_text())["managed_mcp_servers"] == ["managed-a"]
-
-
-# ---------------------------------------------------------------------------
-# Active profile detection tests
-# ---------------------------------------------------------------------------
 
 
 class TestActiveProfileDetection:
@@ -1389,11 +1401,6 @@ class TestActiveProfileDetection:
             install.query_active_profile()
         out = capsys.readouterr().out.strip()
         assert out in ("not installed", "anton (local)")
-
-
-# ---------------------------------------------------------------------------
-# Profile listing tests
-# ---------------------------------------------------------------------------
 
 
 class TestProfileListing:
@@ -1523,16 +1530,18 @@ class TestInitDaemonLifecycle:
         Without this, deleting the `_ensure_mcp_daemon` call from the
         network-transport branch leaves the whole suite green while init silently
         stops starting the daemon — the headline behaviour of this feature.
+
+        Ordered after the unit render: the systemd backend starts the unit that call writes, so starting first would
+        enable a stale or absent one.
+
+        The stdio branch must stop a daemon left over from a network install.
         """
         import inspect
 
         src = inspect.getsource(install._install_global_inner)
 
         assert "_ensure_mcp_daemon(_mcp_transport)" in src
-        # Ordered after the unit render: the systemd backend starts the unit that
-        # call writes, so starting first would enable a stale or absent one.
         assert src.index("_install_systemd_user_unit(_mcp_transport)") < src.index("_ensure_mcp_daemon(_mcp_transport)")
-        # The stdio branch must stop a daemon left over from a network install.
         assert "stop()" in src
 
 

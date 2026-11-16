@@ -306,9 +306,11 @@ def test_first_call_transfers_initialized_session_to_protocol_library(monkeypatc
             if any(json.loads(line).get("id") == "call" for line in self.text.splitlines()):
                 answered.set()
 
-    # The protocol library cancels in-flight requests once stdin ends, so hold end of input
-    # until the call is answered, as a stdio client keeps its pipe open while it awaits a reply.
     class Stdin(StringIO):
+        """The protocol library cancels in-flight requests once stdin ends, so hold end of input until the call is
+        answered, as a stdio client keeps its pipe open while it awaits a reply.
+        """
+
         def readline(self, *args):
             line = super().readline(*args)
             if not line:

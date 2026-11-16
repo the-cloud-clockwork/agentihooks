@@ -1075,6 +1075,7 @@ def test_sizing_reads_only_the_newest_records_within_the_cache_cap(tmp_path, mon
 
 @pytest.mark.wall_clock
 def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(tmp_path, monkeypatch):
+    """Each stored record of 27 October held about 150 KB of input digests beside a few durations."""
     import time
 
     from scripts.ci_mutation import stats_dependencies
@@ -1087,7 +1088,6 @@ def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(
     cache = tmp_path / ".mutation-stats-cache"
     cache.mkdir()
     monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
-    # Each stored record of 27 October held about 150 KB of input digests beside a few durations.
     inputs = {f"scripts/module_{index}.py": "0" * 64 for index in range(1800)}
     for index in range(200):
         durations = {f"{files[index % 40]}::test_{case}": 0.5 for case in range(20)}
@@ -1437,12 +1437,12 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
 
 
 def test_a_mutant_that_renames_its_selected_test_ids_is_killed_within_the_budget(tmp_path, monkeypatch):
+    """A test server thread left running keeps a mutant child alive unless it leaves through os._exit."""
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
     (tmp_path / "tests/test_sample.py").write_text(
         "import os\nimport threading\n\nimport pytest\n\nfrom scripts.sample import value\n\n"
         "NUMBER = value(1)\n"
-        # A test server thread left running keeps a mutant child alive unless it leaves through os._exit.
         "if '__mutmut_' in os.environ.get('MUTANT_UNDER_TEST', ''):\n"
         "    threading.Thread(target=threading.Event().wait).start()\n\n"
         "@pytest.mark.parametrize('number', [NUMBER])\n"

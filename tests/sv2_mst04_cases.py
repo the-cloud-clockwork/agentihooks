@@ -1,3 +1,5 @@
+"""Import of scripts.swarm_ledger.repository: puts the ledger folder on sys.path before ledger_core loads."""
+
 import hashlib
 import json
 import tempfile
@@ -5,7 +7,7 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 
-import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
+import scripts.swarm_ledger.repository  # noqa: F401
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import new_ledger

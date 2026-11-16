@@ -5,34 +5,37 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-# ---------------------------------------------------------------------------
-# Size-aware injection (budget guard for Claude Code 10K cap)
-# ---------------------------------------------------------------------------
-
-
 class TestInjectionBudget:
     def test_default_no_cap_emits_full_doctrine(self, tmp_path):
-        """Default CI_MANIFESTO_MAX_BYTES=0 → no truncation, full content reaches model."""
+        """Default CI_MANIFESTO_MAX_BYTES=0 → no truncation, full content reaches model.
+
+        ~40 KB.
+
+        Body fully present.
+        """
         from unittest.mock import patch
 
         from hooks.context import ci_manifesto
 
         manifest = tmp_path / "huge.md"
-        manifest.write_text("# Doctrine\n" + ("padding " * 5000))  # ~40 KB
+        manifest.write_text("# Doctrine\n" + ("padding " * 5000))
         with patch.object(ci_manifesto, "_load") as mock_load, patch("hooks.config.CI_MANIFESTO_MAX_BYTES", 0):
             mock_load.return_value = {"path": str(manifest), "content": manifest.read_text()}
             payload = ci_manifesto._build_injection()
         assert "[TRUNCATED" not in payload
-        assert "padding " * 100 in payload  # body fully present
+        assert "padding " * 100 in payload
 
     def test_opt_in_cap_truncates_with_path_footer(self, tmp_path):
-        """When CI_MANIFESTO_MAX_BYTES is set, oversized content is truncated."""
+        """When CI_MANIFESTO_MAX_BYTES is set, oversized content is truncated.
+
+        ~40 KB.
+        """
         from unittest.mock import patch
 
         from hooks.context import ci_manifesto
 
         manifest = tmp_path / "huge.md"
-        manifest.write_text("# Doctrine\n" + ("padding " * 5000))  # ~40 KB
+        manifest.write_text("# Doctrine\n" + ("padding " * 5000))
         with patch.object(ci_manifesto, "_load") as mock_load, patch("hooks.config.CI_MANIFESTO_MAX_BYTES", 7500):
             mock_load.return_value = {"path": str(manifest), "content": manifest.read_text()}
             payload = ci_manifesto._build_injection()

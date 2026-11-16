@@ -1,3 +1,5 @@
+"""DEPENDS: Dependencies measured at the record commit, where f calls g."""
+
 import io
 import json
 import re
@@ -20,7 +22,6 @@ CREATED = "2026-10-27T12:00:00Z"
 ENVIRONMENT = "venv-py3.12-abc"
 LISTING = f"{ACTIONS}/workflows/test.yml/runs?branch=feature%2Freuse&event=pull_request&per_page=30"
 UNITS = ["hooks/mod.py::<module>", "hooks/mod.py::f", "hooks/mod.py::g", "hooks/mod.py::h"]
-# Dependencies measured at the record commit, where f calls g.
 DEPENDS = {"test_f": ["f", "g"], "test_g": ["g"], "test_h": ["h"]}
 EMPTY = {"version": 1, "runs": [], "tests": []}
 

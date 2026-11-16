@@ -59,8 +59,9 @@ class TestDetection:
         assert not is_codex()
 
     def test_envelope_buffering_is_target_capability_not_codex_identity(self, claude, codex, copilot):
-        # Fixtures apply in order; the last one wins. Assert against explicit
-        # arguments so this does not depend on that ordering.
+        """Fixtures apply in order; the last one wins. Assert against explicit arguments so this does not depend on that
+        ordering.
+        """
         assert buffers_single_envelope("codex") is True
         assert buffers_single_envelope("copilot") is True
         assert buffers_single_envelope("claude") is False
@@ -236,12 +237,12 @@ class TestEmitter:
         assert not has_buffered()
 
     def test_drain_returns_joined_content_and_clears(self, codex, capsys):
+        """Drain() never emits anything itself — unlike flush(), it's silent."""
         buffer_context("first block")
         buffer_context("second block")
         content = drain()
         assert "first block" in content and "second block" in content
         assert not has_buffered()
-        # drain() never emits anything itself — unlike flush(), it's silent.
         assert capsys.readouterr().out == ""
 
     def test_drain_empty_is_safe(self, codex, capsys):
@@ -251,10 +252,15 @@ class TestEmitter:
 
     def test_drain_after_block_prevents_leak_into_next_event(self, codex, capsys):
         """The invariant fix_2/fix_3 exist to guarantee: content buffered for
-        one event must never survive into the next event's flush."""
+        one event must never survive into the next event's flush.
+
+        Simulates main()'s BlockAction/finally path.
+
+        A later event in the same (hypothetical) process.
+        """
         buffer_context("event-one context")
-        drain()  # simulates main()'s BlockAction/finally path
-        flush("PostToolUse")  # a later event in the same (hypothetical) process
+        drain()
+        flush("PostToolUse")
         assert capsys.readouterr().out == "", "drained buffer leaked into a later flush"
 
 
@@ -393,6 +399,7 @@ class TestCodexRolloutResolverHardening:
             assert codex_rollout_path(evil) == ""
 
     def test_metachar_id_cannot_match_another_session(self, codex, tmp_path, monkeypatch):
+        """One character replaced by a wildcard must NOT resolve to the real file."""
         from hooks.targets.normalizer import codex_rollout_path
 
         monkeypatch.setenv("CODEX_HOME", str(tmp_path))
@@ -400,7 +407,6 @@ class TestCodexRolloutResolverHardening:
         d.mkdir(parents=True)
         real = "019fed35-c6df-7a43-a079-562b82daf86a"
         (d / f"rollout-2026-08-10T21-45-52-{real}.jsonl").write_text("{}\n")
-        # One character replaced by a wildcard must NOT resolve to the real file.
         assert codex_rollout_path(real[:-1] + "?") == ""
         assert codex_rollout_path(real).endswith(f"{real}.jsonl")
 
@@ -420,9 +426,10 @@ class TestCodexRolloutResolverHardening:
         assert len(calls) == 4
 
     def deep_history(self, tmp_path, monkeypatch):
+        """8 months of history."""
         monkeypatch.setenv("CODEX_HOME", str(tmp_path))
         sessions = tmp_path / "sessions"
-        for month in range(1, 9):  # 8 months of history
+        for month in range(1, 9):
             for day in range(1, 29):
                 d = sessions / "2026" / f"{month:02d}" / f"{day:02d}"
                 d.mkdir(parents=True)
@@ -442,7 +449,11 @@ class TestCodexRolloutResolverHardening:
 
     @pytest.mark.wall_clock
     def test_deep_history_stays_fast(self, codex, tmp_path, monkeypatch):
-        """Resolution must not scale with total session history."""
+        """Resolution must not scale with total session history.
+
+        A full-tree walk of ~2200 files costs milliseconds per call; the newest-first scan is bounded by one day
+        directory.
+        """
         import time
 
         from hooks.targets.normalizer import codex_rollout_path
@@ -452,8 +463,6 @@ class TestCodexRolloutResolverHardening:
         for _ in range(20):
             assert codex_rollout_path(sid)
         elapsed = (time.perf_counter() - start) / 20
-        # A full-tree walk of ~2200 files costs milliseconds per call; the
-        # newest-first scan is bounded by one day directory.
         assert elapsed < 0.005, f"{elapsed * 1000:.2f} ms/call — resolution is walking history"
 
 
@@ -767,8 +776,9 @@ class TestCopilotCapabilities:
         assert reports_shell_cwd() is False
 
     def test_envelope_block_required_only_for_copilot(self):
-        # Settled live on v1.0.80: preToolUse denies on exit 2 alone;
-        # userPromptSubmitted blocks ONLY via a stdout {"decision": "block"}.
+        """Settled live on v1.0.80: preToolUse denies on exit 2 alone; userPromptSubmitted blocks ONLY via a stdout
+        {"decision": "block"}.
+        """
         assert requires_envelope_block("PreToolUse", "copilot") is True
         assert requires_envelope_block("PermissionRequest", "copilot") is True
         assert requires_envelope_block("UserPromptSubmit", "copilot") is True
