@@ -113,6 +113,22 @@
       ]
     },
     {
+      "id": "hub-slot-serve-drops-abandoned-requests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-serve-bounded",
+      "behaviour": "A hub pod serves account slot requests on the bus's own bounded thread pool and drops, unanswered and unrun, a request that waited in that pool's queue as long as the hive waits for its answer, timed from when the hub received it, so a slot take or lane admission the hive already gave up on never claims an account slot or a task, and lane admission times its answer budget from that receipt.",
+      "seam": "NatsBus.serve with wait_ms for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": [
+        "nats-serve-default-executor"
+      ],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot",
+        "tests/events/test_scoped_nats.py::test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_queued_ones",
+        "tests/events/test_nats_payload_safety.py::test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_that_did_not",
+        "tests/hub/test_admission.py::test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_queue"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
@@ -627,7 +643,7 @@
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
-      "behaviour": "A checked wait holds a claim holder's idle count only while the waits end step, which ends checked waits whose target resolved, has run within the idle retirement window; when that step is starved, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
+      "behaviour": "A checked wait holds a claim holder's idle count only while the last completed waits end pass, which ends checked waits whose target resolved, ran within the idle retirement window, or within that window of its declaration while no pass ever completed; when that pass is starved or failing, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
       "seam": "scripts.tick.steps.agents._watch_idle and _hive_lost, through _holding_wait",
       "tests": [
         "tests/tick/steps/test_idle_claim_retire.py::test_workstation_engineers_idle_under_an_unended_checked_wait_are_retired_within_25_ticks",
@@ -641,10 +657,22 @@
       "id": "tick-waits-end-records-its-end-every-run",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
-      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, so the waits end step, declared at sixty seconds on the tick lane, refreshes its end on every run and a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
-      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, read by scripts.tick.steps.agents._holding_wait",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, and each completed waits end pass records the time it ran, so while that pass keeps completing a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, and scripts.swarm.waits.end_pass through mark_ended, read by scripts.tick.steps.agents._holding_wait",
       "tests": [
         "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
+      "id": "tick-failing-waits-end-lets-checked-waits-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2564",
+      "behaviour": "The idle count trusts only a completed waits end pass. The registered waits end step reports ok even when its end pass raises, is skipped after an earlier step held an exception, finds no tick view or is refused, so the end a checked wait holds on is the time the last completed end pass ran; while the pass fails after a completion, a checked wait holds only within the idle retirement window after that time, with no completion ever recorded only within that window of its declaration, and engineers idle at their prompts under checked waits are retired within 25 ticks.",
+      "seam": "scripts.swarm.waits.end_pass recording its completion, read by scripts.tick.steps.agents._holding_wait in _watch_idle",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read",
+        "tests/tick/steps/test_idle_claim_retire.py::test_engineers_idle_under_a_checked_wait_are_retired_while_waits_end_fails_every_pass",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_holds_one_window_after_it_was_declared_when_waits_end_never_completed"
       ]
     },
     {
@@ -3726,6 +3754,33 @@
       ]
     },
     {
+      "id": "launch-model-suits-harness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
+      "behaviour": "Every launch path that takes a model from lane config or a filled saved launch chooses it through model_pick.suited, so a Codex launch never asks for a Claude model and a Claude launch never asks for a Codex model: the hive orders launch assignment, the successor fill at hub admission, and the runtime lane default for spawns outside eng and ci and for the resume fallback; HerdrRuntime.spawn passes every final model, saved or picked, and resume every recorded model through the same choice.",
+      "seam": "model_pick.suited through Consumer.launch, successor_fill.filled, runtime._lane_default, and the final model of HerdrRuntime.spawn and HerdrRuntime.resume",
+      "rules": [
+        "launch-model-skips-harness-choice"
+      ],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model",
+        "tests/swarm/test_model_pick.py::test_every_default_model_suits_its_own_harness_and_not_the_other",
+        "tests/hive/test_orders.py::test_a_hive_order_never_launches_the_other_harness_lane_model",
+        "tests/hive/test_orders.py::test_a_hive_order_keeps_a_lane_model_its_harness_runs",
+        "tests/tick/steps/test_successor_fill.py::test_a_successor_with_no_saved_model_never_takes_the_other_harness_lane_model",
+        "tests/tick/steps/test_successor_fill.py::test_hub_admission_fills_a_codex_successor_with_the_codex_model_on_a_claude_pinned_lane",
+        "tests/swarm/test_runtime.py::test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_resume_never_relaunches_a_recorded_model_of_the_other_harness",
+        "tests/swarm/test_runtime.py::test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_launches_the_claude_model",
+        "tests/swarm/test_runtime.py::test_a_successor_never_launches_a_saved_model_of_the_other_harness",
+        "tests/swarm/test_default_models.py::test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_successor_saved_model_of_the_other_harness_falls_back_to_the_swarm_harness_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_takes_the_swarm_claude_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_resumed_model_of_the_other_harness_falls_back_to_the_swarm_harness_model"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
@@ -4298,6 +4353,63 @@
         "tests/swarm/test_panic.py::test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository",
         "tests/swarm/test_panic.py::test_panic_spares_the_first_push_of_a_registered_fix_branch",
         "tests/swarm/test_panic.py::test_panic_refuses_a_push_from_a_branch_no_fix_registers"
+      ]
+    },
+    {
+      "id": "panic-fix-registration-checked",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "Only the swarm's master or the operator presses panic on, and every fix link is checked before panic stores it: a link that is not a pull request or branch link of agentihooks, agentihooks-bundle or antoncore, a branch link whose branch is not a plain branch name of ASCII letters, digits, underscores and hyphens in parts joined by single dots or slashes, or that starts with refs/, a branch link to dev or main, and a pull request that cannot be read or whose head branch is dev or main are refused with nothing stored and nothing cancelled, so no fix spares every dev run and no malformed fix fails every cancel sweep.",
+      "seam": "cmd_panic for the on action and panic.check_fix, both before panic.engage stores the fixes",
+      "rules": [
+        "panic-on-unchecked-registration"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator",
+        "tests/swarm/test_panic.py::test_a_seat_cannot_press_panic_on_as_the_master",
+        "tests/swarm/test_panic.py::test_the_swarm_master_presses_panic_on_with_a_checked_fix",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_it_cannot_read",
+        "tests/swarm/test_panic.py::test_a_branch_link_of_a_panic_repository_passes_the_check_unread",
+        "tests/swarm/test_panic.py::test_a_fix_pull_request_passes_the_check_after_one_read_of_its_head"
+      ]
+    },
+    {
+      "id": "panic-fix-spare-reads-target",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
+      "rules": [
+        "panic-spare-ignores-command-target"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_stays_frozen_for_a_command_that_writes_another_ref",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch",
+        "tests/swarm/test_panic.py::test_git_c_decides_the_checkout_a_push_is_spared_in",
+        "tests/swarm/test_panic.py::test_a_push_git_config_may_route_elsewhere_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_git_config_that_cannot_be_read_counts_as_routed",
+        "tests/swarm/test_panic.py::test_panic_freezes_a_push_behind_git_global_options_or_a_redirection",
+        "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
+        "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
+        "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
+      ]
+    },
+    {
+      "id": "panic-fix-pull-request-head-in-its-repository",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "While fleet panic is on, the CI cancel sweep spares the head branch of a registered fix pull request only in that pull request's own repository, as it spares a fix branch link only in the repository the link names; a run on the same branch name in another panic repository is cancelled.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs: the branches it keeps for each repository",
+      "rules": [
+        "panic-sweep-keeps-fix-heads-everywhere"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_a_fix_pull_request_head_only_in_its_repository"
       ]
     },
     {
@@ -4976,6 +5088,17 @@
       "seam": "hooks.context.hive_join.run",
       "tests": [
         "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
+      "id": "hive-join-report-tool-repair",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2451",
+      "behaviour": "A swarm session whose hive join report write failed at session start, such as on a Redis connection error, writes the report on its next tool call when its execution has none, so the launch check grades the report instead of failing the launch on a missing one; a tool call leaves a report another session of the execution wrote in place and only retries its ledger checks, while a session start still replaces it.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_a_tool_call_writes_the_join_report_a_failed_start_left_missing",
+        "tests/test_hive_join_hook.py::test_only_a_session_start_replaces_the_join_report_of_another_session"
       ]
     },
     {
@@ -6213,6 +6336,20 @@
       ]
     },
     {
+      "id": "inbox-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2563",
+      "behaviour": "Automated swarm notices keep reaching their recipient through the seen claim: an automated agent's activity question closed without a reply, by the agent, through the ledger, blocked or cancelled, is cleared and asked again on the next probe, every master backstop and every master retire handoff ask carries its own ref followed by its send time, and every step starvation alarm carries its own ref followed by the first miss of its starvation, so the recipient's seen marks never close a later backstop, ask or alarm as already shown through the ledger.",
+      "seam": "scripts.swarm.automated_gc.run over a question closed with InboxStore.close, scripts.swarm.master_wake.run sending repeated backstops, scripts.swarm.master_retire.hold sending repeated asks and scripts.swarm.health.step_starvation.step alarming a step that starves again, each delivered by scripts.inbox.seen.claim",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_a_question_closed_without_a_reply_is_asked_again_on_the_next_probe",
+        "tests/swarm/test_automated_gc.py::test_only_a_question_closed_without_a_reply_leaves_an_empty_request",
+        "tests/swarm/test_master_wake.py::test_each_backstop_passes_the_seen_claim",
+        "tests/swarm/test_master_retire.py::test_each_retire_ask_passes_the_seen_claim",
+        "tests/tick/steps/test_step_starvation.py::test_each_starvation_of_a_step_passes_the_seen_claim"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
@@ -6715,14 +6852,17 @@
       "id": "pattern-downloads-keep-a-lone-artifact-where-its-reader-looks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2560",
-      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
+      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root, and Sonar takes the coverage of a lone selected leg that lands at the coverage folder root as that leg's shard. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
       "seam": "The mutation job's Download every mutation shard report path and the Merge the shard reports step in the Tests workflow, the grade download in the retained mutation replay's verify job, scripts.ci_gate_summary.counts over the test summary downloads, and every pattern download under .github",
       "tests": [
         "tests/test_ci_lone_artifact_download.py::test_every_pattern_download_without_merge_multiple_says_where_a_lone_match_lands",
         "tests/test_ci_lone_artifact_download.py::test_a_lone_shard_download_lands_in_a_folder_its_pattern_names",
         "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran",
         "tests/test_ci_lone_artifact_download.py::test_the_mutation_replay_verify_finds_every_grade_however_many_shards_ran",
-        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran"
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
       ]
     },
     {

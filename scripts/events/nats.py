@@ -4,7 +4,9 @@ import datetime
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable, Coroutine, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -25,7 +27,7 @@ from nats.js.errors import (
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nkey
-from .bus import Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
+from .bus import SERVE_WAITED_MS, Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -54,6 +56,7 @@ _log = logging.getLogger(__name__)
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 FIRST_CONNECT_RETRIES = 5
 RECONNECT_WAIT_S = 2
+SERVE_WORKERS = 8
 
 
 def queue_stream(name: str) -> str:
@@ -564,6 +567,7 @@ class NatsBus:
         self._queues: dict[str, NatsWorkQueue] = {}
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
+        self._serving = ThreadPoolExecutor(SERVE_WORKERS)
         try:
             self._nc = self._loop.run(_first_connect(url, config))
             self._js = self._nc.jetstream()
@@ -665,20 +669,35 @@ class NatsBus:
                 store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
             return store
 
-    def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
-        """Answer each request on its own executor thread, because nats-py awaits the callbacks of one subscription
-        one at a time and an awaited handler would hold every later request on the subject behind a slow one."""
+    def serve(
+        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+    ) -> None:
+        """Answer each request on one of the bus's SERVE_WORKERS serve threads, because nats-py awaits the callbacks of
+        one subscription one at a time and an awaited handler would hold every later request on the subject behind a
+        slow one; with wait_ms, a request that waited that long since it arrived is dropped unanswered, because its
+        requester stopped waiting and its handler would claim for nobody."""
 
-        def answer(msg: Msg) -> None:
+        def answer(msg: Msg, received_ns: int) -> None:
+            waited = (time.monotonic_ns() - received_ns) // 1_000_000
+            if wait_ms is not None and waited >= wait_ms:
+                print(
+                    f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "
+                    f"past its requester's {wait_ms} ms wait",
+                    file=sys.stderr,
+                )
+                return
+            token = SERVE_WAITED_MS.set(waited)
             try:
                 reply = handler(msg.subject, msg.data)
                 nats_payload.validate(self._nc, msg.reply, reply)
                 self._loop.run(msg.respond(reply))
             except Exception as error:
                 self._loop.run(_unreported(error))
+            finally:
+                SERVE_WAITED_MS.reset(token)
 
         async def respond(msg: Msg) -> None:
-            asyncio.get_running_loop().run_in_executor(None, answer, msg)
+            self._serving.submit(answer, msg, time.monotonic_ns())
 
         self._loop.run(self._nc.subscribe(subject, queue=queue, cb=respond))
         self._loop.run(self._nc.flush())
@@ -713,6 +732,7 @@ class NatsBus:
                 if not self._loop.closed:
                     self._loop.run(self._nc.close())
             finally:
+                self._serving.shutdown(wait=False, cancel_futures=True)
                 self._loop.close()
 
 

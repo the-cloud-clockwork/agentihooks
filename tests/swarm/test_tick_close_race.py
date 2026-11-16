@@ -198,12 +198,12 @@ def test_automated_activity_records_an_answer_closed_meanwhile(world, race):  # 
     assert automated_gc.state(world[0], GC_SLUG, agent)["request"] == ""
 
 
-def test_master_wake_passes_an_earlier_backstop_closed_meanwhile(store, race):
+def test_master_wake_passes_an_earlier_backstop_closed_meanwhile(store: RedisStore, race: Race) -> None:
     inbox = InboxStore(store.redis)
-    earlier = inbox.send(wake.BY, "sw-master-1", "backstop", ref=f"{master_wake.BACKSTOP_REF}:sw-master-1")
+    earlier = inbox.send(wake.BY, "sw-master-1", "backstop", ref=f"{master_wake.BACKSTOP_REF}:sw-master-1:1")
     inbox.deliver(earlier.id, "sw-master-1")
     race.arm()
-    assert master_wake._backstop(inbox, "sw-master-1", "master@sw", True)
+    assert master_wake._backstop(inbox, "sw-master-1", "master@sw", True, 2)
     assert race.closed_meanwhile(inbox, earlier)
 
 

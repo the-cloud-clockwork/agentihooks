@@ -34,10 +34,11 @@ def run(payload: dict, event: str) -> None:
     agent = next((a for a in store.agents(slug) if a.name == name and join_report.host(a) == hive), None)
     if agent is None:
         return
-    if event == "tool":
+    current = join_report.read(store.redis, agent)
+    if event == "tool" and current:
         join_report.retry_ledger(store.redis, agent, session, at)
         return
-    if join_report.read(store.redis, agent).get("session_id") == session:
+    if current.get("session_id") == session:
         return
     transcript = payload.get("transcript_path")
     harness = agent.harness or current_target()

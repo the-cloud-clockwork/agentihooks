@@ -18,6 +18,7 @@ def build(remaining: float) -> ResourceClient:
     timeout: float = min(ledger.REQUEST_TIMEOUT, remaining)
     if database_ledger.serving():
         return database_ledger.client(base, timeout)
+    # ruleid: feature-tick-database-ledger
     return ResourceClient(base, ledger.credentials(slug, service), timeout)
 
 
@@ -29,6 +30,13 @@ def build(remaining: float) -> ResourceClient:
     return built
 
 
+def build(remaining: float) -> ResourceClient:
+    # ruleid: feature-tick-database-ledger
+    spare: ResourceClient = ResourceClient(ledger.base(slug), {}, remaining)
+    built: ResourceClient = ledger.client(slug, min(ledger.REQUEST_TIMEOUT, remaining))
+    return built
+
+
 # ruleid: feature-tick-database-ledger
 def client(slug, service=False, timeout=REQUEST_TIMEOUT, headers=None):
     from scripts.tick.adapters import database_ledger
@@ -36,6 +44,11 @@ def client(slug, service=False, timeout=REQUEST_TIMEOUT, headers=None):
     if database_ledger.serving():
         return database_ledger.client(base(slug), timeout)
     return ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
+
+
+# ruleid: feature-tick-database-ledger
+def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
+    return ResourceClient(base(slug), credentials(slug), timeout)
 
 
 # ok: feature-tick-database-ledger

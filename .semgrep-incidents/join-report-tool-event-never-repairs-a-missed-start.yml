@@ -1,0 +1,12 @@
+rules:
+  - id: join-report-tool-event-never-repairs-a-missed-start
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tool event that only retries the ledger checks of an existing hive join report leaves a session whose start
+      write failed, such as on a Redis connection error, with no report for the rest of its life, so the launch check
+      fails the launch on a missing report. Let a tool event whose execution has no report write the start report.
+    pattern: |
+      if $EVENT == "tool":
+          join_report.retry_ledger(...)
+          return
