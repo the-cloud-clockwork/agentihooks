@@ -234,7 +234,7 @@ def test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples
 
 
 @pytest.mark.feature("swarm-lab-behind-hold")
-def test_a_lab_stretch_that_ends_as_the_claim_wait_opens_adds_no_lab_wait():
+def test_a_lab_stretch_that_ends_as_the_claim_wait_opens_adds_no_lab_wait() -> None:
     tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
     samples = [lab(at(7, 50), 1800.0), lab(at(8), 60.0)]
     source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], lab_capacity=samples)
