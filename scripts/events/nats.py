@@ -377,9 +377,11 @@ async def provision_queue(js: JetStreamContext, names: QueueNames, config: BusCo
         js,
         config.replicas,
         names.stream,
-        subjects=[names.filter],
-        retention=api.RetentionPolicy.WORK_QUEUE,
-        duplicate_window=_seconds(config.dedupe_window_ms),
+        api.StreamConfig(
+            subjects=[names.filter],
+            retention=api.RetentionPolicy.WORK_QUEUE,
+            duplicate_window=_seconds(config.dedupe_window_ms),
+        ),
     )
 
 
@@ -620,7 +622,10 @@ class NatsBus:
                 for name, subject in ((dead_stream, DEAD_SUBJECT), (LAB_STREAM, LAB_SUBJECT)):
                     self._loop.run(
                         nats_replicas.create(
-                            self._js, config.replicas, name, subjects=[subject], duplicate_window=window
+                            self._js,
+                            config.replicas,
+                            name,
+                            api.StreamConfig(subjects=[subject], duplicate_window=window),
                         )
                     )
         except BaseException:

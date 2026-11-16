@@ -1,7 +1,8 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
+from nats.js.api import StreamConfig
 
 from scripts.events import nats
 from scripts.events.config import BusConfig
@@ -24,12 +25,11 @@ def test_bus_provisions_only_when_requested(monkeypatch, provision):
         assert bus._config.provision is provision
         assert js.add_stream.await_count == (3 if provision else 0)
         if provision:
-            assert js.add_stream.await_args_list[2].kwargs == {
-                "name": "AGENTIHOOKS-CI-LAB-HEADS",
-                "num_replicas": 1,
-                "subjects": ["ci.lab.head.>"],
-                "duplicate_window": 120.0,
-            }
+            assert js.add_stream.await_args_list[2] == call(
+                StreamConfig(subjects=["ci.lab.head.>"], duplicate_window=120.0),
+                name="AGENTIHOOKS-CI-LAB-HEADS",
+                num_replicas=1,
+            )
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
         if provision:

@@ -1,10 +1,9 @@
 """Creates the bus's JetStream streams at its replica count and raises existing streams in place, never lowering one."""
 
 from dataclasses import replace
-from typing import Any
 
 from nats.js import JetStreamContext
-from nats.js.api import StreamInfo
+from nats.js.api import StreamConfig, StreamInfo
 from nats.js.errors import APIError
 
 NAME_IN_USE = 10058
@@ -22,13 +21,14 @@ async def raised(js: JetStreamContext, info: StreamInfo, replicas: int) -> Strea
     return await js.update_stream(config=replace(info.config, num_replicas=replicas))  # pyright: ignore[reportUnknownMemberType]
 
 
-async def create(js: JetStreamContext, replicas: int, name: str, **config: Any) -> StreamInfo:
-    """Create a stream at the count; an existing stream is raised to it or keeps a higher count it holds.
+async def create(js: JetStreamContext, replicas: int, name: str, config: StreamConfig) -> StreamInfo:
+    """Create the stream ``name`` from ``config`` at the count; an existing stream is raised to it or keeps a higher
+    count it holds.
 
     Any other difference from the existing stream's configuration still fails with the server's name in use error.
     """
     try:
-        return await js.add_stream(name=name, num_replicas=replicas, **config)  # pyright: ignore[reportUnknownMemberType]
+        return await js.add_stream(config, name=name, num_replicas=replicas)  # pyright: ignore[reportUnknownMemberType]
     except APIError as exc:
         if exc.err_code != NAME_IN_USE:
             raise
@@ -36,7 +36,7 @@ async def create(js: JetStreamContext, replicas: int, name: str, **config: Any) 
         if held(info) == replicas:
             raise
     info = await raised(js, info, replicas)
-    return await js.add_stream(name=name, num_replicas=held(info), **config)  # pyright: ignore[reportUnknownMemberType]
+    return await js.add_stream(config, name=name, num_replicas=held(info))  # pyright: ignore[reportUnknownMemberType]
 
 
 async def raise_all(js: JetStreamContext, replicas: int) -> None:

@@ -30,7 +30,10 @@ def root(metadata=None, provision=False):
         get_msg=AsyncMock(side_effect=NotFoundError()),
     )
     return SimpleNamespace(
-        _config=SimpleNamespace(provision=provision), _loop=SimpleNamespace(run=asyncio.run), _js=js, _nc=client
+        _config=SimpleNamespace(provision=provision, replicas=1),
+        _loop=SimpleNamespace(run=asyncio.run),
+        _js=js,
+        _nc=client,
     )
 
 

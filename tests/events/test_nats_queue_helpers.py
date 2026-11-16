@@ -56,11 +56,9 @@ def _js(stream_info):
 
 def _assert_added(js, names):
     js.add_stream.assert_awaited_once_with(
+        api.StreamConfig(subjects=[names.filter], retention=api.RetentionPolicy.WORK_QUEUE, duplicate_window=12.345),
         name=names.stream,
         num_replicas=1,
-        subjects=[names.filter],
-        retention=api.RetentionPolicy.WORK_QUEUE,
-        duplicate_window=12.345,
     )
 
 

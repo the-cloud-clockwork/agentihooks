@@ -160,29 +160,31 @@ def _faked(held: int | None, *created: object) -> Any:
     )
 
 
+def _wanted(held: int) -> Any:
+    return call(StreamConfig(subjects=["s"]), name="S", num_replicas=held)
+
+
 def test_a_create_meeting_a_stream_with_fewer_replicas_raises_it_and_creates_at_the_count() -> None:
     js = _faked(None, APIError(err_code=nats_replicas.NAME_IN_USE), "created")
-    assert asyncio.run(nats_replicas.create(js, 2, "S", subjects=["s"])) == "created"
+    assert asyncio.run(nats_replicas.create(js, 2, "S", StreamConfig(subjects=["s"]))) == "created"
+    js.stream_info.assert_awaited_once_with("S")
     [update] = js.update_stream.await_args_list
     assert update.kwargs["config"].num_replicas == 2
     assert update.kwargs["config"].subjects == ["s"]
-    assert js.add_stream.await_args_list == [call(name="S", num_replicas=2, subjects=["s"])] * 2
+    assert js.add_stream.await_args_list == [_wanted(2)] * 2
 
 
 def test_a_create_meeting_a_stream_with_more_replicas_keeps_its_count() -> None:
     js = _faked(COUNT, APIError(err_code=nats_replicas.NAME_IN_USE), "kept")
-    assert asyncio.run(nats_replicas.create(js, 1, "S", subjects=["s"])) == "kept"
+    assert asyncio.run(nats_replicas.create(js, 1, "S", StreamConfig(subjects=["s"]))) == "kept"
     js.update_stream.assert_not_awaited()
-    assert js.add_stream.await_args_list == [
-        call(name="S", num_replicas=1, subjects=["s"]),
-        call(name="S", num_replicas=COUNT, subjects=["s"]),
-    ]
+    assert js.add_stream.await_args_list == [_wanted(1), _wanted(COUNT)]
 
 
 def test_a_create_meeting_a_stream_at_the_same_count_raises_its_other_difference() -> None:
     js = _faked(2, APIError(err_code=nats_replicas.NAME_IN_USE))
     with pytest.raises(APIError) as caught:
-        asyncio.run(nats_replicas.create(js, 2, "S", subjects=["s"]))
+        asyncio.run(nats_replicas.create(js, 2, "S", StreamConfig(subjects=["s"])))
     assert caught.value.err_code == nats_replicas.NAME_IN_USE
     js.update_stream.assert_not_awaited()
     js.add_stream.assert_awaited_once()
@@ -191,7 +193,7 @@ def test_a_create_meeting_a_stream_at_the_same_count_raises_its_other_difference
 def test_a_create_failing_for_another_reason_raises_without_reading_the_stream() -> None:
     js = _faked(1, APIError(err_code=10059))
     with pytest.raises(APIError) as caught:
-        asyncio.run(nats_replicas.create(js, COUNT, "S", subjects=["s"]))
+        asyncio.run(nats_replicas.create(js, COUNT, "S", StreamConfig(subjects=["s"])))
     assert caught.value.err_code == 10059
     js.stream_info.assert_not_awaited()
 

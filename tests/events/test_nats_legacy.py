@@ -72,17 +72,18 @@ def test_legacy_stream_creation_keeps_the_dedupe_window() -> None:
     import asyncio
     from unittest.mock import AsyncMock
 
+    from nats.js.api import StreamConfig
+
     from scripts.events.nats_legacy import EVENTS_MAX_AGE_S, EVENTS_MAX_BYTES, LEGACY_EVENTS, provision_events
 
     js = SimpleNamespace(add_stream=AsyncMock())
     asyncio.run(provision_events(js, "events", 12.5))
     js.add_stream.assert_awaited_once_with(
+        StreamConfig(
+            subjects=LEGACY_EVENTS, duplicate_window=12.5, max_age=EVENTS_MAX_AGE_S, max_bytes=EVENTS_MAX_BYTES
+        ),
         name="events",
         num_replicas=1,
-        subjects=LEGACY_EVENTS,
-        duplicate_window=12.5,
-        max_age=EVENTS_MAX_AGE_S,
-        max_bytes=EVENTS_MAX_BYTES,
     )
 
 

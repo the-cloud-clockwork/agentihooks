@@ -3,6 +3,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from nats.js import JetStreamContext
+from nats.js.api import StreamConfig
 
 from . import nats_replicas
 from .bus import StateStore, WorkQueue
@@ -53,8 +54,10 @@ class NatsScopedBus:
                         root._js,
                         root._config.replicas,
                         streams[resource],
-                        subjects=[f"{subject(swarm, family)}.>"],
-                        duplicate_window=_seconds(root._config.dedupe_window_ms),
+                        StreamConfig(
+                            subjects=[f"{subject(swarm, family)}.>"],
+                            duplicate_window=_seconds(root._config.dedupe_window_ms),
+                        ),
                     )
                 )
             root._loop.run(
@@ -62,8 +65,10 @@ class NatsScopedBus:
                     root._js,
                     root._config.replicas,
                     stream_name(swarm, STOPS),
-                    subjects=[f"{subject(swarm, STOPS.lower())}.>"],
-                    duplicate_window=_seconds(root._config.dedupe_window_ms),
+                    StreamConfig(
+                        subjects=[f"{subject(swarm, STOPS.lower())}.>"],
+                        duplicate_window=_seconds(root._config.dedupe_window_ms),
+                    ),
                 )
             )
             for bucket in SCOPED_STATE_BUCKETS:
