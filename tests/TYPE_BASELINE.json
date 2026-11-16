@@ -271,7 +271,7 @@
   "scripts/doctor/measure.py": 35,
   "scripts/doctor/observation_reconciliation.py": 101,
   "scripts/doctor/priming.py": 22,
-  "scripts/doctor/rates.py": 485,
+  "scripts/doctor/rates.py": 487,
   "scripts/doctor/rates_read.py": 126,
   "scripts/doctor/read.py": 335,
   "scripts/doctor/registry.py": 311,
