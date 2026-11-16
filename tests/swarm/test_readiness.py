@@ -1,3 +1,6 @@
+import threading
+from typing import Any, cast
+
 import pytest
 
 from scripts.events import memory
@@ -268,3 +271,59 @@ def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus)
     queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
     delivery = readiness.take(queue, lambda: None, 0)
     assert delivery.event.key == "a"
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_threads_asking_for_one_new_revision_fetch_the_export_once() -> None:
+    began, second = threading.Event(), threading.Event()
+
+    class Ledger:
+        def __init__(self) -> None:
+            self.fetches = 0
+
+        def metadata(self, slug: str) -> dict[str, Any]:
+            return {"_meta": {"rev": 7}}
+
+        def state(self, slug: str) -> dict[str, Any]:
+            self.fetches += 1
+            if self.fetches == 1:
+                began.set()
+                second.wait(0.5)
+            else:
+                second.set()
+            return doc([task("t1")])
+
+    ledger = Ledger()
+    source = readiness.Source(ledger=cast(Any, ledger))
+    reader = threading.Thread(target=source.state, args=(SLUG,))
+    reader.start()
+    assert began.wait(5)
+    source.state(SLUG)
+    reader.join()
+    assert ledger.fetches == 1
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_one_swarms_fetch_never_waits_for_another_swarms_fetch() -> None:
+    began, other = threading.Event(), threading.Event()
+    waited: list[bool] = []
+
+    class Ledger:
+        def metadata(self, slug: str) -> dict[str, Any]:
+            return {"_meta": {"rev": 7}}
+
+        def state(self, slug: str) -> dict[str, Any]:
+            if slug == "a":
+                began.set()
+                waited.append(other.wait(0.5))
+            else:
+                other.set()
+            return doc([task("t1")])
+
+    source = readiness.Source(ledger=cast(Any, Ledger()))
+    reader = threading.Thread(target=source.state, args=("a",))
+    reader.start()
+    assert began.wait(5)
+    source.state("b")
+    reader.join()
+    assert waited == [True]
