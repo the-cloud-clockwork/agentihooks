@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import pytest
 import redis
 
+from scripts import serena_router_daemon
 from scripts.events import nats
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
@@ -181,6 +182,7 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
     gh_log = trap_gh(tmp_path, monkeypatch)
     client = redis.Redis.from_url(url, decode_responses=True)
     client.flushdb()

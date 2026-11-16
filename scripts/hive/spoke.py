@@ -7,7 +7,6 @@ from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from scripts import serena_router_daemon
 from scripts.events.bus import Bus, Delivery, StateConflict
 from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
@@ -326,9 +325,6 @@ class Spoke:
             },
         )
         execution_events.prepare(self.bus, event.swarm, request.name, generation)
-        if not serena_router_daemon.ensure():
-            claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
-            raise RuntimeError("spawn unavailable: serena")
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)

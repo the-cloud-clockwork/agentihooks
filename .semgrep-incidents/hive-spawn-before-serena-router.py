@@ -1,15 +1,16 @@
 from scripts import serena_router_daemon
+from scripts.swarm_v2.runtime.base import SpawnRequest
 
 
-class Spoke:
-    def _spawn(self, request: object) -> object:
+class UngatedLaneTasks:
+    def request(self, event: object) -> SpawnRequest:
         # ruleid: hive-spawn-before-serena-router
-        return self.runtime.spawn(request)
+        return SpawnRequest(event, "eng", "eng@rig-0001", {})
 
 
-class GatedSpoke:
-    def _spawn(self, request: object) -> object:
+class GatedLaneTasks:
+    def request(self, event: object) -> SpawnRequest:
         if not serena_router_daemon.ensure():
             raise RuntimeError("spawn unavailable: serena")
         # ok: hive-spawn-before-serena-router
-        return self.runtime.spawn(request)
+        return SpawnRequest(event, "eng", "eng@rig-0001", {})

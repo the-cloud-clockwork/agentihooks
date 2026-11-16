@@ -703,50 +703,6 @@ def test_a_launch_waiting_for_room_reports_no_failure(rig):
     rig.tasks.failed.assert_not_called()
 
 
-@pytest.mark.feature("hive-spoke-launch-waits-for-serena-router")
-def test_a_spoke_launches_no_agent_while_the_serena_router_does_not_come_up(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from scripts import serena_router_daemon
-
-    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: False)
-
-    assert rig.spoke.poll() == "retry"
-
-    rig.runtime.spawn.assert_not_called()
-    rig.tasks.failed.assert_not_called()
-    rig.tasks.reopen.assert_called_once_with(rig.event)
-    assert claim(rig) == {"state": "ready"}
-    assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: spawn unavailable: serena)" in (
-        capsys.readouterr().err
-    )
-
-
-@pytest.mark.feature("hive-spoke-launch-waits-for-serena-router")
-def test_a_spoke_ensures_the_serena_router_before_it_spawns_the_agent(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from scripts import serena_router_daemon
-
-    calls: list[str] = []
-    placed = rig.runtime.spawn.return_value
-
-    def ensure() -> bool:
-        calls.append("router")
-        return True
-
-    def spawn(request: object) -> object:
-        calls.append("spawn")
-        return placed
-
-    monkeypatch.setattr(serena_router_daemon, "ensure", ensure)
-    rig.runtime.spawn.side_effect = spawn
-
-    assert rig.spoke.poll() == "started"
-
-    assert calls == ["router", "spawn"]
-
-
 @pytest.mark.parametrize("value", [None, {"pane_id": "w1:p1"}])
 def test_a_launch_failure_naming_no_harness_is_reported_without_one(rig, value):
     from scripts.swarm_v2.runtime.base import Outcome, Status

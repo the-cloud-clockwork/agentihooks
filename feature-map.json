@@ -4,14 +4,14 @@
       "id": "hive-spoke-launch-waits-for-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
-      "behaviour": "A hive lane spoke starts or waits for the Serena router before it spawns an agent, and spawns none while the router does not come up: the launch settles as an unavailable spawn, its claim returns to ready, no launch failure is reported and the offer is given back. An agent a hive launches therefore finds the router serving when its session connects to Serena at startup.",
-      "seam": "Spoke._spawn on the hive, through serena_router_daemon.ensure",
+      "behaviour": "A hive lane spoke starts or waits for the Serena router after the hub admits an offer and before it spawns the agent, and spawns none while the router does not come up: its claim returns to ready, no launch failure is reported and the offer is given back. A worker agent a hive launches therefore finds the router serving when its session connects to Serena at startup. The workstation master spoke does not wait for the router.",
+      "seam": "LaneTasks.request on the hive, through serena_router_daemon.ensure",
       "rules": [
         "hive-spawn-before-serena-router"
       ],
       "tests": [
-        "tests/hive/test_spoke.py::test_a_spoke_launches_no_agent_while_the_serena_router_does_not_come_up",
-        "tests/hive/test_spoke.py::test_a_spoke_ensures_the_serena_router_before_it_spawns_the_agent"
+        "tests/hive/test_lanes.py::test_a_lane_spoke_launches_no_agent_while_the_serena_router_does_not_come_up",
+        "tests/hive/test_lanes.py::test_a_lane_spoke_ensures_the_serena_router_before_it_spawns_the_admitted_agent"
       ]
     },
     {
