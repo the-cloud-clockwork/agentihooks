@@ -6505,6 +6505,20 @@
       ]
     },
     {
+      "id": "lab-scheduler-grade",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-scheduler",
+      "behaviour": "The CI lab scheduler grades an admitted head in passes of Scheduler.tick: a head whose every unit the verdict store answers enqueues nothing and completes its check runs at once; a newer head of the same lane drops the older head's pending units, carries its running jobs and reuses its stored verdicts; an expired lease requeues once and a second loss makes the grade red; a unit that cannot run makes the grade red and stores no verdict; and the grade's conclusion folds the gates by the Gate Required rules of the test workflow, matching every recorded case.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, and scripts.ci_lab.scheduler.fold against the recorded cases in tests/fixtures/ci_lab/gate_required.json",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_fully_cached_head_enqueues_nothing_and_completes_at_once",
+        "tests/ci_lab/test_scheduler.py::test_a_newer_head_drops_pending_units_and_reuses_carried_verdicts",
+        "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict",
+        "tests/ci_lab/test_scheduler.py::test_the_fold_reproduces_gate_required_on_recorded_fixtures"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
