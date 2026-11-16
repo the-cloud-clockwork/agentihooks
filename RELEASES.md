@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.955 · 2026-11-16
+
+### 2026-11-16 · 8c4dbb4e9608 · #11631 · @agenticore-app
+
+**A standby controller replica stands by through a Redis outage**
+
+This change fixes a bug where a standby controller crashed on any Redis error instead of waiting it out, which could leave the cluster with no leader at all during an outage: a restarted replica also failed again at container start because the credential step had no retry against Redis. Now `controller._lead` logs and retries Redis errors while standing by, `main` tolerates a refused lock release at shutdown, and `hive controller --holder` retries its credential check within the controller's grace window, so a standby rides out a Redis outage instead of crash-looping.
+
 ## v2.17.953 · 2026-11-16
 
 ### 2026-11-16 · c3ba8940d67d · #11619 · @agenticore-app
