@@ -347,7 +347,8 @@ The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict
 {"flaky": false, "key": "test-v1-<64 hex digest>", "kind": "test", "passed": true, "seconds": 1.5}
 ```
 
-Read an entry and the disabled kinds from a shell:
+Read an entry and the disabled kinds from a shell, with `KEY` set to a unit key such as
+`test-v1-<64 hex digest>`:
 
 ```bash
 redis-cli -u "$CI_LAB_REDIS_URL" GET "agentihooks-ci:verdict:test:$KEY"
@@ -363,15 +364,16 @@ redis-cli -u "$CI_LAB_REDIS_URL" SMEMBERS agentihooks-ci:disabled
 |---|---|---|
 | `lab/<kind>/<digest>/report.json` | `Store.put` | `{"report": <report>, "verdict": <verdict>}` as JSON with sorted keys |
 | `lab/<kind>/<digest>/log.txt` | `Store.put` | The unit's log bytes as given |
-| `lab/grades/<run>/` | No writer yet; `grade_prefix(run)` names it | The folder of one grade run |
+| `lab/grades/<run>/grade.json` | `evidence.record`, write once; no caller in this tree yet | One grade run's evidence: its inputs and the units it used |
+| `lab/heads/<head>/<run>` | `evidence.record`, write once | An empty marker naming each grade run of a head commit |
 | `lab/uploads/<job>/report.json` and `log.txt` | A worker, through an [upload URL](#worker-uploads) | A leased job's report and log |
 
 `<digest>` is the 64 hex digest at the end of the key, so `test-v1-<digest>` lands in
 `lab/test/<digest>/`. The schema version stays out of the path because the digest already covers
 it. `unit_path(kind, key, name)` builds a unit path and raises `ValueError: not a <kind> unit key:
 <key>` when the key does not read `<kind>-v<n>-<64 lowercase hex>` or names another kind.
-`is_report(path)` matches only `lab/<kind>/<64 hex>/report.json`, so grade and upload objects are
-never read as verdicts.
+`is_report(path)` matches only `lab/<kind>/<64 hex>/report.json`, so grade, head and upload objects
+are never read as verdicts.
 
 Two backends implement the `Objects` protocol of `write_once`, `read`, `keys` and `upload_url`:
 
@@ -387,7 +389,7 @@ report. `LocalObjects` refuses any path that resolves outside its root.
 
 ### Store a verdict
 
-`put(verdict, report, log)` takes the verdict, the report as a JSON serialisable mapping and the
+`put(verdict, report, log)` takes the verdict, the report as a JSON-serializable mapping and the
 log as bytes. It returns `True` when this call stored the verdict and `False` when the key was
 already stored.
 
@@ -440,10 +442,11 @@ not restore the set, so disable the kind again after a flush.
 
 `reindex()` lists every object under `lab/`, keeps the paths `is_report` matches, reads each report
 and indexes its verdict with `SET NX`. It returns how many entries it added. Entries already present
-stay unchanged and are not counted, so a second run returns `0`. It reads every report once, so its
-time grows with the number of stored verdicts. Run it after Redis lost the verdict index, such as a
-flush or a new instance without persistence. With two stored verdicts, `stored` among them under
-`key`:
+stay unchanged and are not counted, so a second run returns `0`. Grade, head and upload objects are
+skipped. It reads every report once, so its time grows with the number of stored verdicts. Run it
+after Redis lost the verdict index, such as a flush or a new instance without persistence. With `client` and `verdicts` built as in
+[Use the store](#use-the-store), two verdicts stored, and `key` and `stored` set to the first one's
+key and verdict:
 
 ```python
 >>> client.flushall()
@@ -479,7 +482,8 @@ GET /upload-url?job=<job>&token=<lease token>&name=report
 | 403 | `{"error": "lease token refused"}` | `job` or `token` is missing, or the token does not hold the lease; checked before `name` |
 | 400 | `{"error": "upload name must be report or log"}` | Any other `name` |
 
-The URL signs only the host header, so a plain PUT of the bytes uploads the file:
+On `LocalObjects` the worker writes the file at the `file://` path. On `S3Objects` the URL signs only
+the host header, so a plain PUT of the bytes uploads the file:
 
 ```bash
 url="$(curl -fsS "$CI_LAB_SCHEDULER_URL/upload-url?job=$JOB&token=$TOKEN&name=log" | jq -r .url)"
@@ -508,8 +512,8 @@ if hit is None:
     verdicts.put(verdict, {"tests": 40, "failed": []}, log)
 ```
 
-With an S3 compatible bucket such as MinIO, where botocore reads its credentials from its usual
-environment variables:
+With an S3 compatible bucket such as MinIO, reusing `client` from the local example, where
+botocore reads its credentials from its usual environment variables:
 
 ```python
 import botocore.session
@@ -521,7 +525,8 @@ signer = objects.Uploads(blobs)
 ```
 
 `inputs` is the unit's `digests.TestInputs` and `log` the batch log as bytes. The tests in
-`tests/ci_lab/test_store.py` run every store behaviour on fakeredis against both backends.
+`tests/ci_lab/test_store.py` run the store behaviours on fakeredis against both backends; the case
+of lost objects runs on `LocalObjects` only.
 
 ### Troubleshooting
 
@@ -531,6 +536,6 @@ signer = objects.Uploads(blobs)
 | `put` returns `False` and `get` returns another verdict than the one put | The key was stored first by another put; the first verdict stands | Read `lab/<kind>/<digest>/report.json` |
 | `ValueError: not a <kind> unit key: <key>` | `Verdict.kind` differs from the key's kind, or the key is not `<kind>-v<n>-<64 hex>` | Build the key with the `digests` builder of that kind |
 | `ValueError: a flaky verdict is a pass: <key>` | A verdict has `flaky` true and `passed` false | Set `flaky` only on a pass that followed a failure |
-| `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root: wrong directory, bucket or prefix | `objects.keys("lab/")` on the same backend |
+| `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root, from a wrong directory, bucket or prefix; or every entry was already indexed | `verdicts.objects.keys("lab/")` lists the stored objects |
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
-| A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat the lease, or lease the job again |
+| A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
