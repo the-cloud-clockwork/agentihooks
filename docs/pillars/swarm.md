@@ -198,7 +198,9 @@ The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a h
 `agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
 so one master is always online. A master busy with no tool call past the stall threshold is recycled the same
 way without its own document: see [Stalled master recycle](#stalled-master-recycle). `issue`, `pr`, `done` and
-`block` refuse the master. The swarm panel on the ledger page shows the master as the first card.
+`block` refuse the master; `merge queue` refuses it unless a route in
+[How the master queues a pull request](#how-the-master-queues-a-pull-request) admits it. The swarm panel on the ledger
+page shows the master as the first card.
 
 Before the tick retires a live master that reported its hook, for any reason (a live binding mismatch, a failed
 launch check, the idle limit or a stopping swarm), it sends that master an inbox item asking for a Handoff v2 and
@@ -206,6 +208,83 @@ waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5; 0 retires at
 retired and its successor starts from the document; one that does not is retired at the deadline. A record field
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
+
+### How the master queues a pull request
+
+The master claims no task, so `agentihooks swarm <id> merge queue URL` refuses its seat by default:
+
+```text
+swarm: master@<code>-<n> is the swarm master; the master works no task
+```
+
+Sub agents the master launches in its own session carry the master's name in `AGENTIHOOKS_AGENT_NAME` and get the
+same answer. A plain GitHub enqueue mutation from any swarm session is refused by the prod lockdown guard with
+`BLOCKED [raw enqueuePullRequest in a swarm]`, so every swarm queue entry goes through the command and lands in the
+[queue journal](../reference/delivery-tiers.md#the-queue-journal).
+
+`merge queue` admits the master seat through three routes, tried in this order. The first that matches decides:
+
+| Route | Admits the master when | Journal `route` and `task` |
+|---|---|---|
+| Hotfix window | The operator typed `allow-master-coding` or `troubleshooting mode` in the master pane and has not typed `deny-master-coding` or `disallow-master-coding` since, in the same session | neither field |
+| `spawn stall` | A [spawn stall finding](#spawn-stall-findings) is open, and a task naming the pull request is `urgent`, not done, and inside the open focus or no focus has open work | `spawn stall` and the first such task |
+| `master freeze` | A task naming the pull request is not done, a master seat froze that task by name, and the pull request's head branch starts with `master-` | `master freeze` and the first task a master froze |
+
+A task names a pull request through its `pr_url`, a split half or a pull scope. A route only queues: the master
+still claims no task, `issue`, `pr`, `done` and `block` still refuse it, and `merge dequeue` refuses the master on
+every route. `merge state` answers any caller.
+
+#### The master freeze route
+
+The master fulfils a coding request through sub agents working in worktrees. Code names each worktree and its branch
+from the session's agent name with the at sign replaced by a dash, so a sub agent of `master@a1b2c3-0002` works on
+`master-a1b2c3-0002`, then `master-a1b2c3-0002-2`, `master-a1b2c3-0002-3`. The master freezes the task first, so no
+lane engineer claims it while the sub agent builds it. The route admits the master's `queue` when all three hold:
+
+1. At least one task naming the pull request is not `done`.
+2. One of those tasks has a `freeze` record on its own address, `tasks/<task>`, written by a seat whose name starts
+   with `master@`. When several qualify, the first in ledger order is journaled. These do not count: a freeze on
+   the task's phase, plan, slice, lane or kind, a `focus` record, and a freeze the operator or the dispatcher wrote.
+3. The pull request's head branch starts with `master-`. GitHub is read for the branch only after the first two hold.
+
+The route reads the ledger's tasks naming the pull request and its `freezes` collection. Every route skips the checks
+a worker passes for its claimed task: the controller authority check, the check that the task names the pull request
+or the worker's own branch opened it, and the queue [intent check](#commands). Every other `queue` check still runs:
+the pull request must target `dev`, its required checks must have passed on the current head, a head whose last merge
+group run failed needs a new commit, and a staged pair needs its proof.
+
+A frozen task, a sub agent pull request, then the queue:
+
+```bash
+agentihooks swarm <id> freeze tasks/<task> --quote "<the operator's words asking for it>"
+agentihooks ledger --slug <id> --as master@<code>-<n> task set <task> pr_url=<url>
+agentihooks swarm <id> merge queue <url>
+```
+
+Below `full` autonomy the master writes a freeze only with `--quote` carrying the operator's recorded words (see
+[Freeze and focus](#freeze-and-focus)). The sub agent opens the pull request from its `master-` branch into `dev`
+between the first two commands. Once the required checks pass, `queue` prints the pull request state as JSON with
+`"queued": true` and appends a journal record carrying `"route": "master freeze"` and `"task": "<task>"`. List the
+master's routed queues on the machine that ran them:
+
+```bash
+jq -c 'select(.action == "queue" and .route != null) | {at, agent, pull, route, task}' \
+  ~/.agentihooks/merge-queue-events.jsonl
+```
+
+```text
+{"at":"<UTC time>","agent":"master@<code>-<n>","pull":"<url>","route":"master freeze","task":"<task>"}
+```
+
+#### Troubleshooting a master queue refusal
+
+| Answer | Cause and check |
+|---|---|
+| `swarm: master@<code>-<n> is the swarm master; the master works no task` | No route matched. `agentihooks swarm <id> status` lists each freeze record with its target and writer: the freeze must name `tasks/<task>` and be written by `master@<code>-<n>`. The task must name the pull request and not be `done`, and the head branch must start with `master-`. |
+| `swarm: pull request <url> is closed, not open` | The freeze matched and GitHub reports the pull request closed or merged. A merged pull request needs no queue. |
+| `swarm: GitHub does not confirm pull request <url>: <error>` | The branch read failed. Retry once the GitHub API answers. |
+| `swarm: required checks on the current pull request head must pass before queueing` | The route matched and a required check has not passed on the current head. Queue again once it passes; a `; failed: <check names>` suffix names the failed checks to fix first. |
+| `swarm: head <sha> failed its last merge group run (...); push a new commit before queueing again` | Push a fix from the sub agent's worktree, then queue the new head. |
 
 ### Master retire request
 
@@ -1249,7 +1328,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker, never the master, on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run for a swarm worker on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. The master seat may `queue` only through a route in [How the master queues a pull request](#how-the-master-queues-a-pull-request), and `dequeue` refuses it. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
