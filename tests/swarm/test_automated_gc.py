@@ -113,6 +113,26 @@ def test_third_distinct_idle_answer_retires_owned_pane_and_records_exit(world):
     release.assert_called_once_with(SLUG, agent.task, agent.name)
 
 
+@pytest.mark.feature("automated-activity-question-own-ref")
+def test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_agent(
+    world: tuple[RedisStore, InboxStore, AgentRecord, Mock, Mock],
+) -> None:
+    from scripts.inbox import seen
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, runtime, ledger = world
+    for attempt in range(1, 4):
+        at = START + attempt * LIMIT
+        sweep(world, at)
+        shown = seen.claim(inbox, agent.name)
+        assert [item.text for item in shown] == [automated_gc.TEXT]
+        inbox.reply(shown[0].id, agent.name, "nothing to do")
+        sweep(world, at + 1)
+    runtime.retire.assert_called_once_with(agent)
+    assert store.agents(SLUG) == []
+    ledger.notify.assert_called_once_with(SLUG, "An automated agent ended after three nothing to do answers.")
+
+
 @pytest.mark.parametrize("text", ["working: reviewing a pull request", "I have work", "NOTHING TO DO later"])
 def test_other_answers_reset_idle_passes(world, text):
     from scripts.swarm import automated_gc

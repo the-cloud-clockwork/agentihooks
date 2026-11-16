@@ -6030,6 +6030,16 @@
       ]
     },
     {
+      "id": "automated-activity-question-own-ref",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-activity-question-own-ref",
+      "behaviour": "Automated agent collection sends each activity question with its own inbox ref, automated-activity followed by the probe time, instead of one fixed ref for every question, so the recipient's seen marks never close a later question as already shown through the ledger on delivery: every question reaches the agent through the seen claim, its reply is recorded, and three nothing to do answers collect the agent.",
+      "seam": "scripts.swarm.automated_gc.run asking an automated agent, each question delivered by scripts.inbox.seen.claim and answered with InboxStore.reply",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_agent"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
