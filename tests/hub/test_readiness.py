@@ -1,7 +1,7 @@
 import json
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -39,7 +39,7 @@ def backend(kind, tmp_path):
                 bus.close()
 
 
-def source():
+def source() -> tuple[dict[str, Any], Mock, Mock]:
     row = task("task-a", claim_generation=3)
     document = doc([row])
     store, ledger = Mock(), Mock()
@@ -49,7 +49,14 @@ def source():
     store.claimant.return_value = None
     store.redis.get.return_value = None
     ledger.state.return_value = document
-    ledger.metadata.side_effect = lambda _: {"_meta": {"rev": id(ledger.state.return_value)}}
+    exports: list[object] = []
+
+    def metadata(slug: str) -> dict[str, Any]:
+        if not exports or exports[-1] is not ledger.state.return_value:
+            exports.append(ledger.state.return_value)
+        return {"_meta": {"rev": len(exports)}}
+
+    ledger.metadata.side_effect = metadata
     return row, store, ledger
 
 
