@@ -102,6 +102,57 @@ def test_the_hive_controller_command_issues_a_replica_credential_for_a_holder(hi
     assert auth.controller(hive, leader)
 
 
+DNS_REFUSAL = "Error -3 connecting to agentihooks-swarm-redis:6379. Temporary failure in name resolution."
+
+
+@pytest.mark.feature("controller-standby-rides-out-redis-outage")
+def test_the_hive_controller_command_rides_out_redis_refusing_at_controller_start(hive, capsys, tmp_path, monkeypatch):
+    import redis
+
+    from scripts.swarm import lease, redis_grace
+
+    asked: list[int] = []
+    slept: list[float] = []
+
+    def client() -> object:
+        asked.append(1)
+        assert len(asked) < 10, "the controller start kept asking Redis without waiting"
+        if len(asked) < 3:
+            raise redis.ConnectionError(DNS_REFUSAL)
+        return hive
+
+    monkeypatch.setattr(cli, "redis_client", client)
+    monkeypatch.setattr(cli.time, "sleep", slept.append)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv(redis_grace.GRACE_ENV, raising=False)
+    assert cli.main(["controller", "--holder", "pod-b"]) == 0
+    _, _, credential = (tmp_path / auth.CONTROLLER_ENV_FILE).read_text().strip().partition("=")
+    assert (len(asked), slept, credential.startswith("controller-pod-b.")) == (3, [lease.tick_ms() / 1000] * 2, True)
+    assert auth.controller(hive, credential)
+    captured = capsys.readouterr()
+    assert captured.err == (
+        f"hive controller: Redis refused, retrying after one tick inside the Redis grace window: {DNS_REFUSAL}\n" * 2
+    )
+
+
+@pytest.mark.feature("controller-standby-rides-out-redis-outage")
+def test_the_hive_controller_command_fails_once_redis_refuses_past_the_grace_window(hive, tmp_path, monkeypatch):
+    import redis
+
+    from scripts.swarm import redis_grace
+
+    def client() -> object:
+        raise redis.ConnectionError(DNS_REFUSAL)
+
+    monkeypatch.setattr(cli, "redis_client", client)
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: pytest.fail("waited past the Redis grace window"))
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv(redis_grace.GRACE_ENV, "0")
+    with pytest.raises(redis.ConnectionError, match="Temporary failure in name resolution"):
+        cli.main(["controller", "--holder", "pod-b"])
+    assert not (tmp_path / auth.CONTROLLER_ENV_FILE).exists()
+
+
 @pytest.mark.feature("controller-standby-replica")
 def test_the_hive_controller_command_names_no_holder_unless_given_one():
     import argparse
