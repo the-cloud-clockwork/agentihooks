@@ -1953,6 +1953,18 @@
       ]
     },
     {
+      "id": "swarm-tick-intent-failure-held",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-held-to-pass-end",
+      "behaviour": "An intent check that raises in a tick pass holds its exception for the pass end: the wrapper relay hook answers without raising and leaves the verdict view and checked actions it never got unset, so the tick view step builds the view itself as it does after an intent check that overran its budget, every step that never needed the verdict still runs in that pass, at the relay site and after it, and the pass still ends failed on the intent failure.",
+      "seam": "the wrapper relay hook scripts.swarm.cli._Wrapper._judged and the end of scripts.swarm.cli.run_tick, with the intent check step of scripts.tick.steps.host",
+      "rules": ["tick-site-hook-raises-held-step"],
+      "tests": [
+        "tests/tick/test_intent_failure.py::test_a_raising_intent_check_still_runs_the_steps_that_never_needed_it",
+        "tests/tick/test_intent_failure.py::test_the_relay_hook_leaves_a_raised_intent_check_to_the_pass_end"
+      ]
+    },
+    {
       "id": "swarm-tick-view-lane-fit",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-view-critical-lane-fit",

@@ -87,7 +87,7 @@ def test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode(monk
 def test_each_site_hook_declares_exactly_the_box_keys_it_reads() -> None:
     assert sites.TICK_HOOK_READS == {"agents": frozenset({"config", "doc", "rows"}), "tasks": frozenset({"config"})}
     assert cli.WRAPPER_HOOK_READS == {
-        "wrapper relay": frozenset({"raised", "judged"}),
+        "wrapper relay": frozenset({"judged"}),
         "wrapper view": frozenset({"agents"}),
     }
 
