@@ -130,6 +130,7 @@ from scripts.gates.base import Who
 from scripts.inbox import outbox
 from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage, workflow_task
 from scripts.swarm_ledger.adapters import hive_ledger
+from scripts.swarm_ledger.repository import postgres
 
 repository = storage.default()
 
@@ -137,6 +138,7 @@ BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
+WRITE_TIMEOUT = postgres.LOCK_TRIES * postgres.LOCK_WAIT + REQUEST_TIMEOUT
 EXPORT_TIMEOUT = 30
 TALK_OPS = ("answer", "add_item", "relay")
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}

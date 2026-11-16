@@ -14,6 +14,10 @@ class PayloadTooLarge(ValueError):
     """The bus refused a message larger than its server limit; sending it again can never succeed."""
 
 
+class NoStream(Exception):
+    """No stream takes the subject a message was published on; sending it again fails until a stream takes it."""
+
+
 @dataclass(frozen=True)
 class StateEntry:
     key: str
