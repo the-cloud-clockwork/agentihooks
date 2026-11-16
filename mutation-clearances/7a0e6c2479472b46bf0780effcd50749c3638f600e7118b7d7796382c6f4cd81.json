@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.xǁMemoryBusǁ__init__:fabc662b30eba2dd88c7a42db608a372730fcd0237d0db5d73e6377164782bb9": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: typing.cast returns val unchanged and never reads typ (its source is return val), so cast(None, raw_dead) passes the same dead log object to MemoryEventLog at runtime; the cast only informs basedpyright, so no runtime test can observe the mutant."
+  }
+}

@@ -371,8 +371,8 @@ NOTICE = {"repo": REPO, "head": "a1", "base": "b0", "actor": "agenticore-app[bot
 
 
 def lab_setup():
-    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.events, NOTICE_SECRET))
-    return ingress, swarm, bus.events.consumer("lab", "ci.lab.head.>")
+    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.lab_heads, NOTICE_SECRET))
+    return ingress, swarm, bus.lab_heads.consumer("lab", "ci.lab.head.>")
 
 
 def merge_group(action="checks_requested"):
@@ -508,6 +508,7 @@ def test_http_handler_routes_the_head_notice_to_the_ingress():
     assert len(ingress.notices) == 1
 
 
+@pytest.mark.feature("lab-head-own-stream")
 def test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", "s")
     monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
@@ -539,5 +540,6 @@ def test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set(monkeypatc
     with pytest.raises(KeyboardInterrupt):
         github_webhooks.main([])
     assert answers == [("status", 404), ("status", 200)]
-    assert [subject for subject, _ in buses[0].events.entries] == []
-    assert [subject for subject, _ in buses[1].events.entries] == ["ci.lab.head.notice"]
+    assert [subject for subject, _ in buses[0].lab_heads.entries] == []
+    assert [subject for subject, _ in buses[1].lab_heads.entries] == ["ci.lab.head.notice"]
+    assert [subject for subject, _ in buses[1].events.entries] == []
