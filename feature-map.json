@@ -4630,6 +4630,16 @@
       ]
     },
     {
+      "id": "protected-grader-pins-gate-names",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-pin-gate-names",
+      "behaviour": "The protected grader refuses a head that changes the reviewed name of the required gate pair, so an added need on the required gate is refused whether the head writes the gate names as expressions or plain text, and the canonical head still grades green.",
+      "seam": "gate_protected.grade",
+      "tests": [
+        "tests/test_ci_gate_queue.py::test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take"
+      ]
+    },
+    {
       "id": "lint-gates-grade-from-grader",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
