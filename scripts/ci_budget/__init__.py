@@ -18,6 +18,7 @@ BUDGETS = {
     "reuse": 30,
     "split": 90,
     "select": 120,
+    "lab-verdict": 60,
     "unit": 300,
     # Merge queue only, after a lost runner; stage budgets grade push and dispatch runs.
     "unit-lost": 0,
