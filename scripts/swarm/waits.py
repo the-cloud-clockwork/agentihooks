@@ -215,8 +215,8 @@ def resolution(
 def end_pass(
     store: Any, slug: str, rows: dict[str, Any], inbox: Any, github: Any, now_ms: int, reread: Any
 ) -> list[str]:
-    """End each checked wait whose target resolved, telling its holder, then record ``now_ms`` as the time the pass
-    completed, which the idle count trusts."""
+    """End each checked wait whose target resolved, telling its holder, then record ``now_ms``, the time the pass
+    ran, as the time of the last completed pass, which the idle count trusts."""
     from scripts.swarm import pr_wait
 
     ended, verdicts = pr_wait.enforce_pass(store, slug, rows, github, now_ms), Verdicts(slug, intent.NAME)
@@ -245,18 +245,19 @@ def end_pass(
 
 
 def mark_ended(store: Any, slug: str, now_ms: int) -> None:
-    """Record ``now_ms`` as the time the waits end pass of swarm ``slug`` last completed."""
+    """Record ``now_ms``, the time a completed waits end pass of swarm ``slug`` ran, as the last completed pass."""
     store.redis.set(_ended_key(slug), now_ms)
 
 
 def ended_at(store: Any, slug: str) -> int | None:
-    """Return when the waits end pass of swarm ``slug`` last completed, in epoch milliseconds, or None if it never did."""
+    """Return the time the last completed waits end pass of swarm ``slug`` ran, in epoch milliseconds, or None if no
+    pass completed."""
     found = store.redis.get(_ended_key(slug))
     return None if found is None else int(found)
 
 
 def _ended_key(slug: str) -> str:
-    """Return the key holding when the waits end pass of swarm ``slug`` last completed."""
+    """Return the key holding the time the last completed waits end pass of swarm ``slug`` ran."""
     return idle.key(slug, "waits", "ended")
 
 
