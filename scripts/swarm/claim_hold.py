@@ -133,7 +133,7 @@ def lab_minutes(reading: dict[str, Any] | None, now_ms: int) -> int:
     return wait_minutes(reading["capacity"]["classes"].get(LAB_CLASS, {}).get("predicted_wait_s"))
 
 
-def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limit: int, fix: str = "") -> str:
+def ci_behind(task: dict[str, Any], reading: dict[str, Any] | None, limit: int, fix: str) -> str:
     """Why the lab holds the task from a claim: its pull request grading runs more than ``limit`` minutes behind;
     empty when it does not or the task is outside the hold."""
     minutes = lab_minutes(reading, int(time() * 1000))

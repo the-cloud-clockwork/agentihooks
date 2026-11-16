@@ -177,6 +177,8 @@ def lab(wait_s, at=None, name="pull_request"):
 
 @pytest.mark.feature("swarm-lab-behind-hold")
 def test_the_lab_holds_eng_claims_outside_the_fix_phase_while_pull_request_grading_runs_behind():
+    import time
+
     from scripts.swarm import claim_hold
 
     eng = {"id": "t1", "lane": "eng", "phase": "p1"}
@@ -187,6 +189,7 @@ def test_the_lab_holds_eng_claims_outside_the_fix_phase_while_pull_request_gradi
     assert claim_hold.ci_behind({**eng, "phase": "fix"}, lab(35 * 60), 20, "fix") == ""
     assert claim_hold.ci_behind({"id": "t2", "phase": ""}, lab(35 * 60), 20, "") == BEHIND.format(35)
     assert claim_hold.ci_behind(eng, lab(35 * 60), 40, "fix") == ""
+    assert claim_hold.ci_behind(eng, lab(35 * 60, int(time.time() * 1000) - 600_001), 20, "fix") == ""
 
 
 @pytest.mark.feature("swarm-lab-behind-hold")
@@ -199,6 +202,8 @@ def test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds():
     assert claim_hold.lab_minutes({"url": "http://lab", "error": "refused", "error_at": LAB_NOW}, LAB_NOW) == 0
     assert claim_hold.lab_minutes(lab(None, LAB_NOW), LAB_NOW) == 0
     assert claim_hold.lab_minutes(lab(35 * 60, LAB_NOW, "queue"), LAB_NOW) == 0
+    unread = {"capacity": lab(35 * 60)["capacity"]}
+    assert claim_hold.lab_minutes(unread, claim_hold.LAB_FRESH_MS + 1) == 0
     assert [claim_hold.wait_minutes(wait) for wait in (None, -1.0, 0.0, 59.9, 1199.0)] == [0, 0, 0, 0, 19]
 
 
@@ -210,6 +215,7 @@ def test_the_lab_threshold_reads_its_environment_variable():
     assert ci_behind_minutes({}) == 20
     assert ci_behind_minutes({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "45"}) == 45
     assert ci_behind_minutes({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "0"}) == 20
+    assert ci_behind_minutes({"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "1"}) == 1
 
 
 @pytest.fixture
