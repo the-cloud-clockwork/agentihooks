@@ -1,7 +1,9 @@
 import json
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -603,6 +605,149 @@ def test_a_named_replica_stands_by_until_the_leader_releases(
     assert events == [("serve", environ, store), ("close", ["api"]), ("beat", controller._lost, stop)]
     assert capsys.readouterr().out == (
         "controller: replica pod-b stands by while pod-a leads\ncontroller: replica pod-b leads the passes\n"
+    )
+
+
+REFUSED = "Error 111 connecting to agentihooks-swarm-redis:6379. Connection refused."
+
+
+def _refused() -> Exception:
+    import redis
+
+    return redis.ConnectionError(REFUSED)
+
+
+class _Refusing:
+    """A Redis client that refuses every command while ``down`` is set, as Redis does through a restart, and fails the
+    test once the code under it keeps asking without ever leading."""
+
+    def __init__(self, redis: Any, down: bool) -> None:
+        self.redis, self.down, self.calls = redis, down, 0
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        command = getattr(self.redis, name)
+
+        def call(*args: Any) -> Any:
+            self.calls += 1
+            assert self.calls < 50, "the standby kept asking Redis without leading"
+            if self.down:
+                raise _refused()
+            return command(*args)
+
+        return call
+
+
+@pytest.mark.feature("controller-standby-rides-out-redis-outage")
+def test_a_standby_stands_by_through_a_redis_outage_and_takes_the_lead_after_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import controller
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import control_service
+
+    store = RedisStore(_redis())
+    leader = replica.ReplicaLock(store.redis, HIVE, "pod-a")
+    assert leader.take() is True
+    refusing = _Refusing(store.redis, down=False)
+    lock = replica.ReplicaLock(refusing, HIVE, "pod-b")
+    waits: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        if len(waits) > 1:
+            assert leader.release() is True
+        refusing.down = len(waits) == 1
+
+    monkeypatch.setattr(control_service, "stand_by", lambda given, at: [])
+    monkeypatch.setattr(control_service, "close", lambda servers: None)
+    monkeypatch.setattr(lock, "beat", lambda lost, stopping: None)
+    controller._lead(store, {}, lock, wait)
+    assert (lock.holder(), waits) == ("pod-b", [replica.POLL_S, replica.POLL_S])
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "controller: replica pod-b stands by while pod-a leads\ncontroller: replica pod-b leads the passes\n"
+    )
+    assert (
+        captured.err == f"controller: replica pod-b stands by through a Redis error, trying again after 5s: {REFUSED}\n"
+    )
+
+
+@pytest.mark.feature("controller-standby-rides-out-redis-outage")
+def test_a_standby_started_inside_a_redis_outage_waits_on_the_local_clock(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import controller
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import control_service
+
+    store = RedisStore(_redis())
+    leader = replica.ReplicaLock(store.redis, HIVE, "pod-a")
+    assert leader.take() is True
+    refusing = _Refusing(store.redis, down=True)
+    lock = replica.ReplicaLock(refusing, HIVE, "pod-b")
+    timed: list[float] = []
+    slept: list[float] = []
+
+    def timer(seconds: float) -> None:
+        timed.append(seconds)
+        raise _refused()
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        assert leader.release() is True
+        refusing.down = False
+
+    monkeypatch.setattr(controller, "scheduled_wait", timer)
+    monkeypatch.setattr(controller, "sleep", sleep)
+    monkeypatch.setattr(control_service, "stand_by", lambda given, at: [])
+    monkeypatch.setattr(control_service, "close", lambda servers: None)
+    monkeypatch.setattr(lock, "beat", lambda lost, stopping: None)
+    controller._lead(store, {}, lock)
+    assert (lock.holder(), timed, slept) == ("pod-b", [replica.POLL_S], [replica.POLL_S])
+    captured = capsys.readouterr()
+    assert captured.out == "controller: replica pod-b leads the passes\n"
+    assert captured.err == (
+        f"controller: replica pod-b stands by through a Redis error, trying again after 5s: {REFUSED}\n"
+        f"controller: the scheduled wait failed, waiting on the local clock: {REFUSED}\n"
+    )
+
+
+@pytest.mark.feature("controller-standby-rides-out-redis-outage")
+def test_controller_run_finishes_its_shutdown_when_redis_refuses_the_lock_release(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import signal
+
+    from scripts import operator_env
+    from scripts.swarm import commands, controller
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import control_service, proof_swarm
+
+    refusing = _Refusing(_redis(), down=False)
+    store, handlers, closed = RedisStore(refusing), [], []
+    monkeypatch.setattr(controller, "STOPPING", threading.Event())
+    monkeypatch.setattr(controller, "DRAINING", threading.Event())
+    monkeypatch.setenv(replica.REPLICA_ENV, "pod-a")
+    monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "open_controller_bus", lambda env: SimpleNamespace(close=lambda: closed.append(1)))
+    monkeypatch.setattr(commands, "hive_id", lambda: HIVE)
+    monkeypatch.setattr(signal, "signal", lambda number, handler: handlers.append(handler) or "previous")
+    monkeypatch.setattr(proof_swarm, "run", lambda env, at: None)
+    monkeypatch.setattr(control_service, "host", lambda env, at, hive: None)
+    monkeypatch.setattr(controller, "_keep_credential", lambda env, at: None)
+    monkeypatch.setattr(controller, "_lead", lambda at, env, lock: None)
+
+    def passes(*args: Any) -> int:
+        refusing.down = True
+        return 0
+
+    monkeypatch.setattr(controller, "_passes", passes)
+    assert controller.main(["run", "--once"]) == 0
+    assert (closed, handlers) == ([1], [controller._stopped, controller._stopped, "previous", "previous"])
+    assert (
+        capsys.readouterr().err == f"controller: releasing the replica lock failed, it lapses on its own: {REFUSED}\n"
     )
 
 
