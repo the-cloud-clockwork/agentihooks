@@ -43,6 +43,14 @@ def checked_by_harness_name_only(harness: str, lane: dict[str, str], fallback: s
     return default
 
 
+def unrelated_foreign_check(harness: str, lane: dict[str, str], other: str, fallback: str) -> ModelPick:
+    # ruleid: launch-model-skips-harness-choice
+    default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
+    if foreign(harness, other):
+        default = replace(default, model=fallback)
+    return default
+
+
 def suited_hive_order_assignment(agent: Any, config: Any, lane: str, harness: str) -> dict[str, Any]:
     fallback = getattr(config, f"{harness}_model")
     # ok: launch-model-skips-harness-choice
@@ -68,5 +76,13 @@ def resolved_pick(harness: str, lane: dict[str, str], fallback: str) -> ModelPic
     # ok: launch-model-skips-harness-choice
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
     if foreign(harness, default.model):
+        default = replace(default, model=fallback)
+    return default
+
+
+def qualified_resolved_pick(harness: str, lane: dict[str, str], fallback: str) -> ModelPick:
+    # ok: launch-model-skips-harness-choice
+    default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
+    if model_pick.foreign(harness, default.model):
         default = replace(default, model=fallback)
     return default

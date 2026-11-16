@@ -17,7 +17,7 @@ def lane_model(chosen: dict[str, Any]) -> str:
 
 
 def filled(saved: dict[str, Any], config: SwarmConfig, lane: str) -> dict[str, Any]:
-    """A saved launch whose empty model takes the lane model its harness runs and whose empty effort the range effort."""
+    """A saved launch whose empty model takes a lane model its harness runs and empty effort the range effort."""
     harness: Any = saved.get("harness")
     if harness not in effort_range.EFFORTS or (saved.get("model") and saved.get("effort")):
         return saved

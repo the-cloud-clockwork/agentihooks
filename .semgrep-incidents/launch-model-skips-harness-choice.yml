@@ -2,7 +2,7 @@ rules:
   - id: launch-model-skips-harness-choice
     languages: [python]
     severity: ERROR
-    message: A launch model read from lane config or a saved launch must pass through model_pick.suited, or a foreign check before use; otherwise a Codex launch asks for the lane's Claude model or a Claude launch for a Codex model and dies before its profile canary.
+    message: A launch model read with .get("model") or lane_model must pass through model_pick.suited, or a foreign check on that model before use; otherwise a Codex launch asks for the lane's Claude model or a Claude launch for a Codex model and dies before its profile canary.
     paths:
       include:
         - /scripts/hive/orders.py
@@ -43,5 +43,10 @@ rules:
       - pattern-not-inside: |
           $DEFAULT = ModelPick(...)
           ...
-          if <... foreign(...) ...>:
+          if <... foreign($HARNESS, $DEFAULT.model) ...>:
+              ...
+      - pattern-not-inside: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... $CHOICE.foreign($HARNESS, $DEFAULT.model) ...>:
               ...

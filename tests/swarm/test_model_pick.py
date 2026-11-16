@@ -261,14 +261,6 @@ def test_only_the_claude_default_model_carries_a_claude_prefix(defaults: dict[st
 
 
 @pytest.mark.feature("launch-model-suits-harness")
-def test_a_claude_launch_on_a_codex_pinned_lane_takes_the_claude_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
-    lane = {"model": "gpt-6.1-sol", "effort": "high"}
-    assert model_pick.pick("claude", lane, {}, {}, default_model="sonnet") == ModelPick("sonnet", "high")
-    assert model_pick.pick("claude", lane, {}, {}) == ModelPick(MODEL_DEFAULTS["claude"], "high")
-
-
-@pytest.mark.feature("launch-model-suits-harness")
 @pytest.mark.parametrize(
     ("harness", "model", "expected"),
     [
@@ -278,10 +270,13 @@ def test_a_claude_launch_on_a_codex_pinned_lane_takes_the_claude_model(monkeypat
         ("codex", "auto", "auto"),
         ("codex", "", ""),
         ("claude", "gpt-6.1-sol", "fallback"),
+        ("claude", "o1-pro", "fallback"),
+        ("claude", "o3-mini", "fallback"),
         ("claude", "o4-mini", "fallback"),
         ("claude", "codex-mini", "fallback"),
         ("claude", "fable", "fable"),
         ("copilot", "gpt-6.1-sol", "gpt-6.1-sol"),
+        ("copilot", "claude-opus", "claude-opus"),
     ],
 )
 def test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model(

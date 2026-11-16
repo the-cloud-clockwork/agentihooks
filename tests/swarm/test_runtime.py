@@ -894,6 +894,35 @@ def test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model
     assert _launched(tmp_path, monkeypatch, "plan", task, lanes=lanes, harness=harness) == launch
 
 
+@pytest.mark.feature("launch-model-suits-harness")
+def test_a_claude_first_life_on_a_codex_pinned_engineer_lane_launches_the_claude_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = {"id": "t1", "title": "Fix typo", "difficulty": "S", "rank": "normal"}
+    lanes = {"eng": {"model": "gpt-6.1-sol", "effort": "medium"}}
+    launched = _launched(tmp_path, monkeypatch, "eng", task, lanes=lanes, harness="claude")
+    assert launched == ["--model", "opus", "--effort", "medium"]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "saved_model", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "medium"]),
+        ("claude", "sonnet", ["--model", "sonnet", "--effort", "medium"]),
+    ],
+)
+def test_a_successor_never_launches_a_saved_model_of_the_other_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, saved_model: str, launch: list[str]
+) -> None:
+    from scripts.swarm.templates import DEFAULT_PROFILES
+
+    saved = {"profile": DEFAULT_PROFILES["eng"], "harness": harness, "model": saved_model, "effort": "medium"}
+    task = {"id": "t1", "title": "Fix typo", "handoff_envelope": {"launch": saved}}
+    assert _launched(tmp_path, monkeypatch, "eng", task, harness=harness) == launch
+
+
 def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", env=None):
     for key in ("MODEL", "EFFORT"):
         for agent in ("CLAUDE", "CODEX"):

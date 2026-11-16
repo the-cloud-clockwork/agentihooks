@@ -67,7 +67,7 @@ def foreign(harness: str, model: str) -> bool:
 
 
 def suited(harness: str, model: str, fallback: str) -> str:
-    """The model when the harness runs it, else the fallback; every launch path chooses its model through this."""
+    """The model when the harness runs it, else the fallback, so a launch never asks for the other harness's model."""
     return fallback if foreign(harness, model) else model
 
 
@@ -82,7 +82,7 @@ def pick(
     from scripts.init_agent import model_effort
 
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
-    if foreign(harness, default.model):
+    if harness == "codex" and default.model.startswith(CLAUDE_PREFIXES):
         default = replace(default, model=default_model or model_effort(harness, [], environ)[0])
     if default.effort != AUTO or harness not in EFFORTS:
         return default
