@@ -175,6 +175,7 @@ class TestCalculate:
             "gap": "",
             "frozen": 0,
             "frozen_work": 0,
+            "lab": None,
         }
 
     def test_the_chain_bound_wins_when_slots_are_many_and_rounds_up(self):
@@ -402,7 +403,7 @@ class TestTimeLeftOp:
         from scripts.swarm_ledger.api import schemas
 
         assert ledger_core.EXTENSION_OPS["time_left"].OPS == ("time_left",)
-        assert schemas.FIELDS["time_left"] == "by slots ci_minutes fix_phase watched"
+        assert schemas.FIELDS["time_left"] == "by slots ci_minutes fix_phase watched lab"
         assert schemas.TYPES["watched"] == {
             "type": "array",
             "maxItems": 100,
@@ -420,8 +421,14 @@ class TestTimeLeftOp:
     @pytest.mark.parametrize(
         ("change", "message"),
         [
-            ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
-            ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
+            (
+                {"by": "eng"},
+                "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase, watched and lab",
+            ),
+            (
+                {"extra": 1},
+                "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase, watched and lab",
+            ),
             ({"slots": -1}, "slots must be a nonnegative integer or null"),
             ({"slots": True}, "slots must be a nonnegative integer or null"),
             ({"slots": 1.0}, "slots must be a nonnegative integer or null"),
@@ -442,7 +449,7 @@ class TestTimeLeftOp:
             ledger_time_left.check(op)
         assert (
             str(refused.value)
-            == "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"
+            == "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase, watched and lab"
         )
 
     def test_check_takes_the_tick_focus_and_refuses_a_malformed_one(self):
@@ -527,6 +534,40 @@ class TestTimeLeftOp:
         assert d["time_left_minutes"] == 30
         assert ctx.meta["stats_refresh"]["calculation"]["slots"] == 2
         assert "computed 0h 30m" in text
+
+    @pytest.mark.feature("ledger-stats-lab")
+    def test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block(self) -> None:
+        from scripts.swarm_ledger.api import schemas
+
+        queue = {"pending": 1, "running": 0, "predicted_wait_s": 30.0}
+        lab = {
+            "url": "http://lab:8080",
+            "at": NOW,
+            "capacity": {"classes": {"queue": queue}},
+            "error": "",
+            "error_at": 0,
+        }
+        op = {**self.op(), "lab": lab}
+        assert ledger_time_left.check(op) is None
+        assert schemas.operation_schema("time_left")["properties"]["lab"] == {"type": "object"}
+        ctx = self.ctx()
+        ledger_time_left.apply(doc(task("a", "open", "S")), op, ctx)
+        assert ctx.meta["time_left"]["inputs"] == {"slots": 1, "ci_minutes": 5, "lab": lab}
+        assert ctx.meta["time_left"]["calculation"]["lab"]["classes"] == [
+            {"class": "queue", "pending": 1, "predicted_wait_s": 30.0}
+        ]
+
+    def test_the_op_refuses_a_lab_reading_that_is_not_an_object(self) -> None:
+        for bad in ("x", [1], None, 3):
+            with pytest.raises(ValueError) as refused:
+                ledger_time_left.check({**self.op(), "lab": bad})
+            assert str(refused.value) == "lab must be an object"
+
+    @pytest.mark.feature("ledger-stats-lab")
+    def test_check_accepts_every_optional_key_at_once(self) -> None:
+        op = {**self.op(), "fix_phase": "p1", "watched": ["the focus on x"], "lab": {"capacity": {}}}
+        assert set(op) == ledger_time_left.FIELDS | set(ledger_time_left.OPTIONAL)
+        assert ledger_time_left.check(op) is None
 
 
 class TestPageInputs:

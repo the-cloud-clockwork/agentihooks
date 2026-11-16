@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/expand_mutation.py:scripts.ci_lab.expand_mutation.x_stats_units:d15a9498ed6a690c912c78053e3991f83251403e3155a647c14da21f99c0e05a": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: stats_units always builds StoredStats with changes {}, so scope returns {} without evaluating its argument, and scope(None) also returns {}."
+  }
+}

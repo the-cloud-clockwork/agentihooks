@@ -4,7 +4,9 @@ import json
 import os
 import shlex
 import subprocess
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -590,6 +592,128 @@ def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path,
     assert marked == []
     assert "handoff=failed" in captured.out
     assert captured.err == "agentihooks init-agent: handoff failed; the new session was not routed to another account\n"
+
+
+def _quick_seat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, popen: Callable[..., None], extra: Sequence[str] = ()
+) -> int:
+    from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV
+
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        QUICK_ENV: "quick-abc",
+        SEAT_ENV: "eng-1",
+        DIR_ENV: str(tmp_path / "quick"),
+    }
+    argv = ["--dir", str(tmp_path), "--name", "quick-abc-eng-1", "--prompt", "seed"]
+    return init_agent.main([*argv, "--start-timeout", "0.5", "--route-timeout", "0.5", *extra], env)
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_quick_seat_never_falls_back_to_bare_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    routed = ["--routed-only", "--dry-run"]
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=routed) == 0
+    [launcher] = (tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")
+    assert "--agentihooks-fallback-bare" not in launcher.read_text()
+    launcher.unlink()
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--dry-run"]) == 0
+    [inherited] = (tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")
+    assert "--agentihooks-fallback-bare" in inherited.read_text()
+    option = next(a for a in init_agent._parser()._actions if "--routed-only" in a.option_strings)
+    assert (option.default, option.help) == (False, init_agent.ROUTED_ONLY_HELP)
+
+
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("status", ["bare", "failed", ""])
+def test_a_quick_seat_whose_agent_was_not_routed_fails_its_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], status: str
+) -> None:
+    rc = _quick_seat(monkeypatch, tmp_path, _routed(status), extra=["--routed-only"])
+    captured = capsys.readouterr()
+    assert rc == 3
+    assert captured.out.splitlines()[-1] == "routed_only=failed" and "\nroute_status=" in captured.out
+    assert captured.err.endswith(
+        "agentihooks init-agent: the agent was not routed to an account, so the launch failed\n"
+    )
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_routed_quick_seat_starts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _quick_seat(monkeypatch, tmp_path, _routed("routed", "beta"), extra=["--routed-only"]) == 0
+    out = capsys.readouterr().out
+    assert "route_status=routed" in out and "routed_only=failed" not in out
+
+
+def test_only_a_launch_that_had_to_be_routed_and_was_not_is_refused_with_its_own_line() -> None:
+    handoff = argparse.Namespace(handoff=True, routed_only=False)
+    routed_only = argparse.Namespace(handoff=False, routed_only=True)
+    plain = argparse.Namespace(handoff=False, routed_only=False)
+    assert init_agent._unrouted(handoff, {"status": "bare"}) == (
+        "handoff=failed",
+        "handoff failed; the new session was not routed to another account",
+    )
+    assert init_agent._unrouted(routed_only, {"status": "failed"}) == (
+        "routed_only=failed",
+        "the agent was not routed to an account, so the launch failed",
+    )
+    assert init_agent._unrouted(routed_only, {"status": "routed"}) is None
+    assert init_agent._unrouted(plain, {"status": "bare"}) is None
+    assert (init_agent._routed_only(handoff), init_agent._routed_only(routed_only)) == (True, True)
+    assert init_agent._routed_only(plain) is False
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.quick import launch, paths, registry
+
+    folder = tmp_path / "quick"
+    seats = (
+        registry.Seat(1, "master", "w1:p1", "claude", "quick-abc-master"),
+        registry.Seat(2, "eng-1", "w1:p2", "claude", "quick-abc-eng-1", state=registry.PENDING),
+    )
+    registry.save(folder, registry.Swarm("quick-abc", str(tmp_path), seats))
+    paths.create(folder, ["master", "eng-1"])
+    launched: list[str] = []
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
+    placed = SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id="w1:p2")
+    monkeypatch.setattr(init_agent.herdr_host, "existing_pane", lambda pane, environ: placed)
+
+    def run(pane: str, launcher: Path, environ: dict[str, str], env: dict[str, str] | None = None) -> None:
+        assert not [name for name in environ if name.startswith("AH_CC_TOKEN_")]
+        launched.append(launcher.read_text())
+        launcher.with_suffix(".started").touch()
+        launcher.with_suffix(".route").write_text("status=failed\nerror=no non-empty AH_CC_TOKEN_* variables found\n")
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        return init_agent.main([*argv, "--start-timeout", "0.5", "--route-timeout", "0.5"], environ)
+
+    monkeypatch.setattr(init_agent.herdr_host, "run", run)
+    env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime")}
+    outcome = launch.relaunch(folder, "eng-1", env, bare=lambda pane: True, start=start, sleep=lambda s: None)
+    loaded = registry.load(folder)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert outcome == "failed-3" and seat is not None and seat.state == registry.PENDING
+    assert len(launched) == 1 and "--agentihooks-fallback-bare" not in launched[0]
 
 
 def test_agenti_writes_the_route_report_and_honours_exclusions(monkeypatch, tmp_path):
