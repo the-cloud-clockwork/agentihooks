@@ -161,6 +161,21 @@ def test_the_refusal_dates_only_failures_within_the_counted_claims(
     assert all(row in store.launches(SLUG) for row in original)
 
 
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_the_claim_cap_reads_only_the_launch_rows_of_its_task(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    lives(rig, 3)
+    asked: list[str | None] = []
+    read = rig.store.launches
+
+    def launches(slug: str, task: str | None = None) -> list[dict[str, Any]]:
+        asked.append(task)
+        return read(slug, task)
+
+    monkeypatch.setattr(rig.store, "launches", launches)
+    assert rig.admitter.admit(SLUG, ask()) is None
+    assert asked == ["t1"]
+
+
 @pytest.mark.feature("hub-admission-earlier-lives-launched-only")
 def test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap(rig: Any) -> None:
     for generation in (0, 2, 4):
