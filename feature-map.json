@@ -245,6 +245,21 @@
       ]
     },
     {
+      "id": "controller-standby-rides-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-critic-standby-redis-outage",
+      "behaviour": "A standby controller replica stands by through a Redis outage: a Redis error while it takes the replica lock, names the leader or waits behind the held lock is logged and tried again after one stand by poll, waiting on the local clock when Redis refuses the scheduler timer, so the standby never exits into restart back off and takes the lead once Redis answers and the leader's lock is gone. A controller whose replica lock release Redis refuses at shutdown logs it, leaves the lock to lapse, and still closes its bus and restores its signal handlers.",
+      "seam": "controller._lead and the stand by attempt it repeats, waiting through controller._tick_wait, and the replica lock release in controller.main",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_a_standby_stands_by_through_a_redis_outage_and_takes_the_lead_after_it",
+        "tests/swarm/test_controller_replica.py::test_a_standby_started_inside_a_redis_outage_waits_on_the_local_clock",
+        "tests/swarm/test_controller_replica.py::test_controller_run_finishes_its_shutdown_when_redis_refuses_the_lock_release"
+      ],
+      "rules": [
+        "controller-standby-unguarded-redis-call"
+      ]
+    },
+    {
       "id": "controller-standby-replica",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
