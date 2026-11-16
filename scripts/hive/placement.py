@@ -288,7 +288,7 @@ def place_master(
                 candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue
         native = hive["interactive"].get(harness)
-        if native and login in ("", native) and account_key(native) not in closed:
+        if front and native and login in ("", native) and account_key(native) not in closed:
             candidates.append(
                 (
                     headless,

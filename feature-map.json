@@ -4874,7 +4874,7 @@
       "behaviour": "A hive master launch refused by a full account reservation retries on another account, never on the refused native interactive login, so the launch ends after one retry instead of looping until the tick lock goes stale.",
       "seam": "HiveLaunch spawn account retry through master selection",
       "tests": [
-        "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
+        "tests/hive/test_master_fallback_launch.py::test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
       ]
     },
     {
@@ -7200,6 +7200,17 @@
         "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
         "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
+    },
+    {
+      "id": "master-interactive-login-without-front-gate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-backend-master-unrouted-account",
+      "behaviour": "place_master offers a hive's native/interactive Claude login as a placement candidate only to the front-door master seat; a secondary master seat (master-2, master-3, ...) never selects it and falls through to a subscription or api slot instead, so it never races the front door for the single cap-1 unrouted account and fails hive admission with \"account reservation is full\".",
+      "seam": "scripts.hive.placement.place_master, the native-login candidate branch gated by front; semgrep incident rule master-interactive-login-without-front-gate",
+      "tests": [
+        "tests/hive/test_master_placement.py::test_a_secondary_master_ignores_a_hive_interactive_login",
+        "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot"
       ]
     }
   ],
