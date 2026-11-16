@@ -199,6 +199,7 @@ def test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds():
     assert claim_hold.lab_minutes({"url": "http://lab", "error": "refused", "error_at": LAB_NOW}, LAB_NOW) == 0
     assert claim_hold.lab_minutes(lab(None, LAB_NOW), LAB_NOW) == 0
     assert claim_hold.lab_minutes(lab(35 * 60, LAB_NOW, "queue"), LAB_NOW) == 0
+    assert [claim_hold.wait_minutes(wait) for wait in (None, -1.0, 0.0, 59.9, 1199.0)] == [0, 0, 0, 0, 19]
 
 
 @pytest.mark.feature("swarm-lab-behind-hold")

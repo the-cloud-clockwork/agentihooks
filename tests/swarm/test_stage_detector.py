@@ -116,6 +116,8 @@ def test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below(st
     stage_detector.lab_finding(store, "scratch", lab(40 * 60, NOW + 60_000), 20, NOW + 60_000)
     row = standing.read(store.redis, "scratch")["lab_wait"]
     assert (row["value"], row["threshold"], row["fired"]) == (40, 20, 1)
+    stage_detector.lab_finding(store, "scratch", lab(20 * 60, NOW + 90_000), 20, NOW + 90_000)
+    assert standing.read(store.redis, "scratch") == {}
     stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 120_000), 20, NOW + 120_000)
     assert standing.read(store.redis, "scratch") == {}
     measured = {

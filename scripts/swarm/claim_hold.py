@@ -122,7 +122,7 @@ def lab_held(task: dict[str, Any], fix: str) -> bool:
 
 def wait_minutes(wait_s: float | None) -> int:
     """Whole minutes of a predicted wait, zero when the lab predicts none."""
-    return int(wait_s // 60) if wait_s and wait_s > 0 else 0
+    return 0 if wait_s is None else max(int(wait_s) // 60, 0)
 
 
 def lab_minutes(reading: dict[str, Any] | None, now_ms: int) -> int:

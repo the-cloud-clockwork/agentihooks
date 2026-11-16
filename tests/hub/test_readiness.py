@@ -158,6 +158,9 @@ def test_the_events_snapshot_holds_eng_offers_while_the_lab_is_behind(monkeypatc
     store.redis.get.return_value = json.dumps(lab(35 * 60))
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
     assert readiness.claimable({**row, "lane": "ci"}, "ci", provider.snapshot("rig"))
+    with monkeypatch.context() as fixing:
+        fixing.setattr("scripts.swarm.freeze.fix_phase", lambda _: row["phase"])
+        assert readiness.claimable(row, "eng", provider.snapshot("rig"))
     store.redis.get.return_value = json.dumps(lab(5 * 60))
     assert readiness.claimable(row, "eng", provider.snapshot("rig"))
 

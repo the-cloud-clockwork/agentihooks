@@ -233,6 +233,14 @@ def test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples
     assert seconds_of(stages.report(bare, waiting, NOW)) == {("seat_wait", ""): 7200.0}
 
 
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_a_lab_stretch_that_ends_as_the_claim_wait_opens_adds_no_lab_wait():
+    tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
+    samples = [lab(at(7, 50), 1800.0), lab(at(8), 60.0)]
+    source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], lab_capacity=samples)
+    assert [timeline.overlays for timeline in stages.timelines(source, tasks, NOW)] == [()]
+
+
 def test_an_open_ready_task_waits_for_its_claim_until_now():
     tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
     found = stages.report(rows(ledger_events=[ledger("task done", at(8), "tasks/t0")]), tasks, NOW)
