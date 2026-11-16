@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import shutil
@@ -8,7 +9,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import nats as nats_py
 import pytest
+from nats.errors import Error as NatsError
 from nats.js.errors import APIError
 
 from scripts.events import nats
@@ -16,6 +19,8 @@ from scripts.events import nats
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
 UNMATCHED_MSG_ID = "never-a-last-msg-id"
 WRONG_LAST_MSG_ID = 10070
+CLUSTER = "replicas"
+READY_STREAM = "CLUSTER_READY"
 
 
 def binary() -> str:
@@ -59,16 +64,20 @@ def wait_logged(log: Path, text: str, deadline_s: float = 10) -> None:
     raise AssertionError(f"nats-server did not log {text!r} in {log}")
 
 
-def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> str:
+def _wait_ports(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> dict[str, list[str]]:
     stop = time.monotonic() + deadline_s
     while time.monotonic() < stop:
         if process.poll() is not None:
             raise RuntimeError(f"nats-server exited with {process.returncode}")
         try:
-            return json.loads(ports.read_text())["nats"][0]
+            return json.loads(ports.read_text())
         except (FileNotFoundError, json.JSONDecodeError):
             time.sleep(0.02)
     raise RuntimeError("nats-server did not publish its listener")
+
+
+def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> str:
+    return _wait_ports(ports, process, deadline_s)["nats"][0]
 
 
 def durables(bus) -> list[str]:
@@ -109,3 +118,71 @@ def running(store: Path) -> Iterator[str]:
     finally:
         process.terminate()
         process.wait(10)
+
+
+def _replicated(url: str, size: int, deadline_s: float = 30) -> None:
+    async def probe() -> None:
+        client = await nats_py.connect(url)
+        try:
+            js = client.jetstream()
+            stop = time.monotonic() + deadline_s
+            while True:
+                try:
+                    await js.add_stream(name=READY_STREAM, subjects=[READY_STREAM.lower()], num_replicas=size)
+                    await js.delete_stream(READY_STREAM)
+                    return
+                except NatsError:
+                    if time.monotonic() >= stop:
+                        raise
+                    await asyncio.sleep(0.2)
+        finally:
+            await client.close()
+
+    asyncio.run(probe())
+
+
+@contextmanager
+def cluster(root: Path, size: int = 3) -> Iterator[list[str]]:
+    """Run `size` routed JetStream servers and yield their client urls once a stream can hold a replica on each."""
+    executable = binary()
+    ports = root / "ports"
+    ports.mkdir(parents=True, exist_ok=True)
+    processes: list[subprocess.Popen] = []
+    urls: list[str] = []
+    routes: list[str] = []
+    try:
+        for index in range(size):
+            process = subprocess.Popen(
+                [
+                    executable,
+                    "-js",
+                    "-a",
+                    "127.0.0.1",
+                    "-p",
+                    "-1",
+                    "-n",
+                    f"{CLUSTER}-{index}",
+                    "-sd",
+                    str(root / f"store-{index}"),
+                    "--cluster_name",
+                    CLUSTER,
+                    "--cluster",
+                    "nats://127.0.0.1:-1",
+                    "--ports_file_dir",
+                    str(ports),
+                    *routes,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            processes.append(process)
+            listed = _wait_ports(ports / f"{Path(executable).name}_{process.pid}.ports", process)
+            urls.append(listed["nats"][0])
+            routes = routes or ["--routes", listed["cluster"][0]]
+        _replicated(urls[0], size)
+        yield urls
+    finally:
+        for process in processes:
+            process.terminate()
+        for process in processes:
+            process.wait(10)
