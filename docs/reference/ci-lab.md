@@ -210,6 +210,236 @@ ci-lab-worker 150
 | A running worker pod was evicted | A higher class that preempts took its node | `kubectl get events -n <namespace> --field-selector reason=Preempted` |
 | `cluster-rbac` sync fails after the value was edited | `value` is immutable | Re-rank by name as above |
 
+## Lab head intake
+
+The lab learns which heads to grade from `agentihooks github-webhook`, the GitHub webhook receiver
+in `scripts.hub.github_webhooks`. `scripts.ci_lab.webhooks` turns each head it hears of into an
+envelope typed `ci.lab.head.<event>`, and the receiver publishes it on the bus stream
+`AGENTIHOOKS-CI-LAB-HEADS`, which holds `ci.lab.head.>`. The receiver records lab heads only when
+both of these hold:
+
+1. **The stream exists.** A bus opened with provisioning on creates it after the events stream; the
+   hub's root bus does so when it starts. The receiver opens its bus with provisioning off whatever
+   `AGENTIHOOKS_BUS_BIND` says, so it never creates the stream and publishes to it by name.
+   [Subjects and streams per swarm](swarm-bus-scope.md#subjects-and-streams-per-swarm) describes
+   the stream itself.
+2. **The receiver holds `AGENTIHOOKS_CI_LAB_NOTICE_SECRET`.** Without it the receiver still
+   verifies GitHub deliveries and records their pull request observations, but records no lab head
+   from any route and answers `404` on `/lab/head`.
+
+### Heads it records
+
+| Source | Recorded when | Subject | `head` and `base` | `actor` |
+|---|---|---|---|---|
+| `push` delivery on `/github` | A branch under `refs/heads/` moved; a deleted branch or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `pull_request` delivery on `/github` | The action is `opened`, `synchronize` or `reopened` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
+| `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |
+| `check_run` delivery on `/github` | The action is `rerequested` and the check's name starts with `lab` | `ci.lab.head.check_run` | The run's `head_sha`, and the base of its first pull request, empty when it has none | The delivery's sender |
+| Signed notice on `/lab/head` | Every valid notice | `ci.lab.head.notice` | As the notice names them | As the notice names it |
+
+A pull request head's actor is its author rather than the sender, so a trusted user reopening an
+untrusted author's pull request admits nothing. Every other GitHub event records no head.
+
+Each head is one envelope:
+
+| Field | Value |
+|---|---|
+| `id` | SHA-256 of the head's fields, so one head event always has one id |
+| `type` | Its subject, `ci.lab.head.<event>` |
+| `swarm` | `ci-lab` |
+| `entity` | `head` |
+| `key` | `<repo>@<head>`; GitHub deliveries give `repo` as the repository's `html_url` |
+| `version` | `0` |
+| `time` | Milliseconds since the epoch when the receiver built it |
+| `author` | The actor |
+| `data` | `event`, `repo`, `head`, `base`, `actor` and `action` (`pushed` for a push or a notice, else the delivery's action) |
+
+The bus sends each envelope with its id as `Nats-Msg-Id`, and the stream drops a repeated id inside
+its duplicate window, the bus dedupe window of two minutes. A GitHub redelivery of the same push,
+or a notice sent twice, inside that window is stored once.
+
+### Receiver environment
+
+`agentihooks github-webhook [--host 127.0.0.1] [--port 8790]` reads:
+
+| Name | Required | Meaning |
+|---|---|---|
+| `AGENTIHOOKS_GITHUB_WEBHOOK_SECRET` | yes | Verifies `X-Hub-Signature-256` on `/github`. Unset, the receiver prints `agentihooks github-webhook: AGENTIHOOKS_GITHUB_WEBHOOK_SECRET must be set to verify GitHub webhooks` and exits 2 |
+| `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | no | Turns lab intake on and verifies `X-Hub-Signature-256` on `/lab/head`. Unset or empty, lab intake is off as above |
+| `AGENTIHOOKS_BUS`, `AGENTIHOOKS_BUS_URL`, `AGENTIHOOKS_BUS_CREDENTIALS` | in a cluster | The bus backend, its address and the receiver's NATS credential |
+
+The receiver reads both secrets once at start, so a changed value reaches it only through a pod
+restart.
+
+### Send a head notice
+
+A head notice tells the lab about a head without waiting for GitHub. It is `POST /lab/head` with a
+JSON body, signed the way GitHub signs a delivery but with the lab notice secret: the
+`X-Hub-Signature-256` header carries `sha256=` and the hex HMAC-SHA256 of the raw body.
+
+| Body field | Meaning |
+|---|---|
+| `repo` | The repository URL. Use its `https://github.com/<owner>/<repo>` form so the key matches the one GitHub deliveries give the same head |
+| `head` | The head commit SHA |
+| `base` | The base commit SHA |
+| `actor` | The GitHub login that pushed |
+
+All four must be non empty strings; other fields are ignored. From a pod inside the cluster:
+
+```bash
+body='{"repo":"https://github.com/<owner>/<repo>","head":"<head sha>","base":"<base sha>","actor":"<login>"}'
+digest="$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$AGENTIHOOKS_CI_LAB_NOTICE_SECRET" | sed 's/^.* //')"
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "X-Hub-Signature-256: sha256=$digest" -H 'Content-Type: application/json' \
+  --data-binary "$body" \
+  http://agentihooks-swarm-github-webhook.agentihooks-swarm.svc:8790/lab/head
+```
+
+Sign the exact bytes you send; JSON serialized again after signing no longer matches.
+
+| Answer | Meaning |
+|---|---|
+| `200` | The head was published |
+| `400` | The body is not JSON, or one of the four fields is missing, empty or not a string |
+| `401` | The signature header is missing or does not match the lab notice secret |
+| `404` | Lab intake is off, or the path is neither `/github` nor `/lab/head` |
+| `411` | `Content-Length` is missing or not a number |
+| `413` | The body is over 25 MiB |
+| `503` | The publish failed; the receiver logs `hub: GitHub webhook could not record the event` with the traceback |
+
+Each request also logs `github-webhook: delivery <X-GitHub-Delivery> event <X-GitHub-Event> answered <code>`
+on standard error; a notice carries neither header, so both print `None`.
+
+The deployment's public ingress routes only `/github`. A notice reaches the receiver's Service on
+port 8790 from inside the cluster, where the receiver's network policy admits the pod network. No
+agentihooks command sends notices yet; `scripts.ci_lab.webhooks` names the agents' push path as
+their sender.
+
+### Provisioning in the deployment
+
+The deployment repository wires the secret in `k8s/manifests/agentihooks-swarm/github-webhook.yaml`,
+added by its pull request 1775, merged on 16 November 2026. The stream needs no manifest: it came
+with agentihooks pull request #11427 and the hub creates it as above.
+
+1. A `Password` generator, `agentihooks-ci-lab-notice`, makes a 48 character value with 8 digits
+   and no symbols.
+2. A `PushSecret`, `agentihooks-ci-lab-notice`, writes that value to the OpenBao key
+   `k8s/agentihooks-ci-lab-notice`, property `secret`, through the `openbao` ClusterSecretStore.
+   `updatePolicy: IfNotExists` writes only while the key is absent, so the value is generated once
+   and its hourly resync leaves it alone. `deletionPolicy: None` keeps the key when the PushSecret
+   is deleted.
+3. The receiver's `ExternalSecret`, `agentihooks-swarm-github-webhook`, reads the key every five
+   minutes into the Secret of the same name as `AGENTIHOOKS_CI_LAB_NOTICE_SECRET`, beside the
+   webhook secret, the bus address and the bus credential.
+
+```yaml
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: agentihooks-ci-lab-notice
+spec:
+  refreshInterval: 1h
+  updatePolicy: IfNotExists
+  deletionPolicy: None
+  secretStoreRefs:
+  - name: openbao
+    kind: ClusterSecretStore
+  selector:
+    generatorRef:
+      apiVersion: generators.external-secrets.io/v1alpha1
+      kind: Password
+      name: agentihooks-ci-lab-notice
+  data:
+  - match:
+      secretKey: password
+      remoteRef:
+        remoteKey: k8s/agentihooks-ci-lab-notice
+        property: secret
+```
+
+The receiver's ExternalSecret carries the value under its template data and reads it from the same
+key; only the lab notice lines are shown:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: agentihooks-swarm-github-webhook
+spec:
+  target:
+    template:
+      data:
+        AGENTIHOOKS_CI_LAB_NOTICE_SECRET: "{{ .lab_notice_secret }}"
+  data:
+  - secretKey: lab_notice_secret
+    remoteRef:
+      key: k8s/agentihooks-ci-lab-notice
+      property: secret
+```
+
+The swarm chart's `githubWebhook.secretName` names that Secret. The receiver Deployment loads the
+whole Secret with `envFrom` and carries a `secret.reloader.stakater.com/reload` annotation naming
+it, so a change to the Secret restarts the receiver with the new value:
+
+```yaml
+githubWebhook:
+  enabled: true
+  secretName: agentihooks-swarm-github-webhook
+```
+
+The receiver's NATS user, `swarm-github-webhook` in the deployment repository's
+`k8s/values-overlays/agentihooks-swarm-nats/users.yaml`, may publish `ci.lab.head.*`. That
+wildcard matches one token after `ci.lab.head`, which covers every subject in
+[Heads it records](#heads-it-records).
+
+The deployment repository's `tests/unit/swarm_nats/test_lab_notice.py` holds the ExternalSecret key
+and its OpenBao reference, the PushSecret's `IfNotExists` and `None` policies, its store and
+generator, and a generated length of at least 48.
+
+To replace the value, write the new one to the same OpenBao key and property. The PushSecret leaves
+an existing key alone, the ExternalSecret copies the new value within five minutes, and the reload
+annotation restarts the receiver. Every notice sender needs the same value.
+
+### Verify
+
+```bash
+kubectl -n agentihooks-swarm get pushsecret agentihooks-ci-lab-notice
+kubectl -n agentihooks-swarm get externalsecret agentihooks-swarm-github-webhook
+kubectl -n agentihooks-swarm describe secret agentihooks-swarm-github-webhook
+```
+
+The PushSecret reports `Synced`, the ExternalSecret reports ready, and `describe` lists
+`AGENTIHOOKS_CI_LAB_NOTICE_SECRET` at 48 bytes. `describe` prints key names and sizes, never values.
+
+```bash
+kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook --since=1h | grep answered
+```
+
+A push to a repository whose webhook reaches the receiver logs `event push answered 200`. With a
+NATS credential that may read the stream, such as the hub's, list the stream and read its latest
+pushed head:
+
+```bash
+nats --server "$AGENTIHOOKS_BUS_URL" --creds <credential file> stream info AGENTIHOOKS-CI-LAB-HEADS
+nats --server "$AGENTIHOOKS_BUS_URL" --creds <credential file> stream get AGENTIHOOKS-CI-LAB-HEADS --last-for ci.lab.head.push
+```
+
+The receiver's own credential publishes only and cannot run these. The acceptance recorded on the
+deployment pull request after promotion run 43811275374 is this check: the PushSecret `Synced`, a
+48 byte key in the receiver Secret, two push deliveries answered `200`, and `ci.lab.head.push` at
+stream sequence 9 for an agentihooks head pushed by `github-merge-queue[bot]`.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `/lab/head` answers `404` | The receiver started without `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | `describe secret` as above. A key in the Secret that the pod lacks means the pod predates it: `kubectl -n agentihooks-swarm rollout restart deploy/agentihooks-swarm-github-webhook` |
+| Pushes answer `200` but the stream gains no head | Lab intake is off for the same reason, or the delivery names no head: a tag, a deleted branch, a closed pull request or a check whose name does not start with `lab` | [Heads it records](#heads-it-records) |
+| The receiver Secret lacks the key | The PushSecret is not `Synced`, or the ExternalSecret has not refreshed | `kubectl -n agentihooks-swarm describe pushsecret agentihooks-ci-lab-notice` and the ExternalSecret's events |
+| A notice answers `401` | It was signed with another value, sent without the header, or its body changed after signing | Sign the bytes sent, with the value the Secret holds |
+| A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
+| A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+
 ## Digest specification
 
 A verdict is stored under the key of the inputs it judged. `scripts.ci_lab.digests` builds every
