@@ -15,6 +15,7 @@ from nats.errors import Error as NatsError
 from nats.js.errors import APIError
 
 from scripts.events import nats
+from tests.ledger_guard import reserve_port
 
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
 UNMATCHED_MSG_ID = "never-a-last-msg-id"
@@ -64,20 +65,16 @@ def wait_logged(log: Path, text: str, deadline_s: float = 10) -> None:
     raise AssertionError(f"nats-server did not log {text!r} in {log}")
 
 
-def _wait_ports(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> dict[str, list[str]]:
+def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> str:
     stop = time.monotonic() + deadline_s
     while time.monotonic() < stop:
         if process.poll() is not None:
             raise RuntimeError(f"nats-server exited with {process.returncode}")
         try:
-            return json.loads(ports.read_text())
+            return json.loads(ports.read_text())["nats"][0]
         except (FileNotFoundError, json.JSONDecodeError):
             time.sleep(0.02)
     raise RuntimeError("nats-server did not publish its listener")
-
-
-def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> str:
-    return _wait_ports(ports, process, deadline_s)["nats"][0]
 
 
 def durables(bus) -> list[str]:
@@ -143,45 +140,41 @@ def _replicated(url: str, size: int, deadline_s: float = 30) -> None:
 
 @contextmanager
 def cluster(root: Path, size: int = 3) -> Iterator[list[str]]:
-    """Run `size` routed JetStream servers and yield their client urls once a stream can hold a replica on each."""
+    """Run `size` routed JetStream servers and yield their client urls once a stream can hold a replica on each.
+
+    A clustered JetStream server refuses to start without configured routes, so each server listens for routes on a
+    held port and every server is given the route to all of them.
+    """
     executable = binary()
     ports = root / "ports"
     ports.mkdir(parents=True, exist_ok=True)
+    holds = [reserve_port() for _ in range(size)]
+    listens = [f"127.0.0.1:{hold.getsockname()[1]}" for hold in holds]
+    routes = [f"nats://{listen}" for listen in listens]
     processes: list[subprocess.Popen] = []
-    urls: list[str] = []
-    routes: list[str] = []
     try:
-        for index in range(size):
-            process = subprocess.Popen(
-                [
-                    executable,
-                    "-js",
-                    "-a",
-                    "127.0.0.1",
-                    "-p",
-                    "-1",
-                    "-n",
-                    f"{CLUSTER}-{index}",
-                    "-sd",
-                    str(root / f"store-{index}"),
-                    "--cluster_name",
-                    CLUSTER,
-                    "--cluster",
-                    "nats://127.0.0.1:-1",
-                    "--ports_file_dir",
-                    str(ports),
-                    *routes,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+        for index, listen in enumerate(listens):
+            config = root / f"server-{index}.conf"
+            config.write_text(
+                json.dumps(
+                    {
+                        "server_name": f"{CLUSTER}-{index}",
+                        "listen": "127.0.0.1:-1",
+                        "ports_file_dir": str(ports),
+                        "jetstream": {"store_dir": str(root / f"store-{index}")},
+                        "cluster": {"name": CLUSTER, "listen": listen, "routes": routes},
+                    }
+                )
             )
-            processes.append(process)
-            listed = _wait_ports(ports / f"{Path(executable).name}_{process.pid}.ports", process)
-            urls.append(listed["nats"][0])
-            routes = routes or ["--routes", listed["cluster"][0]]
+            processes.append(
+                subprocess.Popen([executable, "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            )
+        urls = [_wait_url(ports / f"{Path(executable).name}_{process.pid}.ports", process) for process in processes]
         _replicated(urls[0], size)
         yield urls
     finally:
+        for hold in holds:
+            hold.close()
         for process in processes:
             process.terminate()
         for process in processes:
