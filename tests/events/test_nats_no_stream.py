@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -46,7 +47,7 @@ def test_a_publish_no_stream_answers_is_refused_as_no_stream() -> None:
 
 
 @pytest.mark.feature("ledger-event-relay")
-def test_a_bound_scoped_relay_publishes_the_ledgers_with_a_stream_past_one_without(tmp_path) -> None:
+def test_a_bound_scoped_relay_publishes_the_ledgers_with_a_stream_past_one_without(tmp_path: Path) -> None:
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repository.create("alpha", CONTENT)
     repository.create("ledger", CONTENT)

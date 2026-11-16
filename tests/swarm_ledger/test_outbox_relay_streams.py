@@ -1,5 +1,7 @@
 """A ledger whose events no stream takes never holds back another ledger's outbox rows."""
 
+from pathlib import Path
+
 import pytest
 
 from scripts.events import memory
@@ -30,10 +32,10 @@ class Unclaimed:
 
 
 @pytest.fixture
-def repo(tmp_path) -> SQLiteLedgerRepository:
+def repo(tmp_path: Path) -> SQLiteLedgerRepository:
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repository.create("alpha", CONTENT)
     repository.create("ledger", CONTENT)
+    repository.create("alpha", CONTENT)
     return repository
 
 
@@ -62,7 +64,9 @@ def published(log: memory.MemoryEventLog) -> list[tuple[str, str]]:
 
 
 @pytest.mark.feature("ledger-event-relay")
-def test_a_ledger_whose_events_no_stream_takes_never_holds_back_another_ledgers_rows(repo, log) -> None:
+def test_a_ledger_whose_events_no_stream_takes_never_holds_back_another_ledgers_rows(
+    repo: SQLiteLedgerRepository, log: memory.MemoryEventLog
+) -> None:
     held, taken = rows(repo, "alpha"), rows(repo, "ledger")
     assert outbox.relay(repo, Unclaimed(log, "alpha")) == 2
     assert published(log) == taken
@@ -73,7 +77,9 @@ def test_a_ledger_whose_events_no_stream_takes_never_holds_back_another_ledgers_
 
 
 @pytest.mark.feature("ledger-event-relay")
-def test_a_row_no_stream_takes_keeps_the_later_rows_of_its_ledger_unsent_in_order(repo, log) -> None:
+def test_a_row_no_stream_takes_keeps_the_later_rows_of_its_ledger_unsent_in_order(
+    repo: SQLiteLedgerRepository, log: memory.MemoryEventLog
+) -> None:
     repo.apply_ops("ledger", ops=[CLAIM])
     first, refused, *later = rows(repo, "ledger")
     alpha = rows(repo, "alpha")
@@ -84,7 +90,7 @@ def test_a_row_no_stream_takes_keeps_the_later_rows_of_its_ledger_unsent_in_orde
 
 
 @pytest.mark.feature("ledger-event-relay")
-def test_each_ledger_takes_its_own_batch_of_rows(repo, log) -> None:
+def test_each_ledger_takes_its_own_batch_of_rows(repo: SQLiteLedgerRepository, log: memory.MemoryEventLog) -> None:
     alpha, ledger = rows(repo, "alpha"), rows(repo, "ledger")
     assert outbox.relay(repo, log, batch=1) == 2
     assert published(log) == [alpha[0], ledger[0]]
