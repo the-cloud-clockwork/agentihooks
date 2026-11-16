@@ -94,7 +94,6 @@ class Admission:
             return None
         timer.mark("release")
         held = self.store.redis.get(self._key(slug, request))
-        timer.mark("held")
         if held:
             admitted = json.loads(held)
             live = admitted["name"] in self.store.listed(slug)
@@ -103,6 +102,7 @@ class Admission:
             if live:
                 refused(slug, request, f"already admitted to hive {admitted['hive']}")
                 return None
+        timer.mark("held")
         if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             refused(slug, request, "claims are stopped")
             return None
@@ -245,7 +245,7 @@ class Admission:
             raise
         timer.mark("execution")
         live = self._mark(slug, request, row, name)
-        timer.mark("write")
+        timer.mark("ledger")
         if live is None:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))

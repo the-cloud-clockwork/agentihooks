@@ -639,7 +639,7 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
         f"the hive stopped waiting at {admission.ANSWER_MS} ms release={admission.ANSWER_MS + 5} held=0 stopped=0 "
-        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 write=0"
+        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
     ]
 
 
@@ -649,7 +649,7 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
 ) -> None:
     from scripts.swarm import tick as tick_module
 
-    now = [0]
+    now = [1000]
     rig.admitter.clock = lambda: now[0]
 
     def bump(amount: int, original: Callable[..., Any]) -> Callable[..., Any]:
@@ -691,7 +691,7 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 9100 ms, "
         f"the hive stopped waiting at {admission.ANSWER_MS} ms release=100 held=200 stopped=300 snapshot=400 "
-        f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 write=1300"
+        f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 ledger=1300"
     ]
 
 
