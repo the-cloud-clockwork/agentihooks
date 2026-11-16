@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.946 · 2026-11-16
+
+### 2026-11-16 · 7e3d73afd9fc · #11572 · @agenticore-app
+
+**The hub shared ledger copy fetches only for a newer revision and no reader changes its rows**
+
+This fixes a bug in the hub's shared ledger cache where a reader holding an older revision could trigger an unnecessary refetch and, worse, could have its own task-row edits leak into the shared copy used by other readers. Now the revision check happens inside the swarm lock so each reader sees a consistent snapshot, fetching only when genuinely newer, and every caller gets its own shallow row copy so admission's row updates never bleed into readiness or preemption. This removes redundant ledger fetches and a subtle shared-state corruption risk.
+
 ## v2.17.942 · 2026-11-16
 
 ### 2026-11-16 · 3aef44200190 · #11552 · @nestorcolt
