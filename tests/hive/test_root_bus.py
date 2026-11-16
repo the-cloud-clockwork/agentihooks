@@ -596,6 +596,75 @@ def _hive_run(monkeypatch: pytest.MonkeyPatch, served: list) -> None:
 
 
 @pytest.mark.feature("hive-root-bus-re-mint")
+def test_refresh_re_mints_a_root_credential_minted_without_the_stop_consumer_grants(tmp_path: Path) -> None:
+    signer = _signer(ROOT)
+    root_bus.write(tmp_path, signer, "root")
+    creds = _stored(tmp_path, signer, _without_stop_grants(signer))
+
+    assert root_bus.refresh(tmp_path, lambda: signer, "root") == tmp_path / "root-bus" / "bus.env"
+
+    assert _granted(creds) == _fresh(signer)
+    assert set(nats_grant.stop_publish("alpha", "root")) <= set(_granted(creds)["pub"]["allow"])
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_refresh_re_mints_a_root_credential_whose_subscribe_grant_differs(tmp_path: Path) -> None:
+    signer = _signer(ROOT)
+    root_bus.write(tmp_path, signer, "root")
+    creds = _stored(tmp_path, signer, {**_fresh(signer), "sub": {"allow": ["swarm.alpha.>"]}})
+
+    assert root_bus.refresh(tmp_path, lambda: signer, "root") == tmp_path / "root-bus" / "bus.env"
+
+    assert _granted(creds) == _fresh(signer)
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_refresh_keeps_a_root_credential_that_matches_a_fresh_mint(tmp_path: Path) -> None:
+    signer = _signer(ROOT)
+    env = root_bus.write(tmp_path, signer, "root")
+    creds = tmp_path / "root-bus" / "bus.creds"
+    stored = (creds.read_text(), env.read_text())
+
+    assert root_bus.refresh(tmp_path, lambda: signer, "root") is None
+
+    assert (creds.read_text(), env.read_text()) == stored
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_refresh_re_mints_for_the_swarms_the_signer_lists_now(tmp_path: Path) -> None:
+    signer = _signer(ROOT)
+    env = root_bus.write(tmp_path, signer, "root")
+    wider = dataclasses.replace(signer, member_swarms={"root": ("alpha", "beta")})
+
+    assert root_bus.refresh(tmp_path, lambda: wider, "root") == env
+
+    assert dotenv_values(env)["AGENTIHOOKS_BUS_SWARMS"] == "alpha,beta"
+    assert _granted(tmp_path / "root-bus" / "bus.creds") == _fresh(signer, ("alpha", "beta"))
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_refresh_reads_no_signer_without_a_stored_root_credential(tmp_path: Path) -> None:
+    asked: list[str] = []
+
+    assert root_bus.refresh(tmp_path, lambda: asked.append("signer") or _signer(ROOT), "root") is None
+
+    assert asked == []
+    assert not (tmp_path / "root-bus").exists()
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_refresh_keeps_the_stored_root_credential_without_a_signer(tmp_path: Path) -> None:
+    signer = _signer(ROOT)
+    root_bus.write(tmp_path, signer, "root")
+    creds = _stored(tmp_path, signer, _without_stop_grants(signer))
+    stored = creds.read_text()
+
+    assert root_bus.refresh(tmp_path, lambda: None, "root") is None
+
+    assert creds.read_text() == stored
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
 def test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

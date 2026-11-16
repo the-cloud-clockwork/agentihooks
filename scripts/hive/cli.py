@@ -347,6 +347,24 @@ def _root_bus(args: argparse.Namespace) -> str:
     return "\n".join([*lines, f"wrote the NATS bus settings of hive {hive} to {path} and restarted the hive service"])
 
 
+def _refresh_root_bus() -> None:
+    from dotenv import dotenv_values
+
+    from scripts.hive import root_bus
+    from scripts.swarm.probe import ROOT
+
+    try:
+        path = root_bus.refresh(registry.home(), _signer, ROOT)
+    except auth.HiveError as exc:
+        print(f"hive kept the stored root bus credential ({exc})", file=sys.stderr)
+        return
+    if path is not None:
+        os.environ.update({key: value for key, value in dotenv_values(path).items() if value is not None})
+        print(
+            f"hive re-minted the root bus credential in {path}: its grant differed from a fresh mint", file=sys.stderr
+        )
+
+
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
@@ -573,6 +591,7 @@ def _daemon(command: str) -> int:
 
     def run() -> object:
         daemon.fill_operator_env()
+        _refresh_root_bus()
         lanes.serve(os.environ)
         return daemon.run(lambda: daemon.clients(redis_client()))
 
