@@ -8,7 +8,7 @@ import sys
 import threading
 import traceback
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
@@ -20,7 +20,8 @@ from scripts.hub.registry import Reactor, Registry
 from scripts.scheduler.process_interval import Interval
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import store
-from scripts.swarm_ledger import ledger_link
+from scripts.swarm_ledger import ledger_link, storage
+from scripts.swarm_ledger.repository import postgres
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -217,6 +218,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("action", choices=("run",))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    if cast(Any, ledger_link).remote() and not storage.shared():
+        print(
+            f"hub: a hosted hub writes task claims in process over the shared database and needs {postgres.URL}",
+            file=sys.stderr,
+        )
+        return 2
     holder = os.environ.get("HOSTNAME") or socket.gethostname()
     issued = _issued_credential(holder)
     if issued:

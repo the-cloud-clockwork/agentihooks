@@ -67,7 +67,7 @@ def test_the_holder_hands_its_locked_descriptor_to_the_tick(monkeypatch):
 def _host_tick(monkeypatch, ticked):
     store = SimpleNamespace(
         slugs=lambda: ["one"],
-        config=lambda slug: SimpleNamespace(api_url="", pending_api_url=""),
+        config=lambda slug: SimpleNamespace(api_url=""),
         redis=SimpleNamespace(hget=lambda *_: None),
         key=lambda slug, tail: f"{slug}:{tail}",
     )

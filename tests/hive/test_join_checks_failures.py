@@ -122,8 +122,7 @@ def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monke
             return {"_meta": {"rev": 1}}
 
         monkeypatch.setattr(ledger, "request", request)
-        with ledger.ledger_route.scoped("sw", "http://ledger.example"):
-            checks = join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
+        checks = join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
         assert checks[name] is False
         assert set(checks["errors"]) == {name}
         reported[kind] = checks["errors"][name]
