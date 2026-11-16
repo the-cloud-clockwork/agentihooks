@@ -2340,6 +2340,18 @@
       ]
     },
     {
+      "id": "swarm-lab-wait",
+      "origin": "inventory",
+      "behaviour": "A wait on a lab check run url holds while the check runs, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, and refuses any target that is not a check run url.",
+      "seam": "agentihooks swarm wait --on lab and the tick wait pass",
+      "tests": [
+        "tests/swarm/test_lab_wait.py::test_a_lab_wait_refuses_anything_but_a_check_run_url",
+        "tests/swarm/test_lab_wait.py::test_a_lab_check_still_running_holds_the_wait",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_green_lab_wait_with_the_inbox_notice",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_red_lab_wait_naming_the_gate_and_conclusion"
+      ]
+    },
+    {
       "id": "swarm-push-wait",
       "origin": "inventory",
       "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge.",
