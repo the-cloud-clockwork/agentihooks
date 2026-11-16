@@ -1,0 +1,19 @@
+rules:
+  - id: hive-spawn-before-serena-router
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive launch path spawns an agent without first ensuring the Serena router. On 16 November the hive three lane
+      spoke launched two ci agents before the router came up. Both sessions failed to connect to Serena at startup and
+      could not edit Python for the rest of their run. Call serena_router_daemon.ensure() before runtime.spawn and
+      settle the launch as unavailable when it returns False.
+    paths:
+      include:
+        - /scripts/hive/
+        - hive-spawn-before-serena-router.py
+    patterns:
+      - pattern: self.runtime.spawn(...)
+      - pattern-not-inside: |
+          if not serena_router_daemon.ensure():
+              ...
+          ...
