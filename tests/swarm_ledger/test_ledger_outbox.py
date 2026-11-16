@@ -397,7 +397,7 @@ def test_apply_ledger_replays_as_the_recorded_author_and_reports_the_outcome(mon
     assert outbox.apply_ledger(None, ENG, entry) == {"applied": ["c-1"]}
 
 
-def test_ledger_replay_sends_the_recorded_credential_with_the_request_timeout(monkeypatch):
+def test_ledger_replay_sends_the_recorded_credential_with_the_write_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = []
 
     class Client:
@@ -410,7 +410,7 @@ def test_ledger_replay_sends_the_recorded_credential_with_the_request_timeout(mo
     monkeypatch.setattr("scripts.swarm_ledger.api.client.ResourceClient", Client)
     monkeypatch.setattr(ledger.repository, "token", lambda slug: "admin")
     assert ledger.replay(SLUG, ["op"], ENG, False) == {"slug": SLUG, "ops": ["op"]}
-    assert seen[-1] == (ledger.local_credentials(SLUG, ENG, False), ledger.REQUEST_TIMEOUT)
+    assert seen[-1] == (ledger.local_credentials(SLUG, ENG, False), ledger.WRITE_TIMEOUT)
     assert seen[-1][0]["X-Ledger-Agent"] == ENG
     ledger.replay(SLUG, ["op"], ENG, True)
     assert seen[-1][0] == {"X-Ledger-Token": "admin"}

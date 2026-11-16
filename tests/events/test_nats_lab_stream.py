@@ -2,10 +2,10 @@
 
 import pytest
 from nats.js.api import StreamInfo
-from nats.js.errors import NoStreamResponseError
 
 from scripts.ci_lab.webhooks import HeadEvent, envelope
 from scripts.events import memory, nats
+from scripts.events.bus import NoStream
 from scripts.events.config import BusConfig
 from scripts.events.nats_legacy import LEGACY_EVENTS
 from tests.events.test_nats import url as url
@@ -58,7 +58,7 @@ def test_a_lab_head_publish_without_the_lab_stream_fails_instead_of_falling_back
     controller._loop.run(controller._js.delete_stream(nats.LAB_STREAM))
     receiver = nats.open_bus(BusConfig(url=url, provision=False))
     try:
-        with pytest.raises(NoStreamResponseError):
+        with pytest.raises(NoStream):
             receiver.lab_heads.publish("ci.lab.head.push", envelope(HEAD))
         assert _stream(controller, nats.EVENT_STREAM).state.messages == 0
     finally:

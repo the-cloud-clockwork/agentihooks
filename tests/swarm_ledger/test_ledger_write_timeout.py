@@ -51,18 +51,3 @@ def test_a_read_keeps_the_request_timeout(timeouts: list) -> None:
 def test_an_explicit_timeout_wins_for_a_write(timeouts: list) -> None:
     assert ledger.request("ledger", [ADD], timeout=2) == {"wrote": "ledger", "ops": [ADD]}
     assert timeouts == [("ledger", False, 2)]
-
-
-@pytest.mark.feature("ledger-write-timeout")
-def test_a_replayed_queued_write_waits_past_the_server_writer_lock_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = []
-
-    class Recording(Answering):
-        def __init__(self, base: str, credentials: dict, timeout: float) -> None:
-            seen.append((base, credentials, timeout))
-
-    monkeypatch.setattr("scripts.swarm_ledger.api.client.ResourceClient", Recording)
-    monkeypatch.setattr(ledger, "base", lambda slug="": f"https://ledger.test/{slug}")
-    monkeypatch.setattr(ledger, "local_credentials", lambda slug, agent, service: {"agent": agent, "service": service})
-    assert ledger.replay("ledger", [ADD], "eng", True) == {"wrote": "ledger", "ops": [ADD]}
-    assert seen == [("https://ledger.test/ledger", {"agent": "eng", "service": True}, 40)]
