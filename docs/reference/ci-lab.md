@@ -539,3 +539,178 @@ of lost objects runs on `LocalObjects` only.
 | `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root, from a wrong directory, bucket or prefix; or every entry was already indexed | `verdicts.objects.keys("lab/")` lists the stored objects |
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
 | A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
+
+## Retry policy
+
+`scripts.ci_lab.retry` decides whether a unit runs again after a result. A unit whose worker was
+lost gets one more run; a unit that failed on its own inputs never runs again, because the same
+inputs give the same verdict. `decide` returns `retry` or `final`, and `red` says whether a final
+result makes its unit's grade red. The counts come from `lab.retry` in `delivery.yaml`.
+
+The module is a library: no scheduler or worker code calls it yet.
+[What reaches the policy today](#what-reaches-the-policy-today) covers the lease and crash paths
+that run now.
+
+### Outcomes
+
+`retry.UnitResult` is a frozen dataclass:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `outcome` | `str` | How the run ended, one of the outcomes below |
+| `attempts` | `int` | How many times the unit already ran again: `0` on its first run, `1` on its first rerun |
+
+`decide` sorts the outcome into one of three kinds, matching the text exactly:
+
+| Outcome | What happened | Kind | Count it spends |
+|---|---|---|---|
+| `passed` | The unit passed | pass | none; always final and green |
+| `lost` | The unit's lease expired | loss | `lost` |
+| `crash` | The worker running the unit crashed | loss | `lost` |
+| `failed` | A test failed | failure | `failed` |
+| `gate_failed` | A static gate failed | failure | `failed` |
+| `survived` | A mutant survived | failure | `failed` |
+| Any other text, such as `Passed` or `timeout` | Unknown to the policy | failure | `failed` |
+
+An outcome the policy does not know is a failure, so a misspelled outcome never earns a retry
+under the default counts.
+
+### Decide
+
+`decide(result, rules=retry.DEFAULT)`:
+
+1. `passed` is `final`.
+2. A loss may run again `rules.lost` times; any other outcome `rules.failed` times.
+3. It returns `retry` while `result.attempts` is below that number, else `final`.
+
+Under the default counts, `lost: 1` and `failed: 0`:
+
+| Outcome | `attempts` 0 | `attempts` 1 | `attempts` 2 |
+|---|---|---|---|
+| `passed` | `final` | `final` | `final` |
+| `lost`, `crash` | `retry` | `final` | `final` |
+| `failed`, `gate_failed`, `survived`, any other | `final` | `final` | `final` |
+
+`red(result)` is `True` for every outcome except `passed`. It does not check that the result is
+final, so call it only after `decide` returned `final`. A unit lost on its first run and lost again
+on its rerun is `final` and red:
+
+```python
+>>> from scripts.ci_lab import retry
+>>> first = retry.UnitResult(outcome="lost", attempts=0)
+>>> second = retry.UnitResult(outcome="lost", attempts=1)
+>>> retry.decide(first)
+'retry'
+>>> retry.decide(second)
+'final'
+>>> retry.red(second)
+True
+```
+
+With `retry.Policy(lost=2, failed=1)` a lost unit runs again twice and a failed one once:
+
+| Result | `decide` |
+|---|---|
+| `UnitResult("lost", 1)` | `retry` |
+| `UnitResult("lost", 2)` | `final` |
+| `UnitResult("failed", 0)` | `retry` |
+| `UnitResult("survived", 0)` | `retry` |
+| `UnitResult("failed", 1)` | `final` |
+
+### Configure the counts
+
+`lab.retry` in the repository's `delivery.yaml` sets the two counts. The block is optional, and so
+is each key; a missing count keeps its default.
+
+```yaml
+lab:
+  authoritative: []
+  mutation:
+    run_on: every_push
+    mutants_per_changed_line: all
+    arid: []
+  check_prefix: lab
+  retry:
+    lost: 1
+    failed: 0
+```
+
+| Key | Default | Allowed | Effect |
+|---|---|---|---|
+| `lost` | `1` | An integer, `0` or more | Reruns a unit gets after an expired lease or a crashed worker; `0` makes the first loss final and red |
+| `failed` | `0` | An integer, `0` or more | Reruns a unit gets after a test failure, a static gate failure, a survived mutant or an unknown outcome; above `0` it reruns graded failures |
+
+`scripts.ci_lab.delivery.lab(root)` validates the block with the rest of `lab` and raises
+`delivery.DeliveryError` naming the path:
+
+| `retry` value | Error |
+|---|---|
+| `{lost: -1}` | `delivery.yaml lab.retry.lost: -1 is less than the minimum of 0` |
+| `{lost: 1.5}` | `delivery.yaml lab.retry.lost: 1.5 is not of type 'integer'` |
+| `{lost: one}` | `delivery.yaml lab.retry.lost: 'one' is not of type 'integer'` |
+| `{lost: true}` | `delivery.yaml lab.retry.lost: True is not of type 'integer'` |
+| `{extra: 1}` | `delivery.yaml lab.retry: Additional properties are not allowed ('extra' was unexpected)` |
+| `[]` | `delivery.yaml lab.retry: [] is not of type 'object'` |
+
+`policy(lab)` turns a validated block into a `retry.Policy`:
+
+```python
+from pathlib import Path
+
+from scripts.ci_lab import delivery, retry
+
+rules = retry.policy(delivery.lab(Path(".")))
+result = retry.UnitResult(outcome="crash", attempts=0)
+
+if retry.decide(result, rules) == "retry":
+    print("run the unit again with attempts", result.attempts + 1)
+elif retry.red(result):
+    print("grade the unit red")
+```
+
+Pass `policy` only a block `delivery.lab` returned. It does not validate: an unknown key raises
+`TypeError: Policy.__init__() got an unexpected keyword argument`, and a negative count passes
+through.
+
+### The flake rule
+
+The one rerun of a failed test lives in the run tests engine, not in this policy.
+`scripts.ci_lab.run_tests.run` runs a failed batch a second time on identical inputs inside the same
+unit run:
+
+- A pass on the second attempt is `passed` with `flaky` set, and writes one flake ledger row per
+  test the first attempt failed.
+- A second failure is `failed` and final, so the store keeps the negative verdict.
+
+`lab.retry.failed` does not control that rerun. `run_tests.Verdict.attempts` counts attempts inside
+the run, `1` or `2`, while `UnitResult.attempts` counts reruns of the unit; with the default
+`failed: 0` every failure is final whichever number is passed.
+
+### What reaches the policy today
+
+| Event | What runs now | Outcome it leaves |
+|---|---|---|
+| A lease expires once | `leases.Leases.reap(now_ms)` moves the job back to pending and adds one to its `attempts` | none; the job is pending |
+| A lease expires again | `Leases.reap` sets the job's state and outcome to `lost` | `lost` |
+| A unit's executor raises | The worker prints `ci-lab worker: unit <job> crashed: <error>` to standard error, stops heartbeating the lease and never completes it, so the lease expires and is reaped | `lost` |
+| A worker completes a lease | `Leases.complete` records the outcome the worker sent | the executor's outcome |
+
+Lease reaping allows one requeue from its own constant, `leases.REQUEUES = 1`, not from
+`lab.retry`, so changing `lab.retry.lost` does not change it yet. No code reports the outcome
+`crash` yet; a crashed worker's unit reaches the scheduler as an expired lease. No scheduler loop
+calls `Leases.reap` yet; `tests/ci_lab/test_leases.py` drives it directly.
+
+The tests in `tests/ci_lab/test_retry.py` cover the decision table under the default and
+configured counts, the second loss that is final and red, `red` for each outcome, and the valid and
+refused `lab.retry` blocks.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A failed test, gate or mutant is never rerun | `failed` defaults to `0`: a graded failure is final | Read `lab.retry.failed` in `delivery.yaml`; the flake rule reruns a failed test batch once on its own |
+| A lost unit goes red after one rerun | `lost` defaults to `1`, so the second loss is final | Read `lab.retry.lost`; search the worker's standard error for `crashed` |
+| An outcome that should retry is final | The outcome text is not exactly `lost` or `crash`, so it counts as a failure | Compare the outcome the worker sent to `retry.LOST` |
+| `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |
+| `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
+| Changing `lab.retry.lost` leaves lease requeues unchanged | Lease reaping reads `leases.REQUEUES`, not `lab.retry` | See [What reaches the policy today](#what-reaches-the-policy-today) |
