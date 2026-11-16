@@ -68,6 +68,23 @@ class Signer:
         return f"{self.url}/{job}/{name}"
 
 
+class Slow:
+    def __init__(self) -> None:
+        self.release = threading.Event()
+
+        def hold(request: BaseHTTPRequestHandler) -> None:
+            request.rfile.read(int(request.headers.get("Content-Length", "0")))
+            self.release.wait(5)
+            request.send_response(200)
+            request.send_header("Content-Length", "2")
+            request.end_headers()
+            request.wfile.write(b"{}")
+
+        handler = type("SlowHandler", (BaseHTTPRequestHandler,), {"do_GET": hold, "do_POST": hold, "do_PUT": hold})
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+
 def _serving(server: ThreadingHTTPServer) -> threading.Thread:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -98,6 +115,16 @@ def sink() -> Iterator[Sink]:
     yield sink
     sink.server.shutdown()
     sink.server.server_close()
+
+
+@pytest.fixture
+def slow() -> Iterator[Slow]:
+    slow = Slow()
+    _serving(slow.server)
+    yield slow
+    slow.release.set()
+    slow.server.shutdown()
+    slow.server.server_close()
 
 
 @pytest.fixture
@@ -168,6 +195,49 @@ def test_units_from_two_heads_run_concurrently_on_one_pod(
         "/h2:test:b/log": b"log of h2",
     }
     assert lab.asked == [("pod-1", 2, CAPABILITIES, 0)]
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_path: Path) -> None:
+    keys = [f"u{index}" for index in range(40)]
+    jobs.enqueue([Unit(kind="test", key=key, members=(f"tests/{key}.py::t",)) for key in keys], "h1", {})
+    meet = threading.Barrier(40, timeout=10)
+
+    def together(lease: worker.Lease) -> worker.Finished:
+        meet.wait()
+        return finished(tmp_path, lease)
+
+    wide = pod(scheduler, {"test": together}, slots=40, grace_s=30)
+
+    assert len(wide.run_once()) == 40
+    assert wide.drain() == []
+    assert [found(jobs, f"h1:test:{key}").outcome for key in keys] == ["passed"] * 40
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs(
+    scheduler: str, lab: Counted, jobs: queue.Queue, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    jobs.enqueue([UNIT_B], "h2", {})
+    releases = {"h1": threading.Event(), "h2": threading.Event()}
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        releases[lease.head].wait(10)
+        return finished(tmp_path, lease)
+
+    full = pod(scheduler, {"test": held}, slots=2)
+    assert len(full.run_once()) == 2
+    threading.Timer(0.3, releases["h1"].set).start()
+
+    assert full.run_once() == []
+
+    assert full.free() == 1
+    assert [lease.head for lease in full.running.values()] == ["h2"]
+    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert len(lab.asked) == 1
+    releases["h2"].set()
+    assert full.drain() == []
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
@@ -351,6 +421,18 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
+def test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer(slow: Slow, tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text("{}")
+    client = worker.Client(slow.url, timeout=0.05)
+
+    with pytest.raises(TimeoutError):
+        client.heartbeat("h1:test:a", "token")
+    with pytest.raises(TimeoutError):
+        client.put(f"{slow.url}/h1:test:a/report", report)
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
 def test_the_worker_environment_refuses_github_app_and_redis_variables() -> None:
     environ = {
         "CI_LAB_SCHEDULER_URL": "http://scheduler:8800",
@@ -410,5 +492,6 @@ def test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis()
         3,
     )
     assert built.capabilities == CAPABILITIES
+    assert worker.build({"CI_LAB_SCHEDULER_URL": "http://scheduler:8800"}, executors, "pod-7", 8, 2.0).slots == 2
     with pytest.raises(worker.Refused):
         worker.build({**environ, "REDIS_URL": "redis://redis"}, executors, "pod-7", 8, 6.0)

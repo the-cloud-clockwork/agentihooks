@@ -7,6 +7,8 @@ Redis variable. A unit whose executor raises stops heartbeating and is never com
 lease and requeues it once.
 """
 
+import contextlib
+import functools
 import json
 import sys
 import threading
@@ -22,6 +24,7 @@ from urllib.parse import urlencode
 from scripts import ci_cpu_quota
 from scripts.ci_lab import contract
 from scripts.ci_lab.units import Unit
+from scripts.scheduler.process_interval import Interval
 
 __all__ = [
     "CAPABILITIES",
@@ -73,6 +76,10 @@ Executor = Callable[[Lease], Finished]
 
 class Refused(RuntimeError):
     """The worker environment holds a GitHub App or Redis variable."""
+
+
+class Lost(RuntimeError):
+    """The scheduler refused a heartbeat's lease token, so the lease is no longer this worker's."""
 
 
 def _lease(grant: Mapping[str, Any]) -> Lease:
@@ -142,7 +149,7 @@ class Worker:
     heartbeat_s: float = HEARTBEAT_SECONDS
     grace_s: float = GRACE_SECONDS
     stopping: threading.Event = field(default_factory=threading.Event)
-    running: dict[Future[bool], Lease] = field(default_factory=dict[Future[bool], Lease])
+    running: dict[Future[None], Lease] = field(default_factory=dict[Future[None], Lease])
     pool: ThreadPoolExecutor = field(init=False)
 
     def __post_init__(self) -> None:
@@ -185,31 +192,31 @@ class Worker:
         self.free()
         return list(self.running.values())
 
-    def _unit(self, lease: Lease) -> bool:
+    def _unit(self, lease: Lease) -> None:
         """Run one unit while its lease heartbeats, then deliver it; an executor that raises leaves it to reap."""
-        done = threading.Event()
-        threading.Thread(target=self._beat, args=(lease, done)).start()
+        beat = Interval(functools.partial(self._beat, lease), every=self.heartbeat_s)
+        beat.start()
         try:
             finished = self.executors[lease.unit.kind](lease)
         finally:
-            done.set()
-        return self._deliver(lease, finished)
+            with contextlib.suppress(Lost):
+                beat.close()
+        self._deliver(lease, finished)
 
-    def _beat(self, lease: Lease, done: threading.Event) -> None:
-        """Heartbeat the lease every interval until its unit ends or the scheduler refuses the token."""
-        while not done.wait(self.heartbeat_s):
-            if self.client.heartbeat(lease.job, lease.token) is None:
-                return
+    def _beat(self, lease: Lease) -> None:
+        """Heartbeat the lease; raise Lost to end its heartbeats once the scheduler refuses the token."""
+        if self.client.heartbeat(lease.job, lease.token) is None:
+            raise Lost(lease.job)
 
-    def _deliver(self, lease: Lease, finished: Finished) -> bool:
-        """Upload the unit's report and log through their presigned URLs and complete its lease; False when the
-        scheduler refused the token."""
+    def _deliver(self, lease: Lease, finished: Finished) -> None:
+        """Upload the unit's report and log through their presigned URLs and complete its lease, stopping at the
+        first call the scheduler refuses for the token."""
         for name, path in (("report", finished.report), ("log", finished.log)):
             url = self.client.upload_url(lease.job, lease.token, name)
             if url is None:
-                return False
+                return
             self.client.put(url, path)
-        return self.client.complete(lease.job, lease.token, finished.outcome)
+        self.client.complete(lease.job, lease.token, finished.outcome)
 
 
 def environment(environ: Mapping[str, str]) -> dict[str, str]:
