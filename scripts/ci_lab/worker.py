@@ -149,6 +149,7 @@ class Worker:
     heartbeat_s: float = HEARTBEAT_SECONDS
     grace_s: float = GRACE_SECONDS
     stopping: threading.Event = field(default_factory=threading.Event)
+    abandoned: threading.Event = field(default_factory=threading.Event)
     running: dict[Future[None], Lease] = field(default_factory=dict[Future[None], Lease])
     pool: ThreadPoolExecutor = field(init=False)
 
@@ -181,10 +182,13 @@ class Worker:
         self.stopping.set()
 
     def run(self) -> list[Lease]:
-        """Lease and run units until stop, then drain; return the leases still running when the grace ended."""
+        """Lease and run units until stop, then drain; return the leases still running when the grace ended, whose
+        units stop heartbeating and are never delivered so the scheduler reaps them."""
         while not self.stopping.is_set():
             self.run_once()
-        return self.drain()
+        left = self.drain()
+        self.abandoned.set()
+        return left
 
     def drain(self) -> list[Lease]:
         """Wait up to the termination grace for the running units to end; return the leases still running."""
@@ -193,21 +197,26 @@ class Worker:
         return list(self.running.values())
 
     def _unit(self, lease: Lease) -> None:
-        """Run one unit while its lease heartbeats, then deliver it; an executor that raises leaves it to reap, and
-        a heartbeat that fails or hangs only ends the heartbeats."""
+        """Run one unit while its lease heartbeats, then deliver it unless run abandoned it; an executor that raises
+        leaves it to reap, and a heartbeat that hangs only ends the heartbeats."""
         beat = Interval(functools.partial(self._beat, lease), every=self.heartbeat_s)
         beat.start()
         try:
             finished = self.executors[lease.unit.kind](lease)
         finally:
-            with contextlib.suppress(OSError, RuntimeError):
+            with contextlib.suppress(RuntimeError):
                 beat.close()
-        self._deliver(lease, finished)
+        if not self.abandoned.is_set():
+            self._deliver(lease, finished)
 
     def _beat(self, lease: Lease) -> None:
-        """Heartbeat the lease; raise Lost to end its heartbeats once the scheduler refuses the token."""
-        if self.client.heartbeat(lease.job, lease.token) is None:
+        """Heartbeat the lease, skipping a beat that cannot reach the scheduler; raise Lost to end its heartbeats once
+        the scheduler refuses the token or run abandoned the unit."""
+        if self.abandoned.is_set():
             raise Lost(lease.job)
+        with contextlib.suppress(OSError):
+            if self.client.heartbeat(lease.job, lease.token) is None:
+                raise Lost(lease.job)
 
     def _deliver(self, lease: Lease, finished: Finished) -> None:
         """Upload the unit's report and log through their presigned URLs and complete its lease, stopping at the

@@ -299,27 +299,50 @@ def test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery(
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
-def test_a_heartbeat_that_cannot_reach_the_scheduler_still_delivers_the_unit(
-    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path
+def test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_delivered(
+    scheduler: str, lab: Counted, jobs: queue.Queue, sink: Sink, tmp_path: Path
 ) -> None:
     jobs.enqueue([UNIT_A], "h1", {})
-    beaten = threading.Event()
+    failed: list[str] = []
 
-    class Unreachable(worker.Client):
+    class Flaky(worker.Client):
         def heartbeat(self, job: str, token: str) -> int | None:
-            beaten.set()
-            raise urllib.error.URLError("scheduler unreachable")
+            if not failed:
+                failed.append(job)
+                raise urllib.error.URLError("scheduler unreachable")
+            return super().heartbeat(job, token)
 
     def held(lease: worker.Lease) -> worker.Finished:
-        beaten.wait(10)
+        beating(lab, 1)
         return finished(tmp_path, lease)
 
-    unreachable = worker.Worker(Unreachable(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
-    unreachable.run_once()
+    flaky = worker.Worker(Flaky(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
+    flaky.run_once()
 
-    assert unreachable.drain() == []
+    assert flaky.drain() == []
+    assert failed == ["h1:test:a"]
+    assert len(lab.beats) >= 1
     assert found(jobs, "h1:test:a").outcome == "passed"
     assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_refused_upload_url_ends_the_units_delivery(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+
+    def taken(lease: worker.Lease) -> worker.Finished:
+        assert jobs.finish(found(jobs, lease.job), lease.token, "taken")
+        return finished(tmp_path, lease)
+
+    refused = pod(scheduler, {"test": taken})
+    refused.run_once()
+
+    assert refused.drain() == []
+    assert sink.bodies == {}
+    assert found(jobs, "h1:test:a").outcome == "taken"
+    assert "crashed" not in capsys.readouterr().err
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
@@ -347,31 +370,37 @@ def test_stop_lets_running_units_finish_within_the_termination_grace(
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
-def test_a_unit_past_the_termination_grace_is_left_to_reap(scheduler: str, jobs: queue.Queue, tmp_path: Path) -> None:
+def test_a_unit_past_the_termination_grace_is_left_to_reap(
+    scheduler: str, lab: Counted, jobs: queue.Queue, clock: Clock, sink: Sink, tmp_path: Path
+) -> None:
     jobs.enqueue([UNIT_A], "h1", {})
     release = threading.Event()
     executors: dict[str, worker.Executor] = {}
-    late = pod(scheduler, executors, slots=2, grace_s=0.05)
+    late = pod(scheduler, executors, slots=2, heartbeat_s=0.01, grace_s=0.05)
 
     def held(lease: worker.Lease) -> worker.Finished:
+        beating(lab, 1)
         late.stop()
         release.wait(10)
         return finished(tmp_path, lease)
 
     executors["test"] = held
-    timer = threading.Timer(2, release.set)
-    timer.start()
     guard = threading.Timer(10, late.stop)
     guard.start()
 
     assert [lease.job for lease in late.run()] == ["h1:test:a"]
     guard.cancel()
-    assert found(jobs, "h1:test:a").state == "leased"
+    time.sleep(0.2)
+    beats = len(lab.beats)
+    time.sleep(0.2)
+    assert len(lab.beats) == beats >= 1
     release.set()
-    timer.cancel()
     late.grace_s = 10
     assert late.drain() == []
-    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert sink.bodies == {}
+    assert found(jobs, "h1:test:a").state == "leased"
+    clock.now += lab.ttl_ms + 1
+    assert lab.reap(clock.now) == [("h1:test:a", "pending")]
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
