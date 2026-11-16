@@ -1160,6 +1160,19 @@
       ]
     },
     {
+      "id": "codex-adopts-hub-admitted-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-hub-admitted",
+      "behaviour": "The Codex session supervisor adopts the execution hub admission registered for its seat and hive, starting with no harness or transport, and binds harness codex and the chosen transport onto it while it is still starting, so a hub admitted Codex app-server launch serves its admitted execution, starts no second one, and leaves the move to working to the hub claims reactor; any other shape is refused.",
+      "seam": "scripts.hub.admission.Admission._claim writing the starting execution and scripts.codex_session.supervisor.adopt binding it",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_serves_the_execution_the_hub_admitted",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_it_does_not_serve",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left",
+        "tests/hub/test_admission.py::test_a_hub_admitted_codex_launch_adopts_the_admitted_execution"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",

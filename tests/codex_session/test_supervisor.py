@@ -1174,3 +1174,71 @@ def test_a_hive_member_refuses_an_archived_execution(store, server, clock, root,
     fencing.write(store, SLUG, lambda doc: doc["archive"].update({"exe-archived": asdict(archived)}))
     failed(store, server, clock, root, replace(spec, execution_id="exe-archived"), "execution")
     assert server.commands == []
+
+
+def hub_admitted(store: RedisStore, spec: supervisor.Launch, **changes: str) -> AgentRecord:
+    """The execution hub admission registers for the seat: starting on its hive, with no harness or transport."""
+    agent = spec.agent
+    fields = {"hive": "m1", **changes}
+    record = AgentRecord(agent.name, agent.lane, agent.task, seat=agent.seat, state="starting", started_at=1000)
+    return store.start_execution(SLUG, replace(record, **fields), "")
+
+
+@pytest.mark.feature("codex-adopts-hub-admitted-execution")
+def test_a_hive_member_serves_the_execution_the_hub_admitted(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.swarm.test_dispatch_seat import hive_member
+
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hub_admitted(store, spec)
+    hive_member(monkeypatch)
+    started = supervisor.launch(store, replace(spec, execution_id=admitted.execution_id), deps(server, clock, root))
+    assert started.agent.execution_id == started.record.execution_id == admitted.execution_id
+    assert [agent.execution_id for agent in store.executions(SLUG, SEAT)] == [admitted.execution_id]
+    current = store.execution(SLUG, admitted.execution_id)
+    assert (current.state, current.harness, current.transport, current.hive) == (
+        "starting",
+        "codex",
+        APP_SERVER_TRANSPORT,
+        "m1",
+    )
+    assert (current.generation, current.conversation_id, current.model) == (1, "thread-new", "gpt-6.1-sol")
+    assert only_record(store).state == CONNECTED
+    assert len(server.commands) == 1
+
+
+@pytest.mark.feature("codex-adopts-hub-admitted-execution")
+@pytest.mark.parametrize("change", [{"hive": "other-hive"}, {"harness": "claude"}, {"state": "working"}])
+def test_a_hive_member_refuses_a_hub_admitted_execution_it_does_not_serve(
+    store: RedisStore,
+    server: Server,
+    clock: Clock,
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: dict[str, str],
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hub_admitted(store, spec, **change)
+    failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert store.execution(SLUG, admitted.execution_id).transport == ""
+    assert server.commands == []
+
+
+@pytest.mark.feature("codex-adopts-hub-admitted-execution")
+def test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hub_admitted(store, spec)
+    store.redis.hdel(store.key(SLUG, "agents"), admitted.name)
+    failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert store.execution(SLUG, admitted.execution_id).transport == ""
+    assert server.commands == []
