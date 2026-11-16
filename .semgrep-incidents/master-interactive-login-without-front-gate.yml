@@ -11,9 +11,6 @@ rules:
         - /scripts/hive/placement.py
         - master-interactive-login-without-front-gate.py
     patterns:
-      - pattern-inside: |
-          def place_master(...):
-              ...
       - pattern: |
           if native and $LOGIN in ("", native) and $CHECK:
               ...
