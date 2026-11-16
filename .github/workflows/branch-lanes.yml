@@ -4,6 +4,7 @@ name: Branch workflow lanes
 on:
   push:
     branches-ignore: [dev, main, "gh-readonly-queue/**"]
+    paths: [".github/workflows/**"]
 
 concurrency:
   group: branch-lanes-${{ github.ref }}
