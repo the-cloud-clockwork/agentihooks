@@ -6633,7 +6633,9 @@
         "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran",
         "tests/test_ci_lone_artifact_download.py::test_the_mutation_replay_verify_finds_every_grade_however_many_shards_ran",
         "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
-        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder"
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
       ]
     },
     {
