@@ -2349,6 +2349,22 @@
       ]
     },
     {
+      "id": "swarm-lab-wait",
+      "origin": "inventory",
+      "behaviour": "A lab wait on a check run url is recorded by the cli, holds while the check runs or GitHub cannot answer, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, ends as missing when GitHub has no such check run, and refuses any target that is not a check run url.",
+      "seam": "agentihooks swarm wait --on lab and the tick wait pass",
+      "tests": [
+        "tests/swarm/test_lab_wait.py::test_a_lab_wait_refuses_anything_but_a_check_run_url",
+        "tests/swarm/test_lab_wait.py::test_the_cli_records_a_lab_wait_on_a_check_run",
+        "tests/swarm/test_lab_wait.py::test_a_lab_check_still_running_holds_the_wait",
+        "tests/swarm/test_lab_wait.py::test_an_unreachable_github_holds_the_lab_wait",
+        "tests/swarm/test_lab_wait.py::test_a_missing_check_run_ends_the_lab_wait_with_that_reason",
+        "tests/swarm/test_lab_wait.py::test_a_stored_lab_wait_on_a_bad_target_ends_without_reading_github",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_green_lab_wait_with_the_inbox_notice",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_red_lab_wait_naming_the_gate_and_conclusion"
+      ]
+    },
+    {
       "id": "swarm-push-wait",
       "origin": "inventory",
       "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge.",
@@ -6487,6 +6503,27 @@
         "tests/tick/steps/test_lab_capacity.py::test_lab_capacity",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_keeps_the_lab_block_and_records_its_rows",
         "tests/tick/steps/test_lab_capacity.py::test_the_step_reads_nothing_without_a_lab_url"
+      ]
+    },
+    {
+      "id": "swarm-lab-behind-hold",
+      "origin": "inventory",
+      "behaviour": "While a fresh lab reading predicts pull request grading more than AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES behind, the tick and the events readiness hold every eng task outside the fix phase from a claim, the urgent hold names the lab, claim wait in those stretches is lab wait, and the standing finding bottleneck-stage/lab_wait carries the hold until the reading falls back, when claims resume and the finding clears; its remedy proposes one ci task titled Lab capacity.",
+      "seam": "scripts.swarm.claim_hold.ci_behind through the tick claim view and readiness snapshot, scripts.swarm.health.urgent_hold.observe, scripts.swarm.stages.report, scripts.swarm.stage_detector.lab_finding and record, and scripts.swarm.bottleneck_remedy.remedy_pass",
+      "tests": [
+        "tests/swarm/test_claim_hold.py::test_the_lab_holds_eng_claims_outside_the_fix_phase_while_pull_request_grading_runs_behind",
+        "tests/swarm/test_claim_hold.py::test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds",
+        "tests/swarm/test_claim_hold.py::test_the_lab_threshold_reads_its_environment_variable",
+        "tests/swarm/test_claim_hold.py::test_the_tick_claims_no_eng_task_while_the_lab_is_behind_and_resumes_below_the_threshold",
+        "tests/hub/test_readiness.py::test_the_events_snapshot_holds_eng_offers_while_the_lab_is_behind",
+        "tests/swarm/test_urgent_hold.py::test_an_urgent_eng_task_the_lab_holds_names_the_lab_and_raises_no_finding",
+        "tests/swarm/test_stages.py::test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait",
+        "tests/swarm/test_stages.py::test_a_claimed_task_charges_lab_wait_only_before_its_claim",
+        "tests/swarm/test_stages.py::test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples",
+        "tests/swarm/test_stages.py::test_a_lab_stretch_that_ends_as_the_claim_wait_opens_adds_no_lab_wait",
+        "tests/swarm/test_stage_detector.py::test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below",
+        "tests/swarm/test_stage_detector.py::test_record_updates_the_lab_wait_finding_from_the_stored_reading_on_every_pass",
+        "tests/swarm/test_bottleneck_remedy.py::test_a_lab_wait_finding_proposes_one_ci_task_for_lab_capacity"
       ]
     },
     {

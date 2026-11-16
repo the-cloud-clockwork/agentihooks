@@ -66,14 +66,14 @@ def test_checks_take_a_pull_request_or_a_run_and_merge_takes_only_a_pull_request
 def test_a_mutation_wait_is_refused_with_the_kinds_list(started, capsys):  # noqa: F811
     store, _ = started
     assert run("sw", "--as", ME, "wait", "--on", "mutation", RUN, "--reason", "preflight") == 1
-    assert capsys.readouterr().err.endswith("swarm: wait on one of: checks, merge, reply, task, intent\n")
+    assert capsys.readouterr().err.endswith("swarm: wait on one of: checks, merge, reply, task, intent, lab\n")
     assert held(store) is None
 
 
 def test_a_stored_mutation_wait_ends_with_the_kinds_list(tick):  # noqa: F811
     on = {"kind": "mutation", "target": RUN, "task": "t1"}
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=on)
-    outcome = f"mutation {RUN}, now ended; wait on one of: checks, merge, reply, task, intent"
+    outcome = f"mutation {RUN}, now ended; wait on one of: checks, merge, reply, task, intent, lab"
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
 
