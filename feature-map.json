@@ -7721,7 +7721,8 @@
       "tests": [
         "tests/events/test_nats_replicas.py::test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count",
         "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
-        "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count"
+        "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count",
+        "tests/events/test_nats_replicas.py::test_the_replica_count_defaults_to_one_and_comes_from_the_environment"
       ]
     }
   ],

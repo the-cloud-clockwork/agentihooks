@@ -68,6 +68,7 @@ edit its marker.
 | `AGENTIHOOKS_BUS_CREDENTIALS` | `hive join` | The minted credential, or an `openbao:` reference to it |
 | `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter and event call to the swarm's own streams; state is reached through `for_swarm(<swarm>)`, and the root bus opens no state bucket |
 | `AGENTIHOOKS_BUS_BIND=1` | hive members | Binds existing streams and consumers instead of creating them; members hold no stream create grant |
+| `AGENTIHOOKS_BUS_REPLICAS` | the hub, on a NATS cluster | Creates every stream and bucket at this replica count (default 1) and raises existing streams below it in place at start, never lowering one |
 
 The hub reads the same variables. Set `AGENTIHOOKS_BUS_SCOPED=1` on the hub, without `AGENTIHOOKS_BUS_BIND`, once
 any member is scoped: it then creates each swarm's streams and reads the legacy ones beside them. Without it the hub

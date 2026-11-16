@@ -590,7 +590,9 @@ class NatsBus:
                 self._loop.run(provision_events(self._js, event_stream, window, config.replicas))
                 for name, subject in ((dead_stream, DEAD_SUBJECT), (LAB_STREAM, LAB_SUBJECT)):
                     self._loop.run(
-                        nats_replicas.create(self._js, config.replicas, name, subjects=[subject], duplicate_window=window)
+                        nats_replicas.create(
+                            self._js, config.replicas, name, subjects=[subject], duplicate_window=window
+                        )
                     )
         except BaseException:
             self._loop.close()
