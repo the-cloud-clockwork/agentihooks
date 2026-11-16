@@ -144,8 +144,10 @@ and its budget; see
 runner, in the parallel eager runner and for slow lane steps handed off to run
 after the critical lane.
 
-The end of a run is stored only while the pass is recording, and only for a
-step with an interval above one cron minute or a step in lane `slow`. It is
+The end of a run is stored only while the pass is recording, for every step
+whatever its interval or lane: besides the rest rule, the idle watch reads the
+end of the 60 second `waits end` step to decide whether a checked wait still
+holds the idle count. It is
 written when the step's record is journalled, as epoch seconds, into the hash
 `tick:step-ran` under the swarm's Redis key prefix, one field per step name
 (`scripts.swarm.timing.step_ended` and `step_ends`).

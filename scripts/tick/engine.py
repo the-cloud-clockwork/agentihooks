@@ -493,7 +493,7 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "dropped": dropped,
         "conflicts": len(record.conflicts),
     }
-    if record.outcome in (OK, FAILED) and (step.interval_s > CRON_S or step.lane == SLOW):
+    if record.outcome in (OK, FAILED):
         timing.step_ended(store, slug, step.name, time.time())
     if start is not None and _critical(step):
         current["critical_end_s"] = max(current.get("critical_end_s", 0.0), start + record.wall_s)
