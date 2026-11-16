@@ -1075,11 +1075,9 @@ def test_the_repository_aggregator_rendered_for_the_lab_grades_green() -> None:
     workflows = ci_wiring.load(_ROOT)
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
-    head = copy.deepcopy(workflows)
-    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
-    assert step["run"].count(_QUEUE_TIER_OPENING) == 1
-    step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
-    assert gate_protected.grade(workflows, config, head, config, actors) == []
+    step = workflows["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    assert step["run"].count(ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING) == 1
+    assert gate_protected.grade(workflows, config, workflows, config, actors) == []
 
 
 @pytest.mark.parametrize(

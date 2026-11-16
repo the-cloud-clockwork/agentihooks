@@ -1000,15 +1000,15 @@ def test_shards_wait_only_on_the_durations_lookup():
         ["select", "reuse", "admission"],
         ["test-count", "select", "reuse", "admission"],
     )
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
-    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
+    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
 
 
 def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     jobs = _workflow()["jobs"]
     assert "collect" not in jobs
     collect = jobs["test-count"]
-    assert collect["needs"] == jobs["select"]["needs"]
+    assert collect["needs"] == [*jobs["select"]["needs"], "lab-verdict"]
     assert "needs.select" not in collect["if"]
     assert collect["strategy"]["matrix"] == {"python-version": ["3.12"]}
     assert jobs["split"]["strategy"]["matrix"] == collect["strategy"]["matrix"]
@@ -1209,7 +1209,8 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
     jobs = _workflow()["jobs"]
     job = jobs["shard-check"]
-    assert set(job["needs"]) == {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun"}
+    needs = {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun", "lab-verdict"}
+    assert set(job["needs"]) == needs
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
@@ -2039,6 +2040,7 @@ def test_tests_mutation_refines_shards_and_merges_split_units() -> None:
         "mutation-replan",
         "mutation-shard",
         "admission",
+        "lab-verdict",
     ]
     assert "strategy" not in merged
     steps = {step.get("name"): step for step in merged["steps"]}

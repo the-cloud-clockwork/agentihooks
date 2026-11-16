@@ -1,0 +1,17 @@
+rules:
+  - id: slow-write-step-after-spawn-chain
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A slow lane write step that needs the spawn chain becomes ready only once orphans ends, which a slow pass
+      pushes past the fifty nine second slow deadline, so a long run is cut and every write it returned, a listing
+      save included, is dropped and the next pass pays the same run again. Give a slow lane write step only the needs
+      its body reads, such as RESUMED.
+    paths:
+      include:
+        - /scripts/tick/
+        - slow-write-step-after-spawn-chain.py
+    patterns:
+      - pattern-either:
+          - pattern: WriteStep(..., needs=budgets.SPAWN_NEEDS, ..., lane=SLOW, ...)
+          - pattern: WriteStep(..., needs=SPAWN_NEEDS, ..., lane=SLOW, ...)
