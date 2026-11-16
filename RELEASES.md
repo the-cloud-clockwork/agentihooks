@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.947 · 2026-11-16
+
+### 2026-11-16 · 87aecfa3d041 · #11554 · @nestorcolt
+
+**Shut only the steps that need a raising tick step**
+
+Previously, one raising tick step would halt the entire pass, causing every later step to be skipped even when unrelated—this is how an inbox exits-sweep NamingError on 16 November left reap and tick master resting in 66 straight passes and stalled a master handoff. This change makes a raising step shut only itself and the steps that genuinely depend on it, tracking the first exception and its dependents through hold and fell, while every independent step still runs; the pass still ends failed on that first exception. Regression tests, a Semgrep rule and a feature map entry guard the behavior.
+
+### 2026-11-16 · 9922fa536ab4 · #11564 · @agenticore-app
+
+**Hold a raising intent check to the end of its tick pass**
+
+This fix stops a raising intent check from derailing the rest of a tick pass. Previously, the wrapper relay hook raised immediately on an intent failure, with no handler to catch it, causing the scheduler to cancel every other pending step in that pass—even ones unrelated to the intent verdict, like outbox migration, page relay, and quiet pass. Now the hook simply defers to the pass end, where the held failure is raised and reported as before, letting all independent steps run to completion while still correctly marking the pass as failed.
+
 ## v2.17.946 · 2026-11-16
 
 ### 2026-11-16 · 7e3d73afd9fc · #11572 · @agenticore-app
