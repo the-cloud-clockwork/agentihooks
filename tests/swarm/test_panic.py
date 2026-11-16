@@ -77,7 +77,8 @@ def _branches(monkeypatch: pytest.MonkeyPatch, branches: dict[str, str]) -> list
     def change(url: str, refused: str) -> ChangeState:
         assert refused == f"cannot read pull request {url}"
         asked.append(url)
-        return ChangeState(ChangeRef("o/r", 1), "open", "a" * 40, "dev", False, url, branches[url])
+        owner, name = url.removeprefix("https://github.com/").split("/")[:2]
+        return ChangeState(ChangeRef(f"{owner}/{name}", 1), "open", "a" * 40, "dev", False, url, branches[url])
 
     monkeypatch.setattr(stack, "change", change)
     return asked
@@ -334,7 +335,8 @@ def test_release_refuses_below_the_level(store, counted):
 
 
 def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    fix = "https://github.com/o/a/pull/1"
+    asked = _branches(monkeypatch, {fix: "fix-branch"})
     runs = Runs(
         {
             "o/a": [
@@ -344,21 +346,27 @@ def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs(monkeypatc
                 _row(4, "done", status="completed"),
                 _row(5, "waiting", status="queued"),
             ],
-            "o/b": [_row(6, "other", status="pending")],
+            "o/b": [_row(6, "other", status="pending"), _row(7, "fix-branch")],
         },
     )
-    cancelled = panic.cancel_runs([FIX], ["o/a", "o/b"], runs)
-    assert cancelled == ["o/a run 1 on feature", "o/a run 5 on waiting", "o/b run 6 on other"]
+    cancelled = panic.cancel_runs([fix], ["o/a", "o/b"], runs)
+    assert cancelled == [
+        "o/a run 1 on feature",
+        "o/a run 5 on waiting",
+        "o/b run 6 on other",
+        "o/b run 7 on fix-branch",
+    ]
     assert [(repository, call.operation, call.args) for repository, call in runs.calls()] == [
         ("o/a", "latest_runs", ()),
         ("o/a", "cancel_run", (1,)),
         ("o/a", "cancel_run", (5,)),
         ("o/b", "latest_runs", ()),
         ("o/b", "cancel_run", (6,)),
+        ("o/b", "cancel_run", (7,)),
     ]
     assert all(panic.TOOL_SECONDS - 5 < call.deadline.remaining <= panic.TOOL_SECONDS for _, call in runs.calls())
     assert panic.TOOL_SECONDS == 60.0
-    assert asked == [FIX]
+    assert asked == [fix]
 
 
 def test_every_active_status_is_cancelled():
@@ -613,13 +621,32 @@ def test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository(
         "panic cancelled the-cloud-clockwork/agentihooks run 1 on busy",
         "panic cancelled the-cloud-clockwork/agentihooks-bundle run 1 on busy",
         "panic cancelled the-cloud-clockwork/agentihooks-bundle run 2 on fix-branch",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 3 on pr-branch",
         "panic cancelled the-cloud-clockwork/antoncore run 1 on busy",
         "panic cancelled the-cloud-clockwork/antoncore run 2 on fix-branch",
+        "panic cancelled the-cloud-clockwork/antoncore run 3 on pr-branch",
     ]
     assert asked == [FIX]
 
 
-def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):
+@pytest.mark.feature("panic-fix-pull-request-head-in-its-repository")
+def test_cancel_runs_spares_a_fix_pull_request_head_only_in_its_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    runs = Runs({repo: [_row(1, "fix-branch")] for repo in panic.REPOS})
+    assert panic.cancel_runs([FIX], panic.REPOS, runs) == [
+        "the-cloud-clockwork/agentihooks-bundle run 1 on fix-branch",
+        "the-cloud-clockwork/antoncore run 1 on fix-branch",
+    ]
+    assert runs.cancelled() == ["the-cloud-clockwork/agentihooks-bundle:1", "the-cloud-clockwork/antoncore:1"]
+    assert asked == [FIX]
+
+
+def test_the_panic_button_cancels_and_prints(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     _branches(monkeypatch, {FIX: "fix-branch"})
     runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS})
     monkeypatch.setattr(panic, "port", runs)
@@ -631,7 +658,13 @@ def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys
     assert out == {
         "panic": "on",
         "fixes": [FIX],
-        "cancelled": [f"{repo} run 7 on busy" for repo in panic.REPOS],
+        "cancelled": [
+            "the-cloud-clockwork/agentihooks run 7 on busy",
+            "the-cloud-clockwork/agentihooks-bundle run 7 on busy",
+            "the-cloud-clockwork/agentihooks-bundle run 8 on fix-branch",
+            "the-cloud-clockwork/antoncore run 7 on busy",
+            "the-cloud-clockwork/antoncore run 8 on fix-branch",
+        ],
     }
     current = panic.state(store)
     assert current is not None
@@ -1194,6 +1227,12 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
         ("remote.origin.push", "+refs/heads/*:refs/heads/*", "git push origin fix-branch", True),
         ("remote.origin.pushurl", "https://github.com/someone/else.git", "git push origin fix-branch", True),
         ("remote.origin.mirror", "true", "git push origin fix-branch", True),
+        (
+            "url.git@github.com:someone/.pushInsteadOf",
+            "git@github.com:The-Cloud-Clockwork/",
+            "git push origin fix-branch",
+            True,
+        ),
         ("branch.fix-branch.remote", "upstream", "git push", True),
         ("branch.fix-branch.pushRemote", "elsewhere", "git push", True),
         ("remote.pushDefault", "elsewhere", "git push", True),
