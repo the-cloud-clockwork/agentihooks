@@ -1136,12 +1136,20 @@ REBOUND_READ = (
     "    assert workflow.read_text()\n\n"
     "def test_kept():\n    assert True\n"
 )
+SHADOWED_PATH = (
+    "from pathlib import Path\n\n"
+    "def test_fixture():\n"
+    "    Path = str\n"
+    "    workflow = Path(__file__).resolve().parent / 'fixtures/watch.yml'\n"
+    "    assert workflow.read_text()\n\n"
+    "def test_kept():\n    assert True\n"
+)
 
 
 @pytest.mark.parametrize(
     ("tests", "deleted", "admitted"),
-    [(LOCAL_READ, True, True), (LOCAL_READ, False, False), (REBOUND_READ, True, False)],
-    ids=["local-deleted", "local-retained", "rebound-deleted"],
+    [(LOCAL_READ, True, True), (LOCAL_READ, False, False), (REBOUND_READ, True, False), (SHADOWED_PATH, True, False)],
+    ids=["local-deleted", "local-retained", "rebound-deleted", "shadowed-path"],
 )
 @pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
 def test_a_deleted_workflow_read_through_a_local_variable_is_admitted(
@@ -1195,6 +1203,18 @@ def test_a_lost_case_whose_id_names_a_deleted_file_is_admitted(
     assert (f"test_case[{case}] is admitted" in result.stdout) == admitted
 
 
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red(tmp_path: Path) -> None:
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": _generated("watch.yml", "kept") + "\ndef test_other():\n    assert True\n"},
+        {"test_mod.py": _generated("moved.yml", "kept")},
+        {"base": {"tests/fixtures/watch.yml": WORKFLOW}, "head": {"tests/fixtures/moved.yml": WORKFLOW + "# edited\n"}},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_case[watch.yml] is admitted" not in result.stdout
+
+
 RETIRED_NODE = "tests/test_mod.py::test_retired"
 RETIRING = "def test_kept():\n    assert True\n\ndef test_retired():\n    assert True\n"
 SIGNED = {"reader": "Standards reader", "reason": "the head removes the behaviour it held"}
@@ -1215,8 +1235,30 @@ def _retirement(nodeid: str, ruling: object, name: str | None = None) -> dict[st
         ({}, _retirement(RETIRED_NODE, {"reader": "Standards reader", "reason": " "}), False),
         ({}, _retirement(RETIRED_NODE, SIGNED, name="0" * 64), False),
         (_retirement(RETIRED_NODE, SIGNED), _retirement(RETIRED_NODE, SIGNED), False),
+        ({}, _retirement(RETIRED_NODE, {**SIGNED, "reader": "not standards"}), False),
+        ({}, {next(iter(_retirement(RETIRED_NODE, SIGNED))): "{not json"}, False),
+        (
+            {},
+            {
+                next(iter(_retirement(RETIRED_NODE, SIGNED))): json.dumps(
+                    {RETIRED_NODE: SIGNED, "tests/x.py::t": SIGNED}
+                )
+            },
+            False,
+        ),
     ],
-    ids=["signed", "unlisted", "other-test", "unsigned", "no-reason", "misnamed", "inherited"],
+    ids=[
+        "signed",
+        "unlisted",
+        "other-test",
+        "unsigned",
+        "no-reason",
+        "misnamed",
+        "inherited",
+        "not-standards",
+        "invalid-json",
+        "two-entries",
+    ],
 )
 @pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
 def test_a_lost_test_is_admitted_only_by_a_new_signed_retirement(

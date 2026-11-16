@@ -7024,11 +7024,12 @@
       "id": "count-floor-admits-local-reads-ids-and-retirements",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2518",
-      "behaviour": "The test count floor admits a lost test that reads a deleted workflow or step fixture through a function-local variable bound once, a lost parametrized case whose id names a file the head deletes by its path or by a file name no head file shares and whose bytes survive in no head file, and a lost test the head newly lists in test-retirements under the hash of its node id with a ruling that names a Standards reader and gives a reason; a local name bound twice, an id naming a retained or moved file or only a fragment of a name, and an unlisted, unsigned, misnamed or inherited retirement keep the lost test counted.",
+      "behaviour": "The test count floor admits a lost test that reads a deleted workflow or step fixture through a function-local variable bound once, a lost parametrized case whose id names a file the head deletes, by its path or by a file name with an extension no head file shares, when its bytes survive in no head file and the test gains no case in the head, and a lost test the head newly lists in test-retirements under the hash of its node id with a ruling whose reader starts with Standards and that gives a reason; a local name bound twice, an id naming a retained or moved file or only a fragment of a name, and an unlisted, unsigned, misnamed or inherited retirement keep the lost test counted.",
       "seam": "tests.count_floor._admitted: _fixture_subject local bindings, _case_files and retirements",
       "tests": [
         "tests/test_count_floor.py::test_a_deleted_workflow_read_through_a_local_variable_is_admitted",
         "tests/test_count_floor.py::test_a_lost_case_whose_id_names_a_deleted_file_is_admitted",
+        "tests/test_count_floor.py::test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red",
         "tests/test_count_floor.py::test_a_lost_test_is_admitted_only_by_a_new_signed_retirement",
         "tests/test_count_floor.py::test_the_retire_command_writes_only_a_signed_retirement_the_floor_admits"
       ]

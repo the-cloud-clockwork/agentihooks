@@ -480,7 +480,7 @@ def _fixture_subject(
     ):
         return set()
     names, _ = _imports(module)
-    constructors = {name for name, subjects in names.items() if ("pathlib", "Path") in subjects}
+    constructors = {name for name, subjects in names.items() if ("pathlib", "Path") in subjects} - local.keys()
     bindings = {
         statement.targets[0].id: statement.value
         for statement in module.body
@@ -719,20 +719,19 @@ def _tree_files(tree: Path) -> Iterator[Path]:
 
 def _deleted_files(base: Path, head: Path) -> dict[str, set[str]]:
     """Map the path, and the file name no head file shares, of each base file the head carries nowhere to that file."""
-    sizes: dict[int, list[Path]] = {}
-    for path in _tree_files(head):
-        sizes.setdefault(path.stat().st_size, []).append(path)
-    names = {path.name for paths in sizes.values() for path in paths}
+    head_files = list(_tree_files(head))
+    names = {path.name for path in head_files}
+    candidates = [path for path in _tree_files(base) if not (head / path.relative_to(base)).exists()]
+    sizes = {path.stat().st_size for path in candidates}
+    kept = {hashlib.sha256(path.read_bytes()).digest() for path in head_files if path.stat().st_size in sizes}
     tokens: dict[str, set[str]] = {}
-    for path in _tree_files(base):
+    for path in candidates:
+        if hashlib.sha256(path.read_bytes()).digest() in kept:
+            continue
         relative = path.relative_to(base).as_posix()
-        if (head / relative).exists():
-            continue
-        data = path.read_bytes()
-        if any(other.read_bytes() == data for other in sizes.get(len(data), [])):
-            continue
         for token in {relative} | ({path.name} - names):
-            tokens.setdefault(token, set()).add(relative)
+            if "/" in token or Path(token).suffix:
+                tokens.setdefault(token, set()).add(relative)
     return tokens
 
 
@@ -760,7 +759,7 @@ def _case_files(nodeid: str, named: dict[str, set[str]]) -> list[str]:
 
 def retirement_path(root: Path, nodeid: str) -> Path:
     """Return the retirement file of a node id under the tree root."""
-    return root / _RETIREMENTS / f"{hashlib.sha256(nodeid.encode()).hexdigest()}.json"
+    return root / _RETIREMENTS / f"{hashlib.sha256(nodeid.encode('utf-8', 'surrogatepass')).hexdigest()}.json"
 
 
 def _signed(ruling: object) -> bool:
@@ -768,7 +767,7 @@ def _signed(ruling: object) -> bool:
     return (
         isinstance(ruling, dict)
         and all(isinstance(ruling.get(field), str) and ruling[field].strip() for field in ("reader", "reason"))
-        and "standards" in ruling["reader"].lower()
+        and ruling["reader"].strip().lower().startswith("standards")
     )
 
 
@@ -777,7 +776,7 @@ def retirements(base: Path, head: Path) -> dict[str, str]:
     retired = {}
     for path in sorted((head / _RETIREMENTS).glob("*.json")):
         try:
-            record = json.loads(path.read_bytes())
+            record = None if path.is_symlink() else json.loads(path.read_bytes())
         except (OSError, ValueError):
             record = None
         entry = next(iter(record.items())) if isinstance(record, dict) and len(record) == 1 else None
@@ -803,17 +802,20 @@ def write_retirements(head: Path, nodeids: list[str], reader: str, reason: str) 
         return 1
     for nodeid in nodeids:
         target = retirement_path(head, nodeid)
-        target.parent.mkdir(exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps({nodeid: ruling}, indent=2) + "\n")
         print(target.relative_to(head).as_posix())
     return 0
 
 
-def _admissions(args: argparse.Namespace, lost: list[str]) -> dict[str, list[str]]:
+def _admissions(args: argparse.Namespace, lost: list[str], gained: list[str]) -> dict[str, list[str]]:
     """Return each lost test an admission rule explains, mapped to the subjects that explain it."""
     surviving, opaque = bound_names(args.head)
     for path in opaque:
-        print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
+        print(
+            f"{path} hides its names in the head (unparseable or a star import), "
+            "so no lost test is admitted except by a signed retirement"
+        )
     definitions = set() if opaque else top_level_definitions(args.base, args.tests)
     previous, _ = bound_names(args.base)
     introduced = {name for _, name, _ in surviving - previous}
@@ -823,11 +825,13 @@ def _admissions(args: argparse.Namespace, lost: list[str]) -> dict[str, list[str
     }
     deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
     emptied = set() if opaque else _emptied_test_files(args.base, args.head, args.tests)
-    named = _deleted_files(args.base, args.head)
+    named = {} if opaque else _deleted_files(args.base, args.head)
+    growing = {nodeid.split("[", 1)[0] for nodeid in gained}
     retired = retirements(args.base, args.head)
     admitted = {}
     for nodeid in lost:
-        if admission := _admitted(nodeid, args, emptied, deleted, opaque, named, retired):
+        cases = {} if nodeid.split("[", 1)[0] in growing else named
+        if admission := _admitted(nodeid, args, emptied, deleted, opaque, cases, retired):
             subjects, reason = admission
             admitted[nodeid] = subjects
             print(f"{nodeid} is admitted: {reason}")
@@ -860,7 +864,7 @@ def main(argv: list[str] | None = None) -> int:
     if output := os.environ.get("TEST_COUNT_HEAD_COLLECTION"):
         Path(output).write_text(json.dumps(head))
     lost = sorted(set(base) - set(head))
-    admitted = _admissions(args, lost) if len(head) < len(base) else {}
+    admitted = _admissions(args, lost, sorted(set(head) - set(base))) if len(head) < len(base) else {}
     floor = len(base) - len(admitted)
     print(f"head collects {len(head)} tests, base floor {floor}")
     if len(head) < floor:
