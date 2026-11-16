@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from scripts.swarm import github_reads, ledger_events, mutation_wait, stack
+from scripts.swarm import github_reads, ledger_events, run_wait, stack
 from scripts.swarm.ledger_events import PullRequest
 from scripts.tick.ports.contracts import SourceControl
 from tests.swarm.graph_port import RunPort
@@ -49,7 +49,7 @@ def head(pull: PullRequest | None) -> str:
 
 @pytest.fixture
 def port(monkeypatch: pytest.MonkeyPatch) -> Any:
-    monkeypatch.setattr(mutation_wait, "backing_off", lambda: False)
+    monkeypatch.setattr(run_wait, "backing_off", lambda: False)
     calls: list[str] = []
     missing: set[int] = set()
 
@@ -102,7 +102,7 @@ def test_a_view_holding_no_open_pull_request_reads_each_reread_on_its_own(port: 
 
 @pytest.mark.feature("ledger-events-fresh-reader-batches-rereads")
 def test_a_reread_during_a_rate_limit_backoff_makes_no_request(port: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mutation_wait, "backing_off", lambda: True)
+    monkeypatch.setattr(run_wait, "backing_off", lambda: True)
     reread = ledger_events.fresh_reader(held(*URLS))
     assert reread(URLS[0]) is None
     assert port.calls == []
@@ -121,7 +121,7 @@ def test_each_pass_reads_fresh_past_the_shared_snapshot(
 
 @pytest.mark.feature("ledger-events-fresh-reader-batches-rereads")
 def test_the_batch_forwards_its_cache_and_a_zero_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mutation_wait, "backing_off", lambda: False)
+    monkeypatch.setattr(run_wait, "backing_off", lambda: False)
     seen: list[tuple[Any, ...]] = []
     pull = PullRequest("OPEN", None, None, False, head="batched")
 

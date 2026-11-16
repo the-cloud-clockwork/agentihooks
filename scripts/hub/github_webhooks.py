@@ -160,7 +160,7 @@ def main(argv: list[str]) -> int:
         return 2
     bus = open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     lab_secret = os.environ.get(NOTICE_SECRET_ENV, "").encode()
-    lab = LabIntake(bus.events, lab_secret) if lab_secret else None
+    lab = LabIntake(bus.lab_heads, lab_secret) if lab_secret else None
     server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(LazyPulls(bus), secret, lab)))
     try:
         server.serve_forever()

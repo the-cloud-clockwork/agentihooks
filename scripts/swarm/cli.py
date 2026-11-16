@@ -112,6 +112,7 @@ from scripts.swarm import (
     ledger_events,
     master_launch,
     master_move,
+    master_queue,
     merge_queue,
     naming,
     outage,
@@ -137,7 +138,6 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
-    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -2177,7 +2177,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
         master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
-        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
+        stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
@@ -2428,10 +2428,8 @@ def cmd_wait(store, args):
             if head == "":
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
             if head is None:
-                waits.mutation_wait.admitted_pending(held["target"])
+                waits.run_wait.admitted_pending(held["target"])
             held["head"] = head
-        if held["kind"] == "mutation":
-            held["head"] = waits.mutation_wait.bind(held["target"])
     at = now_ms()
     until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
     idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)

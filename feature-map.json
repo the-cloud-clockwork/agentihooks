@@ -1171,6 +1171,20 @@
       ]
     },
     {
+      "id": "codex-adopts-hub-admitted-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-hub-admitted",
+      "behaviour": "The Codex session supervisor adopts the execution hub admission registered for its seat and hive, starting with no harness or transport, and binds harness codex and the chosen transport onto it while it is still starting, so a hub admitted Codex app-server launch serves its admitted execution, starts no second one, and leaves the move to working to the hub claims reactor; any other shape is refused.",
+      "seam": "scripts.hub.admission.Admission._claim writing the starting execution and scripts.codex_session.supervisor.adopt binding it",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_serves_the_execution_the_hub_admitted",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_it_does_not_serve",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_before_the_bind",
+        "tests/hub/test_admission.py::test_a_hub_admitted_codex_launch_adopts_the_admitted_execution"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -1730,10 +1744,11 @@
       "id": "swarm-tick-pass-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
-      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, in each tick scenario on its own through the tick core and the fenced command entry point; a covering set of scenarios runs every registered step and writes and reads every pass value; a planted undeclared read or missing need is named.",
       "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
       "tests": [
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
       ]
@@ -2316,11 +2331,12 @@
     {
       "id": "swarm-run-wait",
       "origin": "inventory",
-      "behaviour": "A wait on an Actions run ends with its conclusion and a red run names its failed jobs.",
+      "behaviour": "A wait on an Actions run is a checks wait that ends with its conclusion, a red run names its failed jobs, and a mutation wait is refused with the kinds list.",
       "seam": "The run wait pass",
       "tests": [
         "tests/swarm/test_run_wait.py::test_the_tick_ends_a_run_wait_with_its_conclusion",
-        "tests/swarm/test_run_wait.py::test_a_red_run_names_its_failed_jobs_and_ends_the_wait"
+        "tests/swarm/test_run_wait.py::test_a_red_run_names_its_failed_jobs_and_ends_the_wait",
+        "tests/swarm/test_run_wait.py::test_a_mutation_wait_is_refused_with_the_kinds_list"
       ]
     },
     {
@@ -5446,6 +5462,21 @@
       ]
     },
     {
+      "id": "master-freeze-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-subagent-queue-refused",
+      "behaviour": "swarm merge queue accepts the master seat for a pull request on a master sub agent branch when a task naming that pull request is not done and a master seat froze that task by name, and records the master freeze route and the task in the queue journal; a freeze set by anyone but a master, a freeze on the task's phase only, a focus, a done task, a pull request no task names or a branch that is not a master's leaves the master refused, the route never opens a dequeue, and the freeze records are read as the ledger's whole freeze collection.",
+      "seam": "swarm merge queue through cli.cmd_merge and master_queue.route against ledger.tasks_targeting, LedgerClient.freezes and pull_head.pull_branch",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_the_master_seat_queues_a_sub_agent_pull_request_for_a_task_a_master_froze",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_takes_the_frozen_task_among_the_tasks_naming_the_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open",
+        "tests/swarm/test_ledger_client_task.py::test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection"
+      ]
+    },
+    {
       "id": "merge-queue-task-pulls",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-task-prs",
@@ -7031,6 +7062,21 @@
         "tests/ci_lab/test_expressions.py::test_an_expression_evaluates_as_github_actions_evaluates_it",
         "tests/ci_lab/test_expressions.py::test_syntax_outside_the_subset_is_refused",
         "tests/ci_lab/test_expressions.py::test_a_condition_holds_when_its_expression_is_truthy"
+      ]
+    },
+    {
+      "id": "lab-head-own-stream",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
+      "behaviour": "CI lab heads live in their own JetStream stream, AGENTIHOOKS-CI-LAB-HEADS with ci.lab.head.>, which every provisioning bus open creates after the events stream, so the events provisioning that resets the legacy stream's subjects on each controller start never wipes the lab head subjects and a restart keeps the stored heads; the bus exposes it as lab_heads and the GitHub webhook receiver publishes lab heads there by stream name, failing rather than falling back to the legacy events stream when it is missing.",
+      "seam": "scripts.events.nats NatsBus provisioning and NatsBus.lab_heads on LAB_STREAM, and scripts.hub.github_webhooks main wiring LabIntake to bus.lab_heads",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_provisioning_keeps_the_lab_head_subjects_across_a_controller_restart",
+        "tests/events/test_nats_lab_stream.py::test_the_receiver_publishes_lab_heads_to_the_lab_stream_by_name",
+        "tests/events/test_nats_lab_stream.py::test_a_lab_head_publish_without_the_lab_stream_fails_instead_of_falling_back",
+        "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
+        "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
+        "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
       ]
     }
   ],
