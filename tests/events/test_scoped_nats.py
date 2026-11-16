@@ -340,6 +340,54 @@ def test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub(hub:
     assert admitted == [None]
 
 
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot(
+    hub: Any, signer: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Thirty three held admissions fill every hub serve thread, so a take sent after them waits in the hub queue past
+    the hive's wait; one freed thread then drains the queue in order, and the next execution's take finds the slot free."""
+    import re
+    import threading
+    import time
+
+    from scripts.hive import account_slots
+    from scripts.hub import slots
+
+    monkeypatch.setattr(account_slots, "REQUEST_TIMEOUT_MS", 500)
+    gates = {f"held-{n}": threading.Event() for n in range(33)}
+    entered: list[str] = []
+
+    class HeldAdmission:
+        def admit(self, slug: str, request: dict[str, Any]) -> None:
+            entered.append(request["task"])
+            gates[request["task"]].wait(30)
+
+    admitter: Any = HeldAdmission()
+    slots.serve(hub, clock=lambda: 1000, admitter=admitter)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
+    rig = client.for_swarm("rig")
+    try:
+        hold = account_slots.asker(rig, "rig", "m1", 20)
+        for task in gates:
+            with pytest.raises(TimeoutError):
+                hold({"op": "admit", "hive": "m1", "task": task})
+        lost = account_slots.Remote(account_slots.asker(rig, "rig", "m1", 500), "m1", lambda: report)
+        with pytest.raises(TimeoutError):
+            lost.take("lost", "claude")
+        time.sleep(0.2)
+        for task in gates.keys() - set(entered[1:]):
+            gates[task].set()
+        after = account_slots.Remote(account_slots.asker(rig, "rig", "m1", 5_000), "m1", lambda: report)
+        assert after.take("next", "claude") == "a"
+    finally:
+        for gate in gates.values():
+            gate.set()
+        client.close()
+    dropped = r"^bus: dropped a request on 'slots\.rig\.m1' after it waited \d+ ms in the serve queue, past its requester's 500 ms wait$"
+    assert re.search(dropped, capsys.readouterr().err, re.MULTILINE)
+
+
 def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
     client = member(signer)
     try:
