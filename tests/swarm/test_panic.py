@@ -524,9 +524,9 @@ def _github_runs(monkeypatch: pytest.MonkeyPatch, rows: dict[str, list[dict[str,
     from scripts.tick.adapters import github
 
     def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        path = args[1].removeprefix("repos/")
-        listing = {"workflow_runs": rows[path.partition("/actions/runs?")[0]]}
-        return subprocess.CompletedProcess(args, 0, "" if path.endswith("/cancel") else json.dumps(listing), "")
+        repository, listing, _ = args[1].removeprefix("repos/").partition("/actions/runs?")
+        body = json.dumps({"workflow_runs": rows[repository]}) if listing else ""
+        return subprocess.CompletedProcess(args, 0, body, "")
 
     monkeypatch.setattr(github.github_reads, "rest", rest)
 
@@ -572,8 +572,9 @@ def test_the_gate_required_run_name_names_the_branch_the_sweep_keeps(
     _branches(monkeypatch, {FIX: "fix-branch"})
     workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/gate-required.yml").read_text())
     branch = "${{ github.event.workflow_run.head_branch }}"
-    assert workflow["run-name"] == f"Gate Required status for {branch}"
-    titles = [workflow["run-name"].replace(branch, name) for name in ("fix-branch", "feature")]
+    name = workflow.get("run-name")
+    assert name == f"Gate Required status for {branch}"
+    titles = [name.replace(branch, fix) for fix in ("fix-branch", "feature")]
     _github_runs(monkeypatch, {"o/a": [_api_run(number, title) for number, title in enumerate(titles, 1)]})
     assert panic.cancel_runs([FIX], ["o/a"], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
         "o/a run 2 on main"
