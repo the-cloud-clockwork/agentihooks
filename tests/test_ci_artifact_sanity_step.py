@@ -11,6 +11,12 @@ ROOT = Path(__file__).resolve().parent.parent
 CHECKER = Path("scripts") / "swarm_ledger" / "artifact_sanity.py"
 
 
+NO_PAGES = (
+    "::error::The protected grader carries no artifact sanity checker with the pages option, "
+    "so nothing trusted can grade the head viewer page and assets.\n"
+)
+
+
 def _lint_steps() -> list[dict[str, str]]:
     return yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())["jobs"]["lint"]["steps"]
 
@@ -29,9 +35,13 @@ def _checker(name: str, option: str, code: int) -> str:
     )
 
 
-def _run_step(tmp_path: Path, grader_option: str) -> tuple[int, str, str]:
+def _run_step(tmp_path: Path, grader_option: str | None) -> tuple[int, str]:
     grader, head, tools = tmp_path / "temp" / "grader", tmp_path / "head", tmp_path / "bin"
-    for root, source in ((grader, _checker("grader", grader_option, 1)), (head, _checker("planted", '"--pages"', 0))):
+    grader.mkdir(parents=True)
+    checkers = [(head, _checker("planted", '"--pages"', 0))]
+    if grader_option is not None:
+        checkers.append((grader, _checker("grader", grader_option, 1)))
+    for root, source in checkers:
         (root / CHECKER).parent.mkdir(parents=True)
         (root / CHECKER).write_text(source)
         (root / "scripts" / "__init__.py").write_text("")
@@ -52,7 +62,7 @@ def _run_step(tmp_path: Path, grader_option: str) -> tuple[int, str, str]:
     command = ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script]
     done = subprocess.run(command, cwd=head, env=env, capture_output=True, text=True)
     calls = tmp_path / "calls"
-    return done.returncode, calls.read_text() if calls.exists() else "", done.stdout
+    return done.returncode, (calls.read_text() if calls.exists() else "") + done.stdout
 
 
 def test_the_grader_is_checked_out_before_the_artifact_checks() -> None:
@@ -64,19 +74,15 @@ def test_the_grader_is_checked_out_before_the_artifact_checks() -> None:
 def test_a_planted_head_checker_never_runs_once_the_grader_carries_the_pages_option(tmp_path: Path) -> None:
     head = tmp_path / "head"
     pages, notes = head / "scripts" / "swarm_ledger", head / "tests" / "fixtures" / "artifacts" / "notes.md"
-    assert _run_step(tmp_path, '"--pages"') == (
-        1,
-        f"grader {tmp_path / 'temp' / 'grader'} --pages {pages} {notes}\n",
-        "",
-    )
+    assert _run_step(tmp_path, '"--pages"') == (1, f"grader {tmp_path / 'temp' / 'grader'} --pages {pages} {notes}\n")
 
 
 def test_a_grader_without_the_pages_option_turns_the_step_red(tmp_path: Path) -> None:
-    error = (
-        "::error::The protected grader carries no artifact sanity checker with the pages option, "
-        "so nothing trusted can grade the head viewer page and assets.\n"
-    )
-    assert _run_step(tmp_path, '"files"') == (1, "", error)
+    assert _run_step(tmp_path, '"files"') == (1, NO_PAGES)
+
+
+def test_a_grader_without_the_checker_turns_the_step_red(tmp_path: Path) -> None:
+    assert _run_step(tmp_path, None) == (1, NO_PAGES)
 
 
 def test_the_step_detects_the_option_the_checker_really_declares() -> None:
