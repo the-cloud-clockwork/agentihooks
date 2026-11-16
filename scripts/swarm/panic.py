@@ -184,6 +184,10 @@ def branch_fix(fix: str) -> tuple[str, str]:
     return repo_key(f"{GITHUB}{owner}/{name}"), branch
 
 
+def check_fix(fix: str) -> None:
+    """Refuses a fix link panic must not store."""
+
+
 def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
     """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit or a
     release tag."""

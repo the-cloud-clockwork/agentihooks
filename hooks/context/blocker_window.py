@@ -164,6 +164,16 @@ def _spares(tokens: list[str]) -> bool:
     return any(words[: len(prefix)] == list(prefix) for prefix in _FIX_COMMANDS)
 
 
+def _command(tokens: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """Return a command's words, its program's base name first, and git's global options before its subcommand."""
+    return ([Path(tokens[0]).name, *tokens[1:]] if tokens else []), []
+
+
+def _targets(words: list[str]) -> tuple[str, ...] | None:
+    """Return the refs a command the fix may run names, or None for a command it may not run."""
+    return () if any(words[: len(prefix)] == list(prefix) for prefix in _FIX_COMMANDS) else None
+
+
 def _git(cwd: str, *args: str) -> str:
     """Return one git read's output in the session's directory, or an empty string when it fails."""
     try:
