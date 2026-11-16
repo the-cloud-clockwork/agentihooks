@@ -1701,6 +1701,9 @@ def close_server(server: ThreadingHTTPServer, drained: bool) -> None:
 
 
 def serve() -> None:
+    from scripts.hub import projector
+    from scripts.swarm_ledger import outbox_host
+
     predecessor = os.getppid()
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     listener = server_handoff.inherited()
@@ -1736,9 +1739,6 @@ def serve() -> None:
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     drained = True
     try:
-        from scripts.hub import projector
-        from scripts.swarm_ledger import outbox_host
-
         with outbox_host.running(stored), projector.running(repository, HUB):
             try:
                 server.serve_forever(POLL_S)

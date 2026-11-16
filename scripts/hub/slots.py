@@ -63,4 +63,9 @@ def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admis
     admitter = admitter or admission.Admission()
     for bucket in BUCKETS:
         bus.state(bucket)
-    bus.serve(f"{SLOTS}.*.*", QUEUE, lambda subject, data: handle(bus, subject, data, clock, admitter))
+    bus.serve(
+        f"{SLOTS}.*.*",
+        QUEUE,
+        lambda subject, data: handle(bus, subject, data, clock, admitter),
+        wait_ms=account_slots.REQUEST_TIMEOUT_MS,
+    )

@@ -1,0 +1,52 @@
+rules:
+  - id: launch-model-skips-harness-choice
+    languages: [python]
+    severity: ERROR
+    message: A launch model read with .get("model") or lane_model must pass through model_pick.suited, or a foreign check on that model before use; otherwise a Codex launch asks for the lane's Claude model or a Claude launch for a Codex model and dies before its profile canary.
+    paths:
+      include:
+        - /scripts/hive/orders.py
+        - /scripts/hive/spoke.py
+        - /scripts/hub/admission.py
+        - /scripts/swarm/master_launch.py
+        - /scripts/swarm/model_pick.py
+        - /scripts/swarm/runtime.py
+        - /scripts/swarm/successor_fill.py
+        - launch-model-skips-harness-choice.py
+    patterns:
+      - pattern-either:
+          - pattern: |
+              {..., "model": <... $SOURCE.get("model", ...) ...>, ...}
+          - pattern: |
+              {..., "model": <... lane_model(...) ...>, ...}
+          - pattern: |
+              {**$BASE, ..., "model": <... $SOURCE.get("model", ...) ...>, ...}
+          - pattern: |
+              {**$BASE, ..., "model": <... lane_model(...) ...>, ...}
+          - pattern: ModelPick(<... $SOURCE.get("model", ...) ...>, ...)
+          - pattern: $MODULE.ModelPick(<... $SOURCE.get("model", ...) ...>, ...)
+          - pattern: replace($RECORD, ..., model=<... $SOURCE.get("model", ...) ...>, ...)
+      - pattern-not: |
+          {..., "model": <... suited(...) ...>, ...}
+      - pattern-not: |
+          {..., "model": <... $CHOICE.suited(...) ...>, ...}
+      - pattern-not: |
+          {**$BASE, ..., "model": <... suited(...) ...>, ...}
+      - pattern-not: |
+          {**$BASE, ..., "model": <... $CHOICE.suited(...) ...>, ...}
+      - pattern-not: ModelPick(<... suited(...) ...>, ...)
+      - pattern-not: ModelPick(<... $CHOICE.suited(...) ...>, ...)
+      - pattern-not: $MODULE.ModelPick(<... suited(...) ...>, ...)
+      - pattern-not: $MODULE.ModelPick(<... $CHOICE.suited(...) ...>, ...)
+      - pattern-not: replace($RECORD, ..., model=<... suited(...) ...>, ...)
+      - pattern-not: replace($RECORD, ..., model=<... $CHOICE.suited(...) ...>, ...)
+      - pattern-not-inside: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... foreign($HARNESS, $DEFAULT.model) ...>:
+              ...
+      - pattern-not-inside: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... $CHOICE.foreign($HARNESS, $DEFAULT.model) ...>:
+              ...

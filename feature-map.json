@@ -1,6 +1,27 @@
 {
   "features": [
     {
+      "id": "compose-ledger-start-pulls-image",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
+      "behaviour": "Starting the compose ledger service pulls its image before compose up, for the adopted stack swarm service and the legacy ledger service, so up recreates the container on a newer image instead of rerunning mounted code on a stale local one; a failed pull still runs up on the local image.",
+      "seam": "server_compose.start, the docker compose commands it runs",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_adoption_sends_start_and_stop_to_the_bundle_swarm_service",
+        "tests/swarm_ledger/test_server_compose.py::test_a_failed_pull_still_starts_the_service_on_its_local_image"
+      ]
+    },
+    {
+      "id": "reload-successor-imports-hub-before-ready",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
+      "behaviour": "A ledger server imports the hub projector chain before a reload successor reports ready, so a successor whose mounted code needs a dependency the image lacks exits before ready and the old server keeps serving.",
+      "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
       "id": "grader-gates-fail-closed-on-stale-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
@@ -89,6 +110,22 @@
       "rules": ["nats-serve-awaits-handler"],
       "tests": [
         "tests/events/test_scoped_nats.py::test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub"
+      ]
+    },
+    {
+      "id": "hub-slot-serve-drops-abandoned-requests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-serve-bounded",
+      "behaviour": "A hub pod serves account slot requests on the bus's own bounded thread pool and drops, unanswered and unrun, a request that waited in that pool's queue as long as the hive waits for its answer, timed from when the hub received it, so a slot take or lane admission the hive already gave up on never claims an account slot or a task, and lane admission times its answer budget from that receipt.",
+      "seam": "NatsBus.serve with wait_ms for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": [
+        "nats-serve-default-executor"
+      ],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot",
+        "tests/events/test_scoped_nats.py::test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_queued_ones",
+        "tests/events/test_nats_payload_safety.py::test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_that_did_not",
+        "tests/hub/test_admission.py::test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_queue"
       ]
     },
     {
@@ -970,7 +1007,7 @@
       "id": "hub-admission-late-answer-keeps-claim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
-      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, and the offer's claim generation is not raised; a hive whose admit ask the hub did not answer inside its wait asks again for the same offer on its next delivery instead of asking the hub to reopen it, and receives the held admission, while every other failure still reopens.",
+      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, and the offer's claim generation is not raised; a hive whose admit ask the hub did not answer inside its wait asks again for the same offer on its next poll instead of asking the hub to reopen it, and receives the held admission, while every other failure still reopens.",
       "seam": "Admission.admit and Admission._answered on the hub, and LaneTasks.request and Spoke._apply on the hive",
       "rules": [
         "hub-admission-late-answer-releases-claim"
@@ -981,6 +1018,33 @@
         "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept",
         "tests/hive/test_spoke.py::test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer",
         "tests/hive/test_lanes.py::test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing"
+      ]
+    },
+    {
+      "id": "hub-admission-hive-asks-again",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
+      "behaviour": "A hive whose admit ask the hub leaves unanswered keeps the offer as its own pending admission, its claim asked by that hive, and asks the hub again on its next poll with no wait for a redelivery, so an admission the hub kept past the hive's wait launches even after the hub readiness pass withdrew the offer, without the hub launch check freeing it and raising the claim generation by two. It asks on every poll for as long as the hub leaves the ask unanswered, with no delivery cap, because a restarting hub answers no responders at once and a cap would dead letter offers still open, and the launch needs no second room reading because its take already passed one; a held answer to the repeat ask returns the offer, a refusal withdraws it, and a pending admission another hive now asks for is dropped. The hub answers a repeat ask from the same hive with that hive's own admission of the offer once the admission leaves the hive's turn, holds the answer while the admission outlasts the turn wait, and gives another hive none. An asked claim keeps other hives off the offer until its hive is lost.",
+      "seam": "Spoke.poll and LaneTasks.request on the hive, and Admission.admit on the hub",
+      "rules": [
+        "hive-unanswered-admit-waits-for-redelivery"
+      ],
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_late_kept_admission_launches_on_the_next_poll_after_the_hub_withdrew_its_offer",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_keeps_asking_returns_a_held_offer_and_drops_a_refused_one",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch",
+        "tests/hive/test_spoke.py::test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer",
+        "tests/hive/test_spoke.py::test_a_pending_admission_another_hive_now_asks_for_is_dropped",
+        "tests/hive/test_spoke.py::test_an_admission_the_hub_leaves_unanswered_keeps_asking_past_the_delivery_cap",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_launches_without_measuring_room_again",
+        "tests/hive/test_spoke.py::test_lost_hive_work_redelivers_and_changes_the_old_claim_fence",
+        "tests/hive/test_spoke.py::test_a_fresh_hive_keeps_its_claim_until_presence_expires",
+        "tests/hive/test_lanes.py::test_a_held_answer_naming_the_hives_own_admission_in_progress_raises_unanswered",
+        "tests/hub/test_admission.py::test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_another_hive_gets_none",
+        "tests/hub/test_admission.py::test_a_repeat_ask_whose_own_ask_was_kept_before_its_turn_answers_that_admission",
+        "tests/hub/test_admission.py::test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_it_leaves_the_turn",
+        "tests/hub/test_admission.py::test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission",
+        "tests/hub/test_admission.py::test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer"
       ]
     },
     {
@@ -3679,6 +3743,33 @@
       ]
     },
     {
+      "id": "launch-model-suits-harness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
+      "behaviour": "Every launch path that takes a model from lane config or a filled saved launch chooses it through model_pick.suited, so a Codex launch never asks for a Claude model and a Claude launch never asks for a Codex model: the hive orders launch assignment, the successor fill at hub admission, and the runtime lane default for spawns outside eng and ci and for the resume fallback; HerdrRuntime.spawn passes every final model, saved or picked, and resume every recorded model through the same choice.",
+      "seam": "model_pick.suited through Consumer.launch, successor_fill.filled, runtime._lane_default, and the final model of HerdrRuntime.spawn and HerdrRuntime.resume",
+      "rules": [
+        "launch-model-skips-harness-choice"
+      ],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model",
+        "tests/swarm/test_model_pick.py::test_every_default_model_suits_its_own_harness_and_not_the_other",
+        "tests/hive/test_orders.py::test_a_hive_order_never_launches_the_other_harness_lane_model",
+        "tests/hive/test_orders.py::test_a_hive_order_keeps_a_lane_model_its_harness_runs",
+        "tests/tick/steps/test_successor_fill.py::test_a_successor_with_no_saved_model_never_takes_the_other_harness_lane_model",
+        "tests/tick/steps/test_successor_fill.py::test_hub_admission_fills_a_codex_successor_with_the_codex_model_on_a_claude_pinned_lane",
+        "tests/swarm/test_runtime.py::test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_resume_never_relaunches_a_recorded_model_of_the_other_harness",
+        "tests/swarm/test_runtime.py::test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_launches_the_claude_model",
+        "tests/swarm/test_runtime.py::test_a_successor_never_launches_a_saved_model_of_the_other_harness",
+        "tests/swarm/test_default_models.py::test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_successor_saved_model_of_the_other_harness_falls_back_to_the_swarm_harness_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_takes_the_swarm_claude_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_resumed_model_of_the_other_harness_falls_back_to_the_swarm_harness_model"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
@@ -4251,6 +4342,63 @@
         "tests/swarm/test_panic.py::test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository",
         "tests/swarm/test_panic.py::test_panic_spares_the_first_push_of_a_registered_fix_branch",
         "tests/swarm/test_panic.py::test_panic_refuses_a_push_from_a_branch_no_fix_registers"
+      ]
+    },
+    {
+      "id": "panic-fix-registration-checked",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "Only the swarm's master or the operator presses panic on, and every fix link is checked before panic stores it: a link that is not a pull request or branch link of agentihooks, agentihooks-bundle or antoncore, a branch link whose branch is not a plain branch name of ASCII letters, digits, underscores and hyphens in parts joined by single dots or slashes, or that starts with refs/, a branch link to dev or main, and a pull request that cannot be read or whose head branch is dev or main are refused with nothing stored and nothing cancelled, so no fix spares every dev run and no malformed fix fails every cancel sweep.",
+      "seam": "cmd_panic for the on action and panic.check_fix, both before panic.engage stores the fixes",
+      "rules": [
+        "panic-on-unchecked-registration"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator",
+        "tests/swarm/test_panic.py::test_a_seat_cannot_press_panic_on_as_the_master",
+        "tests/swarm/test_panic.py::test_the_swarm_master_presses_panic_on_with_a_checked_fix",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_it_cannot_read",
+        "tests/swarm/test_panic.py::test_a_branch_link_of_a_panic_repository_passes_the_check_unread",
+        "tests/swarm/test_panic.py::test_a_fix_pull_request_passes_the_check_after_one_read_of_its_head"
+      ]
+    },
+    {
+      "id": "panic-fix-spare-reads-target",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
+      "rules": [
+        "panic-spare-ignores-command-target"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_stays_frozen_for_a_command_that_writes_another_ref",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch",
+        "tests/swarm/test_panic.py::test_git_c_decides_the_checkout_a_push_is_spared_in",
+        "tests/swarm/test_panic.py::test_a_push_git_config_may_route_elsewhere_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_git_config_that_cannot_be_read_counts_as_routed",
+        "tests/swarm/test_panic.py::test_panic_freezes_a_push_behind_git_global_options_or_a_redirection",
+        "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
+        "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
+        "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
+      ]
+    },
+    {
+      "id": "panic-fix-pull-request-head-in-its-repository",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "While fleet panic is on, the CI cancel sweep spares the head branch of a registered fix pull request only in that pull request's own repository, as it spares a fix branch link only in the repository the link names; a run on the same branch name in another panic repository is cancelled.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs: the branches it keeps for each repository",
+      "rules": [
+        "panic-sweep-keeps-fix-heads-everywhere"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_a_fix_pull_request_head_only_in_its_repository"
       ]
     },
     {
@@ -6650,14 +6798,17 @@
       "id": "pattern-downloads-keep-a-lone-artifact-where-its-reader-looks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2560",
-      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
+      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root, and Sonar takes the coverage of a lone selected leg that lands at the coverage folder root as that leg's shard. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
       "seam": "The mutation job's Download every mutation shard report path and the Merge the shard reports step in the Tests workflow, the grade download in the retained mutation replay's verify job, scripts.ci_gate_summary.counts over the test summary downloads, and every pattern download under .github",
       "tests": [
         "tests/test_ci_lone_artifact_download.py::test_every_pattern_download_without_merge_multiple_says_where_a_lone_match_lands",
         "tests/test_ci_lone_artifact_download.py::test_a_lone_shard_download_lands_in_a_folder_its_pattern_names",
         "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran",
         "tests/test_ci_lone_artifact_download.py::test_the_mutation_replay_verify_finds_every_grade_however_many_shards_ran",
-        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran"
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
       ]
     },
     {

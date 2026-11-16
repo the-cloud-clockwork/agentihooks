@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x\u01c1NatsBus\u01c1close:1dba08793db15ec42a2ae536b658379521ad925d069e21851609788cec093379": {
+    "reader": "standards-reader-2",
+    "reason": "CPython 3.12 ThreadPoolExecutor.shutdown reads wait only in 'if wait:', so None and False both skip the join loop, and _serving is used only in submit and shutdown in scripts/events/nats.py, so no caller can observe the mutant."
+  }
+}

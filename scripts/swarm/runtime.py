@@ -150,11 +150,13 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
     return recorded and lane != MASTER
 
 
-def _lane_default(lane, agent, chosen, config=None):
+def _lane_default(lane: str, agent: str, chosen: dict[str, Any], config: Any = None) -> model_pick.ModelPick:
     model = default_models.model(config, agent)
     if lane == MASTER:
         return model_pick.frontier(agent, model)
-    return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
+    return model_pick.ModelPick(
+        model_pick.suited(agent, _set(chosen.get("model")) or model, model), chosen.get("effort")
+    )
 
 
 def herdr_call(args: list[str]) -> dict[str, Any]:
@@ -858,7 +860,8 @@ class HerdrRuntime:
             )
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen, config)
-        picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
+        harness_model = default_models.model(config, agent)
+        picked = replace(picked, model=model_pick.suited(agent, _set(picked.model) or harness_model, harness_model))
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
@@ -921,7 +924,7 @@ class HerdrRuntime:
         )
         return placed
 
-    def resume(self, config, agent, text):
+    def resume(self, config: Any, agent: AgentRecord, text: str) -> Placed:
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if live_binding.managed(agent):
             raise SpawnError(MANAGED_RESUME, "unsupported")
@@ -950,7 +953,7 @@ class HerdrRuntime:
         argv += title
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
-            agent.model or defaults.model,
+            model_pick.suited(agent.harness, agent.model or defaults.model, defaults.model),
             agent.effort or defaults.effort,
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
