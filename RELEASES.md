@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.921 · 2026-11-16
+
+### 2026-11-16 · 95becdd1ef4b · #11457 · @agenticore-app
+
+**Start fleet red notice with its group, not after the spawn chain**
+
+This change fixes `fleet red notice` so it depends on `RESUMED` instead of `SPAWN_NEEDS`, letting it start with its group rather than waiting for the spawn chain to finish. Previously it became ready only 36.7 to 56.9 seconds into slow passes, leaving too little time for its 22 to 31 second live listing before the 59 second deadline, causing repeated cuts that dropped the listing save and forced every later pass to list live again. Starting earlier avoids this cascade. A regression test and Semgrep rule now guard against future slow-write steps being placed after the spawn chain.
+
+### 2026-11-16 · 763b57ac2c52 · #11431 · @agenticore-app
+
+**Grade authoritative pull request gates from the lab verdict**
+
+This change introduces a `lab-verdict` job that, on pull requests, reads authority flags from the base branch's `delivery.yaml` so a head can never widen which gates the lab controls, then polls the head's lab check runs from a trusted App token to decide pass or fail, treating any missing or pending verdict at the deadline as failure. Every lab-eligible gate job now skips when the lab is authoritative for it, and `Gate — Required` depends on this job with its steps rendered through the already-approved `ci_reuse.lab_verdict` helper, making lab verdicts safely authoritative without touching the grader.
+
 ## v2.17.919 · 2026-11-16
 
 ### 2026-11-16 · 455f17ca0047 · #11447 · @agenticore-app
