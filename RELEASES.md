@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.916 · 2026-11-16
+
+### 2026-11-16 · 493f847a2439 · #11428 · @agenticore-app
+
+**Announce the lab-verdict need before its workflow job lands**
+
+This change updates the protected grader's `normalize` function in `scripts.ci_gate_queue` to accept the reviewed needs inventory for `Gate — Required` both with and without `lab-verdict` included, while still rejecting any other unapproved additions. This paves the way for the upcoming lab-verdict workflow job (#11422), mirroring the precedent set for the typing job in #8921, so that dev's branch can land the new job without failing CI wiring checks, while keeping the gate strict against unannounced needs.
+
+### 2026-11-16 · 9e3374d58977 · #11441 · @agenticore-app
+
+**Announce the protected grader blobs that drop the date argument without touching bodies (Refs #11374)**
+
+This change updates tests/registry/FROZEN_GATES.json to register two new accepted hashes for the frozen file scripts/gate_protected.py, anticipating an upcoming pull request (#11376) that drops an unused date argument from gate_protected.grade and adjusts the clock read in main. No functional code changes are made here; this purely pre-announces the expected blob hashes so the frozen-gate check stays green once #11376 merges afterward.
+
 ## v2.17.914 · 2026-11-16
 
 ### 2026-11-16 · 5854c0b8c565 · #11420 · @agenticore-app
