@@ -547,6 +547,10 @@ async def _first_connect(url: str, config: BusConfig) -> Client:
         raise ConnectionError(
             f"nats: no server at {url} answered the first connect within {FIRST_CONNECT_RETRIES} retries"
         ) from error
+    except TimeoutError as error:
+        raise TimeoutError(
+            f"nats: the server at {url} did not finish the connect handshake within {FIRST_CONNECT_S} s"
+        ) from error
     lifecycle.client = client
     client.options.update(allow_reconnect=True, max_reconnect_attempts=-1, reconnect_time_wait=RECONNECT_WAIT_S)
     return client
