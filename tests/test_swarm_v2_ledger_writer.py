@@ -1,9 +1,11 @@
 import json
 import os
 import re
+import signal
 import socket
 import sqlite3
 import threading
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from typing import cast
@@ -582,6 +584,51 @@ def test_the_api_service_command_help_names_the_service_and_its_one_mode(capsys:
     shown = capsys.readouterr().out
     assert "\nThe ledger API service: every ledger write over HTTP.\n" in shown
     assert re.search(r"^  --serve +run in the foreground$", shown, re.MULTILINE)
+
+
+def test_the_start_line_names_each_method_a_handler_answers_in_a_fixed_order() -> None:
+    from scripts.swarm_ledger import api_service
+
+    every = type("Every", (), {f"do_{method}": None for method in ("OPTIONS", "PATCH", "PUT", "POST", "GET")})
+    assert api_service.answered(every) == "GET, POST, PUT, PATCH, OPTIONS"
+    assert api_service.answered(type("Neither", (), {})) == ""
+
+
+@pytest.mark.parametrize(("tls", "scheme"), [(None, "http"), (object(), "https")])
+def test_the_api_service_binds_its_own_address_and_names_it_in_the_start_line(
+    serving: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tls: object, scheme: str
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    nested = serving / "a" / "b"
+    handlers: list[tuple[int, Callable[[int, object], None]]] = []
+
+    def retrying(job: object) -> tuple[str, object]:
+        return ("retrying", job)
+
+    def record(signum: int, handler: Callable[[int, object], None]) -> None:
+        handlers.append((signum, handler))
+
+    monkeypatch.setattr(server.core, "LEDGER_DIR", nested)
+    monkeypatch.setattr(api_service.WriteHandler, "tls", tls)
+    monkeypatch.setattr(server, "retrying", retrying)
+    monkeypatch.setattr(api_service.signal, "signal", record)
+    api_service.serve()
+    built = cast(Mock, server.ThreadingHTTPServer)
+    built.assert_called_once_with(
+        (api_service.HOST, api_service.PORT), api_service.WriteHandler, bind_and_activate=False
+    )
+    thread = cast(Mock, server.threading.Thread)
+    upkeep = next(call for call in thread.call_args_list if call.kwargs.get("target") == retrying(api_service.upkeep))
+    assert upkeep.kwargs["daemon"] is True
+    assert [type(argument) for argument in upkeep.kwargs["args"]] == [threading.Event]
+    assert [signum for signum, _ in handlers] == [signal.SIGTERM]
+    handlers[0][1](signal.SIGTERM, None)
+    thread.assert_called_with(target=built.return_value.shutdown, daemon=True)
+    assert capsys.readouterr().out == (
+        f"ledger API service on {scheme}://{api_service.HOST}:{api_service.PORT} answering "
+        f"GET, POST, PUT, PATCH, OPTIONS, dir {nested}\n"
+    )
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

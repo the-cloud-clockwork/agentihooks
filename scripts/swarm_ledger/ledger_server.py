@@ -871,9 +871,12 @@ def watch_ledgers(
 
 
 def listening(
-    listener: socket.socket | None = None, handler: type[BaseHTTPRequestHandler] = Handler
+    listener: socket.socket | None = None,
+    handler: type[BaseHTTPRequestHandler] = Handler,
+    address: tuple[str, int] | None = None,
 ) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((HOST, PORT), handler, bind_and_activate=False)
+    """An HTTP server for ``handler`` on ``address``, the ledger server's own by default, on ``listener`` when given."""
+    server = ThreadingHTTPServer(address or (HOST, PORT), handler, bind_and_activate=False)
     server.request_queue_size = 128
     if listener is None:
         server.server_bind()

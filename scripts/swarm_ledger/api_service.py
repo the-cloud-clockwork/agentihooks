@@ -946,7 +946,7 @@ def serve() -> None:
     cast(Any, legacy).adopt(stored)
     adopt_unrelayed()
     threading.Thread(target=adopt_disk_files, daemon=True).start()
-    httpd: Any = server.listening(handler=WriteHandler)
+    httpd: Any = server.listening(handler=WriteHandler, address=(HOST, PORT))
     stopping = threading.Event()
     threading.Thread(target=server.retrying(upkeep), args=(stopping,), daemon=True).start()
 

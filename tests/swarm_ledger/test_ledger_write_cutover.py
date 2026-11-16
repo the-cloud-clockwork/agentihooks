@@ -7,6 +7,7 @@ import http.server
 import threading
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -68,49 +69,55 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
 
 
 @pytest.fixture
-def store() -> Iterator[RedisStore]:
+def slug() -> str:
+    """A ledger name of this test's own, since the shared ledger store outlives each test of the module."""
+    return f"{SLUG}-{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture
+def store(slug: str) -> Iterator[RedisStore]:
     """A swarm store holding the swarm and a ledger with one open task."""
     import fakeredis
 
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    found.create(SwarmConfig(SLUG, "/repo", 2, 2))
+    found.create(SwarmConfig(slug, "/repo", 2, 2))
     repository = storage.default()
-    repository.create(SLUG, CONTENT)
-    _, rejected = repository.apply_ops(SLUG, ops=SEED)
+    repository.create(slug, CONTENT)
+    _, rejected = repository.apply_ops(slug, ops=SEED)
     assert rejected == []
     yield found
     found.redis.close()
 
 
-def row(task_id: str) -> dict[str, Any]:
+def row(slug: str, task_id: str) -> dict[str, Any]:
     """The task row as the shared ledger store holds it."""
-    state, _ = storage.default().apply_ops(SLUG)
+    state, _ = storage.default().apply_ops(slug)
     return next(task for task in state["tasks"] if task["id"] == task_id)
 
 
 @pytest.mark.feature("swarm-ledger-api-writes")
 def test_the_hub_admission_claim_lands_in_the_ledger_store_with_no_ledger_server_request(
-    recorder: list[str], store: RedisStore
+    recorder: list[str], store: RedisStore, slug: str
 ) -> None:
     admitter = admission.Admission(store)
-    live = admitter._mark(SLUG, {"task": "t1", "lane": "eng", "generation": 0}, {"claimed_by": ""}, NAME)
+    live = admitter._mark(slug, {"task": "t1", "lane": "eng", "generation": 0}, {"claimed_by": ""}, NAME)
     assert live is not None
     assert (live["state"], live["claimed_by"]) == ("claimed", NAME)
-    assert (row("t1")["state"], row("t1")["claimed_by"]) == ("claimed", NAME)
-    admitter._release(SLUG, "t1", NAME)
-    assert (row("t1")["state"], row("t1")["claimed_by"]) == ("open", "")
+    assert (row(slug, "t1")["state"], row(slug, "t1")["claimed_by"]) == ("claimed", NAME)
+    admitter._release(slug, "t1", NAME)
+    assert (row(slug, "t1")["state"], row(slug, "t1")["claimed_by"]) == ("open", "")
     assert recorder == []
 
 
 @pytest.mark.feature("swarm-ledger-api-writes")
 def test_a_stale_hub_claim_is_refused_by_the_route_with_no_ledger_server_request(
-    recorder: list[str], store: RedisStore
+    recorder: list[str], store: RedisStore, slug: str
 ) -> None:
     admitter = admission.Admission(store)
-    assert admitter._mark(SLUG, {"task": "t1", "lane": "eng", "generation": 0}, {"claimed_by": ""}, NAME) is not None
-    stale = admitter._mark(SLUG, {"task": "t1", "lane": "eng", "generation": 0}, {"claimed_by": ""}, "eng@ab-2")
+    assert admitter._mark(slug, {"task": "t1", "lane": "eng", "generation": 0}, {"claimed_by": ""}, NAME) is not None
+    stale = admitter._mark(slug, {"task": "t1", "lane": "eng", "generation": 0}, {"claimed_by": ""}, "eng@ab-2")
     assert stale is None
-    assert row("t1")["claimed_by"] == NAME
+    assert row(slug, "t1")["claimed_by"] == NAME
     assert recorder == []
 
 
