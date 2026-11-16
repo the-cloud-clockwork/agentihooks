@@ -645,6 +645,28 @@ def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleName
     assert rig.rows["t1"]["state"] == "claimed"
 
 
+@pytest.mark.feature("hub-admission-answer-budget-covers-ledger-latency")
+def test_an_admission_whose_ledger_write_outlasts_the_old_answer_budget_still_yields_a_live_claim(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [7_000]
+    rig.admitter.clock = lambda: now[0]
+    original_update_task = rig.ledger.update_task
+
+    def slow_ledger_write(*args: Any, **kwargs: Any) -> Any:
+        now[0] += 9_000
+        return original_update_task(*args, **kwargs)
+
+    monkeypatch.setattr(rig.ledger, "update_task", slow_ledger_write)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert 8_000 < now[0] - 7_000 < admission.ANSWER_MS
+    assert admitted["name"] == rig.store.claimant(SLUG, "t1")
+    assert rig.rows["t1"]["state"] == "claimed"
+
+
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
 def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -808,7 +830,7 @@ def test_an_admitted_offer_prints_no_refusal_line(rig: SimpleNamespace, capsys: 
 
 
 def test_the_hub_answers_inside_the_window_the_hive_waits_for_an_admission() -> None:
-    assert 0 < admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
+    assert 0 < admission.ANSWER_MS < account_slots.ADMISSION_REQUEST_TIMEOUT_MS
 
 
 def test_an_admission_carries_no_avoided_harness_until_a_launch_fails_on_one(rig):

@@ -57,7 +57,7 @@ def test_a_slow_github_read_ends_inside_the_admission_wait_as_unknown() -> None:
     assert found == {"kept": "unknown"}
     assert waited
     assert max(waited) <= branch_heads.TIMEOUT_S
-    assert branch_heads.TIMEOUT_S * 1000 * 2 <= admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
+    assert branch_heads.TIMEOUT_S * 1000 * 2 <= admission.ANSWER_MS < account_slots.ADMISSION_REQUEST_TIMEOUT_MS
 
 
 def test_heads_asks_nothing_for_no_branch(monkeypatch: pytest.MonkeyPatch) -> None:

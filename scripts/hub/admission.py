@@ -25,7 +25,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, connect
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
-ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
+ANSWER_MS = account_slots.ADMISSION_REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
 
