@@ -4,6 +4,7 @@ import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -14,12 +15,12 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
-from scripts.swarm_ledger import api_service  # noqa: E402
-from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import api_service, ledger_server  # noqa: E402
 from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
 
+server: Any = ledger_server
 storage = default_repository()
 
 MINUTE = 60 * 1000

@@ -20,8 +20,9 @@ def test_reopen_clears_closed_time_preserves_summary_and_survives_sync():
 
 
 def test_page_and_home_reopen_route_to_the_same_swarm_command():
-    import api_service
     import ledger_server as server
+
+    from scripts.swarm_ledger import api_service
 
     assert api_service.control_argv({"action": "reopen"}) == ["reopen"]
     make_ledger()

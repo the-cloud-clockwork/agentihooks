@@ -773,6 +773,10 @@ class Writes:
 class WriteHandler(BaseHandler, Writes):
     """The API service's HTTP handler: every ledger write route, the page session and the write health probe."""
 
+    def __init__(self, request: Any, client_address: Any, owner: Any) -> None:
+        """Handle one request that ``owner``, the HTTP server that accepted it, hands this handler."""
+        BaseHandler.__init__(self, request, client_address, owner)
+
     def do_GET(self) -> None:
         """Answer the health probe; the ledger server serves every read."""
         if self.refused():

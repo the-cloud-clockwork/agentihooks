@@ -9,8 +9,6 @@ from typing import Any
 
 from scripts.swarm_ledger import ledger_link
 
-TIMEOUT = 10
-
 
 def call(path: str, payload: dict[str, Any] | None, environ: Mapping[str, str]) -> Any:
     """One proof ledger request through the ledger API route code in process, as the controller."""

@@ -93,7 +93,7 @@ class BinEndpoint(unittest.TestCase):
     def setUpClass(cls):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         make_ledger("via-http")
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)  # pyright: ignore[reportArgumentType]
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 

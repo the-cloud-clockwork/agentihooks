@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_health, ledger_link, ledger_server, proof_ledger, watch_ledger
+from scripts.swarm_ledger import ledger_health, ledger_link, ledger_server, watch_ledger
 from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.ledger_front import Front
@@ -92,38 +92,12 @@ def test_a_plain_http_request_without_a_credential_is_sent(monkeypatch):
     assert seen == [f"http://ledger.test/api/v1/ledgers/{SLUG}/chat"]
 
 
-def test_the_proof_controller_refuses_its_credential_over_plain_http_off_loopback(monkeypatch):
-    environ = {"AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller", "AGENTIHOOKS_DEPLOYMENT": "distributed"}
-    monkeypatch.setattr(proof_ledger.urllib.request, "urlopen", pytest.fail)
-
-    with pytest.raises(ledger_link.Cleartext):
-        proof_ledger.call("ledgers", {}, {**environ, "LEDGER_URL": "http://ledger:8765"})
-
-
-def test_proof_controls_refuse_their_credentials_over_plain_http_off_loopback(monkeypatch):
-    monkeypatch.setattr(proof_ledger.urllib.request, "urlopen", pytest.fail)
-    environ = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": "http://ledger:8765"}
-
-    with pytest.raises(ledger_link.Cleartext):
-        proof_ledger._control_call(SLUG, "controls", {}, {"X-Proof-Credential": "proof"}, environ)
-
-
 def test_the_event_stream_refuses_its_credential_over_plain_http_off_loopback(monkeypatch):
     monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "http://ledger:8765")
     monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", pytest.fail)
 
     with pytest.raises(watch_ledger.ledger_link.Cleartext):
         next(watch_ledger.stream(SLUG, None, {"X-Ledger-Token": "token"}))
-
-
-def test_an_upload_refuses_its_credential_over_plain_http_off_loopback(monkeypatch, tmp_path):
-    (tmp_path / "shot.png").write_bytes(b"png")
-    monkeypatch.setattr(ledger, "base", lambda: "http://ledger:8765")
-    monkeypatch.setattr(ledger, "credentials", lambda slug: {"X-Ledger-Token": "token"})
-    monkeypatch.setattr(ledger.urllib.request, "urlopen", pytest.fail)
-
-    with pytest.raises(SystemExit, match="https"):
-        ledger.upload(SLUG, "engineer@323133-0256", str(tmp_path / "shot.png"), "media", {})
 
 
 def test_the_local_base_is_https_when_the_ledger_serves_tls(tmp_path):
@@ -261,27 +235,15 @@ def trusted(monkeypatch, cert):
     return seen
 
 
-def test_every_credential_sender_trusts_the_ledger_ca_with_its_own_timeout(monkeypatch, cert, tmp_path):
+def test_every_credential_sender_trusts_the_ledger_ca_with_its_own_timeout(monkeypatch, cert):
     seen = trusted(monkeypatch, cert)
-    environ = {**os.environ, "AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": "https://ledger:8765"}
-    (tmp_path / "shot.png").write_bytes(b"png")
-    monkeypatch.setattr(ledger, "base", lambda: "https://ledger:8765")
-    monkeypatch.setattr(ledger, "credentials", lambda slug: {"X-Ledger-Token": "token"})
     monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda environ=None: "https://ledger:8765")
 
-    monkeypatch.delenv("LEDGER_CA_PEM")
-    proof_ledger.call("ledgers", {}, {**environ, "AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller"})
-    proof_ledger._control_call(SLUG, "controls", {}, {"X-Proof-Credential": "proof"}, environ)
-    monkeypatch.setenv("LEDGER_CA_PEM", environ["LEDGER_CA_PEM"])
     api_client.ResourceClient("https://ledger:8765", {"X-Ledger-Token": "token"}, timeout=3).request(SLUG, "chat")
-    ledger.upload(SLUG, "engineer@323133-0256", str(tmp_path / "shot.png"), "media", {})
     list(watch_ledger.stream(SLUG, None, {"X-Ledger-Token": "token"}))
 
     assert seen == [
-        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
-        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
         ("https://ledger:8765", 3, True),
-        ("https://ledger:8765", ledger.REQUEST_TIMEOUT, True),
         ("https://ledger:8765", watch_ledger.STREAM_TIMEOUT_S, True),
     ]
 

@@ -3,6 +3,7 @@ import json
 import threading
 from contextlib import nullcontext
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -12,7 +13,7 @@ from scripts.swarm_ledger import ledger_server as server
 HOST = "ledger.test"
 
 
-def handler(path, cls=None, **headers):
+def handler(path: str, cls: Any = None, **headers: str) -> Any:
     cls = cls or server.Handler
     h = cls.__new__(cls)
     h.path, h.headers, h.principal, h.sent = path, {"Host": HOST, **headers}, None, []

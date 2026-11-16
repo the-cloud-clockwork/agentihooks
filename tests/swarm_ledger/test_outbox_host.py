@@ -2,6 +2,7 @@ import re
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, call
 
 import pytest
@@ -158,7 +159,7 @@ def test_the_ledger_api_service_alone_drives_the_outbox_until_shutdown(
     published = threading.Event()
     publish = bus.events.publish
 
-    def observed(subject: str, event: object) -> object:
+    def observed(subject: str, event: Any) -> Any:
         result = publish(subject, event)
         published.set()
         return result

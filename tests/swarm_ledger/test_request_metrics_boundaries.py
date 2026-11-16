@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
+from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -267,7 +268,7 @@ def test_command_help_describes_the_timing_report(capsys):
 @pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "OPTIONS"])
 def test_supported_methods_keep_separate_route_cpu_totals(capture, monkeypatch, method):
     monkeypatch.setattr(api, "handle", lambda *args: None)
-    cls = api_service.WriteHandler if method in ("POST", "PUT", "PATCH") else server.Handler
+    cls: Any = api_service.WriteHandler if method in ("POST", "PUT", "PATCH") else server.Handler
     handler = cls.__new__(cls)
     handler.command, handler.path, handler.headers = method, "/api/v1/ledgers/private/tasks", {}
     handler.send_response = handler.send_header = handler.end_headers = lambda *args: None

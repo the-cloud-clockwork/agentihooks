@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -298,7 +299,7 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     monkeypatch.setattr(ledger_server.repository, "apply_ops", sync)
     monkeypatch.setattr(api_service, "relay_to_inbox", lambda slug, state: [])
     monkeypatch.setattr(api_service, "doctor_phrase", lambda slug, state: None)
-    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
+    handler: Any = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = f"/api/{SLUG}?view=agent"
     handler.send = lambda code, body, ctype: code
     assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200

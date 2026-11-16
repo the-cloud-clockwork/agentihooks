@@ -6,6 +6,7 @@ import uuid
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -109,7 +110,7 @@ def test_serving_the_page_shell_writes_nothing_and_keeps_the_revision(live):
 
 
 def reply_of(state, rejected=(), ops=None, refusals=None):
-    handler = object.__new__(api_service.WriteHandler)
+    handler: Any = object.__new__(api_service.WriteHandler)
     sent = {}
     handler.send = lambda status, body, kind: sent.update(status=status, body=json.loads(body), kind=kind)
     fake = SimpleNamespace(apply_ops=lambda *args, **kwargs: (state, list(rejected)))

@@ -57,7 +57,7 @@ def page(controls, monkeypatch):
 
     monkeypatch.setattr(server.subprocess, "run", run)
     monkeypatch.setattr(server, "swarm_status", lambda slug: {"config": {"state": store.config(slug).state}})
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), api_service.WriteHandler)  # pyright: ignore[reportArgumentType]
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), api_service.WriteHandler)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
 
