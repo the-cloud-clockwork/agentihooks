@@ -1,0 +1,13 @@
+rules:
+  - id: launch-logs-reads-runtime-target-host-id
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive launch logs wrapper read $X.runtime_target["host_id"] to key its launch receipt, which raised
+      KeyError for a hub admitted execution, whose AgentRecord carries an empty runtime_target. Read $X.hive
+      instead; both the in-process hive admit and hub admission set it to the launching hive.
+    paths:
+      include:
+        - /scripts/hive/launch_logs.py
+        - launch-logs-reads-runtime-target-host-id.py
+    pattern: $X.runtime_target["host_id"]

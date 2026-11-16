@@ -1160,6 +1160,15 @@
       ]
     },
     {
+      "id": "hive-launch-logs-key-by-hive",
+      "origin": "inventory",
+      "behaviour": "The hive launch logs wrapper keys a launch receipt by the execution's hive, so hub admitted Codex launches with no runtime target start serve",
+      "seam": "scripts.hive.launch_logs.main reading agent.hive for Orders(...).launch_receipt(...)",
+      "tests": [
+        "tests/hive/test_launch_logs.py::test_a_hub_admitted_execution_with_no_runtime_target_still_keys_its_receipt_by_hive"
+      ]
+    },
+    {
       "id": "admission-launch-carries-admitted-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-working-retired",
