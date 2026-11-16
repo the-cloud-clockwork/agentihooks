@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from scripts.swarm import controller, controller_probes, redis_grace
+from scripts.swarm import controller, controller_probes, lease, redis_grace
 from scripts.swarm.store import RedisStore, SwarmError, Unreachable
 
 pytestmark = pytest.mark.unit
@@ -248,7 +248,7 @@ def refusing_wait(seconds: float) -> None:
 
 @pytest.mark.feature("controller-waits-ride-out-redis-outage")
 def test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import redis
 
@@ -263,13 +263,14 @@ def test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes(
 
     monkeypatch.setattr(controller, "_pass", run)
     monkeypatch.setattr(controller, "scheduled_wait", refusing_wait)
-    monkeypatch.setattr(controller, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(controller, "sleep", slept.append)
 
     with pytest.raises(StopLoop):
         controller._passes(STORE, None, PROOF, False, redis_grace.Outage(30, Clock()))
     assert len(calls) == 3
     assert len(slept) == 2
-    assert all(seconds > 0 for seconds in slept)
+    assert all(0 < seconds <= lease.tick_ms() / 1000 for seconds in slept)
+    assert capsys.readouterr().err.count("finishing it on the local clock") == 2
 
 
 @pytest.mark.feature("controller-waits-ride-out-redis-outage")
@@ -285,7 +286,7 @@ def test_startup_rides_out_redis_refusing_its_retry_wait(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(controller, "connect", connect)
     monkeypatch.setattr(controller, "scheduled_wait", refusing_wait)
-    monkeypatch.setattr(controller, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(controller, "sleep", slept.append)
 
     assert controller._reached(redis_grace.Outage(30, Clock())) == "store"
     assert len(attempts) == 2

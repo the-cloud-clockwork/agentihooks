@@ -4,7 +4,7 @@
       "id": "controller-waits-ride-out-redis-outage",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-controller-redis-grace",
-      "behaviour": "The controller's tick waits (between passes, on the pass loop's Redis grace path and in the startup retry) finish on the local clock when Redis refuses the scheduler timer. A Redis outage inside the grace window therefore never ends the controller, and no crash leaves its replica lock behind for the next replica to stand behind.",
+      "behaviour": "The controller's tick waits (between passes, on the pass loop's Redis grace path and in the startup retry) finish on the local clock when Redis refuses the scheduler timer. A Redis outage inside the grace window therefore never ends the controller from one of its waits.",
       "seam": "controller._tick_wait, which _cadence_wait, _passes and _reached wait through",
       "tests": [
         "tests/test_swarm_redis_grace.py::test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes",

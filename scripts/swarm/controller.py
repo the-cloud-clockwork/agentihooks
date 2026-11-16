@@ -607,7 +607,8 @@ def _tick_wait(seconds: float) -> None:
     until = monotonic() + seconds
     try:
         scheduled_wait(seconds)
-    except (Unreachable, *store_errors()):
+    except store_errors() as exc:
+        print(f"controller: the scheduled wait failed, finishing it on the local clock: {exc}", file=sys.stderr)
         sleep(max(0.0, until - monotonic()))
 
 
