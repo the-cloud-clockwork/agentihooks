@@ -387,6 +387,9 @@ def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retire
     assert sent_stops(bus, agent) == []
 
 
+ENDED_STOP = "sent the stop for {name} to its hive: its work ended"
+
+
 @pytest.mark.feature("events-retirement-refunds-claim-life")
 @pytest.mark.parametrize(
     ("lane", "state", "live", "acknowledging", "ended", "judged"),
@@ -401,13 +404,14 @@ def test_a_declared_wait_or_typed_input_holds_an_idle_admitted_agent_from_retire
         ("eng", "working", True, True, False, ""),
         ("eng", "working", True, False, True, "stopped"),
         ("eng", "working", False, False, True, "stopped"),
+        ("master", "finished", True, False, True, "stopped"),
         ("eng", "awaiting-decision", True, False, True, ""),
         ("eng", "retiring", True, False, True, ""),
         ("master", "starting", True, False, True, ""),
         ("eng", "working", True, True, True, ""),
     ],
 )
-def test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and_settled(
+def test_the_reap_step_judges_an_admitted_agent_by_its_pane_and_whether_its_work_ended(
     monkeypatch: pytest.MonkeyPatch,
     lane: str,
     state: str,
@@ -436,9 +440,6 @@ def test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and
     expected = {"watched": ["watched a1"], "stopped": [ENDED_STOP.format(name="a1")], "": []}
     assert actions == expected[judged]
     assert stops == ([(SLUG, "a1", "ended")] if judged == "stopped" else [])
-
-
-ENDED_STOP = "sent the stop for {name} to its hive: its work ended"
 
 
 def finish(env: tuple[RedisStore, Any, Any], agent: AgentRecord, ending: str) -> None:

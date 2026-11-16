@@ -18,6 +18,7 @@ from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, budgets, pass_
 
 Get = Callable[[str], Any]
 _IDENTITY_CONFLICT = "stale or changed execution identity"
+ENDED = "ended"
 
 
 def _reap(
@@ -322,13 +323,11 @@ def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
     )
 
 
-ENDED = "ended"
-
-
 def _stop_ended(slug: str, agent: AgentRecord) -> list[str]:
     """Send the execution stop for ``agent``, whose work ended, to the hive that recorded its start, so that hive
     reaps it and the hub lifecycle settles its exit; one action when the stop went out or the bus refused it, none
-    while the same stop is inside the bus dedupe window or once the execution ended."""
+    while the same stop is inside the bus dedupe window, once the execution ended or where no hive recorded its
+    start."""
     from scripts.hive import execution_stop
     from scripts.hub.reconciler import stop_admitted
 
