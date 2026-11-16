@@ -28,6 +28,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     before = read(store, slug).get("tasks", {})
     graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug))
     fix = freeze.fix_phase(store.config(slug))
+    lab = claim_hold.lab_reason(store, slug, fix)
     rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
     for task in rows.values():
@@ -36,7 +37,9 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
         why = (
             BLOCKED_WHY
             if task["state"] == BLOCKED
-            else claim_hold.urgent(task, rows, doc, graph, fix) or (not released(task) and RELEASE.format(**task))
+            else claim_hold.urgent(task, rows, doc, graph, fix)
+            or lab(task)
+            or (not released(task) and RELEASE.format(**task))
         )
         if task.get("merged_into"):
             continue

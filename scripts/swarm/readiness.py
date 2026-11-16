@@ -68,14 +68,18 @@ class Source:
         released = release_wait.checker(config)
         applied = apply_wait.checker(config, rows)
         unshared = fleet_red.checker(fleet_red.saved_reader(self._store, slug))
+        fix = freeze.fix_phase(config)
+        lab = claim_hold.lab_reason(self._store, slug, fix)
         return Snapshot(
             slug,
             rows,
             doc,
             hierarchy.project(doc)[0],
-            freeze.fix_phase(config),
+            fix,
             lambda task_id: task_id in owned or self._store.claimant(slug, task_id) is not None,
-            lambda task: config.state == "running" and released(task) and applied(task) and unshared(task),
+            lambda task: (
+                config.state == "running" and released(task) and applied(task) and unshared(task) and not lab(task)
+            ),
         )
 
 
