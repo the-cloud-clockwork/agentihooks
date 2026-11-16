@@ -1,6 +1,27 @@
 {
   "features": [
     {
+      "id": "compose-ledger-start-pulls-image",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
+      "behaviour": "Starting the compose ledger service pulls its image before compose up, for the adopted stack swarm service and the legacy ledger service, so up recreates the container on a newer image instead of rerunning mounted code on a stale local one; a failed pull still runs up on the local image.",
+      "seam": "server_compose.start, the docker compose commands it runs",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_adoption_sends_start_and_stop_to_the_bundle_swarm_service",
+        "tests/swarm_ledger/test_server_compose.py::test_a_failed_pull_still_starts_the_service_on_its_local_image"
+      ]
+    },
+    {
+      "id": "reload-successor-imports-hub-before-ready",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
+      "behaviour": "A ledger server imports the hub projector chain before a reload successor reports ready, so a successor whose mounted code needs a dependency the image lacks exits before ready and the old server keeps serving.",
+      "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
       "id": "grader-gates-fail-closed-on-stale-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
