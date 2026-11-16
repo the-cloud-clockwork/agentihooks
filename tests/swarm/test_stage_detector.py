@@ -102,6 +102,56 @@ def test_record_measures_with_the_readiness_it_is_given(tmp_path, store, monkeyp
     assert seen == [len]
 
 
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_lab_wait_finding_stands_while_the_lab_is_behind_and_clears_below(store):
+    from tests.swarm.test_claim_hold import lab
+
+    assert stage_detector.THRESHOLD_HOURS["lab_wait"] == 1.0
+    stage_detector.lab_finding(store, "scratch", lab(35 * 60, NOW), 20, NOW)
+    [finding] = standing.findings(store.redis, "scratch", NOW)
+    assert finding.id == "bottleneck-stage/lab_wait"
+    assert finding.summary == "lab wait at 35 minutes behind on pull request grading, over its 20 threshold"
+    assert "eng claims are held: the lab is 35 minutes behind on pull request grading" in finding.evidence
+    assert standing.read(store.redis, "scratch")["lab_wait"]["episodes"] == [f"lab_wait:{NOW}"]
+    stage_detector.lab_finding(store, "scratch", lab(40 * 60, NOW + 60_000), 20, NOW + 60_000)
+    row = standing.read(store.redis, "scratch")["lab_wait"]
+    assert (row["value"], row["threshold"], row["fired"]) == (40, 20, 1)
+    stage_detector.lab_finding(store, "scratch", lab(20 * 60, NOW + 90_000), 20, NOW + 90_000)
+    assert standing.read(store.redis, "scratch") == {}
+    stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 120_000), 20, NOW + 120_000)
+    assert standing.read(store.redis, "scratch") == {}
+    measured = {
+        "stage": "lab_wait",
+        "seconds": 7200.0,
+        "previous_seconds": 0.0,
+        "trend": "rising",
+        "labels": [],
+        "label": "",
+        "episodes": ["lab_wait:t1:1"],
+    }
+    stage_detector.update_findings(store, "scratch", {"stages": [measured]}, NOW + 180_000)
+    stage_detector.lab_finding(store, "scratch", lab(5 * 60, NOW + 240_000), 20, NOW + 240_000)
+    assert standing.read(store.redis, "scratch")["lab_wait"]["unit"] == standing.DETECTOR_UNIT
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_record_updates_the_lab_wait_finding_from_the_stored_reading_on_every_pass(tmp_path, store, monkeypatch):
+    from scripts.swarm.metrics_outbox import Outbox, Settings
+    from tests.swarm.test_claim_hold import lab
+
+    measured = {"at": NOW, "window_hours": 1.0, "stages": [], "total": 0.0}
+    monkeypatch.setattr(stage_detector, "report", lambda *args: measured)
+    store.redis.set(store.key("scratch", "lab-capacity"), json.dumps(lab(35 * 60, NOW)))
+    box = Outbox(tmp_path / "events.db", Settings("http://sink", "writer", ""))
+    try:
+        stage_detector.record(box, store, "scratch", NOW, [], {**FIVE, "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "30"})
+        assert standing.read(store.redis, "scratch")["lab_wait"]["threshold"] == 30
+        stage_detector.record(box, store, "scratch", NOW, [], {**FIVE, "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "40"})
+        assert standing.read(store.redis, "scratch") == {}
+    finally:
+        box.close()
+
+
 FIRST_LIVE_PASS = {
     "seat_wait": 579440.0,
     "quota_hold": 303960.0,
@@ -175,6 +225,7 @@ def test_productive_stages_have_no_threshold_and_every_other_threshold_is_above_
         "merge_queue": 1.0,
         "intent_fix": 1.0,
         "ci_queue": 1.0,
+        "lab_wait": 1.0,
         "ci_overrun": 0.25,
         "launch_failure": 0.25,
     }

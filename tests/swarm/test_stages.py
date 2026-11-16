@@ -171,6 +171,76 @@ def test_host_held_claim_wait_is_host_hold():
     }
 
 
+def lab(ts, wait_s, name="pull_request"):
+    return {"ledger": SLUG, "ts_ms": ts, "class": name, "pending": 3, "running": 2, "predicted_wait_s": wait_s}
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait():
+    tasks = [
+        {"id": "t0", "state": "done"},
+        {"id": "t3", "state": "open", "depends_on": ["t0"]},
+        {"id": "c1", "state": "open", "lane": "ci", "depends_on": ["t0"]},
+    ]
+    samples = [
+        lab(at(8, 30), 1800.0),
+        lab(at(8, 35), 1800.0),
+        lab(at(8, 40), 60.0),
+        lab(at(8, 50), 9000.0, "queue"),
+        lab(at(9), 1200.0),
+        lab(at(9, 15), -1.0),
+        lab(at(9, 30), 1800.0),
+    ]
+    source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], lab_capacity=samples)
+    found = stages.report(source, tasks, NOW)
+    assert seconds_of(found) == {("lab_wait", ""): 1200.0, ("seat_wait", ""): 6000.0 + 7200.0}
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_a_claimed_task_charges_lab_wait_only_before_its_claim():
+    found = stages.report(
+        rows(
+            ledger_events=[ledger("task done", at(7), "tasks/t0"), ledger("joined", at(8), by="e1")],
+            agent_events=[
+                agent("claim", "t1", at(8)),
+                agent("spawn", "t1", at(8), "e1", "claude"),
+                agent("retire", "t1", at(9), "e1"),
+            ],
+            lab_capacity=[lab(at(7, 30), 1800.0), lab(at(8, 30), 1800.0), lab(at(9, 20), 1800.0)],
+        ),
+        [{**TASK, "state": "claimed"}],
+        NOW,
+    )
+    assert seconds_of(found) == {("lab_wait", ""): 600.0, ("seat_wait", ""): 6600.0, ("build", ""): 3600.0}
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_the_lab_hold_spares_ci_and_fix_phase_tasks_and_rows_without_lab_samples():
+    samples = [lab(at(8, 30), 1800.0), lab(at(8, 35), 60.0)]
+    assert stages.lab_spans(samples, NOW, 20) == [stages.Span("lab_wait", at(8, 30), at(8, 35))]
+    done = ledger("task done", at(8), "tasks/t0")
+    claim = [agent("claim", "t1", at(9)), agent("spawn", "t1", at(9), "e1", "claude")]
+    claimed = [{**TASK, "state": "claimed", "lane": "ci"}]
+    joined = ledger("joined", at(9), by="e1")
+    found = stages.report(rows(ledger_events=[done, joined], agent_events=claim, lab_capacity=samples), claimed, NOW)
+    assert seconds_of(found) == {("seat_wait", ""): 3600.0, ("build", ""): 3600.0}
+    tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "phase": "fix", "depends_on": ["t0"]}]
+    ready = stages.claimable({"tasks": tasks, "phases": [{"id": "fix"}]}, "fix")
+    found = stages.report(rows(ledger_events=[done], lab_capacity=samples), tasks, NOW, ready=ready)
+    assert seconds_of(found) == {("seat_wait", ""): 7200.0}
+    bare = {name: kept for name, kept in rows(ledger_events=[done]).items() if name != "lab_capacity"}
+    waiting = [tasks[0], {"id": "t3", "state": "open", "depends_on": ["t0"]}]
+    assert seconds_of(stages.report(bare, waiting, NOW)) == {("seat_wait", ""): 7200.0}
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_a_lab_stretch_that_ends_as_the_claim_wait_opens_adds_no_lab_wait() -> None:
+    tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
+    samples = [lab(at(7, 50), 1800.0), lab(at(8), 60.0)]
+    source = rows(ledger_events=[ledger("task done", at(8), "tasks/t0")], lab_capacity=samples)
+    assert [timeline.overlays for timeline in stages.timelines(source, tasks, NOW)] == [()]
+
+
 def test_an_open_ready_task_waits_for_its_claim_until_now():
     tasks = [{"id": "t0", "state": "done"}, {"id": "t3", "state": "open", "depends_on": ["t0"]}]
     found = stages.report(rows(ledger_events=[ledger("task done", at(8), "tasks/t0")]), tasks, NOW)
