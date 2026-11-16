@@ -653,6 +653,17 @@
       ]
     },
     {
+      "id": "hive-root-bus-re-mint",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2531",
+      "behaviour": "hive run, after the operator env fills and before the lane spokes start, compares the publish and subscribe grant of the stored root hive bus credential with what nats_grant.member_claims mints now for the swarms the hub signer lists for root; when they differ, such as a credential minted before the per member stop consumer grants, it re-mints through root_bus.write and loads the rewritten bus env into the service; a matching credential is kept unchanged, no signer is read without a stored credential, and a signer that cannot mint keeps the stored credential and logs why.",
+      "seam": "root_bus.refresh and hive run",
+      "tests": [
+        "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint"
+      ]
+    },
+    {
       "id": "hive-mint-refuses-unscoped-signer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-mint-refuse-unscoped",

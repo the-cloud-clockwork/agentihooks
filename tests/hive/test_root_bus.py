@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import stat
 import subprocess
@@ -11,7 +12,7 @@ from dotenv import dotenv_values
 from scripts import init_agent, openbao_kv, operator_env
 from scripts.events import nkey
 from scripts.events.config import BusConfig
-from scripts.hive import auth, cli, daemon, member_swarms, nats_grant, root_bus
+from scripts.hive import auth, cli, daemon, lanes, member_swarms, nats_grant, root_bus
 from scripts.swarm import commands
 
 pytestmark = pytest.mark.unit
@@ -564,3 +565,78 @@ def test_restart_restarts_the_hive_user_service():
     assert calls == [
         (["systemctl", "--user", "restart", daemon.UNIT], {"capture_output": True, "text": True, "timeout": 30})
     ]
+
+
+def _fresh(signer: nats_grant.Signer, swarms: tuple[str, ...] = ("alpha",)) -> dict:
+    return nats_grant.member_claims(nats_grant.member_user(signer, "root").public, swarms, member="root")
+
+
+def _without_stop_grants(signer: nats_grant.Signer) -> dict:
+    claims = _fresh(signer)
+    stops = set(nats_grant.stop_publish("alpha", "root"))
+    claims["pub"]["allow"] = [subject for subject in claims["pub"]["allow"] if subject not in stops]
+    return claims
+
+
+def _stored(home: Path, signer: nats_grant.Signer, nats: dict) -> Path:
+    user = nats_grant.member_user(signer, "root")
+    creds = home / "root-bus" / "bus.creds"
+    creds.write_text(nkey.creds(nkey.encode_jwt(signer.account, user.public, "hive-root", nats), user.seed))
+    return creds
+
+
+def _granted(creds: Path) -> dict:
+    return nkey.claims(nkey.parse_creds(creds.read_text())[0])["nats"]
+
+
+def _hive_run(monkeypatch: pytest.MonkeyPatch, served: list) -> None:
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: served.append("env"))
+    monkeypatch.setattr(lanes, "serve", lambda environ: served.append(environ.get("AGENTIHOOKS_BUS_SWARMS")))
+    monkeypatch.setattr(daemon, "run", lambda connect: served.append("telemetry"))
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    env = root_bus.write(home, signer, "root")
+    creds = _stored(home, signer, _without_stop_grants(signer))
+    for key, value in dotenv_values(env).items():
+        monkeypatch.setenv(key, value or "")
+    monkeypatch.setattr(cli, "_signer", lambda: dataclasses.replace(signer, member_swarms={"root": ("alpha", "beta")}))
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", "alpha,beta", "telemetry"]
+    assert _granted(creds) == _fresh(signer, ("alpha", "beta"))
+    assert capsys.readouterr().err == (
+        f"hive re-minted the root bus credential in {env}: its grant differed from a fresh mint\n"
+    )
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    root_bus.write(home, signer, "root")
+    creds = _stored(home, signer, _without_stop_grants(signer))
+    stored = creds.read_text()
+    monkeypatch.delenv("AGENTIHOOKS_BUS_SWARMS", raising=False)
+    monkeypatch.setattr(cli, "_signer", lambda: _signer({"other": ("alpha",)}))
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", None, "telemetry"]
+    assert creds.read_text() == stored
+    assert capsys.readouterr().err == (
+        "hive kept the stored root bus credential (the hub record lists no member swarms for hive member root; "
+        "it mints no unscoped bus credential)\n"
+    )
