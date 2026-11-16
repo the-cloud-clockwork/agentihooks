@@ -1138,7 +1138,14 @@ def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
         ("lint", lambda condition: condition.removesuffix(" }}") + " && false }}"),
         ("lint", lambda condition: gate_protected.lab_clause(condition, "lint")),
         ("lint", lambda condition: condition.replace(f" && {gate_protected.LAB_CLAUSE_PREFIX}['lint'] != true", "")),
-        ("select", lambda condition: condition.removesuffix(" }}") + " && false }}"),
+        ("lint", lambda condition: condition.replace("['lint'] != true", "['docs'] != true")),
+        ("select", lambda condition: gate_protected.lab_clause(condition, "select").replace("!= true", "!= false")),
+        (
+            "select",
+            lambda condition: condition.replace(
+                "${{ ", f"${{{{ {gate_protected.LAB_CLAUSE_PREFIX}['select'] != true && ", 1
+            ),
+        ),
     ],
 )
 def test_a_gate_condition_off_its_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
@@ -1146,14 +1153,22 @@ def test_a_gate_condition_off_its_lab_clause_is_red(gate: str, edit: Callable[[s
     job = head["test.yml"]["jobs"][gate]
     job["if"] = edit(job["if"])
     assert gate_protected.grade(workflows, config, head, config, actors) == [
-        f"The head's {gate} condition is neither its base condition nor the base condition with its lab clause."
+        f"The head's {gate} condition changes its lab clause; the protected branch grades with its own."
     ]
 
 
-def test_a_gate_gaining_its_exact_lab_clause_grades_green() -> None:
+@pytest.mark.parametrize(
+    ("gate", "edit"),
+    [
+        ("select", lambda condition: gate_protected.lab_clause(condition, "select")),
+        ("lint", lambda condition: condition.replace("github.event_name != 'push'", "github.event_name != 'schedule'")),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && always() }}"),
+    ],
+)
+def test_a_gate_keeping_its_exact_lab_clause_grades_green(gate: str, edit: Callable[[str], str]) -> None:
     workflows, head, config, actors = _repository_lab_form()
     jobs = head["test.yml"]["jobs"]
-    jobs["select"]["if"] = gate_protected.lab_clause(jobs["select"]["if"], "select")
+    jobs[gate]["if"] = edit(jobs[gate]["if"])
     assert gate_protected.grade(workflows, config, head, config, actors) == []
 
 
