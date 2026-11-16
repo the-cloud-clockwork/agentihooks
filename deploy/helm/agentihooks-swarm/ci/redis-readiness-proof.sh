@@ -6,7 +6,7 @@ ledger_pod="$release-ledger-0"
 redis_pod="$release-redis-0"
 original="$(kubectl get pod "$redis_pod" -o jsonpath='{.metadata.uid}')"
 image="$(kubectl get pod "$redis_pod" -o jsonpath='{.spec.containers[0].image}')"
-patch="$(python3 -c 'import json, sys; print(json.dumps({"spec": {"template": {"spec": {"initContainers": [{"name": "startup-delay", "image": sys.argv[1], "command": ["sh", "-c", "sleep 15"]}]}}}}))' "$image")"
+patch="$(python3 -c 'import json, sys; print(json.dumps({"spec": {"template": {"spec": {"initContainers": [{"name": "startup-delay", "image": sys.argv[1], "command": ["sh", "-c", "sleep 25"]}]}}}}))' "$image")"
 kubectl patch statefulset "$release-redis" --type=strategic -p "$patch"
 replaced=""
 for _ in $(seq 60); do
