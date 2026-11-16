@@ -162,6 +162,23 @@ def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_ta
     assert fixture.count("# ok: tick-unbounded-store-read") == 10
 
 
+def test_ledger_write_rule_holds_the_whole_tree_without_exceptions() -> None:
+    document = yaml.safe_load((_ROOT / ".semgrep/ledger-server-writes.yml").read_text())
+    rules = {rule["id"]: rule for rule in document["rules"]}
+    assert sorted(rules) == ["ledger-client-in-process", "ledger-server-reads-only"]
+    assert all(rule["languages"] == ["python"] and rule["severity"] == "ERROR" for rule in rules.values())
+    assert "paths" not in rules["ledger-client-in-process"]
+    assert rules["ledger-server-reads-only"]["paths"] == {
+        "include": ["/scripts/swarm_ledger/ledger_server.py", "ledger-server-writes.test.py"]
+    }
+    assert not (_ROOT / ".semgrep/ledger-server-writes-allowlist.json").exists()
+    fixture = (_ROOT / ".semgrep/ledger-server-writes.test.py").read_text()
+    assert fixture.count("# ruleid: ledger-server-reads-only") == 6
+    assert fixture.count("# ok: ledger-server-reads-only") == 2
+    assert fixture.count("# ruleid: ledger-client-in-process") == 6
+    assert fixture.count("# ok: ledger-client-in-process") == 3
+
+
 def test_scan_excludes_only_the_mutable_action_tag_rule():
     assert _jobs()["scan"]["steps"][-1]["env"]["EXCLUDE_RULES"].split() == [
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
