@@ -59,7 +59,12 @@ def described(option: ModelPick) -> str:
 
 
 def pick(
-    harness: str, lane: dict, task: dict, environ: dict, bounds: tuple = DEFAULT_RANGE, default_model: str = ""
+    harness: str,
+    lane: dict,
+    task: dict,
+    environ: dict[str, str],
+    bounds: tuple = DEFAULT_RANGE,
+    default_model: str = "",
 ) -> ModelPick:
     from scripts.init_agent import model_effort
 
