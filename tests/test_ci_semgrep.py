@@ -100,8 +100,6 @@ def test_feature_fixture_command_runs_recursively():
 def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
     steps = [step for job in _jobs().values() for step in job.get("steps", [])]
     assert not any("scripts.feature_map" in step.get("run", "") for step in steps)
-    runs = {(job, step.get("name")): step.get("run") for job, spec in _jobs().items() for step in spec["steps"]}
-    assert runs["feature-tests", "Install Semgrep"] == runs["scan", "Install Semgrep"]
 
 
 def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
@@ -249,7 +247,7 @@ def _run_install(
     if installed:
         (tmp_path / "version").write_text(installed + "\n")
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "STUBS": str(tmp_path), "PIP_GIVES": pip_gives}
-    env.update(install.get("env", {}))
+    env.update(install["env"])
     done = subprocess.run(["bash", "-euo", "pipefail", "-c", install["run"]], env=env, capture_output=True, text=True)
     calls = tmp_path / "calls"
     return done.returncode, calls.read_text().splitlines() if calls.exists() else []
@@ -289,6 +287,12 @@ def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None
     job = _jobs()["feature-tests"]
     install = next(step for step in job["steps"] if step.get("name") == "Install Semgrep")
     assert 0 < install.get("timeout-minutes", job["timeout-minutes"]) < job["timeout-minutes"]
+
+
+def test_feature_tests_install_semgrep_with_the_scan_check_and_pin() -> None:
+    steps = {(job, step.get("name")): step for job, spec in _jobs().items() for step in spec["steps"]}
+    feature, scan = steps["feature-tests", "Install Semgrep"], steps["scan", "Install Semgrep"]
+    assert (feature["run"], feature["env"]) == (scan["run"], scan["env"])
 
 
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
