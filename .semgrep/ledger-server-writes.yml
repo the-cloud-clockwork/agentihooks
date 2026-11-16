@@ -1,0 +1,40 @@
+rules:
+  - id: ledger-server-reads-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Operator order, 16 November: nothing writes through the ledger server. It only reads, for the ledger page;
+      every ledger write is a route of the ledger API service, which writes the shared database.
+    paths:
+      include:
+        - /scripts/swarm_ledger/ledger_server.py
+        - ledger-server-writes.test.py
+    patterns:
+      - pattern-either:
+          - pattern: |
+              def $METHOD(...):
+                  ...
+          - pattern: $METHOD = $VALUE
+          - pattern: $OWNER.$METHOD = $VALUE
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^do_(POST|PUT|PATCH|DELETE)$
+  - id: ledger-client-in-process
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Operator order, 16 November: nothing writes through the ledger server's client. A ResourceClient without the
+      in process transport sends its operations over HTTP to the ledger server; give it the in process transport,
+      which runs the ledger API route code over the shared database.
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: ResourceClient(...)
+              - pattern: $MODULE.ResourceClient(...)
+              - pattern: scripts.swarm_ledger.api.client.ResourceClient(...)
+          - pattern-not: $CLIENT(..., transport=$TRANSPORT, ...)
+          - pattern-not: $CLIENT($BASE, $CREDENTIALS, $TIMEOUT, $TRANSPORT, ...)
+      - pattern: ResourceClient(..., transport=None, ...)
+      - pattern: $MODULE.ResourceClient(..., transport=None, ...)
+      - pattern: ResourceClient($BASE, $CREDENTIALS, $TIMEOUT, None, ...)
+      - pattern: $MODULE.ResourceClient($BASE, $CREDENTIALS, $TIMEOUT, None, ...)
