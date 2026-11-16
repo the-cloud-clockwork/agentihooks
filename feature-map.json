@@ -118,6 +118,19 @@
       ]
     },
     {
+      "id": "hub-shared-ledger-copy-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-shared-copy-revision",
+      "behaviour": "The hub's shared ledger copy reads the ledger revision while it holds the swarm's lock and fetches the export again only for a newer revision, so a reader holding an older revision never relabels the copy backwards or forces another fetch, and every reader gets task rows of its own, so a field a reader sets on a row, as the claim cap does when it blocks a task during admission, never reaches the copy the other readers share.",
+      "seam": "readiness.Source.state: the revision read inside the per swarm lock, the newer revision check and the per caller task rows; the claim cap's row update inside hub admission",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_a_reader_handed_an_older_revision_keeps_the_newer_copy_and_fetches_nothing",
+        "tests/swarm/test_readiness.py::test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn",
+        "tests/swarm/test_readiness.py::test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy",
+        "tests/hub/test_admission_claim_cap.py::test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
@@ -1949,6 +1962,18 @@
         "tests/tick/test_late_view.py::test_an_abandoned_view_skips_the_stall_watch_and_the_pass_ends",
         "tests/tick/test_late_view.py::test_an_error_a_step_held_ends_the_pass_failed_and_the_next_pass_runs",
         "tests/tick/test_late_view.py::test_a_redis_error_a_step_held_reaches_the_outage_guard"
+      ]
+    },
+    {
+      "id": "swarm-tick-intent-failure-held",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-held-to-pass-end",
+      "behaviour": "An intent check that raises in a tick pass holds its exception for the pass end: the wrapper relay hook answers without raising and leaves the verdict view and checked actions it never got unset, so the tick view step builds the view itself as it does after an intent check that overran its budget, every step that never needed the verdict still runs in that pass, at the relay site and after it, and the pass still ends failed on the intent failure.",
+      "seam": "the wrapper relay hook scripts.swarm.cli._Wrapper._judged and the end of scripts.swarm.cli.run_tick, with the intent check step of scripts.tick.steps.host",
+      "rules": ["tick-site-hook-raises-held-step"],
+      "tests": [
+        "tests/tick/test_intent_failure.py::test_a_raising_intent_check_still_runs_the_steps_that_never_needed_it",
+        "tests/tick/test_intent_failure.py::test_the_relay_hook_leaves_a_raised_intent_check_to_the_pass_end"
       ]
     },
     {
@@ -6631,6 +6656,20 @@
       "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
+      ]
+    },
+    {
+      "id": "pattern-downloads-keep-a-lone-artifact-where-its-reader-looks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2560",
+      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
+      "seam": "The mutation job's Download every mutation shard report path and the Merge the shard reports step in the Tests workflow, the grade download in the retained mutation replay's verify job, scripts.ci_gate_summary.counts over the test summary downloads, and every pattern download under .github",
+      "tests": [
+        "tests/test_ci_lone_artifact_download.py::test_every_pattern_download_without_merge_multiple_says_where_a_lone_match_lands",
+        "tests/test_ci_lone_artifact_download.py::test_a_lone_shard_download_lands_in_a_folder_its_pattern_names",
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran",
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_replay_verify_finds_every_grade_however_many_shards_ran",
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran"
       ]
     },
     {

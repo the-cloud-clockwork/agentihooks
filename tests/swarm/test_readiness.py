@@ -327,3 +327,72 @@ def test_one_swarms_fetch_never_waits_for_another_swarms_fetch() -> None:
     source.state("b")
     reader.join()
     assert waited == [True]
+
+
+class Exports:
+    """A ledger that answers its revisions in turn and counts every export it serves."""
+
+    def __init__(self, *revisions: int) -> None:
+        self.revisions, self.fetches = iter(revisions), 0
+
+    def metadata(self, slug: str) -> dict[str, Any]:
+        return {"_meta": {"rev": next(self.revisions)}}
+
+    def state(self, slug: str) -> dict[str, Any]:
+        self.fetches += 1
+        return doc([task("t1")])
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_reader_handed_an_older_revision_keeps_the_newer_copy_and_fetches_nothing() -> None:
+    ledger = Exports(7, 6, 7)
+    source = readiness.Source(ledger=cast(Any, ledger))
+    for _ in range(3):
+        source.state(SLUG)
+    assert ledger.fetches == 1
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn() -> None:
+    began, asked, release = threading.Event(), threading.Event(), threading.Event()
+    got: list[dict[str, Any]] = []
+
+    class Ledger:
+        def __init__(self) -> None:
+            self.rev, self.reads = 7, 0
+
+        def metadata(self, slug: str) -> dict[str, Any]:
+            self.reads += 1
+            if self.reads == 2:
+                asked.set()
+            return {"_meta": {"rev": self.rev}}
+
+        def state(self, slug: str) -> dict[str, Any]:
+            rev = self.rev
+            if rev == 7:
+                began.set()
+                release.wait(5)
+            return doc([task(f"t{rev}")])
+
+    ledger = Ledger()
+    source = readiness.Source(ledger=cast(Any, ledger))
+    first = threading.Thread(target=source.state, args=(SLUG,))
+    first.start()
+    assert began.wait(5)
+    second = threading.Thread(target=lambda: got.append(source.state(SLUG)))
+    second.start()
+    asked.wait(0.5)
+    ledger.rev = 8
+    release.set()
+    first.join()
+    second.join()
+    assert [row["id"] for row in got[0]["tasks"]] == ["t8"]
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy() -> None:
+    ledger = Exports(7, 7)
+    source = readiness.Source(ledger=cast(Any, ledger))
+    source.state(SLUG)["tasks"][0].update(state="blocked")
+    assert [row["state"] for row in source.state(SLUG)["tasks"]] == ["open"]
+    assert ledger.fetches == 1
