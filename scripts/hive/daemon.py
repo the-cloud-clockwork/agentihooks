@@ -693,17 +693,21 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(redis)
-    hosted = [
-        (slug, agent)
-        for slug in store.slugs()
-        for agent in store.agents(slug)
-        if agent.execution_id and agent.runtime_target.get("host_id") == local_id
-    ]
+    slugs: list[str] = store.slugs()
+    records = [(slug, agent) for slug in slugs for agent in store.agents(slug) if agent.execution_id]
+    hosted = [(slug, agent) for slug, agent in records if agent.runtime_target.get("host_id") == local_id]
     from scripts.swarm_v2.runtime.process import local_namespace, started_ms
 
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     report["observed_at"] = int(time.time() * 1000)
     report["started_at"] = started_ms()
+    admitted = {
+        agent.execution_id: {"generation": agent.generation, "pane": asdict(herdr.observe(agent))}
+        for _, agent in records
+        if not agent.runtime_target and agent.hive == local_id
+    }
+    if admitted:
+        report["admitted"] = admitted
     if not hosted:
         return report
     report["process_namespace"] = local_namespace()
