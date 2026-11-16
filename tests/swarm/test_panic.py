@@ -524,8 +524,8 @@ def _github_runs(monkeypatch: pytest.MonkeyPatch, rows: dict[str, list[dict[str,
     from scripts.tick.adapters import github
 
     def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        repository, listing, _ = args[1].removeprefix("repos/").partition("/actions/runs?")
-        body = json.dumps({"workflow_runs": rows[repository]}) if listing else ""
+        repository, found, _ = args[1].removeprefix("repos/").partition("/actions/runs?")
+        body = json.dumps({"workflow_runs": rows[repository]}) if found else ""
         return subprocess.CompletedProcess(args, 0, body, "")
 
     monkeypatch.setattr(github.github_reads, "rest", rest)
