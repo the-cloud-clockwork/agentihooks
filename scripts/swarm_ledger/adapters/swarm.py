@@ -1,4 +1,7 @@
-class Swarm:
+from scripts.swarm_ledger import ports
+
+
+class Swarm(ports.Swarm):
     @property
     def naming(self):
         from scripts.swarm import naming

@@ -5926,15 +5926,14 @@
     {
       "id": "scratch-ledger-folder-skips-shared-database",
       "origin": "inventory",
-      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1, and the swarm lease's ledger address follows the same url() check so a scratch ledger's lease never routes through the shared server; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
-      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm.lease._address and scripts.swarm_ledger.storage.build",
+      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
+      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm_ledger.storage.build",
       "tests": [
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_folder",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_ignores_the_shared_database_url",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_uses_the_shared_database_only_when_asked",
         "tests/swarm_ledger/test_scratch_store.py::test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database",
-        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder",
-        "tests/swarm/test_lease.py::test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited"
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder"
       ]
     },
     {

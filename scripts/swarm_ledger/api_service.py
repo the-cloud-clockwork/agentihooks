@@ -14,6 +14,7 @@ origins it answers.
 
 import argparse
 import functools
+from abc import ABC, abstractmethod
 import itertools
 import json
 import os
@@ -26,6 +27,8 @@ from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
 from typing import Any, cast
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from scripts.gates import talk as talk_budget
 from scripts.swarm_ledger import ledger_alerts as alerts_module
@@ -561,7 +564,7 @@ def services() -> Services:
     return Services(repository=server.repository, ledger=ledger, swarm=swarm, media=media, policy=policy)
 
 
-class Writes:
+class Writes(ABC):
     """The ledger write handlers: served over HTTP by the API service and run in process by every ledger client."""
 
     headers: Message
@@ -569,14 +572,17 @@ class Writes:
     principal: str | None = None
     tls: ssl.SSLContext | None = None
 
+    @abstractmethod
     def send(self, code: int, body: str, ctype: str) -> None:
         """Send one reply; the HTTP handler and the in process exchange each define how."""
         raise NotImplementedError
 
+    @abstractmethod
     def exists(self, slug: str) -> bool:
         """Whether the ledger exists; defined by the HTTP handler and the in process exchange."""
         raise NotImplementedError
 
+    @abstractmethod
     def refused(self, slug: str | None = None) -> bool:
         """Refuse a caller the ledger does not admit, setting the principal of one it does."""
         raise NotImplementedError
