@@ -25,6 +25,8 @@ LAYOUT = (
     'command -v python\necho "$PATH"\necho "$CI_LAB_PORT_FIRST"\necho "$CI_LAB_TEST"\n'
     'echo summary > "$GITHUB_STEP_SUMMARY"\n'
 )
+CHANGED = "${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}"
+ECHOES = 'echo "$BASE"\necho "$RULES"\necho "$CI_LAB_TEST"\necho "$GITHUB_WORKSPACE"\necho "$RUNNER_TEMP"\n'
 
 
 @pytest.fixture
@@ -75,8 +77,8 @@ def _base(tmp_path: Path) -> Path:
     return _tree(tmp_path / "base", {"narrow.py": NARROW, ALLOWLIST: "{}\n"})
 
 
-def _step(run: str) -> StaticGate:
-    return StaticGate("lint/probe", "lint", "Probe", ("python",), (), run, (".",), (".",))
+def _step(run: str, env: tuple[tuple[str, str], ...] = (), condition: str = "") -> StaticGate:
+    return StaticGate("lint/probe", "lint", "Probe", ("python",), (), run, (".",), (".",), env, condition)
 
 
 def _folders(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -139,3 +141,56 @@ def test_a_step_past_its_time_limit_is_red_with_no_code(tmp_path: Path, settings
 def test_the_step_runs_inside_bubblewrap_without_network(tmp_path: Path, settings: run_static.Settings) -> None:
     assert run_static.run(_step("true\n"), *_folders(tmp_path), settings).green
     assert "--unshare-net" in (tmp_path / "bwrap.args").read_text().splitlines()
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_a_step_whose_if_is_false_is_skipped_green_without_running(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    marker = tmp_path / "ran"
+    gate = _step(f"touch '{marker}'\n", condition=CHANGED)
+    trees = _folders(tmp_path)
+    unchanged = dataclasses.replace(settings, context={"steps.self-plant.outputs.changed": "false"})
+    result = run_static.run(gate, *trees, unchanged)
+    assert (result.gate, result.code, result.skipped, result.green) == ("lint/probe", None, True, True)
+    assert result.log.read_text() == f"if is false: {CHANGED}\n"
+    assert result.report.read_text() == ""
+    assert result.log == result.report.parent / "skipped.txt"
+    assert settings.root in result.log.parents
+    assert not marker.exists()
+    assert not (tmp_path / "bwrap.args").exists()
+    held = dataclasses.replace(settings, context={"steps.self-plant.outputs.changed": "true"})
+    ran = run_static.run(gate, *trees, held)
+    assert (ran.code, ran.skipped, ran.green) == (0, False, True)
+    assert marker.exists()
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_the_step_reads_its_env_with_expressions_resolved_from_the_context(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    env = (
+        ("BASE", "${{ inputs.base }}"),
+        ("RULES", ".semgrep"),
+        ("CI_LAB_TEST", "step"),
+        ("RUNNER_TEMP", "/nowhere"),
+        ("GITHUB_WORKSPACE", "/nowhere"),
+    )
+    gate = _step(ECHOES, env, "${{ !cancelled() }}")
+    head, base, grader = _folders(tmp_path)
+    context = dataclasses.replace(settings, context={"inputs.base": "origin/dev"})
+    result = run_static.run(gate, head, base, grader, context)
+    assert (result.code, result.skipped) == (0, False)
+    lines = result.log.read_text().splitlines()
+    assert lines[:4] == ["origin/dev", ".semgrep", "step", str(head)]
+    assert settings.root in Path(lines[4]).parents
+
+
+def test_a_condition_outside_the_expression_subset_is_refused_before_the_step_runs(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    gate = _step("true\n", condition="${{ contains(github.ref, 'dev') }}")
+    with pytest.raises(ValueError) as refused:
+        run_static.run(gate, *_folders(tmp_path), settings)
+    assert str(refused.value) == "cannot read ','"
+    assert not (tmp_path / "bwrap.args").exists()

@@ -11,7 +11,8 @@ __all__ = ["Load", "document", "hit_ratio", "predicted_wait", "utilisation"]
 
 @dataclass(frozen=True)
 class Load:
-    """Queue and slot state at one instant: pending estimates, running counts and verdict cache use per class."""
+    """Queue and slot state at one instant: pending estimates, running counts and verdict cache use per class, and the
+    seconds until each running unit frees its slot."""
 
     pending: Mapping[str, Sequence[float]]
     running: Mapping[str, int]
@@ -21,6 +22,7 @@ class Load:
     shed: tuple[str, ...] = ()
     cache_hits: Mapping[str, int] = field(default_factory=dict[str, int])
     cache_misses: Mapping[str, int] = field(default_factory=dict[str, int])
+    frees_in: Sequence[float] = ()
 
     @property
     def slots_free(self) -> int:
@@ -28,14 +30,17 @@ class Load:
         return max(self.slots_total - self.slots_busy, 0)
 
 
-def predicted_wait(estimates: Sequence[float], free_slots: int) -> float | None:
-    """Seconds until the pending estimates drain across the free slots; None when no slot is free."""
+def predicted_wait(estimates: Sequence[float], free_slots: int, frees_in: Sequence[float] = ()) -> float | None:
+    """Seconds until the pending estimates drain across the pool, each free slot working from now and each busy slot
+    from when its running unit frees it; None when no slot is free and no running unit's free time is known.
+
+    With the ``count`` earliest slots working, the work drains at ``(work + their start times) / count``; every other
+    count is no earlier, so the drain is the least of these."""
     work = fsum(estimates)
     if not work:
         return 0.0
-    if free_slots <= 0:
-        return None
-    return work / free_slots
+    starts = sorted([0.0] * free_slots + [max(at, 0.0) for at in frees_in])
+    return min(((work + fsum(starts[:count])) / count for count in range(1, len(starts) + 1)), default=None)
 
 
 def utilisation(load: Load) -> float:
@@ -60,7 +65,7 @@ def document(load: Load) -> dict[str, object]:
         name: {
             "pending": len(load.pending.get(name, ())),
             "running": load.running.get(name, 0),
-            "predicted_wait_s": predicted_wait(load.pending.get(name, ()), free),
+            "predicted_wait_s": predicted_wait(load.pending.get(name, ()), free, load.frees_in),
             "verdict_cache_hit_ratio": hit_ratio(load.cache_hits.get(name, 0), load.cache_misses.get(name, 0)),
         }
         for name in CLASSES
