@@ -4201,6 +4201,20 @@
       ]
     },
     {
+      "id": "panic-fix-branch-first-push",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2558",
+      "behaviour": "While fleet panic is on, a fix registered as a branch link of a named repository lets a session on that branch in that repository make its first push, rerun or dispatch before any pull request exists, the panic cancel sweep spares that branch's runs in that repository without reading it as a pull request, and a push from any other branch or from the same branch name in another repository stays frozen.",
+      "seam": "The panic fix list branch link read by the blocker window hook and the panic cancel sweep",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_branch_link_names_its_repository_and_branch",
+        "tests/swarm/test_panic.py::test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository",
+        "tests/swarm/test_panic.py::test_panic_spares_the_first_push_of_a_registered_fix_branch",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_from_a_branch_no_fix_registers"
+      ]
+    },
+    {
       "id": "panic-merged-fix-dev-run",
       "origin": "regression",
       "ordered_at": "2026-11-07",

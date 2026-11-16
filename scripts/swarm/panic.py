@@ -172,6 +172,18 @@ def fix_branch(url: str) -> str:
     return fix_change(url).head_branch
 
 
+def branch_fix(fix: str) -> tuple[str, str]:
+    """Return the repository key and the branch a fix branch link https://github.com/OWNER/NAME/tree/BRANCH names,
+    or two empty strings for any other fix."""
+    from scripts.swarm.stack import GITHUB, repo_key
+
+    parts = fix.removeprefix(GITHUB).split("/", 3)
+    if not (fix.startswith(GITHUB) and len(parts) == 4 and parts[2] == "tree" and all(parts)):
+        return "", ""
+    owner, name, _, branch = parts
+    return repo_key(f"{GITHUB}{owner}/{name}"), branch
+
+
 def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
     """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit or a
     release tag."""
@@ -203,8 +215,12 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes and the
-    runs on a fix's merge queue commit, merge commit or merged integration branch head."""
-    changes = [fix_change(url) for url in fixes]
+    runs on a fix's merge queue commit, merge commit or merged integration branch head; a fix branch link spares
+    its branch in its own repository and is never read as a pull request."""
+    from scripts.swarm.stack import GITHUB, repo_key
+
+    named = [(fix, *branch_fix(fix)) for fix in fixes]
+    changes = [fix_change(fix) for fix, _, branch in named if not branch]
     branches = {change.head_branch for change in changes}
     commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
@@ -212,8 +228,10 @@ def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> lis
         provider = ports(repo)
         rows = provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS))
         spared = commits | _fix_heads(rows, changes, repo)
+        here = repo_key(f"{GITHUB}{repo}")
+        kept = branches | {branch for _, key, branch in named if key == here}
         for row in rows:
-            if _spared(row, branches, spared):
+            if _spared(row, kept, spared):
                 continue
             provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
             cancelled.append(f"{repo} run {row.id} on {row.branch}")
