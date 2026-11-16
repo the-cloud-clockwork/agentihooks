@@ -101,7 +101,8 @@ CI lab heads have their own global stream, `AGENTIHOOKS-CI-LAB-HEADS`, holding `
 provisioning bus open creates it after the events stream, so the events provisioning that resets the
 legacy stream's subjects never touches it, and a restart keeps its subjects and stored heads. The bus
 exposes it as `lab_heads`; the GitHub webhook receiver publishes lab heads there by stream name and
-never through the legacy events stream.
+never through the legacy events stream. [Lab head intake](ci-lab.md#lab-head-intake) covers what
+the receiver records there and the lab notice secret it needs.
 
 Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`,
 `execution-starts` and `inbox`.
