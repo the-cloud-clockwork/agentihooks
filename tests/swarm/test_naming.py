@@ -67,6 +67,18 @@ def test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped(store: R
     assert name in [row["name"] for row in store.names.names("sw")]
 
 
+def test_build_refuses_an_invalid_code_at_any_number() -> None:
+    with pytest.raises(naming.NamingError):
+        naming.build("engineer", "nothex", 5)
+    with pytest.raises(naming.NamingError):
+        naming.build("engineer", "nothex", 10_000)
+
+
+def test_build_refuses_an_unknown_kind_with_a_valid_code_and_number() -> None:
+    with pytest.raises(naming.NamingError):
+        naming.build("nope", "a1b2c3", 5)
+
+
 def test_creating_a_swarm_mints_one_code_kept_on_its_record_and_in_the_registry(store):
     code = store.config("sw").code
     assert re.fullmatch(r"[0-9a-f]{6}", code)
