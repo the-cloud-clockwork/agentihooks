@@ -33,3 +33,17 @@ def test_the_plan_job_takes_every_local_action_before_the_stats_setup_uses_one()
     assert len(setup) == 2
     assert all(steps.index(take) < steps.index(step) for step in setup)
     assert names[-2:] == ["Grade the empty change set", "Forward the reused or empty mutation report"]
+
+
+def test_the_plan_job_uses_only_its_local_actions_and_takes_shards_from_refine_first() -> None:
+    plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
+    local = {step["uses"] for step in plan["steps"] if str(step.get("uses", "")).startswith("./.")}
+    assert local == {
+        "./.workflow-revision/.github/actions/nats-server",
+        "./.workflow-revision/.github/actions/browser-cache",
+        "./.workflow-revision/.github/actions/retry-upload",
+    }
+    assert (
+        plan["outputs"]["shards"]
+        == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.refine.outputs.shards || steps.plan.outputs.shards }}"
+    )

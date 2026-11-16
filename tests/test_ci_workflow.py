@@ -2405,10 +2405,6 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && (needs.mutation-stats.result == 'success' || needs.mutation-plan.outputs.collected == 'true') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && (needs.mutation-plan.outputs.stats_parts == '[0]' || needs.mutation-plan.outputs.collected == 'true')) && (needs.mutation-replan.result == 'success' || needs.mutation-probe.result == 'skipped') }}",
         ),
     )
-    assert (
-        plan["outputs"]["shards"]
-        == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.refine.outputs.shards || steps.plan.outputs.shards }}"
-    )
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["if"] == "steps.reuse.outputs.reused != 'true'"
     assert step["run"] == (
@@ -2866,11 +2862,6 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         "mkdir -p .workflow-revision",
         'git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision',
     ]
-    assert {step["uses"] for step in local["mutation-plan"]} == {
-        "./.workflow-revision/.github/actions/nats-server",
-        "./.workflow-revision/.github/actions/browser-cache",
-        "./.workflow-revision/.github/actions/retry-upload",
-    }
     assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
     for name in ("mutation-stats", "mutation-shard"):
         steps = jobs[name]["steps"]
