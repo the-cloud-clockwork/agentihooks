@@ -1,4 +1,5 @@
 name: Gate Required status
+run-name: Gate Required status for ${{ github.event.workflow_run.head_branch }}
 
 on:
   workflow_run:
