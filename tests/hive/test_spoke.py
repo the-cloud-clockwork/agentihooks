@@ -560,6 +560,42 @@ def test_an_admission_asked_again_launches_without_measuring_room_again(rig: Sim
     rig.runtime.spawn.assert_called_once()
 
 
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+def test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_and_launches(rig: SimpleNamespace) -> None:
+    pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"}, attempt=2)
+    assert rig.queue.withdraw(lambda event: True) == 1
+
+    assert rig.spoke.poll() == "started"
+
+    rig.tasks.request.assert_called_once_with(rig.event)
+    rig.tasks.reopen.assert_not_called()
+    rig.runtime.spawn.assert_called_once()
+    assert claim(rig)["state"] == "started"
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+
+
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+@pytest.mark.parametrize(
+    ("answer", "outcome", "state"),
+    [("held", "held", {"state": "ready"}), ("refused", "withdrawn", {"state": "withdrawn"})],
+)
+def test_a_claim_its_own_ended_admission_wait_left_is_freed_when_the_hub_holds_or_refuses_it(
+    rig: SimpleNamespace, answer: str, outcome: str, state: dict[str, str]
+) -> None:
+    from scripts.hive import admission
+
+    pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"})
+    rig.tasks.request.side_effect = [admission.Held("2 of 2 agents on the hive") if answer == "held" else None]
+    rig.spoke.measure = lambda: None
+
+    assert rig.spoke.poll() == outcome
+
+    assert claim(rig) == state
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+    rig.tasks.request.assert_called_once_with(rig.event)
+    rig.runtime.spawn.assert_not_called()
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
 def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):

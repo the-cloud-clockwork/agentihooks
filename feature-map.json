@@ -1011,6 +1011,20 @@
       ]
     },
     {
+      "id": "hive-spoke-own-claimed-leftover-asked-again",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2583",
+      "behaviour": "A hive spoke whose pending admission points at a claim its own hive still holds as claimed, left by an admission wait that ended without settling the claim, asks the hub again on its next poll as it does for an asked claim, instead of answering busy on every poll: the hub's kept admission launches with no wait for a redelivery of the offer, a held answer frees the claim to ready and a refusal withdraws it, and either clears the pending admission so the spoke takes offers again. A claim another hive holds still keeps the spoke busy.",
+      "seam": "Spoke._recover on the hive, through Spoke._ask_again",
+      "rules": [
+        "hive-spoke-recovery-keeps-own-claimed-busy"
+      ],
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_and_launches",
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_is_freed_when_the_hub_holds_or_refuses_it"
+      ]
+    },
+    {
       "id": "hive-ready-through-launch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2172",
