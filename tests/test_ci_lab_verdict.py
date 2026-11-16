@@ -142,7 +142,7 @@ def test_failure_is_published() -> None:
 def test_runs_from_other_apps_never_satisfy_the_poll() -> None:
     clock = Clock()
     fetch, asked = scripted({"lab/lint": [[run(1, "completed", "success", "other-app")]]})
-    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 15, clock, clock.sleep) == {}
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 15, clock, clock.sleep) == {"lint": "failure"}
     assert len(asked) == 2
 
 
@@ -162,18 +162,18 @@ def test_verdict_refuses_an_untrusted_app_before_polling(
     assert not (tmp_path / "out").exists()
 
 
-def test_absent_verdict_is_left_out_at_the_deadline() -> None:
+def test_absent_verdict_fails_at_the_deadline() -> None:
     clock = Clock()
     fetch, asked = scripted({"lab/lint": [[]]})
-    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 30, clock, clock.sleep) == {}
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 30, clock, clock.sleep) == {"lint": "failure"}
     assert clock.slept == [15.0, 15.0]
     assert len(asked) == 3
 
 
-def test_pending_verdict_is_left_out_at_the_deadline() -> None:
+def test_pending_verdict_fails_at_the_deadline() -> None:
     clock = Clock()
     fetch, _ = scripted({"lab/lint": [[run(1, "in_progress")]]})
-    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 20, clock, clock.sleep) == {}
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 20, clock, clock.sleep) == {"lint": "failure"}
     assert clock.slept == [15.0, 15.0]
 
 
@@ -209,7 +209,7 @@ def test_fetch_reads_latest_runs_through_the_rate_limited_helper(monkeypatch: py
     ]
 
 
-def test_lab_outputs_publish_only_gates_the_lab_graded(tmp_path: Path) -> None:
+def test_lab_outputs_publish_every_authoritative_gate(tmp_path: Path) -> None:
     grader = tree(tmp_path, ["lint"], prefix="grade")
     fetch, asked = scripted(
         {
@@ -220,7 +220,7 @@ def test_lab_outputs_publish_only_gates_the_lab_graded(tmp_path: Path) -> None:
     )
     authoritative = '{"unit": true, "lint": true, "type-gate": true, "docs": false}'
     outputs = verdict.lab_outputs(grader, authoritative, fetch, LAB, 0)
-    assert outputs == {"lab_lint": "success", "lab_type-gate": "skipped"}
+    assert outputs == {"lab_lint": "success", "lab_type-gate": "skipped", "lab_unit": "failure"}
     assert asked == ["grade/lint", "grade/type-gate", "grade/unit"]
 
 

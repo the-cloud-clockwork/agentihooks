@@ -3,8 +3,8 @@
 `authority` reads the gates the lab grades from the protected grader's delivery.yaml, so a pull request head can
 never widen them, and AGENTIHOOKS_LAB_OFF empties them; off pull request events it publishes nothing. `verdict` waits
 for the head's completed `lab/<gate>` check run from the lab App named by AGENTIHOOKS_LAB_APP and publishes
-`lab_<gate>` only for gates the lab graded: success or skipped as posted, any other conclusion as failure. A gate with
-no verdict at the deadline keeps its skipped Actions result, which Gate Required refuses for a required gate.
+`lab_<gate>` for each authoritative gate: success or skipped as posted, so the lab marks a gate this pull request does
+not run as skipped, and failure for any other conclusion or a verdict absent or pending at the deadline.
 """
 
 import json
@@ -62,7 +62,7 @@ def verdicts(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, str]:
-    """Poll each gate's check run until every verdict is complete or the wait ends; a gate with no verdict is left out."""
+    """Poll each gate's check run until every verdict is complete or the wait ends; a missing verdict is a failure."""
     deadline = clock() + wait
     results: dict[str, str] = {}
     while True:
@@ -72,7 +72,7 @@ def verdicts(
                 if found is not None:
                     results[gate] = found
         if len(results) == len(checks) or clock() >= deadline:
-            return {gate: results[gate] for gate in checks if gate in results}
+            return {gate: results.get(gate, FAILURE) for gate in checks}
         sleep(POLL_S)
 
 
