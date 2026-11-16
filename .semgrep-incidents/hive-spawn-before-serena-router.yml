@@ -12,9 +12,6 @@ rules:
         - /scripts/hive/lanes.py
         - hive-spawn-before-serena-router.py
     patterns:
-      - pattern-inside: |
-          def request(...):
-              ...
       - pattern: return SpawnRequest(...)
       - pattern-not-inside: |
           if not serena_router_daemon.ensure():
