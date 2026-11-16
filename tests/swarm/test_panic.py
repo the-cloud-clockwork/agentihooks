@@ -23,6 +23,7 @@ SID = "master-session"
 HOUR = panic.HOUR_MS
 WINDOW = panic.WINDOW_MS
 FIX = "https://github.com/the-cloud-clockwork/agentihooks/pull/1"
+BRANCH_FIX = "https://github.com/the-cloud-clockwork/agentihooks/tree/fix-branch"
 
 
 @pytest.fixture
@@ -579,6 +580,45 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
     ]
 
 
+@pytest.mark.parametrize(
+    ("fix", "named"),
+    [
+        (BRANCH_FIX, ("github.com/the-cloud-clockwork/agentihooks", "fix-branch")),
+        (
+            "https://github.com/The-Cloud-Clockwork/agentihooks/tree/Fix",
+            ("github.com/the-cloud-clockwork/agentihooks", "Fix"),
+        ),
+        ("https://github.com/o/r/tree/fix/nested", ("github.com/o/r", "fix/nested")),
+        ("https://github.com/o/tree/tree/b", ("github.com/o/tree", "b")),
+        (FIX, ("", "")),
+        ("o/r/tree/b", ("", "")),
+        ("https://github.com/o/r/tree", ("", "")),
+        ("https://github.com/o/r/tree/", ("", "")),
+        ("https://github.com//r/tree/b", ("", "")),
+    ],
+)
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_a_branch_link_names_its_repository_and_branch(fix: str, named: tuple[str, str]) -> None:
+    assert panic.branch_fix(fix) == named
+
+
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = _branches(monkeypatch, {FIX: "pr-branch"})
+    runs = Runs({repo: [_row(1, "busy"), _row(2, "fix-branch"), _row(3, "pr-branch")] for repo in panic.REPOS})
+    panic.engage(store, "pressed", False, [FIX, BRANCH_FIX], 0)
+    assert panic.tick_pass(store, True, 1_000, runs) == [
+        "panic cancelled the-cloud-clockwork/agentihooks run 1 on busy",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 1 on busy",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 2 on fix-branch",
+        "panic cancelled the-cloud-clockwork/antoncore run 1 on busy",
+        "panic cancelled the-cloud-clockwork/antoncore run 2 on fix-branch",
+    ]
+    assert asked == [FIX]
+
+
 def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):
     _branches(monkeypatch, {FIX: "fix-branch"})
     runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS})
@@ -839,6 +879,36 @@ def test_panic_refuses_a_push_outside_a_git_checkout(
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "reason", False, [FIX], 0)
     assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", str(tmp_path))[1] is not None
+
+
+@pytest.mark.parametrize("command", ["git push -u origin HEAD", "gh run rerun 5", "gh workflow run t.yml"])
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_panic_spares_the_first_push_of_a_registered_fix_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    asked = _branches(monkeypatch, {})
+    panic.engage(store, "60 errors in the last hour", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+    assert asked == []
+
+
+@pytest.mark.parametrize(
+    ("branch", "origin"),
+    [
+        ("other-branch", "git@github.com:The-Cloud-Clockwork/agentihooks.git"),
+        ("fix-branch", "https://github.com/the-cloud-clockwork/antoncore.git"),
+    ],
+)
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_panic_refuses_a_push_from_a_branch_no_fix_registers(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, branch: str, origin: str
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "60 errors in the last hour", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "work", branch, origin)
+    block = blocker_window.pretool("Bash", {"command": "git push -u origin HEAD"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
 
 
 def _git_runs(monkeypatch: pytest.MonkeyPatch, outcome: Any) -> list[tuple[list[str], dict[str, Any]]]:
