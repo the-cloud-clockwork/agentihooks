@@ -111,6 +111,21 @@ def test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing
     configs.assert_not_called()
 
 
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_held_answer_naming_the_hives_own_admission_in_progress_raises_unanswered(hub: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    hub.hub.admitted = {"held": admission.ADMITTING}
+    configs = Mock()
+
+    with pytest.raises(admission.Unanswered) as raised:
+        lanes.LaneTasks(hub.bus, "hive-a", configs).request(offer())
+
+    assert str(raised.value) == admission.ADMITTING
+    assert not isinstance(raised.value, admission.Held)
+    configs.assert_not_called()
+
+
 def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(lane="plan"))
     assert hub.hub.seen == [

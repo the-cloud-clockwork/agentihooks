@@ -674,6 +674,126 @@ def test_an_admission_finished_just_inside_the_hive_wait_is_kept(
     assert "late:" not in capsys.readouterr().err
 
 
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_another_hive_gets_none(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import admission as hive_admission
+
+    monkeypatch.setattr(admission, "TURN_TRIES", 1)
+    monkeypatch.setattr(admission, "TURN_WAIT_S", 0)
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    write = rig.admitter._mark
+    asked: list[dict[str, Any] | None] = []
+
+    def slow(*args: Any) -> dict[str, Any] | None:
+        asked.extend([other.admit(SLUG, ask()), other.admit(SLUG, ask(hive="hive-b"))])
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", slow)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert asked == [{"held": hive_admission.ADMITTING}, None]
+    assert other.admit(SLUG, ask()) == admitted
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [admitted["name"]]
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_that_waited_for_the_hives_turn_answers_the_admission_its_own_ask_kept(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    placement = other._unplaceable
+    kept: list[dict[str, Any] | None] = []
+
+    def admitting(row: dict[str, Any], hive: str) -> str:
+        kept.append(rig.admitter.admit(SLUG, ask()))
+        unplaceable: str = placement(row, hive)
+        return unplaceable
+
+    monkeypatch.setattr(other, "_unplaceable", admitting)
+
+    again = other.admit(SLUG, ask())
+
+    assert again is not None
+    assert again == kept[0]
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [again["name"]]
+    assert len(rig.ledger.writes) == 1
+    assert other.admit(SLUG, ask(hive="hive-b")) is None
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    kept: list[dict[str, Any] | None] = []
+
+    def snapshot(slug: str) -> Any:
+        kept.append(rig.admitter.admit(SLUG, ask()))
+        return rig.admitter.source.snapshot(slug)
+
+    monkeypatch.setattr(other, "source", SimpleNamespace(snapshot=snapshot))
+
+    again = other.admit(SLUG, ask())
+
+    assert again is not None
+    assert again == kept[0]
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from unittest.mock import Mock
+
+    from scripts.hive import lanes
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    bus: Any = open_bus(BusConfig())
+    slots.serve(bus, admitter=rig.admitter)
+    request = type(bus).request
+    asks: list[str] = []
+
+    def late_first(self: Any, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        answer: bytes = request(self, subject, data, timeout_ms)
+        asks.append(json.loads(data)["op"])
+        if asks == ["admit"]:
+            raise TimeoutError(f"no responders for {subject!r}")
+        return answer
+
+    monkeypatch.setattr(type(bus), "request", late_first)
+    rig.admitter.clock = late_clock(0)
+    runtime = Mock()
+    placed = SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500)
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    tasks = lanes.LaneTasks(bus, "hive-a", rig.store.config)
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(config, bus, runtime, tasks, lambda: reading, view=Mock(return_value=None))
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        assert spoke.poll() == "asked"
+        name = rig.store.claimant(SLUG, "t1")
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
+        assert spoke.poll() == "started"
+    finally:
+        bus.close()
+
+    assert "late: finished after" in capsys.readouterr().err
+    [launched] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert launched.name == name
+    assert rig.store.claimant(SLUG, "t1") == name
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claim_generation"]) == ("claimed", 1)
+    assert asks == ["admit", "admit", "launched"]
+
+
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
 def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
