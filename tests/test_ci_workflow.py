@@ -1580,7 +1580,11 @@ def test_unit_shards_upload_their_durations_for_the_refresh() -> None:
     restores = [
         "Mint the token that restores queue unit artifacts",
         "Restore queue shard durations",
+        "Restore torn queue shard durations again",
+        "Check the queue shard durations restored again",
         "Restore queue shard flakes",
+        "Restore torn queue shard flakes again",
+        "Check the queue shard flakes restored again",
         "Restore queue shard coverage",
         "Restore torn queue shard coverage again",
         "Check the queue shard coverage restored again",
@@ -1588,12 +1592,15 @@ def test_unit_shards_upload_their_durations_for_the_refresh() -> None:
     names = [step["name"] for step in between]
     assert names in ([], restores, [*restores, "Empty the test reports of a leg above the queue's shard count"])
     own = "fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
+    torn_gates = {
+        name: _unfinished_queue_restore(kind)
+        for kind in _QUEUE_RESTORE_GATES
+        for name in (f"Restore torn queue shard {kind} again", f"Check the queue shard {kind} restored again")
+    }
     for step in between:
-        expected = "needs.split.outputs.source != ''"
+        expected = torn_gates.get(step["name"], "needs.split.outputs.source != ''")
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
-        if step["name"] in restores[4:]:
-            expected = _UNFINISHED_QUEUE_COVERAGE
         if step["name"] == "Restore queue shard flakes" and names != restores:
             expected += f" && {own}"
         if step["name"].startswith("Empty the test reports"):
@@ -1608,47 +1615,68 @@ def test_unit_shards_upload_their_durations_for_the_refresh() -> None:
     )
 
 
-_UNFINISHED_QUEUE_COVERAGE = (
-    "needs.split.outputs.source != '' && matrix.python-version == '3.12'"
-    " && steps.restore-queue-shard-coverage.outputs.download-path == ''"
-    " && steps.restore-queue-shard-coverage-attempt-2.outputs.download-path == ''"
+_QUEUE_RESTORE_GATES = {
+    "durations": "needs.split.outputs.source != ''",
+    "flakes": (
+        "needs.split.outputs.source != ''"
+        " && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard"
+    ),
+    "coverage": "needs.split.outputs.source != '' && matrix.python-version == '3.12'",
+}
+
+
+def _unfinished_queue_restore(kind: str) -> str:
+    """Return the condition that restores a queue shard artifact again when no earlier attempt finished it."""
+    return (
+        f"{_QUEUE_RESTORE_GATES[kind]}"
+        f" && steps.restore-queue-shard-{kind}.outputs.download-path == ''"
+        f" && steps.restore-queue-shard-{kind}-attempt-2.outputs.download-path == ''"
+    )
+
+
+_QUEUE_RESTORE_CONSUMERS = {
+    "durations": "Upload durations",
+    "flakes": "Record flaky tests",
+    "coverage": "Check the coverage database",
+}
+
+
+@pytest.mark.parametrize(
+    ("kind", "consumer"), list(_QUEUE_RESTORE_CONSUMERS.items()), ids=list(_QUEUE_RESTORE_CONSUMERS)
 )
-
-
 @pytest.mark.parametrize(
     ("restored", "code", "said"),
     [("", 1, "::error::"), ("/home/runner/_work/agentihooks/agentihooks", 0, "::warning::")],
     ids=["unfinished-again", "restored-again"],
 )
-def test_a_queue_coverage_restore_that_stopped_before_it_finished_is_restored_again(
-    restored: str, code: int, said: str
+def test_a_queue_restore_that_stopped_before_it_finished_is_restored_again(
+    kind: str, consumer: str, restored: str, code: int, said: str
 ) -> None:
     steps = _workflow()["jobs"]["unit"]["steps"]
     names = [step["name"] for step in steps]
-    first = steps[names.index("Restore queue shard coverage")]
-    retried = steps[names.index("Restore queue shard coverage, attempt 2")]
-    again = steps[names.index("Restore torn queue shard coverage again")]
-    again_retried = steps[names.index("Restore torn queue shard coverage again, attempt 2")]
-    check = steps[names.index("Check the queue shard coverage restored again")]
+    first = steps[names.index(f"Restore queue shard {kind}")]
+    retried = steps[names.index(f"Restore queue shard {kind}, attempt 2")]
+    again = steps[names.index(f"Restore torn queue shard {kind} again")]
+    again_retried = steps[names.index(f"Restore torn queue shard {kind} again, attempt 2")]
+    check = steps[names.index(f"Check the queue shard {kind} restored again")]
     assert (
         names.index(retried["name"])
         < names.index(again["name"])
         < names.index(again_retried["name"])
         < names.index(check["name"])
-        < names.index("Check the coverage database")
+        < names.index(consumer)
     )
-    assert (first["id"], retried["id"]) == ("restore-queue-shard-coverage", "restore-queue-shard-coverage-attempt-2")
-    assert again["if"] == check["if"] == _UNFINISHED_QUEUE_COVERAGE
+    assert (first["id"], retried["id"]) == (f"restore-queue-shard-{kind}", f"restore-queue-shard-{kind}-attempt-2")
+    assert first["if"] == _QUEUE_RESTORE_GATES[kind]
+    assert again["if"] == check["if"] == _unfinished_queue_restore(kind)
     assert again["continue-on-error"] is True
     assert again["with"] == again_retried["with"] == first["with"]
-    assert (again["id"], again_retried["id"]) == (
-        "restore-torn-queue-shard-coverage",
-        "restore-torn-queue-shard-coverage-attempt-2",
-    )
+    torn = f"restore-torn-queue-shard-{kind}"
+    assert (again["id"], again_retried["id"]) == (torn, f"{torn}-attempt-2")
     assert "continue-on-error" not in check
     assert check["env"] == {
-        "RESTORED": "${{ steps.restore-torn-queue-shard-coverage.outputs.download-path }}"
-        "${{ steps.restore-torn-queue-shard-coverage-attempt-2.outputs.download-path }}"
+        "RESTORED": f"${{{{ steps.{torn}.outputs.download-path }}}}"
+        f"${{{{ steps.{torn}-attempt-2.outputs.download-path }}}}"
     }
     result = subprocess.run(
         ["bash", "-e", "-c", check["run"]],
@@ -1659,6 +1687,13 @@ def test_a_queue_coverage_restore_that_stopped_before_it_finished_is_restored_ag
     )
     assert result.returncode == code
     assert result.stdout.startswith(said)
+    assert f"queue shard {kind}" in result.stdout
+
+
+def test_the_restore_again_test_covers_every_queue_shard_restore() -> None:
+    names = [step["name"] for step in _workflow()["jobs"]["unit"]["steps"]]
+    kinds = [name.removeprefix("Restore queue shard ") for name in names if name.startswith("Restore queue shard ")]
+    assert [kind for kind in kinds if "," not in kind] == list(_QUEUE_RESTORE_GATES) == list(_QUEUE_RESTORE_CONSUMERS)
 
 
 def test_unit_shards_retry_coverage_upload_without_changing_the_artifact():
