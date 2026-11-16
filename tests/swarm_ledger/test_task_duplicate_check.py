@@ -1,4 +1,3 @@
-import inspect
 import io
 import json
 import os
@@ -398,7 +397,7 @@ def test_a_plan_id_from_any_writer_but_the_tick_is_checked(live, monkeypatch):
 
 
 def test_the_budget_leaves_the_cli_time_for_the_locked_apply():
-    assert ledger_task_duplicates.BUDGET_S * 2 <= inspect.signature(cli_ledger.request).parameters["timeout"].default
+    assert ledger_task_duplicates.BUDGET_S * 2 <= cli_ledger.WRITE_TIMEOUT
 
 
 def test_the_server_marker_for_an_unchecked_add_matches_the_finder():
