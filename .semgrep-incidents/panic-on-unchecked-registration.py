@@ -36,6 +36,11 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
         print(found)
 
 
+def press(store: RedisStore, fixes: list[str]) -> None:
+    # ruleid: panic-on-unchecked-registration
+    panic.engage(store, "pressed by a helper", False, fixes, 0)
+
+
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":

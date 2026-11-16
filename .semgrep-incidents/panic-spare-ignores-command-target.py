@@ -19,12 +19,11 @@ def _freezes(tokens: list[str]) -> bool:
 def _spared(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
     words, options = _command(tokens)
     targets = _targets(words)
-    paths = [value for option, value in options if option == "-C"]
-    if targets is None or len(paths) < len(options):
+    if targets is None or any(option != "-C" for option, _ in options):
         return False
-    here = _directory(cwd, paths)
+    here = _directory(cwd, [value for _, value in options])
     # ok: panic-spare-ignores-command-target
-    return _on_fix_branch(here, fixes) and _writes(here, targets)
+    return _on_fix_branch(here, fixes, targets) and not (words[:2] == ["git", "push"] and _routed(here))
 
 
 def _freezes(tokens: list[str]) -> bool:

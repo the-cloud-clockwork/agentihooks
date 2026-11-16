@@ -4233,13 +4233,14 @@
       "origin": "regression",
       "ordered_at": "2026-11-16",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
-      "behaviour": "Only the swarm's master or the operator presses panic on, and every fix link is checked before panic stores it: a link that is not a pull request or branch link of agentihooks, agentihooks-bundle or antoncore, a branch link to dev or main, and a pull request that cannot be read or whose head branch is dev or main are refused with nothing stored and nothing cancelled, so no fix spares every dev run and no malformed fix fails every cancel sweep.",
+      "behaviour": "Only the swarm's master or the operator presses panic on, and every fix link is checked before panic stores it: a link that is not a pull request or branch link of agentihooks, agentihooks-bundle or antoncore, a branch link whose branch is not a plain branch name, a branch link to dev or main, and a pull request that cannot be read or whose head branch is dev or main are refused with nothing stored and nothing cancelled, so no fix spares every dev run and no malformed fix fails every cancel sweep.",
       "seam": "cmd_panic for the on action and panic.check_fix, both before panic.engage stores the fixes",
       "rules": [
         "panic-on-unchecked-registration"
       ],
       "tests": [
         "tests/swarm/test_panic.py::test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator",
+        "tests/swarm/test_panic.py::test_a_seat_cannot_press_panic_on_as_the_master",
         "tests/swarm/test_panic.py::test_the_swarm_master_presses_panic_on_with_a_checked_fix",
         "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything",
         "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main",
@@ -4253,7 +4254,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-16",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
-      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a push only when it pushes to origin and every refspec writes that checked out branch, a dispatch only when its ref names that branch, and git -C moves the checkout the branch is read in; a push to any other ref, remote or set of refs, a dispatch without a ref or on another ref, a git global option other than -C, and a push behind git global options or a redirection stay frozen.",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref, a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
       "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
       "rules": [
         "panic-spare-ignores-command-target"
@@ -4262,9 +4263,12 @@
         "tests/swarm/test_panic.py::test_a_fix_branch_session_stays_frozen_for_a_command_that_writes_another_ref",
         "tests/swarm/test_panic.py::test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch",
         "tests/swarm/test_panic.py::test_git_c_decides_the_checkout_a_push_is_spared_in",
+        "tests/swarm/test_panic.py::test_a_push_git_config_may_route_elsewhere_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_git_config_that_cannot_be_read_counts_as_routed",
         "tests/swarm/test_panic.py::test_panic_freezes_a_push_behind_git_global_options_or_a_redirection",
         "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
-        "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes"
+        "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
+        "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
       ]
     },
     {

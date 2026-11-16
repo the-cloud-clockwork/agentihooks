@@ -734,6 +734,17 @@ def test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator(
 
 
 @pytest.mark.feature("panic-fix-registration-checked")
+def test_a_seat_cannot_press_panic_on_as_the_master(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    assert cli.main([SLUG, "--as", "master@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX]) == 1
+    assert "cannot act as master@a1b2c3-0001" in capsys.readouterr().err
+    assert panic.state(store) is None
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
 def test_the_swarm_master_presses_panic_on_with_a_checked_fix(
     store: RedisStore,
     counted: list[tuple[str, float, dict[str, str]]],
@@ -776,6 +787,13 @@ OUTSIDE = (
         ("http://github.com/the-cloud-clockwork/agentihooks/pull/1", SHAPE),
         ("the-cloud-clockwork/agentihooks/pull/1", SHAPE),
         (f"{FIX}\n", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/dev?x=1", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/dev/", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/refs/heads/dev", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/a..b", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/fix branch", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/.hidden", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree//dev", SHAPE),
     ],
 )
 @pytest.mark.feature("panic-fix-registration-checked")
@@ -837,6 +855,7 @@ def test_panic_on_refuses_a_fix_pull_request_it_cannot_read(
         BRANCH_FIX,
         "https://github.com/the-cloud-clockwork/agentihooks-bundle/tree/devops",
         "https://github.com/the-cloud-clockwork/antoncore/tree/fix/main",
+        "https://github.com/the-cloud-clockwork/agentihooks/tree/diffcheck/ci-1_2.v3",
     ],
 )
 @pytest.mark.feature("panic-fix-registration-checked")
@@ -1090,6 +1109,17 @@ def test_panic_refuses_a_push_from_a_branch_no_fix_registers(
         "gh workflow run t.yml -r dev",
         "gh workflow run t.yml -rmain",
         "gh workflow run t.yml --ref fix-branch -r dev",
+        "gh workflow run t.yml --ref fix-branch -R the-cloud-clockwork/antoncore",
+        "gh workflow run t.yml --ref fix-branch --repo=the-cloud-clockwork/antoncore",
+        "gh run rerun 5 -R the-cloud-clockwork/antoncore",
+        "gh run rerun 5 --repo the-cloud-clockwork/antoncore",
+        "gh -R the-cloud-clockwork/antoncore workflow run t.yml --ref fix-branch",
+        "gh --repo=the-cloud-clockwork/antoncore run rerun 5",
+        "GIT_DIR=/elsewhere/.git git push",
+        "GIT_WORK_TREE=/elsewhere git push origin fix-branch",
+        "export GIT_DIR=/elsewhere/.git; git push origin HEAD",
+        "env GIT_COMMON_DIR=/elsewhere git push origin fix-branch",
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.default GIT_CONFIG_VALUE_0=upstream git push",
         "git -c push.default=upstream push",
         "git --git-dir=.git push origin fix-branch",
         "git --no-pager -C . push origin dev",
@@ -1157,6 +1187,54 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
 
 
 @pytest.mark.parametrize(
+    ("key", "value", "command", "frozen"),
+    [
+        ("push.default", "upstream", "git push", True),
+        ("push.default", "matching", "git push origin", True),
+        ("remote.origin.push", "+refs/heads/*:refs/heads/*", "git push origin fix-branch", True),
+        ("remote.origin.pushurl", "https://github.com/someone/else.git", "git push origin fix-branch", True),
+        ("remote.origin.mirror", "true", "git push origin fix-branch", True),
+        ("branch.fix-branch.remote", "upstream", "git push", True),
+        ("branch.fix-branch.pushRemote", "elsewhere", "git push", True),
+        ("remote.pushDefault", "elsewhere", "git push", True),
+        ("push.default", "current", "git push", False),
+        ("push.default", "simple", "git push", False),
+        ("branch.fix-branch.remote", "origin", "git push", False),
+        ("remote.pushDefault", "origin", "git push origin HEAD", False),
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_push_git_config_may_route_elsewhere_stays_frozen(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    key: str,
+    value: str,
+    command: str,
+    frozen: bool,
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    subprocess.run(["git", "-C", cwd, "config", key, value], check=True)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == (blocker_window.FROZEN.format(reason="reason") if frozen else None)
+
+
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_git_config_that_cannot_be_read_counts_as_routed(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[tuple[str, tuple[str, ...]]] = []
+
+    def git(cwd: str, *args: str) -> str:
+        asked.append((cwd, args))
+        return ""
+
+    monkeypatch.setattr(blocker_window, "_git", git)
+    assert blocker_window._routed("/work") is True
+    assert asked == [("/work", ("config", "--list"))]
+
+
+@pytest.mark.parametrize(
     "command",
     [
         "git -C /work push",
@@ -1165,6 +1243,9 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
         "git -c a=b push",
         "git >/dev/null push origin x",
         ">/dev/null git push origin x",
+        "gh -R o/r workflow run ci.yml --ref dev",
+        "gh --repo o/r run rerun 5",
+        "gh --repo=o/r workflow run ci.yml",
     ],
 )
 @pytest.mark.feature("panic-fix-spare-reads-target")
@@ -1214,7 +1295,9 @@ def test_panic_freezes_a_push_behind_git_global_options_or_a_redirection(store: 
                 ],
             ),
         ),
-        (["gh", "-R", "o/r", "run", "rerun"], (["gh", "-R", "o/r", "run", "rerun"], [])),
+        (["gh", "-R", "o/r", "run", "rerun"], (["gh", "run", "rerun"], [("-R", "o/r")])),
+        (["gh", "--repo=o/r", "-R"], (["gh"], [("--repo=o/r", ""), ("-R", "")])),
+        (["kubectl", "-n", "x", "apply"], (["kubectl", "-n", "x", "apply"], [])),
         (
             [">/dev/null", "git", "push", "2>", "&", "1", "origin", "&", ">", "out", "dev>x", "3<", "in", "x"],
             (["git", "push", "origin", "dev", "x"], []),
@@ -1243,6 +1326,12 @@ def test_a_command_reads_without_its_redirections_and_git_global_options(
         (["gh", "workflow", "run", "t.yml", "-re"], ("e",)),
         (["gh", "workflow", "run", "t.yml", "--ref", "a", "-r", "c"], ("c",)),
         (["gh", "workflow", "run", "-r", "x", "t.yml"], ("x",)),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "-R", "o/r"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "-Ro/r"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "--repo", "o/r"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "--repo=o/r"], None),
+        (["gh", "run", "rerun", "5", "-R", "o/r"], None),
+        (["gh", "run", "rerun", "5", "--repository"], ()),
         (["git", "push"], ()),
         (["git", "push", "-u", "origin", "HEAD"], ()),
         (
@@ -1263,6 +1352,13 @@ def test_a_command_reads_without_its_redirections_and_git_global_options(
 @pytest.mark.feature("panic-fix-spare-reads-target")
 def test_a_spared_command_names_the_refs_it_writes(words: list[str], targets: tuple[str, ...] | None) -> None:
     assert blocker_window._targets(words) == targets
+
+
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_dispatch_without_a_ref_names_an_empty_ref() -> None:
+    assert blocker_window._ref(["t.yml"]) == ""
+    assert blocker_window._ref(["t.yml", "--ref"]) == ""
+    assert blocker_window._ref(["t.yml", "-r", "fix", "-f", "a=b"]) == "fix"
 
 
 def _git_runs(monkeypatch: pytest.MonkeyPatch, outcome: Any) -> list[tuple[list[str], dict[str, Any]]]:
@@ -1363,16 +1459,17 @@ def test_a_checkout_without_an_origin_stays_frozen(monkeypatch: pytest.MonkeyPat
 def test_the_frozen_check_reads_the_branch_in_the_given_directory(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seen: list[tuple[str, tuple[str, ...]]] = []
+    seen: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
 
-    def on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
-        seen.append((cwd, fixes))
+    def on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -> bool:
+        seen.append((cwd, fixes, targets))
         return True
 
     monkeypatch.setattr(blocker_window, "_on_fix_branch", on_fix_branch)
+    monkeypatch.setattr(blocker_window, "_routed", lambda cwd: False)
     panic.engage(store, "reason", False, [FIX], 0)
     assert blocker_window._frozen("Bash", {"command": "git push"}, "/work") is None
-    assert seen == [("/work", (FIX,))]
+    assert seen == [("/work", (FIX,), ())]
 
 
 @pytest.mark.parametrize("command", ["git status", "gh run list", "kubectl get pods", "echo push", ""])

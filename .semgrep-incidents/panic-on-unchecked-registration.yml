@@ -4,20 +4,28 @@ rules:
     severity: ERROR
     message: >-
       panic on stores its fixes through panic.engage. Any seat once registered fixes, a branch link to dev spared
-      every dev run from the cancel sweep, and a malformed link stored before it was read failed every sweep. Check
-      the caller with _master_or_operator and every fix with panic.check_fix before panic.engage.
+      every dev run from the cancel sweep, and a malformed link stored before it was read failed every sweep. Only
+      cmd_panic engages panic with fixes, and it checks the caller with _master_or_operator and every fix with
+      panic.check_fix before panic.engage.
     paths:
       include:
-        - /scripts/swarm/cli.py
+        - /scripts/
+        - /hooks/
         - panic-on-unchecked-registration.py
-    patterns:
-      - pattern-inside: |
-          def cmd_panic(...):
-            ...
-      - pattern: panic.engage(...)
-      - pattern-not-inside: |
-          _master_or_operator(...)
-          ...
-          for $FIX in $FIXES:
-            panic.check_fix($FIX)
-          ...
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def cmd_panic(...):
+                ...
+          - pattern: panic.engage(...)
+          - pattern-not-inside: |
+              _master_or_operator(...)
+              ...
+              for $FIX in $FIXES:
+                panic.check_fix($FIX)
+              ...
+      - patterns:
+          - pattern: panic.engage(...)
+          - pattern-not-inside: |
+              def cmd_panic(...):
+                ...

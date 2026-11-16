@@ -44,7 +44,9 @@ REPOS = (
     "the-cloud-clockwork/antoncore",
 )
 PROTECTED = frozenset({"dev", "main"})
-FIX_LINK = re.compile(r"https://github\.com/([^/]+/[^/]+)/(?:pull/([0-9]+)|tree/(.+))")
+FIX_LINK = re.compile(
+    r"https://github\.com/([^/]+/[^/]+)/(?:pull/([0-9]+)|tree/(?!refs/)([A-Za-z0-9_-]+(?:[./][A-Za-z0-9_-]+)*))"
+)
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
 Ports = Callable[[str], SourceControl]
