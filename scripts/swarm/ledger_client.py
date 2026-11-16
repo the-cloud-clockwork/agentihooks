@@ -210,7 +210,7 @@ class LedgerClient:
 
     def freezes(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's freeze and focus records, read without its tasks."""
-        return []
+        return self._resource(slug, "freezes", collection=True)
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
