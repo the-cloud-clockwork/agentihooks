@@ -36,6 +36,11 @@ def notice_with_one_ref_per_swarm(mail: Any, agent: Any, text: str) -> Any:
     return mail.inbox.send("swarm", agent.seat, text, ref=f"stale-nudge:{mail.slug}:{agent.name}")
 
 
+def alarm_with_one_ref_per_recipient(inbox: InboxStore, master: str, address: str, text: str) -> Any:
+    # ruleid: inbox-send-fixed-ref
+    return inbox.send("swarm", address, text, ref=f"step-starvation:{master}:{address}")
+
+
 def ask_with_its_own_ref(inbox: InboxStore, name: str, text: str, task: str, now_ms: int) -> Any:
     # ok: inbox-send-fixed-ref
     return inbox.send("swarm", name, text, ref=f"automated-activity:{now_ms}", task=task)
