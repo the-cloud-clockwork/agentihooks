@@ -576,6 +576,16 @@
       ]
     },
     {
+      "id": "tick-waits-end-records-its-end-every-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, so the waits end step, declared at sixty seconds on the tick lane, refreshes its end on every run and a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, read by scripts.tick.steps.agents._holding_wait",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
       "id": "tick-merged-task-settlement-after-overrun",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2432",
@@ -4769,6 +4779,26 @@
       ]
     },
     {
+      "id": "bus-request-error-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus request that no subscriber serves fails with no responders for its subject, and a request whose answer does not arrive within its timeout fails with a timeout naming its subject and wait, so a late answer never reads as a missing responder.",
+      "seam": "NatsBus.request mapping the nats client's NoRespondersError and request TimeoutError",
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder"
+      ]
+    },
+    {
+      "id": "bus-connect-timeout-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus open whose server accepts the connection but does not finish the connect handshake within the first connect bound fails with a timeout naming the server and the wait, never a bare timeout with no text.",
+      "seam": "The first connect of NatsBus mapping the nats client's handshake timeout",
+      "tests": [
+        "tests/events/test_nats.py::test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait"
+      ]
+    },
+    {
       "id": "codex-join-report-ends-before-home-removal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2256",
@@ -6038,6 +6068,16 @@
       "seam": "scripts.swarm.automated_gc.run against scripts.inbox.store.InboxStore",
       "tests": [
         "tests/swarm/test_automated_gc.py::test_a_first_import_under_a_patched_inbox_store_sweeps_with_the_real_store"
+      ]
+    },
+    {
+      "id": "automated-activity-question-own-ref",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-activity-question-own-ref",
+      "behaviour": "Automated agent collection sends each activity question with its own inbox ref, automated-activity followed by the probe time, instead of one fixed ref for every question, so the recipient's seen marks never close a later question as already shown through the ledger on delivery: every question reaches the agent through the seen claim, its reply is recorded, and three nothing to do answers collect the agent.",
+      "seam": "scripts.swarm.automated_gc.run asking an automated agent, each question delivered by scripts.inbox.seen.claim and answered with InboxStore.reply",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_agent"
       ]
     },
     {

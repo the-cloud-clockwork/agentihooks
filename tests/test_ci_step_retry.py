@@ -33,6 +33,12 @@ _SPLIT_VERIFY = (
     " [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' ~/dev-durations/.test_durations*"
 )
 _SHARD_VERIFY = '[[ "$(sha256sum .test_durations | cut -d \' \' -f 1)" == "$(< durations.sha256)" ]]'
+_JSON_VERIFY = (
+    "python3 -c 'import json, sys; from pathlib import Path;"
+    " [json.loads(Path(path).read_text()) for path in sys.argv[1:]]'"
+)
+_COLLECTED_VERIFY = f"{_JSON_VERIFY} collected-data/collected.json"
+_REUSED_VERIFY = f"{_JSON_VERIFY} reused-plan/reused-tests.json"
 
 
 def _fallback():
@@ -186,6 +192,53 @@ def test_the_shard_verify_refetches_durations_whose_hash_does_not_match(tmp_path
     done = _verify(tmp_path, _SHARD_VERIFY)
     assert done.returncode == (1 if torn else 0), done.stdout + done.stderr
     assert ("downloaded torn" in done.stdout) is torn
+
+
+@pytest.mark.parametrize(
+    "name, given",
+    [
+        (
+            "Download collected tests",
+            {
+                "name": "collected-${{ matrix.python-version }}",
+                "path": "collected-data",
+                "verify": _COLLECTED_VERIFY,
+                **_APP,
+            },
+        ),
+        (
+            "Download the tests this run reuses",
+            {
+                "name": "reused-tests-${{ matrix.python-version }}",
+                "path": "reused-plan",
+                "verify": _REUSED_VERIFY,
+                **_APP,
+            },
+        ),
+    ],
+)
+def test_the_shard_check_downloads_refetch_a_torn_file(name: str, given: dict[str, str]) -> None:
+    step = next(s for s in _steps("shard-check") if s.get("name") == name)
+    assert step["uses"] == _RETRY
+    assert step["with"] == given
+
+
+@pytest.mark.parametrize(
+    "path, command",
+    [("collected-data/collected.json", _COLLECTED_VERIFY), ("reused-plan/reused-tests.json", _REUSED_VERIFY)],
+)
+@pytest.mark.parametrize("state", ["whole", "torn", "missing"])
+def test_the_shard_check_verify_refetches_a_torn_or_missing_file(
+    tmp_path: Path, path: str, command: str, state: str
+) -> None:
+    target = tmp_path / path
+    target.parent.mkdir()
+    whole = '{"tests": ["t.py::a", "t.py::b"]}'
+    if state != "missing":
+        target.write_text(whole if state == "whole" else whole[:20])
+    done = _verify(tmp_path, command)
+    assert done.returncode == (0 if state == "whole" else 1), done.stdout + done.stderr
+    assert ("downloaded torn" in done.stdout) is (state != "whole")
 
 
 _UPLOAD_WITH = {

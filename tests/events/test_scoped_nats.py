@@ -2,6 +2,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from nats import errors as nats_errors
 
 from scripts.events import nats
 from scripts.events.bus import StateConflict
@@ -294,10 +295,10 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
         own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1"), "m1", lambda: report)
         assert own.take("one", "claude") == "a"
         foreign = account_slots.Remote(account_slots.asker(client, "other", "m1", 500), "m1", lambda: report)
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.other.m1'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.other.m1' timed out after 500 ms$"):
             foreign.take("two", "claude")
         posing = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m2", 500), "m2")
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m2'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.rig.m2' timed out after 500 ms$"):
             posing.release("one", "claude", "a")
         own.release("one", "claude", "a")
         assert own.take("two", "claude") == "a"
@@ -366,18 +367,27 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
     assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
 
 
-def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout():
+@pytest.mark.feature("bus-request-error-text")
+@pytest.mark.parametrize(
+    ("error", "text"),
+    [
+        (nats_errors.TimeoutError, "^request to 'swarm.rig.silent' timed out after 300 ms$"),
+        (nats_errors.NoRespondersError, "^no responders for 'swarm.rig.silent'$"),
+    ],
+    ids=["late answer", "missing responder"],
+)
+def test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder(
+    error: type[nats_errors.Error], text: str
+) -> None:
     import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from nats.errors import TimeoutError as NatsTimeout
-
     bus = object.__new__(nats.NatsBus)
-    silent = AsyncMock(side_effect=NatsTimeout)
+    silent = AsyncMock(side_effect=error)
     bus._loop = SimpleNamespace(run=asyncio.run)
     bus._nc = SimpleNamespace(request=silent, max_payload=1048576)
-    with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
+    with pytest.raises(TimeoutError, match=text):
         bus.request("swarm.rig.silent", b"", 300)
     silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
 
