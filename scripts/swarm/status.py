@@ -131,7 +131,7 @@ def findings(
             {
                 "tasks": tasks,
                 "_meta": {"events": events},
-                "review_rounds": {task["id"]: review_rounds.counts(slug, task["id"]) for task in tasks},
+                "review_rounds": {task["id"]: review_rounds.counts(task) for task in tasks},
             },
             rows,
             timing.call(activity.counts, slug),

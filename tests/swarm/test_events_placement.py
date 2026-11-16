@@ -319,11 +319,13 @@ def test_under_events_the_tick_launches_no_workstation_task(store: RedisStore) -
 def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts import serena_router_daemon
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     scoped = open_bus(BusConfig(scoped=True))
     slots.serve(cast(Bus, scoped), admitter=rig.admitter)
     monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
     found = doc([task("desk", workstation=True)])
     assert readiness.publish(scoped.for_swarm(SLUG), snapshot(found), NOW) == [f"ready:{SLUG}:desk:0:{ROOT}"]
     configs = SimpleNamespace(

@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import ledger_comments
 import ledger_kinds
@@ -59,6 +59,8 @@ UPDATABLE = (
     "doc_items",
     "watchdog",
     "recovery",
+    "review_rounds",
+    "review_readers",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 HARNESSES = ("", "claude", "codex")
@@ -73,6 +75,8 @@ MATCHED: dict[str, Any] = {
     "awaiting": "",
     "difficulty": "",
     "group_members": [],
+    "review_readers": [],
+    "review_rounds": {},
 }
 LIST_FIELDS = (
     "depends_on",
@@ -84,13 +88,14 @@ LIST_FIELDS = (
     "repositories",
     "needs",
     "doc_items",
+    "review_readers",
 )
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
 APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog", "review_rounds")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
 PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
@@ -173,6 +178,7 @@ def check(op):
     check_guards(op)
     check_quote(op)
     check_lists(fields)
+    check_review_rounds(fields)
     check_stack(fields)
     check_release(fields)
     check_applied(fields)
@@ -202,6 +208,7 @@ def check_guards(op: dict) -> None:
     members = expected.get("group_members", [])
     if not isinstance(members, list) or not all(isinstance(m, str) and ID_RE.match(m) for m in members):
         raise ValueError("if_match group_members must list task ids")
+    check_review_guards(expected)
 
 
 def _guarded(task: dict[str, Any], op: dict[str, Any]) -> bool:
@@ -309,7 +316,7 @@ def check_pull_scopes(fields: dict) -> None:
         )
 
 
-def check_lists(fields):
+def check_lists(fields: dict[str, Any]) -> None:
     check_repository_branches(fields)
     check_pull_scopes(fields)
     for key in LIST_FIELDS:
@@ -320,6 +327,40 @@ def check_lists(fields):
         raise ValueError("repositories must list absolute local repository paths")
     if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
+
+
+def _mapping(value: object) -> TypeGuard[dict[str, object]]:
+    """Whether a decoded JSON value is an object."""
+    return isinstance(value, dict)
+
+
+def _listed(value: object) -> TypeGuard[list[object]]:
+    """Whether a decoded JSON value is an array."""
+    return isinstance(value, list)
+
+
+def _names(value: object) -> bool:
+    """Whether a decoded JSON value lists nonempty strings."""
+    return _listed(value) and all(isinstance(name, str) and name.strip() for name in value)
+
+
+def _rounds(value: object) -> bool:
+    """Whether a decoded JSON value maps round counter names to the stamps of the rounds spent on each."""
+    return _mapping(value) and all(name and _names(stamps) for name, stamps in value.items())
+
+
+def check_review_rounds(fields: dict[str, Any]) -> None:
+    """Refuse review rounds that are not round counter names mapped to the stamps of the rounds spent on each."""
+    if not _rounds(fields.get("review_rounds", {})):
+        raise ValueError("review_rounds must map round counter names to lists of round stamps")
+
+
+def check_review_guards(expected: dict[str, Any]) -> None:
+    """Refuse an if_match on review readers or review rounds in any shape other than the one the field holds."""
+    if not _names(expected.get("review_readers", [])):
+        raise ValueError("if_match review_readers must list reader names")
+    if not _rounds(expected.get("review_rounds", {})):
+        raise ValueError("if_match review_rounds must map round counter names to lists of round stamps")
 
 
 def check_bools(fields: dict[str, Any]) -> None:
