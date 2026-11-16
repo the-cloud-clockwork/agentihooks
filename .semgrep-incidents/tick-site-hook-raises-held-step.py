@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps.observe import raise_held
@@ -9,7 +9,6 @@ from scripts.tick.steps.observe import raise_held
 class _Wrapper:
     box: dict[str, Any] = field(default_factory=dict[str, Any])
     judging: dict[str, Any] = field(default_factory=dict[str, Any])
-    checked: list[str] = field(default_factory=list[str])
 
     def _judged(self) -> bool:
         # ruleid: tick-site-hook-raises-held-step
@@ -21,12 +20,6 @@ class _Wrapper:
         raise_held(self.box)
         return False
 
-    def _kept(self) -> bool:
-        if "judged" in self.judging:
-            # ok: tick-site-hook-raises-held-step
-            self.checked = list(self.judging["judged"])
-        return True
-
 
 @dataclass
 class TickSites:
@@ -35,6 +28,25 @@ class TickSites:
     def _listed(self) -> bool:
         # ruleid: tick-site-hook-raises-held-step
         host_steps.raise_held(self.box)
+        return True
+
+
+@dataclass
+class _RelaySites:
+    box: dict[str, Any] = field(default_factory=dict[str, Any])
+
+    def _relayed(self) -> bool:
+        # ruleid: tick-site-hook-raises-held-step
+        host_steps.raise_held(self.box)
+        return True
+
+
+class _Hooks(Protocol):
+    box: dict[str, Any]
+
+    def _viewed(self) -> bool:
+        # ruleid: tick-site-hook-raises-held-step
+        raise_held(self.box)
         return True
 
 
