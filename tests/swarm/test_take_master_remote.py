@@ -10,8 +10,8 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger as remote
 from scripts.swarm_ledger import ledger_authority as authority
-from scripts.swarm_ledger.api import client
 from scripts.swarm_v2.runtime import process
+from scripts.tick.adapters import database_ledger
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 
@@ -25,7 +25,7 @@ MINT = {"X-Hive-Credential": HIVE, "X-Ledger-Agent": MASTER}
 
 def _hive_client(sent):
     class HiveClient:
-        def __init__(self, base, credentials, timeout=10):
+        def __init__(self, base, credentials, timeout=10, transport=None):
             assert base == "https://hub.example"
             self.credentials = credentials
 
@@ -36,6 +36,15 @@ def _hive_client(sent):
             return {"data": {"token": f"minted for {self.credentials['X-Ledger-Agent']}"}}
 
     return HiveClient
+
+
+def _hive_exchanged(sent):
+    def exchanged(command, path, payload, headers):
+        slug = path.rsplit("/", 2)[-2]
+        sent.append((slug, path.rsplit("/", 1)[-1], dict(headers)))
+        return {"data": {"token": f"minted for {headers['X-Ledger-Agent']}"}}
+
+    return exchanged
 
 
 def _operator_token(slug):
@@ -67,7 +76,8 @@ def remote_taker(taker, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(remote.repository, "token", _operator_token)
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: taker[0].redis)
     sent = []
-    monkeypatch.setattr(client, "ResourceClient", _hive_client(sent))
+    monkeypatch.setattr(database_ledger, "ResourceClient", _hive_client(sent))
+    monkeypatch.setattr(database_ledger, "exchanged", _hive_exchanged(sent))
     return (*taker, sent)
 
 
@@ -93,7 +103,7 @@ def test_take_master_on_a_remote_ledger_places_and_pins_the_new_master_before_it
     assert run("sw", "take-master") == 0
 
     assert seen == [(PINNED, True)]
-    assert sent == [("sw", "agent-token", MINT), ("sw", "agent-token", MINT), ("sw", "metadata", PINNED)]
+    assert sent == [("sw", "agent-token", MINT), ("sw", "metadata", {})]
     assert (os.environ["AGENTIHOOKS_SWARM"], os.environ["AGENTIHOOKS_AGENT_NAME"]) == ("sw", MASTER)
     assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in os.environ
     assert _masters(store) == [
@@ -117,7 +127,7 @@ def test_a_session_already_named_this_master_mints_its_token_with_the_hive_crede
     assert run("sw", "take-master") == 0
     assert seen == [(PINNED, True)]
     assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in os.environ
-    assert sent == [("sw", "agent-token", MINT), ("sw", "agent-token", MINT), ("sw", "metadata", PINNED)]
+    assert sent == [("sw", "agent-token", MINT), ("sw", "metadata", {})]
 
 
 def _started(store, rt):

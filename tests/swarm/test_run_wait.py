@@ -263,7 +263,7 @@ def test_the_wait_pass_reads_a_remote_ledger_only_with_tick_authority(tick, monk
 
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.delenv("LEDGER_URL", raising=False)
-    tick.store.redis.hset(tick.store.key("sw", "config"), "api_url", "https://hosted.example")
+    monkeypatch.setenv("SWARM_URL", "https://hosted.example")
     hold_run(tick)
     before = idle.wait(tick.store.redis, "sw", ME)
     acquired, read = [], []

@@ -44,6 +44,7 @@ FIXES = {
     "or remove that volume to start the bus empty, {again}",
     "swarm": "read its logs; the ledger server needs Redis healthy, and if port {SWARM_PORT} is in use, "
     "set SWARM_PORT in {env} to a free port, {again}",
+    "api": "read its logs; the write API starts once Redis and NATS are healthy, so fix those first, {again}",
     "adopted": "read its logs; the adopted ledger server serves port {SWARM_PORT} on the host network, "
     "so stop the legacy ledger container by its id first, {again}",
     "controller": "read its logs; the controller starts once Redis and the ledger server are healthy "

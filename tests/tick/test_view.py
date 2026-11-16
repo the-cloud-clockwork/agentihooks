@@ -197,7 +197,11 @@ def refusing(code: int) -> Callable[..., dict]:
 
 
 def ledger_module() -> SimpleNamespace:
-    return SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+    return SimpleNamespace(
+        base=lambda slug: "http://ledger",
+        client=lambda slug, timeout: api.ResourceClient("http://ledger", {}, timeout),
+        REQUEST_TIMEOUT=4,
+    )
 
 
 def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
@@ -210,7 +214,7 @@ def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", refusing(400))
     view.CURRENT.set(view.LedgerView(1, STATE))
-    assert view.start("sw", False) is None
+    assert view.start("sw") is None
     assert view.CURRENT.get() is None
     assert view.HELD.get() is None
     assert not view.view_file("http://ledger", "sw", tmp_path).exists()
@@ -225,7 +229,7 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", refusing(503))
     with pytest.raises(urllib.error.HTTPError) as raised:
-        view.start("sw", False)
+        view.start("sw")
     assert raised.value.code == 503
 
 

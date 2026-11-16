@@ -83,9 +83,15 @@ class Exchange(Writes):
         return bool(services().repository.exists(slug))
 
     def refused(self, slug: str | None = None) -> bool:
-        """Admit the caller as the principal this process acts as."""
+        """Admit the caller as the principal this process acts as, refusing a request that names another agent than
+        the one it acts as, as the credential check refuses it over HTTP."""
         self.principal = principal()
-        return False
+        claimed = self.headers.get("X-Ledger-Agent")
+        if not self.principal or claimed in (None, self.principal):
+            return False
+        forbidden: Any = APIError(403, "forbidden", f"this process acts as {self.principal}, not {claimed}")
+        self.status, self.reply = forbidden.status, json.dumps(forbidden.envelope()).encode()
+        return True
 
 
 def settled(exchange: Exchange, path: str, route: Callable[[], Any]) -> tuple[int, bytes]:

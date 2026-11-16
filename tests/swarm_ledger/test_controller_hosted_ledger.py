@@ -16,6 +16,7 @@ from scripts.swarm_ledger import api_service, ledger, ledger_close, ledger_serve
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
+from tests.swarm_ledger.ledger_front import Front
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
     SLUG,
@@ -51,7 +52,7 @@ def store():
 
 @pytest.fixture
 def hosted(store, ledger_dir):
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), ledger_server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     host = f"127.0.0.1:{httpd.server_address[1]}"
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     credential = hive_auth.issue_controller(store.redis)

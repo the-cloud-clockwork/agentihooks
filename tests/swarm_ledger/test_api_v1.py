@@ -1091,16 +1091,12 @@ def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, t
 
 
 def test_resource_reads_preserve_pinned_identity(live):
-    from unittest.mock import patch
-
+    from scripts.tick.adapters import database_ledger
     from tests.swarm_ledger.test_ledger_authority import ledger, pinned
 
-    original = ledger.urllib.request.urlopen
-    with pinned("api-reader"), patch.object(ledger.urllib.request, "urlopen", wraps=original) as opened:
+    with pinned("api-reader"):
         assert ledger.resource(SLUG, "metadata")["title"] == "Authority"
-        outgoing = opened.call_args.args[0]
-        assert outgoing.get_header("X-ledger-agent") == "api-reader"
-        assert outgoing.get_header("X-ledger-token") != live["admin"]
+        assert database_ledger.principal() == "api-reader"
 
 
 def test_swarm_control_families_keep_domain_arguments(live):

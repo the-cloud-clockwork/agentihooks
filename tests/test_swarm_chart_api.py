@@ -70,6 +70,7 @@ def test_api_ingressroute_matches_write_methods_at_high_priority() -> None:
     assert "Method(`PUT`)" in template
     assert "Method(`PATCH`)" in template
     assert "Method(`DELETE`)" in template
+    assert "Method(`OPTIONS`)" in template
     assert "priority: {{ int .Values.api.publicRoute.priority }}" in template
     assert "serversTransport: {{ . }}" in template
 

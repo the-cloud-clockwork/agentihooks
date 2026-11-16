@@ -97,7 +97,7 @@ def ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
 
     fake = SimpleNamespace(
         base=lambda slug: base,
-        credentials=lambda slug, service: {},
+        client=lambda slug, timeout: api.ResourceClient(base, {}, timeout),
         REQUEST_TIMEOUT=REQUEST_S,
         Missing=Missing,
         call=call,

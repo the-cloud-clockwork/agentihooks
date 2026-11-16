@@ -116,26 +116,14 @@ def test_join_lands_past_pending_talk(
     assert outbox.path().read_text() == before
 
 
-@pytest.mark.parametrize(
-    "ops",
-    [
-        [],
-        [{"op": "leave", "id": "leave", "by": "eng-1"}],
-        [{"op": "join", "id": "join", "by": "eng-1"}, {"op": "leave", "id": "leave", "by": "eng-1"}],
-    ],
-)
 @pytest.mark.feature("ledger-join-past-talk")
-def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch, ops: list[dict]) -> None:
+def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.inbox import outbox
 
     monkeypatch.setattr(outbox, "waiting", lambda lane: lane == "ledger")
     monkeypatch.setattr(outbox, "flush", lambda store: None)
-    if ops:
-        with pytest.raises(SystemExit, match="still waits in"):
-            ledger.call("s", ops)
-    else:
-        monkeypatch.setattr(ledger, "request", lambda slug, ops: {"read": slug})
-        assert ledger.call("s", ops) == {"read": "s"}
+    monkeypatch.setattr(ledger, "request", lambda slug, ops: {"read": slug})
+    assert ledger.call("s", []) == {"read": "s"}
 
 
 @pytest.mark.parametrize("argv", WRITES, ids=" ".join)

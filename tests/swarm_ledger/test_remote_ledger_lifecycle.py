@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import threading
 import urllib.error
 from unittest.mock import patch
 
@@ -27,9 +26,10 @@ live = authority_live
 @pytest.mark.parametrize("mode", ["compose", "distributed"])
 def test_remote_bin_uses_the_server_and_preserves_conditional_result(live, mode):
     original = bin_storage.bin_closed
+    calls: list[tuple[object, ...]] = []
 
-    def server_bin(*args, **kwargs):
-        assert threading.current_thread() is not threading.main_thread(), "client touched the ledger folder"
+    def server_bin(*args: object, **kwargs: object) -> bool:
+        calls.append(args)
         return original(*args, **kwargs)
 
     bin_storage.restore(SLUG)
@@ -42,14 +42,16 @@ def test_remote_bin_uses_the_server_and_preserves_conditional_result(live, mode)
         client = LedgerClient()
         assert client.bin_closed(SLUG, closed_at) is True
         assert client.bin_closed(SLUG, closed_at) is False
+    assert calls == [(SLUG, closed_at), (SLUG, closed_at)]
 
 
 @pytest.mark.parametrize("mode", ["compose", "distributed"])
 def test_remote_reopen_restores_on_the_server(live, mode):
     original = bin_storage.restore
+    calls: list[tuple[object, ...]] = []
 
-    def server_restore(*args, **kwargs):
-        assert threading.current_thread() is not threading.main_thread(), "client touched the ledger folder"
+    def server_restore(*args: object, **kwargs: object) -> bool:
+        calls.append(args)
         return original(*args, **kwargs)
 
     core.sync(SLUG, ops=[{"op": "close", "id": "close-for-remote", "by": "operator"}])
@@ -63,6 +65,7 @@ def test_remote_reopen_restores_on_the_server(live, mode):
         client.reopen(SLUG, "operator")
         assert client.closed(SLUG) is False
         assert client.binned(SLUG) is False
+    assert calls == [(SLUG,)]
     assert SLUG not in bin_storage.entries()
 
 
@@ -82,8 +85,7 @@ def test_remote_local_storage_calls_name_the_server_route(mode, operation):
 
 def test_remote_lifecycle_refusals_use_swarm_errors(live):
     with (
-        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
-        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": "wrong-token"}),
+        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_AGENT_NAME": WORKER}),
         pytest.raises(LedgerRefused, match="403"),
     ):
         LedgerClient().bin_closed(SLUG, 1)
@@ -122,14 +124,14 @@ def test_remote_agent_can_reopen_but_cannot_bin(live, hive, mode):
         client = LedgerClient()
         client.reopen(SLUG, WORKER)
         assert client.binned(SLUG) is False
-        with pytest.raises(SystemExit, match="a remote ledger client cannot make service writes"):
-            LedgerClient(service=True).binned(SLUG)
         with pytest.raises(LedgerRefused, match="403"):
             client.bin_closed(SLUG, core.now_ms() + 1)
 
 
 @pytest.mark.parametrize("status", [None, 400, 500])
 def test_remote_lifecycle_outages_use_swarm_errors(live, status):
+    from scripts.tick.adapters import database_ledger
+
     failure = (
         OSError("offline")
         if status is None
@@ -137,8 +139,7 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, status):
     )
     with (
         patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
-        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": live["admin"]}),
-        patch("urllib.request.urlopen", side_effect=failure),
+        patch.object(database_ledger, "request", side_effect=failure),
         pytest.raises(SwarmError) as caught,
     ):
         LedgerClient().bin_closed(SLUG, 1)

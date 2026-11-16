@@ -14,7 +14,7 @@ spec:
   {{- end }}
   routes:
     - kind: Rule
-      match: Host(`{{ .Values.api.publicRoute.host }}`) && (Method(`POST`) || Method(`PUT`) || Method(`PATCH`) || Method(`DELETE`))
+      match: Host(`{{ .Values.api.publicRoute.host }}`) && (Method(`POST`) || Method(`PUT`) || Method(`PATCH`) || Method(`DELETE`) || Method(`OPTIONS`))
       priority: {{ int .Values.api.publicRoute.priority }}
       services:
         - name: {{ $fullname }}-api

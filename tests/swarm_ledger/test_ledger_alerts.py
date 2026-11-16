@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -791,7 +792,7 @@ def test_alert_delivery_reads_the_step_from_the_ledger_state(inbox, monkeypatch)
         rendered.append(render(slug, alert))
         return []
 
-    monkeypatch.setattr(ledger_alerts, "deliver", deliver)
+    monkeypatch.setattr(api_service.ledger_alerts, "deliver", deliver)
     blocker = {"attempts": [{}, {}], "critic": None, "escalation": None}
     state = {"_meta": {"rev": 5}, "alerts": [alert], "tasks": [{"id": "t1", "blocker": blocker}]}
     api_service.deliver_alerts(SLUG, state)
@@ -843,7 +844,7 @@ def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
 
     monkeypatch.setattr(ledger_server, "scheduled_wait", tick)
     with pytest.raises(InterruptedError, match="scan observed"):
-        ledger_server.watch_ledgers(interval=0)
+        api_service.upkeep(threading.Event(), interval=0)
     assert len(sleeps) == 16
 
 

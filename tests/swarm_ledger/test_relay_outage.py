@@ -1,5 +1,6 @@
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -283,7 +284,7 @@ def watch_passes(monkeypatch, held, replay, count=6):
     monkeypatch.setattr(api_service, "replay_unrelayed", lambda: replay(len(passes)))
     monkeypatch.setattr(ledger_server, "scheduled_wait", sleep)
     with pytest.raises(Stop):
-        ledger_server.watch_ledgers()
+        api_service.upkeep(threading.Event())
 
 
 def test_the_watch_loop_replays_held_revisions_every_fifth_pass_and_survives_a_failed_replay(
@@ -331,7 +332,7 @@ def test_the_watch_loop_survives_a_failed_journal_read(monkeypatch, capsys):
     monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
     monkeypatch.setattr(api_service, "replay_unrelayed", lambda: replayed.append(1))
     with pytest.raises(Stop):
-        ledger_server.watch_ledgers()
+        api_service.upkeep(threading.Event())
     assert replayed == [] and capsys.readouterr().err.count("unrelayed replay: disk gone") == 2
 
 

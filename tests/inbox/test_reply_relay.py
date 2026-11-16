@@ -22,8 +22,7 @@ def test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post(tmp_path
     )
     assert repository.create_document("reply-proof", doc, meta, token="fixture")
 
-    def call(slug, ops=None, service=False):
-        assert service
+    def call(slug, ops=None):
         state, rejected = repository.apply_ops(slug, ops=ops)
         return {**state, "rejected": rejected}
 

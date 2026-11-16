@@ -8,13 +8,13 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_hook  # noqa: E402
-import ledger_server  # noqa: E402
 import new_ledger  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import RedisStore, SwarmConfig  # noqa: E402
+from scripts.swarm_ledger import api_service  # noqa: E402
 from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
@@ -51,9 +51,9 @@ def comment(phase, cid):
 def test_an_operator_write_through_the_server_becomes_one_item_for_the_master(inbox):
     phase = make_ledger()
     state, _ = core.sync(SLUG, ops=[comment(phase, "c-1")])
-    [item] = ledger_server.relay_to_inbox(SLUG, state)
+    [item] = api_service.relay_to_inbox(SLUG, state)
     assert (item.address, item.sender) == (f"master@{SLUG}", "operator") and "operator says hi" in item.text
-    assert ledger_server.relay_to_inbox(SLUG, state) == []
+    assert api_service.relay_to_inbox(SLUG, state) == []
     assert len(inbox.pending_items(f"master@{SLUG}")) == 1
 
 
@@ -61,7 +61,7 @@ def test_an_agent_write_through_the_server_sends_nothing(inbox):
     phase = make_ledger()
     core.sync(SLUG, ops=[{"op": "join", "id": "j", "by": "eng"}])
     state, _ = core.sync(SLUG, ops=[{**comment(phase, "c-2"), "by": "eng"}])
-    assert ledger_server.relay_to_inbox(SLUG, state) == []
+    assert api_service.relay_to_inbox(SLUG, state) == []
 
 
 @pytest.mark.wall_clock
@@ -89,7 +89,7 @@ def test_an_operator_write_relays_its_item_at_once_while_the_bus_connect_hangs(
     phase = make_ledger()
     start = time.monotonic()
     state, _ = core.sync(SLUG, ops=[comment(phase, "c-3")])
-    [item] = ledger_server.relay_to_inbox(SLUG, state)
+    [item] = api_service.relay_to_inbox(SLUG, state)
     took = time.monotonic() - start
     release.set()
     assert took < 1

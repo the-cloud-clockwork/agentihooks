@@ -273,13 +273,15 @@ def ledger_remote_auth_failures_total() -> int:
 
 def call(slug: str, ops: list[dict[str, Any]] | None = None) -> dict:
     """One ledger read or write through the ledger API route code over the shared database: a missing ledger exits as
-    Missing, any other refusal with the route's answer."""
+    Missing, an unreachable database with the OS error, any other refusal with the route's answer."""
     try:
         return request(slug, ops)
     except urllib.error.HTTPError as exc:
         if exc.code == 404 and "ledger_missing" in refusal_text(exc):
             raise Missing(f"ledger {slug} does not exist") from None
         sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
+    except OSError as exc:
+        sys.exit(f"ledger server not answering on {base(slug)}: {exc}")
 
 
 def queue(slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:

@@ -16,6 +16,7 @@ import ledger_layout as layout  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger import ledger_server as packaged_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 
@@ -59,6 +60,9 @@ def base(ledger_dir):
         patch.setattr(server, "ALLOWED_HOSTS", hosts)
         patch.setattr(server, "ALLOWED_ORIGINS", {f"http://{host}" for host in hosts})
         patch.setattr(server, "swarm_status", lambda slug, state=None: status(handoffs=HANDOFFS))
+        patch.setattr(packaged_server, "ALLOWED_HOSTS", hosts)
+        patch.setattr(packaged_server, "ALLOWED_ORIGINS", {f"http://{host}" for host in hosts})
+        patch.setattr(packaged_server, "swarm_status", lambda slug, state=None: status(handoffs=HANDOFFS))
         threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
         yield f"http://127.0.0.1:{port}"
         httpd.shutdown()

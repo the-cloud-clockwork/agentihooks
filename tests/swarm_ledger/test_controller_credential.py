@@ -11,7 +11,7 @@ from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger import ledger_authority as authority
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
-from tests.swarm_ledger.test_remote_ledger_client import REMOTE, server_only
+from tests.swarm_ledger.test_remote_ledger_client import REMOTE
 from tests.swarm_ledger.test_remote_ledger_client import hive as _remote_hive
 
 remote_hive = _remote_hive
@@ -129,12 +129,11 @@ def test_a_pinned_agent_holding_the_controller_credential_keeps_its_agent_token_
 
 
 def test_the_controller_writes_and_reads_a_remote_ledger_as_the_service(live, controller_env):
-    with patch.object(ledger.core, "read_token", server_only(ledger.core.read_token)):
-        client = LedgerClient()
-        client.notify(SLUG, "Controller hello")
-        client.followup(SLUG, "Controller follow up")
-        assert isinstance(client.tasks(SLUG), list)
-        state = client.state(SLUG)
+    client = LedgerClient()
+    client.notify(SLUG, "Controller hello")
+    client.followup(SLUG, "Controller follow up")
+    assert isinstance(client.tasks(SLUG), list)
+    state = client.state(SLUG)
     assert any(entry.get("text") == "Controller hello" for entry in state["notifications"])
     assert any(item.get("text") == "Controller follow up" for item in state["followups"])
 

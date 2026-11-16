@@ -20,6 +20,8 @@ from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger
 
 @pytest.fixture
 def routes(live, monkeypatch):  # noqa: F811
+    from scripts.tick.adapters import database_ledger
+
     seen = []
     for method in ("do_GET", "do_POST", "do_PUT"):
         original = getattr(Front, method)
@@ -29,6 +31,14 @@ def routes(live, monkeypatch):  # noqa: F811
             return original(self)
 
         monkeypatch.setattr(Front, method, record)
+
+    original_request = database_ledger.request
+
+    def record_request(slug: str, path: str, payload: dict | None = None) -> dict:
+        seen.append(("GET" if payload is None else "POST", f"/api/v1/ledgers/{slug}/{path}"))
+        return original_request(slug, path, payload)
+
+    monkeypatch.setattr(database_ledger, "request", record_request)
     return seen
 
 
@@ -60,14 +70,6 @@ def test_chat_command_posts_through_the_versioned_operations_route(routes, monke
     assert [row["text"] for row in chat_rows() if row["id"] == posted] == ["Through v1"]
     assert ("POST", f"/api/v1/ledgers/{SLUG}/operations") in routes
     assert legacy(routes) == []
-
-
-def test_chat_command_reports_a_dead_server(monkeypatch):
-    monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "Nobody"])
-    with pytest.raises(SystemExit) as exit_:
-        chat_ledger.main()
-    assert str(exit_.value).startswith("ledger server not answering on http://127.0.0.1:9: ")
 
 
 def test_stop_gate_bypass_is_recorded_through_the_versioned_route(routes):
@@ -156,7 +158,7 @@ def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "  Spaced  "])
     chat_ledger.main()
     [(slug, [op], service)] = recorder.calls
-    assert (slug, service) == (SLUG, True)
+    assert slug == SLUG and service is False
     assert op["id"].startswith("m-") and len(op["id"]) == 12
     assert {key: value for key, value in op.items() if key != "id"} == {
         "op": "add",

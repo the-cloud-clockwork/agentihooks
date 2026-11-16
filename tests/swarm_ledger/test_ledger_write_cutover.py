@@ -9,7 +9,6 @@ import urllib.request
 from collections.abc import Iterator
 from typing import Any
 
-import fakeredis
 import pytest
 
 from scripts.hub import admission, runner
@@ -70,6 +69,8 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
 @pytest.fixture
 def store() -> Iterator[RedisStore]:
     """A swarm store holding the swarm and a ledger with one open task."""
+    import fakeredis
+
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     found.create(SwarmConfig(SLUG, "/repo", 2, 2))
     repository = storage.default()

@@ -116,7 +116,7 @@ def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monke
     reported = {}
     for kind in ("refused", "unreachable", "credential"):
 
-        def request(slug, ops, service, kind=kind):
+        def request(slug, ops, timeout=None, kind=kind):
             if ops[0]["op"] == probe:
                 raise transport_failure(kind)
             return {"_meta": {"rev": 1}}

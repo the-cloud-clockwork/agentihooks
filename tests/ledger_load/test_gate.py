@@ -496,7 +496,7 @@ def test_a_client_stops_at_the_deadline_without_sleeping_toward_a_write_it_will_
     monkeypatch.setattr(ledger_load, "time", clock)
     results = {"writes": [], "reads": [], "errors": []}
     deadline = 2.5 * ledger_load.write_every()
-    ledger_load.client(Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)
+    ledger_load.client(Api(), Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)  # pyright: ignore[reportArgumentType]
     assert (len(results["writes"]), len(results["reads"]), results["errors"]) == (3, 3, [])
     assert clock.now <= deadline
 

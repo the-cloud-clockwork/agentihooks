@@ -89,7 +89,7 @@ api:
   podDisruptionBudget:
     enabled: false
     maxUnavailable: 1
-  # Traefik IngressRoute for POST, PUT, PATCH and DELETE; rendered only once host is set. The networking.k8s.io
+  # Traefik IngressRoute for POST, PUT, PATCH, DELETE and OPTIONS; rendered only once host is set. The networking.k8s.io
   # Ingress above stays the GET/HEAD route to the ledger.
   publicRoute:
     host: ""

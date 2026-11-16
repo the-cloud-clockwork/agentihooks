@@ -145,7 +145,13 @@ class LedgerClient:
         try:
             if held_offline and ops and not slow():
                 return _offline_write(ledger, slug, ops, service)
-            state = ledger.call(slug, ops)
+            if service:
+                from scripts.tick.adapters import database_ledger
+
+                with database_ledger.acting(""):
+                    state = ledger.call(slug, ops)
+            else:
+                state = ledger.call(slug, ops)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:

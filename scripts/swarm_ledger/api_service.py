@@ -14,7 +14,6 @@ origins it answers.
 
 import argparse
 import functools
-from abc import ABC, abstractmethod
 import itertools
 import json
 import os
@@ -23,6 +22,7 @@ import signal
 import ssl
 import sys
 import threading
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
@@ -783,6 +783,20 @@ class WriteHandler(BaseHandler, Writes):
         """Handle one request that ``owner``, the HTTP server that accepted it, hands this handler."""
         BaseHandler.__init__(self, request, client_address, owner)
 
+    @request_metrics.measured
+    def do_OPTIONS(self) -> None:
+        """Answer a CORS preflight for a write route, which Traefik sends here with every non-GET method."""
+        self.send_response(204)
+        if self.headers.get("Origin") == server.FILE_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", server.FILE_ORIGIN)
+            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH")
+            self.send_header(
+                "Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+            )
+            if self.headers.get("Access-Control-Request-Private-Network") == "true":
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.end_headers()
+
     def do_GET(self) -> None:
         """Answer the health probe; the ledger server serves every read."""
         if self.refused():
@@ -958,7 +972,10 @@ def serve() -> None:
     cast(Any, legacy).adopt(stored)
     adopt_unrelayed()
     threading.Thread(target=adopt_disk_files, daemon=True).start()
-    httpd: Any = server.ThreadingHTTPServer((HOST, PORT), WriteHandler)
+    httpd: Any = server.ThreadingHTTPServer((HOST, PORT), WriteHandler, bind_and_activate=False)
+    httpd.request_queue_size = 128
+    httpd.server_bind()
+    httpd.server_activate()
     stopping = threading.Event()
     threading.Thread(target=server.retrying(upkeep), args=(stopping,), daemon=True).start()
 

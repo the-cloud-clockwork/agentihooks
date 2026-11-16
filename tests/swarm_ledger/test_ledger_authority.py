@@ -377,7 +377,7 @@ def test_controller_ledger_operations_carry_epoch(monkeypatch):
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     held = lease.acquire(saved, SLUG, "home")
     calls = []
-    transport = SimpleNamespace(call=lambda slug, ops, service: calls.append(ops) or {})
+    transport = SimpleNamespace(call=lambda slug, ops: calls.append(ops) or {}, Missing=Exception)
     monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
     client = LedgerClient()
     with lease.held_pass(saved, SLUG, held):
@@ -404,7 +404,7 @@ def test_controller_lifecycle_actions_carry_the_epoch_of_their_ledger(monkeypatc
     transport = SimpleNamespace(
         base=lambda slug: f"http://ledger/{slug}",
         credentials=lambda slug, service: {},
-        client=lambda slug, service: api_client.ResourceClient(f"http://ledger/{slug}", {}),
+        client=lambda slug: api_client.ResourceClient(f"http://ledger/{slug}", {}),
     )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
     monkeypatch.setattr(ledger_link, "remote", lambda slug: slug == SLUG)
