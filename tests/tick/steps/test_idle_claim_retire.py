@@ -2,6 +2,7 @@
 them to, are retired and counted idle."""
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any, cast
@@ -12,7 +13,8 @@ from scripts.swarm import automated_gc, elapsed, idle, tick, timing
 from scripts.swarm.health.findings import Limits, idle_with_claim
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord
-from scripts.tick.steps import agents
+from scripts.tick import engine
+from scripts.tick.steps import agents, report
 
 pytestmark = pytest.mark.unit
 
@@ -126,12 +128,22 @@ def _seams(monkeypatch: pytest.MonkeyPatch, waits: dict[str, dict[str, Any]], re
     return SimpleNamespace(retire=retire)
 
 
-def _run(store: Store, runtime: Any, crew: list[AgentRecord], passes: int) -> dict[str, int]:
-    """Run ``passes`` one minute idle watch passes over ``crew`` and return the pass that retired each agent."""
+def _run(
+    store: Store,
+    runtime: Any,
+    crew: list[AgentRecord],
+    passes: int,
+    each_pass: Callable[[int], None] = lambda now: None,
+) -> dict[str, int]:
+    """Run ``passes`` one minute idle watch passes over ``crew`` and return the pass that retired each agent.
+
+    ``each_pass`` is called with the pass time before the pass watches any agent.
+    """
     rows = {agent.task: {"claimed_by": agent.name, "state": "claimed"} for agent in crew}
     when: dict[str, int] = {}
     for count in range(1, passes + 1):
         now = STOPPED + count * elapsed.PASS_MS
+        each_pass(now)
         for agent in crew:
             if agent.name in when:
                 continue
@@ -145,6 +157,25 @@ def _run(store: Store, runtime: Any, crew: list[AgentRecord], passes: int) -> di
 def _starved(store: Store) -> None:
     """Record the waits end step's last run long before the agents stopped."""
     timing.step_ended(store, "rig", WAITS_END, WAITS_END_RAN_S)
+
+
+def _failing_waits_end(store: Store, monkeypatch: pytest.MonkeyPatch) -> Callable[[int], None]:
+    """Return a pass hook that journals a failed run of the registered waits end step, as the tick engine journals the
+    run when that step raises."""
+    step = next(step for step in report.STEPS if step.name == WAITS_END)
+    monkeypatch.setattr(timing, "append_record", lambda *_: None)
+
+    def fail(now: int) -> None:
+        """Journal the failed run in a recording pass that starts and ends at ``now``."""
+        token = timing.PASS.set({"pass_id": f"p{now}", "start_ms": now})
+        try:
+            with monkeypatch.context() as clock, timing.tick("rig", store):
+                clock.setattr(engine.time, "time", lambda: now / 1000)
+                engine._journal(step, engine.StepRecord(WAITS_END, 1.0, step.budget_s, "builtins.RuntimeError"), 0.0)
+        finally:
+            timing.PASS.reset(token)
+
+    return fail
 
 
 @pytest.mark.feature("swarm-tick-idle-claim-retire")
@@ -204,6 +235,20 @@ def test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs(monkeypa
     _run(store, runtime, [agent], PASSES)
     assert retired == []
     assert store.saved[agent.name].idle_ticks == 0
+
+
+@pytest.mark.feature("tick-failing-waits-end-lets-checked-waits-lapse")
+def test_engineers_idle_under_a_checked_wait_are_retired_while_waits_end_fails_every_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    crew = [AgentRecord(name=f"engineer@323133-{n}", lane="eng", task=f"t{n}") for n in (7730, 7732)]
+    retired: list[str] = []
+    runtime = _seams(monkeypatch, {a.name: _checked_wait(a.name) for a in crew}, retired)
+    store = Store()
+    _starved(store)
+    when = _run(store, runtime, crew, PASSES, _failing_waits_end(store, monkeypatch))
+    assert sorted(retired) == sorted(a.name for a in crew)
+    assert all(count <= PASSES for count in when.values())
 
 
 @pytest.mark.feature("swarm-tick-idle-claim-retire")

@@ -1,5 +1,6 @@
 from copy import copy
 from types import SimpleNamespace
+from typing import NoReturn
 
 import pytest
 
@@ -75,3 +76,42 @@ def test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds(
             ends.append(timing.step_ends(store, "sw")[agents.WAITS_END])
     assert ends == [BASE_S + 5.0, BASE_S + 65.0]
     assert agents._holding_wait(store, "sw", checked, int(clock[0] * 1000)) == checked
+
+
+def _failing_end_pass(*_: object) -> NoReturn:
+    """Raise the way a waits end pass that fails on every tick does."""
+    raise RuntimeError("waits end pass failed")
+
+
+@pytest.mark.feature("tick-failing-waits-end-lets-checked-waits-lapse")
+def test_a_failed_waits_end_run_leaves_the_end_checked_waits_read(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = merging.store
+    clock = [BASE_S]
+    monkeypatch.setattr(cli, "now_ms", lambda: NOW)
+    monkeypatch.setattr(engine.time, "time", lambda: clock[0])
+    monkeypatch.setattr(waits, "end_pass", _failing_end_pass)
+    state = {
+        "store": store,
+        "slug": "sw",
+        "rows": merging.rows,
+        "inbox": InboxStore(store.redis),
+        "view": {URL: MERGED}.get,
+    }
+    step = next(step for step in report.STEPS if step.name == agents.WAITS_END)
+    timing.step_ended(store, "sw", agents.WAITS_END, BASE_S)
+    outcomes: list[str] = []
+    with timing.tick("sw", store):
+        for index in range(1, 3):
+            start = BASE_S + index * 60.0
+            clock[0] = start + 5.0
+            token = timing.PASS.set({"pass_id": f"p{index}", "start_ms": start * 1000})
+            try:
+                with pool.running(critical_s=0.0, slow_s=1.0):
+                    records = engine.run_graph((step,), Context(_GraphView(state, {}), Deadline.after(5.0)))
+            finally:
+                timing.PASS.reset(token)
+            outcomes.append(records[0].outcome)
+    assert outcomes == [engine.FAILED, engine.FAILED]
+    assert timing.step_ends(store, "sw") == {agents.WAITS_END: BASE_S}
