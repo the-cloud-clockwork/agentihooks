@@ -7276,6 +7276,19 @@
         "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
         "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
       ]
+    },
+    {
+      "id": "lane-model-harness-compatibility",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
+      "behaviour": "A Claude only lane model on a Codex launch resolves to the configured Codex model, or the Codex launch default when none is configured, before an explicit effort returns or an automatic effort picks; Claude and compatible Codex choices retain their model and effort.",
+      "seam": "model_pick.pick for Codex and Claude lanes with an explicit or automatic effort",
+      "rules": ["lane-model-before-harness"],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
+        "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
+        "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
+      ]
     }
   ],
   "unmapped_rules": [
