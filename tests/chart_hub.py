@@ -38,6 +38,10 @@ def hub_problems(deployment: dict) -> list[str]:
         found.append("the hub pods may run as root")
     if RELOAD in deployment["metadata"].get("annotations", {}):
         found.append("a hub without hub.secretEnv still carries a secret reload annotation")
+    strategy = deployment["spec"].get("strategy", {})
+    rolling = strategy.get("rollingUpdate", {})
+    if strategy.get("type") != "RollingUpdate" or rolling.get("maxSurge") != 0 or rolling.get("maxUnavailable") != 1:
+        found.append(f"the hub rollout adds a pod before an old one leaves: {strategy}")
     return found
 
 
