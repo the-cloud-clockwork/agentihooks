@@ -3732,6 +3732,18 @@
       ]
     },
     {
+      "id": "pypi-retry-attempt-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-index-retry-attempt-timeout",
+      "behaviour": "The package index retry wrapper kills an install attempt that runs past its time limit, PYPI_RETRY_ATTEMPT_SECONDS (default 60 s), and retries it with the usual backoff; each timed out attempt doubles the limit, so a slow download that still progresses finishes on a later attempt, and the retry warning and the final error name the timeout.",
+      "seam": "the package index retry wrapper, the time limit around each attempt",
+      "tests": [
+        "tests/test_ci_pypi_retry.py::test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried",
+        "tests/test_ci_pypi_retry.py::test_an_attempt_that_keeps_hanging_doubles_its_limit_then_names_the_timeout",
+        "tests/test_ci_pypi_retry.py::test_a_real_uv_install_against_an_index_that_never_answers_is_stopped_and_retried"
+      ]
+    },
+    {
       "id": "ledger-plain-words-skip-links",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-plain-words-skip-links",
