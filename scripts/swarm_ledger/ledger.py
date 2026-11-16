@@ -232,8 +232,11 @@ def client(
 
 
 def request(
-    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float = REQUEST_TIMEOUT
+    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float | None = None
 ) -> dict[str, Any]:
+    """One ledger read or write; unless a timeout is given, a write waits out the server's writer lock budget."""
+    if timeout is None:
+        timeout = REQUEST_TIMEOUT if ops is None else WRITE_TIMEOUT
     found = client(slug, service, timeout)
     return found.snapshot(slug) if ops is None else found.mutate(slug, ops)
 
