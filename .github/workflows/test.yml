@@ -387,7 +387,7 @@ jobs:
           AGENTIHOOKS_LAB_OFF: ${{ vars.AGENTIHOOKS_LAB_OFF }}
         run: |
           if [[ -f scripts/ci_lab_verdict.py ]]; then
-            python -m scripts.ci_lab_verdict authority --grader-root . --event pull_request
+            python -m scripts.ci_lab_verdict authority . pull_request
           elif grep -qx '  authoritative: \[\]' delivery.yaml; then
             echo 'authoritative={}' >> "$GITHUB_OUTPUT"
           else
@@ -414,7 +414,7 @@ jobs:
           AUTHORITATIVE: ${{ steps.authority.outputs.authoritative }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           LAB_APP: ${{ vars.AGENTIHOOKS_LAB_APP }}
-        run: python -m scripts.ci_lab_verdict verdict --grader-root . --authoritative "$AUTHORITATIVE" --repo "$GITHUB_REPOSITORY" --sha "$HEAD" --app "$LAB_APP"
+        run: python -m scripts.ci_lab_verdict verdict . "$AUTHORITATIVE" "$GITHUB_REPOSITORY" "$HEAD" "$LAB_APP"
 
   select:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
@@ -3650,6 +3650,12 @@ jobs:
           REUSED: ${{ needs.reuse.outputs.reused }}
           INLINE: ${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}
         run: |
+          selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+          if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+            echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+            exit 1
+          fi
+          NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
           if ! NEEDS=$(jq -c --arg event "${EVENT:-}" '
             (."lab-verdict" // {"result": "success"}) as $verdict
             | ($verdict.outputs.authoritative // "" | if . == "" then {} else fromjson end) as $authoritative
@@ -3664,12 +3670,6 @@ jobs:
             echo "::error::The lab verdict job must succeed, or be skipped off pull requests, and publish its authoritative gates as one JSON object."
             exit 1
           fi
-          selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
-          if [[ "$selection" == failure || "$selection" == cancelled ]]; then
-            echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
-            exit 1
-          fi
-          NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
           if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
             if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" '
               (.select.outputs.scope // "") as $scope

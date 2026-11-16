@@ -23,7 +23,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission"]
+    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission", "lab-verdict"]
     assert sonar["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -109,6 +109,7 @@ def test_sonar_requires_successful_selection_before_looking_for_unit_coverage(se
     expression = _workflow()["jobs"]["sonar"]["if"].removeprefix("${{").removesuffix("}}")
     for token, value in {
         "!cancelled()": "'false' != 'true'",
+        "fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true": "'' != 'true'",
         "needs.select.result": f"'{selection}'",
         "github.event_name": f"'{event}'",
         "needs.admission.result": f"'{admission}'",

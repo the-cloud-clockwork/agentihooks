@@ -268,12 +268,14 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
                             rerun(
                                 ci_reuse.inline_mutation(
                                     ci_reuse.postgres_required(
-                                        ci_reuse.gate_steps(
-                                            queue_tier=True,
-                                            promotion=True,
-                                            **options,
-                                            summary=summary,
-                                            watcher_loss=True,
+                                        lab(
+                                            ci_reuse.gate_steps(
+                                                queue_tier=True,
+                                                promotion=True,
+                                                **options,
+                                                summary=summary,
+                                                watcher_loss=True,
+                                            )
                                         )
                                     )
                                 )
@@ -287,6 +289,7 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
         for summary in (False, True)
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)
+        for lab in (list, ci_reuse.lab_verdict)
     ]
 
 

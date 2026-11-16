@@ -6,7 +6,6 @@ for the head's completed `lab/<gate>` check run from the trusted App and publish
 successful run; an authoritative gate whose verdict is absent or still pending at the deadline publishes failure.
 """
 
-import argparse
 import json
 import os
 import subprocess
@@ -15,7 +14,6 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote
 
 import scripts.ci_budget.rate_limit
 from scripts.ci_lab.delivery import OUTPUT, cutover, lab
@@ -80,7 +78,7 @@ def fetcher(repo: str, sha: str) -> Fetch:
     def fetch(check: str) -> list[dict[str, Any]]:
         """Return the latest check runs named check on the head."""
         done = gh_api(
-            [f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(check, safe='')}&filter=latest&per_page=100"],
+            [f"repos/{repo}/commits/{sha}/check-runs?check_name={check}&filter=latest&per_page=100"],
             timeout=TIMEOUT_S,
             text=True,
         )
@@ -105,25 +103,18 @@ def publish(outputs: Mapping[str, str], environ: Mapping[str, str]) -> None:
     print(lines, end="")
 
 
-def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.environ) -> int:
-    """Run the authority or the verdict step of the lab-verdict job."""
-    parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab_verdict")
-    parser.add_argument("step", choices=("authority", "verdict"))
-    parser.add_argument("--grader-root", type=Path, required=True)
-    parser.add_argument("--event", default="")
-    parser.add_argument("--authoritative", default="")
-    parser.add_argument("--repo", default="")
-    parser.add_argument("--sha", default="")
-    parser.add_argument("--app", default="")
-    parser.add_argument("--wait", type=float, default=WAIT_S)
-    args = parser.parse_args(argv)
-    if args.step == "authority":
-        publish(authority(args.grader_root, args.event, environ), environ)
+def main(argv: Sequence[str], environ: Mapping[str, str] = os.environ) -> int:
+    """Run `authority <grader root> <event>` or `verdict <grader root> <authoritative> <repo> <sha> <app>`."""
+    step, grader, *rest = argv
+    if step == "authority":
+        [event] = rest
+        outputs = authority(Path(grader), event, environ)
     else:
-        fetch = fetcher(args.repo, args.sha)
-        publish(lab_outputs(args.grader_root, args.authoritative, fetch, args.app, args.wait), environ)
+        authoritative, repo, sha, app = rest
+        outputs = lab_outputs(Path(grader), authoritative, fetcher(repo, sha), app, WAIT_S)
+    publish(outputs, environ)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

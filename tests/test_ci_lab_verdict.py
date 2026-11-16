@@ -143,6 +143,18 @@ def test_failure_is_published() -> None:
     assert clock.slept == []
 
 
+def test_runs_from_other_apps_never_satisfy_the_poll() -> None:
+    clock = Clock()
+    fetch, asked = scripted({"lab/lint": [[run(1, "completed", "success", "other-app")]]})
+    assert verdict.verdicts({"lint": "lab/lint"}, fetch, LAB, 15, clock, clock.sleep) == {"lint": "failure"}
+    assert len(asked) == 2
+
+
+def test_unknown_step_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        verdict.main(["grade", str(tree(tmp_path, ["lint"])), "pull_request"], {"GITHUB_OUTPUT": str(tmp_path / "out")})
+
+
 def test_absent_verdict_fails_at_the_deadline() -> None:
     clock = Clock()
     fetch, asked = scripted({"lab/lint": [[]]})
@@ -186,7 +198,7 @@ def test_fetch_reads_latest_runs_through_the_rate_limited_helper(monkeypatch: py
     monkeypatch.setattr(verdict, "gh_api", gh_api)
     assert verdict.fetcher("org/repo", "abc")("lab/type-gate") == [run(3, "queued")]
     assert calls == [
-        (["repos/org/repo/commits/abc/check-runs?check_name=lab%2Ftype-gate&filter=latest&per_page=100"], 30.0, True)
+        (["repos/org/repo/commits/abc/check-runs?check_name=lab/type-gate&filter=latest&per_page=100"], 30.0, True)
     ]
 
 
@@ -210,7 +222,7 @@ def test_main_authority_writes_the_step_output(tmp_path: Path, capsys: pytest.Ca
     output = tmp_path / "output"
     output.write_text("before=1\n")
     environ = {"GITHUB_OUTPUT": str(output)}
-    args = ["authority", "--grader-root", str(grader), "--event", "pull_request"]
+    args = ["authority", str(grader), "pull_request"]
     assert verdict.main(args, environ) == 0
     assert output.read_text() == 'before=1\nauthoritative={"lint": true}\n'
     assert capsys.readouterr().out == 'authoritative={"lint": true}\n'
@@ -219,9 +231,16 @@ def test_main_authority_writes_the_step_output(tmp_path: Path, capsys: pytest.Ca
 def test_main_authority_honours_lab_off(tmp_path: Path) -> None:
     output = tmp_path / "output"
     environ = {"GITHUB_OUTPUT": str(output), "AGENTIHOOKS_LAB_OFF": "true"}
-    args = ["authority", "--grader-root", str(tree(tmp_path / "grader", ["lint"])), "--event", "pull_request"]
+    args = ["authority", str(tree(tmp_path / "grader", ["lint"])), "pull_request"]
     assert verdict.main(args, environ) == 0
     assert output.read_text() == "authoritative={}\n"
+
+
+def test_publish_writes_one_line_per_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    output = tmp_path / "output"
+    verdict.publish({"lab_lint": "success", "lab_unit": "failure"}, {"GITHUB_OUTPUT": str(output)})
+    assert output.read_text() == "lab_lint=success\nlab_unit=failure\n"
+    assert capsys.readouterr().out == "lab_lint=success\nlab_unit=failure\n"
 
 
 def test_main_verdict_polls_the_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,8 +261,7 @@ def test_main_verdict_polls_the_head(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(verdict, "fetcher", fetcher)
     monkeypatch.setattr(verdict, "verdicts", recorded)
-    args = ["verdict", "--grader-root", str(grader), "--authoritative", '{"lint": true}']
-    args += ["--repo", "org/repo", "--sha", "abc", "--app", LAB]
+    args = ["verdict", str(grader), '{"lint": true}', "org/repo", "abc", LAB]
     assert verdict.main(args, {"GITHUB_OUTPUT": str(output)}) == 0
     assert output.read_text() == "lab_lint=failure\n"
     assert seen == [("org/repo", "abc")]
@@ -255,7 +273,7 @@ def test_module_entry_exits_with_main(tmp_path: Path, monkeypatch: pytest.Monkey
     grader = tree(tmp_path / "grader", ["lint"])
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.delenv("AGENTIHOOKS_LAB_OFF", raising=False)
-    monkeypatch.setattr(sys, "argv", ["scripts.ci_lab_verdict", "authority", "--grader-root", str(grader)])
+    monkeypatch.setattr(sys, "argv", ["scripts.ci_lab_verdict", "authority", str(grader), "push"])
     monkeypatch.delitem(sys.modules, "scripts.ci_lab_verdict", raising=False)
     with pytest.raises(SystemExit) as stopped:
         runpy.run_module("scripts.ci_lab_verdict", run_name="__main__")
@@ -280,7 +298,8 @@ def test_the_job_reads_authority_only_from_the_protected_base() -> None:
     assert [step["id"] for step in graded] == ["authority", "verdict"]
     assert all(step["working-directory"] == "${{ github.workspace }}/" + checkout["with"]["path"] for step in graded)
     assert graded[0]["env"] == {"AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}"}
-    assert "authority --grader-root . --event pull_request" in graded[0]["run"]
+    assert "ci_lab_verdict authority . pull_request\n" in graded[0]["run"]
+    assert graded[1]["run"].endswith('verdict . "$AUTHORITATIVE" "$GITHUB_REPOSITORY" "$HEAD" "$LAB_APP"')
     assert graded[1]["env"]["HEAD"] == "${{ github.event.pull_request.head.sha }}"
     token = next(step for step in job["steps"] if step.get("id") == "app-token")
     assert {key for key in token["with"] if key.startswith("permission-")} == {"permission-checks"}
@@ -299,4 +318,4 @@ def test_the_job_publishes_a_result_for_every_declared_lab_gate() -> None:
 def test_gate_required_grades_the_lab_verdict() -> None:
     gate = jobs()["gate-required"]
     assert "lab-verdict" in gate["needs"]
-    assert gate["steps"][0]["run"].startswith(ci_reuse.LAB_VERDICT)
+    assert ci_reuse.LAB_VERDICT in gate["steps"][0]["run"]

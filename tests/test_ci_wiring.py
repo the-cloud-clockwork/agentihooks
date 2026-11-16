@@ -328,7 +328,7 @@ def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs() 
         'python -m scripts.ci_wiring --root "$GITHUB_WORKSPACE"',
     ]
     assert check["if"] == "${{ !cancelled() }}"
-    assert lint["needs"] in (["reuse"], ["reuse", "admission"])
+    assert lint["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
 
 
 def test_a_pull_request_workflow_without_jobs_needs_no_declaration() -> None:
