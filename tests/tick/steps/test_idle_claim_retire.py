@@ -23,7 +23,7 @@ STOPPED = 1_794_216_840_000
 WAITS_END_RAN_S = (STOPPED - 56 * 3_600_000) / 1000
 CHECKS_WAIT_MS = 12 * 3_600_000
 PASSES = 25
-WAITS_END = agents.WAITS_END
+WAITS_END = "waits end"
 
 
 class Redis:
@@ -160,13 +160,14 @@ def _starved(store: Store) -> None:
     mark_ended(store, "rig", int(WAITS_END_RAN_S * 1000))
 
 
-def _failing_waits_end(store: Store, monkeypatch: pytest.MonkeyPatch) -> Callable[[int], None]:
-    """Return a pass hook that journals the ok run the tick engine records for the registered waits end step when its
-    held wrapper swallows an end pass that raises."""
+def _held_waits_end(store: Store, monkeypatch: pytest.MonkeyPatch) -> Callable[[int], None]:
+    """Return a pass hook that journals, as the tick engine does, the ok run of the registered waits end step on a
+    pass whose end pass raised inside its held wrapper and recorded no completion; the run's record row is dropped,
+    since this store keeps no streams, while its step end is stored."""
     step = next(step for step in report.STEPS if step.name == WAITS_END)
     monkeypatch.setattr(timing, "append_record", lambda *_: None)
 
-    def fail(now: int) -> None:
+    def held(now: int) -> None:
         """Journal the run in a recording pass that starts and ends at ``now``."""
         token = timing.PASS.set({"pass_id": f"p{now}", "start_ms": now})
         try:
@@ -176,7 +177,7 @@ def _failing_waits_end(store: Store, monkeypatch: pytest.MonkeyPatch) -> Callabl
         finally:
             timing.PASS.reset(token)
 
-    return fail
+    return held
 
 
 @pytest.mark.feature("swarm-tick-idle-claim-retire")
@@ -247,9 +248,23 @@ def test_engineers_idle_under_a_checked_wait_are_retired_while_waits_end_fails_e
     runtime = _seams(monkeypatch, {a.name: _checked_wait(a.name) for a in crew}, retired)
     store = Store()
     _starved(store)
-    when = _run(store, runtime, crew, PASSES, _failing_waits_end(store, monkeypatch))
+    _run(store, runtime, crew, PASSES, _held_waits_end(store, monkeypatch))
     assert sorted(retired) == sorted(a.name for a in crew)
-    assert all(count <= PASSES for count in when.values())
+    assert timing.step_ends(store, "rig")[WAITS_END] == (STOPPED + PASSES * elapsed.PASS_MS) / 1000
+
+
+@pytest.mark.feature("tick-failing-waits-end-lets-checked-waits-lapse")
+def test_a_checked_wait_holds_one_window_after_it_was_declared_when_waits_end_never_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    crew = [AgentRecord(name=f"engineer@323133-{n}", lane="eng", task=f"t{n}") for n in (7730, 7732)]
+    retired: list[str] = []
+    runtime = _seams(monkeypatch, {a.name: _checked_wait(a.name) for a in crew}, retired)
+    store = Store()
+    window = tick.IDLE_KILL_MS // elapsed.PASS_MS
+    when = _run(store, runtime, crew, window + PASSES, _held_waits_end(store, monkeypatch))
+    assert sorted(retired) == sorted(a.name for a in crew)
+    assert min(when.values()) > window
 
 
 @pytest.mark.feature("swarm-tick-idle-claim-retire")

@@ -18,6 +18,7 @@ _fixtures = merging
 pytestmark = pytest.mark.unit
 
 BASE_S = 1_700_000_000.0
+WAITS_END = "waits end"
 
 
 @pytest.mark.feature("tick-merged-task-settlement-after-overrun")
@@ -57,7 +58,7 @@ def test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds(
         "inbox": InboxStore(store.redis),
         "view": {URL: MERGED}.get,
     }
-    step = next(step for step in report.STEPS if step.name == agents.WAITS_END)
+    step = next(step for step in report.STEPS if step.name == WAITS_END)
     checked = {"until": NOW + 60_000, "at": NOW, "on": waits.on("checks", URL)}
     waits.mark_ended(store, "sw", int(BASE_S * 1000) - 2 * tick.IDLE_KILL_MS)
     assert agents._holding_wait(store, "sw", checked, int(clock[0] * 1000)) is None
@@ -74,7 +75,7 @@ def test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds(
             finally:
                 timing.PASS.reset(token)
             assert records[0].outcome == engine.OK
-            ends.append(timing.step_ends(store, "sw")[agents.WAITS_END])
+            ends.append(timing.step_ends(store, "sw")[WAITS_END])
             completed.append(waits.ended_at(store, "sw"))
     last = int((BASE_S + 65.0) * 1000)
     assert ends == [BASE_S + 5.0, BASE_S + 65.0]
@@ -103,7 +104,7 @@ def test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read(
         "inbox": InboxStore(store.redis),
         "view": {URL: MERGED}.get,
     }
-    step = next(step for step in report.STEPS if step.name == agents.WAITS_END)
+    step = next(step for step in report.STEPS if step.name == WAITS_END)
     checked = {"until": NOW + 60_000, "at": NOW, "on": waits.on("checks", URL)}
     window_s = tick.IDLE_KILL_MS / 1000
     outcomes: list[str] = []

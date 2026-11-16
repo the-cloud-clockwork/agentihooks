@@ -151,7 +151,8 @@ interval is above one cron minute. The idle count check in
 reports `ok` even when its end pass raises, is skipped after an earlier step
 held an exception, finds no tick view or is refused, so a checked wait holds an
 agent's idle count only while the waits end pass last completed within the idle
-retirement window. The pass records that time itself, as epoch milliseconds,
+retirement window, or, while no completion was ever recorded, until the wait's
+own end. The pass records that time itself, as epoch milliseconds,
 under the swarm key `waits:ended` (`scripts.swarm.waits.mark_ended` and
 `ended_at`). The step end is
 written when the step's record is journalled, as epoch seconds, into the hash

@@ -502,9 +502,6 @@ def _watch_idle(
     return nudged
 
 
-WAITS_END = "waits end"
-
-
 def _holding_wait(store: Any, slug: str, found: Any, now_ms: int) -> Any:
     """The declared wait ``found`` as the idle count reads it: a checked wait only while the waits end pass, which
     ends a checked wait once its target resolves, last completed within the idle retirement window."""
