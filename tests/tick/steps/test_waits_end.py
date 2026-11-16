@@ -84,14 +84,13 @@ def _failing_end_pass(*_: object) -> NoReturn:
 
 
 @pytest.mark.feature("tick-failing-waits-end-lets-checked-waits-lapse")
-def test_a_failed_waits_end_run_leaves_the_end_checked_waits_read(
+def test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read(
     merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = merging.store
     clock = [BASE_S]
-    monkeypatch.setattr(cli, "now_ms", lambda: NOW)
+    monkeypatch.setattr(cli, "now_ms", lambda: int(clock[0] * 1000))
     monkeypatch.setattr(engine.time, "time", lambda: clock[0])
-    monkeypatch.setattr(waits, "end_pass", _failing_end_pass)
     state = {
         "store": store,
         "slug": "sw",
@@ -100,12 +99,14 @@ def test_a_failed_waits_end_run_leaves_the_end_checked_waits_read(
         "view": {URL: MERGED}.get,
     }
     step = next(step for step in report.STEPS if step.name == agents.WAITS_END)
-    timing.step_ended(store, "sw", agents.WAITS_END, BASE_S)
+    checked = {"until": NOW + 60_000, "at": NOW, "on": waits.on("checks", URL)}
+    window_s = tick.IDLE_KILL_MS / 1000
     outcomes: list[str] = []
     with timing.tick("sw", store):
-        for index in range(1, 3):
-            start = BASE_S + index * 60.0
-            clock[0] = start + 5.0
+        for index, start in enumerate((BASE_S, BASE_S + window_s, BASE_S + window_s + 60.0)):
+            if index == 1:
+                monkeypatch.setattr(waits, "end_pass", _failing_end_pass)
+            clock[0] = start
             token = timing.PASS.set({"pass_id": f"p{index}", "start_ms": start * 1000})
             try:
                 with pool.running(critical_s=0.0, slow_s=1.0):
@@ -113,5 +114,5 @@ def test_a_failed_waits_end_run_leaves_the_end_checked_waits_read(
             finally:
                 timing.PASS.reset(token)
             outcomes.append(records[0].outcome)
-    assert outcomes == [engine.FAILED, engine.FAILED]
-    assert timing.step_ends(store, "sw") == {agents.WAITS_END: BASE_S}
+    assert outcomes == [engine.OK, engine.OK, engine.OK]
+    assert agents._holding_wait(store, "sw", checked, int(clock[0] * 1000)) is None

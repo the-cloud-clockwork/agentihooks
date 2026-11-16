@@ -160,18 +160,18 @@ def _starved(store: Store) -> None:
 
 
 def _failing_waits_end(store: Store, monkeypatch: pytest.MonkeyPatch) -> Callable[[int], None]:
-    """Return a pass hook that journals a failed run of the registered waits end step, as the tick engine journals the
-    run when that step raises."""
+    """Return a pass hook that journals the ok run the tick engine records for the registered waits end step when its
+    held wrapper swallows an end pass that raises."""
     step = next(step for step in report.STEPS if step.name == WAITS_END)
     monkeypatch.setattr(timing, "append_record", lambda *_: None)
 
     def fail(now: int) -> None:
-        """Journal the failed run in a recording pass that starts and ends at ``now``."""
+        """Journal the run in a recording pass that starts and ends at ``now``."""
         token = timing.PASS.set({"pass_id": f"p{now}", "start_ms": now})
         try:
             with monkeypatch.context() as clock, timing.tick("rig", store):
                 clock.setattr(engine.time, "time", lambda: now / 1000)
-                engine._journal(step, engine.StepRecord(WAITS_END, 1.0, step.budget_s, "builtins.RuntimeError"), 0.0)
+                engine._journal(step, engine.StepRecord(WAITS_END, 1.0, step.budget_s), 0.0)
         finally:
             timing.PASS.reset(token)
 
