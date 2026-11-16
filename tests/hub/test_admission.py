@@ -1581,6 +1581,49 @@ def test_a_cleared_protected_branch_continues_from_the_earlier_life_instead(
     assert admitted["task"]["reclaim"]["continue_from"] == "origin/eng-sw-0000"
 
 
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_the_branch_heads_query_asks_only_for_earlier_lives_that_launched(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    for name, state, pane, ended in (
+        ("eng@sw-0001", "finished", "w1:p1", 1),
+        ("eng@sw-0002", "starting", "", 2),
+        ("eng@sw-0003", "starting", "", 3),
+    ):
+        life = {"task": "t1", "lane": "eng", "name": name, "state": state, "pane_id": pane, "ended_at": ended}
+        rig.store.redis.rpush(rig.store.key(SLUG, "history"), json.dumps(life))
+    asked = _github_heads(monkeypatch, {"b0": {"target": {"oid": "abc123"}}})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert asked == [{"owner": "acme", "name": "app", "b0": "refs/heads/eng-sw-0001"}]
+    assert admitted["task"]["reclaim"]["continue_from"] == "origin/eng-sw-0001"
+
+
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hub import branch_heads
+
+    first = rig.admitter.admit(SLUG, ask())
+    [agent] = rig.store.agents(SLUG)
+    rig.admitter.free(SLUG, agent)
+
+    def unread(config: SwarmConfig) -> None:
+        raise AssertionError("a life no hive started pushed no branch")
+
+    monkeypatch.setattr(branch_heads, "reclaimer", unread)
+
+    admitted = rig.admitter.admit(SLUG, ask(generation=2))
+
+    [life] = [json.loads(raw) for raw in rig.store.redis.lrange(rig.store.key(SLUG, "history"), 0, -1)]
+    assert (life["name"], life["state"], life["pane_id"]) == (first["name"], "starting", "")
+    assert "reclaim" not in admitted["task"]
+    assert rig.store.reclaims(SLUG) == {}
+
+
 @pytest.mark.feature("hub-admission-claim-context")
 @pytest.mark.parametrize("handed_off", [False, True])
 def test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_continued(
