@@ -176,9 +176,9 @@ A cache miss preserves normal grading. Token creation is a separate workflow ste
 
 ## Admitted lost tests
 
-Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts; there is no list of exempt tests.
+Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts, except the [signed retirements](#signed-retirements) a pull request adds.
 
-A test id in the base and not in the head is admitted when it referenced code the head deletes: a top level name, a keyword branch, or executable steps in a JSON fixture.
+A test id in the base and not in the head is admitted when it referenced code the head deletes (a top level name, a keyword branch, or executable steps in a JSON fixture or workflow), when its parametrized id names a file the head deletes, or when the pull request retires it under a Standards reader's signature.
 
 ### Deleted definitions and constants
 
@@ -208,9 +208,49 @@ def test_retry_limit_is_three():
 
 ### Executable fixtures and module entry points
 
-A lost test may reference a JSON fixture through `Path.read_text()` or `Path.read_bytes()`, directly or through a called local helper. The path must resolve statically from imported `pathlib.Path`, `__file__`, module level assignments, parent access and literal path joins. The resolved file must stay inside the base checkout and contain nonempty shell `run` strings in a `steps` list. Ordinary data, unresolved paths and paths escaping through `..` or symlinks establish no admission. The fixture must disappear at its old path and none of its executable step strings may survive in another JSON file in the head.
+A lost test may reference a JSON fixture through `Path.read_text()` or `Path.read_bytes()`, directly or through a called local helper. The path must resolve statically from imported `pathlib.Path`, `__file__`, module level assignments, names the test or helper binds exactly once by a plain assignment, parent access and literal path joins. A local name bound twice, bound by a loop, `with`, import or `except`, or passed as a parameter does not resolve. The resolved file must stay inside the base checkout and contain nonempty shell `run` strings in a `steps` list. Ordinary data, unresolved paths and paths escaping through `..` or symlinks establish no admission. The fixture must disappear at its old path and none of its executable step strings may survive in another JSON file in the head.
 
 An explicit `runpy.run_module("pkg.mod", run_name="__main__")` resolves calls inside that module's `if __name__ == "__main__"` guard. A called function must satisfy the same deletion rules as a direct import. A dynamic module target, an ordinary module import, or a surviving entry point admits nothing.
+
+### Parametrized ids that name a deleted file
+
+A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `mutation-preflight.yml-stats` names `mutation-preflight.yml` and `premutation-preflight.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A deleted file also counts as renamed, and admits nothing, when the head adds any file with the same extension or the same name before its extension, so a file renamed with edits keeps the floor where it was wherever its case moves. In a git checkout only tracked files count, so files a job writes into the workspace neither keep nor rename anything.
+
+```text
+tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[mutation-preflight.yml-stats] is admitted: its id names .github/workflows/mutation-preflight.yml, which the head deletes
+```
+
+### Signed retirements
+
+A lost test of behaviour the pull request removes from a module that survives has no deleted subject to point at. The pull request lists it instead, one JSON file per test under `test-retirements/`, named by the SHA-256 of its node id, in the layout mutation clearances use:
+
+```json
+{
+  "tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory": {
+    "reader": "Standards reader",
+    "reason": "The head removes the branch preflight kill memory seed this test held."
+  }
+}
+```
+
+When the job fails, the `test-count` log names every lost test no other rule admits as `<node id> is in the base and not in the head`; retire only those whose behaviour the pull request removes. Write them with the floor itself, which refuses a ruling without a Standards reader or a reason:
+
+```bash
+python -m tests.count_floor --retire "<node id>" ... --reader "Standards reader" --reason "<why the behaviour is gone>"
+```
+
+An entry admits its lost test only when all of these hold:
+
+1. Its file name matches its node id and holds that one entry.
+2. The reader starts with the word `Standards`, in any case (`Standards reader`, `standards_reader`), and the reason is not blank.
+3. The base has no file of that name, so the pull request itself retires the test.
+
+Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review.
+
+```text
+test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
+tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory is admitted: the pull request retires it, signed by Standards reader
+```
 
 ### Deleted keyword branches
 
@@ -250,10 +290,10 @@ The line reads `the head deletes` for a keyword branch too; the function named b
 
 ### When admission is off
 
-If any head file cannot be parsed, or contains a star import (`from x import *`), its names are unknown, so no lost test is admitted for the whole run, through a definition, a constant or a keyword branch. When the head collects fewer tests than the base, the job names each such file:
+If any head file cannot be parsed, or contains a star import (`from x import *`), its names are unknown, so no lost test is admitted for the whole run, through a definition, a constant, a keyword branch, a fixture or a parametrized id. Only a [signed retirement](#signed-retirements) still admits one. When the head collects fewer tests than the base, the job names each such file:
 
 ```text
-pkg/legacy.py hides its names in the head (unparseable or a star import), so no lost test is admitted
+pkg/legacy.py hides its names in the head (unparseable or a star import), so no lost test is admitted except by a signed retirement
 ```
 
 The floor then grades by count alone.
@@ -264,6 +304,7 @@ The floor then grades by count alone.
 - An unrelated unchanged binding is tolerated; a new or changed same-name binding conservatively blocks admission, even when it serves another purpose. This applies to constants as much as to functions.
 - Keyword branches are found only in `if`, `elif`, conditional expression and `while` conditions. A parameter that only drives a `match`, a comprehension filter, an `assert` or a boolean expression outside such a condition, or is only passed on to another call, is not a branch, so its tests stay red.
 - The subject is matched by the module path the test imported it from. A name re-exported through a package (`from pkg import f` where `f` is defined in `pkg/impl.py`) does not match its definition, so its lost tests stay red.
+- A parametrized id admits through a file renamed with edits to a new name and a new extension at once, since the head then adds no file sharing either; and a head that adds any file of the same extension, such as a new `.py` module, keeps every deleted file of that extension from admitting by id, so those cases need a signed retirement.
 - Count masking is unchanged: an unrelated lost test passes when the head adds as many tests.
 
 ## Deleting dead code with its tests
