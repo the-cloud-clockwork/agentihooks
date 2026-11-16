@@ -592,6 +592,7 @@ def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys
         "panic": "on",
         "fixes": [FIX],
         "cancelled": [f"{repo} run 7 on busy" for repo in panic.REPOS],
+        "lab": "no lab url is set for this swarm; lab grading is unchanged",
     }
     current = panic.state(store)
     assert current is not None
@@ -624,8 +625,128 @@ def test_the_panic_button_off_clears_once_stable(store, counted, capsys):
     panic.engage(store, "pressed", False, [], 0)
     args = cli.build_parser().parse_args([SLUG, "panic", "off"])
     args.handler(store, args)
-    assert json.loads(capsys.readouterr().out) == {"panic": "off"}
+    assert json.loads(capsys.readouterr().out) == {
+        "panic": "off",
+        "lab": "no lab url is set for this swarm; lab grading is unchanged",
+    }
     assert panic.state(store) is None
+
+
+class Lab:
+    def __init__(self, replies: dict[str, dict[str, Any]], error: Exception | None = None) -> None:
+        self.replies = replies
+        self.error = error
+        self.calls: list[tuple[str, str, dict[str, Any], Any]] = []
+
+    def __call__(self, url: str, path: str, body: dict[str, Any], environ: Any) -> dict[str, Any]:
+        self.calls.append((url, path, body, environ))
+        if self.error is not None:
+            raise self.error
+        return self.replies[path]
+
+
+PAUSED = {"paused": "pull_request", "except": ["fix-branch"]}
+PRIORITIZED = {"class": "hotfix", "heads": ["fix-branch"]}
+
+
+@pytest.mark.feature("panic-lab-pause")
+def test_panic_lab_engage_prioritizes_the_fix_branches_and_pauses_pull_request_grading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import lab_control
+
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    lab = Lab({"/priority": PRIORITIZED, "/pause": PAUSED})
+    monkeypatch.setattr(lab_control, "send", lab)
+    environ = {"K": "v"}
+    assert panic.lab_engage("http://lab", [FIX], environ) == "lab paused pull request grading except fix-branch"
+    assert lab.calls == [
+        ("http://lab", "/priority", {"heads": ["fix-branch"], "class": "hotfix"}, environ),
+        ("http://lab", "/pause", {"class": "pull_request", "except": ["fix-branch"]}, environ),
+    ]
+
+
+def test_panic_lab_engage_with_no_fix_pauses_every_pull_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import lab_control
+
+    lab = Lab({"/priority": {"class": "hotfix", "heads": []}, "/pause": {"paused": "pull_request", "except": []}})
+    monkeypatch.setattr(lab_control, "send", lab)
+    assert panic.lab_engage("http://lab", [], {}) == "lab paused pull request grading except no head"
+
+
+@pytest.mark.parametrize("error", [OSError("connection refused"), ValueError("not json")])
+def test_panic_lab_engage_names_an_unreachable_lab_without_raising(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    from scripts.swarm import lab_control
+
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    monkeypatch.setattr(lab_control, "send", Lab({}, error))
+    line = panic.lab_engage("http://lab", [FIX], {})
+    assert line == f"lab at http://lab is unreachable, pull request grading goes on: {error}"
+
+
+def test_panic_lab_engage_names_a_missing_lab_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    assert panic.lab_engage("", [FIX], {}) == "no lab url is set for this swarm; lab grading is unchanged"
+    assert asked == []
+
+
+@pytest.mark.feature("panic-lab-pause")
+def test_panic_lab_release_resumes_pull_request_grading(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import lab_control
+
+    lab = Lab({"/resume": {"resumed": ["pull_request"]}})
+    monkeypatch.setattr(lab_control, "send", lab)
+    assert panic.lab_release("http://lab", {"K": "v"}) == "lab resumed grading of pull_request"
+    assert lab.calls == [("http://lab", "/resume", {}, {"K": "v"})]
+
+
+def test_panic_lab_release_with_nothing_paused_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import lab_control
+
+    monkeypatch.setattr(lab_control, "send", Lab({"/resume": {"resumed": []}}))
+    assert panic.lab_release("http://lab", {}) == "lab resumed grading of no class"
+
+
+@pytest.mark.parametrize("error", [OSError("connection refused"), ValueError("not json")])
+def test_panic_lab_release_names_an_unreachable_lab_without_raising(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    from scripts.swarm import lab_control
+
+    monkeypatch.setattr(lab_control, "send", Lab({}, error))
+    line = panic.lab_release("http://lab", {})
+    assert line == f"lab at http://lab is unreachable, its pause holds until a resume reaches it: {error}"
+
+
+def test_panic_lab_release_names_a_missing_lab_url() -> None:
+    assert panic.lab_release("", {}) == "no lab url is set for this swarm; lab grading is unchanged"
+
+
+@pytest.mark.feature("panic-lab-pause")
+def test_the_panic_button_pauses_the_swarm_lab_and_prints_it(
+    store: RedisStore, counted: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.ci_lab import contract
+    from scripts.swarm import lab_control
+
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    monkeypatch.setattr(panic, "port", Runs({}))
+    store.redis.hset(store.key(SLUG, "config"), "lab_url", "http://lab")
+    monkeypatch.setenv(contract.CONTROL_TOKEN, "w")
+    lab = Lab({"/priority": PRIORITIZED, "/pause": PAUSED, "/resume": {"resumed": ["pull_request"]}})
+    monkeypatch.setattr(lab_control, "send", lab)
+    args = cli.build_parser().parse_args([SLUG, "panic", "on", "--fix", FIX])
+    args.handler(store, args)
+    assert json.loads(capsys.readouterr().out)["lab"] == "lab paused pull request grading except fix-branch"
+    assert [(url, path, environ[contract.CONTROL_TOKEN]) for url, path, _, environ in lab.calls] == [
+        ("http://lab", "/priority", "w"),
+        ("http://lab", "/pause", "w"),
+    ]
+    args = cli.build_parser().parse_args([SLUG, "panic", "off"])
+    args.handler(store, args)
+    assert json.loads(capsys.readouterr().out) == {"panic": "off", "lab": "lab resumed grading of pull_request"}
 
 
 def test_panic_status_reports_the_counter_and_level(store, counted, capsys):

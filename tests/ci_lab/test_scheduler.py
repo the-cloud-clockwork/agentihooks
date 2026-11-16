@@ -703,8 +703,9 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
         def serve_forever(self) -> None:
             calls["served"] = True
 
-    def serve_api(host: str, port: int, leases: Leases, signer: Any) -> Server:
+    def serve_api(host: str, port: int, leases: Leases, signer: Any, control: Any, word: str) -> Server:
         calls["api"] = (host, port, leases, signer)
+        calls["control"] = (control, word)
         return Server()
 
     class Thread:
@@ -746,8 +747,11 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
+        scheduler.contract.CONTROL_TOKEN: "lab-word",
     }
     assert scheduler.main(["--interval", "0.5", "--passes", "3"], environ) == 7
+    control, word = calls["control"]
+    assert isinstance(control, scheduler.RedisControl) and control.client is client and word == "lab-word"
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
     options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
     assert calls["s3"] == ("s3", options)

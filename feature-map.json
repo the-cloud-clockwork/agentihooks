@@ -6519,6 +6519,45 @@
       ]
     },
     {
+      "id": "lab-control-routes",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
+      "behaviour": "The CI lab scheduler answers POST /priority, /pause and /resume only with the bearer token named by CI_LAB_CONTROL_TOKEN and refuses any other token or an unset one; a prioritized head commit or head branch is received in the hotfix class without a quiet window; a held request of a paused class stays held unless its head or branch is excepted, and resume releases it; the swarm posts to these routes with the token from its environment.",
+      "seam": "scripts.ci_lab.lease_api.govern and serve, scripts.ci_lab.scheduler.RedisControl and Scheduler.tick over fakeredis, and scripts.swarm.lab_control.send",
+      "tests": [
+        "tests/ci_lab/test_lease_api.py::test_priority_gives_the_heads_the_hotfix_class",
+        "tests/ci_lab/test_lease_api.py::test_pause_holds_a_class_except_the_named_heads",
+        "tests/ci_lab/test_lease_api.py::test_resume_releases_the_paused_classes",
+        "tests/ci_lab/test_lease_api.py::test_control_refuses_a_request_without_the_lab_token",
+        "tests/ci_lab/test_lease_api.py::test_server_routes_control_requests_with_the_bearer_token",
+        "tests/ci_lab/test_scheduler_control.py::test_a_prioritized_head_or_lane_grades_in_the_hotfix_class_without_waiting",
+        "tests/ci_lab/test_scheduler_control.py::test_a_paused_class_holds_its_heads_until_resume_except_the_spared_lanes",
+        "tests/swarm/test_lab_control.py::test_send_posts_json_with_the_lab_token"
+      ]
+    },
+    {
+      "id": "panic-lab-pause",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
+      "behaviour": "The panic button gives the fix branches hotfix priority in the swarm's CI lab and pauses lab pull request grading except them, printing lab paused pull request grading except the branches; panic off resumes lab grading; an unset lab url or an unreachable lab is printed as an action line and never raises.",
+      "seam": "scripts.swarm.panic.lab_engage and lab_release over a fake lab sender, and the swarm panic command through scripts.swarm.cli",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_lab_engage_prioritizes_the_fix_branches_and_pauses_pull_request_grading",
+        "tests/swarm/test_panic.py::test_panic_lab_release_resumes_pull_request_grading",
+        "tests/swarm/test_panic.py::test_the_panic_button_pauses_the_swarm_lab_and_prints_it"
+      ]
+    },
+    {
+      "id": "merge-priority-lab-ack",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
+      "behaviour": "A merge queue priority move also gives the pull request head hotfix priority in the swarm's CI lab, and its priority journal record carries both the GitHub queue steps and the lab acknowledgement.",
+      "seam": "scripts.swarm.merge_queue.prioritize with a lab caller and a queue_record.Journal writing to a temporary AGENTIHOOKS_HOME",
+      "tests": [
+        "tests/swarm/test_merge_queue_priority.py::test_priority_journals_the_queue_move_and_the_lab_acknowledgement"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",

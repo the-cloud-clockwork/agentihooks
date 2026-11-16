@@ -140,6 +140,75 @@ def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
     assert result == {"url": URL, "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)], "errors": []}
 
 
+def _journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
+    return queue_record.Journal(URL, environ={"AGENTIHOOKS_HOME": str(tmp_path)})
+
+
+def _records(tmp_path):
+    return [json.loads(line) for line in (tmp_path / "merge-queue-events.jsonl").read_text().splitlines()]
+
+
+@pytest.mark.feature("merge-priority-lab-ack")
+def test_priority_journals_the_queue_move_and_the_lab_acknowledgement(tmp_path, monkeypatch):
+    queue = FakeQueue()
+    asked = []
+
+    def lab(head):
+        asked.append(head)
+        return {"class": "hotfix", "heads": [head]}
+
+    merge_queue.prioritize(URL, run=queue.run, journal=_journal(tmp_path, monkeypatch), lab=lab)
+    assert asked == ["head9"]
+    [record] = _records(tmp_path)
+    assert (record["action"], record["expected_head"]) == ("priority", "head9")
+    assert ["queue", URL] in record["steps"]
+    assert record["lab"] == {"class": "hotfix", "heads": ["head9"]}
+
+
+def test_priority_without_a_lab_journals_no_lab_acknowledgement(tmp_path, monkeypatch):
+    merge_queue.prioritize(URL, run=FakeQueue().run, journal=_journal(tmp_path, monkeypatch))
+    [record] = _records(tmp_path)
+    assert record["action"] == "priority"
+    assert "lab" not in record
+
+
+def test_the_priority_command_hands_the_swarm_lab_to_the_move(monkeypatch):
+    from scripts.swarm import lab_control
+    from tests.swarm.test_merge_queue import swarm_of
+
+    store = swarm_of("master")
+    store.config = lambda slug: SimpleNamespace(lab_url="http://lab")
+    seen = []
+    monkeypatch.setattr(lab_control, "send", lambda url, path, body, environ: seen.append((url, path, body)) or {})
+
+    def prioritize(url, **kwargs):
+        kwargs["lab"]("head9")
+        return {"url": url, "displaced": [], "errors": []}
+
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
+    queue_priority.reorder(store, "sw", URL, "master@sw", [], queue_record.Journal(URL))
+    assert seen == [("http://lab", "/priority", {"heads": ["head9"], "class": "hotfix"})]
+
+
+def test_the_priority_command_hands_no_lab_without_a_lab_url(monkeypatch):
+    from tests.swarm.test_merge_queue import swarm_of
+
+    store = swarm_of("master")
+    store.config = lambda slug: SimpleNamespace(lab_url="")
+    labs = []
+
+    def prioritize(url, **kwargs):
+        labs.append(kwargs["lab"])
+        return {"url": url, "displaced": [], "errors": []}
+
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
+    queue_priority.reorder(store, "sw", URL, "master@sw", [], queue_record.Journal(URL))
+    assert labs == [None]
+
+
 def test_priority_leaves_earlier_priority_targets_in_place_on_either_side():
     queue = FakeQueue(queued=True)
     queue.entries += [queue.entry(5)]
@@ -154,7 +223,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     tasks = [
@@ -207,7 +276,7 @@ def test_worker_cannot_prioritize(monkeypatch, capsys):
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("ci")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: pytest.fail("worker reordered queue"))
@@ -368,7 +437,7 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))

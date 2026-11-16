@@ -289,3 +289,130 @@ def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue
         server.shutdown()
         server.server_close()
         thread.join(10)
+
+
+WORD = "lab" * 6
+BEARER = f"Bearer {WORD}"
+
+
+class Control:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    def prioritize(self, heads: frozenset[str]) -> None:
+        self.calls.append(("prioritize", *sorted(heads)))
+
+    def pause(self, name: str, spared: frozenset[str]) -> None:
+        self.calls.append(("pause", name, *sorted(spared)))
+
+    def resume(self) -> list[str]:
+        self.calls.append(("resume",))
+        return ["pull_request"]
+
+
+def govern(
+    control: Control, path: str, body: dict[str, Any], authorization: str = BEARER, word: str = WORD
+) -> tuple[int, dict[str, Any]]:
+    return lease_api.govern(control, word, "POST", path, authorization, json.dumps(body).encode())
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_priority_gives_the_heads_the_hotfix_class() -> None:
+    control = Control()
+    reply = govern(control, "/priority", {"heads": ["fix-branch", "abc"], "class": "hotfix"})
+    assert reply == (200, {"class": "hotfix", "heads": ["abc", "fix-branch"]})
+    assert control.calls == [("prioritize", "abc", "fix-branch")]
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_pause_holds_a_class_except_the_named_heads() -> None:
+    control = Control()
+    reply = govern(control, "/pause", {"class": "pull_request", "except": ["fix-branch"]})
+    assert reply == (200, {"paused": "pull_request", "except": ["fix-branch"]})
+    assert control.calls == [("pause", "pull_request", "fix-branch")]
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_resume_releases_the_paused_classes() -> None:
+    control = Control()
+    assert govern(control, "/resume", {}) == (200, {"resumed": ["pull_request"]})
+    assert control.calls == [("resume",)]
+
+
+@pytest.mark.feature("lab-control-routes")
+@pytest.mark.parametrize(
+    ("authorization", "word"),
+    [("", WORD), ("Bearer wrong", WORD), (WORD, WORD), (BEARER, ""), ("Bearer ", "")],
+)
+@pytest.mark.parametrize("path", ["/priority", "/pause", "/resume"])
+def test_control_refuses_a_request_without_the_lab_token(authorization: str, word: str, path: str) -> None:
+    control = Control()
+    body = {"heads": ["a"], "class": "hotfix", "except": []}
+    assert govern(control, path, body, authorization, word) == (401, {"error": "lab control token refused"})
+    assert control.calls == []
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/priority", {"heads": ["a"], "class": "pull_request"}),
+        ("/priority", {"heads": "a", "class": "hotfix"}),
+        ("/priority", {"heads": ["a"]}),
+        ("/pause", {"class": "nightly", "except": []}),
+        ("/pause", {"class": "pull_request"}),
+        ("/pause", {"except": []}),
+    ],
+)
+def test_control_refuses_a_malformed_body(path: str, body: dict[str, Any]) -> None:
+    control = Control()
+    assert govern(control, path, body) == (400, {"error": "bad request"})
+    assert control.calls == []
+
+
+def test_control_answers_not_found_off_its_routes() -> None:
+    control = Control()
+    assert lease_api.govern(control, WORD, "GET", "/pause", BEARER, b"{}") == (404, {"error": "not found"})
+    assert control.calls == []
+
+
+def _post(base: str, path: str, body: dict[str, Any], headers: dict[str, str]) -> tuple[int, Any]:
+    request = urllib.request.Request(f"{base}{path}", data=json.dumps(body).encode(), headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read())
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_server_routes_control_requests_with_the_bearer_token(lab: leases.Leases, signer: Signer) -> None:
+    control = Control()
+    server = lease_api.serve("127.0.0.1", 0, lab, signer, control, WORD)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        paused = _post(base, "/pause", {"class": "pull_request", "except": ["fix"]}, {"Authorization": BEARER})
+        assert paused == (200, {"paused": "pull_request", "except": ["fix"]})
+        refused = _post(base, "/priority", {"heads": ["fix"], "class": "hotfix"}, {})
+        assert refused == (401, {"error": "lab control token refused"})
+        lease = {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0}
+        assert _post(base, "/lease", lease, {"Authorization": BEARER}) == (200, {"leases": []})
+        assert control.calls == [("pause", "pull_request", "fix")]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
+
+
+def test_server_without_control_answers_not_found_on_control_routes(lab: leases.Leases, signer: Signer) -> None:
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        assert _post(base, "/resume", {}, {"Authorization": BEARER}) == (404, {"error": "not found"})
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(10)

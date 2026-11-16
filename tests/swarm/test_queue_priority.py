@@ -20,7 +20,7 @@ GRAPHQL = merge_queue.graphql
 def priority(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger_events, "view", READ_PULL)
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))

@@ -179,3 +179,20 @@ def test_a_larger_task_never_takes_the_exception():
 def test_phase_order_is_never_used():
     ledger = rows({"id": "late", "phase": "p9"}, {"id": "early", "phase": "p1"})
     assert ordered(ledger) == ["late", "early"]
+
+
+def test_tasks_of_the_fix_phase_claim_first():
+    ledger = rows(
+        {"id": "urgent", "rank": "urgent", "phase": "p1", "branch": "b"},
+        {"id": "fix", "phase": "p2"},
+        {"id": "plain", "phase": "p1"},
+    )
+    order = sorted(ledger.values(), key=claim_order.key(ledger, "p2"))
+    assert [task["id"] for task in order] == ["fix", "urgent", "plain"]
+
+
+def test_no_fix_phase_leaves_the_order_alone():
+    ledger = rows({"id": "urgent", "rank": "urgent", "phase": "p1"}, {"id": "other", "phase": ""})
+    assert ordered(ledger) == ["urgent", "other"]
+    order = sorted(ledger.values(), key=claim_order.key(ledger, ""))
+    assert [task["id"] for task in order] == ["urgent", "other"]

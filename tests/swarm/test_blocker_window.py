@@ -45,6 +45,14 @@ def test_a_non_master_session_is_never_touched(store, master):
     assert not master_coding.is_open(SID)
 
 
+def test_the_notice_names_what_the_panic_button_pauses_in_the_lab():
+    notice = blocker_window.NOTICE.format(slug="sw", categories="cat for 60 minutes")
+    assert notice.endswith(
+        "agentihooks swarm sw panic on --fix <pr url> pauses agent starts, cancels every CI run but the fix and the "
+        "merge queue, and pauses lab pull request grading except the fix, printing what it cancelled and paused."
+    )
+
+
 def test_pretool_requires_both_a_session_and_master_status(store, master, monkeypatch):
     monkeypatch.setattr(master_coding, "is_master", lambda session_id: False)
     _sustain(store)
