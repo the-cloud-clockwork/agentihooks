@@ -438,7 +438,7 @@ def test_a_restored_venv_skips_uv_and_the_install():
         lambda s: s.get("name") == "Install dependencies",
     ):
         _, step = _unit_step_index(predicate)
-        assert step["if"] in (hit, f"env.UNIT_SOURCE == '' && {hit}")
+        assert step["if"] == hit
 
 
 def test_unit_tests_run_from_the_venv():
@@ -757,7 +757,7 @@ def _browser_setup_steps(steps):
 def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     steps = _workflow()["jobs"]["lint"]["steps"]
     install = _browser_install(steps)
-    check = next(s for s in steps if s.get("run", "").endswith(".artifact_sanity tests/fixtures/artifacts/*"))
+    check = next(s for s in steps if s.get("name") == "Artifact sanity checks")
     assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
@@ -949,14 +949,17 @@ def _equivalence_group(name: str) -> str:
     return _EQUIVALENCE.read_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
 
 
-def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
+def test_equivalence_runs_only_on_ledger_pull_requests_without_a_body_marker():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
     job = workflow["jobs"]["ledger-equivalence"]
     assert "if" not in job
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    assert "paths" not in workflow[True]["pull_request"]
+    assert workflow[True]["pull_request"] == {
+        "branches": ["dev"],
+        "paths": ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"],
+    }
 
 
 def test_mutation_gate_plants_itself_whenever_its_code_changes():
@@ -967,7 +970,7 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
         listed
     )
-    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    assert 'if ! git diff --quiet "$base" HEAD -- "$path"; then' in changed["run"]
     [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
     assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
     assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
@@ -997,15 +1000,15 @@ def test_shards_wait_only_on_the_durations_lookup():
         ["select", "reuse", "admission"],
         ["test-count", "select", "reuse", "admission"],
     )
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
-    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
+    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
 
 
 def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     jobs = _workflow()["jobs"]
     assert "collect" not in jobs
     collect = jobs["test-count"]
-    assert collect["needs"] == jobs["select"]["needs"]
+    assert collect["needs"] == [*jobs["select"]["needs"], "lab-verdict"]
     assert "needs.select" not in collect["if"]
     assert collect["strategy"]["matrix"] == {"python-version": ["3.12"]}
     assert jobs["split"]["strategy"]["matrix"] == collect["strategy"]["matrix"]
@@ -1206,7 +1209,8 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
     jobs = _workflow()["jobs"]
     job = jobs["shard-check"]
-    assert set(job["needs"]) == {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun"}
+    needs = {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun", "lab-verdict"}
+    assert set(job["needs"]) == needs
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
@@ -2036,6 +2040,7 @@ def test_tests_mutation_refines_shards_and_merges_split_units() -> None:
         "mutation-replan",
         "mutation-shard",
         "admission",
+        "lab-verdict",
     ]
     assert "strategy" not in merged
     steps = {step.get("name"): step for step in merged["steps"]}

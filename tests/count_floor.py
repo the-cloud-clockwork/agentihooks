@@ -10,6 +10,8 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
+import yaml
+
 _SHARED = {"__init__.py", "conftest.py"}
 
 # Runs inside each tree so the base imports its own sources, never the head's.
@@ -424,15 +426,41 @@ def _fixture_code(path: Path) -> set[str]:
     }
 
 
+def _workflow_code(path: Path) -> set[str]:
+    try:
+        workflow = yaml.safe_load(path.read_bytes())
+    except (OSError, ValueError, yaml.YAMLError):
+        return set()
+    if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs"), dict):
+        return set()
+    return {
+        step["run"].strip()
+        for job in workflow["jobs"].values()
+        if isinstance(job, dict)
+        for step in job.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("run"), str) and step["run"].strip()
+    }
+
+
+def _executable_code(path: Path) -> set[str]:
+    if path.suffix == ".json":
+        return _fixture_code(path)
+    if path.suffix in (".yml", ".yaml"):
+        return _workflow_code(path)
+    return set()
+
+
 def _deleted_fixtures(base: Path, head: Path, referenced: set[tuple[str, str]]) -> set[tuple[str, str]]:
     candidates = {subject for subject in referenced if subject[0] == "@fixture" and not (head / subject[1]).exists()}
     if not candidates:
         return set()
-    surviving = set()
-    for path in head.rglob("*.json"):
-        if path.resolve().is_relative_to(head.resolve()):
-            surviving.update(_fixture_code(path))
-    return {subject for subject in candidates if not _fixture_code(base / subject[1]) & surviving}
+    kept = [
+        code
+        for path in head.rglob("*")
+        if path.suffix in (".json", ".yml", ".yaml") and path.resolve().is_relative_to(head.resolve())
+        if (code := _executable_code(path))
+    ]
+    return {subject for subject in candidates if not any(_executable_code(base / subject[1]) <= code for code in kept)}
 
 
 def _fixture_subject(
@@ -455,7 +483,7 @@ def _fixture_subject(
     if not isinstance(path, Path):
         return set()
     path, root = path.resolve(), tree.resolve()
-    if path.is_relative_to(root) and path.suffix == ".json" and _fixture_code(path):
+    if path.is_relative_to(root) and _executable_code(path):
         return {("@fixture", path.relative_to(root).as_posix())}
     return set()
 
@@ -583,6 +611,59 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     return subjects
 
 
+def _project_module_path(tree: Path, module: str) -> Path | None:
+    stem = tree / Path(*module.split("."))
+    direct = stem.with_suffix(".py")
+    if direct.is_file():
+        return direct
+    package = stem / "__init__.py"
+    return package if package.is_file() else None
+
+
+def _imported_modules(path: Path) -> set[str]:
+    try:
+        module = ast.parse(path.read_bytes())
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    modules: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            modules.add(node.module)
+            modules.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return modules
+
+
+def _emptied_test_files(base: Path, head: Path, tests: str) -> set[str]:
+    emptied = set()
+    for path in (base / tests).rglob("*.py"):
+        relative = path.relative_to(base)
+        if (head / relative).exists():
+            continue
+        modules = _imported_modules(path)
+        if any(_project_module_path(base, module) and not _project_module_path(head, module) for module in modules):
+            emptied.add(relative.as_posix())
+    return emptied
+
+
+def _admitted(
+    nodeid: str,
+    args: argparse.Namespace,
+    emptied: set[str],
+    deleted: set[tuple[str, str]],
+    opaque: list[Path],
+) -> tuple[list[str], str] | None:
+    file = nodeid.split("::", 1)[0]
+    if file in emptied:
+        return [file], "its test file is deleted together with a module it imported"
+    referenced = referenced_subjects(args.base, nodeid)
+    removed_fixtures = set() if opaque else _deleted_fixtures(args.base, args.head, referenced)
+    if subjects := sorted(".".join(subject) for subject in referenced & (deleted | removed_fixtures)):
+        return subjects, f"the head deletes {', '.join(subjects)}, which it referenced"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail when the head collects fewer tests than the base")
     side = parser.add_mutually_exclusive_group(required=True)
@@ -617,12 +698,12 @@ def main(argv: list[str] | None = None) -> int:
             definition for definition in definitions if definition not in identities and definition[1] not in introduced
         }
         deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
+        emptied = set() if opaque else _emptied_test_files(args.base, args.head, args.tests)
         for nodeid in lost:
-            referenced = referenced_subjects(args.base, nodeid)
-            removed_fixtures = set() if opaque else _deleted_fixtures(args.base, args.head, referenced)
-            if subjects := sorted(".".join(subject) for subject in referenced & (deleted | removed_fixtures)):
+            if admission := _admitted(nodeid, args, emptied, deleted, opaque):
+                subjects, reason = admission
                 admitted[nodeid] = subjects
-                print(f"{nodeid} is admitted: the head deletes {', '.join(subjects)}, which it referenced")
+                print(f"{nodeid} is admitted: {reason}")
     floor = len(base) - len(admitted)
     print(f"head collects {len(head)} tests, base floor {floor}")
     if len(head) < floor:

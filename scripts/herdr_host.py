@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.naming import pane_label, repo_name
-from scripts.swarm.pane import typed_input
+from scripts.swarm.pane import ESCAPE, typed_input
 
 PLACEMENTS = ("tab", "split", "workspace")
 
@@ -249,6 +249,11 @@ def agent_status(pane_id: str, environ: dict[str, str]) -> str:
 
 def typed(pane_id: str, environ: dict[str, str]) -> str:
     return typed_input(_read(pane_id, environ))
+
+
+def screen(pane_id: str, environ: dict[str, str]) -> str:
+    """The pane's visible text without its styles."""
+    return ESCAPE.sub("", _read(pane_id, environ))
 
 
 def _read(pane_id: str, environ: dict[str, str]) -> str:

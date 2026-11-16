@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage, stack
+from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack
 from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
@@ -333,7 +333,7 @@ def view(
     url: str, source: SourceControl | None = None, required_checks: dict[str, int] | None = None
 ) -> "PullRequest | None":
     number = _number(url)
-    if mutation_wait.backing_off():
+    if run_wait.backing_off():
         return None
     port = source or stack.login_source_control()
     try:
@@ -343,8 +343,8 @@ def view(
                     PULL_QUERY.replace("$number", number), {"url": url}, deadline=Deadline.after(READ_SECONDS)
                 )
         except subprocess.CalledProcessError as error:
-            if mutation_wait.rate_limited(error.stderr):
-                mutation_wait.hold("graphql")
+            if run_wait.rate_limited(error.stderr):
+                run_wait.hold("graphql")
                 return None
             return _merged_without_rollup(json.loads(error.stdout))
         return _view_resource(body["data"]["resource"], number, None, port, required_checks)
@@ -371,7 +371,7 @@ def head(url, run=subprocess.run):
             )
         return read["sha"]
     except SwarmError as error:
-        return None if mutation_wait.rate_limited(str(error)) else ""
+        return None if run_wait.rate_limited(str(error)) else ""
     except (ValueError, KeyError, TypeError):
         return ""
 
@@ -507,7 +507,7 @@ def fresh_reader(
     def reread(url: str) -> PullRequest | None:
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
-        if not read and shared and not mutation_wait.backing_off():
+        if not read and shared and not run_wait.backing_off():
             read.update(views(shared, cache=cache, ttl=0))
         pull = read.get(url)
         return pull if pull is not None else view(url)

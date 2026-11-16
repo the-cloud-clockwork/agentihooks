@@ -91,12 +91,12 @@ def test_queue_binding_preserves_identity_credentials_and_lookup_capabilities(mo
 
 def test_scoped_logs_receive_the_root_credential_context(monkeypatch):
     config, js, owned_loop = BusConfig(provision=False, scoped=True, credentials="member-creds"), object(), loop()
-    root = SimpleNamespace(_config=config, _js=js, _loop=owned_loop)
+    root = SimpleNamespace(_config=config, _js=js, _loop=owned_loop, lab_heads=object())
     select = AsyncMock(side_effect=["events-stream", "dead-stream"])
     logs = Mock()
     monkeypatch.setattr(nats_scope, "existing_stream", select)
     monkeypatch.setattr(nats_scope, "NatsEventLog", logs)
-    nats_scope.NatsScopedBus(root, "rig")
+    assert nats_scope.NatsScopedBus(root, "rig").lab_heads is root.lab_heads
     assert logs.call_args_list == [
         call(owned_loop, js, config.queue, stream_name("rig", "STOP"), False, "rig", "member-creds"),
         call(owned_loop, js, config.queue, "events-stream", False, "rig", "member-creds"),
@@ -118,10 +118,8 @@ def test_root_binding_discovers_global_streams_only_for_unscoped_clients(monkeyp
     monkeypatch.setattr(nats, "auth_options", Mock(return_value={}))
     monkeypatch.setattr(nats, "root_stream", selector)
     nats.NatsBus(config, "nats://example:4222")
-    assert [entry.kwargs for entry in logs.call_args_list] == [
-        {"credentials": "member-creds"},
-        {"credentials": "member-creds"},
-    ]
+    assert [entry.kwargs for entry in logs.call_args_list] == [{"credentials": "member-creds"}] * 3
+    assert logs.call_args_list[2].args[2:] == (config.queue, nats.LAB_STREAM, False)
     assert selector.await_args_list == (
         []
         if scoped
