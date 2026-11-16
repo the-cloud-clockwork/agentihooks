@@ -97,6 +97,12 @@ streams use `AGENTIHOOKS-EVENTS` and `AGENTIHOOKS-DEAD`; existing `AGENTIHOOKS_E
 `AGENTIHOOKS_DEAD` streams remain selected while present. Workspace lookups likewise reuse old labels
 before creating a normalized label.
 
+CI lab heads have their own global stream, `AGENTIHOOKS-CI-LAB-HEADS`, holding `ci.lab.head.>`. Every
+provisioning bus open creates it after the events stream, so the events provisioning that resets the
+legacy stream's subjects never touches it, and a restart keeps its subjects and stored heads. The bus
+exposes it as `lab_heads`; the GitHub webhook receiver publishes lab heads there by stream name and
+never through the legacy events stream.
+
 Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`,
 `execution-starts` and `inbox`.
 
