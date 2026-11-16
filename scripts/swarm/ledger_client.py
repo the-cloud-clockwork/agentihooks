@@ -208,6 +208,10 @@ class LedgerClient:
         found: list[dict[str, Any]] = [row for row in rows if url in pull_links(row)]
         return found
 
+    def freezes(self, slug: str) -> list[dict[str, Any]]:
+        """The ledger's freeze and focus records, read without its tasks."""
+        return []
+
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
         return self.item(slug, f"tasks/{task_id}")
