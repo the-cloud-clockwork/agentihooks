@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import asdict, replace
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,11 +15,13 @@ from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events, execution_stop
 from scripts.hub import claims, lifecycle, reconciler
+from scripts.hub import exits as hub_exits
 from scripts.swarm import idle, launch_check, readiness
 from scripts.swarm import tick as tick_module
 from scripts.swarm.cli import stop_now
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import IDLE_KILL_TICKS
+from scripts.swarm_v2.runtime.base import Outcome, Status
 from scripts.tick.steps import agents as agent_steps
 from scripts.tick.steps import observe
 from scripts.tick.steps.common import DROP_REFUSED
@@ -420,6 +423,107 @@ def test_the_reap_step_watches_an_admitted_agent_only_while_its_pane_is_live_and
     actions = agent_steps._reap_admitted(cast(Any, judging), agent)
 
     assert actions == (["watched a1"] if watched else [])
+
+
+ENDED_STOP = "sent the stop for {name} to its hive: its work ended"
+
+
+def finish(env: tuple[RedisStore, Any, Any], agent: AgentRecord, ending: str) -> None:
+    """Ends the work of ``agent`` the way the swarm records it: its own done or ready marks it finished, or its task
+    is done."""
+    store, ledger, _ = env
+    if ending == "finished":
+        store.put_agent(SLUG, replace(agent, state="finished"))
+    else:
+        ledger.rows["t1"]["done"] = True
+
+
+def reap_pass(env: tuple[RedisStore, Any, Any], now_ms: int) -> list[str]:
+    """The actions of one agents reap pass over the ledger's current rows at ``now_ms``."""
+    store, ledger, rt = env
+    return agent_steps._reap(SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, now_ms)
+
+
+@pytest.mark.feature("events-ended-agent-stopped")
+@pytest.mark.parametrize("live", [True, False])
+@pytest.mark.parametrize("ending", ["finished", "task done"])
+def test_an_admitted_agent_whose_work_ended_gets_the_stop_from_its_hive_in_one_reap_pass(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], ending: str, live: bool
+) -> None:
+    store, _, rt = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    finish(env, agent, ending)
+    if not live:
+        rt.live.discard(agent.name)
+
+    actions = reap_pass(env, NOW + 1)
+
+    assert actions == [ENDED_STOP.format(name=agent.name)]
+    sent = sent_stops(bus, agent)
+    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, "ended")]
+    assert agent.name not in rt.killed
+    assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
+
+
+@pytest.mark.feature("events-ended-agent-stopped")
+def test_a_reap_pass_inside_the_stop_dedupe_window_sends_no_second_stop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+) -> None:
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+    finish(env, agent, "finished")
+    assert reap_pass(env, NOW + 1) == [ENDED_STOP.format(name=agent.name)]
+
+    assert reap_pass(env, NOW + 2) == []
+
+    assert [stop.key for stop in sent_stops(bus, agent)] == [agent.execution_id]
+
+
+@pytest.mark.feature("events-ended-agent-stopped")
+def test_an_ended_admitted_agent_whose_stop_the_bus_refused_is_stopped_on_the_next_pass(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+    finish(env, agent, "finished")
+    working = execution_stop.stop
+    monkeypatch.setattr(execution_stop, "stop", refused_stop)
+
+    assert reap_pass(env, NOW + 1) == [f"could not send the stop for {agent.name}, retrying next tick: {REFUSED}"]
+
+    monkeypatch.setattr(execution_stop, "stop", working)
+    assert reap_pass(env, NOW + 2) == [ENDED_STOP.format(name=agent.name)]
+    assert [stop.key for stop in sent_stops(bus, agent)] == [agent.execution_id]
+
+
+@pytest.mark.feature("events-ended-agent-stopped")
+def test_a_finished_admitted_agent_leaves_its_seat_and_launch_slot_once_its_hive_honors_the_stop(
+    env: tuple[RedisStore, Any, Any], bus: Bus, seat: Callable[..., AgentRecord]
+) -> None:
+    store, ledger, _ = env
+    agent, _ = launched(env, bus, seat)
+    spoke_started(bus)
+    finish(env, agent, "finished")
+    hub_exits.serve(bus, lambda: store)
+    hive = Mock()
+    hive.find.return_value = hive.reap.return_value = Outcome("reap", Status.OK, "local", "pane")
+    released: list[str] = []
+    react = lifecycle.Lifecycle(bus, store, ledger, release=lambda _store, _slug, gone: released.append(gone.name))
+    exits = bus.for_swarm(SLUG).events.consumer("audit-exits", f"swarm.{SLUG}.execution.exited")
+
+    reap_pass(env, NOW + 1)
+    assert execution_stop.Stopper(bus, SLUG, agent.hive, hive).poll() == [execution_stop.STOPPED]
+    [reported] = [delivery.event for delivery in exits.fetch(10, 0)]
+    react.handle(reported)
+
+    hive.reap.assert_called_once_with(agent.name)
+    assert reported.data["stop_reason"] == "ended"
+    assert [seated.name for seated in store.agents(SLUG)] == []
+    assert released == [agent.name]
+    entry = bus.for_swarm(SLUG).state("spoke-work").get("claim")
+    assert entry is not None
+    assert json.loads(entry.value)["state"] == "exited"
 
 
 @pytest.mark.feature("events-retirement-stops-the-execution")
