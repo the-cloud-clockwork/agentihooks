@@ -1938,7 +1938,6 @@
   "tests/test_user_bundle_runtime.py": 5,
   "tests/test_worker_home.py": 1,
   "tests/test_worktree_skill.py": 4,
-  "tests/tick/test_step_failure.py": 5,
   "tests/workflows/test_exit_checks.py": 4,
   "tests/workflows/test_machine.py": 4
 }
