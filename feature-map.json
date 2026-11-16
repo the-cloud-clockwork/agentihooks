@@ -104,6 +104,20 @@
       ]
     },
     {
+      "id": "hub-shared-ledger-copy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-shared-ledger-copy",
+      "behaviour": "One hub process keeps one ledger copy for its events admission, readiness pass and preemption pass, read once per ledger revision however many threads ask for it, and the claim cap reads only the launch rows of the task it judges.",
+      "seam": "readiness.Source.state across threads, the hub runner main handing one Source to the slots admitter and to registry.configured, and the claim cap's store.launches read",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_threads_asking_for_one_new_revision_fetch_the_export_once",
+        "tests/swarm/test_readiness.py::test_one_swarms_fetch_never_waits_for_another_swarms_fetch",
+        "tests/hub/test_runner.py::test_one_hub_process_hands_one_ledger_copy_to_admission_readiness_and_preemption",
+        "tests/hub/test_preemption.py::test_a_handed_ledger_copy_preempts_with_the_store_the_pass_connects",
+        "tests/hub/test_admission_claim_cap.py::test_the_claim_cap_reads_only_the_launch_rows_of_its_task"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
@@ -6595,6 +6609,16 @@
         "tests/test_ci_test_plan.py::test_a_failed_record_download_names_the_github_error_and_runs_every_test",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_every_run_counts_as_no_record",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
+      ]
+    },
+    {
+      "id": "artifact-downloads-retry-a-stalled-blob",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-download-artifact-retry",
+      "behaviour": "Every artifact download in the workflows, composite actions and reviewed test summary steps uses actions/download-artifact@v8.0.2, which fetches a blob again when its stream stalls for thirty seconds, so a stalled download never passes with a partial file the way v4.3.0 did.",
+      "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
       ]
     },
     {

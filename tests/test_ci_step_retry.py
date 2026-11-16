@@ -47,7 +47,7 @@ def _fallback():
 
 def test_one_download_then_a_rest_fallback_only_when_it_fails_or_arrives_torn():
     primary, verify, mint, fallback, refetched = _action()["runs"]["steps"]
-    assert primary["uses"] == "actions/download-artifact@v4"
+    assert primary["uses"] == "actions/download-artifact@v8.0.2"
     assert primary["continue-on-error"] is True and "if" not in primary
     assert primary["with"] == {"name": "${{ inputs.name }}", "path": "${{ inputs.path || github.workspace }}"}
     assert verify["id"] == "verify"
