@@ -1554,3 +1554,29 @@ def test_collected_stats_are_capped_before_the_cache_is_saved(tmp_path, monkeypa
     collect_cached_stats(root, cache, {}, ["tests/test_module.py"], [], collect)
     assert list(cache.glob("*.index"))
     assert not list(cache.glob("*.json"))
+
+
+def test_merged_stats_presence_check_handles_missing_empty_and_nested_caches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    check = next(
+        step["run"]
+        for step in workflow["jobs"]["mutation-shard"]["steps"]
+        if step.get("name") == "Check for merged test stats"
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    for case in ("missing", "empty", "directories", "empty_file", "populated_file"):
+        root = tmp_path / case
+        root.mkdir()
+        if case != "missing":
+            cache = root / ".mutation-stats-cache" / "nested"
+            cache.mkdir(parents=True)
+            if case in {"empty_file", "populated_file"}:
+                (cache / "stats.json").write_text("{}" if case == "populated_file" else "")
+        output.write_text("")
+        subprocess.run(["bash", "-e", "-c", check], cwd=root, check=True, timeout=2)
+        assert output.read_text() == ("found=true\n" if case in {"empty_file", "populated_file"} else "")
