@@ -257,6 +257,28 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
         assert any("context pair" in error.lower() for error in errors)
 
 
+@pytest.mark.parametrize("plain", [False, True])
+def test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take(plain: bool) -> None:
+    from datetime import date
+    from pathlib import Path
+
+    from scripts import ci_runner_trust, ci_wiring, gate_protected
+
+    root = Path(__file__).resolve().parents[1]
+    policy = json.loads((root / ci_runner_trust.ACTORS).read_text())
+    workflows = ci_wiring.load(root)
+    config = json.loads((root / ci_wiring.CONFIG).read_text())
+    today = date(2026, 10, 25)
+    assert gate_protected.grade(workflows, config, copy.deepcopy(workflows), config, today, policy) == []
+    head = copy.deepcopy(workflows)
+    jobs = head["test.yml"]["jobs"]
+    if plain:
+        jobs["gate-required"]["name"] = "Gate — Required"
+        jobs["queue-fail-fast"]["name"] = "queue-fail-fast"
+    jobs["gate-required"]["needs"].append("new-required-check")
+    assert gate_protected.grade(workflows, config, head, config, today, policy)
+
+
 def test_api_waiting_shard_verification_remains_a_unit_dependent_for_lost_runner_recovery():
     from scripts import ci_lost_runner, ci_queue_retry
 
