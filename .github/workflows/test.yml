@@ -880,7 +880,7 @@ jobs:
 
       - &uv
         name: Set up uv
-        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
+        if: steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -894,7 +894,7 @@ jobs:
       # resolved to "command not found" while the packages were installed fine.
       - &install
         name: Install dependencies
-        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
+        if: steps.venv.outputs.cache-hit != 'true'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
@@ -2843,12 +2843,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           vectors="$GITHUB_WORKSPACE/.marker-kernel/tests/fixtures/marker-idempotency-vectors.json"
-          if grep -q -- '--root' "$RUNNER_TEMP/grader/scripts/ci_marker_vectors.py"; then
-            cd "$RUNNER_TEMP/grader"
-            python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
-          else
-            python -m scripts.ci_marker_vectors "$vectors"
-          fi
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
 
       # Each control grades even after an earlier one is red, so one run reports every red control.
       - name: Lint check
@@ -3164,9 +3160,10 @@ jobs:
         id: self-plant
         run: |
           changed=false
+          base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)"
           for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
             pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
-            if [[ -e "$RUNNER_TEMP/base/$path" || -e "$path" ]] && ! diff -rq "$RUNNER_TEMP/base/$path" "$path" >/dev/null 2>&1; then
+            if ! git diff --quiet "$base" HEAD -- "$path"; then
               echo "Changed: $path"
               changed=true
             fi

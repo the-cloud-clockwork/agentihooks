@@ -77,7 +77,8 @@ def test_merge_target_requires_the_recorded_task_and_checks_shared_links():
         done_gate.require_target(state, "sw", "t1", URL, rows)
 
 
-def test_merge_target_accepts_a_recorded_prerequisite_and_refuses_other_pulls():
+@pytest.mark.feature("merge-queue-task-pulls")
+def test_merge_target_accepts_every_declared_pull_and_refuses_other_pulls() -> None:
     from scripts.swarm import fencing
     from scripts.swarm.store import SwarmError
     from tests.swarm.test_merge_queue import swarm_of
@@ -86,15 +87,62 @@ def test_merge_target_accepts_a_recorded_prerequisite_and_refuses_other_pulls():
     first, staged, other = (f"https://github.com/o/r/pull/{n}" for n in (7, 8, 6))
     scopes = {first: {"kind": "prerequisite", "scope": "tests first"}, staged: {"kind": "stage", "scope": "one"}}
     rows = [{"id": "t1", "pr_url": URL, "pull_scopes": scopes}]
-    assert done_gate.require_target(state, "sw", "t1", first, rows) is None
-    assert done_gate.require_target(state, "sw", "t1", URL, rows) is None
-    for url in (staged, other):
-        with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
-            done_gate.require_target(state, "sw", "t1", url, rows)
+    for url in (first, staged, URL):
+        assert done_gate.require_target(state, "sw", "t1", url, rows) is None
+    with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
+        done_gate.require_target(state, "sw", "t1", other, rows)
     rows.append({"id": "t2", "pr_url": other, "pull_scopes": {first: {"kind": "prerequisite", "scope": "shared"}}})
     fencing.write(state, "sw", lambda doc: doc["claims"].update({"t2": {}}))
     with pytest.raises(SwarmError, match="controller outcome"):
         done_gate.require_target(state, "sw", "t1", first, rows)
+
+
+@pytest.mark.feature("merge-queue-task-pulls")
+@pytest.mark.parametrize(
+    "branch, admitted",
+    [
+        ("engineer-a1b2c3-0001", True),
+        ("engineer-a1b2c3-0001-3", True),
+        ("engineer-a1b2c3-0001-tmp-1", False),
+        ("engineer-a1b2c3-00012", False),
+        ("engineer-a1b2c3-0002", False),
+    ],
+)
+def test_merge_target_admits_an_unnamed_pull_only_on_a_claimant_worktree_branch(
+    monkeypatch: pytest.MonkeyPatch, branch: str, admitted: bool
+) -> None:
+    from scripts.swarm import pull_head
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_merge_queue import swarm_of
+
+    opened = "https://github.com/o/r/pull/12"
+    reads: list[str] = []
+    monkeypatch.setattr(
+        pull_head, "pull_branch", lambda url: reads.append(url) or pull_head.PullHead(branch, "", 12, "")
+    )
+    rows = [{"id": "t1", "pr_url": URL}]
+    if admitted:
+        assert done_gate.require_target(swarm_of("eng"), "sw", "t1", opened, rows, "engineer@a1b2c3-0001") is None
+    else:
+        with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
+            done_gate.require_target(swarm_of("eng"), "sw", "t1", opened, rows, "engineer@a1b2c3-0001")
+    assert reads == [opened]
+
+
+@pytest.mark.feature("merge-queue-task-pulls")
+def test_merge_target_reads_no_branch_for_another_tasks_pull_or_without_a_claimant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import pull_head
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_merge_queue import swarm_of
+
+    theirs, unnamed = (f"https://github.com/o/r/pull/{n}" for n in (13, 14))
+    monkeypatch.setattr(pull_head, "pull_branch", lambda url: pytest.fail(f"read the branch of {url}"))
+    rows = [{"id": "t1", "pr_url": URL}, {"id": "t2", "pr_url": theirs}]
+    for url, claimant in ((theirs, "engineer@a1b2c3-0001"), (unnamed, "")):
+        with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
+            done_gate.require_target(swarm_of("eng"), "sw", "t1", url, rows, claimant)
 
 
 def test_a_task_without_a_kind_is_gated_as_code():

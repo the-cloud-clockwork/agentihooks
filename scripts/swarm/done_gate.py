@@ -9,7 +9,7 @@ from collections.abc import Callable
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm.naming import lane_of
+from scripts.swarm.naming import is_worktree, lane_of
 from scripts.swarm_ledger import ledger_kinds
 
 GATED = ("code", "ci")
@@ -77,20 +77,25 @@ def require_local(store: object, slug: str, task_id: str) -> None:
         raise SwarmError("distributed final mutations require the controller outcome path")
 
 
-def require_target(store: object, slug: str, task_id: str, url: str, tasks: list[dict]) -> None:
+def require_target(store: object, slug: str, task_id: str, url: str, tasks: list[dict], claimant: str = "") -> None:
+    """Refuse a final integration of a pull request the task names nowhere and its claimant did not open, one another
+    task names, and one a distributed task names; GitHub is read only for a pull request no task names."""
     from scripts.swarm.store import SwarmError
+    from scripts.swarm_ledger.api.task_list import pull_links
 
-    own = next((task for task in tasks if task["id"] == task_id), {})
-    if url not in _targets(own):
+    named = [task for task in tasks if url in pull_links(task)]
+    if not any(task["id"] == task_id for task in named) and (named or not _opened(url, claimant)):
         raise SwarmError("final integration must target this task's recorded pull request")
-    for task in tasks:
-        if url in _targets(task):
-            require_local(store, slug, task["id"])
+    for task in named:
+        require_local(store, slug, task["id"])
 
 
-def _targets(task):
-    scopes = task.get("pull_scopes") or {}
-    return [*_pulls(task), *(url for url, scope in scopes.items() if scope.get("kind") == "prerequisite")]
+def _opened(url: str, claimant: str) -> bool:
+    """Whether the pull request's head is one of the branches the worktree script names for the claimant."""
+    from scripts.swarm import pull_head
+
+    environ = {"AGENTIHOOKS_AGENT_NAME": claimant}
+    return bool(claimant) and is_worktree(pull_head.pull_branch(url).branch, environ)
 
 
 def recheck_pass(store: Any, slug: str, doc: dict, ledger: Any, now_ms: int, github: Callable[[str], Any]) -> list[str]:
