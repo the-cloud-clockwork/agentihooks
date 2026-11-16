@@ -86,6 +86,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-slot-serve-concurrent",
       "behaviour": "A hub pod answers every account slot request on its own task, so a hive heartbeat that reaches a pod while a slow lane admission holds its handler is answered at once instead of waiting behind the admission past the hive's ten second request timeout.",
       "seam": "NatsBus.serve for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": ["nats-serve-awaits-handler"],
       "tests": [
         "tests/events/test_scoped_nats.py::test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub"
       ]

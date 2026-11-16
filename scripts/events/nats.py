@@ -662,10 +662,19 @@ class NatsBus:
             return store
 
     def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
+        """Answer each request on its own executor thread, because nats-py awaits the callbacks of one subscription
+        one at a time and an awaited handler would hold every later request on the subject behind a slow one."""
+
+        def answer(msg: Msg) -> None:
+            try:
+                reply = handler(msg.subject, msg.data)
+                nats_payload.validate(self._nc, msg.reply, reply)
+                self._loop.run(msg.respond(reply))
+            except Exception as error:
+                self._loop.run(_unreported(error))
+
         async def respond(msg: Msg) -> None:
-            answer = await asyncio.get_running_loop().run_in_executor(None, handler, msg.subject, msg.data)
-            nats_payload.validate(self._nc, msg.reply, answer)
-            await msg.respond(answer)
+            asyncio.get_running_loop().run_in_executor(None, answer, msg)
 
         self._loop.run(self._nc.subscribe(subject, queue=queue, cb=respond))
         self._loop.run(self._nc.flush())
