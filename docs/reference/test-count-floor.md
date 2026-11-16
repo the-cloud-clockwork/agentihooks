@@ -176,9 +176,9 @@ A cache miss preserves normal grading. Token creation is a separate workflow ste
 
 ## Admitted lost tests
 
-Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts; there is no list of exempt tests.
+Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts, except the [signed retirements](#signed-retirements) a pull request adds.
 
-A test id in the base and not in the head is admitted when it referenced code the head deletes: a top level name, a keyword branch, or executable steps in a JSON fixture.
+A test id in the base and not in the head is admitted when it referenced code the head deletes (a top level name, a keyword branch, or executable steps in a JSON fixture or workflow), when its parametrized id names a file the head deletes, or when the pull request retires it under a Standards reader's signature.
 
 ### Deleted definitions and constants
 
@@ -208,9 +208,49 @@ def test_retry_limit_is_three():
 
 ### Executable fixtures and module entry points
 
-A lost test may reference a JSON fixture through `Path.read_text()` or `Path.read_bytes()`, directly or through a called local helper. The path must resolve statically from imported `pathlib.Path`, `__file__`, module level assignments, parent access and literal path joins. The resolved file must stay inside the base checkout and contain nonempty shell `run` strings in a `steps` list. Ordinary data, unresolved paths and paths escaping through `..` or symlinks establish no admission. The fixture must disappear at its old path and none of its executable step strings may survive in another JSON file in the head.
+A lost test may reference a JSON fixture through `Path.read_text()` or `Path.read_bytes()`, directly or through a called local helper. The path must resolve statically from imported `pathlib.Path`, `__file__`, module level assignments, names the test or helper binds exactly once by a plain assignment, parent access and literal path joins. A local name bound twice, bound by a loop, `with`, import or `except`, or passed as a parameter does not resolve. The resolved file must stay inside the base checkout and contain nonempty shell `run` strings in a `steps` list. Ordinary data, unresolved paths and paths escaping through `..` or symlinks establish no admission. The fixture must disappear at its old path and none of its executable step strings may survive in another JSON file in the head.
 
 An explicit `runpy.run_module("pkg.mod", run_name="__main__")` resolves calls inside that module's `if __name__ == "__main__"` guard. A called function must satisfy the same deletion rules as a direct import. A dynamic module target, an ordinary module import, or a surviving entry point admits nothing.
+
+### Parametrized ids that name a deleted file
+
+A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `mutation-preflight.yml-stats` names `mutation-preflight.yml` and `premutation-preflight.yml` does not. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved or renamed file keeps its cases counted.
+
+```text
+tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[mutation-preflight.yml-stats] is admitted: its id names .github/workflows/mutation-preflight.yml, which the head deletes
+```
+
+### Signed retirements
+
+A lost test of behaviour the pull request removes from a module that survives has no deleted subject to point at. The pull request lists it instead, one JSON file per test under `test-retirements/`, named by the SHA-256 of its node id, in the layout mutation clearances use:
+
+```json
+{
+  "tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory": {
+    "reader": "Standards reader",
+    "reason": "The head removes the branch preflight kill memory seed this test held."
+  }
+}
+```
+
+Write them with the floor itself, which refuses a ruling without a Standards reader or a reason:
+
+```bash
+python -m tests.count_floor --retire "<node id>" ... --reader "Standards reader" --reason "<why the behaviour is gone>"
+```
+
+An entry admits its lost test only when all of these hold:
+
+1. Its file name matches its node id and holds that one entry.
+2. The reader names a Standards reader and the reason is not blank.
+3. The base has no file of that name, so the pull request itself retires the test.
+
+Any other file under `test-retirements/` is named in the log and admits nothing. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review.
+
+```text
+test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
+tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory is admitted: the pull request retires it, signed by Standards reader
+```
 
 ### Deleted keyword branches
 

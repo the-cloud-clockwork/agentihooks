@@ -464,11 +464,20 @@ def _deleted_fixtures(base: Path, head: Path, referenced: set[tuple[str, str]]) 
 
 
 def _fixture_subject(
-    tree: Path, source: Path, module: ast.Module, call: ast.Call, shadowed: set[str]
+    tree: Path,
+    source: Path,
+    module: ast.Module,
+    call: ast.Call,
+    shadowed: set[str],
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> set[tuple[str, str]]:
     if not isinstance(call.func, ast.Attribute) or call.func.attr not in {"read_text", "read_bytes"}:
         return set()
-    if any(isinstance(node, ast.Name) and node.id in shadowed for node in ast.walk(call.func.value)):
+    local = _single_bindings(function)
+    if any(
+        isinstance(node, ast.Name) and node.id in shadowed and node.id not in local
+        for node in ast.walk(call.func.value)
+    ):
         return set()
     names, _ = _imports(module)
     constructors = {name for name, subjects in names.items() if ("pathlib", "Path") in subjects}
@@ -479,13 +488,37 @@ def _fixture_subject(
         and len(statement.targets) == 1
         and isinstance(statement.targets[0], ast.Name)
     }
-    path = _resource_path(call.func.value, bindings, source, constructors)
+    path = _resource_path(call.func.value, {**bindings, **local}, source, constructors)
     if not isinstance(path, Path):
         return set()
     path, root = path.resolve(), tree.resolve()
     if path.is_relative_to(root) and _executable_code(path):
         return {("@fixture", path.relative_to(root).as_posix())}
     return set()
+
+
+def _single_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, ast.expr]:
+    """Return each name the function binds exactly once, by a plain assignment, mapped to its assigned value."""
+    stores: dict[str, int] = {}
+    others = {node.arg for node in ast.walk(function.args) if isinstance(node, ast.arg)}
+    for node in _body_nodes(function):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+        elif isinstance(node, (*_DEFINITIONS, ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            others.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            others.add(node.rest)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            others.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+    return {
+        node.targets[0].id: node.value
+        for node in _body_nodes(function)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and stores[node.targets[0].id] == 1
+        and node.targets[0].id not in others
+    }
 
 
 def _entrypoint_subjects(
@@ -594,7 +627,7 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
         for child in _body_nodes(function):
             subjects.update(_resolve(child, local_names, local_modules))
             if isinstance(child, ast.Call):
-                subjects.update(_fixture_subject(tree, tree / path, module, child, shadowed))
+                subjects.update(_fixture_subject(tree, tree / path, module, child, shadowed, function))
                 subjects.update(_entrypoint_subjects(tree, child, local_names, local_modules))
                 if (
                     isinstance(child.func, ast.Name)
@@ -653,6 +686,8 @@ def _admitted(
     emptied: set[str],
     deleted: set[tuple[str, str]],
     opaque: list[Path],
+    named: dict[str, set[str]],
+    retired: dict[str, str],
 ) -> tuple[list[str], str] | None:
     file = nodeid.split("::", 1)[0]
     if file in emptied:
@@ -661,7 +696,142 @@ def _admitted(
     removed_fixtures = set() if opaque else _deleted_fixtures(args.base, args.head, referenced)
     if subjects := sorted(".".join(subject) for subject in referenced & (deleted | removed_fixtures)):
         return subjects, f"the head deletes {', '.join(subjects)}, which it referenced"
+    if files := _case_files(nodeid, named):
+        return files, f"its id names {', '.join(files)}, which the head deletes"
+    if reader := retired.get(nodeid):
+        return [nodeid], f"the pull request retires it, signed by {reader}"
     return None
+
+
+_RETIREMENTS = "test-retirements"
+_SKIPPED = {".git", "__pycache__"}
+
+
+def _tree_files(tree: Path) -> Iterator[Path]:
+    """Yield every regular file of the tree outside git metadata and bytecode caches."""
+    for root, dirs, files in os.walk(tree):
+        dirs[:] = [name for name in dirs if name not in _SKIPPED]
+        for name in files:
+            path = Path(root) / name
+            if name not in _SKIPPED and not path.is_symlink():
+                yield path
+
+
+def _deleted_files(base: Path, head: Path) -> dict[str, set[str]]:
+    """Map the path, and the file name no head file shares, of each base file the head carries nowhere to that file."""
+    sizes: dict[int, list[Path]] = {}
+    for path in _tree_files(head):
+        sizes.setdefault(path.stat().st_size, []).append(path)
+    names = {path.name for paths in sizes.values() for path in paths}
+    tokens: dict[str, set[str]] = {}
+    for path in _tree_files(base):
+        relative = path.relative_to(base).as_posix()
+        if (head / relative).exists():
+            continue
+        data = path.read_bytes()
+        if any(other.read_bytes() == data for other in sizes.get(len(data), [])):
+            continue
+        for token in {relative} | ({path.name} - names):
+            tokens.setdefault(token, set()).add(relative)
+    return tokens
+
+
+def _word_character(character: str) -> bool:
+    """Tell whether a character continues a file name or path rather than separating id parts."""
+    return bool(character) and (character.isalnum() or character in "_.")
+
+
+def _bounded(text: str, token: str) -> bool:
+    """Tell whether the token occurs in the text with no file name character on either side."""
+    start = text.find(token)
+    while start >= 0:
+        end = start + len(token)
+        if not _word_character(text[start - 1 : start]) and not _word_character(text[end : end + 1]):
+            return True
+        start = text.find(token, start + 1)
+    return False
+
+
+def _case_files(nodeid: str, named: dict[str, set[str]]) -> list[str]:
+    """Return the deleted files a lost parametrized case's id names."""
+    case = nodeid.partition("[")[2].removesuffix("]")
+    return sorted({path for token, paths in named.items() if case and _bounded(case, token) for path in paths})
+
+
+def retirement_path(root: Path, nodeid: str) -> Path:
+    """Return the retirement file of a node id under the tree root."""
+    return root / _RETIREMENTS / f"{hashlib.sha256(nodeid.encode()).hexdigest()}.json"
+
+
+def _signed(ruling: object) -> bool:
+    """Tell whether a retirement ruling names a Standards reader and gives a reason."""
+    return (
+        isinstance(ruling, dict)
+        and all(isinstance(ruling.get(field), str) and ruling[field].strip() for field in ("reader", "reason"))
+        and "standards" in ruling["reader"].lower()
+    )
+
+
+def retirements(base: Path, head: Path) -> dict[str, str]:
+    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to that reader."""
+    retired = {}
+    for path in sorted((head / _RETIREMENTS).glob("*.json")):
+        try:
+            record = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            record = None
+        entry = next(iter(record.items())) if isinstance(record, dict) and len(record) == 1 else None
+        if (
+            entry is None
+            or path.name != retirement_path(head, entry[0]).name
+            or not _signed(entry[1])
+            or (base / _RETIREMENTS / path.name).exists()
+        ):
+            print(
+                f"{_RETIREMENTS}/{path.name} is not a new retirement signed by a Standards reader, so it admits nothing"
+            )
+            continue
+        retired[entry[0]] = entry[1]["reader"]
+    return retired
+
+
+def write_retirements(head: Path, nodeids: list[str], reader: str, reason: str) -> int:
+    """Write one signed retirement per node id under the head, or refuse a ruling no Standards reader signed."""
+    ruling = {"reader": reader, "reason": reason}
+    if not _signed(ruling):
+        print("::error::A retirement needs a reader naming a Standards reader and a reason.")
+        return 1
+    for nodeid in nodeids:
+        target = retirement_path(head, nodeid)
+        target.parent.mkdir(exist_ok=True)
+        target.write_text(json.dumps({nodeid: ruling}, indent=2) + "\n")
+        print(target.relative_to(head).as_posix())
+    return 0
+
+
+def _admissions(args: argparse.Namespace, lost: list[str]) -> dict[str, list[str]]:
+    """Return each lost test an admission rule explains, mapped to the subjects that explain it."""
+    surviving, opaque = bound_names(args.head)
+    for path in opaque:
+        print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
+    definitions = set() if opaque else top_level_definitions(args.base, args.tests)
+    previous, _ = bound_names(args.base)
+    introduced = {name for _, name, _ in surviving - previous}
+    identities = {(module, name) for module, name, _ in surviving}
+    deleted = {
+        definition for definition in definitions if definition not in identities and definition[1] not in introduced
+    }
+    deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
+    emptied = set() if opaque else _emptied_test_files(args.base, args.head, args.tests)
+    named = _deleted_files(args.base, args.head)
+    retired = retirements(args.base, args.head)
+    admitted = {}
+    for nodeid in lost:
+        if admission := _admitted(nodeid, args, emptied, deleted, opaque, named, retired):
+            subjects, reason = admission
+            admitted[nodeid] = subjects
+            print(f"{nodeid} is admitted: {reason}")
+    return admitted
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -669,10 +839,15 @@ def main(argv: list[str] | None = None) -> int:
     side = parser.add_mutually_exclusive_group(required=True)
     side.add_argument("--base", type=Path, help="checkout of the base revision")
     side.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
+    side.add_argument("--retire", nargs="+", metavar="NODEID", help="write a signed retirement for each lost test")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
     parser.add_argument("--collected", type=Path, help="with --record, the head collection the floor already exported")
+    parser.add_argument("--reader", default="", help="with --retire, the Standards reader who signs the ruling")
+    parser.add_argument("--reason", default="", help="with --retire, why the removed behaviour needs no test")
     args = parser.parse_args(argv)
+    if args.retire:
+        return write_retirements(args.head, args.retire, args.reader, args.reason)
     if args.record:
         return write_record(args.head, args.tests, args.record, args.collected)
     collected = collect_sides(args.base, args.head, args.tests)
@@ -685,25 +860,7 @@ def main(argv: list[str] | None = None) -> int:
     if output := os.environ.get("TEST_COUNT_HEAD_COLLECTION"):
         Path(output).write_text(json.dumps(head))
     lost = sorted(set(base) - set(head))
-    admitted = {}
-    if len(head) < len(base):
-        surviving, opaque = bound_names(args.head)
-        for path in opaque:
-            print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
-        definitions = set() if opaque else top_level_definitions(args.base, args.tests)
-        previous, _ = bound_names(args.base)
-        introduced = {name for _, name, _ in surviving - previous}
-        identities = {(module, name) for module, name, _ in surviving}
-        deleted = {
-            definition for definition in definitions if definition not in identities and definition[1] not in introduced
-        }
-        deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
-        emptied = set() if opaque else _emptied_test_files(args.base, args.head, args.tests)
-        for nodeid in lost:
-            if admission := _admitted(nodeid, args, emptied, deleted, opaque):
-                subjects, reason = admission
-                admitted[nodeid] = subjects
-                print(f"{nodeid} is admitted: {reason}")
+    admitted = _admissions(args, lost) if len(head) < len(base) else {}
     floor = len(base) - len(admitted)
     print(f"head collects {len(head)} tests, base floor {floor}")
     if len(head) < floor:
