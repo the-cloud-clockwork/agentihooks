@@ -42,12 +42,14 @@ def _held(inbox, item_id):
     return inbox, inbox.find(item_id, "automated-gc")
 
 
-def _answer(inbox, agent, record, now_ms):
+def _answer(inbox: inbox_store.InboxStore, agent: "AgentRecord", record: dict[str, Any], now_ms: int) -> bool:
     _, request = _held(inbox, record["request"])
     if request is None:
         record["request"] = ""
         return False
     if not request.reason.startswith(REPLY_PREFIX):
+        if request.state in inbox_store.CLOSED:
+            record["request"] = ""
         return False
     world, answer = _held(inbox, request.reason.removeprefix(REPLY_PREFIX))
     if answer is None:
