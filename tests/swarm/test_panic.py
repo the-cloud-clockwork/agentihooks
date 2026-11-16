@@ -539,8 +539,15 @@ def _api_run(run_id: int, title: str, event: str = "workflow_run") -> dict[str, 
 def test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _branches(monkeypatch, {FIX: "fix-branch"})
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
     here, there = "the-cloud-clockwork/agentihooks", "the-cloud-clockwork/antoncore"
+
+    def change(url: str, refused: str) -> ChangeState:
+        return ChangeState(ChangeRef(here, 1), "open", "a" * 40, "dev", False, url, "fix-branch")
+
+    monkeypatch.setattr(stack, "change", change)
     _github_runs(
         monkeypatch,
         {
@@ -550,9 +557,12 @@ def test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered(
                 _api_run(3, "Gate Required status for feature"),
                 _api_run(4, "Gate Required status"),
                 _api_run(5, "Gate Required status for fix-branch-2"),
-                _api_run(6, "Spare the sweep for fix-branch", event="push"),
+                _api_run(6, "Cancel the push run for fix-branch", event="push"),
             ],
-            there: [_api_run(7, "Gate Required status for hotfix")],
+            there: [
+                _api_run(7, "Gate Required status for hotfix"),
+                _api_run(8, "Gate Required status for fix-branch"),
+            ],
         },
     )
     fixes = [FIX, f"https://github.com/{here}/tree/hotfix"]
@@ -562,6 +572,7 @@ def test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered(
         f"{here} run 5 on main",
         f"{here} run 6 on main",
         f"{there} run 7 on main",
+        f"{there} run 8 on main",
     ]
 
 
@@ -575,9 +586,9 @@ def test_the_gate_required_run_name_names_the_branch_the_sweep_keeps(
     name = workflow.get("run-name")
     assert name == f"Gate Required status for {branch}"
     titles = [name.replace(branch, fix) for fix in ("fix-branch", "feature")]
-    _github_runs(monkeypatch, {"o/a": [_api_run(number, title) for number, title in enumerate(titles, 1)]})
-    assert panic.cancel_runs([FIX], ["o/a"], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
-        "o/a run 2 on main"
+    _github_runs(monkeypatch, {"o/r": [_api_run(number, title) for number, title in enumerate(titles, 1)]})
+    assert panic.cancel_runs([FIX], ["o/r"], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
+        "o/r run 2 on main"
     ]
 
 
