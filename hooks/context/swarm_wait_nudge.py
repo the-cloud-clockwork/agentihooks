@@ -95,8 +95,8 @@ def check_github_watch(payload: dict) -> None:
     if lane_of(name) in WORKERS and any(_github_watch(tokens) for tokens in found):
         raise BlockAction(
             "Independent GitHub watches spend the shared GitHub hourly quota. "
-            f"Use agentihooks swarm {slug} wait --on checks <pr url>, "
-            "or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally."
+            f"Use agentihooks swarm {slug} wait --on checks <pr url> or <run url>. "
+            "The swarm tick resolves these waits centrally."
         )
     if any(_full_run_view(tokens) for tokens in found):
         raise BlockAction(

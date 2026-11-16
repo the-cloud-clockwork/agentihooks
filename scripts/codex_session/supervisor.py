@@ -194,9 +194,15 @@ def adopt(store: RedisStore, launch: Launch, chosen: str, hive: str) -> AgentRec
     if (
         current is None
         or current.execution_id != agent.execution_id
-        or (agent.state, agent.harness, agent.transport, agent.hive) != ("launching", "codex", chosen, hive)
+        or (agent.state, agent.harness, agent.transport, agent.hive)
+        not in (("launching", "codex", chosen, hive), ("starting", "", "", hive))
     ):
         raise LaunchFailure("execution", NOT_ADMITTED.format(launch.execution_id))
+    if agent.state == "starting":
+        bound = {"harness": "codex", "transport": chosen}
+        if not store.execution_registry.set_launch(launch.slug, agent.execution_id, bound, only_from="starting"):
+            raise LaunchFailure("execution", NOT_ADMITTED.format(launch.execution_id))
+        agent = replace(agent, **bound)
     return replace(agent, model=launch.agent.model, effort=launch.agent.effort)
 
 

@@ -74,7 +74,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
     }
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
@@ -140,7 +140,7 @@ def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(
     assert restore["uses"] == "actions/cache/restore@v4"
     assert restore["with"]["path"] == "~/dev-durations"
     assert restore["with"]["key"] == "durations-merged-${{ github.event.pull_request.base.sha }}"
-    assert restore["if"].startswith("github.event_name == 'pull_request' && ")
+    assert restore["if"].split(" && ")[0] == "github.event_name == 'pull_request'"
     assert restore["with"]["restore-keys"] == "durations-merged-"
     assert "from tests.dev_durations import adopt" in adopt["run"]
     assert 'Path(".test_durations").write_text' in adopt["run"]

@@ -8,16 +8,7 @@ nav_order: 13
 
 The Mutation workflow runs beside Tests for pull requests into dev. It discovers changed Python files in `hooks` and `scripts` from the pull request merge base. Each file runs in an isolated copy with pinned mutmut 3.6.0. Pytest runs serially; matching, importing and recorded covering tests provide mutmut's function coverage stats and per mutant test selection.
 
-Run a focused mutation proof in CI from a pushed branch:
-
-```bash
-gh workflow run proofs.yml \
-  --ref YOUR_BRANCH \
-  -f proof=mutation \
-  -f base=origin/dev
-```
-
-For a stacked branch, set `base` to its dependency branch. Open the draft pull request at the first push; never wait for Mutation preflight before opening it. A branch push with no open pull request still runs the preflight. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+Open the draft pull request into `dev` at the first push; for a stacked branch, open it into its dependency branch. The branch mutation preflight is removed: a branch push runs no mutation, and the pull request Tests run is the only mutation source. Sections below that describe the preflight are history until the preflight documentation pass rewrites them. Tests and mutation runs execute in CI only.
 
 ## Required gate proof
 
@@ -2011,8 +2002,6 @@ Open the run page to read the job summary, or download the evidence. Every artif
 |---|---|---|
 | Tests, on a pull request | `mutation-stats` part | `mutation-evidence-stats-<part>` |
 | Tests, on a pull request | `mutation` shard, or the inline step of a single shard `mutation-stats` job | `mutation-report-<shard>` |
-| Mutation preflight, on a branch push | statistics part | `mutation-evidence-stats-<part>` |
-| Mutation preflight, on a branch push | `mutation-shard` | `mutation-preflight-shard-<shard>` |
 
 For example, for a failed statistics part:
 

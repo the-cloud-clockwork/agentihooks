@@ -302,7 +302,13 @@ def test_a_reusing_leg_sets_up_the_python_its_coverage_steps_run() -> None:
 
     jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     steps = {step.get("name"): step for step in jobs["unit"]["steps"]}
-    setup = ["Set up Python ${{ matrix.python-version }}", "Stamp the day", "Restore the test environment"]
+    setup = [
+        "Set up Python ${{ matrix.python-version }}",
+        "Stamp the day",
+        "Restore the test environment",
+        "Set up uv",
+        "Install dependencies",
+    ]
     for name in [*setup, "Use the test environment", "Check the coverage database", "Summarize the executed lines"]:
         assert "UNIT_SOURCE" not in steps[name].get("if", "")
         assert "outputs.source" not in steps[name].get("if", "")

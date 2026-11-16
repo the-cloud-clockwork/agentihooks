@@ -113,6 +113,31 @@ produce the alert at the second pass. Faster or slower sampling still affects
 when those two observations exist. Prompt backlog counts changes in prompt
 values, rather than controller passes, and is unchanged.
 
+## Lab behind claim hold
+
+The tick reads the CI lab's capacity into the swarm's lab block every pass. While
+that reading is at most ten minutes old and predicts more than
+`AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20) whole minutes of pull request
+grading wait, neither the tick nor the events readiness hub claims an eng task
+outside the fix phase. Running agents keep their tasks and finish them; only
+new claims wait. Ci, plan and fix phase tasks are never held.
+
+| Surface | What it shows |
+|---|---|
+| Urgent hold | An urgent eng task the lab holds records "the lab is N minutes behind on pull request grading" instead of reading as claimable but unclaimed |
+| Standing finding | `bottleneck-stage/lab_wait` at N minutes behind on pull request grading, over the threshold, with "eng claims are held" in its evidence; it clears on the first detector pass under the threshold |
+| Stage report | Claim wait of a held task during a behind sample is `lab_wait` rather than seat or queue wait; the detector raises its own `lab_wait` finding past 1.0 task hours |
+| Remedy | The bottleneck hunter proposes one ci task titled Lab capacity, or raises an open one to urgent |
+
+An older, failed or missing reading never holds a claim, and a lab whose
+reading predicts no wait, such as one with no free slot, does not hold either.
+Set the threshold on the controller, the events hub and the status command
+alike; raising it to silence the finding hides a lab that cannot keep up.
+
+```bash
+AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES=30 agentihooks swarm example-swarm status --json
+```
+
 ## Troubleshooting and evidence
 
 | Symptom | Check and action |

@@ -1,0 +1,252 @@
+import json
+import subprocess
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.swarm import cli, idle, run_wait, waits
+from scripts.swarm.ledger_events import head as pull_head
+from scripts.swarm.ledger_events import view as pull_view
+from tests.helpers.seat import SLUG, seat_agent
+from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_waits import ME
+
+pytestmark = pytest.mark.unit
+URL = "https://github.com/org/repo/actions/runs/123"
+RUN = "repos/org/repo/actions/runs/123"
+PR = "https://github.com/org/repo/pull/7"
+PULL = "repos/org/repo/pulls/7"
+LIMITED = b"gh: API rate limit exceeded for user ID 31187725. (HTTP 403)"
+NOW = 1_792_561_000.0
+RESET = 1_792_561_590
+
+
+@pytest.fixture
+def github(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    state = SimpleNamespace(
+        now=NOW,
+        limited=True,
+        core={"remaining": 0, "reset": RESET},
+        run={"status": "in_progress", "conclusion": None},
+        jobs_limited=False,
+        asked=[],
+        home=tmp_path,
+    )
+    monkeypatch.setattr(run_wait, "_now", lambda: state.now)
+
+    def api(args, **kwargs):
+        assert args[:2] == ["gh", "api"]
+        port = args[2] != PULL
+        assert kwargs.pop("text", False) == (args[2] in ("graphql", PULL, "rate_limit"))
+        check = kwargs.pop("check", False)
+        assert check == (args[2] in ("graphql", "rate_limit"))
+        assert kwargs.pop("cwd", None) == (Path.cwd() if port else None)
+        assert 0 < kwargs.pop("timeout") <= 20
+        assert kwargs == {"capture_output": True}
+        endpoint = args[2]
+        state.asked.append(endpoint)
+        if endpoint == "rate_limit":
+            body = {"resources": {"core": {"used": 5000 - state.core["remaining"], **state.core}}}
+            return completed(args, 0, json.dumps(body), "")
+        if (state.limited or (state.jobs_limited and "/jobs?" in endpoint)) and check:
+            raise subprocess.CalledProcessError(1, args, "", LIMITED.decode())
+        if state.limited or (state.jobs_limited and "/jobs?" in endpoint):
+            return completed(args, 1, "", LIMITED.decode())
+        if "/jobs?" in endpoint:
+            body = {"jobs": [{"name": "unit (3)", "conclusion": "failure"}]}
+        elif endpoint == PULL:
+            body = {"head": {"sha": "first"}}
+        else:
+            body = state.run
+        return completed(args, 0, json.dumps(body), "")
+
+    def completed(args, code, out, err):
+        if args[2] in ("graphql", PULL):
+            return subprocess.CompletedProcess(args, code, out, err)
+        return subprocess.CompletedProcess(args, code, out.encode(), err.encode())
+
+    monkeypatch.setattr(subprocess, "run", api)
+    return state
+
+
+def test_an_unreadable_quota_endpoint_backs_off_one_minute(github, monkeypatch):
+    real = subprocess.run
+
+    def api(args, **kwargs):
+        if args[2] == "rate_limit":
+            github.asked.append("rate_limit")
+            return subprocess.CompletedProcess(args, 1, b"", b"HTTP 502")
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    assert run_wait.run_resolution(URL) == ""
+    assert run_wait._held_until() == NOW + 60
+
+
+def test_reads_back_off_until_the_core_quota_reset(github):
+    assert run_wait.run_resolution(URL) == ""
+    assert github.asked == [RUN, "rate_limit"]
+    github.limited = False
+    github.now = RESET - 1
+    assert run_wait.run_resolution(URL) == ""
+    assert github.asked == [RUN, "rate_limit"]
+    github.now = RESET + 1
+    github.run.update(status="completed", conclusion="success")
+    assert run_wait.run_resolution(URL) == f"checks on {URL}, now green"
+    assert github.asked[2:] == [RUN]
+
+
+def test_a_secondary_limit_backs_off_one_minute_while_core_reports_quota(github):
+    github.core = {"remaining": 4000, "reset": RESET}
+    assert run_wait.run_resolution(URL) == ""
+    github.limited = False
+    github.now = NOW + 59
+    assert run_wait.run_resolution(URL) == ""
+    assert github.asked == [RUN, "rate_limit"]
+    github.now = NOW + 61
+    assert run_wait.run_resolution(URL) == ""
+    assert github.asked == [RUN, "rate_limit", RUN]
+
+
+def test_a_secondary_limit_never_shortens_a_longer_core_backoff(github):
+    run_wait.run_resolution(URL)
+    github.core = {"remaining": 4000, "reset": RESET}
+    assert run_wait.hold(RUN) == RESET
+    github.limited = False
+    github.now = NOW + 61
+    assert run_wait.run_resolution(URL) == ""
+    assert github.asked == [RUN, "rate_limit", "rate_limit"]
+
+
+def test_an_unwritable_backoff_home_still_holds_and_admits_pending(github, monkeypatch):
+    blocked = github.home / "blocked"
+    blocked.write_text("")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(blocked))
+    assert run_wait.run_resolution(URL) == ""
+    run_wait.admitted_pending(URL)
+    assert github.asked == [RUN, "rate_limit"]
+
+
+def test_every_rate_limited_read_is_logged_with_its_backoff(github):
+    run_wait.run_resolution(URL)
+    lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [{"at": NOW, "endpoint": RUN, "until": RESET}]
+
+
+def test_a_rate_limited_jobs_read_keeps_a_red_run_wait_for_its_evidence(github):
+    github.limited = False
+    github.jobs_limited = True
+    github.run.update(status="completed", conclusion="failure")
+    assert run_wait.run_resolution(URL) == ""
+    github.jobs_limited = False
+    github.now = RESET + 1
+    assert run_wait.run_resolution(URL) == (
+        f"checks on {URL}, now red; the run concluded failure; failed jobs: unit (3) failure"
+    )
+
+
+def test_a_rate_limited_pull_request_head_admits_the_checks_wait_pending(env, github, monkeypatch):  # noqa: F811
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    seat_agent(store, ledger, SLUG, "t1")
+    seat_agent(store, ledger, SLUG, "t2")
+    ledger.tasks = lambda slug: list(ledger.rows.values())
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: pull_head(url, subprocess.run))
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "checks", PR]) == 0
+    held = idle.wait(store.redis, "sw", ME)
+    assert held and held["on"] == {"kind": "checks", "target": PR, "head": None}
+    assert github.asked == [PULL, "rate_limit"]
+    lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [
+        {"at": NOW, "endpoint": PULL, "until": RESET},
+        {"at": NOW, "admitted_pending": PR},
+    ]
+
+
+def test_pull_request_reads_back_off_until_the_quota_reset(github):
+    assert pull_head(PR, subprocess.run) is None
+    github.limited = False
+    github.now = RESET - 1
+    assert pull_head(PR, subprocess.run) is None
+    assert pull_view(PR) is None
+    assert github.asked == [PULL, "rate_limit"]
+    github.now = RESET + 1
+    assert pull_head(PR, subprocess.run) == "first"
+
+
+def test_rest_reads_are_refused_locally_while_the_backoff_holds(github):
+    from scripts.swarm import merge_queue
+    from scripts.swarm.store import SwarmError
+
+    run_wait.run_resolution(URL)
+    github.limited = False
+    with pytest.raises(SwarmError, match="rate limit backoff holds repos/org/repo/pulls/7"):
+        merge_queue.rest(PULL, subprocess.run)
+    assert github.asked == [RUN, "rate_limit"]
+
+
+def test_a_rate_limited_checks_view_holds_the_shared_backoff(github):
+    assert pull_view(PR) is None
+    assert github.asked == ["graphql", "rate_limit"]
+    lines = (github.home / "github-backoff.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [{"at": NOW, "endpoint": "graphql", "until": RESET}]
+    github.limited = False
+    assert run_wait.run_resolution(URL) == ""
+    assert github.asked == ["graphql", "rate_limit"]
+
+
+def test_a_pending_checks_wait_binds_the_head_on_its_first_readable_view(github):
+    pull = SimpleNamespace(state="OPEN", head="first")
+    held = {**waits.on("checks", PR), "head": None}
+    assert waits.checks_resolution(held, lambda target: pull) == ""
+    assert held["head"] == "first"
+
+
+@pytest.fixture
+def kolkata(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_a_rate_limited_read_names_the_utc_reset_in_its_error(github, kolkata):
+    message = f"gh api {RUN}: GitHub API rate limited until 05:46:30 UTC"
+    with pytest.raises(run_wait.RateLimited) as limited:
+        run_wait._api(RUN, "waits.checks")
+    assert str(limited.value) == message
+    with pytest.raises(run_wait.RateLimited) as held:
+        run_wait._api(RUN, "waits.checks")
+    assert str(held.value) == message
+    assert github.asked == [RUN, "rate_limit"]
+
+
+def test_the_backoff_ends_at_its_recorded_time(github):
+    (github.home / "github-backoff.json").write_text(json.dumps({"until": NOW}))
+    assert not run_wait.backing_off()
+    github.now = NOW - 1
+    assert run_wait.backing_off()
+
+
+def test_a_missing_or_malformed_hold_never_backs_off(github):
+    github.now = 0.5
+    assert not run_wait.backing_off()
+    (github.home / "github-backoff.json").write_text(json.dumps({"until": "soon"}))
+    assert not run_wait.backing_off()
+
+
+def test_a_core_reset_already_due_backs_off_one_minute(github):
+    github.core = {"remaining": 0, "reset": NOW}
+    assert run_wait.hold(RUN) == NOW + 60
+
+
+def test_the_backoff_lives_in_the_agentihooks_home_of_a_new_user_home(github, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_HOME")
+    user = github.home / "user"
+    monkeypatch.setattr(Path, "home", lambda: user)
+    run_wait.hold(RUN)
+    assert json.loads((user / ".agentihooks" / "github-backoff.json").read_text()) == {"until": RESET}

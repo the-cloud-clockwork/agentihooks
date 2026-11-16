@@ -546,7 +546,7 @@ STEPS = (
         REOPENS,
         held(_fleet_red_notice),
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
-        needs=budgets.SPAWN_NEEDS,
+        needs=RESUMED,
         reads=pass_domains("rows"),
         lane=SLOW,
     ),

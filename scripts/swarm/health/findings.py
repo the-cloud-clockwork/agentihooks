@@ -6,6 +6,7 @@ The calculator only reports; the master diagnoses and the operator decides.
 import dataclasses
 import os
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
@@ -33,7 +34,9 @@ ENV = {
     "cooldown_minutes": "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES",
     "drain_minutes": "AGENTIHOOKS_HEALTH_DRAIN_MINUTES",
     "drain_left": "AGENTIHOOKS_HEALTH_DRAIN_LEFT",
+    "ci_behind_minutes": "AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES",
 }
+CI_BEHIND_MINUTES = 20
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,13 @@ def limits(environ=None):
         if raw.isdigit() and int(raw) > 0:
             values[field.name] = int(raw)
     return Limits(**values)
+
+
+def ci_behind_minutes(environ: Mapping[str, str] | None = None) -> int:
+    """Whole minutes the lab may run behind on pull request grading before eng claims wait, from its environment
+    variable when that holds a positive whole number."""
+    raw = (os.environ if environ is None else environ).get(ENV["ci_behind_minutes"])
+    return int(raw) if raw and raw.isdigit() and int(raw) > 0 else CI_BEHIND_MINUTES
 
 
 def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozenset(), talk=None):

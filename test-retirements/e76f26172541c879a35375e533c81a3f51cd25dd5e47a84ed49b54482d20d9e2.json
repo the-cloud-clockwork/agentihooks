@@ -1,0 +1,6 @@
+{
+  "tests/test_ci_mutation_scope.py::test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed[runs5-jobs5-asked5-False]": {
+    "reader": "Standards reader",
+    "reason": "The head removes push preflight grading from the mutation scope; a commit is graded only by its pull request mutation shards, which the surviving pull request grading tests cover."
+  }
+}
