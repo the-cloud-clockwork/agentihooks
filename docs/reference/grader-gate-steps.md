@@ -6,12 +6,14 @@ nav_order: 81
 
 # Grader gate steps
 
-The lint job of the Tests workflow and the Semgrep workflow grade a pull
+The steps listed under [What each step runs](#what-each-step-runs), in the
+lint job of the Tests workflow and in the Semgrep workflow, grade a pull
 request with the scripts and config of a protected grader checkout. The head
 supplies the code, fixtures and charts being graded. Its own ruff config and
 Semgrep rules can add checks on top of the grader's, but cannot remove or
-replace them, so a pull request cannot loosen a check by editing that check's
-own module or config.
+replace them, so a pull request cannot loosen one of these checks by editing
+the check's own module or config. The one exception in the table is the guard
+rule floors step, which still runs the head's copy on a base that lacks it.
 [Pull request 11361](https://github.com/the-cloud-clockwork/agentihooks/pull/11361)
 moved these steps onto the grader.
 [Pull request 11387](https://github.com/the-cloud-clockwork/agentihooks/pull/11387)
@@ -19,10 +21,15 @@ removed the head copy fallback from the marker key vector step and the two
 chart steps. Each of those three steps now runs only the grader's copy of its
 script, and the head's copy never runs.
 
-For a pull request, the Tests workflow runs every step on this page, and each
-one feeds `Gate — Required`, the check the dev ruleset requires. A red step
-blocks the pull request from the merge queue. The Proofs workflow's `semgrep`
-proof runs the same Semgrep steps outside that gate.
+The other lint gate steps are outside this page. Several of them look for
+their module in the grader and run the head's copy when it is missing; the
+[Tick pattern gate](tick-pattern-gate.md) fails instead.
+
+For a pull request, the Tests workflow runs every step on this page unless the
+CI lab verdict covers the job, and each step feeds `Gate — Required`, the
+check the dev ruleset requires. A red step blocks the pull request from the
+merge queue. The Proofs workflow's `semgrep` proof runs the same Semgrep steps
+outside that gate.
 
 ## The protected grader checkout
 
@@ -71,7 +78,7 @@ The marker vector step compares the head's fixture byte for byte with
 `dev`. The kernel file is checked out at `.marker-kernel` in the step
 `Check out kernel marker vector authority`, which runs before the marker step.
 
-## No head copy fallback
+## Head copy fallback removed from the marker and chart steps
 
 Pull request 11361 guarded the marker step and both chart steps with a
 fallback. When the grader's copy of the script did not yet carry `--root`, the
@@ -133,12 +140,38 @@ the old scripts.
 
 ### Stale base on the marker vector step
 
-Every lint gate step grades with the base sha its pull request event carries.
-On an older pull request that sha can predate current `dev`. When it predates
-pull request 11361, the marker step fails with exit 2 although the head is
-correct. A re-run of the same workflow run reuses that event and its sha.
-Close and reopen the pull request so a new event carries current `dev`, then
-let the checks run again.
+A lint step that runs the grader's module grades with the base sha its pull
+request event carries. Steps that compare against the base checkout at
+`$RUNNER_TEMP/base` use the merge base of the head with the event base
+instead, which is `origin/dev` for a pull request into `dev`.
+On an older pull request the event sha can predate current `dev`. When it
+predates pull request 11361, the marker step fails with exit 2 although the
+head is correct. GitHub
+[re-runs a workflow](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/re-running-workflows-and-jobs)
+with the event of the original run, so a re-run keeps the old sha. Close and
+reopen the pull request so a new event carries current `dev`, then let the
+checks run again.
+
+### Stale base on the guard rule floors step
+
+`Guard rules hold on their fixtures and at their computed floors` reads
+`scripts/ci_semgrep_floors.py` from the fetched base and runs the head's copy
+when the base has none:
+
+```bash
+grader=scripts/ci_semgrep_floors.py
+if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then
+  grader="$RUNNER_TEMP/ci_semgrep_floors.py"
+  git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"
+fi
+python "$grader" check --base FETCH_HEAD
+```
+
+The script arrived with
+[pull request 7222](https://github.com/the-cloud-clockwork/agentihooks/pull/7222),
+so only a Semgrep `base` older than that change runs the head's copy. On such
+a base a head can edit its own copy of the floors check to pass. A pull
+request into `dev` always fetches the `dev` tip, which carries the script.
 
 ## Run a step locally
 
@@ -220,7 +253,7 @@ with tests in `tests/test_ci_grader_gates.py`:
 
 `tests/context/test_marker_key_vectors.py::test_vector_check_is_on_the_required_tests_path`
 pins the marker step's run text, its kernel checkout and its order in the lint
-job.
+job. No test covers the guard rule floors step's fallback to the head copy.
 
 ## Related pages
 
