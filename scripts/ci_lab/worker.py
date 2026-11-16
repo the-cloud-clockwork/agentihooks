@@ -182,8 +182,8 @@ class Worker:
         self.stopping.set()
 
     def run(self) -> list[Lease]:
-        """Lease and run units until stop, then drain; return the leases still running when the grace ended, whose
-        units stop heartbeating and are never delivered so the scheduler reaps them."""
+        """Lease and run units until stop, then drain; return the leases still running when the grace ended. A unit
+        whose executor ends after that stops heartbeating and is never delivered, so the scheduler reaps it."""
         while not self.stopping.is_set():
             self.run_once()
         left = self.drain()
