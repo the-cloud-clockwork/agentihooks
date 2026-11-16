@@ -21,7 +21,7 @@ class Preemption:
         store: RedisStore | None = None,
         ledger: LedgerClient | None = None,
         clock: lease.Clock = lease.wall_ms,
-        source: readiness.Source | None = None,
+        source: "readiness.Source | None" = None,
     ) -> None:
         self._store, self._ledger, self._clock = store, ledger, clock
         self._source = source
