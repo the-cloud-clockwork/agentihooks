@@ -78,6 +78,35 @@ def test_the_standby_takes_over_once_the_leader_lock_expires() -> None:
     assert leader.take() is False
 
 
+class _Lapsing:
+    def __init__(self, left_ms: int) -> None:
+        self.left_ms = left_ms
+        self.takes = 0
+        self.asked: list[str] = []
+
+    def eval(self, script: str, keys: int, *args: object) -> int:
+        self.takes += 1
+        return int(self.takes > 1)
+
+    def pttl(self, key: str) -> int:
+        self.asked.append(key)
+        return self.left_ms
+
+
+@pytest.mark.feature("controller-standby-wakes-at-lock-lapse")
+@pytest.mark.parametrize(
+    ("left_ms", "waits"),
+    [(1_200, [1.2]), (0, [0.0]), (30_000, [replica.POLL_S]), (-1, [replica.POLL_S]), (-2, [])],
+)
+def test_the_standby_waits_no_longer_than_the_held_lock_has_left(left_ms: int, waits: list[float]) -> None:
+    redis = _Lapsing(left_ms)
+    seen: list[float] = []
+    replica.ReplicaLock(redis, HIVE, "pod-b").lead(seen.append)
+    assert seen == waits
+    assert redis.takes == 2
+    assert redis.asked == [f"{replica.PREFIX}:{HIVE}"]
+
+
 @pytest.mark.feature("controller-standby-replica")
 def test_a_replica_lock_is_scoped_to_its_hive() -> None:
     redis = _redis()

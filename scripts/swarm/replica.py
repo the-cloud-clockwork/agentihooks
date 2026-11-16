@@ -13,6 +13,7 @@ PREFIX = f"{ROOT}:controller-replica"
 LOCK_MS = 30_000
 BEAT_S = 10.0
 POLL_S = 5.0
+GONE_MS = -2
 KEEP_S = 60.0
 NEVER = float("-inf")
 BEAT_THREAD = "controller-replica-beat"
@@ -60,9 +61,12 @@ class ReplicaLock:
         return self.redis.get(self.key) or ""
 
     def lead(self, wait: Callable[[float], None], poll_s: float = POLL_S) -> None:
-        """Stand by until this replica takes the lock."""
+        """Stand by until this replica takes the lock, waiting no longer than the held lock has left to live and
+        trying again at once when it is gone, so a standby takes the lead as a dead leader's lock lapses."""
         while not self.take():
-            wait(poll_s)
+            left_ms = self.redis.pttl(self.key)
+            if left_ms != GONE_MS:
+                wait(poll_s if left_ms < 0 else min(poll_s, left_ms / 1000))
 
     def beat(self, lost: Callable[[], None], stop: threading.Event, beat_s: float = BEAT_S) -> threading.Thread:
         """Renew the lock every ``beat_s`` until ``stop`` is set; call ``lost`` once if another replica holds it,

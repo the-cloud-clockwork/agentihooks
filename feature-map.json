@@ -224,6 +224,16 @@
       ]
     },
     {
+      "id": "controller-standby-wakes-at-lock-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43913675090-0",
+      "behaviour": "A standby controller replica waits no longer than the held replica lock has left to live before it tries the lock again, so a standby behind a lock its dead leader left takes the lead as that lock lapses instead of up to one stand by poll later, while the liveness probe already counts the lapsed lock as no leader.",
+      "seam": "replica.ReplicaLock.lead",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_the_standby_waits_no_longer_than_the_held_lock_has_left"
+      ]
+    },
+    {
       "id": "controller-standby-replica",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
