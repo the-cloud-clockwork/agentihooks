@@ -43,6 +43,8 @@ REPOS = (
     "the-cloud-clockwork/agentihooks-bundle",
     "the-cloud-clockwork/antoncore",
 )
+PROTECTED = frozenset({"dev", "main"})
+FIX_LINK = re.compile(r"https://github\.com/([^/]+/[^/]+)/(?:pull/([0-9]+)|tree/(.+))")
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
 Ports = Callable[[str], SourceControl]
@@ -185,7 +187,21 @@ def branch_fix(fix: str) -> tuple[str, str]:
 
 
 def check_fix(fix: str) -> None:
-    """Refuses a fix link panic must not store."""
+    """Refuses, before panic stores it, a fix the cancel sweep could not read or must never spare: anything but a
+    pull request or branch link of a panic repository, a branch link to dev or main, and a pull request whose head
+    branch is dev or main or that cannot be read."""
+    found = FIX_LINK.fullmatch(fix)
+    if found is None:
+        raise SwarmError(
+            f"{fix} is not a fix link: name a pull request https://github.com/OWNER/NAME/pull/NUMBER or a branch "
+            "https://github.com/OWNER/NAME/tree/BRANCH"
+        )
+    repository, number, branch = found.groups()
+    if repository not in REPOS:
+        raise SwarmError(f"{fix} is outside the panic repositories {', '.join(REPOS)}")
+    named = branch if number is None else fix_branch(fix)
+    if named in PROTECTED:
+        raise SwarmError(f"{fix} names {named}, which panic never spares")
 
 
 def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:

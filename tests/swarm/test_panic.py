@@ -716,6 +716,7 @@ def _busy() -> Runs:
     return Runs({repo: [_row(7, "busy")] for repo in panic.REPOS})
 
 
+@pytest.mark.feature("panic-fix-registration-checked")
 def test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -732,6 +733,7 @@ def test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator(
     assert asked == []
 
 
+@pytest.mark.feature("panic-fix-registration-checked")
 def test_the_swarm_master_presses_panic_on_with_a_checked_fix(
     store: RedisStore,
     counted: list[tuple[str, float, dict[str, str]]],
@@ -758,6 +760,25 @@ OUTSIDE = (
 )
 
 
+@pytest.mark.parametrize(
+    ("fix", "refusal"),
+    [
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/dev", "{fix} names dev, which panic never spares"),
+        ("https://github.com/the-cloud-clockwork/antoncore/tree/main", "{fix} names main, which panic never spares"),
+        ("https://github.com/someone/else/tree/fix-branch", OUTSIDE),
+        ("https://github.com/someone/else/pull/1", OUTSIDE),
+        ("https://github.com/The-Cloud-Clockwork/agentihooks/pull/1", OUTSIDE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/pull/one", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/pull/1/files", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/issues/1", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/", SHAPE),
+        ("https://github.com/the-cloud-clockwork/tree/fix-branch", SHAPE),
+        ("http://github.com/the-cloud-clockwork/agentihooks/pull/1", SHAPE),
+        ("the-cloud-clockwork/agentihooks/pull/1", SHAPE),
+        (f"{FIX}\n", SHAPE),
+    ],
+)
+@pytest.mark.feature("panic-fix-registration-checked")
 def test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything(
     store: RedisStore,
     counted: list[tuple[str, float, dict[str, str]]],
@@ -776,6 +797,8 @@ def test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything(
     assert asked == []
 
 
+@pytest.mark.parametrize("head", ["dev", "main"])
+@pytest.mark.feature("panic-fix-registration-checked")
 def test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch, head: str
 ) -> None:
@@ -789,6 +812,7 @@ def test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main(
     assert asked == [FIX]
 
 
+@pytest.mark.feature("panic-fix-registration-checked")
 def test_panic_on_refuses_a_fix_pull_request_it_cannot_read(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1164,6 +1188,32 @@ def test_panic_freezes_a_push_behind_git_global_options_or_a_redirection(store: 
             ["git", "--git-dir=d", "--work-tree", "w", "push"],
             (["git", "push"], [("--git-dir=d", ""), ("--work-tree", "w")]),
         ),
+        (
+            [
+                "git",
+                "--git-dir",
+                "g",
+                "--namespace",
+                "n",
+                "--super-prefix",
+                "s",
+                "--config-env",
+                "e",
+                "--attr-source",
+                "a",
+                "push",
+            ],
+            (
+                ["git", "push"],
+                [
+                    ("--git-dir", "g"),
+                    ("--namespace", "n"),
+                    ("--super-prefix", "s"),
+                    ("--config-env", "e"),
+                    ("--attr-source", "a"),
+                ],
+            ),
+        ),
         (["gh", "-R", "o/r", "run", "rerun"], (["gh", "-R", "o/r", "run", "rerun"], [])),
         (
             [">/dev/null", "git", "push", "2>", "&", "1", "origin", "&", ">", "out", "dev>x", "3<", "in", "x"],
@@ -1192,6 +1242,7 @@ def test_a_command_reads_without_its_redirections_and_git_global_options(
         (["gh", "workflow", "run", "t.yml", "-r=d"], ("d",)),
         (["gh", "workflow", "run", "t.yml", "-re"], ("e",)),
         (["gh", "workflow", "run", "t.yml", "--ref", "a", "-r", "c"], ("c",)),
+        (["gh", "workflow", "run", "-r", "x", "t.yml"], ("x",)),
         (["git", "push"], ()),
         (["git", "push", "-u", "origin", "HEAD"], ()),
         (

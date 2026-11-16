@@ -1,4 +1,4 @@
-def cmd_panic(store, args):
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         # ruleid: panic-on-unchecked-registration
@@ -6,7 +6,7 @@ def cmd_panic(store, args):
         print(found)
 
 
-def cmd_panic(store, args):
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
@@ -15,7 +15,7 @@ def cmd_panic(store, args):
         print(found)
 
 
-def cmd_panic(store, args):
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         for fix in args.fix:
@@ -25,7 +25,7 @@ def cmd_panic(store, args):
         print(found)
 
 
-def cmd_panic(store, args):
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         # ruleid: panic-on-unchecked-registration
@@ -36,7 +36,7 @@ def cmd_panic(store, args):
         print(found)
 
 
-def cmd_panic(store, args):
+def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     now = now_ms()
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
