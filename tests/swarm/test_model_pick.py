@@ -232,9 +232,7 @@ def test_lane_model_matches_harness_before_explicit_effort_returns(
     harness: str, lane_model: str, expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
-    picked = model_pick.pick(
-        harness, {"model": lane_model, "effort": "xhigh"}, {}, {}, default_model="gpt-6-sol"
-    )
+    picked = model_pick.pick(harness, {"model": lane_model, "effort": "xhigh"}, {}, {}, default_model="gpt-6-sol")
     assert picked == ModelPick(expected, "xhigh")
 
 
