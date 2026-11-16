@@ -2,7 +2,9 @@ import copy
 import inspect
 import json
 import os
+import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -2394,6 +2396,108 @@ def test_a_head_behind_a_landed_frozen_change_is_green(frozen, capsys):
     _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
     _put(frozen, {"scripts/gate.py": "new\n"}, "land")
     assert _frozen_grade(frozen, head, capsys)[0] == 0
+
+
+_LINT_PROTECTED = "Require trusted actors before private runner admission"
+_EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
+
+
+def _accepting(one: tuple[str, ...], two: tuple[str, ...]) -> str:
+    """Render a registry freezing two gate files at the given contents, one line per accepted blob."""
+    accepted = {"gates/one.py": [_hash(text) for text in one], "gates/two.py": [_hash(text) for text in two]}
+    return json.dumps(accepted, indent=2) + "\n"
+
+
+def _behind_dev(repo: Path, change: dict[str, str]) -> dict[str, str]:
+    """Open a pull request on dev, land a frozen announcement and gate change on dev, return the event context."""
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    frozen = {
+        "gates/one.py": "old\n",
+        "gates/two.py": "two\n",
+        gate_protected.FROZEN: _accepting(("old\n",), ("two\n",)),
+    }
+    opened = _put(repo, frozen, "freeze")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _put(repo, change, "change")
+    _git(repo, "checkout", "-q", "dev")
+    _put(repo, {gate_protected.FROZEN: _accepting(("old\n", "new\n"), ("two\n",))}, "announce")
+    _put(repo, {"gates/one.py": "new\n"}, "land")
+    _git(repo, "checkout", "-q", "--detach")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", "merge", head)
+    return {
+        "github.event.pull_request.base.sha": opened,
+        "github.event.pull_request.head.sha": head,
+        "github.sha": _git(repo, "rev-parse", "HEAD"),
+    }
+
+
+def _lint_protected(repo: Path, runner: Path, grader: str, context: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the Tests lint step that grades the protected gate from a grader worktree at the given revision."""
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    step = next(step for step in steps if step.get("name") == _LINT_PROTECTED)
+    _git(repo, "worktree", "add", "--detach", str(runner / "grader"), grader)
+    (runner / "grader/scripts").symlink_to(_ROOT / "scripts")
+    (runner / "bin").mkdir()
+    (runner / "bin/python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
+    (runner / "bin/python").chmod(0o755)
+
+    def operand(found: re.Match[str]) -> str:
+        names = [name.strip() for name in found.group(1).split("||")]
+        return next((context[name] for name in names if name in context), "")
+
+    env = {
+        **os.environ,
+        "GITHUB_SHA": context["github.sha"],
+        "PATH": f"{runner / 'bin'}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(runner),
+        **{name: _EXPRESSION.sub(operand, value) for name, value in step.get("env", {}).items()},
+    }
+    command = ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]]
+    return subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=300)
+
+
+@pytest.mark.feature("protected-lint-grades-the-pull-request-head")
+@pytest.mark.parametrize("announces", [False, True], ids=["unrelated", "registry"])
+def test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, announces: bool
+) -> None:
+    announcement = {gate_protected.FROZEN: _accepting(("old\n",), ("two\n", "next\n"))}
+    event = _behind_dev(repo, announcement if announces else {"notes.txt": "unrelated\n"})
+    opened, head = event["github.event.pull_request.base.sha"], event["github.event.pull_request.head.sha"]
+    graded = _lint_protected(repo, tmp_path_factory.mktemp("runner"), opened, event)
+    assert (graded.returncode, graded.stdout) == (
+        0,
+        f"graded {head[:12]} against merge base {opened[:12]}: 0 protected gate problems\n",
+    ), graded.stderr
+
+
+@pytest.mark.feature("protected-lint-grades-the-pull-request-head")
+def test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    event = _behind_dev(repo, {"gates/two.py": "planted\n"})
+    graded = _lint_protected(
+        repo, tmp_path_factory.mktemp("runner"), event["github.event.pull_request.base.sha"], event
+    )
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert (
+        f"::error::The head changes the frozen gate file gates/two.py to content {gate_protected.FROZEN} "
+        "on the base does not accept; announce its blob there by its own pull request first.\n"
+    ) in graded.stdout
+    assert "gates/one.py" not in graded.stdout
+
+
+@pytest.mark.feature("protected-lint-grades-the-pull-request-head")
+def test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    base = _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    head = _put(repo, {"notes.txt": "unrelated\n"}, "change")
+    graded = _lint_protected(repo, tmp_path_factory.mktemp("runner"), base, {"github.sha": head})
+    assert (graded.returncode, graded.stdout) == (
+        0,
+        f"graded {head[:12]} against merge base {base[:12]}: 0 protected gate problems\n",
+    ), graded.stderr
 
 
 def test_a_base_without_a_registry_freezes_nothing(repo, capsys):
