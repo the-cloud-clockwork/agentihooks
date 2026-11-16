@@ -1644,6 +1644,57 @@ def test_the_separate_summary_may_retry_each_download_once(pipefail):
     assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
 
 
+def _downloads_on(steps: list[dict[str, Any]], uses: list[str]) -> list[dict[str, Any]]:
+    releases = iter(uses)
+    return [
+        {**step, "uses": next(releases)} if str(step.get("name")).startswith("Download") else step for step in steps
+    ]
+
+
+@pytest.mark.parametrize("uses", ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"])
+@pytest.mark.parametrize("retried", [False, True])
+def test_the_separate_summary_accepts_each_reviewed_download_release(uses: str, retried: bool) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = _downloads_on(ci_reuse.summary_steps(), [uses, uses])
+    if retried:
+        steps = ci_reuse.retried_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
+
+
+@pytest.mark.parametrize(
+    "uses",
+    [
+        ["actions/download-artifact@v8", "actions/download-artifact@v8"],
+        ["actions/download-artifact@main", "actions/download-artifact@main"],
+        ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"],
+        ["actions/upload-artifact@v4", "actions/upload-artifact@v4"],
+    ],
+)
+def test_the_separate_summary_refuses_an_unreviewed_download_release(uses: list[str]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    config = _separate_summary(head, _downloads_on(ci_reuse.summary_steps(), uses))
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+def test_the_summary_download_pins_only_the_artifact_downloads() -> None:
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    pinned = gate_protected._summary_download([checkout, durations, flakes, summarize], "actions/download-artifact@v9")
+    assert pinned == [
+        checkout,
+        {**durations, "uses": "actions/download-artifact@v9"},
+        {**flakes, "uses": "actions/download-artifact@v9"},
+        summarize,
+    ]
+
+
 def test_the_retried_summary_waits_and_downloads_each_report_once_more():
     from scripts import ci_reuse
 

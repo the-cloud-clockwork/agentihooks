@@ -38,6 +38,8 @@ EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".githu
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
+DOWNLOAD_ARTIFACT = "actions/download-artifact@"
+SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -54,6 +56,11 @@ def _protected_config(base: Mapping[str, Any], head: Mapping[str, Any]) -> dict:
         section: {key: entry for key, entry in base.get(section, {}).items() if key in head.get(section, {})}
         for section in ("not_gates", "outside_gate")
     }
+
+
+def _summary_download(steps: list[dict[str, Any]], uses: str) -> list[dict[str, Any]]:
+    """Return the reviewed summary steps with every artifact download step pinned to ``uses``."""
+    return [{**step, "uses": uses} if str(step.get("uses")).startswith(DOWNLOAD_ARTIFACT) else step for step in steps]
 
 
 def runners(policy: object = None) -> list[str]:
@@ -309,9 +316,10 @@ def grade(
                 "if": "${{ always() }}",
                 "runs-on": runner,
                 "timeout-minutes": 5,
-                "steps": finish(retry(ci_reuse.summary_steps())),
+                "steps": finish(retry(_summary_download(ci_reuse.summary_steps(), uses))),
             }
             for runner in runners(policy)
+            for uses in SUMMARY_DOWNLOADS
             for finish in (list, ci_reuse.pipefail_summary)
             for retry in (list, ci_reuse.retried_summary)
         ]
