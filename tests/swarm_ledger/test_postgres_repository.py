@@ -40,6 +40,7 @@ def fresh(prefix):
 def imported(tmp_path):
     slug = fresh("hierarchy")
     shared = postgres.PostgresLedgerRepository(URL)
+    shared.migrate()
     local = sqlite.SQLiteLedgerRepository(tmp_path / sqlite.DATABASE)
     for repository in (shared, local):
         repository.import_document(slug, STATE)
@@ -70,6 +71,7 @@ def test_an_imported_postgres_ledger_exports_reads_and_snapshots_as_stored(impor
 def test_a_postgres_ledger_write_advances_its_revision_and_records_its_events():
     slug = fresh("writes")
     shared = postgres.PostgresLedgerRepository(URL)
+    shared.migrate()
     assert shared.create(slug, CONTENT)
     created = shared.get_document(slug)["_meta"]["rev"]
     claimed, rejected = shared.apply_ops(slug, ops=[CLAIM])
@@ -84,6 +86,7 @@ def test_a_postgres_ledger_write_advances_its_revision_and_records_its_events():
 def test_a_ledger_write_succeeds_after_the_database_restarts() -> None:
     slug = fresh("restart")
     shared = postgres.PostgresLedgerRepository(URL)
+    shared.migrate()
     assert shared.create(slug, CONTENT)
     subprocess.run(["docker", "restart", "writer-lock-postgres"], check=True, capture_output=True)
     subprocess.run(
@@ -107,6 +110,7 @@ def test_a_ledger_write_succeeds_after_the_database_restarts() -> None:
 def test_the_postgres_relay_journal_holds_each_revision_once_and_drops_it():
     slug = fresh("journal")
     shared = postgres.PostgresLedgerRepository(URL)
+    shared.migrate()
     for _ in range(2):
         shared.hold_revision("inbox", slug, 3)
     for revision in (5, 7):

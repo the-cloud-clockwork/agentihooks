@@ -2,55 +2,56 @@ import io
 import itertools
 import json
 import sys
-import threading
 import urllib.error
-from http.server import ThreadingHTTPServer
+from typing import Any
 
 import ledger_core as core
 import pytest
 
 from scripts.inbox import outbox
-from scripts.swarm_ledger import ledger, ledger_server, new_ledger
+from scripts.swarm_ledger import ledger, new_ledger
 
 SLUG = "outbox-2026-01-01"
 ENG = "eng-1@demo"
 BOSS = "master@demo"
 OPERATOR_LINE = "o-0"
 COUNT = itertools.count(1)
-QUEUED = "queued locally, it replays when the server returns"
 
 
 class Server:
-    """The ledger server on a spare port; stop refuses every connection until start binds a new one."""
+    """The ledger database outage: while stopped, every outbox replay is refused at connect, as by a database that does
+    not answer, until start lets replays through again."""
 
-    def __init__(self, monkeypatch):
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.monkeypatch = monkeypatch
-        self.httpd = None
+        self.replay = ledger.replay
 
-    def start(self):
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), ledger_server.Handler)
-        port = self.httpd.server_port
-        self.monkeypatch.setattr(ledger_server, "ALLOWED_HOSTS", {f"127.0.0.1:{port}"})
-        self.monkeypatch.setattr(ledger, "BASE", f"http://127.0.0.1:{port}")
-        threading.Thread(target=self.httpd.serve_forever, args=(0.01,), daemon=True).start()
+    def start(self) -> None:
+        """Let every replay through to the ledger API route code again."""
+        self.monkeypatch.setattr(ledger, "replay", self.replay)
 
-    def stop(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
+    def stop(self) -> None:
+        """Refuse every replay at connect."""
+
+        def refused(*args: object) -> dict[str, Any]:
+            raise ConnectionRefusedError("the ledger database is not answering")
+
+        self.monkeypatch.setattr(ledger, "replay", refused)
 
 
 @pytest.fixture
-def server(monkeypatch, request):
+def server(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Server:
     monkeypatch.setattr(sys.modules[__name__], "SLUG", f"outbox-{len(request.node.name)}-{next(COUNT)}-2026-01-01")
-    monkeypatch.setenv("LEDGER_AUTOSTART", "0")
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     new_ledger.create(SLUG, {"title": "Outbox", "overview": "o", "phases": [{"title": "one"}], "questions": []})
-    served = Server(monkeypatch)
-    served.start()
     ledger.call(SLUG, [{"op": "join", "id": "join-boss", "by": BOSS, "role": "orchestrator"}])
     ledger.call(SLUG, [{"op": "add", "thread": "chat", "id": OPERATOR_LINE, "text": "Carry on"}])
-    yield served
-    served.stop()
+    return Server(monkeypatch)
+
+
+def say(text: str) -> dict[str, Any]:
+    """Queue one chat line from the engineer the way a pass held offline from the ledger database queues its writes."""
+    return ledger.queue(SLUG, [chat_op(f"m-{next(COUNT)}", text)], False)
 
 
 def run(capsys, *argv):
@@ -81,116 +82,29 @@ def chat(state):
 
 
 @pytest.mark.feature("ledger-outbox")
-def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_when_it_returns(server, capsys):
+def test_a_replayed_record_lands_once_even_when_it_is_replayed_again(server: Server) -> None:
     phase = f"phases/{stored()['phases'][0]['id']}"
-    server.stop()
-    assert run(capsys, ENG, "comment", phase, "The branch builds on the new base") == [
-        {"posted": False, "queued": True}
-    ]
-    assert run.err == f"ledger server not answering on {ledger.BASE}: {QUEUED}\n"
-    assert run(capsys, ENG, "say", "Tests run in continuous integration now", "--reply-to", OPERATOR_LINE) == [
-        {"posted": False, "queued": True}
-    ]
-    assert run(capsys, ENG, "question", "add", "Which port should the service use") == [
-        {"question": "add", "queued": True}
-    ]
-    records = queued()
-    assert [record["op"] for record in records] == ["ledger"] * 3
-    assert {(record["by"], record["args"]["agent"], record["args"]["service"]) for record in records} == {
-        ("", "", False)
-    }
-    assert [record["args"]["ops"][0]["op"] for record in records] == ["add", "add", "add_item"]
-    assert [record["item"] for record in records] == [record["args"]["ops"][0]["id"] for record in records]
-    assert comments(stored()) == []
-    assert chat(stored()) == []
-    assert stored()["questions"] == []
-
-    server.start()
-    ledger.call(SLUG)
-    state = stored()
-    assert comments(state) == ["The branch builds on the new base"]
-    assert chat(state) == ["Tests run in continuous integration now"]
-    assert [question["text"] for question in state["questions"]] == ["Which port should the service use"]
-    assert queued() == []
+    comment = {"op": "add", "thread": f"{phase}/comments", "id": "c-once", "text": "Only one copy lands", "by": ENG}
+    ledger.queue(SLUG, [comment], False)
+    line = outbox.path().read_text()
+    assert outbox.flush(None).applied == [json.loads(line)["item"]]
+    outbox.path().write_text(line)
+    assert outbox.flush(None).applied == [json.loads(line)["item"]]
+    assert comments(stored()) == ["Only one copy lands"]
     assert not outbox.path().exists()
 
 
 @pytest.mark.feature("ledger-outbox")
-def test_a_replayed_record_lands_once_even_when_it_is_replayed_again(server, capsys):
-    phase = f"phases/{stored()['phases'][0]['id']}"
-    server.stop()
-    run(capsys, ENG, "comment", phase, "Only one copy of this lands")
-    line = outbox.path().read_text()
-    server.start()
-    assert outbox.flush(None).applied == [json.loads(line)["item"]]
-    outbox.path().write_text(line)
-    assert outbox.flush(None).applied == [json.loads(line)["item"]]
-    assert comments(stored()) == ["Only one copy of this lands"]
-    assert not outbox.path().exists()
-
-
-def test_an_answer_sent_while_the_server_is_stopped_lands_as_the_master_when_it_returns(server, capsys, monkeypatch):
-    monkeypatch.setattr(ledger, "swarm_autonomy", lambda slug: "delegate")
-    run(capsys, ENG, "question", "add", "Which broker should we use")
-    question = f"questions/{stored()['questions'][0]['id']}"
-    server.stop()
-    assert run(capsys, BOSS, "answer", question, "Use the existing broker") == [
-        {"answered": False, "item": question, "queued": True}
-    ]
-    assert queued()[0]["args"]["agent"] == ""
-    assert queued()[0]["args"]["ops"][0]["op"] == "answer"
-    server.start()
-    ledger.call(SLUG)
-    answers = stored()["questions"][0]["answers"]
-    assert [(entry["by"], entry["text"]) for entry in answers] == [(BOSS, "Use the existing broker")]
-
-
-def test_talk_sent_after_the_server_returns_lands_after_the_talk_queued_before_it(server, capsys):
-    phase = f"phases/{stored()['phases'][0]['id']}"
-    server.stop()
-    run(capsys, ENG, "say", "First message", "--reply-to", OPERATOR_LINE)
-    run(capsys, ENG, "say", "Second message", "--reply-to", OPERATOR_LINE)
-    assert [record["args"]["ops"][0]["text"] for record in queued()] == ["First message", "Second message"]
-    server.start()
-    run(capsys, ENG, "comment", phase, "Third arrives after both")
-    state = stored()
-    assert chat(state) == ["First message", "Second message"]
-    assert comments(state) == ["Third arrives after both"]
-    assert queued() == []
-
-
-def test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported(server, capsys):
-    server.stop()
+def test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported(
+    server: Server, capsys: pytest.CaptureFixture[str]
+) -> None:
     bad = {"op": "add", "thread": "phases/missing/comments", "id": "c-missing", "text": "Lost item", "by": ENG}
-    assert ledger.call(SLUG, [bad])["queued"] == "c-missing"
-    server.start()
+    assert ledger.queue(SLUG, [bad], False)["queued"] == "c-missing"
     report = outbox.flush(None)
     assert report.rejected and report.rejected[0][0] == "c-missing"
     assert not outbox.path().exists()
     assert json.loads(outbox.skipped_path().read_text().splitlines()[-1])["line"].startswith('{"op": "ledger"')
     assert "refused on replay" in capsys.readouterr().err
-
-
-@pytest.mark.feature("ledger-outbox")
-def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(server):
-    server.stop()
-    with pytest.raises(SystemExit, match="ledger server not answering"):
-        ledger.call(SLUG)
-    with pytest.raises(SystemExit, match="ledger server not answering"):
-        ledger.call(SLUG, [{"op": "leave", "id": "leave-1", "by": ENG}])
-    assert queued() == []
-
-
-@pytest.mark.feature("ledger-outbox")
-def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(
-    server: Server, capsys: pytest.CaptureFixture[str]
-) -> None:
-    server.stop()
-    run(capsys, ENG, "say", "Queued first", "--reply-to", OPERATOR_LINE)
-    held = outbox.path().read_text()
-    with pytest.raises(SystemExit, match="still waits in"):
-        ledger.call(SLUG, [{"op": "leave", "id": "leave-eng", "by": ENG}])
-    assert outbox.path().read_text() == held
 
 
 def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
@@ -212,45 +126,10 @@ def test_join_reaches_the_server_past_unrelated_talk_and_keeps_deduplication(
     assert outbox.path().read_text() == before
 
 
-@pytest.mark.parametrize("pinned", [False, True])
-def test_outage_join_is_kept_replayed_once_and_counted_at_launch(
-    server: Server, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pinned: bool
+def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(
+    server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.swarm import launch_check
-    from scripts.swarm.store import AgentRecord
-
-    if pinned:
-        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ENG)
-        monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
-    agent = AgentRecord(ENG, "eng", "t1", started_at=1)
-    assert launch_check.joined_at(agent, stored()) is None
-    server.stop()
-    assert run(capsys, ENG, "join") == [{"joined": ENG, "slug": SLUG, "role": "member"}]
-    line = outbox.path().read_text()
-    entry = json.loads(line)
-    assert entry["args"]["ops"][0]["op"] == "join"
-    assert entry["args"]["agent"] == (ENG if pinned else "")
-    assert launch_check.joined_at(agent, stored()) is None
-    assert outbox.flush(None).applied == []
-    assert outbox.path().read_text() == line
-    server.start()
-    assert outbox.flush(None).applied == [entry["item"]]
-    joined = launch_check.joined_at(agent, stored())
-    assert joined is not None
-    first = stored()["_meta"]
-    outbox.path().write_text(line)
-    assert outbox.flush(None).applied == [entry["item"]]
-    assert stored()["_meta"]["join_history"] == first["join_history"]
-    assert stored()["_meta"]["members"] == first["members"]
-    assert launch_check.joined_at(agent, stored()) == joined
-    assert not outbox.path().exists()
-
-
-def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(server, monkeypatch, capsys):
-    import urllib.error
-
-    server.stop()
-    run(capsys, ENG, "say", "Kept through a busy server", "--reply-to", OPERATOR_LINE)
+    say("Kept through a busy server")
     held = outbox.path().read_text()
     revision = json.dumps({"error": {"code": "revision_conflict", "message": "persisted"}}).encode()
     for code, body in ((503, b""), (500, b""), (429, b""), (409, revision)):
@@ -284,14 +163,11 @@ def aged(seconds):
 
 @pytest.mark.parametrize(("seconds", "kept"), [(59, True), (61, False)])
 def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_than_the_limit(
-    server, monkeypatch, capsys, seconds, kept
-):
-    import urllib.error
-
-    server.stop()
+    server: Server, monkeypatch: pytest.MonkeyPatch, seconds: int, kept: bool
+) -> None:
     from types import SimpleNamespace
 
-    run(capsys, ENG, "say", "Busy for too long", "--reply-to", OPERATOR_LINE)
+    say("Busy for too long")
     entry = aged(seconds)
     now = entry["args"]["queued_at"] + seconds
     monkeypatch.setattr(outbox, "time", SimpleNamespace(time=lambda: now))
@@ -312,10 +188,10 @@ def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_
 
 
 @pytest.mark.feature("ledger-outbox-expiry")
-def test_a_stopped_server_never_expires_held_talk(server, capsys):
-    server.stop()
-    run(capsys, ENG, "say", "Held through a long outage", "--reply-to", OPERATOR_LINE)
+def test_a_stopped_server_never_expires_held_talk(server: Server) -> None:
+    say("Held through a long outage")
     aged(10 * outbox.DEFAULT_BUSY_AGE)
+    server.stop()
     report = outbox.flush(None)
     assert (report.left, report.rejected) == (1, [])
 
@@ -335,12 +211,13 @@ def test_a_record_is_stale_only_past_the_limit(monkeypatch):
     assert outbox.stale({"args": {"queued_at": 939.0}})
 
 
-def test_a_failing_ledger_record_holds_its_later_ledger_records_and_never_the_inbox_lane(server, monkeypatch, capsys):
+def test_a_failing_ledger_record_holds_its_later_ledger_records_and_never_the_inbox_lane(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.inbox import cli
 
-    server.stop()
-    run(capsys, ENG, "say", "First held", "--reply-to", OPERATOR_LINE)
-    run(capsys, ENG, "say", "Second held", "--reply-to", OPERATOR_LINE)
+    say("First held")
+    say("Second held")
     sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
     outbox.append(sent)
     calls, applied = [], []
@@ -368,9 +245,8 @@ def test_a_flush_without_a_store_keeps_inbox_records_untried(server, capsys):
 
 
 @pytest.mark.feature("ledger-outbox-expiry")
-def test_an_expired_record_is_set_aside_as_it_was_written(server, monkeypatch, capsys):
-    server.stop()
-    run(capsys, ENG, "say", "Expired verbatim", "--reply-to", OPERATOR_LINE)
+def test_an_expired_record_is_set_aside_as_it_was_written(server: Server, monkeypatch: pytest.MonkeyPatch) -> None:
+    say("Expired verbatim")
     aged(10)
     line = outbox.path().read_text()
     monkeypatch.setenv(outbox.BUSY_AGE_ENV, "5")
@@ -397,32 +273,28 @@ def test_apply_ledger_replays_as_the_recorded_author_and_reports_the_outcome(mon
     assert outbox.apply_ledger(None, ENG, entry) == {"applied": ["c-1"]}
 
 
-def test_ledger_replay_sends_the_recorded_credential_with_the_write_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = []
+def test_ledger_replay_acts_as_the_recorded_author_with_the_write_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.tick.adapters import database_ledger
+
+    seen: list[tuple[str, float]] = []
 
     class Client:
-        def __init__(self, base, headers, timeout):
-            seen.append((headers, timeout))
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
 
-        def mutate(self, slug, ops):
+        def mutate(self, slug: str, ops: list[Any]) -> dict[str, Any]:
+            seen.append((database_ledger.principal(), self.timeout))
             return {"slug": slug, "ops": ops}
 
-    monkeypatch.setattr("scripts.swarm_ledger.api.client.ResourceClient", Client)
-    monkeypatch.setattr(ledger.repository, "token", lambda slug: "admin")
+    monkeypatch.setattr(ledger, "client", lambda slug, timeout: Client(timeout))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS)
     assert ledger.replay(SLUG, ["op"], ENG, False) == {"slug": SLUG, "ops": ["op"]}
-    assert seen[-1] == (ledger.local_credentials(SLUG, ENG, False), ledger.WRITE_TIMEOUT)
-    assert seen[-1][0]["X-Ledger-Agent"] == ENG
+    assert seen[-1] == (ENG, ledger.WRITE_TIMEOUT)
     ledger.replay(SLUG, ["op"], ENG, True)
-    assert seen[-1][0] == {"X-Ledger-Token": "admin"}
-
-
-def test_talk_is_agent_chat_comments_items_answers_and_relays_without_attachments():
-    assert ledger.talk([{"op": "add", "by": ENG, "thread": "chat"}])
-    assert not ledger.talk([{"op": "add", "by": ENG, "thread": "chat", "attachments": [{"id": "m"}]}])
-    assert not ledger.talk([{"op": "add", "thread": "chat"}])
-    assert ledger.talk([{"op": name} for name in ledger.TALK_OPS])
-    assert not ledger.talk([{"op": "join"}])
-    assert not ledger.talk([])
+    assert seen[-1] == ("", ledger.WRITE_TIMEOUT)
+    ledger.replay(SLUG, ["op"], "", False)
+    assert seen[-1] == ("", ledger.WRITE_TIMEOUT)
 
 
 def test_an_inbox_record_waiting_never_holds_ledger_writes(server, capsys):
@@ -433,19 +305,18 @@ def test_an_inbox_record_waiting_never_holds_ledger_writes(server, capsys):
     assert comments(stored()) == ["Posted past an inbox record"]
 
 
-def test_a_full_outbox_refuses_the_write_with_its_reason(server, monkeypatch, capsys):
-    server.stop()
+def test_a_full_outbox_refuses_the_write_with_its_reason(server: Server, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(outbox.MAX_ENV, "10")
     with pytest.raises(SystemExit) as full:
-        ledger.call(SLUG, [{"op": "add", "thread": "chat", "id": "m-1", "text": "Too big", "by": ENG}])
+        ledger.queue(SLUG, [{"op": "add", "thread": "chat", "id": "m-1", "text": "Too big", "by": ENG}], False)
     assert str(full.value).startswith("the local inbox outbox is full (0 of 10 bytes")
 
 
-def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server, capsys, monkeypatch):
+def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server: Server, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.inbox import cli
 
     server.stop()
-    run(capsys, ENG, "say", "Waits for the ledger", "--reply-to", OPERATOR_LINE)
+    say("Waits for the ledger")
     sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
     outbox.append(sent)
     applied = []
@@ -455,26 +326,22 @@ def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server, capsys, mon
     assert [record["op"] for record in queued()] == ["ledger"]
 
 
-def test_a_redis_record_and_a_ledger_record_replay_independently(server, capsys):
-    server.stop()
+def test_a_redis_record_and_a_ledger_record_replay_independently(server: Server) -> None:
     inbox = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
     outbox.append(inbox)
-    run(capsys, ENG, "say", "Ledger talk behind an inbox send", "--reply-to", OPERATOR_LINE)
-    server.start()
+    say("Ledger talk behind an inbox send")
     report = outbox.flush(None)
     assert chat(stored()) == ["Ledger talk behind an inbox send"]
     assert [record["item"] for record in queued()] == [inbox["item"]]
     assert report.left == 1
 
 
-def test_an_inbox_send_goes_live_past_waiting_ledger_talk_and_the_inbox_flush_replays_it(server, capsys):
-    server.stop()
-    run(capsys, ENG, "say", "Replayed by the inbox", "--reply-to", OPERATOR_LINE)
+def test_an_inbox_send_goes_live_past_waiting_ledger_talk_and_the_inbox_flush_replays_it(server: Server) -> None:
+    say("Replayed by the inbox")
     live = []
     found = outbox.submit(object(), outbox.record("send", ENG, {"text": "x"}), lambda store, entry: live.append(entry))
     assert found is None and len(live) == 1
     assert len(queued()) == 1
-    server.start()
     assert len(outbox.flush(object()).applied) == 1
     assert chat(stored()) == ["Replayed by the inbox"]
     assert not outbox.path().exists()
@@ -677,9 +544,9 @@ def test_a_server_wide_busy_answer_holds_every_later_ledger_record(server, monke
     assert busy.value.targets == frozenset()
 
 
-def test_a_post_retried_while_the_server_is_down_waits_in_the_outbox_once(server):
-    server.stop()
+@pytest.mark.feature("ledger-outbox")
+def test_a_post_retried_while_the_server_is_down_waits_in_the_outbox_once(server: Server) -> None:
     post = {"op": "add", "thread": "chat", "id": "relay-1", "by": BOSS, "text": "All merged", "to": "operator"}
-    assert ledger.call(SLUG, [post]) == {"queued": "relay-1"}
-    assert ledger.call(SLUG, [post]) == {"queued": "relay-1"}
+    assert ledger.queue(SLUG, [post], False) == {"queued": "relay-1"}
+    assert ledger.queue(SLUG, [post], False) == {"queued": "relay-1"}
     assert [entry["item"] for entry in queued()] == ["relay-1"]

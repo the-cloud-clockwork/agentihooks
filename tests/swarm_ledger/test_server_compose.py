@@ -14,8 +14,8 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm import stack_init
+from scripts.swarm_ledger import api_service, server_compose
 from scripts.swarm_ledger import ledger_server as server
-from scripts.swarm_ledger import server_compose
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -337,7 +337,7 @@ def test_a_compose_stop_that_fails_names_its_error(compose_server, monkeypatch):
 
 
 def bare_handler(path, refused=False):
-    handler = server.Handler.__new__(server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = path
     sent = []
     handler.send = lambda code, body, ctype: sent.append((code, body, ctype))

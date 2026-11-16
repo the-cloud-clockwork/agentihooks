@@ -13,11 +13,15 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger import ledger_bin  # noqa: E402
+from scripts.swarm_ledger import (
+    api_service,  # noqa: E402
+    ledger_bin,  # noqa: E402
+)
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger.repository import bin_storage
 from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front
 from tests.swarm_ledger.ledger_page import browser_home
 
 repository = default_repository()
@@ -89,7 +93,7 @@ class BinEndpoint(unittest.TestCase):
     def setUpClass(cls):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         make_ledger("via-http")
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)  # pyright: ignore[reportArgumentType]
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 
@@ -125,7 +129,7 @@ class BinEndpoint(unittest.TestCase):
     def test_delete_stops_the_ledgers_swarm_and_restore_does_not_start_it(self):
         with (
             patch.object(server, "swarm_status", return_value={"state": "running"}),
-            patch.object(server, "swarm_control", return_value=({"state": "stopped"}, "")) as control,
+            patch.object(api_service, "swarm_control", return_value=({"state": "stopped"}, "")) as control,
         ):
             self.assertEqual(self.post({"action": "delete", "slug": "via-http"})[0], 200)
             control.assert_called_once_with("via-http", ["stop", "--now"])
@@ -136,7 +140,7 @@ class BinEndpoint(unittest.TestCase):
     def test_a_ledger_without_a_swarm_bins_as_before(self):
         with (
             patch.object(server, "swarm_status", return_value=None),
-            patch.object(server, "swarm_control") as control,
+            patch.object(api_service, "swarm_control") as control,
         ):
             self.assertEqual(self.post({"action": "delete", "slug": "via-http"})[0], 200)
         control.assert_not_called()

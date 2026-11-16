@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm_ledger.ledger_server import control_argv
+from scripts.swarm_ledger.api_service import control_argv
 
 pytestmark = pytest.mark.unit
 

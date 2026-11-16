@@ -150,11 +150,11 @@ def test_removing_a_missing_proof_ledger_is_not_found(live, credential):
 @pytest.mark.parametrize(("error", "extra"), [(None, {}), ("stop failed", {"swarm_error": "stop failed"})])
 def test_removing_stops_the_proof_ledgers_swarm_and_reports_a_failed_stop(live, credential, error, extra):
     slug = create(live, credential, "tswarm")[1]["data"]["slug"]
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service, ledger_server
 
     with (
         patch.object(ledger_server, "swarm_status", return_value={"state": "running"}) as swarm,
-        patch.object(ledger_server, "swarm_control", return_value=(None, error)) as control,
+        patch.object(api_service, "swarm_control", return_value=(None, error)) as control,
     ):
         status, reply = remove(live, slug, **{"X-Controller-Credential": credential})
     swarm.assert_called_once_with(slug)

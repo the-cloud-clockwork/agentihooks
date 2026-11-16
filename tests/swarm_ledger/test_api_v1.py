@@ -1,9 +1,10 @@
 import json
 import uuid
 
+from scripts.swarm_ledger import api_service
 from tests.swarm_ledger.test_ledger_authority import SLUG, send, server
 
-RELAY = server.relay_to_inbox
+RELAY = api_service.relay_to_inbox
 
 
 import pytest
@@ -13,8 +14,10 @@ from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 authority_live = _authority_live
 
 
-_talk_marks = server.talk.Budget._marks
-_talk_init = server.talk.Budget.__init__
+from scripts.gates import talk
+
+_talk_marks = talk.Budget._marks
+_talk_init = talk.Budget.__init__
 
 
 @pytest.fixture
@@ -302,12 +305,11 @@ def test_operator_write_reaches_inbox_once(live, monkeypatch):
 
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import RedisStore, SwarmConfig
-    from tests.swarm_ledger.test_ledger_authority import server
 
     box = InboxStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
     RedisStore(box.redis).create(SwarmConfig(SLUG, "/repo", 1, 0))
     monkeypatch.setattr("scripts.inbox.store.connect", lambda environ=None: box)
-    monkeypatch.setattr(server, "relay_to_inbox", RELAY)
+    monkeypatch.setattr(api_service, "relay_to_inbox", RELAY)
     revision = request(live, "GET", "chat")[1]["revision"]
     payload = {
         "ops": [{"op": "add", "id": "inbox-canary", "thread": "chat", "text": "Operator resource canary"}],
@@ -368,7 +370,7 @@ def test_versioned_upload_validates_headers_and_binds_the_uploader(live):
 def test_versioned_administration_keeps_origin_and_role_checks(live):
     from unittest.mock import patch
 
-    from tests.swarm_ledger.test_ledger_authority import authority, server
+    from tests.swarm_ledger.test_ledger_authority import authority
 
     status, data, _ = send(live, "GET", "/api/v1/layout")
     assert status == 200
@@ -380,7 +382,7 @@ def test_versioned_administration_keeps_origin_and_role_checks(live):
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
     }
-    with patch.object(server, "swarm_control") as control:
+    with patch.object(api_service, "swarm_control") as control:
         assert request(live, "POST", "swarm/actions", {"action": "start"}, **headers) == (
             403,
             {"error": {"code": "forbidden", "message": "Swarm controls need the operator"}},
@@ -492,7 +494,7 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     from scripts.swarm.ledger_client import LedgerClient
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    ledger.request(SLUG, [{"op": "join", "id": "planner-join", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(SLUG, [{"op": "join", "id": "planner-join", "by": "boss", "role": "orchestrator"}])
     ledger.request(
         SLUG,
         [
@@ -506,7 +508,6 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
                 "phase": "p1",
             }
         ],
-        service=True,
     )
     client = LedgerClient(service=True)
     row = client.update_task(SLUG, "t1", {"state": "claimed", "claimed_by": "api-reader"}, if_state=("open",))
@@ -519,7 +520,7 @@ def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live,
     from scripts.swarm.ledger_client import LedgerClient
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    ledger.request(SLUG, [{"op": "join", "id": "kind-join", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(SLUG, [{"op": "join", "id": "kind-join", "by": "boss", "role": "orchestrator"}])
     ledger.request(
         SLUG,
         [
@@ -534,7 +535,6 @@ def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live,
                 "workspace": str(tmp_path / "elsewhere" / "t1"),
             }
         ],
-        service=True,
     )
     row = LedgerClient(service=True).update_task(SLUG, "t1", {"kind": "ops"}, by="boss")
     assert row["kind"] == "ops"
@@ -588,7 +588,7 @@ def test_task_collection_token_survives_chat_and_reload_without_hashing(live, mo
     from scripts.swarm.ledger_client import LedgerClient
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    ledger.request(SLUG, [{"op": "join", "id": "token-planner", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(SLUG, [{"op": "join", "id": "token-planner", "by": "boss", "role": "orchestrator"}])
     ledger.request(
         SLUG,
         [
@@ -603,7 +603,6 @@ def test_task_collection_token_survives_chat_and_reload_without_hashing(live, mo
             }
             for index in (1, 2)
         ],
-        service=True,
     )
     status, first = request(live, "GET", "tasks?limit=1")
     assert status == 200
@@ -619,7 +618,6 @@ def test_task_collection_token_survives_chat_and_reload_without_hashing(live, mo
     ledger.request(
         SLUG,
         [{"op": "add", "id": "token-chat", "by": "boss", "thread": "chat", "text": "Unrelated collection update"}],
-        service=True,
     )
     assert request(live, "GET", "tasks?limit=1") == (200, first)
     assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 200
@@ -744,14 +742,14 @@ def test_page_budget_counts_the_envelope(live, monkeypatch):
 def test_control_actions_validate_before_domain_execution(live):
     from unittest.mock import patch
 
-    with patch.object(server, "swarm_control", return_value=({}, None)) as control:
+    with patch.object(api_service, "swarm_control", return_value=({}, None)) as control:
         assert request(live, "POST", "swarm/actions", {"action": "pause"}) == (
             200,
             {"action": "pause", "accepted": True},
         )
         assert control.call_args.args[1] == ["pause"]
     for payload in ({"action": "set", "max_eng": True}, {"action": "terminate", "name": "-bad"}, {"action": "set"}):
-        with patch.object(server, "swarm_control") as control:
+        with patch.object(api_service, "swarm_control") as control:
             status, error = request(live, "POST", "swarm/actions", payload)
             assert status == 400
             assert error["error"]["code"] == "schema_invalid"
@@ -929,7 +927,7 @@ def test_command_export_audit_and_purge_use_resources(live, capsys):
 
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    assert ledger.export(SLUG, service=True)["phases"][0]["id"] == "p1"
+    assert ledger.export(SLUG)["phases"][0]["id"] == "p1"
     ledger.cmd_audit(SimpleNamespace(slug=SLUG))
     assert "to clean" in capsys.readouterr().out
     ledger.cmd_artifact_purge(SimpleNamespace(slug=SLUG, name="api-reader"))
@@ -1143,19 +1141,19 @@ def test_swarm_control_families_keep_domain_arguments(live):
         ),
     ]
     for payload, args, command in cases:
-        with patch.object(server, "swarm_control", return_value=({}, None)) as control:
+        with patch.object(api_service, "swarm_control", return_value=({}, None)) as control:
             assert request(live, "POST", "swarm/actions", payload) == (
                 200,
                 {"action": payload["action"], "accepted": True},
             )
             assert control.call_args.args == (SLUG, args, command)
-    with patch.object(server, "refresh_quota", return_value=({}, None)) as refresh:
+    with patch.object(api_service, "refresh_quota", return_value=({}, None)) as refresh:
         assert request(live, "POST", "swarm/actions", {"action": "quota_refresh"}) == (
             200,
             {"action": "quota_refresh", "accepted": True},
         )
         refresh.assert_called_once_with(SLUG)
-    with patch.object(server, "swarm_control", return_value=(None, "Failure")):
+    with patch.object(api_service, "swarm_control", return_value=(None, "Failure")):
         assert request(live, "POST", "swarm/actions", {"action": "pause"}) == (
             502,
             {"error": {"code": "control_failed", "message": "Swarm control failed"}},
@@ -1478,9 +1476,8 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     ledger.request(
         SLUG,
         [{"op": "add", "id": "addressed-event", "thread": "chat", "text": "@api-reader Please verify"}],
-        service=True,
     )
-    state = ledger.request(SLUG, service=True)
+    state = ledger.request(SLUG)
     member = state["_meta"]["members"]["api-reader"]
     assert member["role"] == "member"
     assert member["handled_rev"] == 1
@@ -1644,10 +1641,10 @@ def test_operator_doctor_phrase_keeps_the_ledger(live, monkeypatch):
     from unittest.mock import Mock
 
     doctor = Mock()
-    monkeypatch.setattr(server, "doctor_phrase", doctor)
+    monkeypatch.setattr(api_service, "doctor_phrase", doctor)
     revision = request(live, "GET", "chat")[1]["revision"]
     payload = {
-        "ops": [{"op": "add", "id": "doctor-stop", "thread": "chat", "text": server.DOCTOR_PHRASE}],
+        "ops": [{"op": "add", "id": "doctor-stop", "thread": "chat", "text": api_service.DOCTOR_PHRASE}],
         "guards": {"chat": revision},
     }
     status, result = request(live, "POST", "operations", payload)
@@ -1656,7 +1653,7 @@ def test_operator_doctor_phrase_keeps_the_ledger(live, monkeypatch):
     slug, state = doctor.call_args.args
     assert slug == SLUG
     assert state["_meta"]["rev"] == result["_meta"]["rev"]
-    assert state["chat"][-1]["text"] == server.DOCTOR_PHRASE
+    assert state["chat"][-1]["text"] == api_service.DOCTOR_PHRASE
 
 
 def test_mutations_enforce_the_ledger_talk_budget_on_phase_comments(live, monkeypatch):
@@ -1868,7 +1865,7 @@ def test_bin_delete_stops_its_running_swarm(live, monkeypatch):
 
     control = Mock(return_value=(None, "Stop failed"))
     monkeypatch.setattr(server, "swarm_status", lambda slug: {"mode": "running"})
-    monkeypatch.setattr(server, "swarm_control", control)
+    monkeypatch.setattr(api_service, "swarm_control", control)
     status, data, _ = send(
         live,
         "POST",
@@ -2325,36 +2322,6 @@ def test_tick_tasks_span_more_than_one_page(live):
     assert [row["id"] for row in rows] == [f"t{index}" for index in range(105)]
 
 
-def test_service_flag_keeps_operator_and_worker_credentials_distinct(live, monkeypatch):
-    import urllib.request
-    from types import SimpleNamespace
-
-    from scripts.swarm.ledger_client import LedgerClient
-    from tests.swarm_ledger.test_ledger_authority import ledger
-
-    monkeypatch.setattr(ledger.Who, "from_env", lambda: SimpleNamespace(pinned=True, name="api-reader"))
-    open_request = urllib.request.urlopen
-    callers = []
-
-    def trace(request, **kwargs):
-        callers.append(request.get_header("X-ledger-agent"))
-        return open_request(request, **kwargs)
-
-    monkeypatch.setattr(urllib.request, "urlopen", trace)
-    ledger.resource(SLUG, "metadata", service=True)
-    assert callers[-1] is None
-    ledger.export(SLUG, service=True)
-    assert callers[-1] is None
-    LedgerClient(service=True).closed(SLUG)
-    assert callers[-1] is None
-    ledger.resource(SLUG, "metadata")
-    assert callers[-1] == "api-reader"
-    ledger.export(SLUG)
-    assert callers[-1] == "api-reader"
-    LedgerClient().closed(SLUG)
-    assert callers[-1] == "api-reader"
-
-
 def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
     from tests.swarm_ledger.test_ledger_authority import core
 
@@ -2592,7 +2559,7 @@ def test_control_domain_validation_has_an_exact_envelope(live, monkeypatch):
     from unittest.mock import Mock
 
     control = Mock(side_effect=ValueError("Invalid control"))
-    monkeypatch.setattr(server, "swarm_control", control)
+    monkeypatch.setattr(api_service, "swarm_control", control)
     assert request(live, "POST", "swarm/actions", {"action": "pause"}) == (
         400,
         {"error": {"code": "schema_invalid", "message": "Control does not match its domain schema"}},
@@ -2607,7 +2574,7 @@ def test_upload_schema_accepts_one_byte_and_optional_name(live, monkeypatch):
         calls.append((slug, handler.rfile.read(int(handler.headers["Content-Length"]))))
         handler.send(200, json.dumps({"accepted": True}), "application/json")
 
-    monkeypatch.setattr(server.Handler, "post_media", media)
+    monkeypatch.setattr(api_service.WriteHandler, "post_media", media)
     headers = {
         "X-Ledger-Token": live["admin"],
         "Origin": sorted(server.ALLOWED_ORIGINS)[0],
@@ -2790,8 +2757,8 @@ def test_optional_repository_fields_preserve_success_acknowledgment(live, monkey
     monkeypatch.setattr(server.repository, "get_document", lambda slug: {"_meta": {}})
     apply = Mock(return_value=({"_meta": {"rev": 3}}, []))
     monkeypatch.setattr(server.repository, "apply_ops", apply)
-    monkeypatch.setattr(server, "relay_to_inbox", Mock())
-    monkeypatch.setattr(server, "doctor_phrase", Mock())
+    monkeypatch.setattr(api_service, "relay_to_inbox", Mock())
+    monkeypatch.setattr(api_service, "doctor_phrase", Mock())
     payload = {"ops": [{"op": "sync", "id": "default-success"}], "guards": {}}
     assert request(live, "POST", "operations", payload) == (
         200,
@@ -2894,7 +2861,7 @@ def test_swarm_read_and_bin_stop_use_the_requested_ledger(live, monkeypatch):
     status.assert_called_once_with(SLUG)
     status.reset_mock()
     control = Mock(return_value=({}, None))
-    monkeypatch.setattr(server, "swarm_control", control)
+    monkeypatch.setattr(api_service, "swarm_control", control)
     code, data, _ = send(
         live,
         "POST",

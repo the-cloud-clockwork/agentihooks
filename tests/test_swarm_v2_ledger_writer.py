@@ -393,46 +393,60 @@ def _ledger_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard: None) -> Path:
+    from scripts.swarm_ledger import api_service
+    from scripts.swarm_ledger.repository import legacy
+
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setattr(server, "metrics_journal", lambda *args: None)
-    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
     monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
-    monkeypatch.setattr(server.legacy, "adopt", Mock())
+    monkeypatch.setattr(legacy, "adopt", Mock())
+    monkeypatch.setattr(api_service.signal, "signal", lambda signum, handler: None)
     return tmp_path
 
 
-def test_a_second_server_on_a_held_folder_exits_before_touching_it(serving, lease):
+def test_a_second_api_service_on_a_held_folder_exits_before_touching_it(serving: Path, lease: object) -> None:
+    from scripts.swarm_ledger import api_service
+    from scripts.swarm_ledger.repository import legacy
+
     with pytest.raises(SystemExit) as stopped:
-        server.serve()
+        api_service.serve()
     assert stopped.value.code == (
         f"ledger folder {serving} already has an active writer, pid 4242 on writer-a; a second writer is refused"
     )
-    server.legacy.adopt.assert_not_called()
+    legacy.adopt.assert_not_called()
     server.ThreadingHTTPServer.assert_not_called()
-    assert not (serving / ".server.pid").exists()
 
 
-def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(serving):
+def test_the_api_service_holds_the_lease_while_it_serves_and_releases_it_after(serving: Path) -> None:
+    from scripts.swarm_ledger import api_service
+    from scripts.swarm_ledger.repository import legacy
+
     seen = []
 
-    def serve_forever(poll_interval):
+    def serve_forever(poll_interval: float) -> None:
         seen.append(ledger_writer.holder(serving)["pid"])
         with pytest.raises(ledger_writer.WriterConflict):
             ledger_writer.WriterLease(serving).acquire(OTHER)
 
     server.ThreadingHTTPServer.return_value.serve_forever.side_effect = serve_forever
-    server.serve()
+    api_service.serve()
     assert seen == [os.getpid()]
-    server.legacy.adopt.assert_called_once_with(server.stored)
+    legacy.adopt.assert_called_once_with(server.stored)
     successor = ledger_writer.WriterLease(serving).acquire(OTHER)
     successor.release()
 
 
-def test_a_server_on_the_shared_database_serves_beside_a_held_folder(serving, lease, monkeypatch):
+def test_an_api_service_on_the_shared_database_migrates_and_serves_beside_a_held_folder(
+    serving: Path, lease: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    stored = Mock()
+    monkeypatch.setattr(server, "stored", stored)
     monkeypatch.setenv(server.storage.postgres.URL, "postgresql://ledger.invalid/swarm")
-    server.serve()
+    api_service.serve()
+    stored.migrate.assert_called_once_with()
     server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with(server.POLL_S)
     assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
     assert ledger_writer.conflicts_total(serving) == 0

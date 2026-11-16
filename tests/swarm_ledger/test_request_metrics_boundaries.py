@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from scripts.swarm_ledger import api
+from scripts.swarm_ledger import api, api_service
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import request_metrics as metrics
 
@@ -196,7 +196,7 @@ def test_parallel_handlers_keep_request_clocks_and_lock_wait_separate(capture, m
 
     def request(index):
         local.wall, local.cpu, local.wait = 0.0, 0.0, float(index)
-        handler = server.Handler.__new__(server.Handler)
+        handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
         handler.path, handler.command = f"/api/v1/ledgers/private{index}/operations", "POST"
         handler.do_POST()
         assert metrics.CURRENT.get() is None
@@ -267,7 +267,8 @@ def test_command_help_describes_the_timing_report(capsys):
 @pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "OPTIONS"])
 def test_supported_methods_keep_separate_route_cpu_totals(capture, monkeypatch, method):
     monkeypatch.setattr(api, "handle", lambda *args: None)
-    handler = server.Handler.__new__(server.Handler)
+    cls = api_service.WriteHandler if method in ("POST", "PUT", "PATCH") else server.Handler
+    handler = cls.__new__(cls)
     handler.command, handler.path, handler.headers = method, "/api/v1/ledgers/private/tasks", {}
     handler.send_response = handler.send_header = handler.end_headers = lambda *args: None
     getattr(handler, f"do_{method}")()

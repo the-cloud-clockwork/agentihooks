@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api import proofs, routes
 from tests.swarm_ledger.test_ledger_authority import SLUG, server
@@ -44,7 +45,7 @@ def owned(live, credential, hive, monkeypatch):
             exists=server.repository.exists,
             send=lambda status, text, kind: (status, json.loads(text)),
         )
-        return routes.handle(handler, server.api_services())
+        return routes.handle(handler, api_service.services())
 
     controller = {"X-Controller-Credential": credential}
     status, created = invoke("", {"agent": owner, "task": "contract", "content": CONTENT}, controller)
@@ -346,7 +347,7 @@ def test_stale_drain_refusal_keeps_its_protocol_status_and_reason(owned):
 
 
 def test_drain_service_refusal_keeps_its_protocol_status_and_reason(owned, monkeypatch):
-    monkeypatch.setattr(server, "lifecycle_control", lambda slug, payload, operator: (None, "fixture unavailable"))
+    monkeypatch.setattr(api_service, "lifecycle_control", lambda slug, payload, operator: (None, "fixture unavailable"))
     assert owned.invoke(f"/{owned.slug}/controls", {"control": "drain"}, owned.proof) == (
         409,
         {"error": {"code": "control_refused", "message": "fixture unavailable"}},
@@ -424,7 +425,7 @@ def test_controller_controls_use_the_existing_drain_fences(owned, monkeypatch):
     }
     seen = []
     monkeypatch.setattr(
-        server,
+        api_service,
         "lifecycle_control",
         lambda slug, body, operator: (seen.append((slug, body, operator)) or None, "stale attempt"),
     )
@@ -519,7 +520,7 @@ def test_controller_controls_require_controller_and_enqueue_only_scoped_pause(ow
 @pytest.mark.parametrize("owner", [{}, {"parent": "", "agent": "engineer@a1b2c3-0001", "task": "contract"}])
 def test_migration_refuses_incomplete_requester_identity(owned, owner):
     with pytest.raises(proofs.APIError) as refused:
-        proofs.migrate(server.api_services(), owned.slug, owner)
+        proofs.migrate(api_service.services(), owned.slug, owner)
     assert refused.value.status == 400
     assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {
         "parent": SLUG,
@@ -543,7 +544,7 @@ def test_migration_schema_refuses_malformed_payload_before_authority(owned, chan
     else:
         payload = []
     with pytest.raises(proofs.APIError) as refused:
-        proofs.migrate(server.api_services(), owned.slug, payload)
+        proofs.migrate(api_service.services(), owned.slug, payload)
     assert refused.value.status == 400
     assert refused.value.code == "schema_invalid"
 
@@ -560,6 +561,6 @@ def test_controller_control_schema_refuses_malformed_payload(owned, change):
     else:
         payload = []
     with pytest.raises(proofs.APIError) as refused:
-        proofs.controller_control(server.api_services(), owned.slug, payload)
+        proofs.controller_control(api_service.services(), owned.slug, payload)
     assert refused.value.status == 400
     assert refused.value.code == "schema_invalid"

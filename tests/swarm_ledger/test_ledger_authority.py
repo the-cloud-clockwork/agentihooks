@@ -17,12 +17,13 @@ import new_ledger  # noqa: E402
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm.store import SwarmError  # noqa: E402
-from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
+from scripts.swarm_ledger import api_service, ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
 from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.mutation_trace import traced  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.api_fakes import as_services  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
@@ -50,7 +51,7 @@ def pinned(name=WORKER):
 @pytest.fixture(scope="module")
 def live():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    httpd = Burst(("127.0.0.1", 0), server.Handler)
+    httpd = Burst(("127.0.0.1", 0), Front)
     port = httpd.server_address[1]
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
@@ -60,8 +61,8 @@ def live():
     with (
         patch("hooks._redis.get_redis", return_value=None),
         patch("scripts.gates.talk.Budget._marks", return_value=None),
-        patch.object(server, "relay_to_inbox", return_value=None),
-        patch.object(server, "doctor_phrase", return_value=None),
+        patch.object(api_service, "relay_to_inbox", return_value=None),
+        patch.object(api_service, "doctor_phrase", return_value=None),
         patch.object(server, "ALLOWED_HOSTS", {host}),
         patch.object(ledger, "BASE", f"http://{host}"),
         patch.object(cli_ledger, "BASE", f"http://{host}"),
@@ -155,7 +156,7 @@ def test_a_worker_token_cannot_answer_the_operator_on_an_entry_but_the_service_r
     assert refused in reply["_meta"]["warnings"]
     assert "Worker answer" not in phase_comments(ledger.request(SLUG))
     relayed = operation("add", by=WORKER, thread=thread, to="operator", text="Relayed answer")
-    assert relayed["id"] not in ledger.request(SLUG, [relayed], service=True)["rejected"]
+    assert relayed["id"] not in ledger.request(SLUG, [relayed])["rejected"]
     assert "Relayed answer" in phase_comments(ledger.request(SLUG))
 
 
@@ -252,7 +253,7 @@ def test_a_worker_cannot_send_page_changes(crew):
 
 def test_administrative_swarm_controls_need_the_operator(crew):
     body = json.dumps({"action": "start"})
-    with patch.object(server, "swarm_control", return_value=({"state": "running"}, "")) as control:
+    with patch.object(api_service, "swarm_control", return_value=({"state": "running"}, "")) as control:
         worker = send(crew, "PUT", f"/api/swarm/{SLUG}", body, **agent_headers(crew, WORKER))
         assert worker == (403, b"swarm controls need the operator", "text/plain")
         control.assert_not_called()
@@ -290,39 +291,6 @@ def test_the_principal_resolves_from_the_credential():
     assert authority.principal("", SLUG, "", None) is None
     assert authority.principal("", SLUG, authority.agent_token("", SLUG, WORKER), WORKER) is None
     assert authority.principal("admin-secret", SLUG, "admin-secrét", None) is None
-
-
-def test_call_keeps_the_service_choice_when_it_retries_after_starting_the_server():
-    seen = []
-
-    def request(slug, ops, service):
-        seen.append((slug, ops, service))
-        if len(seen) % 2:
-            raise OSError("not answering")
-        return {"rejected": []}
-
-    with patch.object(ledger, "request", request), patch.object(ledger.subprocess, "run") as run:
-        with patch.object(ledger.repository, "exists", lambda slug: True), patch.dict(os.environ, LEDGER_AUTOSTART="1"):
-            assert ledger.call(SLUG, [], service=True) == {"rejected": []}
-            assert ledger.call(SLUG) == {"rejected": []}
-    assert seen == [(SLUG, [], True), (SLUG, [], True), (SLUG, None, False), (SLUG, None, False)]
-    assert run.call_count == 2
-
-
-def test_call_prints_the_refusal_when_the_retry_after_starting_the_server_is_refused():
-    import io
-    import urllib.error
-
-    body = b'{"error": {"code": "schema_invalid", "message": "chat refused: clock time \'15:45 UTC\'"}}'
-    replies = [OSError("not answering"), urllib.error.HTTPError(ledger.BASE, 400, "Bad Request", {}, io.BytesIO(body))]
-
-    def request(slug, ops, service):
-        raise replies.pop(0)
-
-    with patch.object(ledger, "request", request), patch.object(ledger.subprocess, "run"):
-        with patch.object(ledger.repository, "exists", lambda slug: True), pytest.raises(SystemExit) as exit_:
-            ledger.call(SLUG, [])
-    assert str(exit_.value) == f"server refused: 400 {body.decode()}"
 
 
 def test_a_missing_ledger_sends_an_empty_credential(live):

@@ -112,8 +112,6 @@ def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls
         monkeypatch.setenv("SWARM_RELOAD", value)
     monkeypatch.setattr(server, "LOADED_STAMP", 42)
     monkeypatch.setattr(server, "reload_if_changed", Mock())
-    monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
-    monkeypatch.setattr(server, "bin_closed_without_swarm", Mock())
     monkeypatch.setattr(server, "sample_streams", Mock())
     monkeypatch.setattr(server, "scheduled_wait", Mock(side_effect=Stop))
     with pytest.raises(Stop):

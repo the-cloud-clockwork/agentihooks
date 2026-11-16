@@ -14,6 +14,7 @@ import pytest
 from scripts.swarm_ledger import ledger, ledger_health, ledger_link, ledger_server, proof_ledger, watch_ledger
 from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
+from tests.swarm_ledger.ledger_front import Front
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, new_ledger
 
 CREDENTIALS = [
@@ -161,7 +162,7 @@ def tls_ledger(cert, monkeypatch):
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     handler = type(
         "TLSHandler",
-        (ledger_server.Handler,),
+        (Front,),
         {"tls": ledger_link.server_context(dict(zip(("LEDGER_TLS_CERT", "LEDGER_TLS_KEY"), cert, strict=True)))},
     )
     httpd = ledger_server.ThreadingHTTPServer(("127.0.0.1", 0), handler)

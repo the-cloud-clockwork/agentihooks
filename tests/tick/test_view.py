@@ -145,7 +145,7 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     sent = []
     ledger = SimpleNamespace(
         base=lambda slug: f"http://ledger/{slug}",
-        credentials=lambda slug, service: {"X-Ledger-Token": f"{slug} {service}"},
+        client=lambda slug, timeout: api.ResourceClient(f"http://ledger/{slug}", {}, timeout),
         REQUEST_TIMEOUT=4,
     )
 
@@ -163,9 +163,9 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
-    held = view.start("sw", service=True)
+    held = view.start("sw")
     assert held is not None
-    assert sent == [("http://ledger/sw", {"X-Ledger-Token": "sw True"}, 4, "sw", 0, view.PARTS)]
+    assert sent == [("http://ledger/sw", {}, 4, "sw", 0, view.PARTS)]
     assert view.CURRENT.get() is held
     kept = view.HELD.get()
     assert kept is not None and kept.view is held and not kept.stale
