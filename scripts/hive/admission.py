@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING = "cpu", "ram", "quota", "placement", "node cap", "missing telemetry"
 MAX_AGENTS, DISK = "max agents", "disk"
 HELD = "held"
+ADMITTING = "the hive's own admission of the offer is in progress"
 HIVE_ADMISSION = "hive admission"
 REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
@@ -72,7 +73,8 @@ class Held(RuntimeError):
 
 
 class Unanswered(TimeoutError):
-    """The hub did not answer an admit ask inside the hive's wait; it may hold an admission the next ask receives."""
+    """The hub did not answer an admit ask inside the hive's wait, or held its answer while the hive's own admission of
+    the offer was still in progress; it may hold an admission the next ask receives."""
 
 
 def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:

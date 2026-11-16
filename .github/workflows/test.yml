@@ -2485,8 +2485,15 @@ jobs:
 
       - name: Take each selected leg's latest branch coverage
         if: needs.select.outputs.scope == 'selected'
+        env:
+          COUNT: ${{ needs.select.outputs.count }}
         run: |
           shopt -s nullglob
+          if [[ "$COUNT" == 1 && -f .coverage-shards/.coverage ]]; then
+            mv .coverage-shards .coverage-lone
+            mkdir .coverage-shards
+            mv .coverage-lone .coverage-shards/coverage-3.12-1
+          fi
           declare -A latest
           for folder in .coverage-shards/branch-coverage-3.12-*; do
             [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ && -f "$folder/.coverage" ]] || continue
