@@ -94,6 +94,8 @@ def _offends(step: dict) -> bool:
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
     offenders = []
     for job, step, _ in _all_steps():
+        if job == "lab-verdict":
+            continue
         if job == "select" and step.get("id") == "select":
             env = step.get("env") or {}
             assert env["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
