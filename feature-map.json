@@ -6622,6 +6622,20 @@
       ]
     },
     {
+      "id": "pattern-downloads-keep-a-lone-artifact-where-its-reader-looks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2560",
+      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
+      "seam": "The mutation job's Download every mutation shard report path and the Merge the shard reports step in the Tests workflow, the grade download in the retained mutation replay's verify job, scripts.ci_gate_summary.counts over the test summary downloads, and every pattern download under .github",
+      "tests": [
+        "tests/test_ci_lone_artifact_download.py::test_every_pattern_download_without_merge_multiple_says_where_a_lone_match_lands",
+        "tests/test_ci_lone_artifact_download.py::test_a_lone_shard_download_lands_in_a_folder_its_pattern_names",
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran",
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_replay_verify_finds_every_grade_however_many_shards_ran",
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran"
+      ]
+    },
+    {
       "id": "lab-full-pool-wait",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-full-pool-wait",
