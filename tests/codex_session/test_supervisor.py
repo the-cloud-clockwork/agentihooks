@@ -1195,6 +1195,7 @@ def test_a_hive_member_serves_the_execution_the_hub_admitted(
     hive_member(monkeypatch)
     started = supervisor.launch(store, replace(spec, execution_id=admitted.execution_id), deps(server, clock, root))
     assert started.agent.execution_id == started.record.execution_id == admitted.execution_id
+    assert (started.agent.harness, started.agent.transport) == ("codex", APP_SERVER_TRANSPORT)
     assert [agent.execution_id for agent in store.executions(SLUG, SEAT)] == [admitted.execution_id]
     current = store.execution(SLUG, admitted.execution_id)
     assert (current.state, current.harness, current.transport, current.hive) == (
@@ -1241,4 +1242,20 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left(
     store.redis.hdel(store.key(SLUG, "agents"), admitted.name)
     failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
     assert store.execution(SLUG, admitted.execution_id).transport == ""
+    assert server.commands == []
+
+
+@pytest.mark.feature("codex-adopts-hub-admitted-execution")
+def test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_before_the_bind(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hub_admitted(store, spec)
+    store.execution_registry.set_launch(SLUG, admitted.execution_id, {"state": "finished"})
+    monkeypatch.setattr(store.execution_registry, "get", lambda slug, execution_id: admitted)
+    failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert store.execution(SLUG, admitted.execution_id).state == "finished"
     assert server.commands == []

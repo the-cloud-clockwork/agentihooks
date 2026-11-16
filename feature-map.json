@@ -1169,6 +1169,7 @@
         "tests/codex_session/test_supervisor.py::test_a_hive_member_serves_the_execution_the_hub_admitted",
         "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_it_does_not_serve",
         "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_before_the_bind",
         "tests/hub/test_admission.py::test_a_hub_admitted_codex_launch_adopts_the_admitted_execution"
       ]
     },
