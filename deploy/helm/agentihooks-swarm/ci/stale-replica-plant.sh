@@ -51,7 +51,7 @@ probe="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.templa
     sleep "$((wait_ms / 1000)).$(printf '%03d' $((wait_ms % 1000)))"
   fi
   if out="$(kubectl exec "$pod" -c controller -- python -c "$probe" 2>&1)"; then rc=0; else rc=$?; fi
-  printf 'plant: the liveness probe 1.5s after the lapse exited %s: %s\n' "$rc" "$(printf '%s' "$out" | tail -1)"
+  printf 'plant: the liveness probe 1.5s after the lapse exited %s: %s\n' "$rc" "$(printf '%s' "$out" | grep -m1 -E 'Error' || printf '%s' "$out" | tail -1)"
 ) &
 sampled=$!
 set +e
