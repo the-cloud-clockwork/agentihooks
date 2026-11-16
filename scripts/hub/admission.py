@@ -13,6 +13,7 @@ from typing import Any, cast
 from packaging.version import InvalidVersion, Version
 
 from scripts import updater
+from scripts.events.bus import SERVE_WAITED_MS
 from scripts.handoff import transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
@@ -83,8 +84,9 @@ class Admission:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
-        started = self.clock()
-        timer = _StepTimer(self.clock, started)
+        begun = self.clock()
+        started = begun - SERVE_WAITED_MS.get()
+        timer = _StepTimer(self.clock, begun)
         if older := self._outdated(request["hive"]):
             refused(slug, request, older)
             return None

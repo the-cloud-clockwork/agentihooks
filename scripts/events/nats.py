@@ -27,7 +27,7 @@ from nats.js.errors import (
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nkey
-from .bus import Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
+from .bus import SERVE_WAITED_MS, Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -686,6 +686,7 @@ class NatsBus:
                     file=sys.stderr,
                 )
                 return
+            SERVE_WAITED_MS.set(waited)
             try:
                 reply = handler(msg.subject, msg.data)
                 nats_payload.validate(self._nc, msg.reply, reply)

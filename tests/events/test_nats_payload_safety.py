@@ -10,6 +10,7 @@ import pytest
 from nats.js.errors import APIError, NotFoundError
 
 from scripts.events import nats, nats_payload
+from scripts.events.bus import SERVE_WAITED_MS
 from scripts.events.nats_state import ScopedStateStore
 
 pytestmark = pytest.mark.unit
@@ -88,7 +89,13 @@ def test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_t
     opened._serving = SimpleNamespace(submit=lambda *call: queued.append(call))
     opened._nc = SimpleNamespace(max_payload=100, subscribe=AsyncMock(), flush=AsyncMock())
     monkeypatch.setattr(nats, "time", SimpleNamespace(monotonic=lambda: 20.6))
-    opened.serve("slots.rig.m1", "hub-slots", lambda subject, data: data, wait_ms=600)
+    waits: list[int] = []
+
+    def handler(subject: str, data: bytes) -> bytes:
+        waits.append(SERVE_WAITED_MS.get())
+        return data
+
+    opened.serve("slots.rig.m1", "hub-slots", handler, wait_ms=600)
     callback = opened._nc.subscribe.await_args.kwargs["cb"]
     stale, fresh = (SimpleNamespace(subject="slots.rig.m1", data=b"x", reply="r", respond=AsyncMock()) for _ in "ab")
     asyncio.run(callback(stale))
@@ -98,6 +105,7 @@ def test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_t
     answer(fresh, 20.001)
     stale.respond.assert_not_awaited()
     fresh.respond.assert_awaited_once_with(b"x")
+    assert waits == [599]
     assert capsys.readouterr().err == (
         "bus: dropped a request on 'slots.rig.m1' after it waited 600 ms in the serve queue, "
         "past its requester's 600 ms wait\n"
