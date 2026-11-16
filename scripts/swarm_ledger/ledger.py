@@ -188,10 +188,10 @@ def local_credentials(slug, agent, service):
     return {"X-Ledger-Token": authority.agent_token(token, slug, agent), "X-Ledger-Agent": agent}
 
 
-def replay(slug, ops, agent, service):
+def replay(slug: str, ops: list[Any], agent: str, service: bool) -> dict[str, Any]:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(base(slug), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+    return ResourceClient(base(slug), local_credentials(slug, agent, service), WRITE_TIMEOUT).mutate(slug, ops)
 
 
 def derived_token(slug, name):

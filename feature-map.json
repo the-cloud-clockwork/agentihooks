@@ -3344,7 +3344,8 @@
         "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_write_waits_past_the_server_writer_lock_budget",
         "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_empty_operation_list_is_still_a_write",
         "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_read_keeps_the_request_timeout",
-        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_explicit_timeout_wins_for_a_write"
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_an_explicit_timeout_wins_for_a_write",
+        "tests/swarm_ledger/test_ledger_write_timeout.py::test_a_replayed_queued_write_waits_past_the_server_writer_lock_budget"
       ]
     },
     {
