@@ -13,6 +13,7 @@ from scripts.swarm import automated_gc, elapsed, idle, tick, timing
 from scripts.swarm.health.findings import Limits, idle_with_claim
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord
+from scripts.swarm.waits import mark_ended
 from scripts.tick import engine
 from scripts.tick.steps import agents, report
 
@@ -155,8 +156,8 @@ def _run(
 
 
 def _starved(store: Store) -> None:
-    """Record the waits end step's last run long before the agents stopped."""
-    timing.step_ended(store, "rig", WAITS_END, WAITS_END_RAN_S)
+    """Record the waits end pass's last completion long before the agents stopped."""
+    mark_ended(store, "rig", int(WAITS_END_RAN_S * 1000))
 
 
 def _failing_waits_end(store: Store, monkeypatch: pytest.MonkeyPatch) -> Callable[[int], None]:
@@ -231,7 +232,7 @@ def test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs(monkeypa
     retired: list[str] = []
     runtime = _seams(monkeypatch, {agent.name: _checked_wait(agent.name)}, retired)
     store = Store()
-    timing.step_ended(store, "rig", WAITS_END, (STOPPED + PASSES * elapsed.PASS_MS) / 1000)
+    mark_ended(store, "rig", STOPPED + PASSES * elapsed.PASS_MS)
     _run(store, runtime, [agent], PASSES)
     assert retired == []
     assert store.saved[agent.name].idle_ticks == 0
@@ -262,7 +263,7 @@ def test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost(
     monkeypatch.setattr(tick, "reports", SimpleNamespace(Reports=lambda redis: reports, LOST_MS=10 * elapsed.PASS_MS))
     store = Store()
     now = STOPPED + PASSES * elapsed.PASS_MS
-    timing.step_ended(store, "rig", WAITS_END, WAITS_END_RAN_S if starved else now / 1000)
+    mark_ended(store, "rig", int(WAITS_END_RAN_S * 1000) if starved else now)
     assert agents._hive_lost("rig", store, agent, now) is lost
 
 

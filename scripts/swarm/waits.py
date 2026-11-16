@@ -28,6 +28,7 @@ FINISH_TURN = (
 FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
+ENDED = "waits:ended"
 PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 NOTICE_RE = re.compile(r"Your wait on .+ has ended\. Pick task (\S+) back up:")
 
@@ -212,7 +213,11 @@ def resolution(
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 
-def end_pass(store, slug, rows, inbox, github, now_ms, reread):
+def end_pass(
+    store: Any, slug: str, rows: dict[str, Any], inbox: Any, github: Any, now_ms: int, reread: Any
+) -> list[str]:
+    """End each checked wait whose target resolved, telling its holder, then record ``now_ms`` as the time the pass
+    completed, which the idle count trusts."""
     from scripts.swarm import pr_wait
 
     ended, verdicts = pr_wait.enforce_pass(store, slug, rows, github, now_ms), Verdicts(slug, intent.NAME)
@@ -236,7 +241,19 @@ def end_pass(store, slug, rows, inbox, github, now_ms, reread):
         )
         inbox.send(SENDER, agent.seat or agent.name, text)
         ended.append(f"ended the wait of {agent.name}: {outcome}")
+    mark_ended(store, slug, now_ms)
     return ended
+
+
+def mark_ended(store: Any, slug: str, now_ms: int) -> None:
+    """Record ``now_ms`` as the time the waits end pass of swarm ``slug`` last completed."""
+    store.redis.set(store.key(slug, ENDED), now_ms)
+
+
+def ended_at(store: Any, slug: str) -> int | None:
+    """Return when the waits end pass of swarm ``slug`` last completed, in epoch milliseconds, or None if it never did."""
+    found = store.redis.get(store.key(slug, ENDED))
+    return None if found is None else int(found)
 
 
 def _pick_up(task):
