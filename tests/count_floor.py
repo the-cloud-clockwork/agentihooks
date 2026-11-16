@@ -709,7 +709,12 @@ _SKIPPED = {".git", "__pycache__"}
 
 
 def _tree_files(tree: Path) -> Iterator[Path]:
-    """Yield every regular file of the tree outside git metadata and bytecode caches."""
+    """Yield every regular file a checkout tracks, or of a plain tree outside git metadata and bytecode caches."""
+    if (tree / ".git").exists():
+        listed = subprocess.run(["git", "ls-files", "-z"], cwd=tree, capture_output=True, check=True).stdout
+        paths = (tree / os.fsdecode(name) for name in listed.split(b"\0") if name)
+        yield from (path for path in paths if path.is_file() and not path.is_symlink())
+        return
     for root, dirs, files in os.walk(tree):
         dirs[:] = [name for name in dirs if name not in _SKIPPED]
         for name in files:
@@ -719,10 +724,16 @@ def _tree_files(tree: Path) -> Iterator[Path]:
 
 
 def _deleted_files(base: Path, head: Path) -> dict[str, set[str]]:
-    """Map the path, and the file name no head file shares, of each base file the head carries nowhere to that file."""
+    """Map the path, and the file name no head file shares, of each base file the head neither keeps nor renames."""
     head_files = list(_tree_files(head))
     names = {path.name for path in head_files}
-    candidates = [path for path in _tree_files(base) if not (head / path.relative_to(base)).exists()]
+    added = [path for path in head_files if not (base / path.relative_to(head)).exists()]
+    renamed = {path.suffix for path in added} | {path.stem for path in added}
+    candidates = [
+        path
+        for path in _tree_files(base)
+        if not (head / path.relative_to(base)).exists() and not {path.suffix, path.stem} & renamed
+    ]
     sizes = {path.stat().st_size for path in candidates}
     kept = {hashlib.sha256(path.read_bytes()).digest() for path in head_files if path.stat().st_size in sizes}
     tokens: dict[str, set[str]] = {}
@@ -816,7 +827,7 @@ def write_retirements(head: Path, nodeids: list[str], reader: str, reason: str) 
     return 0
 
 
-def _admissions(args: argparse.Namespace, lost: list[str], gained: list[str]) -> dict[str, list[str]]:
+def _admissions(args: argparse.Namespace, lost: list[str]) -> dict[str, list[str]]:
     """Return each lost test an admission rule explains, mapped to the subjects that explain it."""
     surviving, opaque = bound_names(args.head)
     for path in opaque:
@@ -834,12 +845,10 @@ def _admissions(args: argparse.Namespace, lost: list[str], gained: list[str]) ->
     deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
     emptied = set() if opaque else _emptied_test_files(args.base, args.head, args.tests)
     named = {} if opaque else _deleted_files(args.base, args.head)
-    growing = {nodeid.split("::", 1)[0] for nodeid in gained}
     retired = retirements(args.base, args.head)
     admitted = {}
     for nodeid in lost:
-        cases = {} if nodeid.split("::", 1)[0] in growing else named
-        if admission := _admitted(nodeid, args, emptied, deleted, opaque, cases, retired):
+        if admission := _admitted(nodeid, args, emptied, deleted, opaque, named, retired):
             subjects, reason = admission
             admitted[nodeid] = subjects
             print(f"{nodeid} is admitted: {reason}")
@@ -872,7 +881,7 @@ def main(argv: list[str] | None = None) -> int:
     if output := os.environ.get("TEST_COUNT_HEAD_COLLECTION"):
         Path(output).write_text(json.dumps(head))
     lost = sorted(set(base) - set(head))
-    admitted = _admissions(args, lost, sorted(set(head) - set(base))) if len(head) < len(base) else {}
+    admitted = _admissions(args, lost) if len(head) < len(base) else {}
     floor = len(base) - len(admitted)
     print(f"head collects {len(head)} tests, base floor {floor}")
     if len(head) < floor:

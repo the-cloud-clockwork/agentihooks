@@ -1175,42 +1175,79 @@ def _generated(*cases: str) -> str:
     )
 
 
+SHARED = {"tests/other/watch.yml": NON_WORKFLOW}
+
+
 @pytest.mark.parametrize(
-    ("case", "head", "admitted"),
+    ("case", "head", "kept", "admitted"),
     [
-        ("watch.yml", {}, True),
-        ("tests/fixtures/watch.yml", {}, True),
-        ("watch.yml-build", {}, True),
-        ("rewatch.yml", {}, False),
-        ("watch.yml", {"tests/fixtures/watch.yml": WORKFLOW}, False),
-        ("watch.yml", {"tests/fixtures/moved.yml": WORKFLOW}, False),
-        ("watch.yml", {"tests/other/watch.yml": NON_WORKFLOW}, False),
-        ("tests/fixtures/watch.yml", {"tests/other/watch.yml": NON_WORKFLOW}, True),
+        ("watch.yml", {}, {}, True),
+        ("tests/fixtures/watch.yml", {}, {}, True),
+        ("watch.yml-build", {}, {}, True),
+        ("rewatch.yml", {}, {}, False),
+        ("watch.yml", {"tests/fixtures/watch.yml": WORKFLOW}, {}, False),
+        ("watch.yml", {"tests/fixtures/moved.yml": WORKFLOW}, {}, False),
+        ("watch.yml", {}, SHARED, False),
+        ("tests/fixtures/watch.yml", {}, SHARED, True),
     ],
     ids=["name", "path", "joined", "fragment", "retained", "moved", "shared-name", "path-beside-shared-name"],
 )
 @pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
 def test_a_lost_case_whose_id_names_a_deleted_file_is_admitted(
-    tmp_path: Path, case: str, head: dict[str, str], admitted: bool
+    tmp_path: Path, case: str, head: dict[str, str], kept: dict[str, str], admitted: bool
 ) -> None:
     result = _floor(
         tmp_path,
         {"test_mod.py": _generated(case, "kept")},
         {"test_mod.py": _generated("kept")},
-        {"base": {"tests/fixtures/watch.yml": WORKFLOW}, "head": head},
+        {"base": {"tests/fixtures/watch.yml": WORKFLOW, **kept}, "head": {**head, **kept}},
     )
     assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
     assert (f"test_case[{case}] is admitted" in result.stdout) == admitted
 
 
-@pytest.mark.parametrize("function", ["test_case", "test_moved"], ids=["same-function", "renamed-function"])
+@pytest.mark.parametrize("tracked", [False, True], ids=["untracked", "tracked"])
 @pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
-def test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red(tmp_path: Path, function: str) -> None:
+def test_only_a_tracked_head_file_can_read_as_a_rename(tmp_path: Path, tracked: bool) -> None:
+    head = _tree(tmp_path / "head", {"test_mod.py": _generated("kept")})
+    (head / "tests/fixtures").mkdir()
+    (head / "tests/fixtures/scratch.yml").write_text(NON_WORKFLOW)
+    subprocess.run(["git", "init", "-q"], cwd=head, check=True)
+    subprocess.run(["git", "add", "tests", *(["tests/fixtures/scratch.yml"] if tracked else [])], cwd=head, check=True)
+    if not tracked:
+        subprocess.run(["git", "rm", "-q", "--cached", "tests/fixtures/scratch.yml"], cwd=head, check=True)
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": _generated("watch.yml", "kept")},
+        {"test_mod.py": _generated("kept")},
+        {"base": {"tests/fixtures/watch.yml": WORKFLOW}},
+    )
+    assert result.returncode == (1 if tracked else 0), result.stdout + result.stderr
+    assert ("test_case[watch.yml] is admitted" in result.stdout) != tracked
+
+
+@pytest.mark.parametrize(
+    ("renamed", "module", "function"),
+    [
+        ("moved.yml", "test_mod.py", "test_case"),
+        ("moved.yml", "test_mod.py", "test_moved"),
+        ("moved.yml", "test_moved.py", "test_moved"),
+        ("watch.yaml", "test_moved.py", "test_moved"),
+    ],
+    ids=["same-function", "renamed-function", "moved-test-file", "changed-extension"],
+)
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red(
+    tmp_path: Path, renamed: str, module: str, function: str
+) -> None:
     result = _floor(
         tmp_path,
         {"test_mod.py": _generated("watch.yml", "kept") + "\ndef test_other():\n    assert True\n"},
-        {"test_mod.py": _generated("moved.yml", "kept").replace("def test_case", f"def {function}")},
-        {"base": {"tests/fixtures/watch.yml": WORKFLOW}, "head": {"tests/fixtures/moved.yml": WORKFLOW + "# edited\n"}},
+        {module: _generated(renamed, "kept").replace("def test_case", f"def {function}")},
+        {
+            "base": {"tests/fixtures/watch.yml": WORKFLOW},
+            "head": {f"tests/fixtures/{renamed}": WORKFLOW + "# edited\n"},
+        },
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "tests/test_mod.py::test_case[watch.yml] is in the base and not in the head" in result.stdout
