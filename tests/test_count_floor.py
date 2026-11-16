@@ -1203,16 +1203,17 @@ def test_a_lost_case_whose_id_names_a_deleted_file_is_admitted(
     assert (f"test_case[{case}] is admitted" in result.stdout) == admitted
 
 
+@pytest.mark.parametrize("function", ["test_case", "test_moved"], ids=["same-function", "renamed-function"])
 @pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
-def test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red(tmp_path: Path) -> None:
+def test_a_case_whose_file_is_renamed_with_edits_keeps_the_floor_red(tmp_path: Path, function: str) -> None:
     result = _floor(
         tmp_path,
         {"test_mod.py": _generated("watch.yml", "kept") + "\ndef test_other():\n    assert True\n"},
-        {"test_mod.py": _generated("moved.yml", "kept")},
+        {"test_mod.py": _generated("moved.yml", "kept").replace("def test_case", f"def {function}")},
         {"base": {"tests/fixtures/watch.yml": WORKFLOW}, "head": {"tests/fixtures/moved.yml": WORKFLOW + "# edited\n"}},
     )
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "test_case[watch.yml] is admitted" not in result.stdout
+    assert "tests/test_mod.py::test_case[watch.yml] is in the base and not in the head" in result.stdout
 
 
 RETIRED_NODE = "tests/test_mod.py::test_retired"
@@ -1272,6 +1273,25 @@ def test_a_lost_test_is_admitted_only_by_a_new_signed_retirement(
     )
     assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
     assert (f"{RETIRED_NODE} is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.parametrize("linked", ["file", "folder"])
+@pytest.mark.feature("count-floor-admits-local-reads-ids-and-retirements")
+def test_a_symlinked_retirement_admits_nothing(tmp_path: Path, linked: str) -> None:
+    outside = tmp_path / "outside"
+    name, record = next(iter(_retirement(RETIRED_NODE, SIGNED).items()))
+    (outside / "test-retirements").mkdir(parents=True)
+    (outside / name).write_text(record)
+    target = tmp_path / "head" / name
+    target.parent.mkdir(parents=True)
+    if linked == "file":
+        target.symlink_to(outside / name)
+    else:
+        target.parent.rmdir()
+        target.parent.symlink_to(outside / "test-retirements")
+    result = _floor(tmp_path, {"test_mod.py": RETIRING}, {"test_mod.py": "def test_kept():\n    assert True\n"})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"{RETIRED_NODE} is admitted" not in result.stdout
 
 
 @pytest.mark.parametrize(("reader", "written"), [("Standards reader", True), ("engineer", False)])

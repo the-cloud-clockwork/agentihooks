@@ -4,6 +4,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -767,13 +768,16 @@ def _signed(ruling: object) -> bool:
     return (
         isinstance(ruling, dict)
         and all(isinstance(ruling.get(field), str) and ruling[field].strip() for field in ("reader", "reason"))
-        and ruling["reader"].strip().lower().startswith("standards")
+        and re.match(r"standards(?![a-z])", ruling["reader"].strip(), re.IGNORECASE) is not None
     )
 
 
 def retirements(base: Path, head: Path) -> dict[str, str]:
     """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to that reader."""
     retired = {}
+    if (head / _RETIREMENTS).is_symlink():
+        print(f"{_RETIREMENTS} is a symbolic link, so it admits nothing")
+        return retired
     for path in sorted((head / _RETIREMENTS).glob("*.json")):
         try:
             record = None if path.is_symlink() else json.loads(path.read_bytes())
@@ -799,6 +803,10 @@ def write_retirements(head: Path, nodeids: list[str], reader: str, reason: str) 
     ruling = {"reader": reader, "reason": reason}
     if not _signed(ruling):
         print("::error::A retirement needs a reader naming a Standards reader and a reason.")
+        return 1
+    targets = [retirement_path(head, nodeid) for nodeid in nodeids]
+    if (head / _RETIREMENTS).is_symlink() or any(target.is_symlink() for target in targets):
+        print(f"::error::{_RETIREMENTS} holds a symbolic link, so no retirement is written.")
         return 1
     for nodeid in nodeids:
         target = retirement_path(head, nodeid)
@@ -826,11 +834,11 @@ def _admissions(args: argparse.Namespace, lost: list[str], gained: list[str]) ->
     deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
     emptied = set() if opaque else _emptied_test_files(args.base, args.head, args.tests)
     named = {} if opaque else _deleted_files(args.base, args.head)
-    growing = {nodeid.split("[", 1)[0] for nodeid in gained}
+    growing = {nodeid.split("::", 1)[0] for nodeid in gained}
     retired = retirements(args.base, args.head)
     admitted = {}
     for nodeid in lost:
-        cases = {} if nodeid.split("[", 1)[0] in growing else named
+        cases = {} if nodeid.split("::", 1)[0] in growing else named
         if admission := _admitted(nodeid, args, emptied, deleted, opaque, cases, retired):
             subjects, reason = admission
             admitted[nodeid] = subjects

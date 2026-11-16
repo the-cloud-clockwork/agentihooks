@@ -214,7 +214,7 @@ An explicit `runpy.run_module("pkg.mod", run_name="__main__")` resolves calls in
 
 ### Parametrized ids that name a deleted file
 
-A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `mutation-preflight.yml-stats` names `mutation-preflight.yml` and `premutation-preflight.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A test that gains any case in the head admits none of its lost cases this way, so a file renamed with edits, whose case moves to the new name, keeps the floor where it was.
+A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `mutation-preflight.yml-stats` names `mutation-preflight.yml` and `premutation-preflight.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A test file that gains any test in the head admits none of its lost cases this way, so a file renamed with edits, whose case moves to the new name under the same or a renamed function, keeps the floor where it was.
 
 ```text
 tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[mutation-preflight.yml-stats] is admitted: its id names .github/workflows/mutation-preflight.yml, which the head deletes
@@ -233,7 +233,7 @@ A lost test of behaviour the pull request removes from a module that survives ha
 }
 ```
 
-The `test-count` log names every lost test no other rule admits as `<node id> is in the base and not in the head`; retire only those whose behaviour the pull request removes. Write them with the floor itself, which refuses a ruling without a Standards reader or a reason:
+When the job fails, the `test-count` log names every lost test no other rule admits as `<node id> is in the base and not in the head`; retire only those whose behaviour the pull request removes. Write them with the floor itself, which refuses a ruling without a Standards reader or a reason:
 
 ```bash
 python -m tests.count_floor --retire "<node id>" ... --reader "Standards reader" --reason "<why the behaviour is gone>"
@@ -242,10 +242,10 @@ python -m tests.count_floor --retire "<node id>" ... --reader "Standards reader"
 An entry admits its lost test only when all of these hold:
 
 1. Its file name matches its node id and holds that one entry.
-2. The reader starts with `Standards`, in any case, and the reason is not blank.
+2. The reader starts with the word `Standards`, in any case (`Standards reader`, `standards_reader`), and the reason is not blank.
 3. The base has no file of that name, so the pull request itself retires the test.
 
-Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review.
+Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review.
 
 ```text
 test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
