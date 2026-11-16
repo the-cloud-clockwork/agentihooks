@@ -241,6 +241,25 @@ def test_a_focused_tests_proof_never_waits_on_a_lane_and_every_other_proof_keeps
             assert _is_lane(resolved["group"]), (proof, run_id)
 
 
+def test_a_pull_request_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on() -> None:
+    jobs = _workflow("test.yml")["jobs"]
+    assert all("concurrency" not in jobs[job] for job in ("mutation-stats", "mutation-shard"))
+    mutation: set[str] = set()
+    for number in range(11300, 11310):
+        github = {"event_name": "pull_request", "event": {"pull_request": {"number": number}}, "workflow": "Tests"}
+        group = _resolve(_block("test.yml"), **github)["group"]
+        assert group == f"tests-pull_request-{number}", group
+        mutation.add(group)
+    shared = {
+        _resolve(block, **github)["group"]
+        for where, block in _blocks()
+        if where in LANE_USERS
+        for github in _contexts(where)
+    }
+    assert {"hosted-lane-a", "hosted-lane-b", "hosted-lane-c"} <= shared
+    assert not mutation & shared
+
+
 @pytest.mark.parametrize("caller", ["Tests", "Proofs"])
 def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
     github = {

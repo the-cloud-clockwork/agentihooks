@@ -1,0 +1,6 @@
+{
+  "tests/test_ci_workflow.py::test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader": {
+    "reader": "Standards reader",
+    "reason": "The head removes the mutation preflight and the pull request reuse of its report and kill memory; the Tests run is the only mutation source, so no preflight lookup, reuse or seed step remains to test."
+  }
+}

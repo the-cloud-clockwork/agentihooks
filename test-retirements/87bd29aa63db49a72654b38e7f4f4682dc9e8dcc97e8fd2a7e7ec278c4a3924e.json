@@ -1,0 +1,6 @@
+{
+  "tests/test_ci_pull_request_api.py::test_the_preflight_reuse_lookup_runs_only_on_the_app_token": {
+    "reader": "Standards reader",
+    "reason": "The head removes the mutation preflight and the pull request reuse of its report and kill memory; the Tests run is the only mutation source, so no preflight lookup, reuse or seed step remains to test."
+  }
+}

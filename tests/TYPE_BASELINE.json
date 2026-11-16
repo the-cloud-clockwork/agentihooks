@@ -213,7 +213,6 @@
   "scripts/ci_mutation/__main__.py": 6,
   "scripts/ci_mutation/browser.py": 9,
   "scripts/ci_mutation/clearances.py": 6,
-  "scripts/ci_mutation/evidence.py": 5,
   "scripts/ci_mutation/identity.py": 27,
   "scripts/ci_mutation/killers.py": 29,
   "scripts/ci_mutation/measured.py": 97,

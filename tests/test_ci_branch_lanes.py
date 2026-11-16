@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -856,16 +857,95 @@ def test_the_promotion_lanes_apply_only_to_dev_pushes():
 
 
 @pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
-def test_a_mutation_leg_grouped_by_its_own_run_is_refused(job: str, stage: str, index: str) -> None:
+@pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
+def test_a_mutation_leg_grouped_by_its_own_run_is_refused(job: str, stage: str, index: str, change: str | None) -> None:
     import copy
 
     lane = {"group": "${{ 'mutation-lane-a' }}", "queue": "max"}
-    baseline = _workflow(**{job: {"runs-on": "ubuntu-latest", "concurrency": lane}})
+    baseline: dict[str, Any] | None = _workflow(**{job: {"runs-on": "ubuntu-latest", "concurrency": lane}})
+    assert baseline is not None
     baseline["name"] = "Mutation preflight"
     updated = copy.deepcopy(baseline)
-    group = f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
-    updated["jobs"][job]["concurrency"] = {"group": group}
-    assert lanes.problems(updated, baseline) == [f"job {job} has no shared hosted lane concurrency group"]
+    block: dict[str, Any] = {
+        "group": f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
+    }
+    updated["jobs"][job]["concurrency"] = block
+    if change == "runs-on":
+        updated["jobs"][job]["runs-on"] = "anton-oss-batch"
+    elif change == "queue":
+        block["queue"] = "max"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "stage":
+        block["group"] = block["group"].replace(f"-{stage}-", "-other-")
+    elif change == "index":
+        block["group"] = block["group"].replace(f"matrix.{index}", "matrix.other")
+    elif change == "group":
+        block["group"] = "${{ github.run_id }}"
+    elif change == "untrusted":
+        baseline = None
+    found = lanes.problems(updated, baseline)
+    assert [problem for problem in found if problem.startswith(f"job {job} ")] == found
+    assert len(found) == 1
+
+
+def _superseded_block(stage: str, index: str) -> dict[str, str]:
+    """Return the lane block the deleted preflight once gave a statistics part or mutation shard."""
+    lane = lanes.LANE.replace("hosted-lane-", "mutation-lane-")
+    return {
+        "group": f"${{{{ format('{{0}}-{stage}-{{1}}', github.workflow == 'Mutation preflight' && {lane} "
+        f"|| format('mutation-preflight-job-{{0}}', github.run_id), matrix.{index}) }}}}",
+        "queue": "${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}",
+    }
+
+
+def _superseded_workflow() -> dict[Any, Any]:
+    """Return a branch workflow named like the deleted preflight whose mutation legs carry its old lanes."""
+    return {
+        "name": "Mutation preflight",
+        "on": {"push": {"branches-ignore": ["dev"]}},
+        "jobs": {
+            "stats": {"runs-on": "anton-oss-batch", "concurrency": _superseded_block("stats", "part")},
+            "mutation-shard": {"runs-on": "anton-oss-batch", "concurrency": _superseded_block("shard", "shard")},
+        },
+    }
+
+
+def test_a_branch_only_copy_of_the_mutation_preflight_keeps_no_superseded_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base, head, sha = _repo(tmp_path, {"mutation-copy.yml": _superseded_workflow(), "test.yml": "name: Tests\n"})
+    monkeypatch.chdir(head)
+    found = lanes.refused(sha, base)[f"{lanes.WORKFLOWS}/mutation-copy.yml"]
+    assert "job stats has no shared hosted lane concurrency group" in found
+    assert "job mutation-shard has no shared hosted lane concurrency group" in found
+
+
+@pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
+def test_the_superseded_mutation_lane_is_refused_on_any_other_job(job: str, stage: str, index: str) -> None:
+    import copy
+
+    baseline = _superseded_workflow()
+    updated = copy.deepcopy(baseline)
+    updated["jobs"][f"{job}-2"] = {**updated["jobs"][job], "concurrency": _superseded_block(stage, index)}
+    assert lanes.problems(updated, baseline) == [f"job {job}-2 has no shared hosted lane concurrency group"]
+
+
+@pytest.mark.parametrize("change", ["swap", "events"])
+def test_the_superseded_mutation_lanes_are_refused_swapped_or_with_new_events(change: str) -> None:
+    baseline = _superseded_workflow()
+    updated = _superseded_workflow()
+    if change == "swap":
+        jobs = updated["jobs"]
+        jobs["stats"]["concurrency"], jobs["mutation-shard"]["concurrency"] = (
+            jobs["mutation-shard"]["concurrency"],
+            jobs["stats"]["concurrency"],
+        )
+    else:
+        updated["on"] = {**updated["on"], "workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert "job stats has no shared hosted lane concurrency group" in found
+    assert "job mutation-shard has no shared hosted lane concurrency group" in found
 
 
 @pytest.mark.parametrize(

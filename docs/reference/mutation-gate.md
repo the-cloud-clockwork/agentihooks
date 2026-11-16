@@ -2002,8 +2002,6 @@ Open the run page to read the job summary, or download the evidence. Every artif
 |---|---|---|
 | Tests, on a pull request | `mutation-stats` part | `mutation-evidence-stats-<part>` |
 | Tests, on a pull request | `mutation` shard, or the inline step of a single shard `mutation-stats` job | `mutation-report-<shard>` |
-| Mutation preflight, on a branch push | statistics part | `mutation-evidence-stats-<part>` |
-| Mutation preflight, on a branch push | `mutation-shard` | `mutation-preflight-shard-<shard>` |
 
 For example, for a failed statistics part:
 
