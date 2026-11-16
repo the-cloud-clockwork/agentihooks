@@ -24,15 +24,18 @@ from threading import Thread
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
+import jsonschema
+import yaml
+
 from scripts.ci_lab import contract, lease_api
 from scripts.ci_lab.checks import Checks, Output
-from scripts.ci_lab.delivery import CLASSES
+from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, upload_path
 from scripts.ci_lab.queue import Job, Queue
-from scripts.ci_lab.retry import LOST, Policy
+from scripts.ci_lab.retry import LOST, Policy, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
@@ -54,6 +57,7 @@ __all__ = [
     "Settings",
     "build",
     "fold",
+    "frame",
     "main",
     "serve",
 ]
@@ -666,6 +670,23 @@ def _within(files: Mapping[str, str], paths: Sequence[str]) -> dict[str, str]:
     return {path: blob for path, blob in files.items() if path in paths or path.startswith(folders)}
 
 
+def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit, ...]]) -> Plan:
+    """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
+    a gate without units, which passes, so only what the lab grades can turn the grade red.
+
+    A pull request or hotfix grade runs with no test scope and no mutation; a merge group grade runs only the queue
+    suite with no lost unit rerun; a promotion or backfill grade takes every lab gate, since those rules require no
+    job by name.
+    """
+    if tier >= Priority.PROMOTION:
+        return Plan(tree, grader, dict(gates))
+    if tier == Priority.QUEUE:
+        required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
+        return Plan(tree, grader, {job: gates.get(job, ()) for job in required}, frozenset(UNIT_JOBS[1:]))
+    framed = {job: gates.get(job, ()) for job in PULL_REQUIRED}
+    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}})
+
+
 class MirrorExpander:
     """Static gate units of a head read from a git mirror with ls-tree and show, never a checkout."""
 
@@ -691,18 +712,29 @@ class MirrorExpander:
             files[path] = meta.split()[2]
         return files
 
-    def trusted(self, repo: str) -> frozenset[str]:
-        """Return the runner trust list on the repository's dev branch."""
+    def _on_dev(self, repo: str, path: str) -> str:
+        """Return one file of the repository's dev branch head."""
         mirror = self._mirror(repo)
         listing = subprocess.run(
             ["git", "ls-remote", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
         )
         head = listing.stdout.split()[0]
         mirror.fetch(head)
-        return frozenset(validate_actors(json.loads(self._git(mirror, "show", f"{head}:{ACTORS}"))))
+        return self._git(mirror, "show", f"{head}:{path}")
+
+    def trusted(self, repo: str) -> frozenset[str]:
+        """Return the runner trust list on the repository's dev branch."""
+        return frozenset(validate_actors(json.loads(self._on_dev(repo, ACTORS))))
+
+    def retries(self, repo: str) -> Policy:
+        """Return the retry policy of the lab block of delivery.yaml on the repository's dev branch."""
+        document = yaml.safe_load(self._on_dev(repo, DELIVERY))
+        jsonschema.validate(document, DELIVERY_SCHEMA)
+        return policy(document["lab"])
 
     def expand(self, request: GradeRequest) -> Plan:
-        """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base."""
+        """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
+        framed by the request's tier."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -718,7 +750,7 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
-        return Plan(tree, grader, {job: tuple(units) for job, units in gates.items()})
+        return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
 
 
 class PanicFixes:
@@ -752,7 +784,9 @@ def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: C
 
     hotfixes = PanicFixes(swarm) if swarm is not None else frozenset[str]
     ports = Ports(BusInbox(consumer), expander, poster, hotfixes)
-    return Scheduler(client, objects, ports, Settings(expander.trusted(environ[REPOSITORY])))
+    repository = environ[REPOSITORY]
+    settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
+    return Scheduler(client, objects, ports, settings)
 
 
 def serve(

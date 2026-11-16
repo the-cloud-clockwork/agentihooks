@@ -320,12 +320,19 @@ key; the builders are pure and read no file, clock or network.
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree
    a merge group grade completed carries that grade's gates. The rest is enqueued.
-5. Expired leases requeue while `lab.retry.lost` allows (once by default); a second loss is `lost`.
+5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
+   default); the next loss is `lost`.
 6. Finished jobs are collected: a graded outcome with an uploaded report becomes a verdict in the
    store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red.
 7. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
    check run never moves again.
+
+Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
+keeps the lab gates the pull request rules require and names every other required job as a gate without
+units, with no test scope and no mutation; a merge group grade does the same for the queue suite; a
+promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
+through what the lab grades.
 
 A gate passes when every unit passed. The `required` conclusion is
 `scripts.ci_lab.scheduler.fold`, the rules of the `Gate — Required` step of the test workflow over
@@ -343,7 +350,8 @@ key of the repository, head, base, class and grader revision. Live grades sit in
 `<run>-<now_ms>`, bypassing negative verdicts in the store.
 
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
-head supersedes nothing until intake records the branch; expansion keys static gates only; a
+head supersedes nothing until intake records the branch; expansion keys static gates only, so the
+jobs the lab does not run yet pass by their frame and a push grade folds only the static gates; a
 rerequested grade reuses the finished jobs of its own head.
 
 ## Verdict store

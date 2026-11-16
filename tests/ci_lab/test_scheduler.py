@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import fakeredis
+import jsonschema
 import pytest
 
 from scripts.ci_lab import __main__ as cli
@@ -53,8 +54,26 @@ def plan(gates: dict[str, tuple[Unit, ...]], tree: str = TREE) -> scheduler.Plan
 
 
 def pull_plan(gates: dict[str, tuple[Unit, ...]]) -> scheduler.Plan:
-    required: dict[str, tuple[Unit, ...]] = {job: () for job in scheduler.PULL_REQUIRED}
-    return scheduler.Plan(TREE, BASE, {**required, **gates}, outputs={"select": {"scope": "none"}})
+    return scheduler.frame(Priority.PULL_REQUEST, TREE, BASE, gates)
+
+
+def test_a_tier_frame_requires_the_jobs_its_rules_name_and_keeps_only_the_lab_gates_they_grade() -> None:
+    lint, docs, other = (unit(1),), (unit(2),), (unit(3),)
+    gates = {"lint": lint, "docs": docs, "other": other}
+    pulled = scheduler.frame(Priority.PULL_REQUEST, TREE, BASE, gates)
+    assert pulled == scheduler.frame(Priority.HOTFIX, TREE, BASE, gates)
+    assert pulled.gates == {job: {"lint": lint, "docs": docs}.get(job, ()) for job in scheduler.PULL_REQUIRED}
+    assert (pulled.skipped, pulled.outputs, pulled.flags) == (
+        frozenset(),
+        {"select": {"scope": "none"}},
+        scheduler.Flags(),
+    )
+    queued = scheduler.frame(Priority.QUEUE, TREE, BASE, {**gates, "unit": other})
+    required = ("select", "split", "shard-check", "test-count", "queue-fail-fast", "unit")
+    assert queued.gates == {job: other if job == "unit" else () for job in required}
+    assert (queued.skipped, queued.outputs) == (frozenset({"unit-lost", "unit-rerun"}), {})
+    for tier in (Priority.PROMOTION, Priority.BACKFILL):
+        assert scheduler.frame(tier, TREE, BASE, gates) == scheduler.Plan(TREE, BASE, gates)
 
 
 @dataclass
@@ -284,6 +303,23 @@ def test_the_fold_reads_a_grade_as_needs_of_its_tier(lab: Callable[..., Run]) ->
     assert run.grade(HEAD_B).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, "lint") == [("completed", "success")]
     assert run.lab.poster.moves(HEAD_A, "docs") == []
+
+
+def test_framed_grades_fold_green_unless_a_lab_gate_fails(lab: Callable[..., Run]) -> None:
+    good, bad = unit(1), unit(2)
+    run = lab(
+        {
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (good,)}),
+            HEAD_B: scheduler.frame(Priority.QUEUE, OTHER_TREE, BASE, {"unit": (bad,)}),
+        }
+    )
+    run.cache(good)
+    run.cache(bad, passed=False)
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.push(HEAD_B, lane="gh-readonly-queue/dev/pr-2", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    assert run.grade(HEAD_A).conclusion == "success"
+    assert run.grade(HEAD_B).conclusion == "failure"
 
 
 def test_a_head_waits_out_its_lanes_quiet_window_and_a_newer_head_restarts_it(lab: Callable[..., Run]) -> None:
@@ -536,6 +572,8 @@ def _blob(repo: Path, sha: str, path: str) -> str:
 
 
 ACTORS = {"actors": ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"], "queue_actor": "github-merge-queue[bot]"}
+MUTATION = {"run_on": "ready", "mutants_per_changed_line": "all", "arid": []}
+DELIVERY = {"lab": {"authoritative": [], "mutation": MUTATION, "check_prefix": "lab", "retry": {"lost": 2}}}
 
 
 @pytest.fixture
@@ -548,6 +586,7 @@ def origin(tmp_path: Path) -> tuple[Path, str, str]:
             ".github/workflows/test.yml": "jobs: {}\n",
             ".github/input-keys.json": '{"gates": {}}',
             ".github/workflows/trusted-actors.json": json.dumps(ACTORS),
+            "delivery.yaml": json.dumps(DELIVERY),
             "uv.lock": "lock",
             "pyproject.toml": "[project]\n",
             "src/a.py": "a = 1\n",
@@ -605,10 +644,16 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
             ),
         ),
     }
-    assert found == scheduler.Plan(_git(repo, "rev-parse", f"{head}^{{tree}}").strip(), base, expected)
-    assert read == [("jobs: {}\\n", {"gates": {}})]
+    tree = _git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+    assert found == scheduler.frame(Priority.PULL_REQUEST, tree, base, expected)
+    assert read == [("jobs: {}\n", {"gates": {}})]
     promoted = expander.expand(GradeRequest(remote, head, base, Priority.PROMOTION, ACTOR, False))
-    assert promoted.grader == head
+    assert (promoted.tree, promoted.grader, set(promoted.gates), promoted.skipped) == (
+        tree,
+        head,
+        {"lint", "semgrep"},
+        frozenset(),
+    )
 
 
 def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path, origin: tuple[Path, str, str]) -> None:
@@ -617,6 +662,10 @@ def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path,
     _git(tmp_path, "init", "-q", "--bare", str(node))
     expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}))
     assert expander.trusted(f"file://{repo}") == frozenset([*ACTORS["actors"], ACTORS["queue_actor"]])
+    assert expander.retries(f"file://{repo}") == Policy(lost=2, failed=0)
+    _commit(repo, {"delivery.yaml": json.dumps({"lab": {**DELIVERY["lab"], "retry": {"lost": -1}}})})
+    with pytest.raises(jsonschema.ValidationError):
+        expander.retries(f"file://{repo}")
 
 
 def test_panic_fixes_name_the_fix_branches_while_panic_is_on(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -644,6 +693,7 @@ class FakeChecks:
 
 def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
@@ -655,6 +705,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     consumer = Consumer([])
     built = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), consumer, None)
     assert built.settings.trusted == frozenset({"repository"})
+    assert built.settings.retries == Policy(lost=len("repository"))
     assert built.ports.hotfixes() == frozenset()
     assert isinstance(built.ports.inbox, scheduler.BusInbox) and built.ports.inbox.consumer is consumer
     expander = built.ports.expander
