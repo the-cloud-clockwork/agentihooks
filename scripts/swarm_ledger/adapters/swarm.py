@@ -173,8 +173,3 @@ class Swarm:
 
         return authority
 
-    @property
-    def ledger_cutover(self):
-        from scripts.swarm import ledger_cutover
-
-        return ledger_cutover

@@ -57,7 +57,6 @@ WORKER_KEYS = (
     "swarm:*:stage-covers",
     "swarm:*:gate-lifts:tasks:*",
     "swarm:*:gate-lift-drops",
-    "swarm:*:ledger-ready",
     "seat:*:recaps",
     "seat:*:learned",
     "seat-of:*:exit",
