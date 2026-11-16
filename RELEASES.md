@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.914 · 2026-11-16
+
+### 2026-11-16 · 5854c0b8c565 · #11420 · @agenticore-app
+
+**Install the unit test environment on a cache miss for reuse legs**
+
+This fixes a bug where unit test legs that reuse queued results would skip the "Set up uv and Install dependencies" step whenever the venv cache missed, such as on the first push after midnight UTC when the cache key rolls over. Previously the install step was gated on queue-reuse status, so reuse legs with a cache miss ran coverage against a bare environment and failed with ModuleNotFoundError. Now the install step runs on any cache miss regardless of reuse status, keeping unit legs and the shard check green.
+
+### 2026-11-16 · 5f9e8b93fa25 · #11421 · @agenticore-app
+
+**Announce the protected grader blob that accepts collected mutation stats**
+
+This change registers the protected grader blob (gate_protected.py, hash 38e54a849) in the frozen registry, enabling it to accept collected mutation stats. It is the grader counterpart to #11393, rebuilt on current dev after #11404 relocated accepted renderings into a cached helper, resolving the conflict that had stalled #11393 in the queue; ci_reuse.py’s existing announced blob (e18e4b34) is left untouched. This unblocks the plan-stats-and-refine task by satisfying its prerequisite of having the grader blob announced ahead of the grader variant landing.
+
 ## v2.17.913 · 2026-11-16
 
 ### 2026-11-16 · 0a4e7bc36894 · #11417 · @agenticore-app
