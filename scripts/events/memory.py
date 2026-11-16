@@ -292,7 +292,7 @@ class MemoryBus:
         self.events = ScopedLog(raw_events, swarm, "events") if swarm is not None else raw_events
         raw_stops = MemoryEventLog(self._runtime, config, cast(EventLog, self.dead))
         self._legacy_stops = raw_stops
-        self.lab_heads = raw_events
+        self.lab_heads = MemoryEventLog(self._runtime, config, cast(EventLog, raw_dead))
         self.stops = ScopedLog(cast(EventLog, raw_stops), swarm, STOPS.lower()) if swarm is not None else raw_stops
         if config.scoped:
             self.events = RoutedLog(

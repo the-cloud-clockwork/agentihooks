@@ -1,14 +1,19 @@
 """The lab head stream on a real NATS server: its provisioning across controller restarts and the lab head log."""
 
+from dataclasses import replace
+from typing import Any
+
 import pytest
 from nats.js.api import StreamInfo
 from nats.js.errors import NoStreamResponseError
 
 from scripts.ci_lab.webhooks import HeadEvent, envelope
-from scripts.events import nats
-from scripts.events.config import BusConfig
+from scripts.events import memory, nats
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.nats_legacy import LEGACY_EVENTS
 from tests.events.test_nats import url as url
+from tests.hive.test_nats_grant import _user_creds
+from tests.hive.test_nats_grant import signer as signer
 
 pytestmark = pytest.mark.unit
 
@@ -64,3 +69,28 @@ def test_a_lab_head_publish_without_the_lab_stream_fails_instead_of_falling_back
     finally:
         receiver.close()
         controller.close()
+
+
+@pytest.mark.feature("lab-head-own-stream")
+def test_the_lab_head_log_takes_the_bus_credential_policy_dedupe_window_and_scope(signer: Any) -> None:
+    credential, policy = _user_creds(signer.account, "lab"), QueuePolicy(max_deliver=2, ack_wait_ms=300)
+    config = BusConfig(url=signer.url, credentials=credential, queue=policy, dedupe_window_ms=12_500)
+    bus = nats.open_bus(config)
+    scoped = nats.open_bus(replace(config, scoped=True))
+    try:
+        log = bus.lab_heads
+        assert (log._credentials, log._policy, log._provision) == (credential, policy, True)
+        assert _stream(bus, nats.LAB_STREAM).config.duplicate_window == 12.5
+        assert scoped.for_swarm("rig").lab_heads is scoped.lab_heads
+    finally:
+        scoped.close()
+        bus.close()
+
+
+@pytest.mark.feature("lab-head-own-stream")
+def test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters() -> None:
+    bus = memory.open_bus(BusConfig())
+    assert bus.lab_heads.publish("ci.lab.head.push", envelope(HEAD))
+    assert [subject for subject, _ in bus.lab_heads.entries] == ["ci.lab.head.push"]
+    assert bus.events.entries == []
+    assert bus.lab_heads.dead is bus.dead

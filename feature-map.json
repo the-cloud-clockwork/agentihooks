@@ -7018,6 +7018,8 @@
         "tests/events/test_nats_lab_stream.py::test_provisioning_keeps_the_lab_head_subjects_across_a_controller_restart",
         "tests/events/test_nats_lab_stream.py::test_the_receiver_publishes_lab_heads_to_the_lab_stream_by_name",
         "tests/events/test_nats_lab_stream.py::test_a_lab_head_publish_without_the_lab_stream_fails_instead_of_falling_back",
+        "tests/events/test_nats_lab_stream.py::test_the_lab_head_log_takes_the_bus_credential_policy_dedupe_window_and_scope",
+        "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
       ]
     }

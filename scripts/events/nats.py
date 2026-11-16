@@ -566,6 +566,11 @@ class NatsBus:
                         name=dead_stream, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
                     )
                 )
+                self._loop.run(
+                    self._js.add_stream(
+                        name=LAB_STREAM, subjects=[LAB_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
+                    )
+                )
         except BaseException:
             self._loop.close()
             raise
@@ -585,7 +590,9 @@ class NatsBus:
             if config.scoped
             else self._legacy_dead
         )
-        self.lab_heads = self._legacy_events
+        self.lab_heads = NatsEventLog(
+            self._loop, self._js, config.queue, LAB_STREAM, config.provision, credentials=config.credentials
+        )
         self._legacy_stops = self._legacy_events
         self.stops = (
             RoutedLog(lambda swarm: self.for_swarm(swarm).stops, lambda: self._logs("stops"), config.queue)
