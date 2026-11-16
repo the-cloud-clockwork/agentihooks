@@ -5445,6 +5445,7 @@
         "tests/swarm/test_merge_queue.py::test_the_freeze_route_takes_the_frozen_task_among_the_tasks_naming_the_pull_request",
         "tests/swarm/test_merge_queue.py::test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull_request",
         "tests/swarm/test_merge_queue.py::test_the_freeze_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_merge_queue.py::test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open",
         "tests/swarm/test_ledger_client_task.py::test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection"
       ]
     },

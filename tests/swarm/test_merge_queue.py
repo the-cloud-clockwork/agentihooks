@@ -1380,14 +1380,26 @@ def test_the_freeze_route_takes_the_frozen_task_among_the_tasks_naming_the_pull_
     "rows, freezes, branch, read",
     [
         ([FROZEN_TASK], [master_freeze(by="operator")], SUB_AGENT_BRANCH, False),
+        ([FROZEN_TASK], [master_freeze(by="masterly@a1b2c3-0002")], SUB_AGENT_BRANCH, False),
         ([{**FROZEN_TASK, "phase": "p1"}], [master_freeze(target="phases/p1")], SUB_AGENT_BRANCH, False),
         ([FROZEN_TASK], [master_freeze(verb="focus")], SUB_AGENT_BRANCH, False),
         ([FROZEN_TASK, OTHER_TASK], [master_freeze(target="tasks/t2")], SUB_AGENT_BRANCH, False),
         ([{**FROZEN_TASK, "state": "done"}], [master_freeze()], SUB_AGENT_BRANCH, False),
         ([], [master_freeze()], SUB_AGENT_BRANCH, False),
         ([FROZEN_TASK], [master_freeze()], "engineer-a1b2c3-0003", True),
+        ([FROZEN_TASK], [master_freeze()], "masterly-a1b2c3-0002-2", True),
     ],
-    ids=["operator freeze", "phase freeze", "focus", "another task frozen", "done", "no task", "engineer branch"],
+    ids=[
+        "operator freeze",
+        "another seat named like a master",
+        "phase freeze",
+        "focus",
+        "another task frozen",
+        "done",
+        "no task",
+        "engineer branch",
+        "branch named like a master",
+    ],
 )
 def test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull_request(
     monkeypatch: pytest.MonkeyPatch,
@@ -1402,6 +1414,23 @@ def test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull
     assert cli.main(["sw", "merge", "queue", URL]) == 1
     assert (seen, reads) == ([], [URL] if read else [])
     assert capsys.readouterr().err == "swarm: engineer@a1b2c3-0001 is the swarm master; the master works no task\n"
+
+
+@pytest.mark.feature("master-freeze-queue")
+def test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import pull_head
+
+    seen, _ = frozen_master(monkeypatch, tmp_path, [FROZEN_TASK], [master_freeze()])
+
+    def closed(url: str) -> pull_head.PullHead:
+        raise SwarmError(f"pull request {url} is closed, not open")
+
+    monkeypatch.setattr(pull_head, "pull_branch", closed)
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
+    assert seen == []
+    assert capsys.readouterr().err == f"swarm: pull request {URL} is closed, not open\n"
 
 
 @pytest.mark.feature("master-freeze-queue")
