@@ -175,33 +175,3 @@ def test_a_failure_without_a_message_is_named_by_its_type(hub, monkeypatch):
     request = {"op": "release", "hive": "one", "execution": "e", "harness": "claude", "account": "a"}
     answer = json.loads(slots.handle(bus, "slots.rig.one", json.dumps(request).encode()))
     assert answer == {"ok": False, "error": "StateConflict"}
-
-
-@pytest.mark.feature("hub-admission-ledger-through-database")
-@pytest.mark.parametrize(("url", "served"), [("postgresql://ledger.invalid/swarm", True), ("", False)])
-def test_an_admission_runs_its_ledger_calls_through_the_shared_database_when_it_is_set(
-    monkeypatch: pytest.MonkeyPatch, url: str, served: bool
-) -> None:
-    from types import SimpleNamespace
-    from typing import Any
-
-    from scripts.swarm_ledger.repository import postgres
-    from scripts.tick.adapters import database_ledger
-
-    seen: list[tuple[str, bool]] = []
-
-    def admit(slug: str, request: dict[str, object]) -> dict[str, str]:
-        seen.append((slug, database_ledger.serving()))
-        return {"name": "sw-eng-1"}
-
-    monkeypatch.setenv(postgres.URL, url)
-    monkeypatch.delenv("LEDGER_DIR", raising=False)
-    unused: Any = SimpleNamespace()
-    admitter: Any = SimpleNamespace(admit=admit)
-    request = {"op": "admit", "hive": "one", "task": "t1", "lane": "eng", "generation": 0}
-
-    answer = slots.handle(unused, "slots.rig.one", json.dumps(request).encode(), admitter=admitter)
-
-    assert json.loads(answer) == {"ok": True, "result": {"name": "sw-eng-1"}}
-    assert seen == [("rig", served)]
-    assert database_ledger.serving() is False

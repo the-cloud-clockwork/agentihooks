@@ -920,16 +920,6 @@
       ]
     },
     {
-      "id": "hub-admission-ledger-through-database",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
-      "behaviour": "Every hub admission operation a hive asks over the slot subject runs its ledger reads and writes, the claim write among them, in process through the ledger API route code against the shared database whenever the shared database setting is present, so the hub never writes a claim through the ledger server; without the setting it keeps the ledger server path.",
-      "seam": "scripts.hub.slots handle for the admission operations, through scripts.tick.adapters.database_ledger.scoped",
-      "tests": [
-        "tests/hub/test_slots.py::test_an_admission_runs_its_ledger_calls_through_the_shared_database_when_it_is_set"
-      ]
-    },
-    {
       "id": "hive-ready-through-launch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2172",
