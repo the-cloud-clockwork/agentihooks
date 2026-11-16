@@ -53,11 +53,12 @@ def until(check, limit=30):
 
 @pytest.mark.wall_clock
 def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, ledger_port: int) -> None:
-    """Every request across a hangup gets 200 and the old server keeps accepting while the successor starts.
+    """Every request across a hangup gets 200 and none waits for the successor to start.
 
-    A sequential client has at most one request in flight when the old server stops accepting, so two answers
-    between the successor appearing and the old server exiting show the old server accepted requests after it
-    started the successor.
+    The successor writes its pid before it serves, so an answer read while the pid file still names the old server
+    came from the old server. A sequential client has at most one request in flight when the old server stops
+    accepting, so two such answers after the successor appeared show the old server kept accepting while the
+    successor started.
     """
     env = {
         **child_env(),
@@ -70,7 +71,7 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, le
     with (tmp_path / "server.out").open("w") as log:
         first = subprocess.Popen([sys.executable, str(SERVER), "--serve"], env=env, stdout=log, stderr=log)
     successor = None
-    events: list[tuple[str, object]] = []
+    events: list[tuple[str, int | str]] = []
     stop = threading.Event()
     try:
         until(lambda: pid_of(tmp_path) == first.pid)
@@ -83,9 +84,10 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, le
                     seen.add(child)
                     events.append(("child", child))
                 try:
-                    events.append(("answer", healthy(ledger_port)))
+                    status: int | str = healthy(ledger_port)
                 except OSError as exc:
-                    events.append(("answer", repr(exc)))
+                    status = repr(exc)
+                events.append(("old" if (tmp_path / ".server.pid").read_text() == str(first.pid) else "new", status))
                 time.sleep(0.005)
 
         worker = threading.Thread(target=hammer, daemon=True)
@@ -96,18 +98,19 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, le
             first.wait(timeout=30)
         except subprocess.TimeoutExpired:
             pytest.fail((tmp_path / "server.out").read_text())
-        events.append(("exited", first.pid))
         until(lambda: pid_of(tmp_path) not in (None, first.pid))
         successor = pid_of(tmp_path)
         time.sleep(0.2)
         stop.set()
         worker.join(60)
+        assert not worker.is_alive(), (tmp_path / "server.out").read_text()
         assert successor not in (None, first.pid)
         assert healthy(ledger_port) == 200
-        answers = [value for kind, value in events if kind == "answer"]
+        answers = [value for kind, value in events if kind != "child"]
         assert answers and set(answers) == {200}, (tmp_path / "server.out").read_text()
-        warming = events[events.index(("child", successor)) : events.index(("exited", first.pid))]
-        assert [kind for kind, _ in warming].count("answer") >= 2, warming
+        assert ("child", successor) in events, f"the old server {first.pid} never listed {successor} as its child"
+        started = [kind for kind, _ in events[events.index(("child", successor)) :]]
+        assert started.count("old") >= 2, started
     finally:
         stop.set()
         for pid in {first.pid, successor} - {None}:
