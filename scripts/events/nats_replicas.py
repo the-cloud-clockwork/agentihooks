@@ -1,6 +1,7 @@
 """Creates the bus's JetStream streams at its replica count and raises existing streams in place, never lowering one."""
 
 from dataclasses import replace
+from typing import Any
 
 from nats.js import JetStreamContext
 from nats.js.api import StreamInfo
@@ -18,16 +19,16 @@ async def raised(js: JetStreamContext, info: StreamInfo, replicas: int) -> Strea
     """Return the stream raised in place to the count when it holds fewer replicas, its data and settings kept."""
     if held(info) >= replicas:
         return info
-    return await js.update_stream(config=replace(info.config, num_replicas=replicas))
+    return await js.update_stream(config=replace(info.config, num_replicas=replicas))  # pyright: ignore[reportUnknownMemberType]
 
 
-async def create(js: JetStreamContext, replicas: int, name: str, **config: object) -> StreamInfo:
+async def create(js: JetStreamContext, replicas: int, name: str, **config: Any) -> StreamInfo:
     """Create a stream at the count; an existing stream is raised to it or keeps a higher count it holds.
 
     Any other difference from the existing stream's configuration still fails with the server's name in use error.
     """
     try:
-        return await js.add_stream(name=name, num_replicas=replicas, **config)
+        return await js.add_stream(name=name, num_replicas=replicas, **config)  # pyright: ignore[reportUnknownMemberType]
     except APIError as exc:
         if exc.err_code != NAME_IN_USE:
             raise
@@ -35,7 +36,7 @@ async def create(js: JetStreamContext, replicas: int, name: str, **config: objec
         if held(info) == replicas:
             raise
     info = await raised(js, info, replicas)
-    return await js.add_stream(name=name, num_replicas=held(info), **config)
+    return await js.add_stream(name=name, num_replicas=held(info), **config)  # pyright: ignore[reportUnknownMemberType]
 
 
 async def raise_all(js: JetStreamContext, replicas: int) -> None:

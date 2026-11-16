@@ -19,7 +19,6 @@ from . import nats_server
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "swarm-streams-hold-the-bus-replica-count"
 REPLICAS = "AGENTIHOOKS_BUS_REPLICAS"
 COUNT = 3
 POLICY = QueuePolicy(max_deliver=2, ack_wait_ms=1000)
@@ -93,7 +92,7 @@ def _provision(url: str, replicas: int) -> None:
         root.close()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-streams-hold-the-bus-replica-count")
 def test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count(url: str) -> None:
     _provision(url, COUNT)
     held = asyncio.run(_read(url))
@@ -113,7 +112,7 @@ def test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count(u
     assert {replicas for replicas, _ in held.values()} == {COUNT}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-streams-hold-the-bus-replica-count")
 def test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages(url: str) -> None:
     _provision(url, 1)
     asyncio.run(_write(url))
@@ -124,14 +123,14 @@ def test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping
     assert asyncio.run(_read(url)) == {name: (COUNT, messages) for name, (_, messages) in before.items()}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-streams-hold-the-bus-replica-count")
 def test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count(url: str) -> None:
     _provision(url, COUNT)
     _provision(url, 1)
     assert {replicas for replicas, _ in asyncio.run(_read(url)).values()} == {COUNT}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-streams-hold-the-bus-replica-count")
 def test_the_replica_count_defaults_to_one_and_comes_from_the_environment() -> None:
     assert BusConfig().replicas == BusConfig.from_environ({}).replicas == 1
     assert REPLICAS_ENV == REPLICAS

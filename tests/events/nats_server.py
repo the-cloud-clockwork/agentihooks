@@ -152,33 +152,25 @@ def cluster(root: Path, size: int = 3) -> Iterator[list[str]]:
     routes: list[str] = []
     try:
         for index in range(size):
+            config = root / f"server-{index}.conf"
+            config.write_text(
+                json.dumps(
+                    {
+                        "server_name": f"{CLUSTER}-{index}",
+                        "listen": "127.0.0.1:-1",
+                        "ports_file_dir": str(ports),
+                        "jetstream": {"store_dir": str(root / f"store-{index}")},
+                        "cluster": {"name": CLUSTER, "listen": "127.0.0.1:-1", "routes": routes},
+                    }
+                )
+            )
             process = subprocess.Popen(
-                [
-                    executable,
-                    "-js",
-                    "-a",
-                    "127.0.0.1",
-                    "-p",
-                    "-1",
-                    "-n",
-                    f"{CLUSTER}-{index}",
-                    "-sd",
-                    str(root / f"store-{index}"),
-                    "--cluster_name",
-                    CLUSTER,
-                    "--cluster",
-                    "nats://127.0.0.1:-1",
-                    "--ports_file_dir",
-                    str(ports),
-                    *routes,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                [executable, "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             processes.append(process)
             listed = _wait_ports(ports / f"{Path(executable).name}_{process.pid}.ports", process)
             urls.append(listed["nats"][0])
-            routes = routes or ["--routes", listed["cluster"][0]]
+            routes = routes or listed["cluster"][:1]
         _replicated(urls[0], size)
         yield urls
     finally:

@@ -372,7 +372,7 @@ async def provision_state(js: JetStreamContext, bucket: str, replicas: int = 1) 
             raise
     info = await nats_replicas.raised(js, info, replicas)
     if bucket not in STATE_LIMITS:
-        return await js.create_key_value(bucket=bucket, replicas=nats_replicas.held(info), **limits)
+        return await js.create_key_value(bucket=bucket, replicas=nats_replicas.held(info), **limits)  # pyright: ignore[reportUnknownMemberType]
     await js.update_stream(config=replace(info.config, max_msgs_per_subject=limits["history"]))
     await nats_payload.reclaim_all(js, stream, f"$KV.{bucket}.")
     bounded = replace(info.config, max_msgs_per_subject=limits["history"], max_bytes=limits["max_bytes"])
