@@ -59,7 +59,11 @@ def _api(endpoint: str, caller: str) -> Any:
 
 
 def _run(repo: str, number: str, caller: str) -> dict[str, Any]:
-    endpoint = f"repos/{repo}/actions/runs/{number}"
+    return read(f"repos/{repo}/actions/runs/{number}", caller)
+
+
+def read(endpoint: str, caller: str) -> dict[str, Any]:
+    """One GitHub read of an Actions run or check run endpoint, through the shared run cache and backoff."""
     return github_reads.run(endpoint, _now(), lambda: _api(endpoint, caller))
 
 
