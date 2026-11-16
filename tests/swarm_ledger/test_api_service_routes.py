@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable
 from email.message import Message
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -212,3 +212,17 @@ def test_the_upkeep_waits_its_interval_after_each_pass(monkeypatch: pytest.Monke
     monkeypatch.setattr(api_service.server, "scheduled_wait", wait)
     api_service.upkeep(stopping, 7.5)
     assert waited == [7.5]
+
+
+def test_the_write_handler_hands_its_request_address_and_server_to_the_http_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handed: list[tuple[object, object, object]] = []
+
+    def init(self: object, request: object, client_address: object, owner: object) -> None:
+        handed.append((request, client_address, owner))
+
+    monkeypatch.setattr(api_service.server.Handler, "__init__", init)
+    request, address, owner = object(), ("10.0.0.1", 4242), object()
+    cast(Any, api_service.WriteHandler)(request, address, owner)
+    assert handed == [(request, address, owner)]

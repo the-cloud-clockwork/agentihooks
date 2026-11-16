@@ -115,6 +115,75 @@ def test_a_service_call_asks_its_own_ledger_whether_the_service_is_refused(refus
     assert str(stopped.value) == f"ledger {SLUG}: {authority_context.REMOTE_SERVICE}"
 
 
+@pytest.mark.parametrize(("pinned", "refused"), [(True, True), (False, False)])
+def test_only_a_pinned_remote_agent_without_the_tick_credential_is_refused_the_service(
+    monkeypatch: pytest.MonkeyPatch, pinned: bool, refused: bool
+) -> None:
+    from scripts import gates
+    from scripts.swarm_ledger import ledger_link
+
+    asked: list[tuple[str, object]] = []
+
+    def from_env(cls: object, environ: object = None) -> SimpleNamespace:
+        return SimpleNamespace(pinned=pinned, name="eng@a")
+
+    def remote(environ: object = None, slug: object = "") -> bool:
+        asked.append(("remote", slug))
+        return True
+
+    def tick_headers(slug: str) -> dict[str, str]:
+        asked.append(("tick", slug))
+        return {}
+
+    monkeypatch.setattr(gates.Who, "from_env", classmethod(from_env))
+    monkeypatch.setattr(ledger_link, "remote", remote)
+    monkeypatch.setattr(authority_context, "tick_headers", tick_headers)
+    assert authority_context.service_refused(SLUG) is refused
+    assert asked == ([("remote", SLUG), ("tick", SLUG)] if pinned else [])
+
+
+def test_a_call_the_database_does_not_answer_exits_naming_the_base_of_its_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def request(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
+        raise OSError("connection refused")
+
+    def base(slug: str = "") -> str:
+        return f"https://ledger.test/{slug}"
+
+    monkeypatch.setattr(ledger, "request", request)
+    monkeypatch.setattr(ledger, "base", base)
+    with pytest.raises(SystemExit) as stopped:
+        ledger.call(SLUG)
+    assert stopped.value.code == f"ledger server not answering on https://ledger.test/{SLUG}: connection refused"
+
+
+def test_a_remote_ledger_base_is_the_base_of_its_own_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[object] = []
+
+    def linked(environ: object = None, slug: object = "") -> str:
+        asked.append(slug)
+        return f"https://ledger.test/{slug}"
+
+    monkeypatch.setattr(ledger, "BASE", "")
+    monkeypatch.setattr(cast(Any, ledger).ledger_link, "base", linked)
+    assert ledger.base(SLUG) == f"https://ledger.test/{SLUG}"
+    assert asked == [SLUG]
+
+
+def test_a_tick_routed_call_acts_as_the_swarm_service() -> None:
+    from scripts.swarm_ledger import ledger_route
+
+    acting: list[str | None] = []
+
+    def call(store: object, slug: str) -> str:
+        acting.append(database_ledger.ACTING.get())
+        return slug
+
+    assert ledger_route.tick(call)(object(), SLUG) == SLUG
+    assert acting == [""]
+
+
 def test_the_chat_command_names_a_ledger_database_that_does_not_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     def gone(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
         raise OSError("connection refused")
