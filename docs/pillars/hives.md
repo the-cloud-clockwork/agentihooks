@@ -1782,13 +1782,14 @@ hub's `lifecycle` reactor acts only on `execution.exited`, which a hive publishe
 the hive honors an execution stop. The tick's `reap` step therefore sends that stop. On every pass it judges each
 agent whose hive recorded its `execution.started`, and for an agent whose work ended it sends the execution stop
 with reason `ended` to that hive in the same pass. It sends the stop whether or not the controller can see the
-agent's pane, because the pane lives on the hive.
+agent's pane, because the pane lives on the hive. A pass that reaches its deadline judges no further agent and
+names how many it left for the next pass.
 
 Before [pull request #11464](https://github.com/the-cloud-clockwork/agentihooks/pull/11464) nothing sent that
-stop. A finished agent kept its seat, its launch slot and its place under its hive's max agents for hours. On 15
-November finished agents, with the live ones, filled the workstation root hive's admission (18 agents against a
-max of 8), and workstation tasks could not launch until the master closed the panes by hand. The controller cannot close those
-panes itself: it runs in its own pod, where no herdr server holds them.
+stop, so a finished agent kept its seat, its launch slot and its place under its hive's max agents until its pane
+was closed by hand, and a hive full of finished agents admitted no new work. The controller cannot close such a
+pane itself: it runs in its own pod, where a pane lookup fails with
+`herdr pane list: no herdr server is running at <socket>`.
 
 #### What counts as ended
 
@@ -1805,7 +1806,7 @@ Otherwise the agent's work has ended when any of these holds:
 | The agent record reads `finished`, as after the agent's own `swarm done` or `swarm ready` | Every lane, masters included |
 | The task row has `done` set, or its state is `done`, `blocked` or `handoff` | Every lane except the master |
 | The task awaits verify and has no claimant | Every lane except the master |
-| The task's claimant is no longer this agent, because it is empty or names another agent | Every lane except the master, for an agent another hive runs |
+| The task's claimant is no longer this agent, because it is empty or names another agent | Every lane except the master, for an agent run by another hive or by a runtime that is not local |
 
 An agent whose work has not ended and whose pane the controller lists as live goes through the same idle and revoked
 seat watch as an agent the tick launched. One whose pane the controller cannot list gets no action from the reap
@@ -1814,15 +1815,15 @@ step; the hub reconciler and the lost hive rules above cover it.
 #### The stop and what the tick reports
 
 The stop is an `execution.stop` event published on the swarm's subject ending in `execution.stop.<hive>`, which
-only that hive reads. Its id is `stop:<started event id>`, and its data names the agent, the hive and the reason. The first stop sent for a hive
-creates that hive's durable stop consumer; until then the hive's stop reader finds nothing and tries again on its
-next pass.
+only that hive reads. Its id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
+The first stop sent for a hive creates that hive's durable stop consumer; until then the hive's stop reader finds
+nothing and tries again on its next pass.
 
 | Stop answer | Tick action | Next |
 |---|---|---|
 | `sent` | `sent the stop for <agent> to its hive: its work ended` | The hive reaps the agent. |
 | `pending` | None | The same stop went out less than 120 seconds ago, the bus dedupe window. A pass after the window sends it again while the agent is still seated. |
-| `ended` | None | The execution's exit is already out, or its spoke claim has left `started`; the hub `lifecycle` reactor settles it. |
+| `ended` | None | The execution already ended: its exit is out, or its spoke claim is gone or has left the `started` state it launched under. Nothing is sent. |
 | `unknown` | None | No started event on the bus matches the agent's current execution. |
 | `failed (<error>)` | `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The bus refused the stop. The next pass judges the agent again and sends a new stop. |
 
@@ -1841,22 +1842,22 @@ For each stop it reads, the hive:
 1. checks that the stop names an execution this hive started, and acknowledges and ignores any other stop;
 2. reaps the agent's session through its own runtime. A failed reap prints
    `hive execution stop for <agent> in swarm <slug> could not reap it; retrying`, and the stop comes back after 30
-   seconds for as long as the agent lives;
+   seconds until the reap succeeds, up to 100,000 deliveries;
 3. publishes `execution.exited` with id `exited:<started event id>`, `reason` `stopped` and `stop_reason` `ended`.
-   When the execution's exit is already out, the hive still reaps the agent and publishes nothing more.
+   When the execution already ended, because its exit is out or its spoke claim is gone or has left the `started`
+   state it launched under, the hive still reaps the agent and publishes nothing more.
 
 The hub's `lifecycle` reactor then acts on that exit for the claim and generation the execution started:
 
 1. It moves the spoke claim to `exiting`.
 2. It removes the agent record, which frees the seat, and in the same Redis transaction releases the hive launch
-   slot and the task claim.
+   slot and, unless the task's claim authority is held, the task claim.
 3. It settles a task the agent still holds in `claimed` or `pr`: `done` when the task row is done, otherwise `open`
    with no claimant. It leaves alone a task that waits on a merge, one on a newer claim generation and one in any
    other state.
 4. It marks the spoke claim `exited`.
 
-The agent leaves `agentihooks swarm <slug> status`. Its place under the hive's max agents frees at the hive's next
-beat, which no longer reports its session.
+The agent leaves `agentihooks swarm <slug> status`, and its seat and launch slot are free for the next launch.
 
 #### Upgrade
 
@@ -1890,9 +1891,9 @@ whose work ended.
 
 | Symptom | Check | Fix |
 |---|---|---|
-| Finished agents keep their seats and fill a hive's max agents | The controller log for `hub execution stop for <agent>` | No line: the controller predates pull request #11464; roll it onto a release that carries it. |
-| The controller logs `sent` for the agent after each dedupe window, and the agent stays seated | The hive's log for `hive execution stop` | No line at all: the hive service predates the stop reader or is not running; restart it as in [Upgrade](#upgrade). `could not reap it; retrying`: the hive's runtime cannot find or reap the session; check herdr on that hive. |
-| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error | The hive's bus credential cannot read its stop consumer. On the workstation root hive after a NATS member grant change, run `agentihooks hive root-bus` again so the credential carries the new grants; on a member hive, `agentihooks hive refresh`. |
+| Finished agents keep their seats and fill a hive's max agents | The controller log for `hub execution stop for <agent>` | No line while finished hub admitted agents are seated: the controller predates pull request #11464; roll it onto a release that carries it. |
+| The controller logs `sent` for the agent after each dedupe window, and the agent stays seated | The hive's log for `hive execution stop` | No line at all: the hive is not reading its stops, because its service predates the stop reader or is not running; restart it as in [Upgrade](#upgrade). The hive logs nothing for a stop it honors, so a quiet log alone proves nothing. `could not reap it; retrying`: the hive's runtime cannot find or reap the session; check herdr on that hive. |
+| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, run `agentihooks hive root-bus` again, because the credential it wrote earlier does not gain grants added after; on a member hive, run `agentihooks hive refresh`. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
 ### Running a spoke

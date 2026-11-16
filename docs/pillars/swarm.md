@@ -136,10 +136,11 @@ When a hive disappears its agents end as if they had exited; see
 
 For an `events` swarm the tick spawns no lane agent, reaps no lane agent through its own runtime and collects no
 acknowledgement: those moved to the hub and the hives. Its reap step still judges every agent the hub admitted. It
-sends the execution stop to the hive of an agent whose work ended, and the hive ends the agent (see
-[Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)). It runs a settled agent whose
-pane is live through the same idle watch as any other agent. It still runs master failover and recovery, the orphan pass that reopens a claimed
-task whose claimant has no agent record and no claim, pane evidence, exits, verification, the dispatcher, master
+sends the execution stop to the hive of an agent whose work ended, and the hive reaps the agent's session (see
+[Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)). An agent whose work has not
+ended and whose pane is live goes through the same idle and revoked seat watch as any other agent. The tick still
+runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
+and no claim, pane evidence, exits, verification, the dispatcher, master
 scaling and the promotion and release watches for both engines. Master agents are reaped by the tick under either engine.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
@@ -3891,9 +3892,8 @@ An agent is spawned for one task, told that task in its opening prompt, and ends
 blocked. The prompt walks it through a fixed order: open an issue where the repo has issues, create a worktree, red test then green,
 pull request into `dev`, queue on green checks with `agentihooks swarm <slug> merge queue <url>`, then `done`. An agent that cannot finish pushes a draft pull request
 and calls `block`. A finished agent is retired on the next tick and its pane closed. On an `events` swarm the
-tick sends the execution stop for a finished hub admitted agent to the hive that started it, and that hive closes
-the agent's pane
-(see [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)).
+tick sends the execution stop for a finished hub admitted agent to the hive that started it, and that hive reaps
+the agent's session (see [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)).
 
 That order is for a task of kind `code` (the default) or `ci`. A task's kind (`ledger task add --kind`)
 picks its prompt and the proof `done` must carry, and the ledger refuses `done` without it:
