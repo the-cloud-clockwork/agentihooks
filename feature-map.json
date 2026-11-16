@@ -1021,6 +1021,7 @@
       ],
       "tests": [
         "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_timeout_later",
+        "tests/hive/test_spoke.py::test_a_new_pending_reservation_under_a_claimed_claim_restarts_the_admit_ask_timeout",
         "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_settles_like_an_asked_claim_on_the_repeat_ask",
         "tests/hive/test_spoke.py::test_a_claimed_claim_another_hive_holds_keeps_the_spoke_busy_past_the_admit_ask_timeout"
       ]
