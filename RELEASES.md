@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.927 · 2026-11-16
+
+### 2026-11-16 · 2be57e9d9b6f · #11474 · @agenticore-app
+
+**Announce the protected grader blob that accepts collected mutation stats on the dateless grader**
+
+This change registers the new grader blob hash from PR #11393 into the frozen registry gate so the dateless grader can accept collected mutation stats without being rejected as an unrecognized artifact. Since the underlying grader was recently modified by dev, its blob fingerprint changed; without announcing the new hash, the protected gate would block legitimate updates. This two-line addition keeps the grader registry in sync with the latest accepted code, closing out the follow-up tracked in #11386.
+
 ## v2.17.926 · 2026-11-16
 
 ### 2026-11-16 · 61a7e07aa532 · #11401 · @nestorcolt
