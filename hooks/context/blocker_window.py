@@ -211,13 +211,14 @@ def _command(tokens: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
     words = _words(tokens)
     if not words:
         return [], []
-    program, rest = Path(words[0]).name, words[1:]
+    program, rest = Path(words[0]).name, iter(words[1:])
     values = _GLOBAL_VALUES.get(program)
     options: list[tuple[str, str]] = []
-    while values is not None and rest and rest[0].startswith("-"):
-        option = rest.pop(0)
-        options.append((option, rest.pop(0) if option in values and rest else ""))
-    return [program, *rest], options
+    for word in rest:
+        if values is None or not word.startswith("-"):
+            return [program, word, *rest], options
+        options.append((word, next(rest, "") if word in values else ""))
+    return [program], options
 
 
 def _targets(words: list[str]) -> tuple[str, ...] | None:
