@@ -118,6 +118,19 @@
       ]
     },
     {
+      "id": "hub-shared-ledger-copy-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-shared-copy-revision",
+      "behaviour": "The hub's shared ledger copy reads the ledger revision while it holds the swarm's lock and fetches the export again only for a newer revision, so a reader holding an older revision never relabels the copy backwards or forces another fetch, and every reader gets task rows of its own, so a reader that changes a row, as the claim cap does when it blocks a task during admission, never changes the copy the other readers share.",
+      "seam": "readiness.Source.state: the revision read inside the per swarm lock, the newer revision check and the per caller task rows; the claim cap's row update inside hub admission",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_a_reader_handed_an_older_revision_keeps_the_newer_copy_and_fetches_nothing",
+        "tests/swarm/test_readiness.py::test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn",
+        "tests/swarm/test_readiness.py::test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy",
+        "tests/hub/test_admission_claim_cap.py::test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
