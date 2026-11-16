@@ -161,6 +161,9 @@ def test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the
         "queue · 0 pending · 0m wait · no cache lookups",
         "backfill · 2 pending · no free slot · 67% cache hits",
     ]
+    parts = row.locator("li").first.locator(".lab-part")
+    assert parts.all_inner_texts() == ["pull request ·", "3 pending ·", "4m wait ·", "75% cache hits"]
+    assert parts.evaluate_all("spans => spans.map(s => getComputedStyle(s).whiteSpace)") == ["nowrap"] * 4
     assert row.locator(".lab-error").count() == 0
     keys = page.eval_on_selector_all("#stats > .stat", "rows => rows.map(r => r.dataset.stat)")
     assert keys[-2:] == ["lab", "top-bottleneck"]
