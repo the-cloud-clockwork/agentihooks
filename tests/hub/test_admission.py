@@ -783,12 +783,14 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
 ) -> None:
     from unittest.mock import Mock
 
+    from scripts import serena_router_daemon
     from scripts.events.config import QueuePolicy
     from scripts.hive import lanes
     from scripts.hive.spoke import Spoke, SpokeConfig
     from scripts.swarm import readiness
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
     bus: Any = open_bus(BusConfig())
     slots.serve(bus, admitter=rig.admitter)
     request = type(bus).request

@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
+from scripts import serena_router_daemon
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, admission, execution_stop, presence, registry, workstation
@@ -54,7 +55,10 @@ class LaneTasks:
         config = self.configs(event.swarm)
         if config.repo_origin:
             config = replace(config, repo=config.repo_origin)
-        return SpawnRequest(config, event.data["lane"], admitted["name"], placed(event.swarm, admitted["task"]))
+        task = placed(event.swarm, admitted["task"])
+        if not serena_router_daemon.ensure():
+            raise RuntimeError("spawn unavailable: serena")
+        return SpawnRequest(config, event.data["lane"], admitted["name"], task)
 
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
