@@ -49,19 +49,19 @@ def run(slug: str, store: RedisStore, runtime: "Runtime", doc: dict, now_ms: int
         last = idle.last_prompt(store.redis, slug, agent.name)
         if observed.typed or (last is not None and now_ms - last < wake.quiet_ms(os.environ)):
             continue
-        if not _backstop(inbox, agent.name, agent.seat or seat_address(slug, MASTER), waiting(doc)):
+        if not _backstop(inbox, agent.name, agent.seat or seat_address(slug, MASTER), waiting(doc), now_ms):
             continue
         store.redis.hset(key, "woken_at", now_ms)
         actions.append(f"sent idle master {agent.name} the backstop through its inbox to work waiting Priorities")
     return actions
 
 
-def _backstop(inbox: InboxStore, name: str, seat: str, work: bool) -> bool:
+def _backstop(inbox: InboxStore, name: str, seat: str, work: bool, now_ms: int) -> bool:
     mail = inbox.open_items(name) + inbox.open_items(seat)
     earlier = [item for item in mail if item.ref.startswith(f"{BACKSTOP_REF}:")]
     if any(item.state == "pending" for item in earlier) or not (work or len(mail) > len(earlier)):
         return False
     for item in earlier:
         inbox.settle(item.id, item.address, "done", "a newer backstop replaced it")
-    inbox.send(wake.BY, seat, PROMPT, ref=f"{BACKSTOP_REF}:{name}")
+    inbox.send(wake.BY, seat, PROMPT, ref=f"{BACKSTOP_REF}:{name}:{now_ms}")
     return True
