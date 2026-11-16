@@ -4878,6 +4878,16 @@
       ]
     },
     {
+      "id": "fleet-red-notice-starts-with-its-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2517",
+      "behaviour": "The fleet red notice step needs only the drained resume step, like its slow lane siblings promotion refresh and release alert, and waits on no spawn chain step, so it starts early in a slow pass and its live listing, about twenty five seconds once the ten minute save expires, ends before the slow deadline; a cut would drop the listing save and make every later pass list live again and be cut again.",
+      "seam": "the needs of the fleet red notice step in scripts.tick.steps.tasks, read through the registry waves",
+      "tests": [
+        "tests/swarm/test_fleet_red.py::test_the_notice_step_waits_on_no_spawn_chain_step_so_a_slow_pass_cannot_cut_its_live_listing"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
