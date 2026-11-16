@@ -398,6 +398,7 @@ def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard:
     from scripts.swarm_ledger.repository import legacy
 
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
     monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
@@ -417,6 +418,7 @@ def test_a_second_api_service_on_a_held_folder_exits_before_touching_it(serving:
     )
     legacy.adopt.assert_not_called()
     server.ThreadingHTTPServer.assert_not_called()
+    assert not (serving / ".server.pid").exists()
 
 
 def test_the_api_service_holds_the_lease_while_it_serves_and_releases_it_after(serving: Path) -> None:

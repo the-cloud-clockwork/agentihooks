@@ -2,7 +2,6 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, cast
 
 REMOTE_SERVICE = "a remote ledger client cannot make service writes; the operator credential stays on its host"
 _current = None
@@ -31,8 +30,7 @@ def service_refused(slug: str) -> bool:
     from scripts.gates import Who
     from scripts.swarm_ledger.ledger_link import remote
 
-    who: Any = cast(Any, Who).from_env()
-    return bool(who.pinned) and remote(slug=slug) and not tick_headers(slug)
+    return Who.from_env().pinned and remote(slug=slug) and not tick_headers(slug)
 
 
 def _hosted_secret(server_secret) -> str | None:

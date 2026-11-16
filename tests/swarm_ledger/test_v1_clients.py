@@ -82,9 +82,14 @@ def test_stop_gate_bypass_is_recorded_through_the_versioned_route(routes):
     assert legacy(routes) == []
 
 
-def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch):
-    logged = []
-    monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
+def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    logged: list[str] = []
+
+    def gone(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Answer as a ledger database that does not answer."""
+        raise OSError("the ledger database is not answering")
+
+    monkeypatch.setattr(database_ledger, "request", gone)
     monkeypatch.setattr(ledger_hook, "log", logged.append)
     ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 1)
     assert len(logged) == 1
@@ -146,9 +151,9 @@ class Recorder:
     def __init__(self, reply=None, error=None):
         self.calls, self.reply, self.error = [], reply, error
 
-    def __call__(self, slug: str, ops: list[dict[str, Any]], **options: Any) -> Any:
+    def __call__(self, slug: str, ops: list[dict[str, Any]], timeout: float | None = None) -> Any:
         self.calls.append((slug, [dict(op) for op in ops], database_ledger.ACTING.get() == ""))
-        self.options = options
+        self.options = {} if timeout is None else {"timeout": timeout}
         if self.error is not None:
             raise self.error
         return self.reply
