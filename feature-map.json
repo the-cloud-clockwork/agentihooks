@@ -4687,6 +4687,18 @@
       ]
     },
     {
+      "id": "protected-lint-grades-the-pull-request-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2550",
+      "behaviour": "The Tests lint step that runs the protected gate grades the pull request head against its merge base with the trusted event base, and the run revision outside a pull request, so frozen registry and grader changes that landed on dev after the event base are never blamed on a pull request behind dev, while a pull request that edits a frozen file still fails.",
+      "seam": "The Tests lint step run text that invokes scripts.gate_protected, executed over a planted repository with a grader worktree at the event base",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request"
+      ]
+    },
+    {
       "id": "hive-rollout-lease-failed-sync",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
