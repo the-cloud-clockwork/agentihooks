@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_ledger_outbox.py::test_an_answer_sent_while_the_server_is_stopped_lands_as_the_master_when_it_returns": {
+    "reader": "standards-reader",
+    "reason": "Talk queueing while the ledger server is down, the hold of other writes behind queued talk and the flush before a live write lived only in the deleted HTTP server_call; ledger.queue is fed only by LedgerClient offline writes, whose in order replay keeps its own test."
+  }
+}

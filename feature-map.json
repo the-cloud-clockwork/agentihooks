@@ -3462,11 +3462,10 @@
     {
       "id": "ledger-join-past-talk",
       "origin": "inventory",
-      "behaviour": "A ledger join lands past pending talk while pending talk still holds other writes.",
+      "behaviour": "A ledger join lands in process past records waiting in the outbox and leaves them for the outbox replay.",
       "seam": "agentihooks ledger join",
       "tests": [
-        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk",
-        "tests/swarm_ledger/test_ledger.py::test_pending_talk_still_holds_other_writes"
+        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk"
       ]
     },
     {

@@ -5,6 +5,7 @@ import sqlite3
 import threading
 from contextlib import nullcontext
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -450,6 +451,58 @@ def test_an_api_service_on_the_shared_database_migrates_and_serves_beside_a_held
     server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with(server.POLL_S)
     assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
     assert ledger_writer.conflicts_total(serving) == 0
+
+
+class Lease:
+    """A writer lease that records each acquire's wait and is held when it names a holder."""
+
+    def __init__(self, holder: dict | None = None) -> None:
+        self.holder = holder
+        self.waits: list[float] = []
+
+    def acquire(self, claimant: dict, wait: float) -> "Lease":
+        self.waits.append(wait)
+        if self.holder is not None:
+            raise ledger_writer.WriterConflict(Path("/ledgers"), self.holder)
+        return self
+
+
+def test_a_free_lease_is_taken_on_the_first_try() -> None:
+    from scripts.swarm_ledger import api_service
+
+    lease = Lease()
+    api_service.take_lease(lease, ledger_writer)
+    assert lease.waits == [0.0]
+
+
+def test_a_fresh_server_refuses_a_held_lease_at_once() -> None:
+    from scripts.swarm_ledger import api_service
+
+    lease = Lease(CLAIMANT)
+    with pytest.raises(SystemExit, match="pid 4242 on writer-a; a second writer is refused"):
+        api_service.take_lease(lease, ledger_writer)
+    assert lease.waits == [0.0]
+
+
+def test_the_api_service_releases_the_lease_only_after_its_requests_end(serving: Path) -> None:
+    from scripts.swarm_ledger import api_service
+
+    held = []
+    httpd: Mock = cast(Mock, server.ThreadingHTTPServer).return_value
+    httpd.server_close.side_effect = lambda: held.append(ledger_writer.holder(serving)["pid"])
+    api_service.serve()
+    assert held == [os.getpid()]
+    ledger_writer.WriterLease(serving).acquire(OTHER).release()
+
+
+def test_a_failed_api_service_still_releases_the_lease(serving: Path) -> None:
+    from scripts.swarm_ledger import api_service
+
+    httpd: Mock = cast(Mock, server.ThreadingHTTPServer).return_value
+    httpd.serve_forever.side_effect = OSError("disk full")
+    with pytest.raises(OSError, match="disk full"):
+        api_service.serve()
+    ledger_writer.WriterLease(serving).acquire(OTHER).release()
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

@@ -116,16 +116,6 @@ def test_join_lands_past_pending_talk(
     assert outbox.path().read_text() == before
 
 
-@pytest.mark.feature("ledger-join-past-talk")
-def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.inbox import outbox
-
-    monkeypatch.setattr(outbox, "waiting", lambda lane: lane == "ledger")
-    monkeypatch.setattr(outbox, "flush", lambda store: None)
-    monkeypatch.setattr(ledger, "request", lambda slug, ops: {"read": slug})
-    assert ledger.call("s", []) == {"read": "s"}
-
-
 @pytest.mark.parametrize("argv", WRITES, ids=" ".join)
 @pytest.mark.feature("ledger-write-results")
 def test_every_write_command_exits_non_zero_naming_the_refusal_reason(cli, capsys, argv):

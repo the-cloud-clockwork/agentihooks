@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_api_v1.py::test_service_flag_keeps_operator_and_worker_credentials_distinct": {
+    "reader": "standards-reader",
+    "reason": "The HTTP ledger client transport is deleted: uploads, proof ledger calls, proof controls, launch tokens, replays and the controller and chat clients run the ledger API route code in process, so no credential, access header, plain http refusal, HTTP timeout or stall retry of these calls remains, and ledger.resource and ledger.export always retry, so the run once read is gone."
+  }
+}

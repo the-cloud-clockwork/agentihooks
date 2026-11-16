@@ -186,6 +186,22 @@ def test_a_transient_outage_retries_reads_without_starting_a_server(remote: None
     popen.assert_not_called()
 
 
+def test_a_missing_token_or_foreign_label_is_unauthenticated_and_never_uses_the_local_credential(remote: None) -> None:
+    from scripts.swarm_ledger import ledger_authority
+
+    os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN")
+    os.environ.pop("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", None)
+    with (
+        patch.object(ledger.repository, "token", side_effect=AssertionError("the local credential was read")),
+        pytest.raises(ledger.Unauthenticated, match="^unauthenticated: a remote ledger client needs"),
+    ):
+        ledger.credentials(SLUG)
+    token = ledger_authority.agent_token("admin", SLUG, WORKER)
+    with patch.object(ledger_authority, "remote", return_value=False):
+        assert ledger_authority.principal("admin", SLUG, token, WORKER) == WORKER
+        assert ledger_authority.principal("admin", SLUG, token, "eng-9@another-swarm") is None
+
+
 @pytest.mark.parametrize("code", [401, 403])
 def test_a_refused_hive_credential_is_unauthenticated(remote, code):
     from scripts.tick.adapters import database_ledger
