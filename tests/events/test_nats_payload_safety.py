@@ -88,7 +88,7 @@ def test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_t
     queued: list[tuple[Any, ...]] = []
     opened._serving = SimpleNamespace(submit=lambda *call: queued.append(call))
     opened._nc = SimpleNamespace(max_payload=100, subscribe=AsyncMock(), flush=AsyncMock())
-    monkeypatch.setattr(nats, "time", SimpleNamespace(monotonic=lambda: 20.6))
+    monkeypatch.setattr(nats, "time", SimpleNamespace(monotonic_ns=lambda: 20_600_000_000))
     waits: list[int] = []
 
     def handler(subject: str, data: bytes) -> bytes:
@@ -100,9 +100,9 @@ def test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_t
     stale, fresh = (SimpleNamespace(subject="slots.rig.m1", data=b"x", reply="r", respond=AsyncMock()) for _ in "ab")
     asyncio.run(callback(stale))
     answer, message, received = queued[0]
-    assert (message, received) == (stale, 20.6)
-    answer(stale, 20.0)
-    answer(fresh, 20.001)
+    assert (message, received) == (stale, 20_600_000_000)
+    answer(stale, 20_000_000_000)
+    answer(fresh, 20_000_000_001)
     stale.respond.assert_not_awaited()
     fresh.respond.assert_awaited_once_with(b"x")
     assert waits == [599]

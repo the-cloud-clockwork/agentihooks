@@ -344,8 +344,9 @@ def test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub(hub:
 def test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot(
     hub: Any, signer: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Thirty three held admissions fill every hub serve thread, so a take sent after them waits in the hub queue past
-    the hive's wait; one freed thread then drains the queue in order, and the next execution's take finds the slot free."""
+    """Thirty three held admissions fill every hub serve thread, so a take sent after them waits in the hub queue
+    past the hive's wait; one freed thread then drains the queue in order, and the next execution's take finds the
+    slot free."""
     import re
     import threading
     import time
@@ -376,7 +377,8 @@ def test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot(
         with pytest.raises(TimeoutError):
             lost.take("lost", "claude")
         time.sleep(0.2)
-        for task in gates.keys() - set(entered[1:]):
+        queued = gates.keys() - set(entered)
+        for task in (entered[0], *queued):
             gates[task].set()
         after = account_slots.Remote(account_slots.asker(rig, "rig", "m1", 5_000), "m1", lambda: report)
         assert after.take("next", "claude") == "a"
@@ -384,7 +386,10 @@ def test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot(
         for gate in gates.values():
             gate.set()
         client.close()
-    dropped = r"^bus: dropped a request on 'slots\.rig\.m1' after it waited \d+ ms in the serve queue, past its requester's 500 ms wait$"
+    dropped = (
+        r"^bus: dropped a request on 'slots\.rig\.m1' after it waited \d+ ms in the serve queue, "
+        r"past its requester's 500 ms wait$"
+    )
     assert re.search(dropped, capsys.readouterr().err, re.MULTILINE)
 
 
