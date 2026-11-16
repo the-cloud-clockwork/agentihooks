@@ -2235,7 +2235,7 @@ def test_the_required_gate_accepts_a_stats_skip_when_the_plan_collected() -> Non
     step["run"] = _with_collected_stats(step["run"])
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
-    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+    assert gate_protected.grade(base, config, head, config, actors) == []
 
 
 @pytest.mark.parametrize(
