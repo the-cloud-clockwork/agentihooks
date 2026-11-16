@@ -13,6 +13,8 @@ SONNET = "sonnet"
 SONNET_EFFORT = "xhigh"
 FRONTIER_EFFORT = "high"
 CLAUDE_PREFIXES = ("claude", "opus", SONNET, "haiku", "fable")
+CODEX_PREFIXES = ("gpt", "codex", "o1", "o3", "o4")
+FOREIGN = {"claude": CODEX_PREFIXES, "codex": CLAUDE_PREFIXES}
 KEYS = ("lower", "higher")
 STEPS = ((SONNET, SONNET_EFFORT), ("", "medium"), ("", "high"), ("", "xhigh"))
 STARTS = {"S": 0, "M": 1, "L": 2}
@@ -59,6 +61,16 @@ def described(option: ModelPick) -> str:
     return f"{LABELS.get(option.model, option.model)} at {EFFORT_WORDS[option.effort]}: {fit}"
 
 
+def foreign(harness: str, model: str) -> bool:
+    """Whether the model belongs to the other harness: a Claude model on Codex or a Codex model on Claude."""
+    return model.startswith(FOREIGN.get(harness, ()))
+
+
+def suited(harness: str, model: str, fallback: str) -> str:
+    """The model when the harness runs it, else the fallback; every launch path chooses its model through this."""
+    return fallback if foreign(harness, model) else model
+
+
 def pick(
     harness: str,
     lane: dict[str, str],
@@ -70,7 +82,7 @@ def pick(
     from scripts.init_agent import model_effort
 
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
-    if harness == "codex" and default.model.startswith(CLAUDE_PREFIXES):
+    if foreign(harness, default.model):
         default = replace(default, model=default_model or model_effort(harness, [], environ)[0])
     if default.effort != AUTO or harness not in EFFORTS:
         return default

@@ -3664,6 +3664,8 @@
       ],
       "tests": [
         "tests/swarm/test_model_pick.py::test_a_claude_launch_on_a_codex_pinned_lane_takes_the_claude_model",
+        "tests/swarm/test_model_pick.py::test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model",
+        "tests/swarm/test_model_pick.py::test_every_default_model_suits_its_own_harness_and_not_the_other",
         "tests/hive/test_orders.py::test_a_hive_order_never_launches_the_other_harness_lane_model",
         "tests/hive/test_orders.py::test_a_hive_order_keeps_a_lane_model_its_harness_runs",
         "tests/tick/steps/test_successor_fill.py::test_a_successor_with_no_saved_model_never_takes_the_other_harness_lane_model",

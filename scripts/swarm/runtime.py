@@ -150,11 +150,13 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
     return recorded and lane != MASTER
 
 
-def _lane_default(lane, agent, chosen, config=None):
+def _lane_default(lane: str, agent: str, chosen: dict[str, Any], config: Any = None) -> model_pick.ModelPick:
     model = default_models.model(config, agent)
     if lane == MASTER:
         return model_pick.frontier(agent, model)
-    return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
+    return model_pick.ModelPick(
+        model_pick.suited(agent, _set(chosen.get("model")) or model, model), chosen.get("effort")
+    )
 
 
 def herdr_call(args: list[str]) -> dict[str, Any]:

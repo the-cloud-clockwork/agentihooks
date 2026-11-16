@@ -268,6 +268,39 @@ def test_a_claude_launch_on_a_codex_pinned_lane_takes_the_claude_model(monkeypat
     assert model_pick.pick("claude", lane, {}, {}) == ModelPick(MODEL_DEFAULTS["claude"], "high")
 
 
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "model", "expected"),
+    [
+        ("codex", "opus", "fallback"),
+        ("codex", "claude-sonnet-5-5", "fallback"),
+        ("codex", "gpt-6.1-sol", "gpt-6.1-sol"),
+        ("codex", "auto", "auto"),
+        ("codex", "", ""),
+        ("claude", "gpt-6.1-sol", "fallback"),
+        ("claude", "o4-mini", "fallback"),
+        ("claude", "codex-mini", "fallback"),
+        ("claude", "fable", "fable"),
+        ("copilot", "gpt-6.1-sol", "gpt-6.1-sol"),
+    ],
+)
+def test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model(
+    harness: str, model: str, expected: str
+) -> None:
+    assert model_pick.suited(harness, model, "fallback") == expected
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize("defaults", [MODEL_DEFAULTS, default_models.DEFAULTS], ids=["launch", "swarm"])
+def test_every_default_model_suits_its_own_harness_and_not_the_other(defaults: dict[str, str]) -> None:
+    own = {harness: model_pick.foreign(harness, model) for harness, model in defaults.items()}
+    other = {
+        harness: model_pick.foreign({"claude": "codex", "codex": "claude"}[harness], model)
+        for harness, model in defaults.items()
+    }
+    assert (own, other) == ({"claude": False, "codex": False}, {"claude": True, "codex": True})
+
+
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("missing lane called classifier"))
     assert model_pick.pick("claude", {}, {}, {}) == ModelPick("", "")

@@ -3,9 +3,11 @@
 from importlib import import_module
 from typing import Any
 
+from scripts.swarm import model_pick
 from scripts.swarm.store import SwarmConfig
 
 effort_range: Any = import_module("scripts.swarm.effort_range")
+default_models: Any = import_module("scripts.swarm.default_models")
 
 
 def lane_model(chosen: dict[str, Any]) -> str:
@@ -15,17 +17,18 @@ def lane_model(chosen: dict[str, Any]) -> str:
 
 
 def filled(saved: dict[str, Any], config: SwarmConfig, lane: str) -> dict[str, Any]:
-    """A saved launch whose empty model takes the lane's pinned model and whose empty effort the lane range effort."""
-    harness = saved.get("harness")
+    """A saved launch whose empty model takes the lane model its harness runs and whose empty effort the range effort."""
+    harness: Any = saved.get("harness")
     if harness not in effort_range.EFFORTS or (saved.get("model") and saved.get("effort")):
         return saved
     settings: Any = config
     chosen: dict[str, Any] = settings.lanes.get(lane, {})
     bounds: tuple[str, str] = effort_range.bounds(config, lane)
     wanted = chosen.get("effort") if effort_range.rank(chosen.get("effort")) is not None else bounds[0]
+    fallback = default_models.model(config, harness)
     return {
         **saved,
-        "model": saved.get("model") or lane_model(chosen),
+        "model": saved.get("model") or model_pick.suited(harness, lane_model(chosen), fallback),
         "effort": saved.get("effort") or effort_range.clamp(harness, wanted, bounds),
     }
 
