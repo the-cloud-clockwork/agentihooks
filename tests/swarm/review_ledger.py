@@ -9,7 +9,7 @@ GUARD_DEFAULTS: dict[str, Any] = {"review_readers": []}
 class ReviewLedger:
     def __init__(self, rows: dict[str, dict[str, Any]] | None = None, slug: str = "sw") -> None:
         self.slug = slug
-        self.rows = rows if rows is not None else {"t1": {"id": "t1"}}
+        self.rows: dict[str, dict[str, Any]] = rows if rows is not None else {"t1": {"id": "t1"}}
         self.writes: list[dict[str, Any]] = []
 
     def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
