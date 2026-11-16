@@ -1,4 +1,4 @@
-"""Lab check waits: a wait on the check run of a lab or lab shadow gate ends when GitHub reports it completed."""
+"""Lab check waits: a wait on a check run, such as a lab or lab shadow gate's, ends when GitHub reports it completed."""
 
 import re
 
@@ -11,8 +11,11 @@ CHECK_URL = re.compile(
 
 def resolution(target: str) -> str:
     """What ended the wait on the check run at target, in plain words, or '' while it still holds."""
-    repo, plain, pulled = CHECK_URL.findall(target)[0]
     outcome = f"lab check {target}"
+    found = CHECK_URL.fullmatch(target)
+    if found is None:
+        return f"{outcome}, not a check run url; wait on a check run url"
+    repo, plain, pulled = found.groups()
     try:
         check = run_wait.read(f"repos/{repo}/check-runs/{plain or pulled}", "waits.lab")
     except run_wait.Unreachable as error:

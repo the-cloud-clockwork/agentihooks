@@ -2342,7 +2342,7 @@
     {
       "id": "swarm-lab-wait",
       "origin": "inventory",
-      "behaviour": "A wait on a lab check run url holds while the check runs, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, and refuses any target that is not a check run url.",
+      "behaviour": "A lab wait on a check run url holds while the check runs, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, and refuses any target that is not a check run url.",
       "seam": "agentihooks swarm wait --on lab and the tick wait pass",
       "tests": [
         "tests/swarm/test_lab_wait.py::test_a_lab_wait_refuses_anything_but_a_check_run_url",
