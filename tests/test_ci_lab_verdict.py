@@ -149,14 +149,14 @@ def test_runs_from_other_apps_never_satisfy_the_poll() -> None:
 @pytest.mark.parametrize("extra", [[], ["{}", "org/repo", "abc", LAB]])
 def test_unknown_step_is_refused(tmp_path: Path, extra: list[str]) -> None:
     args = ["grade", str(tree(tmp_path, ["lint"])), "pull_request", *extra]
-    with pytest.raises(ValueError, match="unknown step 'grade'; expected authority or verdict"):
+    with pytest.raises(ValueError, match="^unknown step 'grade'; expected authority or verdict$"):
         verdict.main(args, {"GITHUB_OUTPUT": str(tmp_path / "out")})
 
 
 def test_verdict_refuses_an_unnamed_app_before_polling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(verdict, "fetcher", lambda repo, sha: pytest.fail("polled"))
     args = ["verdict", str(tree(tmp_path, ["lint"])), '{"lint": true}', "org/repo", "abc", ""]
-    with pytest.raises(ValueError, match="no lab App is named; set AGENTIHOOKS_LAB_APP to the lab App slug"):
+    with pytest.raises(ValueError, match="^no lab App is named; set AGENTIHOOKS_LAB_APP to the lab App slug$"):
         verdict.main(args, {"GITHUB_OUTPUT": str(tmp_path / "out")})
     assert not (tmp_path / "out").exists()
 
