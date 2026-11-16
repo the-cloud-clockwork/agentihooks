@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import ledger_comments
 import ledger_kinds
@@ -59,6 +59,8 @@ UPDATABLE = (
     "doc_items",
     "watchdog",
     "recovery",
+    "review_rounds",
+    "review_readers",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 HARNESSES = ("", "claude", "codex")
@@ -73,6 +75,7 @@ MATCHED: dict[str, Any] = {
     "awaiting": "",
     "difficulty": "",
     "group_members": [],
+    "review_readers": [],
 }
 LIST_FIELDS = (
     "depends_on",
@@ -84,13 +87,14 @@ LIST_FIELDS = (
     "repositories",
     "needs",
     "doc_items",
+    "review_readers",
 )
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
 APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog", "review_rounds")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
 PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
@@ -173,6 +177,7 @@ def check(op):
     check_guards(op)
     check_quote(op)
     check_lists(fields)
+    check_review_rounds(fields)
     check_stack(fields)
     check_release(fields)
     check_applied(fields)
@@ -309,7 +314,7 @@ def check_pull_scopes(fields: dict) -> None:
         )
 
 
-def check_lists(fields):
+def check_lists(fields: dict[str, Any]) -> None:
     check_repository_branches(fields)
     check_pull_scopes(fields)
     for key in LIST_FIELDS:
@@ -320,6 +325,18 @@ def check_lists(fields):
         raise ValueError("repositories must list absolute local repository paths")
     if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
+
+
+def _mapping(value: object) -> TypeGuard[dict[str, object]]:
+    """Whether a decoded JSON value is an object."""
+    return isinstance(value, dict)
+
+
+def check_review_rounds(fields: dict[str, Any]) -> None:
+    """Refuse review rounds that are not round counter names mapped to the whole number of rounds spent on each."""
+    rounds: object = fields.get("review_rounds", {})
+    if not _mapping(rounds) or not all(name and type(spent) is int and spent >= 0 for name, spent in rounds.items()):
+        raise ValueError("review_rounds must map round counter names to nonnegative integers")
 
 
 def check_bools(fields: dict[str, Any]) -> None:

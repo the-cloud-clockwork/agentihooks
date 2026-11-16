@@ -1,96 +1,191 @@
+import hashlib
 import json
+from typing import Any
 
 import pytest
 
 from scripts.gates import log as gate_log
 from scripts.swarm import review_rounds
 from scripts.swarm.store import SwarmError
+from tests.swarm.review_ledger import ReviewLedger
 
 CLOSED = (
     "Review is closed after three rounds: any finding still open gets one ruling from the other reader, "
     "then the merge proceeds."
 )
+ME = "engineer@a1b2c3-0001"
+FIRST = "https://github.com/o/r/pull/1"
+SECOND = "https://github.com/o/r/pull/2"
+
+
+def start(ledger, home, task="t1", slug="sw"):
+    return review_rounds.start(slug, task, ledger, ME, home)
 
 
 def test_the_first_two_rounds_carry_no_notice(tmp_path):
-    assert review_rounds.start("sw", "t1", tmp_path) == {"task": "t1", "round": 1}
-    assert review_rounds.start("sw", "t1", tmp_path) == {"task": "t1", "round": 2}
+    ledger = ReviewLedger()
+    assert start(ledger, tmp_path) == {"task": "t1", "round": 1}
+    assert start(ledger, tmp_path) == {"task": "t1", "round": 2}
 
 
 def test_a_task_at_three_rounds_gets_the_close_notice(tmp_path):
-    review_rounds.start("sw", "t1", tmp_path)
-    review_rounds.start("sw", "t1", tmp_path)
-    assert review_rounds.start("sw", "t1", tmp_path) == {"task": "t1", "round": 3, "notice": CLOSED}
+    ledger = ReviewLedger()
+    start(ledger, tmp_path)
+    start(ledger, tmp_path)
+    assert start(ledger, tmp_path) == {"task": "t1", "round": 3, "notice": CLOSED}
 
 
-def test_a_fourth_round_is_refused_with_the_close_text(tmp_path):
+def test_a_fourth_round_is_refused_with_the_close_text_and_writes_nothing(tmp_path):
+    ledger = ReviewLedger()
     for _ in range(3):
-        review_rounds.start("sw", "t1", tmp_path)
+        start(ledger, tmp_path)
     with pytest.raises(SwarmError) as refused:
-        review_rounds.start("sw", "t1", tmp_path)
+        start(ledger, tmp_path)
     assert str(refused.value) == f"task t1 gets no fourth review round. {CLOSED}"
     with pytest.raises(SwarmError):
-        review_rounds.start("sw", "t1", tmp_path)
+        start(ledger, tmp_path)
+    assert len(ledger.writes) == 3
+    assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": 3}
 
 
 def test_rounds_count_per_task_and_per_swarm(tmp_path):
+    ledger = ReviewLedger({"t1": {"id": "t1"}, "t2": {"id": "t2"}})
     for _ in range(3):
-        review_rounds.start("sw", "t1", tmp_path)
-    assert review_rounds.start("sw", "t2", tmp_path) == {"task": "t2", "round": 1}
-    assert review_rounds.start("other", "t1", tmp_path) == {"task": "t1", "round": 1}
+        start(ledger, tmp_path)
+    assert start(ledger, tmp_path, task="t2") == {"task": "t2", "round": 1}
+    assert start(ReviewLedger(slug="other"), tmp_path, slug="other") == {"task": "t1", "round": 1}
 
 
-def test_rounds_live_in_the_swarm_home_by_default(tmp_path, monkeypatch):
-    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
-    review_rounds.start("sw", "t1")
-    assert (tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds-before-pr").read_text() == "1"
-
-
-def test_rounds_live_in_the_home_given(tmp_path, monkeypatch):
-    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path / "default")
-    review_rounds.start("sw", "t1", tmp_path / "given")
-    assert (tmp_path / "given" / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds-before-pr").read_text() == "1"
-    assert not (tmp_path / "default").exists()
-
-
-@pytest.mark.parametrize("current", ["first", "second"])
-def test_legacy_rounds_remain_bound_to_the_first_pull_request(tmp_path, current):
-    first = "https://github.com/o/r/pull/1"
-    second = "https://github.com/o/r/pull/2"
-    legacy = tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds"
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("3")
-    if current == "first":
-        with pytest.raises(SwarmError, match="no fourth review round"):
-            review_rounds.start("sw", "t1", tmp_path, pr_url=first)
-    assert review_rounds.start("sw", "t1", tmp_path, pr_url=second, first_pr=first)["round"] == 1
+@pytest.mark.feature("review-state-on-ledger")
+def test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_the_ledger(tmp_path):
+    ledger = ReviewLedger({"t1": {"id": "t1", "review_rounds": {"rounds-before-pr": 2}}})
+    assert start(ledger, tmp_path / "successor") == {"task": "t1", "round": 3, "notice": CLOSED}
     with pytest.raises(SwarmError, match="no fourth review round"):
-        review_rounds.start("sw", "t1", tmp_path, pr_url=first)
-    assert review_rounds.start("sw", "t1", tmp_path, pr_url=second)["round"] == 2
+        start(ledger, tmp_path / "another-hive")
 
 
-def test_rounds_spent_before_any_pull_request_do_not_count_against_the_first_one(tmp_path):
-    first = "https://github.com/o/r/pull/1"
+@pytest.mark.feature("review-state-on-ledger")
+def test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_on_this_machine(tmp_path):
+    ledger = ReviewLedger({"t1": {"id": "t1", "review_rounds": {"rounds-before-pr": 1}, "review_readers": ["x"]}})
+    start(ledger, tmp_path)
+    assert ledger.writes == [
+        {"task": "t1", "fields": {"review_rounds": {"rounds-before-pr": 2}}, "by": ME, "if_match": None}
+    ]
+    assert ledger.rows["t1"]["review_readers"] == ["x"]
+    assert sorted(path.name for path in (tmp_path / "sw" / "gates" / "reviews").iterdir()) == ["rounds.jsonl"]
+
+
+def test_the_counter_is_one_before_any_pull_request_then_one_per_pull_request_url():
+    assert review_rounds.counter("") == "rounds-before-pr"
+    assert review_rounds.counter(FIRST) == f"rounds-{hashlib.sha256(FIRST.encode()).hexdigest()}"
+    assert review_rounds.counter(SECOND) != review_rounds.counter(FIRST)
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_rounds_before_a_pull_request_and_on_each_pull_request_count_apart(tmp_path):
+    ledger = ReviewLedger()
     for _ in range(3):
-        review_rounds.start("sw", "t1", tmp_path)
+        start(ledger, tmp_path)
     with pytest.raises(SwarmError, match="no fourth review round"):
-        review_rounds.start("sw", "t1", tmp_path)
-    assert review_rounds.start("sw", "t1", tmp_path, pr_url=first) == {"task": "t1", "round": 1}
-    assert review_rounds.start("sw", "t1", tmp_path, pr_url=first, first_pr=first)["round"] == 2
-    assert review_rounds.counts("sw", "t1", tmp_path) == {"rounds-before-pr": 3, "rounds": 2}
+        start(ledger, tmp_path)
+    ledger.rows["t1"]["pr_url"] = FIRST
+    assert start(ledger, tmp_path) == {"task": "t1", "round": 1}
+    ledger.rows["t1"]["pr_url"] = SECOND
+    assert start(ledger, tmp_path) == {"task": "t1", "round": 1}
+    ledger.rows["t1"]["pr_url"] = FIRST
+    assert start(ledger, tmp_path) == {"task": "t1", "round": 2}
+    assert review_rounds.counts(ledger.rows["t1"]) == {
+        "rounds-before-pr": 3,
+        review_rounds.counter(FIRST): 2,
+        review_rounds.counter(SECOND): 1,
+    }
 
 
-def test_counts_read_the_given_home_without_combining_pull_requests(tmp_path, monkeypatch):
-    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path / "default")
-    given = tmp_path / "given"
-    first = "https://github.com/o/r/pull/1"
-    second = "https://github.com/o/r/pull/2"
-    assert review_rounds.counts("sw", "t1", given) == {}
-    review_rounds.start("sw", "t1", given, pr_url=first)
-    review_rounds.start("sw", "t1", given, pr_url=first)
-    review_rounds.start("sw", "t1", given, pr_url=second)
-    assert sorted(review_rounds.counts("sw", "t1", given).values()) == [1, 2]
-    assert review_rounds.counts("sw", "t1") == {}
+class Unlisted(ReviewLedger):
+    """A ledger that answers no row for a task it still takes writes for, counting each read."""
+
+    def __init__(self) -> None:
+        super().__init__({"t9": {"id": "t9"}})
+        self.reads: list[str] = []
+
+    def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
+        self.reads.append(task_id)
+        return None
+
+
+def test_a_task_the_ledger_does_not_return_starts_at_round_one(tmp_path):
+    ledger = Unlisted()
+    assert start(ledger, tmp_path, task="t9") == {"task": "t9", "round": 1}
+    assert (ledger.reads, ledger.rows["t9"]["review_rounds"]) == (["t9"], {"rounds-before-pr": 1})
+
+
+def test_counts_and_readers_read_a_task_row_as_copies():
+    assert (review_rounds.counts({}), review_rounds.readers({})) == ({}, [])
+    assert (review_rounds.counts({"review_rounds": None}), review_rounds.readers({"review_readers": None})) == ({}, [])
+    row = {"review_rounds": {"rounds": 2}, "review_readers": ["spec-reader"]}
+    counted, read = review_rounds.counts(row), review_rounds.readers(row)
+    assert (counted, read) == ({"rounds": 2}, ["spec-reader"])
+    counted["rounds"] = 9
+    read.append("standards-reader")
+    assert row == {"review_rounds": {"rounds": 2}, "review_readers": ["spec-reader"]}
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_a_reader_is_recorded_once_on_the_ledger_task_under_a_guard_on_the_readers_read():
+    ledger = ReviewLedger()
+    review_rounds.record_reader("sw", "t1", "spec-reader", ledger, ME)
+    review_rounds.record_reader("sw", "t1", "spec-reader", ledger, ME)
+    assert ledger.rows["t1"]["review_readers"] == ["spec-reader"]
+    assert ledger.writes == [
+        {"task": "t1", "fields": {"review_readers": ["spec-reader"]}, "by": ME, "if_match": {"review_readers": []}}
+    ]
+
+
+class Racing(ReviewLedger):
+    """A ledger where another writer lands a reader between this writer's read and each of its first writes."""
+
+    def __init__(self, races: int) -> None:
+        super().__init__()
+        self.races = races
+
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict[str, Any],
+        by: str = "swarm",
+        if_state: tuple[str, ...] = (),
+        if_match: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if len(self.writes) < self.races:
+            row = self.rows[task_id]
+            row["review_readers"] = sorted({*row.get("review_readers", []), f"other-{len(self.writes)}"})
+        return super().update_task(slug, task_id, fields, by, if_state, if_match)
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_two_readers_racing_on_the_same_task_both_land():
+    ledger = Racing(races=1)
+    review_rounds.record_reader("sw", "t1", "spec-reader", ledger, ME)
+    assert ledger.rows["t1"]["review_readers"] == ["other-0", "spec-reader"]
+    assert [write["if_match"] for write in ledger.writes] == [
+        {"review_readers": []},
+        {"review_readers": ["other-0"]},
+    ]
+
+
+def test_a_reader_that_lands_on_the_last_write_is_recorded():
+    ledger = Racing(races=review_rounds.WRITES - 1)
+    review_rounds.record_reader("sw", "t1", "spec-reader", ledger, ME)
+    assert "spec-reader" in ledger.rows["t1"]["review_readers"]
+    assert len(ledger.writes) == review_rounds.WRITES == 5
+
+
+def test_a_reader_the_guard_keeps_refusing_gives_up_after_five_writes():
+    ledger = Racing(races=99)
+    review_rounds.record_reader("sw", "t1", "spec-reader", ledger, ME)
+    assert "spec-reader" not in ledger.rows["t1"]["review_readers"]
+    assert len(ledger.writes) == 5
 
 
 def _logged(home):
@@ -99,25 +194,34 @@ def _logged(home):
 
 
 def test_each_granted_round_is_logged_for_the_metrics(tmp_path):
-    review_rounds.start("sw", "t1", tmp_path)
-    review_rounds.start("sw", "t1", tmp_path, pr_url="https://github.com/o/r/pull/2")
+    ledger = ReviewLedger()
+    start(ledger, tmp_path)
+    ledger.rows["t1"]["pr_url"] = SECOND
+    start(ledger, tmp_path)
     logged = _logged(tmp_path)
     assert [(line["task"], line["counter"], line["round"]) for line in logged] == [
         ("t1", "rounds-before-pr", 1),
-        ("t1", "rounds", 1),
+        ("t1", review_rounds.counter(SECOND), 1),
     ]
     assert all(isinstance(line["at"], int) and line["at"] > 0 for line in logged)
 
 
+def test_the_metrics_log_lives_in_the_swarm_home_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
+    review_rounds.start("sw", "t1", ReviewLedger(), ME)
+    assert [line["round"] for line in _logged(tmp_path)] == [1]
+
+
 def test_a_refused_round_is_not_logged(tmp_path):
+    ledger = ReviewLedger()
     for _ in range(3):
-        review_rounds.start("sw", "t1", tmp_path)
+        start(ledger, tmp_path)
     with pytest.raises(SwarmError):
-        review_rounds.start("sw", "t1", tmp_path)
+        start(ledger, tmp_path)
     assert [line["round"] for line in _logged(tmp_path)] == [1, 2, 3]
 
 
 def test_a_logged_round_carries_the_wall_clock_in_milliseconds(tmp_path, monkeypatch):
     monkeypatch.setattr(review_rounds.time, "time", lambda: 1_800_000_000.25)
-    review_rounds.start("sw", "t1", tmp_path)
+    start(ReviewLedger(), tmp_path)
     assert [line["at"] for line in _logged(tmp_path)] == [1_800_000_000_250]

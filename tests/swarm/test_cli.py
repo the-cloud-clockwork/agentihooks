@@ -837,6 +837,14 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkey
     run("sw", "create", "--repo", "/repo")
     started(env, seat)
     capsys.readouterr()
+    writers, update = [], ledger.update_task
+
+    def recorded(slug, task, fields, *args, **kwargs):
+        if "review_rounds" in fields:
+            writers.append(kwargs["by"])
+        return update(slug, task, fields, *args, **kwargs)
+
+    monkeypatch.setattr(ledger, "update_task", recorded)
     for n in (1, 2):
         assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
         assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": n}
@@ -844,7 +852,7 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkey
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": 3, "notice": cli.review_rounds.CLOSED}
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
-    assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": 3}
+    assert (ledger.rows["t1"]["review_rounds"], writers) == ({"rounds-before-pr": 3}, ["engineer@a1b2c3-0001"] * 3)
 
 
 @pytest.mark.feature("review-state-on-ledger")

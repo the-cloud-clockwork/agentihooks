@@ -6850,6 +6850,11 @@
       "behaviour": "Review rounds and reader launches live on the ledger task, so a successor on another hive spends the rounds its predecessor left and is refused a fourth on the same pull request, and may open or mark ready the pull request whose standards and spec readers its predecessor ran; a reader launch lands on the task beside this machine's counter even when two readers race, and swarm status counts each task's rounds from its ledger row.",
       "seam": "scripts.swarm.review_rounds start and record_reader over the ledger task fields review_rounds and review_readers that scripts.swarm_ledger.ledger_tasks accepts, validates and guards, read by scripts.gates.one_push.OnePush.opening, written by scripts.gates.subagents.SubagentBudget.decide and scripts.swarm.cli review, and counted by scripts.swarm.status findings",
       "tests": [
+        "tests/swarm/test_review_rounds.py::test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_the_ledger",
+        "tests/swarm/test_review_rounds.py::test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_on_this_machine",
+        "tests/swarm/test_review_rounds.py::test_rounds_before_a_pull_request_and_on_each_pull_request_count_apart",
+        "tests/swarm/test_review_rounds.py::test_a_reader_is_recorded_once_on_the_ledger_task_under_a_guard_on_the_readers_read",
+        "tests/swarm/test_review_rounds.py::test_two_readers_racing_on_the_same_task_both_land",
         "tests/swarm_ledger/test_task_review_fields.py::test_a_task_update_records_the_review_round_counts_and_readers",
         "tests/swarm_ledger/test_task_review_fields.py::test_review_rounds_that_are_not_counter_names_to_whole_numbers_are_refused",
         "tests/swarm_ledger/test_task_review_fields.py::test_review_readers_that_are_not_a_list_of_names_are_refused",
