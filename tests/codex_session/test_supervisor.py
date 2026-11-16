@@ -1257,5 +1257,6 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_befor
     store.execution_registry.set_launch(SLUG, admitted.execution_id, {"state": "finished"})
     monkeypatch.setattr(store.execution_registry, "get", lambda slug, execution_id: admitted)
     failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
-    assert store.execution(SLUG, admitted.execution_id).state == "finished"
+    [current] = store.executions(SLUG, SEAT)
+    assert (current.execution_id, current.state, current.transport) == (admitted.execution_id, "finished", "")
     assert server.commands == []
