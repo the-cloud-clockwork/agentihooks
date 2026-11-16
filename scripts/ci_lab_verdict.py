@@ -9,15 +9,18 @@ successful run; an authoritative gate whose verdict is absent or still pending a
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
-from scripts.ci_budget.rate_limit import gh_api
+import scripts.ci_budget.rate_limit
 from scripts.ci_lab.delivery import OUTPUT, cutover, lab
+
+gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budget.rate_limit.gh_api)
 
 PULL_REQUEST = "pull_request"
 UNTRUSTED = "github-actions"

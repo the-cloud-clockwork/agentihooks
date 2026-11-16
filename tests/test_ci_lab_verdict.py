@@ -12,7 +12,9 @@ import pytest
 import yaml
 
 from scripts import ci_lab_verdict as verdict
+from scripts import ci_reuse
 
+ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = {"on": "push", "jobs": {"lint": {}, "type-gate": {}, "unit": {}}}
 LAB = "agenticore-app"
 
@@ -259,3 +261,42 @@ def test_module_entry_exits_with_main(tmp_path: Path, monkeypatch: pytest.Monkey
         runpy.run_module("scripts.ci_lab_verdict", run_name="__main__")
     assert stopped.value.code == 0
     assert output.read_text() == ""
+
+
+def jobs() -> dict[str, Any]:
+    """Return the Tests workflow jobs."""
+    return yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+
+
+def test_the_job_reads_authority_only_from_the_protected_base() -> None:
+    job = jobs()["lab-verdict"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert "needs" not in job
+    assert job["permissions"] == {"contents": "read"}
+    [checkout, *_] = job["steps"]
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    graded = [step for step in job["steps"] if step.get("id") in ("authority", "verdict")]
+    assert [step["id"] for step in graded] == ["authority", "verdict"]
+    assert all(step["working-directory"] == "${{ github.workspace }}/" + checkout["with"]["path"] for step in graded)
+    assert graded[0]["env"] == {"AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}"}
+    assert "authority --grader-root . --event pull_request" in graded[0]["run"]
+    assert graded[1]["env"]["HEAD"] == "${{ github.event.pull_request.head.sha }}"
+    token = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert {key for key in token["with"] if key.startswith("permission-")} == {"permission-checks"}
+    assert token["with"]["permission-checks"] == "read"
+    assert token["if"] == graded[1]["if"] == "steps.authority.outputs.authoritative != '{}'"
+
+
+def test_the_job_publishes_a_result_for_every_declared_lab_gate() -> None:
+    outputs = dict(jobs()["lab-verdict"]["outputs"])
+    declared = json.loads((ROOT / ".github/gate-wiring.json").read_text())["lab_gates"]
+    gates = {entry.removeprefix("lab/") for entry in declared}
+    assert outputs.pop("authoritative") == "${{ steps.authority.outputs.authoritative }}"
+    assert outputs == {f"lab_{gate}": f"${{{{ steps.verdict.outputs['lab_{gate}'] }}}}" for gate in gates}
+
+
+def test_gate_required_grades_the_lab_verdict() -> None:
+    gate = jobs()["gate-required"]
+    assert "lab-verdict" in gate["needs"]
+    assert gate["steps"][0]["run"].startswith(ci_reuse.LAB_VERDICT)
