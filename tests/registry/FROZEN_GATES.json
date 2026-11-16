@@ -34,7 +34,8 @@
     "b2004fa98c2aefb9efd4a7e7e03110d34558ef4b",
     "096800ce6c3c5c61267d4a8b77ae41f301443c82",
     "6a20407f566c2200cbf43e5878e7af51a3c2e8a5",
-    "15700d45bee14e624876dacbaeabf065c79bcdd0"
+    "15700d45bee14e624876dacbaeabf065c79bcdd0",
+    "54424e2dd3d57b3aa359700cc02e310aeaadaa64"
   ],
   ".github/workflows/gate-protected.yml": [
     "d794eee5a317a353e437e19ff2c64498a86d6c5f",
