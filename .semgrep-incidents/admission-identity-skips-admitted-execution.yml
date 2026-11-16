@@ -1,0 +1,19 @@
+rules:
+  - id: admission-identity-skips-admitted-execution
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A launch identity dict names execution_id without also naming admitted_execution_id, so
+      scripts/swarm_v2/runtime/codex.py:arguments() never emits --execution for the admitted execution and the Codex
+      app-server supervisor self-admits a second, untracked execution under the same agent name. Add
+      "admitted_execution_id": $EXPR beside "execution_id": $EXPR.
+    paths:
+      include:
+        - /scripts/hub/
+        - /scripts/hive/
+        - admission-identity-skips-admitted-execution.py
+    patterns:
+      - pattern: |
+          $NAME = {"execution_id": $EXPR, ...}
+      - pattern-not: |
+          $NAME = {"execution_id": $EXPR, "admitted_execution_id": $EXPR2, ...}
