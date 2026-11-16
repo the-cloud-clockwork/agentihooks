@@ -1102,7 +1102,7 @@ def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
     ]
 
 
-def _repository_lab_form() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _repository_lab_form() -> tuple[dict[str, Any], dict[str, Any], ci_wiring.Wiring, dict[str, Any]]:
     """Return the repository workflows, a head copy with the lab aggregation under static gate names, the wiring config and the actors."""
     from scripts import ci_reuse, ci_runner_trust
 
