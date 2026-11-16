@@ -58,7 +58,8 @@ class Source:
 
     def state(self, slug: str) -> dict[str, Any]:
         """The export of ``slug`` at the revision read while holding the swarm's lock, fetched again only when that
-        revision is newer than the kept one, with task rows of the caller's own so no reader changes the kept copy."""
+        revision is newer than the kept one, with task rows of the caller's own so a field a reader sets on a row never
+        reaches the kept copy; values nested inside a row and the other export keys stay shared and are read only."""
         with self._guard:
             fetching = self._fetching.setdefault(slug, threading.Lock())
         with fetching:

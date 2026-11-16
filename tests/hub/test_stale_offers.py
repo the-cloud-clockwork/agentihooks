@@ -143,7 +143,7 @@ def test_an_offer_whose_task_turned_workstation_is_withdrawn_and_offered_again_t
     view = provider.snapshot("rig")
     assert not readiness.stale(offered("task-a", 3), view)
     assert readiness.stale(offered("task-a", 2), view)
-    row["workstation"] = True
+    ledger.state.return_value = doc([{**row, "workstation": True}])
     view = provider.snapshot("rig")
     assert readiness.stale(offered("task-a", 3), view)
     with backend("memory", None) as bus:
