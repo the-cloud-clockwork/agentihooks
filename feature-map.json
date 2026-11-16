@@ -325,6 +325,7 @@
       "tests": [
         "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_runs_it",
         "tests/hive/test_reports.py::test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_pane_for_reads_unknown",
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr",
         "tests/tick/steps/test_idle_claim_retire.py::test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire"
       ]

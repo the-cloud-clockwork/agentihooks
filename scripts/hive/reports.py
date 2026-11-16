@@ -69,10 +69,9 @@ class Reports:
 
     def admitted_pane(self, agent: "AgentRecord") -> dict[str, Any]:
         """The pane the hive that runs hub admitted ``agent`` reports for its execution and generation, else empty."""
-        raw = self.redis.get(key(admitted(agent)))
-        report: dict[str, Any] = json.loads(cast(str, raw)) if raw else {}
+        report = self.read(admitted(agent)) or {}
         found: dict[str, Any] = report.get("admitted", {}).get(agent.execution_id, {})
-        return found.get("pane", {}) if found.get("generation") == agent.generation else {}
+        return found["pane"] if found.get("generation") == agent.generation else {}
 
     def gone(self, agent: "AgentRecord") -> bool:
         report = self.read(host(agent))

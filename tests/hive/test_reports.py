@@ -166,6 +166,21 @@ def test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unkno
 
 
 @pytest.mark.feature("swarm-reap-reads-hub-admitted-panes-from-their-hive")
+@pytest.mark.parametrize("admitted", [None, {"exe-other": {"generation": 1, "pane": {"state": "done"}}}])
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_worker_its_hive_reports_no_pane_for_reads_unknown(
+    remote: SimpleNamespace, admitted: dict[str, object] | None
+) -> None:
+    agent = remote.agent
+    report: dict[str, object] = {"names": [agent.name], "executions": {}}
+    if admitted is not None:
+        report["admitted"] = admitted
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert remote.runtime.observe(agent).state == "unknown"
+
+
+@pytest.mark.feature("swarm-reap-reads-hub-admitted-panes-from-their-hive")
 @pytest.mark.parametrize("target", [{}, {"host_id": "controller"}])
 @pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
 def test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr(
