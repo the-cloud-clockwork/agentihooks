@@ -6,7 +6,8 @@ from typing import Any
 import pytest
 
 from scripts.gates.claims import refusal
-from scripts.hub import claims
+from scripts.hub import admission, claims
+from scripts.swarm import readiness
 from scripts.swarm.store import AgentRecord
 from tests.helpers import store_seed
 from tests.hub.test_admission import SLUG, ask
@@ -174,6 +175,18 @@ def test_the_claim_cap_reads_only_the_launch_rows_of_its_task(rig: Any, monkeypa
     monkeypatch.setattr(rig.store, "launches", launches)
     assert rig.admitter.admit(SLUG, ask()) is None
     assert asked == ["t1"]
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it(rig: Any) -> None:
+    lives(rig, 3)
+    rig.ledger.metadata = lambda slug: {"_meta": {"rev": 1}}
+    rig.ledger.state = lambda slug: {**rig.found, "tasks": [dict(row) for row in rig.rows.values()]}
+    shared = readiness.Source(rig.store, rig.ledger)
+    admitter = admission.Admission(rig.store, rig.ledger, shared, clock=lambda: 7_000)
+    assert admitter.admit(SLUG, ask()) is None
+    assert rig.rows["t1"]["state"] == "blocked"
+    assert [row["state"] for row in shared.state(SLUG)["tasks"]] == ["open", "open"]
 
 
 @pytest.mark.feature("hub-admission-earlier-lives-launched-only")
