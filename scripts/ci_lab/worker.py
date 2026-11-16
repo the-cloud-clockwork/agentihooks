@@ -214,11 +214,11 @@ class Worker:
         """Heartbeat the lease, skipping a beat that cannot reach the scheduler; raise Lost to end its heartbeats once
         run abandoned the unit, or mark the lease lost first when the scheduler refuses the token."""
         if self.abandoned.is_set():
-            raise Lost(lease.job)
+            raise Lost
         with contextlib.suppress(OSError):
             if self.client.heartbeat(lease.job, lease.token) is None:
                 lost.set()
-                raise Lost(lease.job)
+                raise Lost
 
     def _deliver(self, lease: Lease, finished: Finished) -> None:
         """Upload the unit's report and log through their presigned URLs and complete its lease, stopping at the
