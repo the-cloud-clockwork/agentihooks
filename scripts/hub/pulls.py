@@ -11,7 +11,7 @@ from scripts.events.envelope import Envelope
 from scripts.events.subjects import subject
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
-from scripts.swarm import merge_queue, mutation_wait
+from scripts.swarm import merge_queue, run_wait
 from scripts.swarm.store import SwarmError
 
 BUCKET = "hub-github"
@@ -230,7 +230,7 @@ class Pulls:
                 seen = self._fetch(url)
             except FETCH_ERRORS as exc:
                 print(f"hub: GitHub poll skipped {url}: {exc}", file=sys.stderr)
-                if mutation_wait.rate_limited(exc):
+                if run_wait.rate_limited(exc):
                     break
                 continue
             self.observe(seen)
