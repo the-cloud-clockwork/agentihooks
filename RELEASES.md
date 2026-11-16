@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.919 · 2026-11-16
+
+### 2026-11-16 · 455f17ca0047 · #11447 · @agenticore-app
+
+**Announce the protected grader blob that pins the gate job names**
+
+This change adds a new entry to `tests/registry/FROZEN_GATES.json`, registering the hash of the updated `scripts/gate_protected.py` grader script at the top of its list. This announcement is required so that the follow-up change in #11446, which pins the gate job names ahead of the queue needs inventory check, is allowed to modify the frozen protected grader without tripping the freeze check, since that run previously failed with an unexpected empty needs list.
+
 ## v2.17.918 · 2026-11-16
 
 ### 2026-11-16 · a5b80e163423 · #11442 · @agenticore-app
