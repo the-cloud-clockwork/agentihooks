@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.xǁNatsWorkQueueǁrelease:8f78cc17db4bcb7c1e5096d0c2e0602c259c112a2dcdde9c3a9f94b31cdbd582": {
+    "reader": "standards-reader",
+    "reason": "`cast` only changes the static type of its operand; at runtime it returns `delivery` unchanged, and the call dispatches to the runtime object's own `release` method. Replacing the cast target with None changes no runtime behaviour. Only a static type checker could observe it, and that check runs outside mutation testing."
+  }
+}

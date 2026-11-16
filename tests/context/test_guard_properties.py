@@ -33,7 +33,11 @@ NEGATIONS = ["don't", "dont", "do not", "not", "never", "should not", "won't", "
 NEUTRAL_WORDS = ["please", "ok", "now", "sure", "then", "go", "yes"]
 TEMPLATE_SUFFIXES = ["example", "sample", "template", "dist", "tpl"]
 
-property_settings = settings(database=None, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+property_settings = settings(
+    database=None,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.differing_executors],
+)
 
 
 def recased(text):

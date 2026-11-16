@@ -49,6 +49,9 @@ class _WorkQueue:
     def take(self, timeout_ms: int) -> Delivery | None:
         return None
 
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        pass
+
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
         return 0
 

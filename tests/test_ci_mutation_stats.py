@@ -248,6 +248,58 @@ def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(t
     assert result["files"] == [node]
 
 
+def test_a_stats_rerun_passes_a_class_based_property_test_on_its_fresh_instance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    root = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    work.mkdir()
+    module = work / "test_rerun_property.py"
+    module.write_text(
+        "from hypothesis import given, strategies as st\n"
+        "from tests.context.test_guard_properties import property_settings\n"
+        "class TestRerun:\n"
+        "    @property_settings\n"
+        "    @given(value=st.integers())\n"
+        "    def test_value(self, request, value):\n"
+        "        assert request.node.execution_count > 1\n"
+    )
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", os.environ.get("PY_IGNORE_IMPORTMISMATCH", ""))
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    outputs: list[str] = []
+
+    class Runner:
+        _pytest_add_cli_args: list[str] = []
+
+        def run_stats(self, *, tests: list[str]) -> int:
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=root,
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            outputs.append(done.stdout + done.stderr)
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [str(module)], output, str(tmp_path / "base"))
+    assert json.loads(output.read_text())["status"] == 0, outputs
+    assert "1 passed" in outputs[0] and "1 rerun" in outputs[0], outputs
+
+
 @pytest.mark.wall_clock
 def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, monkeypatch):
     import threading
