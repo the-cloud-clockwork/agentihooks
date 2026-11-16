@@ -1,0 +1,22 @@
+rules:
+  - id: panic-spare-ignores-command-target
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The panic spare once read only the checked out branch: a fix branch session could push another refspec to dev
+      or main, dispatch on another ref or push from another checkout with git -C, and git -C push was not frozen at
+      all. Freeze on the words _command returns, and spare a command only when _writes finds that every ref it names
+      is the checked out fix branch.
+    paths:
+      include:
+        - /hooks/context/blocker_window.py
+        - panic-spare-ignores-command-target.py
+    pattern-either:
+      - patterns:
+          - pattern: _on_fix_branch(...)
+          - pattern-not-inside: _on_fix_branch(...) and _writes(...)
+      - patterns:
+          - pattern-inside: |
+              def _freezes(...):
+                ...
+          - pattern: "[Path($TOKENS[0]).name, *$TOKENS[1:]]"

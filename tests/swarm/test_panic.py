@@ -706,6 +706,129 @@ def test_the_panic_button_without_a_fix_spares_only_the_merge_queue(store, count
     assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [], "cancelled": []}
 
 
+def _press(store: RedisStore, monkeypatch: pytest.MonkeyPatch, runs: Runs, *argv: str) -> None:
+    monkeypatch.setattr(panic, "port", runs)
+    args = cli.build_parser().parse_args([SLUG, *argv])
+    args.handler(store, args)
+
+
+def _busy() -> Runs:
+    return Runs({repo: [_row(7, "busy")] for repo in panic.REPOS})
+
+
+def test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    asked = _branches(monkeypatch, {})
+    runs = _busy()
+    store.put_agent(SLUG, AgentRecord("engineer@a1b2c3-0001", "eng", "t1"))
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "--as", "engineer@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX)
+    assert str(caught.value) == "only the master or the operator presses panic on"
+    assert panic.state(store) is None
+    assert runs.calls() == []
+    assert asked == []
+
+
+def test_the_swarm_master_presses_panic_on_with_a_checked_fix(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    asked = _branches(monkeypatch, {})
+    store.put_agent(SLUG, AgentRecord("master@a1b2c3-0001", "master", "master"))
+    _press(store, monkeypatch, _busy(), "--as", "master@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX)
+    cancelled = [f"{repo} run 7 on busy" for repo in panic.REPOS]
+    assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [BRANCH_FIX], "cancelled": cancelled}
+    assert asked == []
+
+
+SHAPE = (
+    "{fix} is not a fix link: name a pull request https://github.com/OWNER/NAME/pull/NUMBER or a branch "
+    "https://github.com/OWNER/NAME/tree/BRANCH"
+)
+OUTSIDE = (
+    "{fix} is outside the panic repositories the-cloud-clockwork/agentihooks, "
+    "the-cloud-clockwork/agentihooks-bundle, the-cloud-clockwork/antoncore"
+)
+
+
+def test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    fix: str,
+    refusal: str,
+) -> None:
+    asked = _branches(monkeypatch, {})
+    panic.engage(store, "pressed", False, [BRANCH_FIX], 0)
+    runs = _busy()
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "panic", "on", "--fix", BRANCH_FIX, "--fix", fix)
+    assert str(caught.value) == refusal.format(fix=fix)
+    assert panic.state(store) == panic.Panic(0, "pressed", False, (BRANCH_FIX,))
+    assert runs.calls() == []
+    assert asked == []
+
+
+def test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch, head: str
+) -> None:
+    asked = _branches(monkeypatch, {FIX: head})
+    runs = _busy()
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "panic", "on", "--fix", FIX)
+    assert str(caught.value) == f"{FIX} names {head}, which panic never spares"
+    assert panic.state(store) is None
+    assert runs.calls() == []
+    assert asked == [FIX]
+
+
+def test_panic_on_refuses_a_fix_pull_request_it_cannot_read(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import stack
+    from scripts.swarm.store import SwarmError
+
+    def unreadable(url: str, refused: str) -> None:
+        raise SwarmError(f"{refused}: boom")
+
+    monkeypatch.setattr(stack, "change", unreadable)
+    runs = _busy()
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "panic", "on", "--fix", FIX)
+    assert str(caught.value) == f"cannot read pull request {FIX}: boom"
+    assert panic.state(store) is None
+    assert runs.calls() == []
+
+
+@pytest.mark.parametrize(
+    "fix",
+    [
+        BRANCH_FIX,
+        "https://github.com/the-cloud-clockwork/agentihooks-bundle/tree/devops",
+        "https://github.com/the-cloud-clockwork/antoncore/tree/fix/main",
+    ],
+)
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_a_branch_link_of_a_panic_repository_passes_the_check_unread(monkeypatch: pytest.MonkeyPatch, fix: str) -> None:
+    asked = _branches(monkeypatch, {})
+    assert panic.check_fix(fix) is None
+    assert asked == []
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_a_fix_pull_request_passes_the_check_after_one_read_of_its_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    assert panic.check_fix(FIX) is None
+    assert asked == [FIX]
+
+
 def test_panic_found_names_the_panic_since_its_start(store):
     from scripts.swarm.blockers import Blocker
 
@@ -771,7 +894,9 @@ def _checkout(root: Path, branch: str, origin: str = "git@github.com:The-Cloud-C
     return str(root)
 
 
-@pytest.mark.parametrize("command", ["git push origin fix-branch", "gh run rerun 5", "gh workflow run t.yml"])
+@pytest.mark.parametrize(
+    "command", ["git push origin fix-branch", "gh run rerun 5", "gh workflow run t.yml --ref fix-branch"]
+)
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
@@ -881,7 +1006,9 @@ def test_panic_refuses_a_push_outside_a_git_checkout(
     assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", str(tmp_path))[1] is not None
 
 
-@pytest.mark.parametrize("command", ["git push -u origin HEAD", "gh run rerun 5", "gh workflow run t.yml"])
+@pytest.mark.parametrize(
+    "command", ["git push -u origin HEAD", "gh run rerun 5", "gh workflow run t.yml --ref fix-branch"]
+)
 @pytest.mark.feature("panic-fix-branch-first-push")
 def test_panic_spares_the_first_push_of_a_registered_fix_branch(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
@@ -909,6 +1036,182 @@ def test_panic_refuses_a_push_from_a_branch_no_fix_registers(
     cwd = _checkout(tmp_path / "work", branch, origin)
     block = blocker_window.pretool("Bash", {"command": "git push -u origin HEAD"}, "engineer-session", cwd)[1]
     assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin fix-branch:dev",
+        "git push origin HEAD:main",
+        "git push origin HEAD:refs/heads/dev",
+        "git push origin dev",
+        "git push origin fix-branch dev",
+        "git push origin :",
+        "git push origin dev:HEAD",
+        "git push upstream fix-branch",
+        "git push origin HEAD:dev>/dev/null",
+        "git push 2> err.txt origin HEAD:dev",
+        "git push --all origin",
+        "git push --branches origin",
+        "git push --mirror origin",
+        "git push origin --tags",
+        "git push --follow-tags origin fix-branch",
+        "git push --prune origin fix-branch",
+        "git push --repo=elsewhere",
+        "git push --repo elsewhere fix-branch",
+        "gh workflow run t.yml",
+        "gh workflow run t.yml --ref",
+        "gh workflow run t.yml --ref dev",
+        "gh workflow run t.yml --ref=main",
+        "gh workflow run t.yml -r dev",
+        "gh workflow run t.yml -rmain",
+        "gh workflow run t.yml --ref fix-branch -r dev",
+        "git -c push.default=upstream push",
+        "git --git-dir=.git push origin fix-branch",
+        "git --no-pager -C . push origin dev",
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_fix_branch_session_stays_frozen_for_a_command_that_writes_another_ref(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push",
+        "git push origin",
+        "git push -u origin HEAD 2>&1 | tail -3",
+        "git push origin fix-branch",
+        "git push origin +fix-branch",
+        "git push --force-with-lease origin HEAD:fix-branch",
+        "git push origin fix-branch:refs/heads/fix-branch >/dev/null 2>&1",
+        "git push origin fix-branch < /dev/null",
+        "git -C . push origin fix-branch",
+        "gh workflow run t.yml --ref fix-branch",
+        "gh workflow run t.yml --ref=refs/heads/fix-branch",
+        "gh workflow run t.yml -r fix-branch",
+        "gh workflow run t.yml -r=fix-branch",
+        "gh workflow run t.yml -rfix-branch",
+        "gh workflow run t.yml -r dev --ref fix-branch",
+        "gh run rerun 5 --failed",
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+
+
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_git_c_decides_the_checkout_a_push_is_spared_in(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    fix = _checkout(tmp_path / "fix", "fix-branch")
+    other = _checkout(tmp_path / "other", "other-branch")
+    frozen = blocker_window.FROZEN.format(reason="reason")
+    assert blocker_window.pretool("Bash", {"command": f"git -C {other} push"}, "s", fix)[1] == frozen
+    assert blocker_window.pretool("Bash", {"command": f"git -C {other} push origin fix-branch"}, "s", fix)[1] == frozen
+    assert blocker_window.pretool("Bash", {"command": f"git -C {fix} push origin fix-branch"}, "s", other) == (
+        None,
+        None,
+    )
+    assert blocker_window.pretool("Bash", {"command": "git -C ../fix push"}, "s", other) == (None, None)
+    assert blocker_window.pretool("Bash", {"command": f"git -C {fix} push"}, "s", "")[1] == frozen
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /work push",
+        "/usr/bin/git -C /work push origin x",
+        "git --no-pager push origin x",
+        "git -c a=b push",
+        "git >/dev/null push origin x",
+        ">/dev/null git push origin x",
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_panic_freezes_a_push_behind_git_global_options_or_a_redirection(store: RedisStore, command: str) -> None:
+    panic.engage(store, "reason", True, [], 0)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")[1]
+    assert block == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.parametrize(
+    ("tokens", "command"),
+    [
+        ([], ([], [])),
+        (["git"], (["git"], [])),
+        (["git", "-C"], (["git"], [("-C", "")])),
+        (
+            ["/usr/bin/git", "--no-pager", "-C", "x", "-c", "a=b", "push", "-u"],
+            (["git", "push", "-u"], [("--no-pager", ""), ("-C", "x"), ("-c", "a=b")]),
+        ),
+        (
+            ["git", "--git-dir=d", "--work-tree", "w", "push"],
+            (["git", "push"], [("--git-dir=d", ""), ("--work-tree", "w")]),
+        ),
+        (["gh", "-R", "o/r", "run", "rerun"], (["gh", "-R", "o/r", "run", "rerun"], [])),
+        (
+            [">/dev/null", "git", "push", "2>", "&", "1", "origin", "&", ">", "out", "dev>x", "3<", "in", "x"],
+            (["git", "push", "origin", "dev", "x"], []),
+        ),
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_command_reads_without_its_redirections_and_git_global_options(
+    tokens: list[str], command: tuple[list[str], list[tuple[str, str]]]
+) -> None:
+    assert blocker_window._command(tokens) == command
+
+
+@pytest.mark.parametrize(
+    ("words", "targets"),
+    [
+        ([], None),
+        (["kubectl", "apply"], None),
+        (["gh", "run", "rerun", "5"], ()),
+        (["gh", "workflow", "run", "t.yml"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a"], ("a",)),
+        (["gh", "workflow", "run", "t.yml", "--ref=b"], ("b",)),
+        (["gh", "workflow", "run", "t.yml", "-r", "c"], ("c",)),
+        (["gh", "workflow", "run", "t.yml", "-r=d"], ("d",)),
+        (["gh", "workflow", "run", "t.yml", "-re"], ("e",)),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "-r", "c"], ("c",)),
+        (["git", "push"], ()),
+        (["git", "push", "-u", "origin", "HEAD"], ()),
+        (
+            ["git", "push", "origin", "+HEAD:refs/heads/f", "f", ":", "d:HEAD", "+g"],
+            ("refs/heads/f", "f", "", "HEAD", "g"),
+        ),
+        (["git", "push", "upstream"], None),
+        (["git", "push", "--all"], None),
+        (["git", "push", "--branches"], None),
+        (["git", "push", "--mirror"], None),
+        (["git", "push", "--tags"], None),
+        (["git", "push", "--follow-tags"], None),
+        (["git", "push", "--prune"], None),
+        (["git", "push", "--repo"], None),
+        (["git", "push", "--repo=x"], None),
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_spared_command_names_the_refs_it_writes(words: list[str], targets: tuple[str, ...] | None) -> None:
+    assert blocker_window._targets(words) == targets
 
 
 def _git_runs(monkeypatch: pytest.MonkeyPatch, outcome: Any) -> list[tuple[list[str], dict[str, Any]]]:
