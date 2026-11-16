@@ -633,7 +633,7 @@ granting each key Redis refused until all five passed gave the list.
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
 `lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `execution-publishing`, the
 Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`,
-`stage-covers`, the task gate lifts `gate-lifts:tasks:*`, `gate-lift-drops` and `ledger-ready`.
+`stage-covers`, and the task gate lifts `gate-lifts:tasks:*` and `gate-lift-drops`.
 
 The list also keeps `swarm:*:identity-conflicts`, the key the identity conflict counter used before it moved into
 `swarm:state:counters:*`. Code only reads it, as a fallback when the counters record holds no entry.

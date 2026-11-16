@@ -22,6 +22,24 @@ Operator constraints this record follows (swarm culture, 19 and 29 October):
 The 29 October inventory the plan names was never written down; the master confirmed it was kept only in a session.
 The inventory below was mapped from `dev` at `65249ec02` by reading the code named in each table.
 
+## Landed so far
+
+A first ledger API service, `scripts/swarm_ledger/api_service.py` (`python -m scripts.swarm_ledger.api_service
+--serve`, port 8766), runs as its own process and deployment and takes every write the page sends: `do_POST`,
+`do_PUT`, `do_PATCH` and its own `POST /healthz` probe. The public host routes a request to it by method (POST,
+PUT, PATCH, DELETE); `GET` stays with the ledger server. It migrates the shared schema at start and runs the write
+side upkeep this record lists under the ledger server today: bin purge, binning closed ledgers without a swarm,
+alert expiry, the inbox relay replay and the outbox relay to the bus.
+
+This is not yet the four way split below: one process holds both the API's guarded data application and the app
+server's rule chain, derivations and side effects, instead of two services with the chain pulled out of the write
+transaction first (step 1 and step 2 in [Order, strangler steps and rollback](#order-strangler-steps-and-rollback)).
+Every swarm, agent and service client reaches it the same way, in process through
+`scripts.tick.adapters.database_ledger`, never over HTTP; only the page's own writes travel as HTTP, routed to this
+service. The ledger server (`ledger_server.py`) keeps every read: the page, `GET /api/v1`, the event stream, and
+`ledger_server.api_services()`, whose write hooks all refuse. `PostgresLedgerRepository.connect()` no longer
+creates the schema; only this service's `migrate()` does, at start.
+
 ## Target in one picture
 
 ```
@@ -190,7 +208,7 @@ the ledger request metrics.
 
 | Step | Phase | Change | Switch | Rollback |
 |---|---|---|---|---|
-| 1 | One API owns the database (da2) | Split `repository.mutation.apply` into data application (API) and the rule chain with derivations (ledger server). Stand up the API deployment. The ledger server reaches storage through an HTTP repository that implements `LedgerRepository` against the API, with revision guards on every write | Ledger server repository backend: direct or API | Set the backend to direct and scale the API to zero. Both paths write the same Postgres, so no data moves |
+| 1 | One API owns the database (da2) | Landed in a different shape: the API deployment stood up (`api_service.py`) owns every write, in and out of the request thread, but still runs the full rule chain and derivations itself rather than leaving them in the ledger server; splitting `repository.mutation.apply` into data application and a separately owned rule chain stays open | Ledger server write routes: refused always (`do_POST`/`do_PUT`/`do_PATCH` removed); the public host routes writes to the API deployment | Point the public host's write routes back at a ledger server carrying the old write handlers; both paths write the same Postgres, so no data moves |
 | 2 | One API owns the database (da3) | Relay, alerts, masters channel and doctor stop run from outbox events, consumed by the hub, idempotent by event id | One setting per side effect: in request or outbox | Set it back to in request. Inbox ids are stable, so an effect that ran on both paths during the switch lands once |
 | 3 | App server is the control plane (dp1) | The hub becomes the app server: it takes the rule chain and the operations, controls and swarm read routes. The ledger server forwards those routes to it | Ledger server forwards writes: off or on | Turn forwarding off; the ledger server still holds the chain until step 7 |
 | 4 | App server is the control plane | The tick moves from the controller deployment and the workstation scheduler into the app server | Controller tick: on or off; app server tick: on or off, never both (the tick lease already enforces one holder) | Turn the controller tick back on; the lease hands over within one lease period |
