@@ -328,6 +328,7 @@ spec:
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+            {{- include "swarm.databaseEnv" (dict "root" . "env" .Values.controller.env "secretEnv" .Values.controller.secretEnv) | nindent 12 }}
             - name: AGENTIHOOKS_HOME
               value: /run/agentihooks
             {{- with $schedulerState }}

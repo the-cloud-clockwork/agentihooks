@@ -19,7 +19,7 @@ from scripts.swarm.stack_env import BIND, client_env, read_env, settings, write_
 
 PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
-SERVICES = ("redis", "nats", "swarm", "controller")
+SERVICES = ("redis", "nats", "swarm", "api", "controller")
 ADOPTION = "deploy/compose/adopt.yaml"
 PREPARED_CLIENT = "swarm-client.env"
 LEDGER_PORT = 8765

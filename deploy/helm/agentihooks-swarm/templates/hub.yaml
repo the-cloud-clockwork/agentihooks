@@ -49,6 +49,7 @@ spec:
           command: [agentihooks, hub, run]
           env:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+            {{- include "swarm.databaseEnv" (dict "root" . "env" $hub.env "secretEnv" $hub.secretEnv) | nindent 12 }}
             - name: AGENTIHOOKS_BUS
               value: {{ $hub.bus.backend | quote }}
             {{- if $hub.bus.scoped }}

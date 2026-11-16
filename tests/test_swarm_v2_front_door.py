@@ -4,8 +4,8 @@ import pytest
 
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.gates import log
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger import ledger_server
 from scripts.swarm_v2 import front_door
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
@@ -281,7 +281,7 @@ def test_the_server_write_gate_refuses_a_backend_master_chat_write_naming_the_fr
     operator_says(world)
     ops = [chat(SECOND_NAME, n=1), chat(LEAD_NAME, n=2)]
 
-    state, rejected = core.sync(SLUG, ops=ops, gate=ledger_server.write_gate(SLUG))
+    state, rejected = core.sync(SLUG, ops=ops, gate=api_service.write_gate(SLUG))
 
     assert set(rejected) == {"m-1"}
     assert state["_meta"]["warnings"] == [front_door.refusal(SLUG, SECOND)]

@@ -254,11 +254,11 @@ def test_a_claude_only_profile_refuses_a_codex_affinity_visibly(tmp_path, monkey
 
 
 def test_the_ledger_server_maps_master_agent_to_the_swarm_set_pair():
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service
 
-    assert ledger_server.control_argv({"action": "set", "master_agent": "codex"}) == ["set", "master-agent=codex"]
+    assert api_service.control_argv({"action": "set", "master_agent": "codex"}) == ["set", "master-agent=codex"]
     with pytest.raises(ValueError, match="master_agent"):
-        ledger_server.control_argv({"action": "set", "master_agent": "auto"})
+        api_service.control_argv({"action": "set", "master_agent": "auto"})
 
 
 def test_a_swarm_created_from_scratch_keeps_its_affinity_through_the_config_round_trip(store):
@@ -394,10 +394,10 @@ def test_a_claude_only_profile_launches_a_claude_affinity(tmp_path, monkeypatch)
 
 
 def test_the_ledger_server_names_the_master_agent_choices():
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service
 
     with pytest.raises(ValueError) as caught:
-        ledger_server.control_argv({"action": "set", "master_agent": "auto"})
+        api_service.control_argv({"action": "set", "master_agent": "auto"})
     assert str(caught.value) == "master_agent must be one of claude, codex"
 
 

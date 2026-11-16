@@ -5,7 +5,7 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service
 from scripts.swarm_v2 import master_scale, masters
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -252,10 +252,10 @@ def test_swarm_set_stores_the_masters_step_beside_the_lane_caps(swarm, monkeypat
 
 @pytest.mark.parametrize("step", [0, 12, 50])
 def test_the_page_sets_the_masters_step(step):
-    assert ledger_server.control_argv({"action": "set", "masters_step": step}) == ["set", f"masters-step={step}"]
+    assert api_service.control_argv({"action": "set", "masters_step": step}) == ["set", f"masters-step={step}"]
 
 
 @pytest.mark.parametrize("step", [-1, 51, True, "12"])
 def test_the_page_refuses_an_invalid_masters_step(step):
     with pytest.raises(ValueError, match="masters_step"):
-        ledger_server.control_argv({"action": "set", "masters_step": step})
+        api_service.control_argv({"action": "set", "masters_step": step})
