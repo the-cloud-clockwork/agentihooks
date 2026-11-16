@@ -348,7 +348,9 @@ def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch, total, extr
 
 def test_the_retry_workflow_requeues_unless_enforcement_is_switched_off():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
-    assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}
+    assert workflow[True] == {
+        "workflow_run": {"workflows": ["Tests"], "types": ["completed"], "branches": ["gh-readonly-queue/**"]}
+    }
     retry = workflow["jobs"]["retry"]
     for term in ("event == 'merge_group'", "conclusion == 'failure'", "conclusion == 'cancelled'", "run_attempt == 1"):
         assert term in retry["if"]

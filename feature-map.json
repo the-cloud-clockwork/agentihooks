@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "grader-gates-fail-closed-on-stale-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
+      "behaviour": "The marker vector step and the two chart steps run only the protected grader's copy of their script with the head as root, so a pull request whose base predates root support fails closed and a head copy edited to pass never decides the verdict.",
+      "seam": "The lint marker vector step and the Semgrep chart step run text, executed over a stale grader tree and a planted head copy that exits 0",
+      "tests": [
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_never_runs",
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_runs"
+      ]
+    },
+    {
       "id": "hub-started-clears-launch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
@@ -5447,6 +5458,19 @@
         "tests/swarm/test_merge_queue.py::test_the_freeze_route_never_opens_a_dequeue_for_the_master",
         "tests/swarm/test_merge_queue.py::test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open",
         "tests/swarm/test_ledger_client_task.py::test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection"
+      ]
+    },
+    {
+      "id": "merge-queue-task-pulls",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-task-prs",
+      "behaviour": "swarm merge queue admits every pull request the claimant's task names, final, split half, stage or prerequisite, and a pull request no task names whose head branch is one of the claimant's worktree branches, reading GitHub only for that case; it refuses another task's pull request and any other branch, and each queue journal record names the claimant's task.",
+      "seam": "swarm merge queue through cli.cmd_merge and done_gate.require_target",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_claimant_queues_two_pull_requests_of_its_task_in_order_and_a_third_party_one_is_refused",
+        "tests/swarm/test_done_gate.py::test_merge_target_accepts_every_declared_pull_and_refuses_other_pulls",
+        "tests/swarm/test_done_gate.py::test_merge_target_admits_an_unnamed_pull_only_on_a_claimant_worktree_branch",
+        "tests/swarm/test_done_gate.py::test_merge_target_reads_no_branch_for_another_tasks_pull_or_without_a_claimant"
       ]
     },
     {
