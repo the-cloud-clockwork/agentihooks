@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_queue_suites_use_a_precise_reuse_condition():
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    selected = " && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}"
+    selected = (
+        " && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full')"
+        " && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['unit'] != true }}"
+    )
     assert jobs["unit"]["if"] == (
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')"
         + selected

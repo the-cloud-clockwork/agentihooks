@@ -85,6 +85,7 @@ class _Bus:
     events = _EventLog()
     dead = _EventLog()
     stops = _EventLog()
+    lab_heads = _EventLog()
 
     def for_swarm(self, swarm):
         return self

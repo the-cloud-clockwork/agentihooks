@@ -155,9 +155,11 @@ def test_the_workflow_builds_on_dev_pushes_to_its_inputs_a_daily_refresh_and_dis
     assert "workflow_dispatch" in on
 
 
-def test_every_run_queues_on_a_shared_hosted_lane_and_is_never_cancelled() -> None:
+def test_a_dev_push_builds_on_its_own_group_and_every_other_run_queues_on_a_shared_lane() -> None:
     workflow = _workflow()
-    assert workflow["concurrency"]["queue"] == "max"
+    dev = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+    assert workflow["concurrency"]["group"].startswith(f"${{{{ {dev} && format('ci-lab-image-{{0}}', github.ref) || ")
+    assert workflow["concurrency"]["queue"] == f"${{{{ {dev} && 'single' || 'max' }}}}"
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert ci_branch_lanes.problems(workflow) == []
 

@@ -307,7 +307,7 @@ def test_the_client_timeout_reaches_the_transport(monkeypatch):
     assert seen == [10, 3]
 
 
-def test_the_request_layer_passes_its_timeout_to_the_client(monkeypatch):
+def test_the_request_layer_passes_its_timeout_to_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
     built = []
 
     class Client:
@@ -321,7 +321,10 @@ def test_the_request_layer_passes_its_timeout_to_the_client(monkeypatch):
     monkeypatch.setattr(ledger_module, "credentials", lambda slug, service: {"service": service})
     ledger_module.request(SLUG, chat_add())
     ledger_module.request(SLUG, chat_add(), service=True, timeout=3)
-    assert built == [(ledger_module.BASE, {"service": False}, 10), (ledger_module.BASE, {"service": True}, 3)]
+    assert built == [
+        (ledger_module.BASE, {"service": False}, ledger_module.WRITE_TIMEOUT),
+        (ledger_module.BASE, {"service": True}, 3),
+    ]
 
 
 def test_stop_gate_bypass_never_raises_on_any_failure(monkeypatch):

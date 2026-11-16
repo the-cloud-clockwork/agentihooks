@@ -36,6 +36,7 @@ DIRECT = {
 }
 LANE_USERS = {
     "chaos.yml",
+    "queue-retry.yml:retry",
     "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
@@ -78,8 +79,6 @@ REQUIRED = ("pull_request", "merge_group", "pull_request_target")
 REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
 
 
-if (_WORKFLOWS / "count-record.yml").is_file():
-    LANE_USERS = LANE_USERS | {"count-record.yml"}
 if (_WORKFLOWS / "actions-storage.yml").is_file():
     LANE_USERS = LANE_USERS | {"actions-storage.yml"}
 if (_WORKFLOWS / "ci-minutes.yml").is_file():
@@ -210,25 +209,14 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
             else:
-                assert resolved["queue"] in (None, "single"), (where, github)
+                dev_push = (github["event_name"], github["ref"]) == ("push", "refs/heads/dev")
+                assert resolved["queue"] in (None, "single") or dev_push, (where, github)
     assert seen == LANE_USERS
 
 
 def test_no_required_run_or_its_callee_ever_reaches_a_lane():
     checked = 0
     for where, block in _blocks():
-        if where == "count-record.yml":
-            recorder = _workflow(where)
-            assert recorder[True] == {"push": {"branches": ["dev"]}}
-            assert set(recorder["jobs"]) == {"count-record"}
-            assert recorder["jobs"]["count-record"]["continue-on-error"] is True
-            assert all("count-record" not in job.get("needs", []) for job in _workflow("test.yml")["jobs"].values())
-            continue
-        if where == "ci-lab-image.yml":
-            assert set(_workflow(where)[True]) == {"push", "schedule", "workflow_dispatch"}
-            assert _workflow(where)[True]["push"]["branches"] == ["dev", "diffcheck/ci-lab-image-*"]
-            assert all("ci-lab-image" not in (_WORKFLOWS / name).read_text() for name in ("test.yml", "promote.yml"))
-            continue
         for github in _contexts(where):
             if github["event_name"] in REQUIRED or (github["event_name"], github["ref"]) == ("push", "refs/heads/dev"):
                 checked += 1

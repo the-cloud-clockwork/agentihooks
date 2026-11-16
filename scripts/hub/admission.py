@@ -230,6 +230,7 @@ class Admission:
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
             "execution_id": agent.execution_id,
+            "admitted_execution_id": agent.execution_id,
             "execution_generation": agent.generation,
             profile_choice.LEDGER_INTENT: profile_choice.carried(doc, task),
         }

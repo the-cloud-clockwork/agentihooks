@@ -36,6 +36,33 @@ def test_hive_codex_server_launch_captures_its_receipt(tmp_path):
     assert command[12:14] == ["scripts.codex_session", "serve"]
 
 
+@pytest.mark.feature("hive-launch-logs-key-by-hive")
+def test_a_hub_admitted_execution_with_no_runtime_target_still_keys_its_receipt_by_hive(monkeypatch):
+    import fakeredis
+
+    from scripts.hive import launch_logs
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    agent = SimpleNamespace(execution_id="execution-one", generation=7, hive="hive-one", runtime_target={})
+
+    def lookup(slug, execution):
+        assert (slug, execution) == ("fixture", "execution-one")
+        return agent
+
+    monkeypatch.setattr(store.execution_registry, "get", lookup)
+    monkeypatch.setattr(launch_logs, "connect", lambda: store)
+    process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: 0)
+    monkeypatch.setattr(launch_logs.subprocess, "Popen", lambda *args, **kwargs: nullcontext(process))
+    monkeypatch.setattr(launch_logs.sys, "stdout", io.StringIO())
+
+    assert launch_logs.main(["--slug", "fixture", "--execution", "execution-one", "--", "server"]) == 0
+
+    receipt = Orders(store.redis).launch_receipt("hive-one", "fixture", "execution-one", 7)
+    assert store.redis.hgetall(receipt) == {"supervisor_log": ""}
+
+
 def test_failed_server_log_survives_pod_files_and_keeps_receipt_generation(tmp_path, monkeypatch):
     import fakeredis
 
@@ -44,7 +71,9 @@ def test_failed_server_log_survives_pod_files_and_keeps_receipt_generation(tmp_p
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    agent = SimpleNamespace(execution_id="execution-one", generation=7, runtime_target={"host_id": "hive-one"})
+    agent = SimpleNamespace(
+        execution_id="execution-one", generation=7, hive="hive-one", runtime_target={"host_id": "hive-one"}
+    )
 
     def lookup(slug, execution):
         assert (slug, execution) == ("fixture", "execution-one")
@@ -125,7 +154,7 @@ def test_log_is_persisted_before_server_exit_and_retention_is_bounded(monkeypatc
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    agent = SimpleNamespace(execution_id="execution", generation=2, runtime_target={"host_id": "hive"})
+    agent = SimpleNamespace(execution_id="execution", generation=2, hive="hive", runtime_target={"host_id": "hive"})
     monkeypatch.setattr(store.execution_registry, "get", lambda slug, execution: agent)
     monkeypatch.setattr(launch_logs, "connect", lambda: store)
     monkeypatch.setattr(

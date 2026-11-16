@@ -102,6 +102,7 @@ class NatsScopedBus:
             swarm,
             "dead",
         )
+        self.lab_heads = root.lab_heads
 
     def for_swarm(self, swarm: str) -> "NatsScopedBus":
         if swarm != self._swarm:

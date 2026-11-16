@@ -1,0 +1,18 @@
+rules:
+  - id: hub-hang-frees-live-agent
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub launch check frees an agent whose stop answered unknown without reading its hive's live report, so an
+      agent that runs with no started record loses its claim, seat and task. Free it only after live(...) finds no
+      hive report naming it.
+    paths:
+      include:
+        - /scripts/hub/launch_checks.py
+        - hub-hang-frees-live-agent.py
+    patterns:
+      - pattern: $FREER.free(...)
+      - pattern-not-inside: |
+          if <... live(...) ...>:
+              ...
+          ...

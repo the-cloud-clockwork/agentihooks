@@ -13,10 +13,10 @@ from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.hive import scope
 from scripts.inbox.store import CLOSED, Gone, InboxError
-from scripts.swarm import idle, merge_queue, mutation_wait
+from scripts.swarm import idle, merge_queue, run_wait
 from scripts.swarm.store import SwarmError
 
-KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
+KINDS = ("checks", "merge", "reply", "task", "intent")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
 FINISH_TURN = (
@@ -43,7 +43,7 @@ def dependency(held: dict, task: dict, rows: dict, github: Callable) -> bool:
 def on(kind, target, task=""):
     if kind not in KINDS:
         raise SwarmError(f"wait on one of: {', '.join(KINDS)}")
-    return {"kind": kind, "target": target, **({"task": task} if kind in ("intent", "mutation") else {})}
+    return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
 
 
 def checks_resolution(held, github, reread=None):
@@ -107,12 +107,10 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
 def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
     if kind == "checks":
-        known = PULL_URL.fullmatch(target) or mutation_wait.RUN_URL.fullmatch(target)
+        known = PULL_URL.fullmatch(target) or run_wait.RUN_URL.fullmatch(target)
         return "" if known else f"wait on checks needs a pull request url or an Actions run url, not {target}"
     if kind == "merge":
         return "" if PULL_URL.fullmatch(target) else f"wait on merge needs a pull request url, not {target}"
-    if kind == "mutation":
-        return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
     if kind == "intent":
         own = rows.get(mine, {}).get("pr_url")
         return (
@@ -173,20 +171,15 @@ def intent_resolution(held, record, github):
     return f"the intent verdict on {held['target']}, now {record['verdict']}: {record['reason']}"
 
 
-def stacked_branches(task, rows):
-    deps = (rows.get(task) or {}).get("depends_on") or []
-    return [rows[dep]["branch"] for dep in deps if rows[dep].get("state") != "done" and rows[dep].get("branch")]
-
-
 def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
-    if kind == "mutation":
-        return mutation_wait.resolution(held, stacked_branches(held.get("task"), rows))
+    if kind not in KINDS:
+        return f"{kind} {target}, now ended; wait on one of: {', '.join(KINDS)}"
     if kind == "intent":
         return intent_resolution(held, verdicts.read(held["task"]), github)
-    if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
-        return mutation_wait.run_resolution(target)
+    if kind == "checks" and run_wait.RUN_URL.fullmatch(target):
+        return run_wait.run_resolution(target)
     if kind == "checks":
         return checks_resolution(held, github, reread)
     if kind == "merge":

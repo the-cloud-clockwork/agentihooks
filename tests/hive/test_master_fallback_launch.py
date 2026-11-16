@@ -499,7 +499,8 @@ def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
     assert selected.account == Account("claude", "login", "room", 0, None, None, kind="master-login")
 
 
-def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_master_login(setup):
+@pytest.mark.feature("master-interactive-login-without-front-gate")
+def test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot(setup: Any) -> None:
     task = {**master(setup), "seat": "master-2@fixture"}
     master_login_hive(setup)
     write_hive(
@@ -511,7 +512,7 @@ def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_maste
         slots=[{"harness": "claude", "account": "login", "kind": "subscription", "cap": 4}],
     )
     selected = setup.launcher.select(setup.config, "master", task)
-    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "interactive", 1)
+    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "subscription", 4)
 
 
 def test_a_front_door_master_on_a_native_hive_reserves_one_launch_while_another_hive_has_a_master_login(setup):

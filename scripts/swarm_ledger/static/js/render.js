@@ -330,6 +330,20 @@ function withRefusals(top, counts) {
   return shown ? { ...(top || {}), waits: [...((top && top.waits) || []), `Admission refusals ${shown}`] } : top;
 }
 
+function labLine(entry) {
+  const wait = entry.predicted_wait_s === null ? "no free slot" : `${span(entry.predicted_wait_s * 1000)} wait`;
+  return `${entry.class.replace(/_/g, " ")} · ${entry.pending} pending · ${wait}`;
+}
+
+function labStat(lab) {
+  const age = lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
+  const lines = lab.classes.map((entry) => h("li", { text: labLine(entry) }));
+  const failed = lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];
+  return h("div", { class: "stat lab-capacity", "data-stat": statKey("Lab") },
+    h("dt", {}, statGrip("Lab"), `Lab${age}`),
+    h("dd", {}, h("ul", { class: "lab-list" }, ...lines, ...failed)));
+}
+
 export function renderStats() {
   const phases = inScope(doc.phases), ups = inScope(doc.followups), tasks = inScope(doc.tasks);
   const total = phases.length + closedLeft("phases"), done = phases.filter((p) => p.done).length + closedLeft("phases");
@@ -363,6 +377,7 @@ export function renderStats() {
     row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
+    ...(calc && calc.lab ? [labStat(calc.lab)] : []),
     bottleneckStat(withRefusals(swarm && swarm.top_bottleneck, swarm && swarm.admission)));
   document.dispatchEvent(new Event("stats"));
 }

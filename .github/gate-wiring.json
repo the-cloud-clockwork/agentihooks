@@ -30,5 +30,62 @@
       "reason": "Grades the head's Gate Required wiring from the base branch on pull_request_target and reports its verdict as the Gate Required status, so the aggregator it guards cannot need it.",
       "owner": "ci-2@rig-grade-swarm"
     }
+  },
+  "lab_gates": {
+    "lab/lint": {
+      "reason": "The lab grades on every pushed head what the Actions lint job grades; while delivery.yaml lab.authoritative lists lint, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/lint"
+    },
+    "lab/type-gate": {
+      "reason": "The lab grades on every pushed head what the Actions type-gate job grades; while delivery.yaml lab.authoritative lists type-gate, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/type-gate"
+    },
+    "lab/docs": {
+      "reason": "The lab grades on every pushed head what the Actions docs job grades; while delivery.yaml lab.authoritative lists docs, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/docs"
+    },
+    "lab/semgrep": {
+      "reason": "The lab grades on every pushed head what the Actions semgrep job grades; while delivery.yaml lab.authoritative lists semgrep, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/semgrep"
+    },
+    "lab/writer-lock": {
+      "reason": "The lab grades on every pushed head what the Actions writer-lock job grades; while delivery.yaml lab.authoritative lists writer-lock, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/writer-lock"
+    },
+    "lab/test-count": {
+      "reason": "The lab grades on every pushed head what the Actions test-count job grades; while delivery.yaml lab.authoritative lists test-count, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/test-count"
+    },
+    "lab/unit-selected": {
+      "reason": "The lab grades on every pushed head what the Actions unit-selected job grades; while delivery.yaml lab.authoritative lists unit-selected, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/unit-selected"
+    },
+    "lab/unit": {
+      "reason": "The lab grades on every pushed head what the Actions unit job grades; while delivery.yaml lab.authoritative lists unit, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/unit"
+    },
+    "lab/shard-check": {
+      "reason": "The lab grades on every pushed head what the Actions shard-check job grades; while delivery.yaml lab.authoritative lists shard-check, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/shard-check"
+    },
+    "lab/sonar": {
+      "reason": "The lab grades on every pushed head what the Actions sonar job grades; while delivery.yaml lab.authoritative lists sonar, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/sonar"
+    },
+    "lab/mutation": {
+      "reason": "The lab grades on every pushed head what the Actions mutation job grades; while delivery.yaml lab.authoritative lists mutation, Gate Required reads this check run in place of that job.",
+      "owner": "eng-11@rig-grade-swarm",
+      "replaces": "test.yml/mutation"
+    }
   }
 }
