@@ -5,6 +5,7 @@ stage's last action.
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from scripts import agent_choice
 from scripts.inbox.store import InboxStore
@@ -26,6 +27,8 @@ RAISED = "Raised task {task} to urgent after {targeted}."
 PROPOSED = "Proposed a task to the master after {targeted}: {why}."
 PROPOSE = "The bottleneck hunter proposes a task for the {label} stage: {targeted}, fired {fired} {times}; {why}. {ask}"
 ADD = "If the operator agrees, add it titled {fix} and the next window raises it to urgent."
+ADD_CI = "If the operator agrees, add a ci task titled {fix} and the next window raises it to urgent."
+FIXES = {"lab_wait": ("Lab capacity", ADD_CI)}
 RAISE = "If the operator agrees, raise task {task} titled {fix} to urgent."
 UNMECHANICAL = "the stage has no mechanical remedy"
 BELOW = "autonomy {autonomy} leaves remedies to the master"
@@ -119,8 +122,13 @@ def _mechanical(slug, config, store, stage):
     return UNMECHANICAL
 
 
-def _fixer(doc, stage):
-    title = FIX.format(label=stage.label)
+def _fix(stage: Stage) -> tuple[str, str]:
+    """The title of the task that fixes the stage and the ask that adds it."""
+    return FIXES.get(stage.name, (FIX.format(label=stage.label), ADD))
+
+
+def _fixer(doc: dict[str, Any], stage: Stage) -> dict[str, Any] | None:
+    title = _fix(stage)[0]
     return next((t for t in doc["tasks"] if str(t.get("title")).startswith(title) and dispatcher._open(t)), None)
 
 
@@ -195,10 +203,10 @@ def _hive_room(store, lane, profiles):
     )
 
 
-def _propose(slug, store, stage, why, fixer):
+def _propose(slug: str, store: RedisStore, stage: Stage, why: str, fixer: dict[str, Any] | None) -> dispatcher.Action:
     mail = Mail(InboxStore(store.redis), store, slug)
-    fix = FIX.format(label=stage.label)
-    ask = RAISE.format(task=fixer["id"], fix=fix) if fixer else ADD.format(fix=fix)
+    fix, add = _fix(stage)
+    ask = RAISE.format(task=fixer["id"], fix=fix) if fixer else add.format(fix=fix)
     times = "time" if stage.fired == 1 else "times"
     text = PROPOSE.format(label=stage.label, targeted=stage.targeted, fired=stage.fired, times=times, why=why, ask=ask)
     mail.inbox.send(SENDER, mail.master, text)

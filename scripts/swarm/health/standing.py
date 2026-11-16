@@ -34,7 +34,7 @@ def key(slug: str) -> str:
     return f"{PREFIX}:{slug}:standing-findings"
 
 
-def read(redis: Redis, slug: str) -> dict:
+def read(redis: Redis, slug: str) -> dict[str, Any]:
     return {stage: json.loads(raw) for stage, raw in sorted(redis.hgetall(key(slug)).items())}
 
 
@@ -115,7 +115,7 @@ def _detector(old: dict[str, Any], reading: dict[str, Any], now_ms: int, thresho
     return row
 
 
-def fire(redis: Redis, slug: str, stage: str, reading: Reading, now_ms: int) -> dict:
+def fire(redis: Redis, slug: str, stage: str, reading: Reading, now_ms: int) -> dict[str, Any]:
     return _update(redis, slug, stage, lambda old: _fire(old, stage, reading, now_ms))
 
 
