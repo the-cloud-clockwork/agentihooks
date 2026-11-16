@@ -243,9 +243,10 @@ runner trust list (`.github/workflows/trusted-actors.json`) as grade requests, b
 calls it yet. A pull request head's actor is its author rather than the sender, so once that filter
 is wired in, a trusted user reopening an untrusted author's pull request yields no grade request.
 
-A delivery the receiver cannot read answers `400`. A missing field in the pull request or check
-suite part answers before anything is recorded. With lab intake on, a missing field that only a
-head row reads answers after the pull request observations were recorded.
+A delivery the receiver cannot read answers `400`. A missing field that the pull request
+observation of a `pull_request` or `check_suite` delivery reads answers before anything is
+recorded. With lab intake on, a missing field that only a head row reads answers after the pull
+request observations were recorded.
 
 Each head is one envelope:
 
