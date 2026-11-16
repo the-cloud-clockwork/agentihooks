@@ -1,9 +1,12 @@
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from .config import QueuePolicy
 from .envelope import Envelope
+
+SERVE_WAITED_MS: ContextVar[int] = ContextVar("serve_waited_ms", default=0)
 
 
 class StateConflict(Exception):

@@ -272,7 +272,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
-WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"judged"}), "wrapper view": frozenset({"agents"})}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
@@ -501,11 +501,13 @@ class _Wrapper:
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
         needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
-        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say, asked
+        first so a step needing a step that raised falls whatever else shuts it."""
+        ticked = self.ticks.shut(step)
         open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
         stopped = not open_past_stop and "stop" in self.box
         ended = self.ended is not None and step.group not in ENDS_AFTER
-        return stopped or ended or self.ticks.shut(step)
+        return ticked or stopped or ended
 
     def actions(self, records: Iterable[Any]) -> list[str]:
         """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
@@ -562,10 +564,10 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan, raise what the intent check held and keep its view and checked actions when it stored
-        them; an intent check that overran its budget stored nothing and leaves the pass going."""
+        """End the tick's scan and keep the intent check's view and checked actions when it stored them; an intent
+        check that raised or overran its budget stored neither and leaves the pass going, and only the pass end raises
+        what it held."""
         self.ticks.close()
-        host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
             self.box["view"] = host_steps.pass_view(self.slug, view)
@@ -1853,9 +1855,13 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
-    """The panic button: on stops agent starts and cancels CI runs but the fixes, off clears it once stable."""
+    """The panic button: on, pressed by the master or the operator, stops agent starts and cancels CI runs but the
+    checked fixes, off clears it once stable."""
     now = now_ms()
     if args.action == "on":
+        _master_or_operator(store, args, "only the master or the operator presses panic on")
+        for fix in args.fix:
+            panic.check_fix(fix)
         found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
         cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))

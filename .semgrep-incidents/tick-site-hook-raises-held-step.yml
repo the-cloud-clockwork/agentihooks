@@ -1,0 +1,25 @@
+rules:
+  - id: tick-site-hook-raises-held-step
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A class of the tick pass modules, such as a site hook or shut check, raises an exception a step held while the
+      pass runs. The raise leaves the site gate, so the scheduler stops and every step still waiting is lost, steps
+      that never needed the raising one included. Leave a held exception to the pass end, where run_tick and tick
+      raise it, and skip only what the raising step never stored.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - /scripts/tick/sites.py
+        - tick-site-hook-raises-held-step.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              class $CLASS:
+                  ...
+          - pattern-inside: |
+              class $CLASS(...):
+                  ...
+      - pattern-either:
+          - pattern: $MODULE.raise_held(...)
+          - pattern: raise_held(...)

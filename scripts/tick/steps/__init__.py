@@ -7,7 +7,7 @@ from typing import Any, TypedDict, TypeGuard, Unpack, cast
 
 from scripts.tick import hook_reads, registry
 from scripts.tick.engine import StepRecord
-from scripts.tick.step import Context, Domain, Lane, Result, Write
+from scripts.tick.step import Context, Domain, Lane, Result, Step, Write
 from scripts.tick.steps import budgets
 
 PASS = Domain("pass")
@@ -17,6 +17,7 @@ SWARM = Domain("swarm")
 DEADLINE = "deadline"
 BOX = "box"
 RAISED = "raised"
+FALLEN = "fallen"
 PASS_PREFIX = "pass:"
 HOOK_PREFIX = "hook:"
 BOX_KEYS = frozenset(
@@ -193,6 +194,25 @@ class DeclaredBox(MutableMapping[str, Any]):
     def __len__(self) -> int:
         """Return the number of box keys the step declares."""
         return len(list(iter(self)))
+
+
+def hold(box: MutableMapping[str, Any], exc: BaseException) -> None:
+    """Hold ``exc``, raised by the step reading the pass ``box``: the first exception of the pass stays the one it ends
+    on, and the step a declared box reads for joins the fallen steps, whose dependents stay shut."""
+    found = box.box if isinstance(box, DeclaredBox) else box
+    found.setdefault(RAISED, exc)
+    if isinstance(box, DeclaredBox):
+        found.setdefault(FALLEN, set[str]()).add(box.step)
+
+
+def fell(box: Mapping[str, Any], step: Step) -> bool:
+    """Return whether ``step`` needs a fallen step of the pass ``box``, one that raised or one shut for needing one,
+    naming ``step`` fallen in turn so the steps that need it stay shut too."""
+    fallen: set[str] | None = box.get(FALLEN)
+    if fallen is None or fallen.isdisjoint(step.needs):
+        return False
+    fallen.add(step.name)
+    return True
 
 
 def actions(records: Iterable[StepRecord]) -> list[str]:

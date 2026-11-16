@@ -45,6 +45,10 @@ REPOS = (
     "the-cloud-clockwork/agentihooks-bundle",
     "the-cloud-clockwork/antoncore",
 )
+PROTECTED = frozenset({"dev", "main"})
+FIX_LINK = re.compile(
+    r"https://github\.com/([^/]+/[^/]+)/(?:pull/([0-9]+)|tree/(?!refs/)([A-Za-z0-9_-]+(?:[./][A-Za-z0-9_-]+)*))"
+)
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
 Ports = Callable[[str], SourceControl]
@@ -186,6 +190,24 @@ def branch_fix(fix: str) -> tuple[str, str]:
     return repo_key(f"{GITHUB}{owner}/{name}"), branch
 
 
+def check_fix(fix: str) -> None:
+    """Refuses, before panic stores it, a fix the cancel sweep could not read or must never spare: anything but a
+    pull request or branch link of a panic repository, a branch link to dev or main, and a pull request whose head
+    branch is dev or main or that cannot be read."""
+    found = FIX_LINK.fullmatch(fix)
+    if found is None:
+        raise SwarmError(
+            f"{fix} is not a fix link: name a pull request https://github.com/OWNER/NAME/pull/NUMBER or a branch "
+            "https://github.com/OWNER/NAME/tree/BRANCH"
+        )
+    repository, number, branch = found.groups()
+    if repository not in REPOS:
+        raise SwarmError(f"{fix} is outside the panic repositories {', '.join(REPOS)}")
+    named = branch if number is None else fix_branch(fix)
+    if named in PROTECTED:
+        raise SwarmError(f"{fix} names {named}, which panic never spares")
+
+
 def _fix_triggered(row: RepositoryRun, branches: set[str]) -> bool:
     """Return whether the run is a workflow run event run whose run-name names, after its last " for ", one of the
     fix branches as the head branch of the run that triggered it."""
@@ -193,16 +215,16 @@ def _fix_triggered(row: RepositoryRun, branches: set[str]) -> bool:
     return row.event == WORKFLOW_RUN and found is not None and found[1] in branches
 
 
-def _spared(row: RepositoryRun, branches: set[str], commits: set[str], repo_fixes: set[str]) -> bool:
+def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
     """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit, a
-    release tag or a workflow run event run that a run of a fix in its own repository triggered."""
+    release tag or a workflow run event run that a fix's run triggered."""
     return (
         row.status not in ACTIVE
         or row.event in (MERGE_QUEUE, RELEASE_EVENT)
         or row.branch in branches
         or row.head_sha in commits
         or RELEASE_TAG.fullmatch(str(row.branch)) is not None
-        or _fix_triggered(row, repo_fixes)
+        or _fix_triggered(row, branches)
     )
 
 
@@ -225,14 +247,13 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes, the
-    workflow run event runs a fix's run in the same repository triggered and the runs on a fix's merge queue commit,
-    merge commit or merged integration branch head; a fix branch link spares its branch in its own repository and
-    is never read as a pull request."""
+    workflow run event runs a fix's run triggered and the runs on a fix's merge queue commit, merge commit or merged
+    integration branch head; a fix pull request spares its head branch and a fix branch link its branch only in its
+    own repository, and a branch link is never read as a pull request."""
     from scripts.swarm.stack import GITHUB, repo_key
 
     named = [(fix, *branch_fix(fix)) for fix in fixes]
     changes = [fix_change(fix) for fix, _, branch in named if not branch]
-    branches = {change.head_branch for change in changes}
     commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
@@ -240,11 +261,10 @@ def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> lis
         rows = provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS))
         spared = commits | _fix_heads(rows, changes, repo)
         here = repo_key(f"{GITHUB}{repo}")
-        links = {branch for _, key, branch in named if key == here}
-        kept = branches | links
-        repo_fixes = links | {change.head_branch for change in changes if change.reference.repository == repo}
+        kept = {change.head_branch for change in changes if change.reference.repository == repo}
+        kept |= {branch for _, key, branch in named if key == here}
         for row in rows:
-            if _spared(row, kept, spared, repo_fixes):
+            if _spared(row, kept, spared):
                 continue
             provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
             cancelled.append(f"{repo} run {row.id} on {row.branch}")
