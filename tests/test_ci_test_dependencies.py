@@ -1,7 +1,10 @@
+import os
 import re
 import shlex
+import subprocess
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -122,3 +125,61 @@ def test_inherited_constraints_must_include_the_generated_lock(tmp_path, scope, 
     assert len(_unlocked_installs(tmp_path)) == 1
     constraints.write_text("pytest<9.2\n--constraint test-requirements.lock\n")
     assert len(_unlocked_installs(tmp_path)) == (0 if installer == "uv pip" else 1)
+
+
+def _named_steps(job: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str | None]]:
+    """Return a job's steps and their names in order."""
+    steps = job["steps"]
+    return steps, [step.get("name") for step in steps]
+
+
+@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation-shard"])
+def test_protected_mutation_jobs_install_with_no_branch_lock(tmp_path: Path, job: str) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    steps, names = _named_steps(workflow["jobs"][job])
+    export = steps[names.index("Take the helper scripts from the workflow revision")]["run"]
+    install = steps[names.index("Install dependencies")]["run"]
+    trusted = tmp_path / "workflow"
+    trusted.mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_SHA="HEAD")
+    archive = next(line for line in export.splitlines() if line.strip().startswith("git archive"))
+    subprocess.run(["bash", "-euc", archive], cwd=ROOT, env=env, check=True)
+    branch = tmp_path / "old-branch"
+    branch.mkdir()
+    probe = """
+uv() {
+    [[ "$1 $2 $3 $4" == "pip install --system --constraint" ]] || return 1
+    [[ "$5" == "$RUNNER_TEMP/workflow/.github/test-requirements.lock" ]] || return 1
+    [[ -s "$5" ]] || return 1
+    echo "Trusted dependency lock resolved without a branch lock"
+}
+export -f uv
+"""
+    result = subprocess.run(
+        ["bash", "-euc", probe + install], cwd=branch, env=env, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Trusted dependency lock resolved without a branch lock" in result.stdout
+
+
+@pytest.mark.parametrize("job", ["mutation-stats", "mutation-shard"])
+def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path: Path, job: str) -> None:
+    steps, names = _named_steps(yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"][job])
+    install = steps[names.index("Install dependencies")]["run"]
+    helper = tmp_path / "workflow/.github/scripts/pypi-retry.sh"
+    helper.parent.mkdir(parents=True)
+    helper.write_text('shift 2\n"$@"\n')
+    branch = tmp_path / "branch"
+    (branch / ".github").mkdir(parents=True)
+    (branch / ".github/test-requirements.lock").write_text("pytest==8.0\n")
+    probe = 'uv() { echo "constraint=$5"; }\nexport -f uv\n'
+    result = subprocess.run(
+        ["bash", "-euc", probe + install],
+        cwd=branch,
+        env=dict(os.environ, RUNNER_TEMP=str(tmp_path)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "constraint=./.github/test-requirements.lock"

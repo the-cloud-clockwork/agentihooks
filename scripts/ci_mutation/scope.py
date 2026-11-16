@@ -11,7 +11,6 @@ from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
 HELD: dict[Path, tuple[dict[Path, str], dict[tuple[Path, bool], list[str]]]] = {}
-PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 TESTS = "actions/workflows/test.yml/runs"
 SHARDS = (
     '.jobs[] | if (.name | startswith("mutation (")) then .conclusion'
@@ -52,11 +51,6 @@ def graded_green(sha: str) -> bool:
         found = subprocess.run(command, capture_output=True, text=True)
         return found.stdout if found.returncode == 0 else ""
 
-    runs = api(PREFLIGHT, "-f", f"head_sha={sha}", "-f", "event=push", "--jq", ".workflow_runs[].id")
-    green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
-    if any(api(f"actions/runs/{run}/jobs", "--jq", green).strip() not in ("", "0") for run in runs.split()):
-        return True
-    # An open pull request skips the push preflight, so its own mutation shards grade the head.
     runs = api(TESTS, "-f", f"head_sha={sha}", "-f", "event=pull_request", "--jq", ".workflow_runs[].id")
     for run in runs.split():
         found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", SHARDS).split()

@@ -4061,12 +4061,11 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 30
     outputs:
-      shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.refine.outputs.shards || steps.plan.outputs.shards }}
-      stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
+      shards: ${{ steps.refine.outputs.shards || steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
       browser: ${{ steps.plan.outputs.browser }}
-      reused: ${{ steps.reuse.outputs.reused || 'false' }}
-      forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
+      forwarded: ${{ steps.plan.outputs.changed == '0' && 'true' || 'false' }}
       selection: ${{ steps.contract.outputs.selection || 'false' }}
       durations: ${{ steps.durations.outputs.cache-matched-key }}
       collected: ${{ steps.collect.outputs.collected || 'false' }}
@@ -4099,7 +4098,6 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
-      # An earlier branch counts as a base only once its push preflight mutated it green; the lookup runs on the App's quota.
       - name: Mint the tcc main ci App token
         id: app-token
         uses: actions/create-github-app-token@v3.2.0
@@ -4109,7 +4107,6 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
-      # The protected copy gives the reuse verdict and refuses a head whose preflight producer differs from the grader's.
       - name: Check out the protected grader
         if: github.event_name == 'pull_request'
         env:
@@ -4118,42 +4115,18 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      - name: Reuse the branch preflight report graded on this head and base
-        id: reuse
-        if: github.event_name == 'pull_request'
-        env:
-          BRANCH: ${{ github.head_ref }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          GRADER: ${{ github.event.pull_request.base.sha }}
-        run: |
-          base=$(git merge-base origin/dev "$HEAD_SHA")
-          PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
-            --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
-
-      - name: Share the branch preflight kill memory with the mutation shards
-        if: steps.reuse.outputs.reused != 'true' && hashFiles('.mutation-killers-restored/killers/*') != ''
-        uses: ./.workflow-revision/.github/actions/retry-upload
-        with:
-          name: mutation-stats-killers
-          path: .mutation-killers-restored/
-          include-hidden-files: true
-          retention-days: 1
-
       - name: Take the helper scripts from the workflow revision
-        if: steps.reuse.outputs.reused != 'true'
         run: |
           git fetch --no-tags origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
       - name: Install dependencies
-        if: steps.reuse.outputs.reused != 'true'
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
         id: durations
-        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -4163,7 +4136,6 @@ jobs:
           restore-keys: durations-merged-
 
       - name: Adopt latest dev durations
-        if: steps.reuse.outputs.reused != 'true'
         env:
           PYTHON_VERSION: "3.12"
         run: |
@@ -4171,7 +4143,6 @@ jobs:
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Restore measured statistics timings
-        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -4184,7 +4155,6 @@ jobs:
 
       - name: Size mutation shards from stored timings
         id: plan
-        if: steps.reuse.outputs.reused != 'true'
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -4193,7 +4163,7 @@ jobs:
         run: python -I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload the mutation-plan step peak memory
-        if: always() && github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        if: always() && github.event_name == 'pull_request'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           after-cancel: true
@@ -4203,7 +4173,7 @@ jobs:
           retention-days: 7
 
       - name: Check out the protected mutation grader
-        if: github.event_name == 'workflow_dispatch' && steps.reuse.outputs.reused != 'true'
+        if: github.event_name == 'workflow_dispatch'
         env:
           GRADER: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
         run: |
@@ -4212,7 +4182,6 @@ jobs:
 
       # The protected copy holds the planned bases, so a pull request cannot narrow the lines it is graded on.
       - name: Hold the planned mutation bases to the protected grader
-        if: steps.reuse.outputs.reused != 'true'
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           BASES: ${{ steps.plan.outputs.bases }}
@@ -4226,7 +4195,6 @@ jobs:
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
       - name: Check the planned selection contract
         id: contract
-        if: steps.reuse.outputs.reused != 'true'
         run: |
           if [[ ! -e .mutation-selection.json ]]; then
             echo "This head's planner predates the planned test selection, so mutation selects matching and importing test modules as before." >> "$GITHUB_STEP_SUMMARY"
@@ -4238,7 +4206,7 @@ jobs:
           echo "selection=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload planned mutation test selection
-        if: steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'
+        if: steps.contract.outputs.selection == 'true'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-selection
@@ -4251,7 +4219,7 @@ jobs:
 
       - name: Collect the mutation stats in this job when four parts or fewer cover them
         id: collect
-        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed != '0'
+        if: steps.plan.outputs.changed != '0'
         env:
           PARTS: ${{ steps.plan.outputs.stats_parts }}
         run: |
@@ -4355,9 +4323,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Take the branch preflight kill memory for the only shard
-        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.shards == '[0]' && steps.plan.outputs.stats_parts == '[0]' && hashFiles('.mutation-killers-restored/killers/*') != ''
-        run: cp -R .mutation-killers-restored/. .mutation-stats/
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: steps.collect.outputs.collected == 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Mutate the only shard in the plan job
         id: mutate
@@ -4388,58 +4362,6 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-      - name: Restore the tests that killed this branch's earlier mutants
-        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts != '[0]'
-        uses: actions/cache/restore@v4
-        env:
-          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
-        with:
-          path: .mutation-stats/killers
-          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
-
-      - name: Seed the kill memory from the branch preflight
-        id: preflight
-        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts != '[0]' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('.mutation-stats/killers/*') == ''
-        continue-on-error: true
-        timeout-minutes: 3
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          BRANCH: ${{ github.head_ref }}
-        run: &seed-branch-preflight-kill-memory |
-          fetch() { gh run download "$1" --repo "$GITHUB_REPOSITORY" --pattern 'mutation-killers-*' --dir "$2"; }
-          runs="repos/$GITHUB_REPOSITORY/actions/workflows/mutation-preflight.yml/runs"
-          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH and .status == "completed") | .id') || same=""
-          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[] | select(.status == "completed") | .id') || newest=""
-          while read -r run; do
-            [[ -n "$run" ]] || continue
-            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("mutation-killers-")))] | length') || continue
-            if (( kept > 0 )); then
-              folder="$RUNNER_TEMP/preflight-killers/1"
-              if ! fetch "$run" "$folder"; then
-                echo "::warning::Download of the kill memory of Mutation preflight run $run failed, as an artifact service outage does; retrying it once in 30 seconds."
-                sleep 30
-                folder="$RUNNER_TEMP/preflight-killers/2"
-                fetch "$run" "$folder"
-              fi
-              mkdir -p .mutation-stats/killers
-              find "$folder" -type f -exec cp {} .mutation-stats/killers/ \;
-              echo "Seeded the first plan with $(find .mutation-stats/killers -type f | wc -l) kill memory files of Mutation preflight run $run"
-              echo "id=$run" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done < <(printf '%s\n%s\n' "$same" "$newest" | awk 'NF && !seen[$0]++')
-          echo "No Mutation preflight run of $BRANCH kept kill memory, so the first plan prices units without it."
-
-      - name: Keep the branch preflight kill memory for this run's shards
-        if: steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: .mutation-stats/killers
-          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}-preflight
-
       - name: Refine mutation shards from measured statistics
         id: refine
         if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts != '[0]'
@@ -4461,7 +4383,7 @@ jobs:
           retention-days: 7
 
       - name: Grade the empty change set
-        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
+        if: steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
         run: |
@@ -4471,8 +4393,8 @@ jobs:
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
-      - name: Forward the reused or empty mutation report
-        if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
+      - name: Forward the empty mutation report
+        if: always() && steps.plan.outputs.changed == '0'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           after-cancel: true
@@ -4661,27 +4583,15 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      - name: Download the branch preflight kill memory
+      - name: Restore the tests that killed this branch's earlier mutants
         if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
-        id: download-the-branch-preflight-kill-memory
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &mutation-download-the-branch-preflight-kill-memory
-          pattern: mutation-stats-killers
-          path: .mutation-stats
-          merge-multiple: true
-
-      - name: Download the branch preflight kill memory, wait before attempt 2
-        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download the branch preflight kill memory failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download the branch preflight kill memory, attempt 2
-        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *mutation-download-the-branch-preflight-kill-memory
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Mutate the only shard in the statistics job
         id: mutate
@@ -4806,36 +4716,6 @@ jobs:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
-
-      - name: Mint the token that reads the branch preflight kill memory
-        id: app-token
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('.mutation-stats/killers/*') == ''
-        continue-on-error: true
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-
-      - name: Seed the kill memory from the branch preflight
-        id: preflight
-        if: steps.app-token.outcome == 'success'
-        continue-on-error: true
-        timeout-minutes: 3
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          BRANCH: ${{ github.head_ref }}
-        run: *seed-branch-preflight-kill-memory
-
-      - name: Keep the branch preflight kill memory for this run's shards
-        if: steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: .mutation-stats/killers
-          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}-preflight
 
       - name: Refine mutation shards from measured statistics
         id: refine

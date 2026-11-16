@@ -18,6 +18,7 @@ from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, budgets, pass_
 
 Get = Callable[[str], Any]
 _IDENTITY_CONFLICT = "stale or changed execution identity"
+ENDED = "ended"
 
 
 def _reap(
@@ -303,20 +304,39 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
 
 
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
-    """Return the actions the live agent watch takes on one agent whose hive recorded its start while its pane is
-    live; its exit, its recovery and its lease stay with the hub lifecycle and reconciler."""
+    """Return the actions the reap step takes on one agent whose hive recorded its start: an agent whose work ended
+    gets that hive's execution stop through ``_stop_ended``, and a settled agent is watched while its pane is live;
+    its exit, its recovery and its lease stay with the hub lifecycle and reconciler."""
     slug, store = judging.slug, judging.store
     if (
-        agent.name not in judging.live
-        or agent.state in {"awaiting-decision", "retiring"}
+        agent.state in {"awaiting-decision", "retiring"}
         or (agent.lane == tick.MASTER and agent.state == "starting")
         or tick.timing.timed(tick._acknowledging, slug, store, agent)
-        or tick._ended(agent, judging.rows)
     ):
+        return []
+    if tick._ended(agent, judging.rows):
+        return tick.timing.timed(_stop_ended, slug, agent)
+    if agent.name not in judging.live:
         return []
     return tick.timing.timed(
         tick._watch_agent, slug, store, judging.ledger, judging.runtime, judging.rows, agent, judging.now_ms
     )
+
+
+def _stop_ended(slug: str, agent: AgentRecord) -> list[str]:
+    """Send the execution stop for ``agent``, whose work ended, to the hive that recorded its start, so that hive
+    reaps it and the hub lifecycle settles its exit; one action when the stop went out or the bus refused it, none
+    while the same stop is inside the bus dedupe window, once the execution ended or where no hive recorded its
+    start."""
+    from scripts.hive import execution_stop
+    from scripts.hub.reconciler import stop_admitted
+
+    outcome = stop_admitted(slug, agent, ENDED)
+    if outcome == execution_stop.SENT:
+        return [f"sent the stop for {agent.name} to its hive: its work {ENDED}"]
+    if outcome.startswith(execution_stop.FAILED):
+        return [f"could not send the stop for {agent.name}, retrying next tick: {outcome}"]
+    return []
 
 
 def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:

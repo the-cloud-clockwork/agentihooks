@@ -1,0 +1,6 @@
+{
+  "tests/test_ci_workflow.py::test_the_inline_statistics_shard_downloads_the_branch_preflight_kill_memory_before_it_mutates": {
+    "reader": "Standards reader",
+    "reason": "The head removes the mutation preflight and the pull request reuse of its report and kill memory; the Tests run is the only mutation source, so no preflight lookup, reuse or seed step remains to test."
+  }
+}
