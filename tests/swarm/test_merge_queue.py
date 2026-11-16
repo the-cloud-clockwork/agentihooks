@@ -948,6 +948,7 @@ def test_cli_lets_the_master_queue_while_its_coding_window_is_open(monkeypatch, 
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "master-session")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "connect", lambda: swarm_of(MASTER))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([]))
     seen = []
     monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append(verb) or {"queued": True})
     assert cli.main(["sw", "merge", "queue", URL]) == 1
@@ -960,6 +961,7 @@ def test_cli_lets_the_master_queue_while_its_coding_window_is_open(monkeypatch, 
 def test_cli_refuses_the_master_a_queue_change(monkeypatch, capsys, action):
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("master"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([]))
     monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: pytest.fail("the master changed the queue"))
 
     assert cli.main(["sw", "merge", action, URL]) == 1
@@ -1212,7 +1214,13 @@ def stall_ledger(rows: list[dict], focus: tuple[str, ...] = ()) -> object:
         own(slug)
         return doc
 
-    return SimpleNamespace(task=scoped.task, tasks_targeting=targeting, tasks=scoped.tasks, state=state)
+    def freezes(slug: str) -> list[dict]:
+        own(slug)
+        return doc["freezes"]
+
+    return SimpleNamespace(
+        task=scoped.task, tasks_targeting=targeting, tasks=scoped.tasks, state=state, freezes=freezes
+    )
 
 
 def plant_stall(store: Any, minutes: int) -> None:
@@ -1317,3 +1325,145 @@ def test_the_stall_route_skips_an_earlier_urgent_task_outside_the_focus(
     seen = stalled_master(monkeypatch, tmp_path, rows, focus=("phases/p1",))
     assert cli.main(["sw", "merge", "queue", URL]) == 0
     assert seen[0]["journal"].context == {"route": stall_queue.ROUTE, "task": "t1"}
+
+
+FROZEN_TASK = {"id": "t1", "rank": "normal", "state": "open", "pr_url": URL}
+SUB_AGENT_BRANCH = "master-a1b2c3-0002-2"
+
+
+def master_freeze(target: str = "tasks/t1", by: str = "master@a1b2c3-0002", verb: str = "freeze") -> dict[str, str]:
+    return {"verb": verb, "target": target, "by": by}
+
+
+def freeze_ledger(rows: list[dict], freezes: list[dict]) -> object:
+    from types import SimpleNamespace
+
+    scoped: Any = scoped_ledger(rows)
+
+    def own(slug: str) -> None:
+        if slug != "sw":
+            pytest.fail(f"the freeze route read swarm {slug}")
+
+    def targeting(slug: str, url: str) -> list[dict]:
+        own(slug)
+        return scoped.tasks_targeting(slug, url)
+
+    def read_freezes(slug: str) -> list[dict]:
+        own(slug)
+        return freezes
+
+    return SimpleNamespace(task=scoped.task, tasks_targeting=targeting, tasks=scoped.tasks, freezes=read_freezes)
+
+
+def frozen_master(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rows: list[dict],
+    freezes: list[dict],
+    branch: str = SUB_AGENT_BRANCH,
+) -> tuple[list[dict], list[str]]:
+    from scripts.swarm import pull_head
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "master-session")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of(MASTER))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: freeze_ledger(rows, freezes))
+    reads: list[str] = []
+    monkeypatch.setattr(
+        pull_head, "pull_branch", lambda url: reads.append(url) or pull_head.PullHead(branch, "", 7, "abc")
+    )
+    seen: list[dict] = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append(kwargs) or {"queued": True})
+    return seen, reads
+
+
+@pytest.mark.feature("master-freeze-queue")
+def test_the_master_seat_queues_a_sub_agent_pull_request_for_a_task_a_master_froze(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import master_queue
+
+    seen, reads = frozen_master(monkeypatch, tmp_path, [FROZEN_TASK, OTHER_TASK], [master_freeze()])
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert reads == [URL]
+    journal = seen[0]["journal"]
+    assert journal.context == {"route": master_queue.ROUTE, "task": "t1"}
+    journal.write("queue", URL, "abc", [], [])
+    record = json.loads((tmp_path / "merge-queue-events.jsonl").read_text().splitlines()[-1])
+    assert (record["route"], record["task"], record["pull"]) == ("master freeze", "t1", URL)
+
+
+@pytest.mark.feature("master-freeze-queue")
+def test_the_freeze_route_takes_the_frozen_task_among_the_tasks_naming_the_pull_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = [{**FROZEN_TASK, "id": "t0"}, FROZEN_TASK]
+    seen, _ = frozen_master(monkeypatch, tmp_path, rows, [master_freeze()])
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert seen[0]["journal"].context == {"route": "master freeze", "task": "t1"}
+
+
+@pytest.mark.feature("master-freeze-queue")
+@pytest.mark.parametrize(
+    "rows, freezes, branch, read",
+    [
+        ([FROZEN_TASK], [master_freeze(by="operator")], SUB_AGENT_BRANCH, False),
+        ([FROZEN_TASK], [master_freeze(by="masterly@a1b2c3-0002")], SUB_AGENT_BRANCH, False),
+        ([{**FROZEN_TASK, "phase": "p1"}], [master_freeze(target="phases/p1")], SUB_AGENT_BRANCH, False),
+        ([FROZEN_TASK], [master_freeze(verb="focus")], SUB_AGENT_BRANCH, False),
+        ([FROZEN_TASK, OTHER_TASK], [master_freeze(target="tasks/t2")], SUB_AGENT_BRANCH, False),
+        ([{**FROZEN_TASK, "state": "done"}], [master_freeze()], SUB_AGENT_BRANCH, False),
+        ([], [master_freeze()], SUB_AGENT_BRANCH, False),
+        ([FROZEN_TASK], [master_freeze()], "engineer-a1b2c3-0003", True),
+        ([FROZEN_TASK], [master_freeze()], "masterly-a1b2c3-0002-2", True),
+    ],
+    ids=[
+        "operator freeze",
+        "another seat named like a master",
+        "phase freeze",
+        "focus",
+        "another task frozen",
+        "done",
+        "no task",
+        "engineer branch",
+        "branch named like a master",
+    ],
+)
+def test_the_master_is_still_refused_without_a_master_freeze_on_a_sub_agent_pull_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    rows: list[dict],
+    freezes: list[dict],
+    branch: str,
+    read: bool,
+) -> None:
+    seen, reads = frozen_master(monkeypatch, tmp_path, rows, freezes, branch)
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
+    assert (seen, reads) == ([], [URL] if read else [])
+    assert capsys.readouterr().err == "swarm: engineer@a1b2c3-0001 is the swarm master; the master works no task\n"
+
+
+@pytest.mark.feature("master-freeze-queue")
+def test_the_freeze_route_names_a_pull_request_github_does_not_confirm_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import pull_head
+
+    seen, _ = frozen_master(monkeypatch, tmp_path, [FROZEN_TASK], [master_freeze()])
+
+    def closed(url: str) -> pull_head.PullHead:
+        raise SwarmError(f"pull request {url} is closed, not open")
+
+    monkeypatch.setattr(pull_head, "pull_branch", closed)
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
+    assert seen == []
+    assert capsys.readouterr().err == f"swarm: pull request {URL} is closed, not open\n"
+
+
+@pytest.mark.feature("master-freeze-queue")
+def test_the_freeze_route_never_opens_a_dequeue_for_the_master(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen, reads = frozen_master(monkeypatch, tmp_path, [FROZEN_TASK], [master_freeze()])
+    assert cli.main(["sw", "merge", "dequeue", URL]) == 1
+    assert (seen, reads) == ([], [])

@@ -48,7 +48,7 @@ def _key(endpoint):
     return hashlib.sha256(f"{credential} {endpoint}".encode()).hexdigest()
 
 
-def run(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
+def run(endpoint: str, now: float, fetch: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     entry = home() / f"{_key(endpoint)}.json"
     try:
         cached = json.loads(entry.read_text())

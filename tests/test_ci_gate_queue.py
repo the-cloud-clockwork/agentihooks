@@ -171,9 +171,18 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     ci_gate_queue.normalize(announced)
     announced["test.yml"]["jobs"]["gate-required"]["needs"].append("dep-manifest")
     ci_gate_queue.normalize(announced)
+    for typed in (False, True):
+        lab = copy.deepcopy(announced)
+        lab["test.yml"]["jobs"]["gate-required"]["needs"] += ["type-gate"] * typed + ["lab-verdict"]
+        assert ci_gate_queue.normalize(lab)["test.yml"]["jobs"]["gate-required"]["name"] == "Gate — Required"
     announced["test.yml"]["jobs"]["gate-required"]["needs"].append("unannounced")
     with pytest.raises(ValueError):
         ci_gate_queue.normalize(announced)
+    unlabelled = copy.deepcopy(workflow)
+    unlabelled["test.yml"]["jobs"]["gate-required"]["needs"].remove("lint")
+    unlabelled["test.yml"]["jobs"]["gate-required"]["needs"].append("lab-verdict")
+    with pytest.raises(ValueError):
+        ci_gate_queue.normalize(unlabelled)
 
 
 @pytest.mark.parametrize("deferred", [False, True])
@@ -232,7 +241,6 @@ def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota(
 
 def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened_watcher():
     import json
-    from datetime import date
     from pathlib import Path
 
     from scripts import ci_runner_trust, ci_wiring, gate_protected
@@ -245,22 +253,20 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
     jobs = candidate["test.yml"]["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
     jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
-    today = date(2026, 10, 25)
-    assert gate_protected.grade(workflows, config, candidate, config, today, policy) == []
-    assert ci_wiring.check(candidate, config, today) == []
+    assert gate_protected.grade(workflows, config, candidate, config, policy) == []
+    assert ci_wiring.check(candidate, config) == []
     for field, value in [("needs", []), ("steps", []), ("if", "true")]:
         changed = copy.deepcopy(candidate)
         changed["test.yml"]["jobs"]["queue-fail-fast"][field] = value
-        errors = gate_protected.grade(workflows, config, changed, config, today, policy)
+        errors = gate_protected.grade(workflows, config, changed, config, policy)
         assert any("context pair" in error.lower() for error in errors)
-        errors = ci_wiring.check(changed, config, today)
+        errors = ci_wiring.check(changed, config)
         assert any("context pair" in error.lower() for error in errors)
 
 
 @pytest.mark.feature("protected-grader-pins-gate-names")
 @pytest.mark.parametrize("plain", [False, True])
 def test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take(plain: bool) -> None:
-    from datetime import date
     from pathlib import Path
 
     from scripts import ci_runner_trust, ci_wiring, gate_protected
@@ -269,15 +275,14 @@ def test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_nam
     policy = json.loads((root / ci_runner_trust.ACTORS).read_text())
     workflows = ci_wiring.load(root)
     config = json.loads((root / ci_wiring.CONFIG).read_text())
-    today = date(2026, 10, 25)
-    assert gate_protected.grade(workflows, config, copy.deepcopy(workflows), config, today, policy) == []
+    assert gate_protected.grade(workflows, config, copy.deepcopy(workflows), config, policy) == []
     head = copy.deepcopy(workflows)
     jobs = head["test.yml"]["jobs"]
     if plain:
         jobs["gate-required"]["name"] = "Gate — Required"
         jobs["queue-fail-fast"]["name"] = "queue-fail-fast"
     jobs["gate-required"]["needs"].append("new-required-check")
-    errors = gate_protected.grade(workflows, config, head, config, today, policy)
+    errors = gate_protected.grade(workflows, config, head, config, policy)
     assert any(("pins it" if plain else "inventory") in error for error in errors), errors
 
 

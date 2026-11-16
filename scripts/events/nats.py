@@ -32,6 +32,8 @@ from .subjects import subject as event_subject
 
 DEFAULT_URL = "nats://127.0.0.1:4222"
 EVENT_STREAM = "AGENTIHOOKS-EVENTS"
+LAB_STREAM = "AGENTIHOOKS-CI-LAB-HEADS"
+LAB_SUBJECT = "ci.lab.head.>"
 QUEUE_SUBJECT = "agentihooks.queue"
 MSG_ID = "Nats-Msg-Id"
 KV_HISTORY = 64
@@ -564,6 +566,11 @@ class NatsBus:
                         name=dead_stream, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
                     )
                 )
+                self._loop.run(
+                    self._js.add_stream(
+                        name=LAB_STREAM, subjects=[LAB_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
+                    )
+                )
         except BaseException:
             self._loop.close()
             raise
@@ -582,6 +589,9 @@ class NatsBus:
             RoutedLog(lambda swarm: self.for_swarm(swarm).dead, lambda: self._logs("dead"), config.queue)
             if config.scoped
             else self._legacy_dead
+        )
+        self.lab_heads = NatsEventLog(
+            self._loop, self._js, config.queue, LAB_STREAM, config.provision, credentials=config.credentials
         )
         self._legacy_stops = self._legacy_events
         self.stops = (
