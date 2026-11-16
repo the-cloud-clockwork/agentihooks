@@ -229,7 +229,7 @@ class Spoke:
     def _return_offer(self, event: Envelope, error: Exception) -> None:
         """Ask the hub to reopen an offer this hive failed to start, unless the admit ask timed out: the next delivery
         asks again and receives the admission the hub kept."""
-        if not isinstance(error, TimeoutError):
+        if not isinstance(error, admission.Unanswered):
             self.tasks.reopen(event)
 
     def _report_launch(self, event: Envelope, launch: dict[str, Any] | None) -> None:

@@ -393,7 +393,9 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
 
 @pytest.mark.feature("hub-admission-late-answer-keeps-claim")
 def test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer(rig: SimpleNamespace) -> None:
-    rig.tasks.request.side_effect = [TimeoutError("no responders for 'slots.rig.one'"), rig.request]
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.one'"), rig.request]
 
     assert rig.spoke.poll() == "retry"
 
