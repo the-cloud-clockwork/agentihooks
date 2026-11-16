@@ -71,6 +71,53 @@ def test_a_refused_credential_on_a_remote_resource_read_is_unauthenticated(remot
         ledger.resource(SLUG, "metadata")
 
 
+def test_a_request_uses_the_bounded_timeout_by_default(remote: None) -> None:
+    client = Mock()
+    client.return_value.snapshot.return_value = {"tasks": []}
+    with patch("scripts.tick.adapters.database_ledger.client", client):
+        assert ledger.request(SLUG) == {"tasks": []}
+    client.assert_called_once_with("https://hub.example", 10)
+
+
+@pytest.mark.parametrize("ops", [[{"op": "ack"}], []])
+@pytest.mark.parametrize("failure", ["outage", "server error"])
+def test_a_remote_write_runs_once_through_an_outage_or_a_server_error(
+    remote: None, ops: list[dict[str, str]], failure: str
+) -> None:
+    error = ConnectionRefusedError("down") if failure == "outage" else refusal(503, "unavailable")[0]
+    with (
+        patch.object(ledger, "request", side_effect=error) as request,
+        patch.object(ledger.time, "sleep") as sleep,
+        pytest.raises(SystemExit, match="^(ledger server not answering|server refused: 503)"),
+    ):
+        ledger.call(SLUG, ops)
+    request.assert_called_once_with(SLUG, ops)
+    sleep.assert_not_called()
+
+
+def test_resource_and_export_reads_retry_a_storage_failure_with_a_fresh_client_and_bounded_timeouts(
+    remote: None,
+) -> None:
+    built: list[float] = []
+    replies: list[object] = [ConnectionResetError("reset"), {"data": {"title": "T"}}, OSError("gone"), {"data": {}}]
+
+    def request(slug: str, path: str, payload: object = None) -> object:
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    def client(slug: str, timeout: float) -> SimpleNamespace:
+        built.append(timeout)
+        return SimpleNamespace(request=request)
+
+    with patch.object(ledger, "client", client), patch.object(ledger.time, "sleep") as sleep:
+        assert ledger.resource(SLUG, "metadata") == {"title": "T"}
+        assert ledger.export(SLUG) == {}
+    assert built == [10, 10, 30, 30]
+    assert sleep.call_count == 2
+
+
 @pytest.mark.parametrize("code", [401, 403])
 def test_a_refused_hive_credential_is_unauthenticated(remote, code):
     from scripts.tick.adapters import database_ledger

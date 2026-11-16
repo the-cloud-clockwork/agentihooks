@@ -846,8 +846,10 @@ def watch_ledgers(
         scheduled_wait(interval)
 
 
-def listening(listener: socket.socket | None = None) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
+def listening(
+    listener: socket.socket | None = None, handler: type[BaseHTTPRequestHandler] = Handler
+) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((HOST, PORT), handler, bind_and_activate=False)
     server.request_queue_size = 128
     if listener is None:
         server.server_bind()

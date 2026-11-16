@@ -952,6 +952,7 @@ def answered(handler: type[Any]) -> str:
         ("POST", hasattr(handler, "do_POST")),
         ("PUT", hasattr(handler, "do_PUT")),
         ("PATCH", hasattr(handler, "do_PATCH")),
+        ("OPTIONS", hasattr(handler, "do_OPTIONS")),
     )
     return ", ".join(method for method, found in methods if found)
 
@@ -972,10 +973,7 @@ def serve() -> None:
     cast(Any, legacy).adopt(stored)
     adopt_unrelayed()
     threading.Thread(target=adopt_disk_files, daemon=True).start()
-    httpd: Any = server.ThreadingHTTPServer((HOST, PORT), WriteHandler, bind_and_activate=False)
-    httpd.request_queue_size = 128
-    httpd.server_bind()
-    httpd.server_activate()
+    httpd: Any = server.listening(handler=WriteHandler)
     stopping = threading.Event()
     threading.Thread(target=server.retrying(upkeep), args=(stopping,), daemon=True).start()
 

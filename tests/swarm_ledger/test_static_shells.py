@@ -236,6 +236,27 @@ def test_the_shell_names_the_server_port_and_no_token_when_the_record_has_none(b
     assert f'<meta name="ledger-port" content="{server.PORT}">' in page
 
 
+def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger import api_service
+
+    sweeps: list[int] = []
+    passes: list[float] = []
+    monkeypatch.setattr(api_service, "bin_closed_without_swarm", lambda: sweeps.append(len(passes)))
+    monkeypatch.setattr(api_service.ledger_bin, "tidy", lambda: None)
+    monkeypatch.setattr(api_service, "expire_alerts", lambda: None)
+    monkeypatch.setattr(api_service, "unrelayed", lambda: {})
+
+    def tick(interval: float) -> None:
+        passes.append(interval)
+        if len(passes) == 31:
+            raise StopIteration
+
+    monkeypatch.setattr(server, "scheduled_wait", tick)
+    with pytest.raises(StopIteration):
+        api_service.upkeep(threading.Event())
+    assert sweeps == [0, 15, 30]
+
+
 def history(copies):
     def said(n):
         return [{"id": f"c{n}-{i}", "by": "operator", "text": f"line {i}", "at": i + 1} for i in range(copies)]
