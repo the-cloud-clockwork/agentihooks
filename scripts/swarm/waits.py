@@ -28,7 +28,6 @@ FINISH_TURN = (
 FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
-ENDED = "waits:ended"
 PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 NOTICE_RE = re.compile(r"Your wait on .+ has ended\. Pick task (\S+) back up:")
 
@@ -247,13 +246,18 @@ def end_pass(
 
 def mark_ended(store: Any, slug: str, now_ms: int) -> None:
     """Record ``now_ms`` as the time the waits end pass of swarm ``slug`` last completed."""
-    store.redis.set(store.key(slug, ENDED), now_ms)
+    store.redis.set(_ended_key(slug), now_ms)
 
 
 def ended_at(store: Any, slug: str) -> int | None:
     """Return when the waits end pass of swarm ``slug`` last completed, in epoch milliseconds, or None if it never did."""
-    found = store.redis.get(store.key(slug, ENDED))
+    found = store.redis.get(_ended_key(slug))
     return None if found is None else int(found)
+
+
+def _ended_key(slug: str) -> str:
+    """Return the key holding when the waits end pass of swarm ``slug`` last completed."""
+    return idle.key(slug, "waits", "ended")
 
 
 def _pick_up(task):

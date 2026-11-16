@@ -504,14 +504,15 @@ def _watch_idle(
 
 def _holding_wait(store: Any, slug: str, found: Any, now_ms: int) -> Any:
     """The declared wait ``found`` as the idle count reads it: a checked wait only while the waits end pass, which
-    ends a checked wait once its target resolves, last completed within the idle retirement window."""
+    ends a checked wait once its target resolves, last completed within the idle retirement window, or, before any
+    pass completed, within that window of the wait's declaration."""
     if not isinstance(found, dict):
         return found
     held = cast(dict[str, Any], found)
     if not held.get("on"):
         return held
     ended = waits.ended_at(store, slug)
-    if ended is None or now_ms - ended < tick.IDLE_KILL_MS:
+    if now_ms - (held["at"] if ended is None else ended) < tick.IDLE_KILL_MS:
         return held
     return None
 
