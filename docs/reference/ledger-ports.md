@@ -37,7 +37,7 @@ keeps the call shape it used before: `ports.swarm().store.connect(environ)` in p
 
 | Port | Members | Adapter delegates to |
 |---|---|---|
-| `Swarm` | `naming`, `store`, `commands`, `lifecycle`, `freeze`, `effort_range`, `claim_hold`, `idle`, `lease`, `model_catalog`, `default_models`, `quota_refresh`, `operator_mail`, `overlays`, `verdicts`, `phase_state`, `affinity`, `templates`, `stack_env`, `stack_init`, `front_door`, `ledger_writer`, `master_fence`, `masters`, `architecture`, `operator_auth`, `task_specs`, `authority`, `ledger_cutover` | Modules under `scripts.swarm` and `scripts.swarm_v2` |
+| `Swarm` | `naming`, `store`, `commands`, `lifecycle`, `freeze`, `effort_range`, `claim_hold`, `idle`, `lease`, `model_catalog`, `default_models`, `quota_refresh`, `operator_mail`, `overlays`, `verdicts`, `phase_state`, `affinity`, `templates`, `stack_env`, `stack_init`, `front_door`, `ledger_writer`, `master_fence`, `masters`, `architecture`, `operator_auth`, `task_specs`, `authority` | Modules under `scripts.swarm` and `scripts.swarm_v2` |
 | `Hive` | `auth`, `registry`, `launch`, `reports`, `headroom`, `herdr_stats` | `scripts.hive.<member>` |
 | `Hooks` | `account_sessions`, `config`, `conditions`, `filters`, `operator_words`, `classifier`, `profile_chain`, and the method `redis()` | `hooks.context`, `hooks.config`, `hooks.filters.check`, `hooks.classifier` with its `code_rules` and `runner`, and `hooks._redis.get_redis()` |
 
