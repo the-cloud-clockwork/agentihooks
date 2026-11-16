@@ -534,6 +534,24 @@ def test_a_stop_on_pending_checks_turns_a_live_bare_wait_into_the_checks_wait(ri
     assert idle.wait(rig.store.redis, SLUG, ME)["on"] == {"kind": "checks", "target": URL}
 
 
+def test_a_live_checks_wait_on_another_pull_request_reads_that_pull_request(rig, tmp_path):
+    other = "https://github.com/o/r/pull/8"
+    rig.task.update(state="pr", pr_url=URL)
+    asked = []
+
+    def view(url):
+        if url is None:
+            raise TypeError("expected string or bytes-like object, got 'NoneType'")
+        asked.append(url)
+        return PENDING
+
+    gate = ClaimStop(connect=lambda: rig.store, ledger=lambda: rig.ledger, github=view, now=lambda: rig.clock[0])
+    on = {"kind": "checks", "target": other}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "the other half", rig.clock[0], on=on)
+    assert gate.decide(STOP, WHO, Verdicts(SLUG, gate.name, tmp_path)).allowed
+    assert asked == [URL, other]
+
+
 def test_a_live_wait_lets_the_stop_through_and_an_expired_one_does_not(rig):
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "reviewers", rig.clock[0])
     assert rig.stop().allowed

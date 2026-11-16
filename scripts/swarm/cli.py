@@ -2428,10 +2428,8 @@ def cmd_wait(store, args):
             if head == "":
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
             if head is None:
-                waits.mutation_wait.admitted_pending(held["target"])
+                waits.run_wait.admitted_pending(held["target"])
             held["head"] = head
-        if held["kind"] == "mutation":
-            held["head"] = waits.mutation_wait.bind(held["target"])
     at = now_ms()
     until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
     idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)
