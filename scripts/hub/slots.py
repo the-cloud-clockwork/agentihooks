@@ -23,8 +23,9 @@ OPERATIONS: dict[str, Callable[[account_slots.Slots, dict[str, Any]], Any]] = {
 }
 
 
-def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admitter: "Admission | None"):
+def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admitter: "Admission | None") -> object:
     from scripts.hub import admission
+    from scripts.tick.adapters import database_ledger
 
     parts = subject.split(".")
     if len(parts) != 3 or parts[0] != SLOTS:
@@ -41,7 +42,8 @@ def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admit
         print(f"hub: refused a {request['op']} in swarm {parts[1]}: {refusal}", file=sys.stderr)
         raise PermissionError(refusal)
     if admit:
-        return getattr(admitter, request["op"])(parts[1], request)
+        with database_ledger.scoped():
+            return getattr(admitter, request["op"])(parts[1], request)
     return operation(account_slots.Slots(bus, request["hive"], lambda: request["report"], clock), request)
 
 

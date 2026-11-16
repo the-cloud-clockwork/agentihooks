@@ -855,14 +855,14 @@
       "id": "hub-admission-claim-continuity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-continuity",
-      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened or late admission detaches the transfer for the next successor without a second row, and a refused attach releases the claim, the agent and the ledger row.",
+      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened admission detaches the transfer for the next successor without a second row, a late admission keeps it with its admitted successor, and a refused attach releases the claim, the agent and the ledger row.",
       "seam": "Admission.admit and Admission.reopen against the stored handoff transfers",
       "tests": [
         "tests/hub/test_admission.py::test_an_events_successor_attaches_the_transfer_its_predecessor_left",
         "tests/hub/test_admission.py::test_an_events_successor_with_no_transfer_left_carries_none",
         "tests/hub/test_admission.py::test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor",
         "tests/hub/test_admission.py::test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was",
-        "tests/hub/test_admission.py::test_a_late_events_admission_hands_its_transfer_back",
+        "tests/hub/test_admission.py::test_a_late_events_admission_keeps_its_transfer_with_the_admitted_successor",
         "tests/hub/test_admission.py::test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_row"
       ]
     },
@@ -896,14 +896,37 @@
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
-      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, and the hub releases an admission that finished after the hive stopped waiting, so no claimed agent waits for the controller retire.",
-      "seam": "Spoke failure and own launching recovery paths, and Admission.admit answer window",
+      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, so no claimed agent waits for the controller retire.",
+      "seam": "Spoke failure and own launching recovery paths",
       "tests": [
         "tests/hive/test_spoke.py::test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry",
         "tests/hive/test_spoke.py::test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness",
-        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work",
-        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused",
+        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work"
+      ]
+    },
+    {
+      "id": "hub-admission-late-answer-keeps-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
+      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, a hive that stopped waiting receives the same admission when it asks again for the same offer, and the offer's claim generation is not raised.",
+      "seam": "Admission.admit and Admission._answered on the hub",
+      "rules": [
+        "hub-admission-late-answer-releases-claim"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive",
+        "tests/hub/test_admission.py::test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live_claimant",
         "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept"
+      ]
+    },
+    {
+      "id": "hub-admission-ledger-through-database",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
+      "behaviour": "Every hub admission operation a hive asks over the slot subject runs its ledger reads and writes, the claim write among them, in process through the ledger API route code against the shared database whenever the shared database setting is present, so the hub never writes a claim through the ledger server; without the setting it keeps the ledger server path.",
+      "seam": "scripts.hub.slots handle for the admission operations, through scripts.tick.adapters.database_ledger.scoped",
+      "tests": [
+        "tests/hub/test_slots.py::test_an_admission_runs_its_ledger_calls_through_the_shared_database_when_it_is_set"
       ]
     },
     {
