@@ -565,6 +565,16 @@
       ]
     },
     {
+      "id": "tick-waits-end-records-its-end-every-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, so the waits end step, declared at sixty seconds on the tick lane, refreshes its end on every run and a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, read by scripts.tick.steps.agents._holding_wait",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
       "id": "tick-merged-task-settlement-after-overrun",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2432",
