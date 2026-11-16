@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.936 · 2026-11-16
+
+### 2026-11-16 · 78abc135d0b3 · #11535 · @nestorcolt
+
+**Restore a queue shard coverage download again when it ends before finishing**
+
+This change fixes a silent failure where the "Restore queue shard coverage" step could exit successfully even though its download never actually completed, leaving partial coverage files that got re-published as if valid, which broke the sonar coverage merge. Now, if neither restore attempt sets `download-path`, the workflow retries the download once more and fails the job if that also leaves no `download-path`, catching the stalled-download case that the existing failure-only retry missed. Tests were updated to pin the new steps and verify the fix.
+
 ## v2.17.931 · 2026-11-16
 
 ### 2026-11-16 · 3b0a9616373c · #11423 · @agenticore-app
