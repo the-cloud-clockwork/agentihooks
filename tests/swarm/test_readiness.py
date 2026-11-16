@@ -273,9 +273,8 @@ def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus)
     assert delivery.event.key == "a"
 
 
-@pytest.mark.feature("hub-shared-ledger-copy")
 def test_threads_asking_for_one_new_revision_fetch_the_export_once() -> None:
-    second = threading.Event()
+    began, second = threading.Event(), threading.Event()
 
     class Ledger:
         def __init__(self) -> None:
@@ -287,6 +286,7 @@ def test_threads_asking_for_one_new_revision_fetch_the_export_once() -> None:
         def state(self, slug: str) -> dict[str, Any]:
             self.fetches += 1
             if self.fetches == 1:
+                began.set()
                 second.wait(0.5)
             else:
                 second.set()
@@ -294,9 +294,9 @@ def test_threads_asking_for_one_new_revision_fetch_the_export_once() -> None:
 
     ledger = Ledger()
     source = readiness.Source(ledger=cast(Any, ledger))
-    readers = [threading.Thread(target=source.state, args=(SLUG,)) for _ in range(2)]
-    for reader in readers:
-        reader.start()
-    for reader in readers:
-        reader.join()
+    reader = threading.Thread(target=source.state, args=(SLUG,))
+    reader.start()
+    assert began.wait(5)
+    source.state(SLUG)
+    reader.join()
     assert ledger.fetches == 1

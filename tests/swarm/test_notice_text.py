@@ -268,7 +268,7 @@ class _CapStore:
     def handoff_envelope(self, slug, task_id):
         return None
 
-    def launches(self, slug: str, task: str) -> list[dict[str, str]]:
+    def launches(self, slug: str, task: str | None = None) -> list[dict[str, str]]:
         return []
 
     def reset_claims(self, slug, task_id):

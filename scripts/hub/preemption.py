@@ -34,11 +34,12 @@ class Preemption:
         now = self._clock()
         if now < self._due or not guard():
             return
-        if self._store is None or self._source is None:
-            if self._store is None and BusConfig.from_environ().backend == "memory":
+        if self._store is None:
+            if BusConfig.from_environ().backend == "memory":
                 return
-            self._store = self._store or connect()
-            self._source = self._source or readiness.Source(self._store, self._ledger or LedgerClient(service=True))
+            self._store = connect()
+        if self._source is None:
+            self._source = readiness.Source(self._store, self._ledger or LedgerClient(service=True))
         for slug in self._source.slugs():
             if not guard():
                 return
