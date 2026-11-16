@@ -4,8 +4,8 @@ rules:
     severity: ERROR
     message: >-
       A hub admission that finished past its answer budget released the claim it had just written and refused the
-      hive, which withdrew the offer and raised its claim generation; on 16 November no urgent ci task kept a live
-      claimant. Keep the claim and answer with the admission; a hive that stopped waiting asks again for the
+      hive, which withdrew the offer and raised its claim generation, as the ledger does on every change of claimant;
+      on 16 November no urgent ci task kept a live claimant. Keep the claim and answer with the admission; a hive that stopped waiting asks again for the
       same offer and receives the held admission.
     paths:
       include:
