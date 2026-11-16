@@ -10,10 +10,9 @@ nav_order: 90
 The CI lab runs as two services, the scheduler and the worker. This page lists what each one
 exposes and reads: its entry point, environment, ports, metric names and capacity document.
 Every name lives in `scripts.ci_lab.contract`; the services and the platform tests are to
-import these constants by
-name, so a rename fails an import instead of dropping a series. The worker's PriorityClass is a
-cluster object outside that module; [Worker scheduling priority](#worker-scheduling-priority)
-covers it.
+import these constants by name, so a rename fails an import instead of dropping a series. The
+worker's PriorityClass is a cluster object outside that module;
+[Worker scheduling priority](#worker-scheduling-priority) covers it.
 
 ## Entry points
 
