@@ -3,6 +3,7 @@ import inspect
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -1101,151 +1102,79 @@ def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
 
 
 def _repository_lab_form() -> tuple[dict[str, Any], dict[str, Any], ci_wiring.Wiring, dict[str, Any]]:
-    """Return the repository workflows, a head copy with the lab aggregation under static gate names, the wiring config and the actors."""
-    from scripts import ci_reuse, ci_runner_trust
+    """Return the repository workflows, a head copy of them, the wiring config and the actors."""
+    from scripts import ci_runner_trust
 
     workflows = ci_wiring.load(_ROOT)
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
     actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
-    head = copy.deepcopy(workflows)
-    jobs = head["test.yml"]["jobs"]
-    jobs["gate-required"]["name"] = gate_protected.GATE
-    jobs["queue-fail-fast"]["name"] = "queue-fail-fast"
-    step = jobs["gate-required"]["steps"][0]
-    step["run"] = step["run"].replace(_QUEUE_TIER_OPENING, ci_reuse.LAB_VERDICT + _QUEUE_TIER_OPENING)
-    return workflows, head, config, actors
+    return workflows, copy.deepcopy(workflows), config, actors
 
 
 def test_a_forged_lab_verdict_job_is_red() -> None:
     workflows, head, config, actors = _repository_lab_form()
-    jobs = head["test.yml"]["jobs"]
-    jobs["lab-verdict"] = {
+    head["test.yml"]["jobs"]["lab-verdict"] = {
         "runs-on": "ubuntu-latest",
         "outputs": {"authoritative": '{"lint": true}', "lab_lint": "success"},
         "steps": [{"run": "true"}],
     }
-    for gate in ci_wiring.needs_of(jobs["gate-required"]) - gate_protected.LAB_UPSTREAM:
-        jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
-    jobs["gate-required"]["needs"].append("lab-verdict")
     assert gate_protected.grade(workflows, config, head, config, actors) == [
         "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
     ]
 
 
-def test_a_gate_condition_off_its_lab_clause_is_red() -> None:
+def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
     workflows, head, config, actors = _repository_lab_form()
-    lint = head["test.yml"]["jobs"]["lint"]
-    lint["if"] = lint["if"].removesuffix(" }}") + " && false }}"
-    assert gate_protected.grade(workflows, config, head, config, actors) == [
-        "The head's lint condition differs from the reviewed lab rendering of its base condition."
-    ]
-
-
-@pytest.mark.parametrize("clauses", [False, True])
-def test_the_canonical_lab_verdict_job_requires_every_lab_clause(clauses: bool) -> None:
-    workflows, head, config, actors = _repository_lab_form()
-    jobs = head["test.yml"]["jobs"]
-    gates = sorted(ci_wiring.needs_of(jobs["gate-required"]) - gate_protected.LAB_UPSTREAM)
-    jobs["lab-verdict"] = gate_protected.lab_verdict_jobs(set(gates), actors)[1]
-    jobs["gate-required"]["needs"].append("lab-verdict")
-    for gate in gates if clauses else ():
-        jobs[gate]["if"] = gate_protected.lab_clause(jobs[gate].get("if"), gate)
-    assert gate_protected.grade(workflows, config, head, config, actors) == (
-        []
-        if clauses
-        else [
-            f"The head's {gate} condition differs from the reviewed lab rendering of its base condition."
-            for gate in gates
-        ]
+    del head["test.yml"]["jobs"]["lab-verdict"]
+    assert (
+        "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+        in gate_protected.grade(workflows, config, head, config, actors)
     )
 
 
 @pytest.mark.parametrize(
-    ("condition", "rendered"),
+    ("gate", "edit"),
     [
-        (None, "${{ fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}"),
-        (
-            "${{ !cancelled() }}",
-            "${{ (!cancelled()) && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}",
-        ),
-        (
-            "${{ always() || github.event_name == 'push' }}",
-            "${{ (always() || github.event_name == 'push') && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true }}",
-        ),
-        (
-            "github.event_name != 'push'",
-            "(github.event_name != 'push') && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true",
-        ),
+        ("lint", lambda condition: condition.removesuffix(" }}") + " && false }}"),
+        ("lint", lambda condition: gate_protected.lab_clause(condition, "lint")),
+        ("lint", lambda condition: condition.replace(f" && {gate_protected.LAB_CLAUSE_PREFIX}['lint'] != true", "")),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && false }}"),
     ],
 )
-def test_the_lab_clause_extends_the_base_condition(condition: str | None, rendered: str) -> None:
-    assert gate_protected.lab_clause(condition, "lint") == rendered
+def test_a_gate_condition_off_its_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    job = head["test.yml"]["jobs"][gate]
+    job["if"] = edit(job["if"])
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
+        f"The head's {gate} condition is neither its base condition nor the base condition with its lab clause."
+    ]
+
+
+def test_a_gate_gaining_its_exact_lab_clause_grades_green() -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    jobs = head["test.yml"]["jobs"]
+    jobs["select"]["if"] = gate_protected.lab_clause(jobs["select"]["if"], "select")
+    assert gate_protected.grade(workflows, config, head, config, actors) == []
 
 
 @pytest.mark.parametrize(
     ("condition", "rendered"),
     [
-        ("${{ always()", "(${{ always()) && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true"),
-        ("always() }}", "(always() }}) && fromJSON(needs.lab-verdict.outputs.authoritative)['lint'] != true"),
+        (None, "${{ fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true }}"),
+        (
+            "${{ !cancelled() }}",
+            "${{ !cancelled() && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true }}",
+        ),
+        (
+            "github.event_name != 'push'",
+            "github.event_name != 'push' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true",
+        ),
+        ("${{ always()", "${{ always() && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true"),
+        ("always() }}", "always() }} && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true"),
     ],
 )
-def test_a_half_wrapped_condition_takes_the_plain_lab_clause(condition: str, rendered: str) -> None:
+def test_the_lab_clause_extends_the_base_condition(condition: str | None, rendered: str) -> None:
     assert gate_protected.lab_clause(condition, "lint") == rendered
-
-
-def test_the_lab_verdict_job_runs_the_protected_grader_copy_with_a_check_reader_token() -> None:
-    assert gate_protected.lab_verdict_jobs({"lint", "reuse", "lab-verdict"}) == [
-        {
-            "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
-            "needs": ["reuse", "admission"],
-            "runs-on": "ubuntu-latest",
-            "timeout-minutes": 30,
-            "permissions": {"contents": "read"},
-            "outputs": {
-                "authoritative": "${{ steps.verdict.outputs.authoritative }}",
-                "lab_lint": "${{ steps.verdict.outputs.lab_lint }}",
-            },
-            "steps": [
-                {
-                    "uses": "actions/checkout@v4",
-                    "with": {
-                        "ref": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}",
-                        "path": "lab-grader",
-                        "persist-credentials": False,
-                    },
-                },
-                {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
-                {
-                    "name": "Mint the lab check reader App token",
-                    "id": "app-token",
-                    "if": "github.event_name == 'pull_request'",
-                    "uses": "actions/create-github-app-token@v3.2.0",
-                    "with": {
-                        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
-                        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
-                        "repositories": "${{ github.event.repository.name }}",
-                        "permission-checks": "read",
-                    },
-                },
-                {
-                    "name": "Read the lab verdict from the protected grader",
-                    "id": "verdict",
-                    "shell": "bash",
-                    "working-directory": "${{ github.workspace }}/lab-grader",
-                    "env": {
-                        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
-                        "EVENT": "${{ github.event_name }}",
-                        "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
-                        "AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}",
-                        "PYTHONNOUSERSITE": "1",
-                    },
-                    "run": 'python -m pip install "pyyaml>=6.0" "jsonschema>=4"\n'
-                    'python -m scripts.ci_lab_verdict --grader . --event "$EVENT" --head "$HEAD" '
-                    '--repository "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"\n',
-                },
-            ],
-        }
-    ]
 
 
 @pytest.mark.parametrize("docs", [False, True])

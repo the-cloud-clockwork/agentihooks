@@ -39,9 +39,8 @@ UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
 LAB_VERDICT_JOB = "lab-verdict"
-LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative)"
+LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative || '{{}}')"
 LAB_UPSTREAM = frozenset({"reuse", LAB_VERDICT_JOB})
-LAB_GRADER_REF = "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}"
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -186,90 +185,33 @@ def lab_clause(condition: str | None, gate: str) -> str:
     if condition is None:
         return f"${{{{ {clause} }}}}"
     if condition.startswith("${{") and condition.endswith("}}"):
-        return f"${{{{ ({condition.removeprefix('${{').removesuffix('}}').strip()}) && {clause} }}}}"
-    return f"({condition}) && {clause}"
+        return f"{condition.removesuffix('}}').rstrip()} && {clause} }}}}"
+    return f"{condition} && {clause}"
 
 
-def lab_verdict_jobs(gates: set[str], policy: object = None) -> list[dict[str, Any]]:
-    """Every rendering of the lab verdict job the protected branch accepts for the aggregator's gates."""
-    outputs = {"authoritative": "${{ steps.verdict.outputs.authoritative }}"} | {
-        f"lab_{gate}": f"${{{{ steps.verdict.outputs.lab_{gate} }}}}" for gate in sorted(gates - LAB_UPSTREAM)
-    }
-    steps: list[dict[str, Any]] = [
-        {
-            "uses": "actions/checkout@v4",
-            "with": {"ref": LAB_GRADER_REF, "path": "lab-grader", "persist-credentials": False},
-        },
-        {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
-        {
-            "name": "Mint the lab check reader App token",
-            "id": "app-token",
-            "if": "github.event_name == 'pull_request'",
-            "uses": "actions/create-github-app-token@v3.2.0",
-            "with": {
-                "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
-                "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
-                "repositories": "${{ github.event.repository.name }}",
-                "permission-checks": "read",
-            },
-        },
-        {
-            "name": "Read the lab verdict from the protected grader",
-            "id": "verdict",
-            "shell": "bash",
-            "working-directory": "${{ github.workspace }}/lab-grader",
-            "env": {
-                "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
-                "EVENT": "${{ github.event_name }}",
-                "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
-                "AGENTIHOOKS_LAB_OFF": "${{ vars.AGENTIHOOKS_LAB_OFF }}",
-                "PYTHONNOUSERSITE": "1",
-            },
-            "run": 'python -m pip install "pyyaml>=6.0" "jsonschema>=4"\n'
-            'python -m scripts.ci_lab_verdict --grader . --event "$EVENT" --head "$HEAD" '
-            '--repository "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"\n',
-        },
-    ]
-    return [
-        {
-            "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
-            "needs": ["reuse", "admission"],
-            "runs-on": runner,
-            "timeout-minutes": 30,
-            "permissions": {"contents": "read"},
-            "outputs": outputs,
-            "steps": steps,
-        }
-        for runner in runners(policy)
-    ]
+def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
+    """Refuse a lab verdict job off the base's reviewed one and, with the lab form in play, a gate condition off base.
 
-
-def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any], policy: object = None) -> list[str]:
-    """Refuse a lab verdict job off its reviewed rendering and, with the lab form in play, a gate condition off base.
-
-    With the lab verdict job present each gate condition must carry its lab clause, kept as the base wrote it once
-    the base carries it; with only the lab aggregation each gate condition must equal the base's.
+    A gate condition must equal its base condition, or the base condition with its exact lab clause when the base
+    does not carry one yet.
     """
-    gates = ci_wiring.needs_of(gate) - LAB_UPSTREAM
     steps: list[dict[str, Any]] = gate.get("steps") or []
     problems: list[str] = []
-    if LAB_VERDICT_JOB in head and head[LAB_VERDICT_JOB] not in lab_verdict_jobs(gates, policy):
+    if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
         problems.append(
             "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
         )
     if LAB_VERDICT_JOB not in head and not any(ci_reuse.LAB_VERDICT in str(step.get("run")) for step in steps):
         return problems
 
-    def expected(need: str) -> str | None:
+    def accepted(need: str) -> tuple[str | None, ...]:
         condition: str | None = base[need].get("if")
-        if LAB_VERDICT_JOB not in head or LAB_CLAUSE_PREFIX in str(condition):
-            return condition
-        return lab_clause(condition, need)
+        return (condition,) if LAB_CLAUSE_PREFIX in str(condition) else (condition, lab_clause(condition, need))
 
     return problems + [
-        f"The head's {need} condition differs from the reviewed lab rendering of its base condition."
-        for need in sorted(gates)
-        if need in base and need in head and head[need].get("if") != expected(need)
+        f"The head's {need} condition is neither its base condition nor the base condition with its lab clause."
+        for need in sorted(ci_wiring.needs_of(gate) - LAB_UPSTREAM)
+        if need in base and need in head and head[need].get("if") not in accepted(need)
     ]
 
 
@@ -399,7 +341,6 @@ def grade(
         base_workflows[file]["jobs"],
         cast("dict[str, Any]", head_jobs),
         cast("dict[str, Any]", head_gates[0][2]),
-        policy,
     )
     problems += duration_problems
     config = _protected_config(base_config, head_config)
