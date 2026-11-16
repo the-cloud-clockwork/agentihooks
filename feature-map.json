@@ -81,6 +81,17 @@
       ]
     },
     {
+      "id": "hub-slot-requests-answered-concurrently",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-slot-serve-concurrent",
+      "behaviour": "A hub pod answers every account slot request on its own task, so a hive heartbeat that reaches a pod while a slow lane admission holds its handler is answered at once instead of waiting behind the admission past the hive's ten second request timeout.",
+      "seam": "NatsBus.serve for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": ["nats-serve-awaits-handler"],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
@@ -4781,6 +4792,26 @@
       ]
     },
     {
+      "id": "bus-request-error-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus request that no subscriber serves fails with no responders for its subject, and a request whose answer does not arrive within its timeout fails with a timeout naming its subject and wait, so a late answer never reads as a missing responder.",
+      "seam": "NatsBus.request mapping the nats client's NoRespondersError and request TimeoutError",
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder"
+      ]
+    },
+    {
+      "id": "bus-connect-timeout-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus open whose server accepts the connection but does not finish the connect handshake within the first connect bound fails with a timeout naming the server and the wait, never a bare timeout with no text.",
+      "seam": "The first connect of NatsBus mapping the nats client's handshake timeout",
+      "tests": [
+        "tests/events/test_nats.py::test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait"
+      ]
+    },
+    {
       "id": "codex-join-report-ends-before-home-removal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2256",
@@ -6053,6 +6084,16 @@
       ]
     },
     {
+      "id": "automated-activity-question-own-ref",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-activity-question-own-ref",
+      "behaviour": "Automated agent collection sends each activity question with its own inbox ref, automated-activity followed by the probe time, instead of one fixed ref for every question, so the recipient's seen marks never close a later question as already shown through the ledger on delivery: every question reaches the agent through the seen claim, its reply is recorded, and three nothing to do answers collect the agent.",
+      "seam": "scripts.swarm.automated_gc.run asking an automated agent, each question delivered by scripts.inbox.seen.claim and answered with InboxStore.reply",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_agent"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
@@ -7298,6 +7339,19 @@
       "tests": [
         "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
         "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
+      ]
+    },
+    {
+      "id": "lane-model-harness-compatibility",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
+      "behaviour": "A Claude only lane model on a Codex launch resolves to the configured Codex model, or the Codex launch default when none is configured, before an explicit effort returns or an automatic effort picks; Claude and compatible Codex choices retain their model and effort.",
+      "seam": "model_pick.pick for Codex and Claude lanes with an explicit or automatic effort",
+      "rules": ["lane-model-before-harness"],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
+        "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
+        "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
       ]
     }
   ],
