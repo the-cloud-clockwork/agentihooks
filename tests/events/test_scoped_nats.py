@@ -305,6 +305,40 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
         client.close()
 
 
+@pytest.mark.feature("hub-slot-requests-answered-concurrently")
+def test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub(hub: Any, signer: Any) -> None:
+    import threading
+
+    from scripts.hive import account_slots
+    from scripts.hub import slots
+
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowAdmission:
+        def admit(self, slug: str, request: dict[str, Any]) -> None:
+            entered.set()
+            release.wait(30)
+
+    admitter: Any = SlowAdmission()
+    slots.serve(hub, clock=lambda: 1000, admitter=admitter)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
+    admitted: list[Any] = []
+    admit = account_slots.asker(client.for_swarm("rig"), "rig", "m1", 30_000)
+    beat = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1", 3_000), "m1")
+    admitting = threading.Thread(target=lambda: admitted.append(admit({"op": "admit", "hive": "m1", "task": "t"})))
+    admitting.start()
+    try:
+        assert entered.wait(10)
+        beat.heartbeat(report, {})
+        assert admitting.is_alive()
+    finally:
+        release.set()
+        admitting.join(30)
+        client.close()
+    assert admitted == [None]
+
+
 def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
     client = member(signer)
     try:
