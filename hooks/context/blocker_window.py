@@ -127,7 +127,7 @@ def _panic_found(store: "RedisStore", now_ms: int) -> "dict[str, Blocker]":
 
 
 def _freezes(tokens: list[str]) -> bool:
-    words = [Path(tokens[0]).name, *tokens[1:]] if tokens else []
+    words = _command(tokens)[0]
     return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS)
 
 
@@ -160,8 +160,7 @@ def _directory(cwd: str, folders: list[str]) -> str:
 
 
 def _spares(tokens: list[str]) -> bool:
-    words = [Path(tokens[0]).name, *tokens[1:]]
-    return any(words[: len(prefix)] == list(prefix) for prefix in _FIX_COMMANDS)
+    return _targets(_command(tokens)[0]) is not None
 
 
 def _command(tokens: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
