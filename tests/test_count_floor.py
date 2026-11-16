@@ -1088,3 +1088,32 @@ def test_moving_a_workflow_file_keeps_its_lost_test_red(tmp_path):
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "test_fixture is admitted" not in result.stdout
+
+
+SHARED_WORKFLOW = "jobs:\n  build:\n    steps:\n      - run: printf shared\n      - run: printf retired\n"
+KEEPER_WORKFLOW = "jobs:\n  keep:\n    steps:\n      - run: printf shared\n"
+
+
+@pytest.mark.parametrize(
+    ("kept", "admitted"), [(KEEPER_WORKFLOW, True), (SHARED_WORKFLOW, False)], ids=["partly-shared", "fully-kept"]
+)
+@pytest.mark.feature("count-floor-admits-deleted-reads")
+def test_a_deleted_workflow_stays_counted_only_while_one_head_file_keeps_all_its_steps(
+    tmp_path: Path, kept: str, admitted: bool
+) -> None:
+    tests = (
+        "from pathlib import Path\n\n"
+        "def test_fixture():\n    assert (Path(__file__).resolve().parent / 'fixtures/watch.yml').read_text()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {
+            "base": {"tests/fixtures/watch.yml": SHARED_WORKFLOW, "tests/fixtures/other.yml": kept},
+            "head": {"tests/fixtures/other.yml": kept},
+        },
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_fixture is admitted" in result.stdout) == admitted

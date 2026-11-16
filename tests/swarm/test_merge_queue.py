@@ -869,14 +869,43 @@ def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
 
 
 def test_cli_refuses_an_unlisted_pull_before_a_queue_call(monkeypatch):
+    from scripts.swarm import pull_head
+
     task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/6", URL]}
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([task]))
+    monkeypatch.setattr(pull_head, "pull_branch", lambda url: pull_head.PullHead("someone-else", "", 99, ""))
     seen = []
     monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append((verb, url)) or {})
     assert cli.main(["sw", "merge", "queue", "https://github.com/o/r/pull/99"]) == 1
     assert seen == []
+
+
+@pytest.mark.feature("merge-queue-task-pulls")
+def test_a_claimant_queues_two_pull_requests_of_its_task_in_order_and_a_third_party_one_is_refused(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import pull_head
+
+    stage, own, third = (f"https://github.com/o/r/pull/{n}" for n in (5, 6, 9))
+    task = {"id": "t1", "pr_url": URL, "pull_scopes": {stage: {"kind": "stage", "scope": "the announcement"}}}
+    branches = {own: "engineer-a1b2c3-0001-2", third: "engineer-a1b2c3-0002"}
+    reads: list[str] = []
+    monkeypatch.setattr(
+        pull_head, "pull_branch", lambda url: reads.append(url) or pull_head.PullHead(branches[url], "", 0, "")
+    )
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger([task]))
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        merge_queue, "operate", lambda verb, url, **kwargs: seen.append((url, kwargs["journal"].context)) or {}
+    )
+    assert [cli.main(["sw", "merge", "queue", url]) for url in (stage, own, third)] == [0, 0, 1]
+    assert seen == [(stage, {"task": "t1"}), (own, {"task": "t1"})]
+    assert reads == [own, third]
+    assert capsys.readouterr().err.endswith("swarm: final integration must target this task's recorded pull request\n")
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])

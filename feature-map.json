@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "grader-gates-fail-closed-on-stale-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
+      "behaviour": "The marker vector step and the two chart steps run only the protected grader's copy of their script with the head as root, so a pull request whose base predates root support fails closed and a head copy edited to pass never decides the verdict.",
+      "seam": "The lint marker vector step and the Semgrep chart step run text, executed over a stale grader tree and a planted head copy that exits 0",
+      "tests": [
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_never_runs",
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_runs"
+      ]
+    },
+    {
       "id": "hub-started-clears-launch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
@@ -1160,6 +1171,20 @@
       ]
     },
     {
+      "id": "codex-adopts-hub-admitted-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-hub-admitted",
+      "behaviour": "The Codex session supervisor adopts the execution hub admission registered for its seat and hive, starting with no harness or transport, and binds harness codex and the chosen transport onto it while it is still starting, so a hub admitted Codex app-server launch serves its admitted execution, starts no second one, and leaves the move to working to the hub claims reactor; any other shape is refused.",
+      "seam": "scripts.hub.admission.Admission._claim writing the starting execution and scripts.codex_session.supervisor.adopt binding it",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_serves_the_execution_the_hub_admitted",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_it_does_not_serve",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left",
+        "tests/codex_session/test_supervisor.py::test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_before_the_bind",
+        "tests/hub/test_admission.py::test_a_hub_admitted_codex_launch_adopts_the_admitted_execution"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -1719,10 +1744,11 @@
       "id": "swarm-tick-pass-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
-      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, in each tick scenario on its own through the tick core and the fenced command entry point; a covering set of scenarios runs every registered step and writes and reads every pass value; a planted undeclared read or missing need is named.",
       "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
       "tests": [
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
       ]
@@ -5435,6 +5461,19 @@
       ]
     },
     {
+      "id": "merge-queue-task-pulls",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-task-prs",
+      "behaviour": "swarm merge queue admits every pull request the claimant's task names, final, split half, stage or prerequisite, and a pull request no task names whose head branch is one of the claimant's worktree branches, reading GitHub only for that case; it refuses another task's pull request and any other branch, and each queue journal record names the claimant's task.",
+      "seam": "swarm merge queue through cli.cmd_merge and done_gate.require_target",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_claimant_queues_two_pull_requests_of_its_task_in_order_and_a_third_party_one_is_refused",
+        "tests/swarm/test_done_gate.py::test_merge_target_accepts_every_declared_pull_and_refuses_other_pulls",
+        "tests/swarm/test_done_gate.py::test_merge_target_admits_an_unnamed_pull_only_on_a_claimant_worktree_branch",
+        "tests/swarm/test_done_gate.py::test_merge_target_reads_no_branch_for_another_tasks_pull_or_without_a_claimant"
+      ]
+    },
+    {
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
@@ -6970,13 +7009,14 @@
       "id": "count-floor-admits-deleted-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-count-floor-deleted-reads",
-      "behaviour": "The test count floor admits a lost test when its whole test file is deleted together with a project-local module it imported that the head no longer carries as a file, and when the test reads by literal path a repository workflow file (a YAML job definition with run steps, not only a JSON step fixture) that the head deletes; a lost test whose test file, imported module or fixture content still exists anywhere in the head stays counted.",
+      "behaviour": "The test count floor admits a lost test when its whole test file is deleted together with a project-local module it imported that the head no longer carries as a file, and when the test reads by literal path a repository workflow file (a YAML job definition with run steps, not only a JSON step fixture) that the head deletes; a lost test whose test file or imported module still exists, or whose deleted fixture keeps every run step inside one head file, stays counted.",
       "seam": "tests.count_floor.main's admission loop: _emptied_test_files, _fixture_subject and _deleted_fixtures",
       "tests": [
         "tests/test_count_floor.py::test_a_module_deleted_together_with_its_test_file_passes_the_floor",
         "tests/test_count_floor.py::test_a_deleted_test_file_whose_imported_module_survives_admits_nothing",
         "tests/test_count_floor.py::test_a_deleted_workflow_file_explains_only_its_own_lost_test",
-        "tests/test_count_floor.py::test_moving_a_workflow_file_keeps_its_lost_test_red"
+        "tests/test_count_floor.py::test_moving_a_workflow_file_keeps_its_lost_test_red",
+        "tests/test_count_floor.py::test_a_deleted_workflow_stays_counted_only_while_one_head_file_keeps_all_its_steps"
       ]
     },
     {
