@@ -701,11 +701,13 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     report["observed_at"] = int(time.time() * 1000)
     report["started_at"] = started_ms()
-    report["admitted"] = {
+    admitted = {
         agent.execution_id: {"generation": agent.generation, "pane": asdict(herdr.observe(agent))}
         for _, agent in records
         if not agent.runtime_target and agent.hive == local_id
     }
+    if admitted:
+        report["admitted"] = admitted
     if not hosted:
         return report
     report["process_namespace"] = local_namespace()
