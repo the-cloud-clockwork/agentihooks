@@ -38,8 +38,17 @@ class Mounted(Handler):
     do_POST = Handler.do_GET
 
 
+class Annotated(Handler):
+    # ruleid: ledger-server-reads-only
+    do_PUT: Any = Handler.do_GET
+
+
 # ruleid: ledger-server-reads-only
 Handler.do_PATCH = Handler.do_GET
+# ruleid: ledger-server-reads-only
+setattr(Handler, "do_DELETE", Handler.do_GET)
+# ok: ledger-server-reads-only
+setattr(Handler, "do_HEAD", Handler.do_GET)
 
 
 def over_http(base: str, headers: dict[str, str]) -> ResourceClient:
