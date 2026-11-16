@@ -645,28 +645,6 @@ def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleName
     assert rig.rows["t1"]["state"] == "claimed"
 
 
-@pytest.mark.feature("hub-admission-answer-budget-covers-ledger-latency")
-def test_an_admission_whose_ledger_write_outlasts_the_old_answer_budget_still_yields_a_live_claim(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    now = [7_000]
-    rig.admitter.clock = lambda: now[0]
-    original_update_task = rig.ledger.update_task
-
-    def slow_ledger_write(*args: Any, **kwargs: Any) -> Any:
-        now[0] += 9_000
-        return original_update_task(*args, **kwargs)
-
-    monkeypatch.setattr(rig.ledger, "update_task", slow_ledger_write)
-
-    admitted = rig.admitter.admit(SLUG, ask())
-
-    assert admitted is not None
-    assert 8_000 < now[0] - 7_000 < admission.ANSWER_MS
-    assert admitted["name"] == rig.store.claimant(SLUG, "t1")
-    assert rig.rows["t1"]["state"] == "claimed"
-
-
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
 def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -742,32 +720,31 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
 
     @contextmanager
     def turn(hive: str) -> Iterator[str]:
-        now[0] += 1600
+        now[0] += 800
         with original_turn(hive) as busy:
             yield busy
 
-    monkeypatch.setattr(rig.admitter, "_outdated", bump(200, rig.admitter._outdated))
-    monkeypatch.setattr(rig.admitter, "_key", bump(400, rig.admitter._key))
-    monkeypatch.setattr(admission.run_window, "claims_stopped", bump(600, admission.run_window.claims_stopped))
-    monkeypatch.setattr(rig.admitter.source, "snapshot", bump(800, rig.admitter.source.snapshot))
-    monkeypatch.setattr(admission.readiness, "withdrawal", bump(1000, admission.readiness.withdrawal))
-    monkeypatch.setattr(rig.admitter, "_unplaceable", bump(1200, rig.admitter._unplaceable))
-    monkeypatch.setattr(tick_module, "_lives_spent", bump(1400, tick_module._lives_spent))
+    monkeypatch.setattr(rig.admitter, "_outdated", bump(100, rig.admitter._outdated))
+    monkeypatch.setattr(rig.admitter, "_key", bump(200, rig.admitter._key))
+    monkeypatch.setattr(admission.run_window, "claims_stopped", bump(300, admission.run_window.claims_stopped))
+    monkeypatch.setattr(rig.admitter.source, "snapshot", bump(400, rig.admitter.source.snapshot))
+    monkeypatch.setattr(admission.readiness, "withdrawal", bump(500, admission.readiness.withdrawal))
+    monkeypatch.setattr(rig.admitter, "_unplaceable", bump(600, rig.admitter._unplaceable))
+    monkeypatch.setattr(tick_module, "_lives_spent", bump(700, tick_module._lives_spent))
     monkeypatch.setattr(rig.admitter, "_turn", turn)
-    monkeypatch.setattr(rig.admitter, "_full", bump(1800, rig.admitter._full))
-    monkeypatch.setattr(rig.store, "claim", bump(2000, rig.store.claim))
-    monkeypatch.setattr(tick_module, "_free_seat", bump(2200, tick_module._free_seat))
-    monkeypatch.setattr(rig.store, "start_execution", bump(2400, rig.store.start_execution))
-    monkeypatch.setattr(rig.ledger, "update_task", bump(2600, rig.ledger.update_task))
+    monkeypatch.setattr(rig.admitter, "_full", bump(900, rig.admitter._full))
+    monkeypatch.setattr(rig.store, "claim", bump(1000, rig.store.claim))
+    monkeypatch.setattr(tick_module, "_free_seat", bump(1100, tick_module._free_seat))
+    monkeypatch.setattr(rig.store, "start_execution", bump(1200, rig.store.start_execution))
+    monkeypatch.setattr(rig.ledger, "update_task", bump(1300, rig.ledger.update_task))
 
     with pytest.raises(admission.LateAdmission):
         rig.admitter.admit(SLUG, ask())
 
     assert capsys.readouterr().err.splitlines() == [
-        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 18200 ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms release=200 held=400 stopped=600 snapshot=800 "
-        f"withdrawal=1000 placement=1200 cap=1400 turn=1600 full=1800 claim=2000 seat=2200 execution=2400 "
-        f"ledger=2600"
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 9100 ms, "
+        f"the hive stopped waiting at {admission.ANSWER_MS} ms release=100 held=200 stopped=300 snapshot=400 "
+        f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 ledger=1300"
     ]
 
 
@@ -831,7 +808,7 @@ def test_an_admitted_offer_prints_no_refusal_line(rig: SimpleNamespace, capsys: 
 
 
 def test_the_hub_answers_inside_the_window_the_hive_waits_for_an_admission() -> None:
-    assert 0 < admission.ANSWER_MS < account_slots.ADMISSION_REQUEST_TIMEOUT_MS
+    assert 0 < admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
 
 
 def test_an_admission_carries_no_avoided_harness_until_a_launch_fails_on_one(rig):

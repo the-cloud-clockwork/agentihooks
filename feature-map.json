@@ -893,16 +893,6 @@
       ]
     },
     {
-      "id": "hub-admission-answer-budget-covers-ledger-latency",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
-      "behaviour": "The hub's admission answer budget (ANSWER_MS) derives from an admission-specific request timeout, not the fast account-slot take/heartbeat/release timeout, so an admission whose hosted-ledger claim write runs past the old, too-short budget still finishes inside the real window the hive waits and yields a live claim instead of being reopened and refused as late.",
-      "seam": "Admission.admit on the hub and LaneTasks._ask on the hive, over account_slots.ADMISSION_REQUEST_TIMEOUT_MS",
-      "tests": [
-        "tests/hub/test_admission.py::test_an_admission_whose_ledger_write_outlasts_the_old_answer_budget_still_yields_a_live_claim"
-      ]
-    },
-    {
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",

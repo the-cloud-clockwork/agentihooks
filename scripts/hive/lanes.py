@@ -29,8 +29,7 @@ class LaneTasks:
         self.bus, self.hive, self.configs = bus, hive, configs
 
     def _ask(self, op: str, event: Envelope, **fields):
-        timeout_ms = account_slots.ADMISSION_REQUEST_TIMEOUT_MS if op == "admit" else account_slots.REQUEST_TIMEOUT_MS
-        ask = account_slots.asker(self.bus.for_swarm(event.swarm), event.swarm, self.hive, timeout_ms=timeout_ms)
+        ask = account_slots.asker(self.bus.for_swarm(event.swarm), event.swarm, self.hive)
         request = {
             "op": op,
             "hive": self.hive,
