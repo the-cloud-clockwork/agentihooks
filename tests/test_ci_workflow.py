@@ -949,14 +949,17 @@ def _equivalence_group(name: str) -> str:
     return _EQUIVALENCE.read_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
 
 
-def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
+def test_equivalence_runs_only_on_ledger_pull_requests_without_a_body_marker():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
     job = workflow["jobs"]["ledger-equivalence"]
     assert "if" not in job
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    assert "paths" not in workflow[True]["pull_request"]
+    assert workflow[True]["pull_request"] == {
+        "branches": ["dev"],
+        "paths": ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"],
+    }
 
 
 def test_mutation_gate_plants_itself_whenever_its_code_changes():
@@ -967,7 +970,7 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
         listed
     )
-    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    assert 'if ! git diff --quiet "$base" HEAD -- "$path"; then' in changed["run"]
     [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
     assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
     assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
