@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts.ci_lab import contract, lease_api
+from scripts.ci_lab import contract, evidence, lease_api
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
@@ -362,6 +362,13 @@ def _parse(raw: str | bytes) -> State:
     return State(**data)
 
 
+def _evidence(state: State) -> evidence.GradeEvidence:
+    """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
+    inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
+    units = tuple(evidence.GradeUnit(slot.kind, slot.key, state.run) for slot in state.units.values())
+    return evidence.GradeEvidence(state.run, inputs, units)
+
+
 def _request(data: Mapping[str, Any]) -> GradeRequest:
     """Read a held grade request."""
     return GradeRequest(
@@ -589,6 +596,7 @@ class Scheduler:
             state.conclusion = str(state.posted[REQUIRED][1])
             if state.tier == Priority.QUEUE and not state.superseded:
                 self.client.set(f"{TREES}{state.repo}|{state.tree}", run)
+            evidence.record(self.objects, _evidence(state))
             actions.append(f"completed {run} {state.conclusion}")
         self._save(state)
         return actions
