@@ -1,0 +1,180 @@
+name: Download stall plant
+
+on:
+  push:
+    branches: [diffcheck/download-stall-plant]
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write an incompressible 8 MiB file and its digest
+        run: |
+          head -c 8388608 /dev/urandom > blob.bin
+          sha256sum blob.bin | cut -d' ' -f1 > blob.sha256
+          cat blob.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stall-plant
+          path: blob.bin
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stall-plant-digest
+          path: blob.sha256
+
+  download-v4:
+    needs: upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - &digest
+        uses: actions/download-artifact@v4
+        with:
+          name: stall-plant-digest
+          path: expect
+      - &proxy
+        name: Start a proxy whose first blob tunnel stalls 45 s after 1 MiB
+        run: |
+          cat > "$RUNNER_TEMP/stall_proxy.py" <<'PY'
+          import socket
+          import sys
+          import threading
+          import time
+
+          PORT, STALL_AFTER, STALL_SECONDS, LOG = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+          LOCK = threading.Lock()
+          STALLED = [False]
+
+
+          def log(message):
+              with LOCK, open(LOG, "a") as handle:
+                  handle.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+
+
+          def close(*sockets):
+              for sock in sockets:
+                  try:
+                      sock.shutdown(socket.SHUT_RDWR)
+                  except OSError:
+                      pass
+                  sock.close()
+
+
+          def relay(source, target, host, limit=None):
+              sent = 0
+              try:
+                  while True:
+                      data = source.recv(65536)
+                      if not data:
+                          break
+                      if limit is not None and sent + len(data) >= limit:
+                          target.sendall(data[: limit - sent])
+                          sent = limit
+                          log(f"{host}: sent {sent} bytes to the client, stalling {STALL_SECONDS}s")
+                          time.sleep(STALL_SECONDS)
+                          log(f"{host}: stall over, closing the tunnel")
+                          break
+                      target.sendall(data)
+                      sent += len(data)
+              except OSError as error:
+                  log(f"{host}: relay ended: {error}")
+              finally:
+                  close(source, target)
+
+
+          def handle(client):
+              head = b""
+              while b"\r\n\r\n" not in head:
+                  chunk = client.recv(4096)
+                  if not chunk:
+                      client.close()
+                      return
+                  head += chunk
+              method, target, _ = head.split(b"\r\n", 1)[0].decode().split(" ", 2)
+              if method != "CONNECT":
+                  client.sendall(b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+                  client.close()
+                  return
+              host, port = target.rsplit(":", 1)
+              upstream = socket.create_connection((host, int(port)), timeout=30)
+              upstream.settimeout(None)
+              client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+              limit = None
+              with LOCK:
+                  if host.endswith(".blob.core.windows.net") and not STALLED[0]:
+                      STALLED[0] = True
+                      limit = STALL_AFTER
+              log(f"CONNECT {host}:{port}" + (" (this tunnel stalls)" if limit else ""))
+              threading.Thread(target=relay, args=(client, upstream, host), daemon=True).start()
+              threading.Thread(target=relay, args=(upstream, client, host, limit), daemon=True).start()
+
+
+          server = socket.create_server(("127.0.0.1", PORT))
+          log(f"listening on {PORT}")
+          while True:
+              connection, _ = server.accept()
+              threading.Thread(target=handle, args=(connection,), daemon=True).start()
+          PY
+          nohup python3 "$RUNNER_TEMP/stall_proxy.py" 18080 1048576 45 "$RUNNER_TEMP/proxy.log" > /dev/null 2>&1 &
+          for _ in $(seq 1 50); do
+            grep -q listening "$RUNNER_TEMP/proxy.log" 2>/dev/null && exit 0
+            sleep 0.1
+          done
+          echo "::error::The stall proxy did not start."
+          exit 1
+      - name: Download through the stalling proxy with download-artifact v4
+        id: download
+        env: &through-proxy
+          HTTPS_PROXY: http://127.0.0.1:18080
+          https_proxy: http://127.0.0.1:18080
+          NO_PROXY: ""
+          no_proxy: ""
+        uses: actions/download-artifact@v4
+        with: &stall-plant
+          name: stall-plant
+          path: got
+      - &verify
+        name: Verify the downloaded file against the uploaded digest
+        if: ${{ always() }}
+        env:
+          OUTCOME: ${{ steps.download.outcome }}
+          DOWNLOAD_PATH: ${{ steps.download.outputs.download-path }}
+        run: |
+          echo "download step outcome: $OUTCOME"
+          echo "download-path output: '${DOWNLOAD_PATH}'"
+          echo "--- proxy log"
+          cat "$RUNNER_TEMP/proxy.log"
+          echo "--- file"
+          expected="$(cat expect/blob.sha256)"
+          if [[ -f got/blob.bin ]]; then
+            size="$(stat -c %s got/blob.bin)"
+            actual="$(sha256sum got/blob.bin | cut -d' ' -f1)"
+          else
+            size=missing
+            actual=missing
+          fi
+          echo "blob.bin size $size of 8388608, sha256 $actual, expected $expected"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::The download step ended $OUTCOME but left blob.bin torn: $size of 8388608 bytes."
+            exit 1
+          fi
+          echo "blob.bin is complete."
+
+  download-v8:
+    needs: upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - *digest
+      - *proxy
+      - name: Download through the stalling proxy with download-artifact v8.0.2
+        id: download
+        env: *through-proxy
+        uses: actions/download-artifact@v8.0.2
+        with: *stall-plant
+      - *verify
