@@ -685,7 +685,7 @@ def _lead(
     servers = control_service.stand_by(environ, store)
     try:
         while not _took_the_lead(lock, wait):
-            continue
+            pass
     finally:
         control_service.close(servers)
     print(f"controller: replica {lock.owner} leads the passes", flush=True)

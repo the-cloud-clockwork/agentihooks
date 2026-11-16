@@ -618,15 +618,18 @@ def _refused() -> Exception:
 
 
 class _Refusing:
-    """A Redis client that refuses every command while ``down`` is set, as Redis does through a restart."""
+    """A Redis client that refuses every command while ``down`` is set, as Redis does through a restart, and fails the
+    test once the code under it keeps asking without ever leading."""
 
     def __init__(self, redis: Any, down: bool) -> None:
-        self.redis, self.down = redis, down
+        self.redis, self.down, self.calls = redis, down, 0
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         command = getattr(self.redis, name)
 
         def call(*args: Any) -> Any:
+            self.calls += 1
+            assert self.calls < 50, "the standby kept asking Redis without leading"
             if self.down:
                 raise _refused()
             return command(*args)

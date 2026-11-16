@@ -1,5 +1,7 @@
 import json
 import os
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -106,7 +108,9 @@ DNS_REFUSAL = "Error -3 connecting to agentihooks-swarm-redis:6379. Temporary fa
 
 
 @pytest.mark.feature("controller-standby-rides-out-redis-outage")
-def test_the_hive_controller_command_rides_out_redis_refusing_at_controller_start(hive, capsys, tmp_path, monkeypatch):
+def test_the_hive_controller_command_rides_out_redis_refusing_at_controller_start(
+    hive: Any, capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import redis
 
     from scripts.swarm import lease, redis_grace
@@ -136,7 +140,9 @@ def test_the_hive_controller_command_rides_out_redis_refusing_at_controller_star
 
 
 @pytest.mark.feature("controller-standby-rides-out-redis-outage")
-def test_the_hive_controller_command_fails_once_redis_refuses_past_the_grace_window(hive, tmp_path, monkeypatch):
+def test_the_hive_controller_command_fails_once_redis_refuses_past_the_grace_window(
+    hive: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import redis
 
     from scripts.swarm import redis_grace
