@@ -1,6 +1,7 @@
 """Replica counts of the bus's JetStream streams and buckets, on a three server cluster and against a faked server."""
 
 import asyncio
+import time
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
@@ -8,7 +9,8 @@ from unittest.mock import AsyncMock, call
 
 import nats as nats_py
 import pytest
-from nats.js.api import StreamConfig
+from nats.js import JetStreamContext
+from nats.js.api import StreamConfig, StreamInfo, StreamsListIterator
 from nats.js.errors import APIError
 
 from scripts.events import nats, nats_replicas
@@ -39,11 +41,24 @@ def url(servers: list[str]) -> str:
     return servers[0]
 
 
+async def _listed(js: JetStreamContext, deadline_s: float = 10) -> list[StreamInfo]:
+    """Return every stream once a listing names them all, because a stream electing its leader after a replica change
+    is missing from the listing for a moment."""
+    stop = time.monotonic() + deadline_s
+    while True:
+        page = await js.streams_info_iterator()
+        assert isinstance(page, StreamsListIterator)
+        streams = list(page)
+        if len(streams) == page.total or time.monotonic() >= stop:
+            return streams
+        await asyncio.sleep(0.1)
+
+
 async def _wipe(url: str) -> None:
     client = await nats_py.connect(url)
     try:
         js = client.jetstream()
-        for info in await js.streams_info():
+        for info in await _listed(js):
             assert info.config.name
             await js.delete_stream(info.config.name)
     finally:
@@ -55,7 +70,7 @@ async def _read(url: str) -> dict[str | None, tuple[int | None, int]]:
     try:
         return {
             info.config.name: (info.config.num_replicas, info.state.messages)
-            for info in await client.jetstream().streams_info()
+            for info in await _listed(client.jetstream())
         }
     finally:
         await client.close()

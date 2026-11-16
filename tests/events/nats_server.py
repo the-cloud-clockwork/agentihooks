@@ -15,7 +15,6 @@ from nats.errors import Error as NatsError
 from nats.js.errors import APIError
 
 from scripts.events import nats
-from tests.ledger_guard import reserve_port
 
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
 UNMATCHED_MSG_ID = "never-a-last-msg-id"
@@ -138,6 +137,15 @@ def _replicated(url: str, size: int, deadline_s: float = 30) -> None:
     asyncio.run(probe())
 
 
+def _held_port() -> socket.socket:
+    """Return a socket bound to a free port and never listening, so no other bind takes the port while a server that
+    sets SO_REUSEADDR, as nats-server does, still binds it."""
+    hold = socket.socket()
+    hold.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hold.bind(("127.0.0.1", 0))
+    return hold
+
+
 @contextmanager
 def cluster(root: Path, size: int = 3) -> Iterator[list[str]]:
     """Run `size` routed JetStream servers and yield their client urls once a stream can hold a replica on each.
@@ -148,7 +156,7 @@ def cluster(root: Path, size: int = 3) -> Iterator[list[str]]:
     executable = binary()
     ports = root / "ports"
     ports.mkdir(parents=True, exist_ok=True)
-    holds = [reserve_port() for _ in range(size)]
+    holds = [_held_port() for _ in range(size)]
     listens = [f"127.0.0.1:{hold.getsockname()[1]}" for hold in holds]
     routes = [f"nats://{listen}" for listen in listens]
     processes: list[subprocess.Popen] = []
