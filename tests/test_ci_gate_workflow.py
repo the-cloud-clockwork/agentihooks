@@ -138,13 +138,13 @@ def test_required_gate_runs_after_parallel_unit_and_lint() -> None:
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
     assert jobs["split"]["needs"] in (
         ["durations", "select", "reuse", "admission"],
         ["select", "reuse", "admission"],
         ["test-count", "select", "reuse", "admission"],
     )
-    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
@@ -287,7 +287,7 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
 
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
-    assert job["needs"] in (["reuse"], ["reuse", "admission"])
+    assert job["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["with"]["base"] == (
         "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
@@ -295,7 +295,9 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         " || github.event.before || inputs.base }}"
     )
     assert "continue-on-error" not in job
-    assert job["if"] in (
+    assert job["if"].replace(
+        " && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['semgrep'] != true", ""
+    ) in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}",
@@ -322,7 +324,7 @@ def test_unit_matrix_does_not_fail_fast():
 
 def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     job = _workflow()["jobs"]["test-count"]
-    assert job["needs"] in (["reuse"], ["reuse", "admission"])
+    assert job["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
     assert (
         job["strategy"]["matrix"]["python-version"]
         == _workflow()["jobs"]["unit"]["strategy"]["matrix"]["python-version"]
@@ -952,7 +954,9 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     }
     for name in ("unit", "lint"):
         job = jobs[name]
-        assert job["if"] in (
+        assert job["if"].replace(
+            f" && fromJSON(needs.lab-verdict.outputs.authoritative || '{{}}')['{name}'] != true", ""
+        ) in (
             expected[name],
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
