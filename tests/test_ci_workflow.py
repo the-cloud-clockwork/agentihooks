@@ -438,7 +438,7 @@ def test_a_restored_venv_skips_uv_and_the_install():
         lambda s: s.get("name") == "Install dependencies",
     ):
         _, step = _unit_step_index(predicate)
-        assert step["if"] in (hit, f"env.UNIT_SOURCE == '' && {hit}")
+        assert step["if"] == hit
 
 
 def test_unit_tests_run_from_the_venv():
