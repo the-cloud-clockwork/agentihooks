@@ -635,6 +635,19 @@ def test_sonar_takes_each_legs_newest_branch_coverage_over_an_older_uploaded_att
     assert (shards / "coverage-3.12-1/js-coverage").is_dir()
 
 
+@pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")
+def test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    (shards / "js-coverage").mkdir(parents=True)
+    (shards / ".coverage").write_text("lone")
+    take = _step("sonar", "Take each selected leg's latest branch coverage")
+    assert take["env"] == {"COUNT": "${{ needs.select.outputs.count }}"}
+    subprocess.run(["bash", "-e", "-c", take["run"]], cwd=tmp_path, env={**os.environ, "COUNT": "1"}, check=True)
+    assert [path.name for path in shards.iterdir()] == ["coverage-3.12-1"]
+    assert (shards / "coverage-3.12-1/.coverage").read_text() == "lone"
+    assert (shards / "coverage-3.12-1/js-coverage").is_dir()
+
+
 def test_a_selected_leg_stamps_the_attempt_that_measured_its_uploaded_coverage(tmp_path: Path) -> None:
     upload = _step("unit-selected", "Upload coverage")
     stamp = _step("unit-selected", "Stamp coverage with its attempt")
