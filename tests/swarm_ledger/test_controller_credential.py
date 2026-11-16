@@ -152,6 +152,7 @@ def test_the_hive_controller_command_fails_once_redis_refuses_past_the_grace_win
 
     monkeypatch.setattr(cli, "redis_client", client)
     monkeypatch.setattr(cli.time, "sleep", lambda seconds: pytest.fail("waited past the Redis grace window"))
+    monkeypatch.setattr(cli.time, "monotonic", lambda: 100.0)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.setenv(redis_grace.GRACE_ENV, "0")
     with pytest.raises(redis.ConnectionError, match="Temporary failure in name resolution"):

@@ -675,15 +675,16 @@ def _issued_controller(holder: str) -> str:
     from scripts.swarm import lease, redis_grace
     from scripts.swarm.store import store_errors
 
-    outage = redis_grace.Outage.from_environ()
+    deadline = time.monotonic() + redis_grace.grace_seconds(os.environ)
     while True:
         try:
             return auth.issue_controller(redis_client(), holder)
         except store_errors() as exc:
-            if not outage.tolerated():
-                raise
-            print(
-                f"hive controller: Redis refused, retrying after one tick inside the Redis grace window: {exc}",
-                file=sys.stderr,
-            )
-            time.sleep(lease.tick_ms() / 1000)
+            refused = exc
+        if time.monotonic() >= deadline:
+            raise refused
+        print(
+            f"hive controller: Redis refused, retrying after one tick inside the Redis grace window: {refused}",
+            file=sys.stderr,
+        )
+        time.sleep(lease.tick_ms() / 1000)
