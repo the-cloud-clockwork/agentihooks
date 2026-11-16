@@ -414,8 +414,8 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
 
-    def configured(bus):
-        assert bus is opened
+    def configured(bus: Any, source: Any = None) -> registry.Registry:
+        assert (bus, source) == (opened, None)
         return declared
 
     monkeypatch.setattr(registry, "configured", configured)
@@ -462,7 +462,7 @@ def test_sigterm_ends_the_hub_with_143_and_releases_its_leases(monkeypatch):
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
 
-    def configured(bus):
+    def configured(bus: Any, source: Any = None) -> registry.Registry:
         assert bus is opened
         return declared
 

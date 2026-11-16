@@ -21,9 +21,10 @@ class Preemption:
         store: RedisStore | None = None,
         ledger: LedgerClient | None = None,
         clock: lease.Clock = lease.wall_ms,
-    ):
+        source: readiness.Source | None = None,
+    ) -> None:
         self._store, self._ledger, self._clock = store, ledger, clock
-        self._source: readiness.Source | None = None
+        self._source = source
         self._due = 0
 
     def reactor(self) -> Reactor:
@@ -33,11 +34,11 @@ class Preemption:
         now = self._clock()
         if now < self._due or not guard():
             return
-        if self._source is None:
+        if self._store is None or self._source is None:
             if self._store is None and BusConfig.from_environ().backend == "memory":
                 return
             self._store = self._store or connect()
-            self._source = readiness.Source(self._store, self._ledger or LedgerClient(service=True))
+            self._source = self._source or readiness.Source(self._store, self._ledger or LedgerClient(service=True))
         for slug in self._source.slugs():
             if not guard():
                 return

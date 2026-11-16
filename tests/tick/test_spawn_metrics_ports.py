@@ -74,7 +74,7 @@ def test_an_observed_claim_cap_writes_its_row_through_the_metrics_port(
         claims=lambda slug, task_id: place.claim_cap.CAP,
         config=lambda slug: SimpleNamespace(gates={}),
         handoff_envelope=lambda slug, task_id: {"reason": "quota"},
-        launches=lambda slug: [],
+        launches=lambda slug, task: [],
     )
     monkeypatch.setattr(place.modes, "configured", lambda gate, gates: "observe")
     monkeypatch.setattr(place.claim_cap, "refusal", lambda *args: "four lives spent")
