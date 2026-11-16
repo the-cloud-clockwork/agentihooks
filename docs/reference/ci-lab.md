@@ -237,12 +237,15 @@ both of these hold:
 | `check_run` delivery on `/github` | The action is `rerequested` and the check's name starts with `lab` | `ci.lab.head.check_run` | The run's `head_sha`, and the base of its first pull request, empty when it has none | The delivery's sender |
 | Signed notice on `/lab/head` | Every valid notice | `ci.lab.head.notice` | As the notice names them | As the notice names it |
 
-Every head is recorded; `scripts.ci_lab.intake` turns only a head whose actor is on the runner
-trust list (`.github/workflows/trusted-actors.json`) into a grade request. A pull request head's
-actor is its author rather than the sender, so when a trusted user reopens a pull request whose
-author is untrusted, the head is recorded but becomes no grade request. Every other GitHub event
-records no head. When lab intake is on and a delivery the table names lacks a field its row reads,
-`/github` answers `400` after recording the delivery's pull request observations.
+The receiver records each head the table names whoever its actor is, and every other GitHub
+event records no head. `scripts.ci_lab.intake.admit` keeps only heads whose actor is on the
+runner trust list (`.github/workflows/trusted-actors.json`) as grade requests, but no service
+calls it yet. A pull request head's actor is its author rather than the sender, so once that filter
+is wired in, a trusted user reopening an untrusted author's pull request yields no grade request.
+
+A delivery the receiver cannot read answers `400`. A missing field in the pull request or check
+suite part answers before anything is recorded. With lab intake on, a missing field that only a
+head row reads answers after the pull request observations were recorded.
 
 Each head is one envelope:
 
@@ -288,7 +291,8 @@ JSON body, signed the way GitHub signs a delivery but with the lab notice secret
 | `base` | The base commit SHA |
 | `actor` | The GitHub login that pushed |
 
-All four must be non empty strings; other fields are ignored. From a pod inside the cluster:
+All four must be non empty strings; other fields are ignored. From a pod inside the cluster that has
+`python3` and `curl`:
 
 ```bash
 body='{"repo":"https://github.com/<owner>/<repo>","head":"<head sha>","base":"<base sha>","actor":"<login>"}'
@@ -324,8 +328,7 @@ GitHub delivery or a notice sent by hand as above.
 
 The deployment repository wires the secret in `k8s/manifests/agentihooks-swarm/github-webhook.yaml`,
 added by pull request 1775 of the deployment repository, merged on 16 November 2026. The stream
-needs no manifest: it came
-with agentihooks pull request #11427 and the hub creates it as above.
+needs no manifest: it came with agentihooks pull request #11427 and the hub creates it as above.
 
 1. A `Password` generator, `agentihooks-ci-lab-notice`, makes a 48 character value with 8 digits
    and no symbols.
@@ -431,9 +434,10 @@ nats --server "$AGENTIHOOKS_BUS_URL" --creds <credential file> stream get AGENTI
 ```
 
 The receiver's own credential publishes only and cannot run these. The acceptance recorded on the
-deployment pull request on 16 November 2026, after its promotion run 43811275374, is this check: the PushSecret `Synced`, a
-48 byte key in the receiver Secret, two push deliveries answered `200`, and `ci.lab.head.push` at
-stream sequence 9 for an agentihooks head pushed by `github-merge-queue[bot]`.
+deployment pull request on 16 November 2026, after its promotion run 43811275374, is this check:
+the PushSecret `Synced`, a 48 byte key in the receiver Secret, two push deliveries answered `200`,
+and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
+`github-merge-queue[bot]`.
 
 ### Troubleshooting
 
@@ -444,7 +448,7 @@ stream sequence 9 for an agentihooks head pushed by `github-merge-queue[bot]`.
 | The receiver Secret lacks the key | The PushSecret is not `Synced`, or the ExternalSecret has not refreshed | `kubectl -n agentihooks-swarm describe pushsecret agentihooks-ci-lab-notice` and the ExternalSecret's events |
 | A notice answers `401` | It was signed with another value, sent without the header, or its body changed after signing | Sign the bytes sent, with the value the Secret holds |
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
-| A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads for its pull request observation or, with lab intake on, for its head | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
+| A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
 
 ## Digest specification
