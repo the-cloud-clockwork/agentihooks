@@ -1206,16 +1206,8 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
     jobs = _workflow()["jobs"]
     job = jobs["shard-check"]
-    assert set(job["needs"]) == {
-        "split",
-        "select",
-        "reuse",
-        "admission",
-        "unit",
-        "unit-lost",
-        "unit-rerun",
-        "lab-verdict",
-    }
+    needs = {"split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun", "lab-verdict"}
+    assert set(job["needs"]) == needs
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
