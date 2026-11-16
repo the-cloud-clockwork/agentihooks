@@ -1,6 +1,7 @@
 import hashlib
 import signal
 import threading
+from typing import Any
 
 import pytest
 
@@ -694,3 +695,36 @@ def test_scoped_delivery_provisions_the_event_view_before_the_handler(monkeypatc
     finally:
         hub.stop()
         bus.close()
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_one_hub_process_hands_one_ledger_copy_to_admission_readiness_and_preemption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = memory.open_bus(BusConfig())
+    served: list[Any] = []
+    built: list[registry.Registry] = []
+    configured = registry.configured
+
+    def serve(bus: Any, admitter: Any = None) -> None:
+        served.append(admitter)
+
+    def configure(bus: Any, **wiring: Any) -> registry.Registry:
+        built.append(configured(bus, **wiring))
+        return built[-1]
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: opened)
+    monkeypatch.setattr(runner.buckets, "provision", lambda bus: None)
+    monkeypatch.setattr(runner.exits, "serve", lambda bus: None)
+    monkeypatch.setattr(runner.slots, "serve", serve)
+    monkeypatch.setattr(registry, "configured", configure)
+    monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {})
+    assert runner.main(["run", "--once"]) == 0
+    holders = {reactor.name: getattr(reactor.poll, "__self__", None) for reactor in built[0]}
+    [admitter] = served
+    assert admitter is not None
+    assert getattr(holders["readiness"], "_source") is admitter.source
+    assert getattr(holders["preemption"], "_source") is admitter.source

@@ -93,6 +93,18 @@
       ]
     },
     {
+      "id": "hub-shared-ledger-copy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-shared-ledger-copy",
+      "behaviour": "One hub process keeps one ledger copy for its events admission, readiness pass and preemption pass, read once per ledger revision however many threads ask for it, and the claim cap reads only the launch rows of the task it judges.",
+      "seam": "readiness.Source.state across threads, the hub runner main handing one Source to the slots admitter and to registry.configured, and the claim cap's store.launches read",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_threads_asking_for_one_new_revision_fetch_the_export_once",
+        "tests/hub/test_runner.py::test_one_hub_process_hands_one_ledger_copy_to_admission_readiness_and_preemption",
+        "tests/hub/test_admission_claim_cap.py::test_the_claim_cap_reads_only_the_launch_rows_of_its_task"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
