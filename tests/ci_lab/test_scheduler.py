@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-import fakeredis
+import jsonschema
 import pytest
 
 from scripts.ci_lab import __main__ as cli
@@ -37,6 +37,12 @@ OTHER_TREE = "e" * 40
 Post = tuple[str, str, str, str | None, Output, bool]
 
 
+def fake_redis() -> Any:
+    import fakeredis
+
+    return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+
+
 def key(kind: str, number: int) -> str:
     return f"{kind}-v1-{number:064x}"
 
@@ -54,8 +60,26 @@ def plan(gates: dict[str, tuple[Unit, ...]], tree: str = TREE) -> scheduler.Plan
 
 
 def pull_plan(gates: dict[str, tuple[Unit, ...]]) -> scheduler.Plan:
-    required: dict[str, tuple[Unit, ...]] = {job: () for job in scheduler.PULL_REQUIRED}
-    return scheduler.Plan(TREE, BASE, {**required, **gates}, outputs={"select": {"scope": "none"}})
+    return scheduler.frame(Priority.PULL_REQUEST, TREE, BASE, gates)
+
+
+def test_a_tier_frame_requires_the_jobs_its_rules_name_and_keeps_only_the_lab_gates_they_grade() -> None:
+    lint, docs, other = (unit(1),), (unit(2),), (unit(3),)
+    gates = {"lint": lint, "docs": docs, "other": other}
+    pulled = scheduler.frame(Priority.PULL_REQUEST, TREE, BASE, gates)
+    assert pulled == scheduler.frame(Priority.HOTFIX, TREE, BASE, gates)
+    assert pulled.gates == {job: {"lint": lint, "docs": docs}.get(job, ()) for job in scheduler.PULL_REQUIRED}
+    assert (pulled.skipped, pulled.outputs, pulled.flags) == (
+        frozenset(),
+        {"select": {"scope": "none"}},
+        scheduler.Flags(),
+    )
+    queued = scheduler.frame(Priority.QUEUE, TREE, BASE, {**gates, "unit": other})
+    required = ("select", "split", "shard-check", "test-count", "queue-fail-fast", "unit")
+    assert queued.gates == {job: other if job == "unit" else () for job in required}
+    assert (queued.skipped, queued.outputs) == (frozenset({"unit-lost", "unit-rerun"}), {})
+    for tier in (Priority.PROMOTION, Priority.BACKFILL):
+        assert scheduler.frame(tier, TREE, BASE, gates) == scheduler.Plan(TREE, BASE, gates)
 
 
 @dataclass
@@ -160,7 +184,7 @@ class Run:
 @pytest.fixture
 def lab(tmp_path: Path) -> Callable[..., Run]:
     def make(plans: dict[str, scheduler.Plan], quiet_ms: int = 0, retries: Policy = Policy()) -> Run:
-        client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+        client = fake_redis()
         state = Lab(client, LocalObjects(tmp_path / "objects"), Inbox(), Expander(plans))
         return Run(state, state.build(quiet_ms, retries))
 
@@ -279,8 +303,8 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     run.push(HEAD_A)
     run.tick(1000)
     first = run.lease(ttl_ms=100)[0]
-    assert run.tick(1100) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
-    assert f"reaped {first.job} pending" in run.tick(1101)
+    assert run.tick(1099) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
+    assert run.tick(1100) == [f"reaped {first.job} pending"]
     job = run.engine.queue.job(first.job)
     assert job is not None and (job.state, job.attempts) == ("pending", 1)
     second = run.lease(ttl_ms=100)[0]
@@ -335,6 +359,23 @@ def test_the_fold_reads_a_grade_as_needs_of_its_tier(lab: Callable[..., Run]) ->
     assert run.grade(HEAD_B).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, "lint") == [("completed", "success")]
     assert run.lab.poster.moves(HEAD_A, "docs") == []
+
+
+def test_framed_grades_fold_green_unless_a_lab_gate_fails(lab: Callable[..., Run]) -> None:
+    good, bad = unit(1), unit(2)
+    run = lab(
+        {
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (good,)}),
+            HEAD_B: scheduler.frame(Priority.QUEUE, OTHER_TREE, BASE, {"unit": (bad,)}),
+        }
+    )
+    run.cache(good)
+    run.cache(bad, passed=False)
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.push(HEAD_B, lane="gh-readonly-queue/dev/pr-2", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    assert run.grade(HEAD_A).conclusion == "success"
+    assert run.grade(HEAD_B).conclusion == "failure"
 
 
 def test_a_head_waits_out_its_lanes_quiet_window_and_a_newer_head_restarts_it(lab: Callable[..., Run]) -> None:
@@ -441,6 +482,26 @@ def test_a_dev_push_grade_reuses_the_merge_group_grade_of_the_same_tree(lab: Cal
     run.push(BASE, lane="dev")
     run.tick(1300)
     assert run.engine.queue.pending() == [scheduler.job_id(BASE, other)]
+
+
+def test_a_framed_push_grade_carries_the_unit_suite_its_merge_group_grade_graded(lab: Callable[..., Run]) -> None:
+    suite, pushed_suite, lint = unit(1, "test"), unit(2, "test"), unit(3)
+    run = lab(
+        {
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (suite,), "lint": (lint,)}),
+            HEAD_B: scheduler.frame(Priority.PROMOTION, TREE, BASE, {"unit": (pushed_suite,), "lint": (lint,)}),
+        }
+    )
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, suite)]
+    run.finish(run.lease()[0], "passed", {})
+    run.tick(1100)
+    assert run.grade(HEAD_A).conclusion == "success"
+    run.push(HEAD_B, lane="dev")
+    run.tick(1200)
+    assert run.grade(HEAD_B).gates["unit"] == [ref(suite)]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, lint)]
 
 
 def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., Run]) -> None:
@@ -587,6 +648,8 @@ def _blob(repo: Path, sha: str, path: str) -> str:
 
 
 ACTORS = {"actors": ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"], "queue_actor": "github-merge-queue[bot]"}
+MUTATION = {"run_on": "ready", "mutants_per_changed_line": "all", "arid": []}
+DELIVERY = {"lab": {"authoritative": [], "mutation": MUTATION, "check_prefix": "lab", "retry": {"lost": 2}}}
 
 
 @pytest.fixture
@@ -599,6 +662,7 @@ def origin(tmp_path: Path) -> tuple[Path, str, str]:
             ".github/workflows/test.yml": "jobs: {}\n",
             ".github/input-keys.json": '{"gates": {}}',
             ".github/workflows/trusted-actors.json": json.dumps(ACTORS),
+            "delivery.yaml": json.dumps(DELIVERY),
             "uv.lock": "lock",
             "pyproject.toml": "[project]\n",
             "src/a.py": "a = 1\n",
@@ -656,10 +720,16 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
             ),
         ),
     }
-    assert found == scheduler.Plan(_git(repo, "rev-parse", f"{head}^{{tree}}").strip(), base, expected)
-    assert read == [("jobs: {}\\n", {"gates": {}})]
+    tree = _git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+    assert found == scheduler.frame(Priority.PULL_REQUEST, tree, base, expected)
+    assert read == [("jobs: {}\n", {"gates": {}})]
     promoted = expander.expand(GradeRequest(remote, head, base, Priority.PROMOTION, ACTOR, False))
-    assert promoted.grader == head
+    assert (promoted.tree, promoted.grader, set(promoted.gates), promoted.skipped) == (
+        tree,
+        head,
+        {"lint", "semgrep"},
+        frozenset(),
+    )
 
 
 def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path, origin: tuple[Path, str, str]) -> None:
@@ -668,13 +738,17 @@ def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path,
     _git(tmp_path, "init", "-q", "--bare", str(node))
     expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}))
     assert expander.trusted(f"file://{repo}") == frozenset([*ACTORS["actors"], ACTORS["queue_actor"]])
+    assert expander.retries(f"file://{repo}") == Policy(lost=2, failed=0)
+    _commit(repo, {"delivery.yaml": json.dumps({"lab": {**DELIVERY["lab"], "retry": {"lost": -1}}})})
+    with pytest.raises(jsonschema.ValidationError):
+        expander.retries(f"file://{repo}")
 
 
 def test_panic_fixes_name_the_fix_branches_while_panic_is_on(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import panic
     from scripts.swarm.store import RedisStore, SwarmError
 
-    client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    client = fake_redis()
     fixes = scheduler.PanicFixes(client)
     assert fixes() == frozenset()
     panic.engage(RedisStore(client), "outage", False, ["first", "second"], 1)
@@ -695,6 +769,7 @@ class FakeChecks:
 
 def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
@@ -702,10 +777,11 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
         scheduler.REPOSITORY: "repository",
         scheduler.IMAGE: "image",
     }
-    client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    client = fake_redis()
     consumer = Consumer([])
     built = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), consumer, None)
     assert built.settings.trusted == frozenset({"repository"})
+    assert built.settings.retries == Policy(lost=len("repository"))
     assert built.ports.hotfixes() == frozenset()
     assert isinstance(built.ports.inbox, scheduler.BusInbox) and built.ports.inbox.consumer is consumer
     expander = built.ports.expander
@@ -727,7 +803,7 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     from scripts.events import config, factory
 
     calls: dict[str, Any] = {}
-    client = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    client = fake_redis()
 
     def from_url(url: str, **options: Any) -> Any:
         calls["redis"] = (url, options)
