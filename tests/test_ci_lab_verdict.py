@@ -146,9 +146,11 @@ def test_runs_from_other_apps_never_satisfy_the_poll() -> None:
     assert len(asked) == 2
 
 
-def test_unknown_step_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
-        verdict.main(["grade", str(tree(tmp_path, ["lint"])), "pull_request"], {"GITHUB_OUTPUT": str(tmp_path / "out")})
+@pytest.mark.parametrize("extra", [[], ["{}", "org/repo", "abc", LAB]])
+def test_unknown_step_is_refused(tmp_path: Path, extra: list[str]) -> None:
+    args = ["grade", str(tree(tmp_path, ["lint"])), "pull_request", *extra]
+    with pytest.raises(ValueError, match="unknown step 'grade'; expected authority or verdict"):
+        verdict.main(args, {"GITHUB_OUTPUT": str(tmp_path / "out")})
 
 
 @pytest.mark.parametrize("app", ["", "github-actions"])
@@ -203,9 +205,13 @@ def test_fetch_reads_latest_runs_through_the_rate_limited_helper(monkeypatch: py
         return subprocess.CompletedProcess(args, 0, json.dumps({"total_count": 1, "check_runs": [run(3, "queued")]}))
 
     monkeypatch.setattr(verdict, "gh_api", gh_api)
-    assert verdict.fetcher("org/repo", "abc")("lab/type-gate") == [run(3, "queued")]
+    assert verdict.fetcher("org/repo", "abc")("lab/type gate&x") == [run(3, "queued")]
     assert calls == [
-        (["repos/org/repo/commits/abc/check-runs?check_name=lab/type-gate&filter=latest&per_page=100"], 30.0, True)
+        (
+            ["repos/org/repo/commits/abc/check-runs?check_name=lab/type%20gate%26x&filter=latest&per_page=100"],
+            30.0,
+            True,
+        )
     ]
 
 

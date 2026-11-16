@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import quote
 
 import scripts.ci_budget.rate_limit
 from scripts.ci_lab.delivery import OUTPUT, cutover, lab
@@ -82,7 +83,7 @@ def fetcher(repo: str, sha: str) -> Fetch:
     def fetch(check: str) -> list[dict[str, Any]]:
         """Return the latest check runs named check on the head."""
         done = gh_api(
-            [f"repos/{repo}/commits/{sha}/check-runs?check_name={check}&filter=latest&per_page=100"],
+            [f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(check)}&filter=latest&per_page=100"],
             timeout=TIMEOUT_S,
             text=True,
         )
@@ -113,11 +114,13 @@ def main(argv: Sequence[str], environ: Mapping[str, str] = os.environ) -> int:
     if step == "authority":
         [event] = rest
         outputs = authority(Path(grader), event, environ)
-    else:
+    elif step == "verdict":
         authoritative, repo, sha, app = rest
         if app in ("", UNTRUSTED):
             raise ValueError(f"the lab App {app!r} cannot be trusted; set AGENTIHOOKS_LAB_APP to the lab App slug")
         outputs = lab_outputs(Path(grader), authoritative, fetcher(repo, sha), app, WAIT_S)
+    else:
+        raise ValueError(f"unknown step {step!r}; expected authority or verdict")
     publish(outputs, environ)
     return 0
 
