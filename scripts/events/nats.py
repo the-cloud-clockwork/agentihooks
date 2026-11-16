@@ -677,8 +677,8 @@ class NatsBus:
         slow one; with wait_ms, a request that waited that long since it arrived is dropped unanswered, because its
         requester stopped waiting and its handler would claim for nobody."""
 
-        def answer(msg: Msg, received: int) -> None:
-            waited = (time.monotonic_ns() - received) // 1_000_000
+        def answer(msg: Msg, received_ns: int) -> None:
+            waited = (time.monotonic_ns() - received_ns) // 1_000_000
             if wait_ms is not None and waited >= wait_ms:
                 print(
                     f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "

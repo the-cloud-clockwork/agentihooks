@@ -85,7 +85,8 @@ class Admission:
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         begun = self.clock()
-        started = begun - SERVE_WAITED_MS.get()
+        queued_ms = SERVE_WAITED_MS.get()
+        started = begun - queued_ms
         timer = _StepTimer(self.clock, begun)
         if older := self._outdated(request["hive"]):
             refused(slug, request, older)
