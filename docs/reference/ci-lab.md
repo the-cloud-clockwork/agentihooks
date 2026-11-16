@@ -8,7 +8,7 @@ nav_order: 90
 {: .no_toc }
 
 The CI lab runs as two services, the scheduler and the worker. This page lists what each one
-exposes and reads: its entry point, environment, ports and metric names. Every name lives in
+exposes and reads: its entry point, environment, ports, metric names and capacity document. Every name lives in
 `scripts.ci_lab.contract`; the services and the platform tests are to import these constants by
 name, so a rename fails an import instead of dropping a series. The worker's PriorityClass is a
 cluster object outside that module; [Worker scheduling priority](#worker-scheduling-priority)
@@ -49,7 +49,7 @@ A worker started with any `GITHUB_APP_*` variable in its environment refuses to 
 
 | Port | Service | Serves |
 |---|---|---|
-| `8800` | scheduler | The lease API workers call, and `/capacity` |
+| `8800` | scheduler | The lease API workers call, and [`/capacity`](#capacity-document) |
 | `9108` | scheduler and worker | Prometheus metrics |
 
 ## Metrics
@@ -81,6 +81,153 @@ A worker started with any `GITHUB_APP_*` variable in its environment refuses to 
 `BUS_PREFIX`, `MINIO_PREFIX`, `GITHUB_APP_PREFIX`, `REDIS_URL`, `RUNTIME_CONFIG`,
 `SCHEDULER_URL`, `SLOTS`, `GIT_MIRROR` and `UV_CACHE_DIR`, with `SCHEDULER_PORT` and
 `METRICS_PORT` for the ports.
+
+## Capacity document
+
+`GET /capacity` answers with one JSON document: the lab's queue and slots at one instant and a
+predicted queue wait per scheduling class. `scripts.ci_lab.capacity.document` builds it from a
+`Load` snapshot, and `scripts.ci_lab.metrics.respond` serves it; a `GET /metrics` on the same
+snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
+`scripts.ci_lab.metrics.observe_load`. The swarm tick reads the document to decide the
+[lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
+
+No service loop builds a `Load` yet: the scheduler starts only with `--self-test`
+([Entry points](#entry-points)). The code that will build the snapshot must fill `frees_in`, or
+a pool with every slot busy predicts no wait and the claim hold cannot fire on a full lab.
+
+### Load snapshot
+
+`scripts.ci_lab.capacity.Load` is a frozen dataclass.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `pending` | required | Estimated seconds of each queued unit, keyed by class |
+| `running` | required | Units running now, keyed by class |
+| `slots_total` | required | Slots in the pool |
+| `slots_busy` | required | Slots running a unit; `slots_free` is `slots_total - slots_busy`, never below zero |
+| `budget_fraction` | `1.0` | Fraction of the day's core budget left; `scripts.ci_lab.budget.observe` sets it |
+| `shed` | `()` | Classes the budget sheds; `scripts.ci_lab.budget.observe` sets them |
+| `cache_hits`, `cache_misses` | `{}` | Verdict cache lookups, keyed by class |
+| `frees_in` | `()` | Seconds until each busy slot frees, one entry per busy slot; an entry at or below zero counts as a slot free now |
+
+### Document fields
+
+A pool of two slots, both busy with merge queue units that free in 300 and 60 seconds, with two
+pull request units of 120 and 60 seconds queued:
+
+```json
+{
+  "classes": {
+    "hotfix": {"pending": 0, "running": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": null},
+    "pull_request": {"pending": 2, "running": 0, "predicted_wait_s": 240.0, "verdict_cache_hit_ratio": null},
+    "queue": {"pending": 0, "running": 2, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": null},
+    "promotion": {"pending": 0, "running": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": null},
+    "backfill": {"pending": 0, "running": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": null}
+  },
+  "slots": {"total": 2, "busy": 2, "free": 0},
+  "utilisation": 1.0,
+  "budget_fraction": 1.0,
+  "shed": []
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `classes` | One entry for every class in `scripts.ci_lab.delivery.CLASSES`, in the order `hotfix`, `pull_request`, `queue`, `promotion`, `backfill` |
+| `classes.<class>.pending` | Queued units of the class |
+| `classes.<class>.running` | Running units of the class |
+| `classes.<class>.predicted_wait_s` | Seconds until the class's queued work drains; `0.0` with nothing queued, `null` when no slot is free and `frees_in` is empty |
+| `classes.<class>.verdict_cache_hit_ratio` | Verdict cache hits over lookups; `null` with no lookups |
+| `slots` | `total`, `busy` and `free` slots |
+| `utilisation` | Busy slots over total slots, at most `1.0`; `0.0` for a pool with no slots |
+| `budget_fraction` | As in the snapshot |
+| `shed` | Shed classes, in class order |
+
+### Predicted wait
+
+`scripts.ci_lab.capacity.predicted_wait(estimates, free_slots, frees_in)` computes each class's
+`predicted_wait_s`:
+
+1. `work` is the sum of the class's pending estimates. With no work the wait is `0.0`.
+2. Each free slot starts at 0 seconds and each busy slot at its `frees_in` entry, raised to 0
+   when negative. The start times are sorted, earliest first.
+3. With the `k` earliest slots working, the work drains at `(work + their k start times) / k`.
+   The wait is the least of these over every `k` from one to the number of slots.
+4. With no start time at all, no free slot and an empty `frees_in`, the wait is `null`.
+
+The rule shares a class's queued seconds across the slots as one body of work, so it predicts
+when that queue drains, not when a given unit starts: one 45 second unit on two slots freeing
+in 10 and 20 seconds predicts 37.5 seconds. Each class is predicted against the whole pool on
+its own; a queued hotfix does not add to the pull request wait.
+
+| Pending seconds | Free slots | `frees_in` | Wait | How |
+|---|---|---|---|---|
+| 120, 60 | 0 | 300, 60 | 240 | The slot free at 60 takes all 180 seconds; adding the slot at 300 gives (180 + 360) / 2 = 270, later |
+| 60 | 0 | 300, 100 | 160 | The slot free at 100 alone: 100 + 60 |
+| 600 | 0 | 300, 100 | 500 | Both slots share the work: (600 + 100 + 300) / 2 |
+| 90 | 1 | 30 | 60 | The free slot and the slot free at 30: (90 + 0 + 30) / 2 |
+| 50, 50 | 0 | 40, -30 | 70 | The overdue unit's slot counts as free now: (100 + 0 + 40) / 2 |
+| none | 0 | 100 | 0 | Nothing queued |
+| 10 | 0 | none | `null` | A full pool with no free time known |
+
+### A wait the lab cannot predict
+
+| Surface | A `null` wait shows as |
+|---|---|
+| `GET /capacity` | `"predicted_wait_s": null` |
+| `ci_lab_queue_wait_seconds{class="<class>"}` | `+Inf` |
+| The swarm's `lab_capacity` ClickHouse row | `-1.0` |
+| The ledger page Lab stat | `no free slot` beside the class |
+| The lab behind claim hold and the `lab_wait` stage finding | 0 minutes, so it never holds a claim |
+
+### How the swarm reads it
+
+Point a swarm at the scheduler with its `lab-url` setting, an `http` or `https` address with a
+host and no credentials:
+
+```bash
+agentihooks swarm example-swarm set lab-url=http://lab:8800
+```
+
+Each tick pass, `scripts.swarm.lab_capacity.capture` reads `<lab-url>/capacity` with a three
+second timeout. It stores the swarm's lab block in Redis as `url`, `at`, `capacity`, `error` and
+`error_at`, and ships one `lab_capacity` row per class. A failed read keeps the last capacity
+and records the error; a changed `lab-url` drops the capacity read from the old address. The
+claim hold reads `capacity.classes.pull_request.predicted_wait_s` from that block while it is
+at most ten minutes old.
+
+### Verify
+
+The capacity document needs no service to check: build a snapshot and print the pull request
+class.
+
+```bash
+python -c 'import json; from scripts.ci_lab.capacity import Load, document; print(json.dumps(document(Load({"pull_request": (120.0, 60.0)}, {"queue": 2}, slots_total=2, slots_busy=2, frees_in=(300.0, 60.0)))["classes"]["pull_request"]))'
+```
+
+```json
+{"pending": 2, "running": 0, "predicted_wait_s": 240.0, "verdict_cache_hit_ratio": null}
+```
+
+Read what a swarm last captured:
+
+```bash
+agentihooks swarm example-swarm status --json \
+  | jq '.lab | {at, error, slots: .capacity.slots, pull_request: .capacity.classes.pull_request}'
+```
+
+The feature map entry `lab-full-pool-wait` lists the regression tests: the drain rule, the full
+pool document, the queue wait gauge and the swarm reading the claim hold reads.
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A full lab reads `null`, `+Inf` or `no free slot` and never holds claims | The snapshot carries no `frees_in` | Fill one entry per busy slot with the seconds until the unit on it ends |
+| The predicted wait is shorter than the longest queued unit | The rule shares queued seconds across slots | Expected; read it as when the class's queue drains |
+| `predicted_wait_s` is `0.0` while every slot is busy | Nothing of that class is queued | Expected; only queued work of the class adds wait |
+| A long hotfix queue leaves the pull request wait unchanged | Each class is predicted on its own | Expected; read each class's wait |
+| The lab block shows an `error` and an old `at` | The last read failed and the last capacity was kept | Check `lab-url` and that the scheduler answers `/capacity`; a reading older than ten minutes never holds a claim |
 
 ## Worker scheduling priority
 
