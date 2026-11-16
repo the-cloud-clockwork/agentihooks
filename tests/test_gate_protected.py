@@ -401,6 +401,19 @@ def test_the_branch_lane_preflight_may_run_only_for_workflow_changes(
     assert refused is bool(verdict)
 
 
+@pytest.mark.parametrize("cover_proofs", [False, True])
+def test_a_preflight_that_ignored_proofs_may_gain_the_workflow_filter_with_or_without_covering_them(
+    repo: Path, cover_proofs: bool
+) -> None:
+    preflight = _push_paths(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()), None)
+    ignored = [branch for branch in preflight[True]["push"]["branches-ignore"] if branch != "diffcheck/**"]
+    preflight[True]["push"]["branches-ignore"] = [*ignored, "diffcheck/**"]
+    head = _push_paths(preflight, [".github/workflows/**"])
+    if cover_proofs:
+        head[True]["push"]["branches-ignore"] = ignored
+    assert _grade_preflight(repo, preflight, head) == 0
+
+
 @pytest.mark.parametrize("fault", ["paths_ignore", "other_event", "dropped"])
 def test_the_branch_lane_preflight_refuses_any_other_trigger_filter(
     repo: Path, capsys: pytest.CaptureFixture[str], fault: str
