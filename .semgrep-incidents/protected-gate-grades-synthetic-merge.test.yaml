@@ -20,6 +20,10 @@ jobs:
         # ruleid: protected-gate-grades-synthetic-merge
         run: python -m scripts.gate_protected --base HEAD --head=${GITHUB_SHA}
 
+      - name: Grade a prefix of the synthetic merge
+        # ruleid: protected-gate-grades-synthetic-merge
+        run: python -m scripts.gate_protected --head "${GITHUB_SHA:0:40}"
+
       - name: Grade the pull request head from the grader worktree
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

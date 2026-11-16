@@ -2,7 +2,6 @@ import copy
 import inspect
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +11,7 @@ import pytest
 import yaml
 
 from scripts import ci_wiring, gate_protected
+from scripts.ci_lab import expressions
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
@@ -2399,7 +2399,6 @@ def test_a_head_behind_a_landed_frozen_change_is_green(frozen, capsys):
 
 
 _LINT_PROTECTED = "Require trusted actors before private runner admission"
-_EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
 
 
 def _accepting(one: tuple[str, ...], two: tuple[str, ...]) -> str:
@@ -2432,7 +2431,8 @@ def _behind_dev(repo: Path, change: dict[str, str]) -> dict[str, str]:
 
 
 def _lint_protected(repo: Path, runner: Path, grader: str, context: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    """Run the Tests lint step that grades the protected gate from a grader worktree at the given revision."""
+    """Run the Tests lint step that grades the protected gate, from a grader worktree at the given revision that
+    imports this checkout's gate code, with the step env read from the event context."""
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
     step = next(step for step in steps if step.get("name") == _LINT_PROTECTED)
     _git(repo, "worktree", "add", "--detach", str(runner / "grader"), grader)
@@ -2440,17 +2440,12 @@ def _lint_protected(repo: Path, runner: Path, grader: str, context: dict[str, st
     (runner / "bin").mkdir()
     (runner / "bin/python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
     (runner / "bin/python").chmod(0o755)
-
-    def operand(found: re.Match[str]) -> str:
-        names = [name.strip() for name in found.group(1).split("||")]
-        return next((context[name] for name in names if name in context), "")
-
     env = {
         **os.environ,
         "GITHUB_SHA": context["github.sha"],
         "PATH": f"{runner / 'bin'}{os.pathsep}{os.environ['PATH']}",
         "RUNNER_TEMP": str(runner),
-        **{name: _EXPRESSION.sub(operand, value) for name, value in step.get("env", {}).items()},
+        **{name: expressions.interpolate(value, context) for name, value in step.get("env", {}).items()},
     }
     command = ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]]
     return subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=300)
@@ -2493,7 +2488,8 @@ def test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request(
 ) -> None:
     base = _commit(repo, {"test.yml": _workflow()}, {}, "base")
     head = _put(repo, {"notes.txt": "unrelated\n"}, "change")
-    graded = _lint_protected(repo, tmp_path_factory.mktemp("runner"), base, {"github.sha": head})
+    outside = {"github.event.pull_request.head.sha": "", "github.sha": head}
+    graded = _lint_protected(repo, tmp_path_factory.mktemp("runner"), base, outside)
     assert (graded.returncode, graded.stdout) == (
         0,
         f"graded {head[:12]} against merge base {base[:12]}: 0 protected gate problems\n",

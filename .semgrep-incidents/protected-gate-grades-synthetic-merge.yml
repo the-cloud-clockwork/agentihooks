@@ -12,4 +12,4 @@ rules:
         - '**/.github/workflows/*.yml'
         - '**/.github/workflows/*.yaml'
         - '**/protected-gate-grades-synthetic-merge.test.yaml'
-    pattern-regex: 'scripts\.gate_protected\b[^\n]*--head[= ]+"?(\$GITHUB_SHA\b|\$\{GITHUB_SHA\}|\$\{\{ *github\.sha *\}\})'
+    pattern-regex: 'scripts\.gate_protected\b[^\n]*--head[= ]+"?(\$GITHUB_SHA\b|\$\{GITHUB_SHA\b|\$\{\{ *github\.sha *\}\})'
