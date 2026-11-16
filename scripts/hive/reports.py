@@ -27,6 +27,14 @@ def host(agent: "AgentRecord") -> str:
     return target if target and target != hive_id() else ""
 
 
+def admitted(agent: "AgentRecord") -> str:
+    """The hive hub admission named for an agent no hive has given a host target, or '' when that hive is this one."""
+    from scripts.swarm.commands import hive_id
+
+    hive = "" if agent.runtime_target else agent.hive
+    return hive if hive and hive != hive_id() else ""
+
+
 def pane_key(agent: "AgentRecord") -> str:
     remote = host(agent)
     return f"{remote}/{agent.pane_id}" if remote else agent.pane_id
@@ -45,7 +53,7 @@ class Reports:
     def __init__(self, redis: "Redis") -> None:
         self.redis = redis
 
-    def read(self, hive: str) -> dict | None:
+    def read(self, hive: str) -> dict[str, Any] | None:
         raw = self.redis.get(key(hive))
         return json.loads(raw) if raw else None
 
@@ -58,6 +66,13 @@ class Reports:
             return None
         found = report["executions"].get(agent.execution_id, {})
         return found if found.get("generation") == agent.generation else {}
+
+    def admitted_pane(self, agent: "AgentRecord") -> dict[str, Any]:
+        """The pane the hive that runs hub admitted ``agent`` reports for its execution and generation, else empty."""
+        raw = self.redis.get(key(admitted(agent)))
+        report: dict[str, Any] = json.loads(cast(str, raw)) if raw else {}
+        found: dict[str, Any] = report.get("admitted", {}).get(agent.execution_id, {})
+        return found.get("pane", {}) if found.get("generation") == agent.generation else {}
 
     def gone(self, agent: "AgentRecord") -> bool:
         report = self.read(host(agent))
