@@ -860,7 +860,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::Collecting the {side} tests failed or found none, so the floor cannot be graded.")
     if failed:
         return 1
-    base, head = collected["base"], collected["head"]
+    base, head = collected["base"] or [], collected["head"] or []
     if output := os.environ.get("TEST_COUNT_HEAD_COLLECTION"):
         Path(output).write_text(json.dumps(head))
     lost = sorted(set(base) - set(head))
