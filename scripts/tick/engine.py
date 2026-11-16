@@ -467,6 +467,7 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
     its run began, the ready offset when it never ran. A step on the critical chain moves the pass record's
     ``critical_end_s`` to its start offset plus its wall time when that is later. An
     abandoned step that started counts every write domain it declares as dropped, since its result never applies.
+    An ok or failed run of any step also stores its end time in ``tick:step-ran``.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
     if store is None or slug is None or current is None:
