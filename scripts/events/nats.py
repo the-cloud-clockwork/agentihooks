@@ -674,8 +674,10 @@ class NatsBus:
         nats_payload.validate(self._nc, subject, data)
         try:
             return self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
-        except (FetchTimeout, NoRespondersError):
+        except NoRespondersError:
             raise TimeoutError(f"no responders for {subject!r}") from None
+        except FetchTimeout:
+            raise TimeoutError(f"request to {subject!r} timed out after {timeout_ms} ms") from None
 
     def migrate_state(self, swarm: str, bucket: str, keys: list[str]) -> None:
         from .nats_migration import migrate_state
