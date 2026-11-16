@@ -208,6 +208,10 @@ class LedgerClient:
         found: list[dict[str, Any]] = [row for row in rows if url in pull_links(row)]
         return found
 
+    def freezes(self, slug: str) -> list[dict[str, Any]]:
+        """The ledger's freeze and focus records, read without its tasks."""
+        return self._resource(slug, "freezes", collection=True)
+
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
         return self.item(slug, f"tasks/{task_id}")
@@ -283,9 +287,16 @@ class LedgerClient:
         self.comment(slug, task_id, text, by="swarm")
 
     def time_left(
-        self, slug: str, slots: int, ci_minutes: float | None, fix_phase: str = "", watched: list[str] | None = None
+        self,
+        slug: str,
+        slots: int,
+        ci_minutes: float | None,
+        fix_phase: str = "",
+        watched: list[str] | None = None,
+        lab: dict[str, Any] | None = None,
     ) -> None:
-        focus = {key: value for key, value in (("fix_phase", fix_phase), ("watched", watched)) if value}
+        sent = (("fix_phase", fix_phase), ("watched", watched), ("lab", lab))
+        focus = {key: value for key, value in sent if value}
         self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes, **focus)])
 
     def ack_events(self, slug: str, revision: int) -> None:

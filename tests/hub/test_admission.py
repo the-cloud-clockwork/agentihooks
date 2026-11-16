@@ -125,6 +125,59 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     json.dumps(admitted)
 
 
+@pytest.mark.feature("admission-launch-carries-admitted-execution")
+def test_the_admitted_task_carries_its_launch_execution_identity(rig: Any) -> None:
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    [agent] = rig.store.agents(SLUG)
+    spawned = admitted["task"]
+    assert spawned["admitted_execution_id"] == agent.execution_id
+    assert spawned["execution_id"] == agent.execution_id
+
+
+@pytest.mark.feature("admission-launch-carries-admitted-execution")
+def test_the_admitted_task_launch_arguments_pass_the_admitted_execution(rig: Any) -> None:
+    from dataclasses import replace
+
+    from scripts.swarm_v2.runtime import codex
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    spawned = admitted["task"]
+    config = replace(rig.store.config(SLUG), codex_inbox_transport="app_server")
+    argv = codex.arguments(config, "codex", spawned)
+    assert argv[:4] == ["--codex-transport", "app_server", "--seat", "eng-1@sw"]
+    assert argv[argv.index("--execution") + 1] == spawned["admitted_execution_id"]
+
+
+@pytest.mark.feature("codex-adopts-hub-admitted-execution")
+def test_a_hub_admitted_codex_launch_adopts_the_admitted_execution(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.codex_session import supervisor
+    from scripts.swarm import commands
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+    from scripts.swarm_v2.runtime import codex
+
+    rig.store.update(SLUG, codex_inbox_transport=APP_SERVER_TRANSPORT)
+    admitted = rig.admitter.admit(SLUG, ask())
+    argv = codex.arguments(rig.store.config(SLUG), "codex", admitted["task"])
+    seat, execution = argv[argv.index("--seat") + 1], argv[argv.index("--execution") + 1]
+    monkeypatch.setattr(commands, "hive_id", lambda: admitted["hive"])
+    agent = AgentRecord(admitted["name"], "eng", "t1", seat=seat, model="gpt-5", effort="high")
+    launch = supervisor.Launch(SLUG, agent, "/repo", "", {}, execution_id=execution)
+
+    adopted = supervisor.admit(rig.store, launch, supervisor.Deps())
+
+    assert (adopted.execution_id, adopted.model, adopted.effort) == (execution, "gpt-5", "high")
+    [only] = rig.store.executions(SLUG, seat)
+    assert (only.execution_id, only.state, only.harness, only.transport, only.hive) == (
+        execution,
+        "starting",
+        "codex",
+        APP_SERVER_TRANSPORT,
+        "hive-a",
+    )
+
+
 LAUNCH = {"harness": "codex", "profile": "engineer", "account": "work", "model": "gpt-5", "effort": "high"}
 HUB_CHECK = {"task": "t1", "at": 7_000, "relaunch": True, "owner": "hub"}
 

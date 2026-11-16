@@ -37,12 +37,13 @@ def test_scan_runs_inline_without_private_organization_workflow_calls():
         )
 
 
-def test_scan_keeps_the_reusable_workflow_steps():
+def test_scan_keeps_the_reusable_workflow_steps() -> None:
     steps = _jobs()["scan"]["steps"]
     assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
     assert steps[1] == {"name": "Set up Python", "uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}}
     assert [step.get("name") for step in steps[2:]] == [
         "Install Semgrep",
+        "Check out the protected grader",
         "Own rules hold on their fixtures and the code",
         "Rule exceptions only shrink",
         "Resolve the merge base of the head and the base",
@@ -129,7 +130,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert "/scripts/swarm/fleet_red.py" not in allowed
     assert "/scripts/swarm/cli.py" not in allowed
     assert "/scripts/swarm/ci_speed.py" not in allowed
-    assert "/scripts/swarm/mutation_wait.py" not in allowed
+    assert "/scripts/swarm/run_wait.py" not in allowed
     assert "/scripts/swarm/ledger_events.py" not in allowed
     assert allowed == ["/scripts/swarm/github_reads.py", "/scripts/tick/adapters/github.py"]
 
@@ -168,13 +169,15 @@ def test_scan_excludes_only_the_mutable_action_tag_rule():
     ]
 
 
-def test_scan_reads_the_domain_rules_folder_that_holds_rule_files():
-    step = _jobs()["scan"]["steps"][3]
+def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
+    step = next(
+        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+    )
     rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
     assert any(_ROOT.glob(".semgrep/*.yml"))
     assert "semgrep --metrics off --test --config rules rules" in step["run"]
-    assert 'semgrep scan --error --strict --metrics off --config "$RULES" .' in step["run"]
+    assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
 
 
 def test_scan_and_charts_run_on_the_select_runner_expression():
@@ -183,15 +186,21 @@ def test_scan_and_charts_run_on_the_select_runner_expression():
     assert jobs["scan"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
 
 
-def test_charts_run_the_chart_timer_guard():
+def test_charts_run_the_chart_timer_guard() -> None:
     steps = _jobs()["charts"]["steps"]
-    assert steps[-1]["run"] == "python tests/ci_charts/chart_timers.py"
+    assert steps[-1]["run"].splitlines()[0] == "script=tests/ci_charts/chart_timers.py"
+    assert 'python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"' in steps[-1]["run"]
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
 
 
-def test_charts_render_every_pod_template_at_two_chart_versions():
-    runs = [step.get("run") for step in _jobs()["charts"]["steps"]]
-    assert "python tests/ci_charts/chart_pod_templates.py" in runs
+def test_charts_render_every_pod_template_at_two_chart_versions() -> None:
+    step = next(
+        step
+        for step in _jobs()["charts"]["steps"]
+        if step.get("name") == "A chart version bump leaves every pod template unchanged"
+    )
+    assert step["run"].splitlines()[0] == "script=tests/ci_charts/chart_pod_templates.py"
+    assert 'python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"' in step["run"]
     assert (_ROOT / "tests/ci_charts/chart_pod_templates.py").is_file()
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import cli, idle, mutation_wait, waits
+from scripts.swarm import cli, idle, run_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
@@ -62,6 +62,22 @@ def test_checks_take_a_pull_request_or_a_run_and_merge_takes_only_a_pull_request
     assert waits.target_problem("merge", RUN, "t1", {}, None) == f"wait on merge needs a pull request url, not {RUN}"
 
 
+@pytest.mark.feature("swarm-run-wait")
+def test_a_mutation_wait_is_refused_with_the_kinds_list(started, capsys):  # noqa: F811
+    store, _ = started
+    assert run("sw", "--as", ME, "wait", "--on", "mutation", RUN, "--reason", "preflight") == 1
+    assert capsys.readouterr().err.endswith("swarm: wait on one of: checks, merge, reply, task, intent\n")
+    assert held(store) is None
+
+
+def test_a_stored_mutation_wait_ends_with_the_kinds_list(tick):  # noqa: F811
+    on = {"kind": "mutation", "target": RUN, "task": "t1"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=on)
+    outcome = f"mutation {RUN}, now ended; wait on one of: checks, merge, reply, task, intent"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 @pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
 def test_a_run_still_going_keeps_the_wait(tick, actions, status):  # noqa: F811
     actions["run"] = {"status": status, "conclusion": None}
@@ -95,7 +111,7 @@ def test_the_tick_ends_a_run_wait_with_its_conclusion(tick, actions, conclusion,
 def test_a_missing_run_ends_the_wait_with_that_reason(tick, actions):  # noqa: F811
     actions["code"], actions["stderr"] = 1, b"gh: Not Found (HTTP 404)"
     hold_run(tick)
-    assert mutation_wait.run_resolution(RUN) == f"checks on {RUN}, missing; GitHub has no such run"
+    assert run_wait.run_resolution(RUN) == f"checks on {RUN}, missing; GitHub has no such run"
     assert tick.end() == [f"ended the wait of {ME}: checks on {RUN}, missing; GitHub has no such run"]
 
 
@@ -104,6 +120,19 @@ def test_an_unreachable_github_keeps_the_run_wait(tick, actions):  # noqa: F811
     hold_run(tick)
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["target"] == RUN
+
+
+def test_undecodable_gh_stderr_is_reported_with_replacement_characters(actions):
+    actions["code"], actions["stderr"] = 1, b"HTTP \xff502"
+    with pytest.raises(run_wait.Unreachable) as unreachable:
+        run_wait._api(ENDPOINT, "waits.checks")
+    assert str(unreachable.value) == f"gh api {ENDPOINT}: HTTP �502"
+
+
+def test_utf8_json_is_parsed_without_process_locale_decoding(monkeypatch):
+    body = json.dumps({"display_title": "café"}, ensure_ascii=False).encode()
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, body, b""))
+    assert run_wait._api(ENDPOINT, "waits.checks") == {"display_title": "café"}
 
 
 def job(name, conclusion):

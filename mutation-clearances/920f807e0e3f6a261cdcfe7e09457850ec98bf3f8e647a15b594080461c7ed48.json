@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/store.py:scripts.ci_lab.store.xǁStoreǁreindex:80991feb8e9af218ad2715cf4733f3080b8d0d1b584fdb4903c8500e9a4f36fa": {
+    "reader": "standards_reader",
+    "reason": "Replaces replace=False with replace=None in the reindex call to _index. _index reads replace only through nx=not replace, and not None equals not False equals True, so the Redis set call receives identical arguments for every input and reindex returns the same sum of the same set results; return value and Redis writes are unchanged."
+  }
+}

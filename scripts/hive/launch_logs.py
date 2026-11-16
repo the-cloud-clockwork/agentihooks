@@ -35,9 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(arguments[:split])
     store = connect()
     agent = store.execution_registry.get(args.slug, args.execution)
-    receipt = Orders(store.redis).launch_receipt(
-        agent.runtime_target["host_id"], args.slug, agent.execution_id, agent.generation
-    )
+    receipt = Orders(store.redis).launch_receipt(agent.hive, args.slug, agent.execution_id, agent.generation)
     retained = ""
     store.redis.hset(receipt, "supervisor_log", retained)
     with subprocess.Popen(

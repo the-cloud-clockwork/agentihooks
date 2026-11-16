@@ -1,8 +1,9 @@
 import argparse
 import json
 import subprocess
+from collections.abc import Mapping
 from copy import deepcopy
-from datetime import UTC, date, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,8 @@ EQUIVALENCE_DEV_PARENT = {
     "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
 }
 EQUIVALENCE_DEV_PARENT_REF = "${{ steps.comparison-base.outputs.sha }}"
+PREFLIGHT_PATHS = [".github/workflows/**"]
+EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
@@ -46,7 +49,7 @@ def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
     ]
 
 
-def _protected_config(base: dict, head: dict) -> dict:
+def _protected_config(base: Mapping[str, Any], head: Mapping[str, Any]) -> dict:
     return {
         section: {key: entry for key, entry in base.get(section, {}).items() if key in head.get(section, {})}
         for section in ("not_gates", "outside_gate")
@@ -76,6 +79,60 @@ def reuse_jobs(policy: object = None) -> list[dict]:
     return jobs
 
 
+@lru_cache(maxsize=None)
+def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> list[list[dict[str, Any]]]:
+    """Every rendering of the gate-required job's steps the protected branch still accepts, for one (type_gate, postgres, docs) combination."""
+    requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
+    return [
+        typing(
+            sonar(
+                diagnostic(
+                    forward(
+                        finish(
+                            rerun(
+                                shape(
+                                    required(
+                                        lab(
+                                            ci_reuse.gate_steps(
+                                                **form,
+                                                summary=summary,
+                                                docs=docs,
+                                                watcher_loss=watcher_loss,
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        for typing in ((ci_reuse.typing_required,) if type_gate else (list,))
+        for sonar in (list, ci_reuse.test_only_sonar)
+        for diagnostic, forward in (
+            (list, list),
+            (ci_reuse.selection_diagnostic, list),
+            (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+        )
+        for form in (
+            {},
+            {"selected": True},
+            {"queue_tier": True},
+            {"queue_tier": True, "promotion": True},
+            {"queue_tier": True, "consolidated": True},
+            {"queue_tier": True, "promotion": True, "consolidated": True},
+        )
+        for summary in (False, True)
+        for watcher_loss in (False, True)
+        for required in requirements
+        for lab in (list[dict[str, Any]], ci_reuse.lab_verdict)
+        for rerun in (list, ci_reuse.lost_rerun)
+        for shape in (list, ci_reuse.inline_mutation)
+        for finish in (list, ci_reuse.pipefail_summary)
+    ]
+
+
 def _aggregator_problems(
     base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None, retired: frozenset = frozenset()
 ) -> list[str]:
@@ -88,7 +145,6 @@ def _aggregator_problems(
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
     postgres = any(ci_reuse.POSTGRES_REQUIRED[1] in str(step.get("run")) for step in base_job.get("steps") or [])
-    requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
     return problems + [
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
         for field in fields
@@ -102,51 +158,9 @@ def _aggregator_problems(
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
-            in [
-                typing(
-                    sonar(
-                        diagnostic(
-                            forward(
-                                finish(
-                                    rerun(
-                                        shape(
-                                            required(
-                                                ci_reuse.gate_steps(
-                                                    **form,
-                                                    summary=summary,
-                                                    docs="docs" in ci_wiring.needs_of(head_job),
-                                                    watcher_loss=watcher_loss,
-                                                )
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-                for typing in ((ci_reuse.typing_required,) if "type-gate" in ci_wiring.needs_of(head_job) else (list,))
-                for sonar in (list, ci_reuse.test_only_sonar)
-                for diagnostic, forward in (
-                    (list, list),
-                    (ci_reuse.selection_diagnostic, list),
-                    (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
-                )
-                for form in (
-                    {},
-                    {"selected": True},
-                    {"queue_tier": True},
-                    {"queue_tier": True, "promotion": True},
-                    {"queue_tier": True, "consolidated": True},
-                    {"queue_tier": True, "promotion": True, "consolidated": True},
-                )
-                for summary in (False, True)
-                for watcher_loss in (False, True)
-                for required in requirements
-                for rerun in (list, ci_reuse.lost_rerun)
-                for shape in (list, ci_reuse.inline_mutation)
-                for finish in (list, ci_reuse.pipefail_summary)
-            ]
+            in _accepted_steps_renderings(
+                "type-gate" in ci_wiring.needs_of(head_job), postgres, "docs" in ci_wiring.needs_of(head_job)
+            )
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
@@ -219,7 +233,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
 
 
 def _mutation_stage_entries(
-    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: dict[str, Any]
+    file: str, gate: dict[str, Any], jobs: dict[str, Any], head_config: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Return the head's non gate entries for mutation stages whose results the required mutation job merges."""
     needs = ci_wiring.needs_of
@@ -236,10 +250,9 @@ def _mutation_stage_entries(
 
 def grade(
     base_workflows: dict[str, dict[str, Any]],
-    base_config: dict[str, Any],
+    base_config: ci_wiring.Wiring,
     head_workflows: dict[str, dict[str, Any]],
-    head_config: dict[str, Any],
-    today: date,
+    head_config: ci_wiring.Wiring,
     policy: object = None,
 ) -> list[str]:
     from scripts import ci_gate_queue
@@ -296,7 +309,7 @@ def grade(
                 config["not_gates"].setdefault(key, head_config["not_gates"][key])
     for key, entry in _mutation_stage_entries(file, head_gates[0][2], head_jobs, head_config).items():
         config["not_gates"].setdefault(key, entry)
-    return problems + ci_wiring.check(head_workflows, config, today)
+    return problems + ci_wiring.check(head_workflows, config)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -314,7 +327,9 @@ def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
     return workflows, config
 
 
-def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+def _preflight_problems(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> list[str]:
     baseline = base_workflows.get("branch-lanes.yml")
     if baseline is None:
         return []
@@ -323,14 +338,24 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    if head_workflows.get("branch-lanes.yml") in (
-        baseline,
-        expanded,
-        *_checkout_forms(baseline),
-        *_checkout_forms(expanded),
-    ):
+    forms = [*_path_forms(baseline, "push", PREFLIGHT_PATHS), *_path_forms(expanded, "push", PREFLIGHT_PATHS)]
+    if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
+
+
+def _path_forms(workflow: dict[Any, Any], event: str, paths: list[str]) -> list[dict[Any, Any]]:
+    """Return the workflow as given, then with its event trigger unfiltered and filtered to the paths."""
+    forms = [workflow]
+    for kept in (None, paths):
+        form = deepcopy(workflow)
+        events: dict[str, Any] = form[True] if True in form else form["on"]
+        if event in events:
+            trigger: dict[str, Any] = dict(events[event] or {})
+            trigger.pop("paths", None)
+            events[event] = {**trigger, "paths": list(kept)} if kept else (trigger or None)
+        forms.append(form)
+    return forms
 
 
 def _checkout_forms(preflight: dict) -> list[dict]:
@@ -366,7 +391,9 @@ def _dev_parent_form(steps: list[dict]) -> list[dict]:
     return form
 
 
-def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+def _equivalence_problems(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> list[str]:
     file, job_id = EQUIVALENCE
     base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
     base_job, head_job = ((workflow.get("jobs") or {}).get(job_id) or {} for workflow in (base, head))
@@ -381,12 +408,26 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
         accepted is None
         or any(word in json.dumps(step) for step in head_steps[len(accepted) :] for word in EQUIVALENCE_WORDS)
         or {key: value for key, value in head.items() if key != "jobs"}
-        != {key: value for key, value in base.items() if key != "jobs"}
+        not in [
+            {key: value for key, value in form.items() if key != "jobs"}
+            for form in _path_forms(base, "pull_request", EQUIVALENCE_PATHS)
+        ]
         or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
         != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}
     ):
         return ["The head changes the ledger equivalence grading; the protected branch grades with its own."]
     return []
+
+
+def _filtered_equivalence(
+    base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
+) -> set[str]:
+    """Name the equivalence workflow when the head only adds or drops its ledger path filter, so lanes keep trusting it."""
+    file = EQUIVALENCE[0]
+    base = base_workflows.get(file)
+    if base is None or head_workflows.get(file) not in _path_forms(base, "pull_request", EQUIVALENCE_PATHS):
+        return set()
+    return {file}
 
 
 def _blob(root: Path, rev: str, path: str) -> str | None:
@@ -440,9 +481,10 @@ def main(argv: list[str] | None = None) -> int:
     if ci_runner_trust.ACTORS in _git(root, "ls-tree", "-r", "--name-only", args.base).splitlines():
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
-    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    problems = grade(base_workflows, base_config, head_workflows, head_config, actors)
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
+    governed |= _filtered_equivalence(base_workflows, head_workflows)
     problems += preflight
     problems += _equivalence_problems(tip_workflows, head_workflows)
     problems += _frozen_problems(root, merge_base, args.base, args.head)
