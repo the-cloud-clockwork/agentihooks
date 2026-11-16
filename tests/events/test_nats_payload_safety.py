@@ -57,7 +57,7 @@ def test_publish_preserves_stream_and_counts_its_exact_wire_header():
         asyncio.run(nats_payload.publish(js, "subject", b"x" * 59, stream="EVENTS", headers={}))
 
 
-def test_requests_and_replies_report_the_refused_subject_before_sending():
+def test_requests_and_replies_report_the_refused_subject_before_sending(caplog: pytest.LogCaptureFixture) -> None:
     opened = object.__new__(nats.NatsBus)
     opened._loop = SimpleNamespace(run=asyncio.run)
     opened._nc = SimpleNamespace(max_payload=10, subscribe=AsyncMock(), flush=AsyncMock(), request=AsyncMock())
@@ -67,8 +67,10 @@ def test_requests_and_replies_report_the_refused_subject_before_sending():
     opened.serve("service", "workers", lambda subject, data: b"x" * 11)
     callback = opened._nc.subscribe.await_args.kwargs["cb"]
     message = SimpleNamespace(subject="service", data=b"", reply="reply.subject", respond=AsyncMock())
-    with pytest.raises(ValueError, match="reply.subject: payload 11 exceeds server limit 10"):
-        asyncio.run(callback(message))
+    asyncio.run(callback(message))
+    assert [record.getMessage() for record in caplog.records if record.name == nats.__name__] == [
+        "reply.subject: payload 11 exceeds server limit 10"
+    ]
     message.respond.assert_not_awaited()
 
 

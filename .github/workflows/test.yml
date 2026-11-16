@@ -1672,8 +1672,40 @@ jobs:
 
       - name: Restore queue shard durations, attempt 2
         if: steps.restore-queue-shard-durations.outcome == 'failure'
+        id: restore-queue-shard-durations-attempt-2
         uses: actions/download-artifact@v4
         with: *unit-restore-queue-shard-durations
+
+      - name: Restore torn queue shard durations again
+        if: &unfinished-queue-durations needs.split.outputs.source != '' && steps.restore-queue-shard-durations.outputs.download-path == '' && steps.restore-queue-shard-durations-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-durations
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-durations
+
+      - name: Restore torn queue shard durations again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard durations again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard durations again, attempt 2
+        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+        id: restore-torn-queue-shard-durations-attempt-2
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-durations
+
+      - name: Check the queue shard durations restored again
+        if: *unfinished-queue-durations
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-durations.outputs.download-path }}${{ steps.restore-torn-queue-shard-durations-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard durations again also stopped before the download finished; the restored durations are incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard durations stopped before the download finished, so its partial files were restored again in full."
 
       - name: Restore queue shard flakes
         if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
@@ -1694,8 +1726,40 @@ jobs:
 
       - name: Restore queue shard flakes, attempt 2
         if: steps.restore-queue-shard-flakes.outcome == 'failure'
+        id: restore-queue-shard-flakes-attempt-2
         uses: actions/download-artifact@v4
         with: *unit-restore-queue-shard-flakes
+
+      - name: Restore torn queue shard flakes again
+        if: &unfinished-queue-flakes needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard && steps.restore-queue-shard-flakes.outputs.download-path == '' && steps.restore-queue-shard-flakes-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-flakes
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-flakes
+
+      - name: Restore torn queue shard flakes again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard flakes again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard flakes again, attempt 2
+        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
+        id: restore-torn-queue-shard-flakes-attempt-2
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-flakes
+
+      - name: Check the queue shard flakes restored again
+        if: *unfinished-queue-flakes
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-flakes.outputs.download-path }}${{ steps.restore-torn-queue-shard-flakes-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard flakes again also stopped before the download finished; the restored flakes are incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard flakes stopped before the download finished, so its partial files were restored again in full."
 
       - name: Restore queue shard coverage
         if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
@@ -1716,8 +1780,40 @@ jobs:
 
       - name: Restore queue shard coverage, attempt 2
         if: steps.restore-queue-shard-coverage.outcome == 'failure'
+        id: restore-queue-shard-coverage-attempt-2
         uses: actions/download-artifact@v4
         with: *unit-restore-queue-shard-coverage
+
+      - name: Restore torn queue shard coverage again
+        if: &unfinished-queue-coverage needs.split.outputs.source != '' && matrix.python-version == '3.12' && steps.restore-queue-shard-coverage.outputs.download-path == '' && steps.restore-queue-shard-coverage-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-coverage
+
+      - name: Restore torn queue shard coverage again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard coverage again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard coverage again, attempt 2
+        if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
+        id: restore-torn-queue-shard-coverage-attempt-2
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-coverage
+
+      - name: Check the queue shard coverage restored again
+        if: *unfinished-queue-coverage
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-coverage.outputs.download-path }}${{ steps.restore-torn-queue-shard-coverage-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard coverage again also stopped before the download finished; the restored coverage is incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard coverage stopped before the download finished, so its partial files were restored again in full."
 
       - name: Empty the test reports of a leg above the queue's shard count
         if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
@@ -2188,35 +2284,25 @@ jobs:
       - *python
 
       - name: Download collected tests
-        id: shard-data
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &shard-check-download-collected-tests
-          pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
-          path: shard-data
+        uses: ./.github/actions/retry-download
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected-data
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' collected-data/collected.json
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
-      - name: Download collected tests, wait before attempt 2
-        if: steps.shard-data.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download collected tests failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download collected tests, attempt 2
-        if: steps.shard-data.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *shard-check-download-collected-tests
-
-      - name: Arrange shard verification data
-        shell: bash
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-          REUSED: ${{ needs.split.outputs.reused }}
-        run: |
-          mv "shard-data/collected-$PYTHON_VERSION" collected-data
-          if [[ -n "$REUSED" && "$REUSED" != '0' ]]; then
-            mv "shard-data/reused-tests-$PYTHON_VERSION" reused-plan
-          fi
+      - name: Download the tests this run reuses
+        if: needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
+        uses: ./.github/actions/retry-download
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-plan
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' reused-plan/reused-tests.json
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Mint the tcc main ci App token
         id: app-token

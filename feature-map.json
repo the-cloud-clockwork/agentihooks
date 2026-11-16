@@ -81,6 +81,17 @@
       ]
     },
     {
+      "id": "hub-slot-requests-answered-concurrently",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-slot-serve-concurrent",
+      "behaviour": "A hub pod answers every account slot request on its own task, so a hive heartbeat that reaches a pod while a slow lane admission holds its handler is answered at once instead of waiting behind the admission past the hive's ten second request timeout.",
+      "seam": "NatsBus.serve for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": ["nats-serve-awaits-handler"],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
@@ -317,6 +328,20 @@
       "tests": [
         "tests/hive/test_reports.py::test_a_member_of_a_removed_hive_is_dropped_and_its_task_reopened",
         "tests/hive/test_reports.py::test_an_agent_that_names_no_hive_never_reads_as_vanished"
+      ]
+    },
+    {
+      "id": "swarm-reap-reads-hub-admitted-panes-from-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-reap-reads-hive-panes",
+      "behaviour": "A worker the hub admitted to another hive, which carries no host target, is judged by the pane its hive reports for its execution and generation instead of the controller's own herdr, so a finished worker reads idle or done and reaches the idle retire; each hive reports the pane of every hub admitted execution it runs, a pane reported for another generation reads unknown, and a worker admitted to this hive is still read from its own herdr.",
+      "seam": "scripts.hive.daemon.execution_report writes the admitted panes, read through scripts.hive.reports.Reports.admitted_pane by scripts.swarm.runtime.HerdrRuntime.observe for scripts.tick.steps.agents._watch_idle",
+      "tests": [
+        "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_pane_for_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire"
       ]
     },
     {
@@ -576,6 +601,16 @@
         "tests/tick/steps/test_idle_claim_retire.py::test_the_idle_with_claim_finding_fires_on_the_counted_idle_ticks",
         "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs",
         "tests/tick/steps/test_idle_claim_retire.py::test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost"
+      ]
+    },
+    {
+      "id": "tick-waits-end-records-its-end-every-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, so the waits end step, declared at sixty seconds on the tick lane, refreshes its end on every run and a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, read by scripts.tick.steps.agents._holding_wait",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
       ]
     },
     {
@@ -4180,6 +4215,20 @@
       ]
     },
     {
+      "id": "panic-fix-branch-first-push",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2558",
+      "behaviour": "While fleet panic is on, a fix registered as a branch link of a named repository lets a session on that branch in that repository make its first push, rerun or dispatch before any pull request exists, the panic cancel sweep spares that branch's runs in that repository without reading it as a pull request, and a push from any other branch or from the same branch name in another repository stays frozen.",
+      "seam": "The panic fix list branch link read by the blocker window hook and the panic cancel sweep",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_branch_link_names_its_repository_and_branch",
+        "tests/swarm/test_panic.py::test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository",
+        "tests/swarm/test_panic.py::test_panic_spares_the_first_push_of_a_registered_fix_branch",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_from_a_branch_no_fix_registers"
+      ]
+    },
+    {
       "id": "panic-merged-fix-dev-run",
       "origin": "regression",
       "ordered_at": "2026-11-07",
@@ -4769,6 +4818,26 @@
       "tests": [
         "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
         "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
+      ]
+    },
+    {
+      "id": "bus-request-error-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus request that no subscriber serves fails with no responders for its subject, and a request whose answer does not arrive within its timeout fails with a timeout naming its subject and wait, so a late answer never reads as a missing responder.",
+      "seam": "NatsBus.request mapping the nats client's NoRespondersError and request TimeoutError",
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder"
+      ]
+    },
+    {
+      "id": "bus-connect-timeout-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus open whose server accepts the connection but does not finish the connect handshake within the first connect bound fails with a timeout naming the server and the wait, never a bare timeout with no text.",
+      "seam": "The first connect of NatsBus mapping the nats client's handshake timeout",
+      "tests": [
+        "tests/events/test_nats.py::test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait"
       ]
     },
     {
@@ -6044,6 +6113,16 @@
       ]
     },
     {
+      "id": "automated-activity-question-own-ref",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-activity-question-own-ref",
+      "behaviour": "Automated agent collection sends each activity question with its own inbox ref, automated-activity followed by the probe time, instead of one fixed ref for every question, so the recipient's seen marks never close a later question as already shown through the ledger on delivery: every question reaches the agent through the seen claim, its reply is recorded, and three nothing to do answers collect the agent.",
+      "seam": "scripts.swarm.automated_gc.run asking an automated agent, each question delivered by scripts.inbox.seen.claim and answered with InboxStore.reply",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_agent"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
@@ -7302,6 +7381,19 @@
         "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
         "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
         "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
+      ]
+    },
+    {
+      "id": "hub-admission-earlier-lives-launched-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admission-branch-heads-after-answer",
+      "behaviour": "Hub admission reads branch heads only for the earlier lives of a reclaimed task that launched: an agent retired while still starting with no pane, such as one the hub freed because no hive started it, ran nothing and pushed no branch, so it adds no branch to the GitHub query and a task whose earlier lives all never launched reads no branch heads; those lives never count toward the claim cap either.",
+      "seam": "RedisStore.earlier_lives over the swarm history, Admission.admit through its branch heads read, and the claim cap after Admission.free",
+      "tests": [
+        "tests/swarm/test_store.py::test_earlier_lives_leave_out_an_agent_retired_while_starting_with_no_pane",
+        "tests/hub/test_admission.py::test_the_branch_heads_query_asks_only_for_earlier_lives_that_launched",
+        "tests/hub/test_admission.py::test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission",
+        "tests/hub/test_admission_claim_cap.py::test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap"
       ]
     }
   ],

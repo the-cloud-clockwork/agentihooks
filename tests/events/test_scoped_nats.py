@@ -2,6 +2,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from nats import errors as nats_errors
 
 from scripts.events import nats
 from scripts.events.bus import StateConflict
@@ -294,15 +295,49 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
         own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1"), "m1", lambda: report)
         assert own.take("one", "claude") == "a"
         foreign = account_slots.Remote(account_slots.asker(client, "other", "m1", 500), "m1", lambda: report)
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.other.m1'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.other.m1' timed out after 500 ms$"):
             foreign.take("two", "claude")
         posing = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m2", 500), "m2")
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m2'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.rig.m2' timed out after 500 ms$"):
             posing.release("one", "claude", "a")
         own.release("one", "claude", "a")
         assert own.take("two", "claude") == "a"
     finally:
         client.close()
+
+
+@pytest.mark.feature("hub-slot-requests-answered-concurrently")
+def test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub(hub: Any, signer: Any) -> None:
+    import threading
+
+    from scripts.hive import account_slots
+    from scripts.hub import slots
+
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowAdmission:
+        def admit(self, slug: str, request: dict[str, Any]) -> None:
+            entered.set()
+            release.wait(30)
+
+    admitter: Any = SlowAdmission()
+    slots.serve(hub, clock=lambda: 1000, admitter=admitter)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
+    admitted: list[Any] = []
+    admit = account_slots.asker(client.for_swarm("rig"), "rig", "m1", 30_000)
+    beat = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1", 3_000), "m1")
+    admitting = threading.Thread(target=lambda: admitted.append(admit({"op": "admit", "hive": "m1", "task": "t"})))
+    admitting.start()
+    try:
+        assert entered.wait(10)
+        beat.heartbeat(report, {})
+        assert admitting.is_alive()
+    finally:
+        release.set()
+        admitting.join(30)
+        client.close()
+    assert admitted == [None]
 
 
 def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
@@ -332,18 +367,27 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
     assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
 
 
-def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout():
+@pytest.mark.feature("bus-request-error-text")
+@pytest.mark.parametrize(
+    ("error", "text"),
+    [
+        (nats_errors.TimeoutError, "^request to 'swarm.rig.silent' timed out after 300 ms$"),
+        (nats_errors.NoRespondersError, "^no responders for 'swarm.rig.silent'$"),
+    ],
+    ids=["late answer", "missing responder"],
+)
+def test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder(
+    error: type[nats_errors.Error], text: str
+) -> None:
     import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from nats.errors import TimeoutError as NatsTimeout
-
     bus = object.__new__(nats.NatsBus)
-    silent = AsyncMock(side_effect=NatsTimeout)
+    silent = AsyncMock(side_effect=error)
     bus._loop = SimpleNamespace(run=asyncio.run)
     bus._nc = SimpleNamespace(request=silent, max_payload=1048576)
-    with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
+    with pytest.raises(TimeoutError, match=text):
         bus.request("swarm.rig.silent", b"", 300)
     silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
 
