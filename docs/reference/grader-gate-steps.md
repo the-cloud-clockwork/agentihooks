@@ -7,9 +7,11 @@ nav_order: 81
 # Grader gate steps
 
 The lint job of the Tests workflow and the Semgrep workflow grade a pull
-request with the scripts and config of a protected grader checkout. They read
-the head only as data, so a pull request cannot loosen a check by editing that
-check's own module or config.
+request with the scripts and config of a protected grader checkout. The head
+supplies the code, fixtures and charts being graded. Its own ruff config and
+Semgrep rules can add checks on top of the grader's, but cannot remove or
+replace them, so a pull request cannot loosen a check by editing that check's
+own module or config.
 [Pull request 11361](https://github.com/the-cloud-clockwork/agentihooks/pull/11361)
 moved these steps onto the grader.
 [Pull request 11387](https://github.com/the-cloud-clockwork/agentihooks/pull/11387)
@@ -17,8 +19,10 @@ removed the head copy fallback from the marker key vector step and the two
 chart steps. Each of those three steps now runs only the grader's copy of its
 script, and the head's copy never runs.
 
-Every step on this page feeds `Gate — Required`, the check the dev ruleset
-requires. A red step blocks the pull request from the merge queue.
+For a pull request, the Tests workflow runs every step on this page, and each
+one feeds `Gate — Required`, the check the dev ruleset requires. A red step
+blocks the pull request from the merge queue. The Proofs workflow's `semgrep`
+proof runs the same Semgrep steps outside that gate.
 
 ## The protected grader checkout
 
@@ -53,13 +57,14 @@ holds an authoritative verdict for it.
 | Tests `lint` | `Check every pull request job is a need of Gate Required` | `python -m scripts.ci_wiring`, run from `$RUNNER_TEMP/grader` | The workflows under `--root "$GITHUB_WORKSPACE"` |
 | Semgrep `scan` | `Own rules hold on their fixtures and the code` | The rules in the grader's `.semgrep` | The code, scanned with the head's `.semgrep` as well. The head rules' own fixture tests run first |
 | Semgrep `scan` | `Fail on findings new against the base` | The rules in the grader's `.semgrep-incidents` | The code, compared against the merge base with the head's `.semgrep-incidents` and the `p/ci`, `p/secrets` and `p/python` registry rules |
+| Semgrep `charts` | `Guard rules hold on their fixtures and at their computed floors` | `scripts/ci_semgrep_floors.py`, read from the fetched base with `git show`. This step keeps a fallback: when the base has no copy of the script, the head's copy runs | The guard rules and their fixtures |
 | Semgrep `charts` | `A chart version bump leaves every pod template unchanged` | `tests/ci_charts/chart_pod_templates.py` | The charts under `deploy` in `--root "$GITHUB_WORKSPACE"` |
 | Semgrep `charts` | `Charts render no CronJob outside the scheduler` | `tests/ci_charts/chart_timers.py` | The charts under `deploy` in `--root "$GITHUB_WORKSPACE"` |
 
 The ruff steps run `python -P`, which keeps the current directory off the
 import path. A head that ships its own `ruff` package therefore cannot stand in
-for the installed one. Every lint step carries `if: ${{ !cancelled() }}`, so
-each one reports even after an earlier step turns red.
+for the installed one. Every lint gate step carries `if: ${{ !cancelled() }}`,
+so each one reports even after an earlier step turns red.
 
 The marker vector step compares the head's fixture byte for byte with
 `tests/fixtures/marker-idempotency-vectors.json` from `agentibrain-kernel` on
@@ -109,8 +114,6 @@ What each step does depends on the grader revision:
 | Predates pull request 11361 | argparse refuses the option: `error: unrecognized arguments: --root ...`, exit 2, red | The old scripts have no argument parser. They ignore `--root` and grade the grader's own charts under `deploy`, then exit 0 when those charts are clean. The head's charts are not graded |
 | Has no copy of the script | `No module named scripts.ci_marker_vectors`, exit 1, red | `can't open file ...: No such file or directory`, exit 2, red |
 
-The head's copy runs in no row.
-
 ### Stale base limit for the chart steps
 
 On a base older than pull request 11361, the chart steps pass on the base's
@@ -126,16 +129,16 @@ which carries `--root`. The limit applies to a pull request into another
 branch whose base predates 11361, and to a dispatch that passes an older
 `base`. The stale base tests for the chart steps use a stand-in grader script
 that parses arguments, so they pin the argparse refusal and do not exercise
-the old scripts. A follow up to fail the chart steps when the grader copy lacks
-`--root` is open.
+the old scripts.
 
 ### Stale base on the marker vector step
 
-The lint job grades with the base sha its pull request event carries. On an
-older pull request that sha can predate current `dev`. When it predates pull
-request 11361, the marker step fails with exit 2 although the head is correct.
-Close and reopen the pull request so its next event carries current `dev`,
-then let the checks run again.
+Every lint gate step grades with the base sha its pull request event carries.
+On an older pull request that sha can predate current `dev`. When it predates
+pull request 11361, the marker step fails with exit 2 although the head is
+correct. A re-run of the same workflow run reuses that event and its sha.
+Close and reopen the pull request so a new event carries current `dev`, then
+let the checks run again.
 
 ## Run a step locally
 
@@ -145,11 +148,12 @@ The chart checks also need `helm` and PyYAML.
 
 ```bash
 head="$PWD"
+kernel="${KERNEL_DIR:?set KERNEL_DIR to a checkout of agentibrain-kernel on dev}"
 grader="$(mktemp -d)/grader"
 git fetch --no-tags origin dev
 git worktree add --detach "$grader" FETCH_HEAD
 
-# Marker vectors: $kernel is a checkout of agentibrain-kernel on dev
+# Marker vectors
 (cd "$grader" && python -m scripts.ci_marker_vectors --root "$head" \
   "$kernel/tests/fixtures/marker-idempotency-vectors.json")
 
