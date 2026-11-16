@@ -224,6 +224,16 @@
       ]
     },
     {
+      "id": "controller-standby-wakes-at-lock-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43913675090-0",
+      "behaviour": "A standby controller replica waits no longer than the held replica lock has left to live before it tries the lock again, so a standby behind a lock its dead leader left takes the lead as that lock lapses instead of up to one stand by poll later, while the liveness probe already counts the lapsed lock as no leader.",
+      "seam": "replica.ReplicaLock.lead",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_the_standby_waits_no_longer_than_the_held_lock_has_left"
+      ]
+    },
+    {
       "id": "controller-standby-replica",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
@@ -643,7 +653,7 @@
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
-      "behaviour": "A checked wait holds a claim holder's idle count only while the waits end step, which ends checked waits whose target resolved, has run within the idle retirement window; when that step is starved, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
+      "behaviour": "A checked wait holds a claim holder's idle count only while the last completed waits end pass, which ends checked waits whose target resolved, ran within the idle retirement window, or within that window of its declaration while no pass ever completed; when that pass is starved or failing, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
       "seam": "scripts.tick.steps.agents._watch_idle and _hive_lost, through _holding_wait",
       "tests": [
         "tests/tick/steps/test_idle_claim_retire.py::test_workstation_engineers_idle_under_an_unended_checked_wait_are_retired_within_25_ticks",
@@ -657,10 +667,22 @@
       "id": "tick-waits-end-records-its-end-every-run",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
-      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, so the waits end step, declared at sixty seconds on the tick lane, refreshes its end on every run and a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
-      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, read by scripts.tick.steps.agents._holding_wait",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, and each completed waits end pass records the time it ran, so while that pass keeps completing a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, and scripts.swarm.waits.end_pass through mark_ended, read by scripts.tick.steps.agents._holding_wait",
       "tests": [
         "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
+      "id": "tick-failing-waits-end-lets-checked-waits-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2564",
+      "behaviour": "The idle count trusts only a completed waits end pass. The registered waits end step reports ok even when its end pass raises, is skipped after an earlier step held an exception, finds no tick view or is refused, so the end a checked wait holds on is the time the last completed end pass ran; while the pass fails after a completion, a checked wait holds only within the idle retirement window after that time, with no completion ever recorded only within that window of its declaration, and engineers idle at their prompts under checked waits are retired within 25 ticks.",
+      "seam": "scripts.swarm.waits.end_pass recording its completion, read by scripts.tick.steps.agents._holding_wait in _watch_idle",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read",
+        "tests/tick/steps/test_idle_claim_retire.py::test_engineers_idle_under_a_checked_wait_are_retired_while_waits_end_fails_every_pass",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_holds_one_window_after_it_was_declared_when_waits_end_never_completed"
       ]
     },
     {
@@ -1045,6 +1067,22 @@
         "tests/hub/test_admission.py::test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_it_leaves_the_turn",
         "tests/hub/test_admission.py::test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission",
         "tests/hub/test_admission.py::test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer"
+      ]
+    },
+    {
+      "id": "hive-spoke-own-claimed-leftover-asked-again",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2583",
+      "behaviour": "A hive spoke whose pending admission points at a claim its own hive still holds as claimed answers busy while that claim may still be inside an admission wait, and once the claim has kept the same pending reservation for a whole admit ask timeout since the spoke first saw it, the wait that wrote it has ended without settling it and the spoke asks the hub again as it does for an asked claim, instead of answering busy on every poll: the hub's kept admission launches with no wait for a redelivery of the offer, a held answer frees the claim to ready and a refusal withdraws it, and either clears the pending admission so the spoke takes offers again, while a repeat ask left unanswered turns it into an asked claim asked again on the next poll. A claimed claim another hive holds still keeps the spoke busy past the timeout.",
+      "seam": "Spoke._recover and Spoke._first_seen on the hive, through Spoke._ask_again",
+      "rules": [
+        "hive-spoke-recovery-keeps-own-claimed-busy"
+      ],
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_timeout_later",
+        "tests/hive/test_spoke.py::test_a_new_pending_reservation_under_a_claimed_claim_restarts_the_admit_ask_timeout",
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_settles_like_an_asked_claim_on_the_repeat_ask",
+        "tests/hive/test_spoke.py::test_a_claimed_claim_another_hive_holds_keeps_the_spoke_busy_past_the_admit_ask_timeout"
       ]
     },
     {
@@ -4428,6 +4466,18 @@
       ]
     },
     {
+      "id": "panic-fix-triggered-workflow-run",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2582",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running a workflow run event run, such as the Gate Required status run that posts a pull request's required status, whose run name names the head branch of a registered fix in its repository, and still cancels every other workflow run event run, including one whose run name names no branch.",
+      "seam": "The Gate Required status run name and the panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered",
+        "tests/swarm/test_panic.py::test_the_gate_required_run_name_names_the_branch_the_sweep_keeps"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",
@@ -5058,6 +5108,17 @@
       "seam": "hooks.context.hive_join.run",
       "tests": [
         "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
+      "id": "hive-join-report-tool-repair",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2451",
+      "behaviour": "A swarm session whose hive join report write failed at session start, such as on a Redis connection error, writes the report on its next tool call when its execution has none, so the launch check grades the report instead of failing the launch on a missing one; a tool call leaves a report another session of the execution wrote in place and only retries its ledger checks, while a session start still replaces it.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_a_tool_call_writes_the_join_report_a_failed_start_left_missing",
+        "tests/test_hive_join_hook.py::test_only_a_session_start_replaces_the_join_report_of_another_session"
       ]
     },
     {

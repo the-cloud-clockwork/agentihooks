@@ -38,6 +38,8 @@ QUEUE_BRANCH = "gh-readonly-queue/"
 PUSH = "push"
 RELEASE_EVENT = "release"
 RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
+WORKFLOW_RUN = "workflow_run"
+TRIGGER_TITLE = re.compile(r".+ for (\S+)")
 REPOS = (
     "the-cloud-clockwork/agentihooks",
     "the-cloud-clockwork/agentihooks-bundle",
@@ -206,15 +208,23 @@ def check_fix(fix: str) -> None:
         raise SwarmError(f"{fix} names {named}, which panic never spares")
 
 
+def _fix_triggered(row: RepositoryRun, branches: set[str]) -> bool:
+    """Return whether the run is a workflow run event run whose run-name names, after its last " for ", one of the
+    fix branches as the head branch of the run that triggered it."""
+    found = TRIGGER_TITLE.fullmatch(row.title)
+    return row.event == WORKFLOW_RUN and found is not None and found[1] in branches
+
+
 def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
-    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit or a
-    release tag."""
+    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit, a
+    release tag or a workflow run event run that a fix's run triggered."""
     return (
         row.status not in ACTIVE
         or row.event in (MERGE_QUEUE, RELEASE_EVENT)
         or row.branch in branches
         or row.head_sha in commits
         or RELEASE_TAG.fullmatch(str(row.branch)) is not None
+        or _fix_triggered(row, branches)
     )
 
 
@@ -236,10 +246,10 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
 
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
-    """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes and the
-    runs on a fix's merge queue commit, merge commit or merged integration branch head; a fix pull request spares its
-    head branch and a fix branch link its branch only in its own repository, and a branch link is never read as a pull
-    request."""
+    """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes, the
+    workflow run event runs a fix's run triggered and the runs on a fix's merge queue commit, merge commit or merged
+    integration branch head; a fix pull request spares its head branch and a fix branch link its branch only in its
+    own repository, and a branch link is never read as a pull request."""
     from scripts.swarm.stack import GITHUB, repo_key
 
     named = [(fix, *branch_fix(fix)) for fix in fixes]

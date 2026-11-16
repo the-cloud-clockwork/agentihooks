@@ -1,4 +1,5 @@
 import argparse
+import importlib
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import urllib.request
 from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 import fakeredis
@@ -39,6 +41,19 @@ def exchange(server, token, body=None, route=f"/api/{SLUG}", method=None):
         return {"status": response.status, "type": response.headers["Content-Type"], "body": body}
 
 
+def served(root: Path) -> tuple[ModuleType, type]:
+    """The ledger server module the replay patches and the handler that answers the replay: the ledger server's own
+    on a tree whose ledger server takes writes, else the ledger API service's write handler with the ledger server's
+    reads."""
+    if not (root / "scripts/swarm_ledger/api_service.py").is_file():
+        import ledger_server
+
+        return ledger_server, ledger_server.Handler
+    package = importlib.import_module("scripts.swarm_ledger.ledger_server")
+    writes = importlib.import_module("scripts.swarm_ledger.api_service")
+    return package, type("Replay", (writes.WriteHandler,), {"do_GET": package.Handler.do_GET})
+
+
 def record(root: Path, folder: Path) -> list:
     folder.mkdir(parents=True, exist_ok=True)
     os.environ["LEDGER_DIR"] = str(folder)
@@ -47,7 +62,8 @@ def record(root: Path, folder: Path) -> list:
     sys.path.insert(0, str(root / "scripts/swarm_ledger"))
     sys.path.insert(1, str(root))
     import ledger_core as core
-    import ledger_server
+
+    ledger_server, handler = served(root)
     import new_ledger
 
     from scripts.inbox.store import InboxStore
@@ -79,7 +95,7 @@ def record(root: Path, folder: Path) -> list:
         stored = ledger_server.stored
         results.append({"created": new_ledger.create(SLUG, content), "stored": stored.export_document(SLUG)})
         token = stored.token(SLUG)
-        server = ThreadingHTTPServer(("127.0.0.1", 0), ledger_server.Handler)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
