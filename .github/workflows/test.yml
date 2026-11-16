@@ -5275,7 +5275,7 @@ jobs:
         uses: actions/download-artifact@v8.0.2
         with: &mutation-download-every-mutation-shard-report
           pattern: mutation-report-*
-          path: .mutation-shards
+          path: ${{ (needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) == '[0]' && '.mutation-shards/mutation-report-0' || '.mutation-shards' }}
 
       - name: Download every mutation shard report, wait before attempt 2
         if: steps.download-every-mutation-shard-report.outcome == 'failure'
