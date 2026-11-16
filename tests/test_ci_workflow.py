@@ -1100,7 +1100,7 @@ def test_the_collection_wait_outlasts_the_count_job_timeout(tmp_path):
     attempts = [step for step in _await_steps() if step.get("uses")]
     waits = [step for step in _await_steps() if step.get("name", "").startswith("Wait ")]
     assert len(waits) == len(attempts) - 1
-    assert all(step["uses"] == "actions/download-artifact@v4" for step in attempts)
+    assert all(step["uses"] == "actions/download-artifact@v8.0.2" for step in attempts)
     assert all(step["continue-on-error"] is True for step in attempts)
     assert all(step["with"] == {"name": "${{ inputs.name }}", "path": "${{ github.workspace }}"} for step in attempts)
     binary = tmp_path / "bin"
@@ -2475,7 +2475,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
-    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["uses"] == "actions/download-artifact@v8.0.2"
     assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}
 
 
@@ -2588,7 +2588,7 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert base["with"] == cached
     download = mutation[mutation_names.index("Download every part's test stats cache")]
     assert download["if"] == first
-    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["uses"] == "actions/download-artifact@v8.0.2"
     assert download["with"] == {
         "pattern": "mutation-test-stats-cache-*",
         "path": ".mutation-stats-cache",
