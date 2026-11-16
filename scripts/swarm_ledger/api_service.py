@@ -913,7 +913,7 @@ def upkeep(stopping: threading.Event, interval: float = UPKEEP_S) -> None:
                     replay_unrelayed()
             except Exception as exc:
                 sys.stderr.write(f"unrelayed replay: {exc}\n")
-        stopping.wait(interval)
+        server.scheduled_wait(interval)
 
 
 def take_lease(writer: Any, ledger_writer: Any) -> None:

@@ -359,7 +359,7 @@ def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_with
     stopping = threading.Event()
     with (
         patch.object(server, "swarm_store", return_value=Swarms()),
-        patch.object(stopping, "wait", finish),
+        patch.object(server, "scheduled_wait", finish),
         pytest.raises(RuntimeError, match="watch ended"),
     ):
         api_service.upkeep(stopping)

@@ -19,6 +19,9 @@ spec:
       services:
         - name: {{ $fullname }}-api
           port: http
+          {{- if .Values.ledger.tls.secretName }}
+          scheme: https
+          {{- end }}
           {{- with .Values.api.publicRoute.serversTransportName }}
           serversTransport: {{ . }}
           {{- end }}

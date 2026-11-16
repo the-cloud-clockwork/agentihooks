@@ -74,6 +74,13 @@ def test_api_ingressroute_matches_write_methods_at_high_priority() -> None:
     assert "serversTransport: {{ . }}" in template
 
 
+def test_api_ingressroute_reaches_the_api_pods_over_https_when_the_ledger_serves_tls() -> None:
+    template = (CHART / "templates/api-ingressroute.yaml").read_text()
+    service = template.split("port: http", 1)[1].split("serversTransport", 1)[0]
+
+    assert "{{- if .Values.ledger.tls.secretName }}\n          scheme: https\n          {{- end }}" in service
+
+
 def test_hub_and_controller_get_the_ledgers_database_url() -> None:
     hub = (CHART / "templates/hub.yaml").read_text()
     controller = (CHART / "templates/controller.yaml").read_text()
