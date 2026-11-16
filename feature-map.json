@@ -4753,6 +4753,16 @@
       ]
     },
     {
+      "id": "bus-connect-timeout-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus open whose server accepts the connection but does not finish the connect handshake within the first connect bound fails with a timeout naming the server and the wait, never a bare timeout with no text.",
+      "seam": "The first connect of NatsBus mapping the nats client's handshake timeout",
+      "tests": [
+        "tests/events/test_nats.py::test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait"
+      ]
+    },
+    {
       "id": "codex-join-report-ends-before-home-removal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2256",

@@ -556,6 +556,20 @@ def test_a_reconnecting_bus_ends_its_first_connect_when_no_server_answers(monkey
     assert str(error) == f"nats: no server at {url} answered the first connect within 1 retries"
 
 
+@pytest.mark.feature("bus-connect-timeout-text")
+def test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import socket
+
+    monkeypatch.setattr(nats, "FIRST_CONNECT_S", 0.2)
+    with socket.create_server(("127.0.0.1", 0)) as silent:
+        url = f"nats://127.0.0.1:{silent.getsockname()[1]}"
+        with pytest.raises(TimeoutError) as caught:
+            nats.open_bus(BusConfig(backend="nats", url=url))
+    assert str(caught.value) == f"nats: the server at {url} did not finish the connect handshake within 0.2 s"
+
+
 def test_close_closes_the_server_connection(url):
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
     connection = opened._nc
