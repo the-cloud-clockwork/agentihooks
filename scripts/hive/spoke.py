@@ -213,8 +213,7 @@ class Spoke:
             current = json.loads(claims.get(key).value)
             if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
                 self._clear_pending(pending_revision)
-                if not isinstance(error, TimeoutError):
-                    self.tasks.reopen(event)
+                self._return_offer(event, error)
             raise
         if spawned is None:
             self._clear_pending(pending_revision)
@@ -226,6 +225,12 @@ class Spoke:
         delivery.ack()
         self._report_launch(event, launch)
         return "started"
+
+    def _return_offer(self, event: Envelope, error: Exception) -> None:
+        """Ask the hub to reopen an offer this hive failed to start, unless the admit ask timed out: the next delivery
+        asks again and receives the admission the hub kept."""
+        if not isinstance(error, TimeoutError):
+            self.tasks.reopen(event)
 
     def _report_launch(self, event: Envelope, launch: dict[str, Any] | None) -> None:
         """Reports the stored launch decision to the hub once the started event is out; a refused or slow report is
