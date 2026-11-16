@@ -1,8 +1,8 @@
 """PreToolUse enforcement for sustained swarm blockers: a category stuck for an hour or more opens the master coding
 window automatically and injects a once-a-minute notice naming each sustained category, putting the master in
 troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
-session's pushes, reruns, dispatches and deploys; a session on the head branch of a registered fix keeps its pushes,
-reruns and dispatches.
+session's pushes, reruns, dispatches and deploys; a session on a registered fix branch, or on the head branch of a
+registered fix pull request, keeps its pushes, reruns and dispatches.
 Fails open on a store error."""
 
 import subprocess
@@ -185,7 +185,9 @@ def _fix_branch(url: str) -> str:
 
 
 def _on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
-    """Return whether the session works in the repository and on the head branch of a registered fix pull request."""
+    """Return whether the session works in the repository and on the branch of a registered fix: a fix branch link
+    naming both, or a fix pull request whose head branch it is."""
+    from scripts.swarm import panic
     from scripts.swarm.stack import repo_key
 
     if not (cwd and fixes):
@@ -196,7 +198,10 @@ def _on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
     origin = _git(cwd, "remote", "get-url", "origin")
     if not origin:
         return False
-    changes = f"{repo_key(origin)}/pull/"
+    repository = repo_key(origin)
+    if (repository, branch) in {panic.branch_fix(fix) for fix in fixes}:
+        return True
+    changes = f"{repository}/pull/"
     return any(repo_key(url).startswith(changes) and _fix_branch(url) == branch for url in fixes)
 
 
