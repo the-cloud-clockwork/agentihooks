@@ -3,7 +3,7 @@
 AgentiHooks guards and coordinates Claude Code, Codex, and Copilot CLI sessions.
 Every `agentihooks` tool, CLI command, skill and swarm control, with its trigger,
 is in the `agentihooks-toolbelt` skill: load it before using one this rule does
-not name. The read-docs skill explains AgentiHooks terms to the operator.
+not name.
 
 - `ENFORCEMENT` and `BROADCAST` blocks are operative. Read each one and apply it
   to the next action; action is the acknowledgment, quoting is not.
