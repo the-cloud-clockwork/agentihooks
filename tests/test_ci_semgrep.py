@@ -231,8 +231,14 @@ PYTHON_STUB = (
 )
 
 
-def _run_install(tmp_path, installed, pip_gives="1.177.0"):
-    install = next(step for step in _jobs()["charts"]["steps"] if step.get("name") == "Install PyYAML and Semgrep")
+def _run_install(
+    tmp_path: Path,
+    installed: str,
+    pip_gives: str = "1.177.0",
+    job: str = "charts",
+    name: str = "Install PyYAML and Semgrep",
+) -> tuple[int, list[str]]:
+    install = next(step for step in _jobs()[job]["steps"] if step.get("name") == name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "python").write_text(PYTHON_STUB)
@@ -242,7 +248,7 @@ def _run_install(tmp_path, installed, pip_gives="1.177.0"):
     if installed:
         (tmp_path / "version").write_text(installed + "\n")
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "STUBS": str(tmp_path), "PIP_GIVES": pip_gives}
-    env.update(install["env"])
+    env.update(install.get("env", {}))
     done = subprocess.run(["bash", "-euo", "pipefail", "-c", install["run"]], env=env, capture_output=True, text=True)
     calls = tmp_path / "calls"
     return done.returncode, calls.read_text().splitlines() if calls.exists() else []
@@ -259,6 +265,29 @@ def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_pa
 
 def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path):
     assert _run_install(tmp_path, "", pip_gives="1.176.0") == (1, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+
+
+def test_feature_tests_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path: Path) -> None:
+    assert _run_install(tmp_path, "1.177.0", job="feature-tests", name="Install Semgrep") == (0, [])
+
+
+@pytest.mark.parametrize("installed", ["", "1.176.0"])
+def test_feature_tests_install_the_pinned_semgrep_without_a_matching_runner_copy(
+    tmp_path: Path, installed: str
+) -> None:
+    install = _run_install(tmp_path, installed, job="feature-tests", name="Install Semgrep")
+    assert install == (0, ["-m pip install semgrep==1.177.0"])
+
+
+def test_feature_tests_fail_when_the_install_leaves_another_semgrep(tmp_path: Path) -> None:
+    install = _run_install(tmp_path, "", pip_gives="1.176.0", job="feature-tests", name="Install Semgrep")
+    assert install == (1, ["-m pip install semgrep==1.177.0"])
+
+
+def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None:
+    job = _jobs()["feature-tests"]
+    install = next(step for step in job["steps"] if step.get("name") == "Install Semgrep")
+    assert 0 < install.get("timeout-minutes", job["timeout-minutes"]) < job["timeout-minutes"]
 
 
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
