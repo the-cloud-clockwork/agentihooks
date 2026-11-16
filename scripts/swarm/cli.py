@@ -105,7 +105,6 @@ from scripts.swarm import (
     doc_report,
     done_gate,
     failed_panes,
-    frozen_queue,
     git_https,
     hive_release,
     idle,
@@ -113,6 +112,7 @@ from scripts.swarm import (
     ledger_events,
     master_launch,
     master_move,
+    master_queue,
     merge_queue,
     naming,
     outage,
@@ -138,7 +138,6 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
-    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -2152,13 +2151,6 @@ def _queue_intent(store, args, agent, head):
         raise SwarmError(decision.reason)
 
 
-def _master_route(store: Any, args: argparse.Namespace) -> dict[str, str] | None:
-    """The journal context of the spawn stall or master freeze route that lets the master seat queue the pull
-    request, else None."""
-    ledger = LedgerClient()
-    return stall_queue.route(store, args.slug, args.url, ledger) or frozen_queue.route(args.slug, args.url, ledger)
-
-
 def _hotfix_master(store, args) -> bool:
     from hooks.context import master_coding
 
@@ -2184,7 +2176,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
         master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
-        stalled = _master_route(store, args) if master else None
+        stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:

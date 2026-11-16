@@ -1353,13 +1353,13 @@ def frozen_master(
 def test_the_master_seat_queues_a_sub_agent_pull_request_for_a_task_a_master_froze(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from scripts.swarm import frozen_queue
+    from scripts.swarm import master_queue
 
     seen, reads = frozen_master(monkeypatch, tmp_path, [FROZEN_TASK, OTHER_TASK], [master_freeze()])
     assert cli.main(["sw", "merge", "queue", URL]) == 0
     assert reads == [URL]
     journal = seen[0]["journal"]
-    assert journal.context == {"route": frozen_queue.ROUTE, "task": "t1"}
+    assert journal.context == {"route": master_queue.ROUTE, "task": "t1"}
     journal.write("queue", URL, "abc", [], [])
     record = json.loads((tmp_path / "merge-queue-events.jsonl").read_text().splitlines()[-1])
     assert (record["route"], record["task"], record["pull"]) == ("master freeze", "t1", URL)
