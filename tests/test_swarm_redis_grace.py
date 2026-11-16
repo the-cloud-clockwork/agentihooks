@@ -237,3 +237,56 @@ def test_startup_gives_up_once_the_refusal_outlasts_the_window(monkeypatch):
 
     with pytest.raises(Unreachable):
         controller._reached(redis_grace.Outage(30, clock))
+
+
+def refusing_wait(seconds: float) -> None:
+    """Stand in for the scheduler timer while Redis refuses its state reads."""
+    import redis
+
+    raise redis.ConnectionError("Error 111 connecting to agentihooks-swarm-redis:6379. Connection refused.")
+
+
+@pytest.mark.feature("controller-waits-ride-out-redis-outage")
+def test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import redis
+
+    outcomes: list[BaseException | None] = [None, redis.ConnectionError("refused"), StopLoop()]
+    calls: list[int] = []
+    slept: list[float] = []
+
+    def run(store: RedisStore, service: object, proof_swarm: ModuleType) -> None:
+        calls.append(1)
+        if (outcome := outcomes[len(calls) - 1]) is not None:
+            raise outcome
+
+    monkeypatch.setattr(controller, "_pass", run)
+    monkeypatch.setattr(controller, "scheduled_wait", refusing_wait)
+    monkeypatch.setattr(controller, "sleep", slept.append, raising=False)
+
+    with pytest.raises(StopLoop):
+        controller._passes(STORE, None, PROOF, False, redis_grace.Outage(30, Clock()))
+    assert len(calls) == 3
+    assert len(slept) == 2
+    assert all(seconds > 0 for seconds in slept)
+
+
+@pytest.mark.feature("controller-waits-ride-out-redis-outage")
+def test_startup_rides_out_redis_refusing_its_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+    slept: list[float] = []
+
+    def connect() -> str:
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise Unreachable("Redis is unreachable (connection refused)")
+        return "store"
+
+    monkeypatch.setattr(controller, "connect", connect)
+    monkeypatch.setattr(controller, "scheduled_wait", refusing_wait)
+    monkeypatch.setattr(controller, "sleep", slept.append, raising=False)
+
+    assert controller._reached(redis_grace.Outage(30, Clock())) == "store"
+    assert len(attempts) == 2
+    assert len(slept) == 1
