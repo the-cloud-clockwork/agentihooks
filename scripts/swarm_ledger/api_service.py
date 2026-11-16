@@ -795,6 +795,10 @@ class WriteHandler(BaseHandler, Writes):
             return post()
         if route != "/api/bin":
             return self.send(404, "not found", "text/plain")
+        return self.post_bin()
+
+    def post_bin(self) -> None:
+        """Move a ledger to the bin, stopping its swarm, or restore it, as the page's bin action asks."""
         if self.headers.get("Origin") not in server.ALLOWED_ORIGINS:
             return self.send(403, "origin not allowed", "text/plain")
         if not (self.headers.get("Content-Type") or "").startswith("application/json"):
