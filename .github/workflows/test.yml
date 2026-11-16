@@ -1672,8 +1672,40 @@ jobs:
 
       - name: Restore queue shard durations, attempt 2
         if: steps.restore-queue-shard-durations.outcome == 'failure'
+        id: restore-queue-shard-durations-attempt-2
         uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-durations
+
+      - name: Restore torn queue shard durations again
+        if: &unfinished-queue-durations needs.split.outputs.source != '' && steps.restore-queue-shard-durations.outputs.download-path == '' && steps.restore-queue-shard-durations-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-durations
+        continue-on-error: true
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-durations
+
+      - name: Restore torn queue shard durations again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard durations again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard durations again, attempt 2
+        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+        id: restore-torn-queue-shard-durations-attempt-2
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-durations
+
+      - name: Check the queue shard durations restored again
+        if: *unfinished-queue-durations
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-durations.outputs.download-path }}${{ steps.restore-torn-queue-shard-durations-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard durations again also stopped before the download finished; the restored durations are incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard durations stopped before the download finished, so its partial files were restored again in full."
 
       - name: Restore queue shard flakes
         if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
@@ -1694,8 +1726,40 @@ jobs:
 
       - name: Restore queue shard flakes, attempt 2
         if: steps.restore-queue-shard-flakes.outcome == 'failure'
+        id: restore-queue-shard-flakes-attempt-2
         uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-flakes
+
+      - name: Restore torn queue shard flakes again
+        if: &unfinished-queue-flakes needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard && steps.restore-queue-shard-flakes.outputs.download-path == '' && steps.restore-queue-shard-flakes-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-flakes
+        continue-on-error: true
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-flakes
+
+      - name: Restore torn queue shard flakes again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard flakes again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard flakes again, attempt 2
+        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
+        id: restore-torn-queue-shard-flakes-attempt-2
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-flakes
+
+      - name: Check the queue shard flakes restored again
+        if: *unfinished-queue-flakes
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-flakes.outputs.download-path }}${{ steps.restore-torn-queue-shard-flakes-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard flakes again also stopped before the download finished; the restored flakes are incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard flakes stopped before the download finished, so its partial files were restored again in full."
 
       - name: Restore queue shard coverage
         if: needs.split.outputs.source != '' && matrix.python-version == '3.12'

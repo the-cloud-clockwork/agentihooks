@@ -1,8 +1,10 @@
-"""Claim holders idle at their prompts under a checked wait the tick could not end are retired and counted idle."""
+"""Claim holders idle at their prompts, under a checked wait the tick could not end or on the hive the hub admitted
+them to, are retired and counted idle."""
 
+import json
 from dataclasses import asdict
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -217,3 +219,34 @@ def test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost(
     now = STOPPED + PASSES * elapsed.PASS_MS
     timing.step_ended(store, "rig", WAITS_END, WAITS_END_RAN_S if starved else now / 1000)
     assert agents._hive_lost("rig", store, agent, now) is lost
+
+
+@pytest.mark.feature("swarm-reap-reads-hub-admitted-panes-from-their-hive")
+def test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm.runtime import HerdrRuntime
+
+    def no_server(args: list[str]) -> dict[str, Any]:
+        """Answer every herdr call the way the controller pod's herdr does, with no server running."""
+        raise RuntimeError(f"herdr {' '.join(args)}: server_not_running")
+
+    agent = AgentRecord(
+        name="ci@323133-4312", lane="ci", task="t4312", hive="hive-b", execution_id="e4312", generation=2
+    )
+    retired: list[str] = []
+    runtime = _seams(monkeypatch, {}, retired)
+    monkeypatch.setattr(tick, "_observe", agents._observe)
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    store = Store()
+    entry = {"generation": agent.generation, "pane": asdict(PaneObservation("done"))}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: entry}}
+    store.redis.set(reports.key("hive-b"), json.dumps(report))
+    herdr = HerdrRuntime(herdr=no_server)
+    herdr.hive = cast(Any, reports.Reports(cast(Any, store.redis)))
+    runtime.observe = herdr.observe
+
+    assert set(_run(store, runtime, [agent], PASSES)) == {agent.name}
+    assert retired == [agent.name]

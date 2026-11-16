@@ -1474,11 +1474,16 @@ class HerdrRuntime:
         return self.observe(agent).state
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
+        from scripts.hive import reports
+
         if self.remote(agent):
             if self.hive is not None and self.hive.gone(agent):
                 return PaneObservation("exited")
             pane = self._hosted(agent).get("pane")
             return PaneObservation(**pane) if pane else PaneObservation("unknown")
+        if reports.admitted(agent):
+            reported: dict[str, Any] = self.hive.admitted_pane(agent) if self.hive is not None else {}
+            return PaneObservation(**reported) if reported else PaneObservation("unknown")
         if live_binding.managed(agent):
             return live_binding.observe_managed(self._managed_record(agent))
         if agent.runtime_backend != "local":
