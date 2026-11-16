@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.912 · 2026-11-16
+
+### 2026-11-16 · 4890f12636ea · #11319 · @agenticore-app
+
+**Let the protected grader accept path-filtered branch lane and equivalence triggers**
+
+This change updates the protected grader so it can recognize two new, narrower trigger forms without breaking older ones: a path-filtered branch-lanes workflow scoped to `.github/workflows/**`, and a path-filtered equivalence workflow scoped to the ledger package, its tests, and the workflow file. It also preserves lane trust when the equivalence workflow merely gains or drops that path filter, avoiding false demands for a shared lane group. This groundwork lets PR #11337 skip unnecessary runs while keeping the grader strict about any other trigger changes, with tests confirming old failures are now fixed and no regressions introduced.
+
+### 2026-11-16 · 90e7d359d5b7 · #11403 · @agenticore-app
+
+**Announce the protected grader blob that types the wiring configuration**
+
+This change updates tests/registry/FROZEN_GATES.json to register blob d1be831a52a1 for the frozen gate scripts/gate_protected.py, in anticipation of pull request 11376, which removes the unused date parameter from gate_protected.grade and adds typing to its wiring configuration. No functional code changes are included here; this is purely a bookkeeping step to keep the frozen gate registry in sync once the upcoming grader change lands, avoiding a broken gate check in CI.
+
+### 2026-11-15 · 368fac296429 · #11413 · @agenticore-app
+
+**Move the dev push image and count workflows off the shared lane**
+
+This change finishes moving count-record.yml and ci-lab-image.yml off the shared hosted lane for dev pushes, now that the branch lane grader accepts a per-branch concurrency group on dev. Both workflows switch to branch-scoped groups (count-record keeps queue max to still record every dev head; ci-lab-image uses queue single), their now-redundant hosted-lane exemptions are deleted from the grader tests, and the concurrency tests are updated to assert and accept the new form. Net effect: dev pushes of these two workflows no longer occupy one of the three shared lanes that branch proofs and dispatches wait on, freeing that capacity.
+
 ## v2.17.910 · 2026-11-15
 
 ### 2026-11-15 · 939218019074 · #11369 · @nestorcolt
