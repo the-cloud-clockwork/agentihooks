@@ -241,7 +241,6 @@ def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota(
 
 def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened_watcher():
     import json
-    from datetime import date
     from pathlib import Path
 
     from scripts import ci_runner_trust, ci_wiring, gate_protected
@@ -254,15 +253,14 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
     jobs = candidate["test.yml"]["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
     jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
-    today = date(2026, 10, 25)
-    assert gate_protected.grade(workflows, config, candidate, config, today, policy) == []
-    assert ci_wiring.check(candidate, config, today) == []
+    assert gate_protected.grade(workflows, config, candidate, config, policy) == []
+    assert ci_wiring.check(candidate, config) == []
     for field, value in [("needs", []), ("steps", []), ("if", "true")]:
         changed = copy.deepcopy(candidate)
         changed["test.yml"]["jobs"]["queue-fail-fast"][field] = value
-        errors = gate_protected.grade(workflows, config, changed, config, today, policy)
+        errors = gate_protected.grade(workflows, config, changed, config, policy)
         assert any("context pair" in error.lower() for error in errors)
-        errors = ci_wiring.check(changed, config, today)
+        errors = ci_wiring.check(changed, config)
         assert any("context pair" in error.lower() for error in errors)
 
 
