@@ -308,7 +308,7 @@ def test_the_job_reads_authority_only_from_the_protected_base() -> None:
     job = jobs()["lab-verdict"]
     assert job["if"] == "github.event_name == 'pull_request'"
     assert "needs" not in job
-    assert job["permissions"] == {"contents": "read", "checks": "read"}
+    assert job["permissions"] == {"contents": "read"}
     [checkout, *_] = job["steps"]
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
     assert checkout["with"]["persist-credentials"] is False
@@ -319,9 +319,11 @@ def test_the_job_reads_authority_only_from_the_protected_base() -> None:
     assert "ci_lab_verdict authority . pull_request\n" in graded[0]["run"]
     assert graded[1]["run"].endswith('verdict . "$AUTHORITATIVE" "$GITHUB_REPOSITORY" "$HEAD" "$LAB_APP"')
     assert graded[1]["env"]["HEAD"] == "${{ github.event.pull_request.head.sha }}"
-    assert not any("create-github-app-token" in step.get("uses", "") for step in job["steps"])
-    assert graded[1]["env"]["GH_TOKEN"] == "${{ github.token }}"
-    assert graded[1]["if"] == "steps.authority.outputs.authoritative != '{}'"
+    token = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert {key for key in token["with"] if key.startswith("permission-")} == {"permission-checks"}
+    assert token["with"]["permission-checks"] == "read"
+    assert graded[1]["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert token["if"] == graded[1]["if"] == "steps.authority.outputs.authoritative != '{}'"
 
 
 def test_the_job_publishes_a_result_for_every_declared_lab_gate() -> None:

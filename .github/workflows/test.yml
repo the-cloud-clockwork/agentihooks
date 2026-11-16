@@ -352,7 +352,6 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-      checks: read
     outputs:
       authoritative: ${{ steps.authority.outputs.authoritative }}
       lab_lint: ${{ steps.verdict.outputs['lab_lint'] }}
@@ -395,12 +394,22 @@ jobs:
             exit 1
           fi
 
+      - name: Mint a checks read token
+        id: app-token
+        if: steps.authority.outputs.authoritative != '{}'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+
       - name: Wait for the lab verdict on each authoritative gate
         id: verdict
         if: steps.authority.outputs.authoritative != '{}'
         working-directory: ${{ github.workspace }}/grader
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           AUTHORITATIVE: ${{ steps.authority.outputs.authoritative }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           LAB_APP: ${{ vars.AGENTIHOOKS_LAB_APP }}
