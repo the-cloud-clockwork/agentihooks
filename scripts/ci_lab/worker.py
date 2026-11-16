@@ -197,25 +197,27 @@ class Worker:
         return list(self.running.values())
 
     def _unit(self, lease: Lease) -> None:
-        """Run one unit while its lease heartbeats, then deliver it unless run abandoned it; an executor that raises
-        leaves it to reap, and a heartbeat that hangs only ends the heartbeats."""
-        beat = Interval(functools.partial(self._beat, lease), every=self.heartbeat_s)
+        """Run one unit while its lease heartbeats, then deliver it unless its lease was lost or run abandoned it; an
+        executor that raises leaves it to reap, and a heartbeat that hangs only ends the heartbeats."""
+        lost = threading.Event()
+        beat = Interval(functools.partial(self._beat, lease, lost), every=self.heartbeat_s)
         beat.start()
         try:
             finished = self.executors[lease.unit.kind](lease)
         finally:
             with contextlib.suppress(RuntimeError):
                 beat.close()
-        if not self.abandoned.is_set():
+        if not (lost.is_set() or self.abandoned.is_set()):
             self._deliver(lease, finished)
 
-    def _beat(self, lease: Lease) -> None:
+    def _beat(self, lease: Lease, lost: threading.Event) -> None:
         """Heartbeat the lease, skipping a beat that cannot reach the scheduler; raise Lost to end its heartbeats once
-        the scheduler refuses the token or run abandoned the unit."""
+        run abandoned the unit, or mark the lease lost first when the scheduler refuses the token."""
         if self.abandoned.is_set():
             raise Lost(lease.job)
         with contextlib.suppress(OSError):
             if self.client.heartbeat(lease.job, lease.token) is None:
+                lost.set()
                 raise Lost(lease.job)
 
     def _deliver(self, lease: Lease, finished: Finished) -> None:

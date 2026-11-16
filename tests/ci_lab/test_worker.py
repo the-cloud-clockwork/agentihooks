@@ -32,6 +32,7 @@ class Clock:
 @dataclass
 class Counted(leases.Leases):
     beats: list[str] = field(default_factory=list[str])
+    owned: list[str] = field(default_factory=list[str])
     asked: list[tuple[str, int, frozenset[str], int]] = field(
         default_factory=list[tuple[str, int, frozenset[str], int]]
     )
@@ -43,6 +44,10 @@ class Counted(leases.Leases):
     def heartbeat(self, job: str, token: str) -> int | None:
         self.beats.append(job)
         return super().heartbeat(job, token)
+
+    def owns(self, job: str, token: str) -> bool:
+        self.owned.append(job)
+        return super().owns(job, token)
 
 
 class Sink:
@@ -294,6 +299,7 @@ def test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery(
 
     assert holding.drain() == []
     assert sink.bodies == {}
+    assert lab.owned == []
     assert found(jobs, lease.job).outcome == "taken"
     assert "crashed" not in capsys.readouterr().err
 
