@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.922 · 2026-11-16
+
+### 2026-11-16 · e5da92ad7b75 · #11453 · @agenticore-app
+
+**Admit lost tests through local reads, generated ids and signed retirements**
+
+This change gives the test-count floor three narrow, honest ways to excuse tests lost since PR #11335 removed the branch mutation preflight, instead of padding numbers: it recognizes local variable reads resolved to a single binding, follows renamed or deleted files through parametrized test ids using path or extension matching, and accepts explicitly signed retirement files naming a node id with a Standards reviewer and a stated reason. Every other lost test still fails the count, and a new CLI command writes signed retirements so none slip through unreviewed, letting #11335 merge cleanly once this lands.
+
 ## v2.17.921 · 2026-11-16
 
 ### 2026-11-16 · 95becdd1ef4b · #11457 · @agenticore-app
