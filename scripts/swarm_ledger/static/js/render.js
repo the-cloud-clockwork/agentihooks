@@ -335,7 +335,7 @@ function labLine(entry) {
   const ratio = entry.verdict_cache_hit_ratio;
   const hits = typeof ratio === "number" ? `${Math.round(ratio * 100)}% cache hits` : "no cache lookups";
   const parts = [entry.class.replace(/_/g, " "), `${entry.pending} pending`, wait, hits].map((part, i, all) => (i < all.length - 1 ? `${part} ·` : part));
-  return h("li", {}, ...parts.flatMap((part, i) => [i ? " " : "", h("span", { class: "lab-part", text: part })]));
+  return h("li", { title: parts.join(" ") }, ...parts.flatMap((part, i) => [i ? " " : "", h("span", { class: "lab-part", text: part })]));
 }
 
 function labStat(lab) {
