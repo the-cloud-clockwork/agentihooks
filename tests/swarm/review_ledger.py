@@ -3,7 +3,7 @@
 import copy
 from typing import Any
 
-GUARD_DEFAULTS: dict[str, Any] = {"review_readers": []}
+GUARD_DEFAULTS: dict[str, Any] = {"review_readers": [], "review_rounds": {}}
 
 
 class ReviewLedger:

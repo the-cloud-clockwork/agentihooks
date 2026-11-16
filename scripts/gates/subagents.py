@@ -1,6 +1,6 @@
 """The sub-agent budget: every sub-agent launch and continuation in a swarm task is counted, whatever its name."""
 
-import contextlib
+import sys
 from typing import TYPE_CHECKING
 
 from scripts.gates import lift, log
@@ -45,7 +45,7 @@ class SubagentBudget:
         if readers and (allowed or lift.head_lifted(state.slug, who.task, self.name, state.home)):
             for reader in readers:
                 budget.spend(who.task, reader, 1)
-            record(who, readers)
+            record_on_ledger(who, readers)
         if not allowed:
             return Decision.deny(refusal(who.swarm, who.task, counter, cap))
         reason = f"sub-agent {counter} {spent} of {cap} for task {who.task}"
@@ -53,14 +53,16 @@ class SubagentBudget:
         return Decision()
 
 
-def record(who: Who, readers: list[str]) -> None:
+def record_on_ledger(who: Who, readers: list[str]) -> None:
     """Record each reader launch on the ledger task so a successor on another hive sees it ran; a ledger that cannot
-    take the write leaves only this machine's counter."""
+    take the write leaves only this machine's counter and says so on stderr."""
     from scripts.swarm import review_rounds
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import SwarmError
 
     ledger = LedgerClient()
-    with contextlib.suppress(SwarmError, OSError):
+    try:
         for reader in readers:
             review_rounds.record_reader(who.swarm, who.task, reader, ledger, who.name)
+    except (SwarmError, OSError) as exc:
+        print(f"reader launch counted on this machine only, the ledger task did not take it: {exc}", file=sys.stderr)

@@ -138,15 +138,31 @@ def test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter
     assert (budget.spent("t1", "standards-reader"), budget.spent("t1", "spec-reader")) == (1, 1)
 
 
-@pytest.mark.parametrize("ledger", [Unreachable(), Refusing(slug="demo")])
-def test_a_ledger_that_cannot_take_the_reader_leaves_it_counted_here_and_the_launch_allowed(
-    tmp_path, monkeypatch, ledger
+class Unmoved(ReviewLedger):
+    def update_task(self, *args: object, **kwargs: object) -> dict:
+        return {}
+
+
+@pytest.mark.feature("review-state-on-ledger")
+@pytest.mark.parametrize(
+    ("ledger", "error"),
+    [
+        (Unreachable(), "connection refused"),
+        (Refusing(slug="demo"), "ledger demo: server refused: task_update may set only"),
+        (Unmoved(slug="demo"), "reader spec-reader not recorded on task t1: its review readers changed under 5 writes"),
+    ],
+)
+def test_a_reader_launch_the_ledger_cannot_take_is_counted_here_reported_and_allowed(
+    tmp_path, monkeypatch, capsys, ledger, error
 ):
     monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
     decision = SubagentBudget().decide(Call("Agent", {"name": "spec-reader", "prompt": "go"}), ME, state(tmp_path))
     assert decision.allowed
     assert Budget("demo", "subagents", tmp_path).spent("t1", "spec-reader") == 1
     assert [r["kind"] for r in rows(tmp_path)] == ["count"]
+    assert capsys.readouterr().err == (
+        f"reader launch counted on this machine only, the ledger task did not take it: {error}\n"
+    )
 
 
 def test_a_refused_reader_launch_is_not_recorded_on_the_ledger(tmp_path, monkeypatch):

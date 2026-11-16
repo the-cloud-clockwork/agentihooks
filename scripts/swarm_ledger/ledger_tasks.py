@@ -76,6 +76,7 @@ MATCHED: dict[str, Any] = {
     "difficulty": "",
     "group_members": [],
     "review_readers": [],
+    "review_rounds": {},
 }
 LIST_FIELDS = (
     "depends_on",
@@ -207,6 +208,7 @@ def check_guards(op: dict) -> None:
     members = expected.get("group_members", [])
     if not isinstance(members, list) or not all(isinstance(m, str) and ID_RE.match(m) for m in members):
         raise ValueError("if_match group_members must list task ids")
+    check_review_guards(expected)
 
 
 def _guarded(task: dict[str, Any], op: dict[str, Any]) -> bool:
@@ -332,11 +334,33 @@ def _mapping(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
+def _listed(value: object) -> TypeGuard[list[object]]:
+    """Whether a decoded JSON value is an array."""
+    return isinstance(value, list)
+
+
+def _names(value: object) -> bool:
+    """Whether a decoded JSON value lists nonempty strings."""
+    return _listed(value) and all(isinstance(name, str) and name.strip() for name in value)
+
+
+def _rounds(value: object) -> bool:
+    """Whether a decoded JSON value maps round counter names to the stamps of the rounds spent on each."""
+    return _mapping(value) and all(name and _names(stamps) for name, stamps in value.items())
+
+
 def check_review_rounds(fields: dict[str, Any]) -> None:
-    """Refuse review rounds that are not round counter names mapped to the whole number of rounds spent on each."""
-    rounds: object = fields.get("review_rounds", {})
-    if not _mapping(rounds) or not all(name and type(spent) is int and spent >= 0 for name, spent in rounds.items()):
-        raise ValueError("review_rounds must map round counter names to nonnegative integers")
+    """Refuse review rounds that are not round counter names mapped to the stamps of the rounds spent on each."""
+    if not _rounds(fields.get("review_rounds", {})):
+        raise ValueError("review_rounds must map round counter names to lists of round stamps")
+
+
+def check_review_guards(expected: dict[str, Any]) -> None:
+    """Refuse an if_match on review readers or review rounds in any shape other than the one the field holds."""
+    if not _names(expected.get("review_readers", [])):
+        raise ValueError("if_match review_readers must list reader names")
+    if not _rounds(expected.get("review_rounds", {})):
+        raise ValueError("if_match review_rounds must map round counter names to lists of round stamps")
 
 
 def check_bools(fields: dict[str, Any]) -> None:

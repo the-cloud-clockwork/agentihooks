@@ -8,6 +8,8 @@ from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError
 from tests.helpers.seat import Launched, seat_launched, seat_owner
 from tests.swarm.ledger_items import LedgerItems
 
+GUARD_DEFAULTS: dict[str, object] = {"claim_generation": 0, "review_readers": [], "review_rounds": {}}
+
 
 def check_update_guards(if_state, if_match):
     import sys
@@ -79,9 +81,7 @@ class FakeLedger(LedgerItems):
         check_update_guards(if_state, if_match)
         assert slug == "sw"
         row = self.rows[task_id]
-        if any(
-            row.get(key, 0 if key == "claim_generation" else "") != value for key, value in (if_match or {}).items()
-        ):
+        if any(row.get(key, GUARD_DEFAULTS.get(key, "")) != value for key, value in (if_match or {}).items()):
             return dict(row)
         if not if_state or row["state"] in if_state:
             if "claimed_by" in fields and fields["claimed_by"] != row.get("claimed_by"):

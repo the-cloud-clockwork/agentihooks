@@ -11,9 +11,10 @@ from tests.swarm_ledger import legacy_page
 
 SLUG = "reviewfields-2026-01-01"
 ENGINEER = "engineer@abcdef-0002"
-ROUNDS = {"rounds-before-pr": 3, "rounds-0a1b": 0}
+ROUNDS = {"rounds-before-pr": ["a1", "a2", "a3"], "rounds-0a1b": []}
 READERS = ["spec-reader", "standards-reader"]
-REFUSED = "review_rounds must map round counter names to nonnegative integers"
+REFUSED = "review_rounds must map round counter names to lists of round stamps"
+WRONG: dict[type, object] = {str: 1, int: "1", list: "x", dict: []}
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +51,9 @@ def test_an_empty_review_rounds_object_is_taken() -> None:
 @pytest.mark.feature("review-state-on-ledger")
 @pytest.mark.parametrize(
     "rounds",
-    [[], "3", None, {"rounds": -1}, {"rounds": True}, {"rounds": 1.5}, {"rounds": "1"}, {"": 1}, {"rounds": None}],
+    [[], "3", None, {"rounds": 1}, {"rounds": "a"}, {"rounds": [""]}, {"rounds": [" "]}, {"rounds": [3]}, {"": ["a"]}],
 )
-def test_review_rounds_that_are_not_counter_names_to_whole_numbers_are_refused(rounds: object) -> None:
+def test_review_rounds_that_are_not_counter_names_to_round_stamps_are_refused(rounds: object) -> None:
     with pytest.raises(ValueError) as refused:
         ledger_tasks.check(op({"review_rounds": rounds}))
     assert str(refused.value) == REFUSED
@@ -74,3 +75,46 @@ def test_a_reader_write_lands_only_while_the_readers_it_read_still_hold() -> Non
         core.check_op(write)
     landed = [task(core.sync(SLUG, ops=[write])[0])["review_readers"] for write in (first, stale, fresh)]
     assert landed == [["spec-reader"], ["spec-reader"], READERS]
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_a_round_write_lands_only_while_the_rounds_it_read_still_hold() -> None:
+    first = op({"review_rounds": {"rounds-before-pr": ["a1"]}}, "rv-1", if_match={"review_rounds": {}})
+    stale = op({"review_rounds": {"rounds-before-pr": ["b1"]}}, "rv-2", if_match={"review_rounds": {}})
+    fresh = {"rounds-before-pr": ["a1", "b1"]}
+    retry = op({"review_rounds": fresh}, "rv-3", if_match={"review_rounds": {"rounds-before-pr": ["a1"]}})
+    for write in (first, stale, retry):
+        core.check_op(write)
+    landed = [task(core.sync(SLUG, ops=[write])[0])["review_rounds"] for write in (first, stale, retry)]
+    assert landed == [{"rounds-before-pr": ["a1"]}, {"rounds-before-pr": ["a1"]}, fresh]
+
+
+@pytest.mark.parametrize("key", sorted(ledger_tasks.MATCHED))
+def test_an_if_match_value_shaped_unlike_its_field_is_refused(key: str) -> None:
+    with pytest.raises(ValueError, match="^if_match "):
+        ledger_tasks.check(op({"review_readers": READERS}, if_match={key: WRONG[type(ledger_tasks.MATCHED[key])]}))
+
+
+@pytest.mark.parametrize(
+    ("guard", "refusal"),
+    [
+        ({"review_readers": [""]}, "if_match review_readers must list reader names"),
+        ({"review_readers": [3]}, "if_match review_readers must list reader names"),
+        (
+            {"review_rounds": {"rounds": 1}},
+            "if_match review_rounds must map round counter names to lists of round stamps",
+        ),
+        (
+            {"review_rounds": {"": ["a1"]}},
+            "if_match review_rounds must map round counter names to lists of round stamps",
+        ),
+    ],
+)
+def test_a_review_guard_that_is_not_the_field_shape_is_refused_by_name(guard: dict, refusal: str) -> None:
+    with pytest.raises(ValueError) as refused:
+        ledger_tasks.check(op({"review_readers": READERS}, if_match=guard))
+    assert str(refused.value) == refusal
+
+
+def test_a_review_guard_in_the_field_shape_is_taken() -> None:
+    core.check_op(op({"review_readers": READERS}, if_match={"review_readers": [], "review_rounds": ROUNDS}))

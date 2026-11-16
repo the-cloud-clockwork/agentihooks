@@ -852,7 +852,8 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkey
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": 3, "notice": cli.review_rounds.CLOSED}
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
-    assert (ledger.rows["t1"]["review_rounds"], writers) == ({"rounds-before-pr": 3}, ["engineer@a1b2c3-0001"] * 3)
+    counted = cli.review_rounds.counts(ledger.rows["t1"])
+    assert (counted, writers) == ({"rounds-before-pr": 3}, ["engineer@a1b2c3-0001"] * 3)
 
 
 @pytest.mark.feature("review-state-on-ledger")
@@ -864,13 +865,14 @@ def test_review_spends_the_rounds_the_ledger_task_holds_for_each_pull_request(en
     capsys.readouterr()
     first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
     spent = f"rounds-{hashlib.sha256(first.encode()).hexdigest()}"
-    ledger.rows["t1"].update(pr_url=first, review_rounds={spent: 3})
+    ledger.rows["t1"].update(pr_url=first, review_rounds={spent: ["a", "b", "c"]})
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert "no fourth review round" in capsys.readouterr().err
     ledger.rows["t1"]["pr_url"] = second
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
     assert json.loads(capsys.readouterr().out)["round"] == 1
-    assert ledger.rows["t1"]["review_rounds"] == {spent: 3, f"rounds-{hashlib.sha256(second.encode()).hexdigest()}": 1}
+    later = f"rounds-{hashlib.sha256(second.encode()).hexdigest()}"
+    assert cli.review_rounds.counts(ledger.rows["t1"]) == {spent: 3, later: 1}
 
 
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):

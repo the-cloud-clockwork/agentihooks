@@ -53,9 +53,9 @@ def test_proof_loop_reads_each_pull_requests_review_rounds_from_the_task_row(mon
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_REVIEW_ROUNDS", "1")
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
-    task = {"id": "t1", "title": "Review split task", "review_rounds": {"rounds-a": 1, "rounds-b": 1}}
+    task = {"id": "t1", "title": "Review split task", "review_rounds": {"rounds-a": ["a1"], "rounds-b": ["b1"]}}
     assert findings(store, "sw", store.config("sw"), [task], []) == []
-    task["review_rounds"]["rounds-a"] = 2
+    task["review_rounds"]["rounds-a"].append("a2")
     found = findings(store, "sw", store.config("sw"), [task], [])
     assert [(row["kind"], row["subject"]) for row in found] == [("proof loop", "t1")]
     assert "2 review rounds" in found[0]["evidence"]

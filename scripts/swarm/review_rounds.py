@@ -4,6 +4,7 @@ third round on a counter closes review and a fourth is refused."""
 import hashlib
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -33,9 +34,14 @@ def counter(pr_url: str) -> str:
     return f"rounds-{hashlib.sha256(pr_url.encode()).hexdigest()}" if pr_url else "rounds-before-pr"
 
 
+def rounds(row: dict[str, Any]) -> dict[str, list[str]]:
+    """The stamps a ledger task row records on each round counter, one stamp per round spent."""
+    return {name: list(stamps) for name, stamps in (row.get("review_rounds") or {}).items()}
+
+
 def counts(row: dict[str, Any]) -> dict[str, int]:
     """The rounds a ledger task row records on each counter."""
-    return dict(row.get("review_rounds") or {})
+    return {name: len(stamps) for name, stamps in rounds(row).items()}
 
 
 def readers(row: dict[str, Any]) -> list[str]:
@@ -44,27 +50,40 @@ def readers(row: dict[str, Any]) -> list[str]:
 
 
 def start(slug: str, task: str, ledger: Ledger, by: str, home: Path | None = None) -> dict[str, str | int]:
-    """Spend one review round of the task on its ledger row, refusing a fourth on the same counter."""
-    row = ledger.task(slug, task) or {}
-    name, held = counter(row.get("pr_url") or ""), counts(row)
-    spent = held.get(name, 0) + 1
-    if spent > ROUNDS:
-        raise SwarmError(f"task {task} gets no fourth review round. {CLOSED}")
-    ledger.update_task(slug, task, {"review_rounds": {**held, name: spent}}, by=by)
-    log = gates_dir(slug, home) / "reviews" / "rounds.jsonl"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a") as stream:
-        stream.write(json.dumps({"task": task, "counter": name, "round": spent, "at": int(time.time() * 1000)}) + "\n")
-    return {"task": task, "round": spent, **({"notice": CLOSED} if spent == ROUNDS else {})}
+    """Spend one review round of the task on its ledger row, refusing a fourth on the same counter. The round adds a
+    stamp of its own under a guard on the rounds it read, so a round racing it lands first and this one counts after
+    it, at most five writes."""
+    stamp, row = uuid.uuid4().hex, ledger.task(slug, task) or {}
+    for _ in range(WRITES):
+        name, held = counter(row.get("pr_url") or ""), rounds(row)
+        spent = len(held.get(name, [])) + 1
+        if spent > ROUNDS:
+            raise SwarmError(f"task {task} gets no fourth review round. {CLOSED}")
+        fields = {"review_rounds": {**held, name: [*held.get(name, []), stamp]}}
+        ledger.update_task(slug, task, fields, by=by, if_match={"review_rounds": held})
+        row = ledger.task(slug, task) or {}
+        if stamp in rounds(row).get(name, []):
+            log = gates_dir(slug, home) / "reviews" / "rounds.jsonl"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open("a") as stream:
+                line = {"task": task, "counter": name, "round": spent, "at": int(time.time() * 1000)}
+                stream.write(json.dumps(line) + "\n")
+            return {"task": task, "round": spent, **({"notice": CLOSED} if spent == ROUNDS else {})}
+    raise SwarmError(f"task {task} spent no review round: its review rounds changed under each of {WRITES} writes")
 
 
 def record_reader(slug: str, task: str, reader: str, ledger: Ledger, by: str) -> None:
     """Add the reader to the task's review readers on the ledger, guarded on the readers it read, and write again while
     a racing writer changes them first, at most five writes."""
+    held = readers(ledger.task(slug, task) or {})
     for _ in range(WRITES):
-        held = readers(ledger.task(slug, task) or {})
         if reader in held:
             return
         ledger.update_task(
             slug, task, {"review_readers": sorted({*held, reader})}, by=by, if_match={"review_readers": held}
+        )
+        held = readers(ledger.task(slug, task) or {})
+    if reader not in held:
+        raise SwarmError(
+            f"reader {reader} not recorded on task {task}: its review readers changed under {WRITES} writes"
         )
