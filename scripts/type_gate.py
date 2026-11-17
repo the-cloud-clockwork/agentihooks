@@ -67,10 +67,11 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
 
     An empty list measures nothing. The Node heap limit keeps the checker inside the 6 GiB memory limit of the anton-oss
-    runner container. Once its heap use, plus the five percent it adds, passes ninety percent of that limit, basedpyright
-    empties its whole type cache at points garbage collection decides and can count other errors on another runner, so
-    the sources are checked in contiguous runs of at most a thousand files, one process each, and a measurement whose
-    checker processes reached that line in resident memory, which bounds heap use from above, is refused.
+    runner container. Once its heap use, plus the five percent it adds, passes ninety percent of that limit, 4388 MB,
+    basedpyright empties its whole type cache at points garbage collection decides and can count other errors on another
+    runner. So the sources are checked in contiguous runs of at most a thousand files, one process each, and a
+    measurement whose checker processes reached that line in resident memory, which bounds heap use from above, is
+    refused.
     """
     files = sources(head) if files is None else sorted(files)
     if not files:
