@@ -2275,6 +2275,19 @@
       ]
     },
     {
+      "id": "feature-suite-pull-request-tier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-feature-suite-in-queue",
+      "behaviour": "Every pull request touching the ledger store, the tick, the scheduler, any module the feature suite imports, the feature tests or the feature and writer lock workflows runs the feature suite on real Redis and Postgres through the writer lock workflow, which feeds Gate Required, so a change that breaks the suite cannot merge green and fail only at promotion.",
+      "seam": "writer-lock.yml features selection and caller, feature-suite.yml features job",
+      "tests": [
+        "tests/test_ci_feature_suite_pr.py::test_feature_suite_selection",
+        "tests/test_ci_feature_suite_pr.py::test_the_ledger_write_cutover_selects_the_feature_suite",
+        "tests/test_ci_feature_suite_pr.py::test_every_module_the_feature_suite_imports_selects_it",
+        "tests/test_ci_feature_suite_pr.py::test_the_feature_suite_feeds_the_required_gate_on_selected_pull_requests"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-scope",
       "origin": "inventory",
       "behaviour": "The host tick skips retired, closed and unavailable ledgers before any tick pass.",
