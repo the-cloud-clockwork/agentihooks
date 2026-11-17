@@ -4622,7 +4622,7 @@
         "tests/swarm/test_panic.py::test_the_pass_read_records_the_open_fixer_branches_of_its_document",
         "tests/swarm/test_panic.py::test_the_pass_read_drops_the_record_once_no_fixer_is_open",
         "tests/swarm/test_panic.py::test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file",
-        "tests/swarm/test_panic.py::test_a_fixer_record_lapses_unless_a_later_pass_writes_it_again"
+        "tests/swarm/test_panic.py::test_the_pass_read_writes_the_fixer_record_to_expire_after_fixers_ms"
       ]
     },
     {

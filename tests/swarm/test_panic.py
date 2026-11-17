@@ -898,7 +898,7 @@ def test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_f
 
 
 @pytest.mark.feature("panic-spares-fixer-branches")
-def test_a_fixer_record_lapses_unless_a_later_pass_writes_it_again(
+def test_the_pass_read_writes_the_fixer_record_to_expire_after_fixers_ms(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sent: list[dict[str, Any]] = []
