@@ -307,11 +307,11 @@ def test_a_merge_that_leaves_no_status_fails_the_wait_at_once(tmp_path, pid):
     assert "::error::The coverage merge ended without a status." in waited.stdout
 
 
-def test_setup_and_evidence_upload_overlap_existing_waits():
+def test_setup_and_evidence_upload_overlap_existing_waits() -> None:
     steps = _sonar()["steps"]
     names = [step.get("name") or step.get("uses") for step in steps]
     order = [
-        "Download shard coverage",
+        "Take each shard's coverage as it lands",
         "Merge shard coverage",
         "Start Cloudflare Access proxy",
         "Wait for the coverage merge",

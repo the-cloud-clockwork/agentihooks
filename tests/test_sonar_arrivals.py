@@ -250,6 +250,20 @@ def test_backend_ids_come_from_the_results_scope_of_the_runtime_token() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("entry", "value"),
+    [
+        ({"database_id": "7"}, "7"),
+        ({"databaseId": "8"}, "8"),
+        ({"database_id": "7", "databaseId": "8"}, "7"),
+        ({"database_id": 0}, 0),
+        ({"name": "x"}, None),
+    ],
+)
+def test_a_field_reads_its_proto_name_before_its_camel_case_name(entry: dict[str, object], value: object) -> None:
+    assert arrivals.field(entry, "database_id") == value
+
+
 @pytest.fixture
 def results() -> Iterator[tuple[str, list[tuple[str, str, dict[str, object]]]]]:
     archive = io.BytesIO()
