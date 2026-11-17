@@ -1,4 +1,4 @@
-"""The dispatch seat tick step holds while fleet panic is on and runs the dispatcher seat once panic clears."""
+"""The dispatch seat tick step holds while its swarm's panic is on and runs the dispatcher seat once panic clears."""
 
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -19,7 +19,7 @@ def test_dispatch_seat() -> None:
     panic: list[object] = ["halted"]
     fake = SimpleNamespace(
         PLACING=nullcontext(),
-        panic=SimpleNamespace(state=lambda store: panic[0]),
+        panic=SimpleNamespace(state=lambda store, slug: panic[0] if slug == "sw" else None),
         skip_refused=lambda function, *args: calls.append((function, *args)) or ["dispatched"],
     )
     state: dict[str, Any] = {

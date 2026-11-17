@@ -1,6 +1,46 @@
 {
   "features": [
     {
+      "id": "compose-master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: the promotion swarm smoke runs the compose master drill in the built swarm image on its own ports: a scratch proof swarm with a live front door master, retired by the master drill, with a stand-in claude that reports the claude ai login route; the smoke fails unless the tick's night watch forced up a successor that held the front door seat on the claude ai login within thirty minutes.",
+      "seam": "scripts/packaging/compose-master-drill.sh through the swarm smoke workflow and scripts.swarm.master_drill.run",
+      "tests": [
+        "tests/test_compose_master_drill.py::test_the_swarm_image_job_runs_the_master_drill_on_the_built_image",
+        "tests/test_compose_master_drill.py::test_the_master_drill_binds_ports_apart_from_every_other_compose_scenario",
+        "tests/test_compose_master_drill.py::test_the_master_drill_retires_a_live_front_door_master_through_the_tick_night_watch_with_a_login_stand_in",
+        "tests/test_compose_master_drill.py::test_the_master_drill_fails_unless_a_login_successor_held_the_seat_within_thirty_minutes"
+      ]
+    },
+    {
+      "id": "master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: agentihooks swarm SLUG master-drill retires the front door master of a running or paused scratch proof swarm through its runtime, leaving the seat empty, sets the night watch gate to enforce and steps the tick's own night watch pass once a minute on a drill clock from thirty minutes back; it stores and prints the minute a successor from the tick's own master launch holds the front door seat and that successor's route, recovered only for a claude ai login successor inside the thirty minutes. A live or stopped swarm, or a master the runtime cannot retire, is refused; a paused swarm stays paused.",
+      "seam": "scripts.swarm.master_drill.run and scripts.swarm.master_drill.command through the swarm command parser and scripts.tick.steps.masters._night_watch",
+      "tests": [
+        "tests/swarm/test_master_drill.py::test_the_drill_retires_the_front_door_master_and_records_a_login_successor_forced_up_at_ten_minutes",
+        "tests/swarm/test_master_drill.py::test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_working_codex_successor_on_the_login_route_kind_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_successor_forced_up_at_the_thirtieth_minute_still_recovers",
+        "tests/swarm/test_master_drill.py::test_a_seat_left_empty_for_thirty_minutes_records_no_successor",
+        "tests/swarm/test_master_drill.py::test_the_drill_starts_the_night_watch_seat_episode_over",
+        "tests/swarm/test_master_drill.py::test_the_drill_drives_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_master_drill.py::test_only_unfinished_front_door_masters_are_retired_and_only_a_front_door_master_succeeds",
+        "tests/swarm/test_master_drill.py::test_a_swarm_whose_master_retired_with_no_new_tasks_sleeps_through_the_drill",
+        "tests/swarm/test_master_drill.py::test_a_task_added_since_the_master_retired_wakes_the_swarm_for_the_drill",
+        "tests/swarm/test_master_drill.py::test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recovery",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_retire",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_the_runtime_cannot_retire_refuses_the_drill",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_swarm_that_is_not_a_scratch_proof_swarm_and_leaves_it_untouched",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running_or_paused",
+        "tests/swarm/test_master_drill.py::test_the_master_drill_command_prints_the_record_of_a_drill_through_the_routed_runtime"
+      ]
+    },
+    {
       "id": "master-route-placement-fallback",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
@@ -4218,6 +4258,21 @@
       ]
     },
     {
+      "id": "ledger-bin-tidy-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2592",
+      "behaviour": "A bin tidy pass with nothing to bin or purge takes no exclusive writer lock, so it never stalls ledger writers; a pass with work still bins or purges under the writer lock.",
+      "seam": "The ledger bin tidy and its writer lock",
+      "tests": [
+        "tests/swarm_ledger/test_bin_storage.py::test_an_idle_tidy_pass_takes_no_exclusive_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_at_exactly_the_kept_days_is_kept_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_an_expired_bin_entry_is_purged_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_ledger_due_for_the_bin_is_binned_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_recent_restore_keeps_an_old_ledger_out_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_without_a_time_is_never_purged"
+      ]
+    },
+    {
       "id": "ledger-column-resize",
       "origin": "inventory",
       "behaviour": "Every column on the ledger page and HOME resizes by its header grip, and widths are saved beside panel sizes and clear with Reset layout.",
@@ -4734,6 +4789,32 @@
         "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
         "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
         "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
+      "id": "panic-holds-only-its-swarm",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-swarm-scoped",
+      "behaviour": "Panic belongs to the swarm that pressed it: its push, rerun, dispatch and deploy freeze holds only sessions bound to that swarm, sessions bound to another swarm and unbound sessions keep every command, the sweep cancels only runs on worktree branches of that swarm's agents and the runs those branches triggered, and a legacy fleet panic holds only the swarm its reason names.",
+      "seam": "the blocker window PreToolUse hook, swarm panic on and the tick pass panic sweep",
+      "tests": [
+        "tests/swarm/test_panic_scope.py::test_panic_on_one_swarm_leaves_other_swarms_and_unbound_sessions_free",
+        "tests/swarm/test_panic_scope.py::test_the_panic_button_cancels_only_the_runs_of_its_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_panic_holds_only_the_swarm_its_reason_names",
+        "tests/swarm/test_panic_scope.py::test_the_tick_sweep_cancels_only_the_runs_of_the_held_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_the_owner_names_only_branches_of_the_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_swarm_without_a_code_owns_no_branch",
+        "tests/swarm/test_panic_scope.py::test_one_swarms_errors_and_failed_passes_reach_only_its_own_panic",
+        "tests/swarm/test_panic_scope.py::test_each_swarm_keeps_its_own_cancel_minute",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_the_legacy_fleet_record_only_for_the_swarm_it_names",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_only_its_own_swarms_kept_fixes",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_record_naming_no_swarm_holds_none",
+        "tests/swarm/test_panic_scope.py::test_an_unbound_session_never_reads_panic",
+        "tests/swarm/test_panic_scope.py::test_swarm_publish_holds_only_the_panicking_swarms_push",
+        "tests/swarm/test_panic_scope.py::test_another_swarms_panic_opens_no_window_for_this_master",
+        "tests/swarm/test_panic_scope.py::test_the_panic_messages_name_the_held_swarm",
+        "tests/gates/test_push_stop.py::test_another_swarms_panic_leaves_the_stop_hook_pushing"
       ]
     },
     {
