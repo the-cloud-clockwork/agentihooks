@@ -108,17 +108,20 @@ def _start_wait(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, probes: Iterato
     return clock
 
 
-def _pod(monkeypatch: pytest.MonkeyPatch, router: _Router) -> None:
+def _pod(monkeypatch: pytest.MonkeyPatch, router: _Router) -> list[list[str]]:
+    launched: list[list[str]] = []
+
     def systemd(python: str) -> str:
         raise AssertionError(f"a pod without a systemd user bus started the router unit with {python}")
 
     def popen(argv: list[str], **kwargs: object) -> _Router:
-        assert argv[1:3] == ["-m", "hooks.serena_router"]
+        launched.append(argv)
         return router
 
     monkeypatch.setattr(daemon.mcp_daemon, "_systemctl_usable", lambda: False)
     monkeypatch.setattr(daemon, "_start_systemd", systemd)
     monkeypatch.setattr(daemon.subprocess, "Popen", popen)
+    return launched
 
 
 @pytest.mark.feature("serena-router-start-stops-waiting-on-an-exited-router")
@@ -126,10 +129,11 @@ def test_start_reports_the_router_down_as_soon_as_its_process_exits_before_openi
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     clock = _start_wait(monkeypatch, tmp_path, itertools.repeat(False))
-    _pod(monkeypatch, _Router(1))
+    launched = _pod(monkeypatch, _Router(1))
 
     assert daemon.start("/opt/venv/bin/python") == 1
     assert clock.now == 0
+    assert launched == [["/opt/venv/bin/python", "-m", "hooks.serena_router", "--host", "127.0.0.1", "--port", "9911"]]
     log = tmp_path / "logs" / "serena-router.log"
     assert capsys.readouterr().err == f"serena router exited 1 before opening http://127.0.0.1:9911; see {log}\n"
     assert (tmp_path / "serena-router.pid").read_text() == "4242"
