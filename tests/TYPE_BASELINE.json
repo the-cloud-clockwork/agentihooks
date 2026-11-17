@@ -703,7 +703,6 @@
   "scripts/swarm_ledger/api/admin.py": 79,
   "scripts/swarm_ledger/api/architecture.py": 22,
   "scripts/swarm_ledger/api/client.py": 147,
-  "scripts/swarm_ledger/api/controller_lease.py": 16,
   "scripts/swarm_ledger/api/errors.py": 16,
   "scripts/swarm_ledger/api/hives.py": 49,
   "scripts/swarm_ledger/api/monitor.py": 121,

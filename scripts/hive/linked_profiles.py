@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -59,7 +60,20 @@ def install(environ: Mapping[str, str]) -> None:
         if not path.resolve().is_relative_to(repo.resolve()):
             raise ValueError("linked profile symlink must stay inside its repository")
         subprocess.run(
-            ["agentihooks", "link-profile", "link", str(path), "--name", name, "--no-append", "--no-init"], check=True
+            [
+                sys.executable,
+                "-P",
+                "-m",
+                "scripts.install",
+                "link-profile",
+                "link",
+                str(path),
+                "--name",
+                name,
+                "--no-append",
+                "--no-init",
+            ],
+            check=True,
         )
 
 

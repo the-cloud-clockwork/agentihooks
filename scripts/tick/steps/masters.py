@@ -13,6 +13,7 @@ from scripts.swarm import (
     dispatch_seat,
     lifetime,
     master_alarm,
+    master_lock,
     master_prompt_stall,
     master_stall,
     master_wake,
@@ -45,6 +46,7 @@ DISPATCH = "dispatch seat"
 WATCH = "master watch"
 RAISED = "raised"
 BOX = "box"
+STARTER = "tick master"
 QUIET_STATES = frozenset({"stopped", "stopping"})
 SEAT: Any = SimpleNamespace(
     dispatch_seat=dispatch_seat,
@@ -295,7 +297,13 @@ STEPS = (
     CallStep("prompt stall", MASTERS, _held(_prompt_stall), RESUMED, CONFIG, lane=SLOW),
     CallStep("master down", SEATS, _held(tasks.placing(_master_down_step)), RESUMED, CONFIG, kept=True),
     CallStep(
-        "tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc"), kept=True
+        "tick master",
+        SEATS,
+        _held(tasks.placing(_tick_master)),
+        RESUMED,
+        pass_domains("config", "doc"),
+        kept=True,
+        feature="master-launch-lock",
     ),
     CallStep("master scale", SEATS, _held(tasks.placing(_master_scale)), RESUMED, pass_domains("config", "doc")),
     CallStep("seat alarm", SEATS, _held(tasks.placing(_seat_alarm)), LISTED, pass_domains("doc")),
@@ -361,6 +369,12 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
 
 
 def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
+    """Start the front door master under the swarm's master launch lock, so no other starter launches one at once."""
+    with master_lock.held(store, slug, STARTER) as refused:
+        return [refused] if refused else _launch_master(slug, config, store, runtime, now_ms)
+
+
+def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
     store.redis.hdel(tick.MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == tick.MASTER]
