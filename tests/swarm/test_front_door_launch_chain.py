@@ -29,12 +29,16 @@ PANE = {
     "CLAUDE_CODE_OAUTH_TOKEN": "fixture",
     "SWARM_HIVE_ID": "hive-a",
 }
+DEAD_HOLDER = 999_999_999
+MARK = "AGENTIHOOKS_ENV_FILE_MARK"
+ENV_FILE = {"CLAUDE_CODE_OAUTH_TOKEN": "env-file", "AH_CC_TOKEN_workeratexample_com": "env-file", MARK: "loaded"}
 Exec = tuple[str, list[str], dict[str, str]]
 
 
 @pytest.fixture
 def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
-    """Two stored claude ai logins, a pane environment holding worker tokens, and every process boundary recorded."""
+    """Two stored claude ai logins, a pane environment and an agentihooks env file both holding worker tokens, and
+    every process boundary recorded."""
     from scripts import claude_quota_balancer, deps_preflight, profile_telemetry
     from scripts.hive import account_slots
 
@@ -54,7 +58,7 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
         target.mkdir(parents=True)
         (target / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "fixture"}}))
         (target / login.CONFIG).write_text(json.dumps({login.ACCOUNT: {"emailAddress": email}}))
-        (target.parent / login.OWNER).write_text(json.dumps({"holders": {"master@old": 999999999}, "epoch": 3}))
+        (target.parent / login.OWNER).write_text(json.dumps({"holders": {"master@old": DEAD_HOLDER}, "epoch": 3}))
     for name, value in {**PANE, "CLAUDE_CONFIG_DIR": str(rendered)}.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv(binding.REPORT, raising=False)
@@ -64,7 +68,11 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
     monkeypatch.setattr(select_profile, "prepare", lambda *args: ({"AGENTIHOOKS_PROFILE": "master"}, args[4]))
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *_: ("linux", ["terminal", str(launcher)]))
     monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
-    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / ".env").write_text("".join(f"{name}={value}\n" for name, value in ENV_FILE.items()))
+    monkeypatch.setattr(install, "_ENV_FILE_DST", state / ".env")
+    monkeypatch.setenv(MARK, "pane")
     monkeypatch.setattr(deps_preflight, "ensure", lambda: None)
     monkeypatch.setattr(claude_quota_balancer, "_cache_path", lambda _: tmp_path / "quota.json")
     monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, invoke, **_: invoke(environ))
@@ -124,6 +132,7 @@ def test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_contro
     at = argv.index("--remote-control")
     assert argv[at : at + 4] == RC
     assert not [name for name in environ if name == "CLAUDE_CODE_OAUTH_TOKEN" or name.startswith("AH_CC_TOKEN_")]
+    assert environ[MARK] == "loaded"
     assert environ["CLAUDE_CONFIG_DIR"] == str(login.home(1))
     assert (placed.route_kind, placed.account) == ("interactive", "oneatexample_com")
     assert placed.remote_control == {"state": "on", "detail": TITLE}
@@ -138,6 +147,7 @@ def test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_
     ((_, argv, environ),) = executed
     assert environ["CLAUDE_CONFIG_DIR"] == str(login.home(2))
     assert not [name for name in environ if name == "CLAUDE_CODE_OAUTH_TOKEN" or name.startswith("AH_CC_TOKEN_")]
+    assert environ[MARK] == "loaded"
     at = argv.index("--remote-control")
     assert argv[at : at + 4] == RC
     assert (placed.route_kind, placed.account) == ("interactive", "twoatexample_com")

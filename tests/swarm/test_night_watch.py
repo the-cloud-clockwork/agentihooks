@@ -97,12 +97,12 @@ def kinds(store):
     return [finding.kind for finding in night_watch.findings(store, SLUG)]
 
 
-@pytest.mark.feature("night-watch-respawns-by-default")
+@pytest.mark.feature("night-watch-gate-defaults-to-deny")
 def test_the_night_watch_gate_defaults_to_deny() -> None:
     assert catalog.defaults()["nightwatch"] == "enforce"
 
 
-@pytest.mark.feature("night-watch-respawns-by-default")
+@pytest.mark.feature("night-watch-gate-defaults-to-deny")
 def test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes(store: RedisStore) -> None:
     assert "nightwatch" not in store.config(SLUG).gates
     rig = Rig()

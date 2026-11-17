@@ -1944,15 +1944,25 @@
       ]
     },
     {
+      "id": "night-watch-gate-defaults-to-deny",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape of the swarm config: a swarm stored with no night watch mode in its gates, as swarm init stores it, reads the night watch gate as deny, so its night watch respawns an empty front door master seat at ten minutes and raises the seat alert instead of only logging a would-be respawn.",
+      "seam": "scripts.gates.enforcement.NIGHT_WATCH default mode through scripts.swarm.health.night_watch.run",
+      "tests": [
+        "tests/swarm/test_night_watch.py::test_the_night_watch_gate_defaults_to_deny",
+        "tests/swarm/test_night_watch.py::test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes"
+      ]
+    },
+    {
       "id": "night-watch-respawns-by-default",
       "origin": "regression",
       "ordered_at": "2026-11-17",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
-      "behaviour": "deployed shape: a swarm whose gates map names no night watch mode runs the night watch at deny, so an empty front door master seat is respawned at ten minutes and raises its seat alert instead of only logging a would-be respawn; after a recycle handoff in a controller pod the respawn places the successor through the tick's own master launch, the controller's fleet account rows and a launch order root consumes, on root's claude ai login, also with that login at seven percent of its week as on 17 November.",
-      "seam": "scripts.gates.enforcement.NIGHT_WATCH default mode through scripts.swarm.health.night_watch.run and the respawn of scripts.tick.steps.masters._night_watch through scripts.swarm.controller.FencedRuntime",
+      "behaviour": "deployed shape: after a recycle handoff in a controller pod, the night watch at its default mode respawns the empty front door master seat at ten minutes through the tick's own master launch, the pod controller's fenced runtime, the controller's fleet account rows and a launch order root consumes, on root's claude ai login, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._night_watch through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts and scripts.hive.orders.Consumer",
       "tests": [
-        "tests/swarm/test_night_watch.py::test_the_night_watch_gate_defaults_to_deny",
-        "tests/swarm/test_night_watch.py::test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes",
         "tests/hive/test_master_refill_deployed_shape.py::test_the_default_night_watch_refills_a_recycled_front_door_seat_at_ten_minutes_through_the_pod_controller"
       ]
     },

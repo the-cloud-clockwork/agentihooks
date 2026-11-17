@@ -15,9 +15,12 @@ from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 
 MINUTE = 60_000
+SEAT_MINUTES = 10
+FIVE_HOUR_USED = 10.0
+FIVE_HOUR_RESET_S = 3600
+WEEK_RESET_S = 48 * 3600
 WEEKS = (7.0, 80.0)
 WEEK_IDS = ("login-at-seven-percent-week-as-on-17-november", "login-with-room")
-QUIET_MERGE = {"repo": "o/r", "queue": 0, "merged": 0, "failed": "none observed", "streak": 0, "head": 0}
 HANDOFF = (
     "# Handoff v2\n## Intent\nKeep the front door.\n## Done\nNone\n## Stopped at\nNone\n## Next\nNone\n"
     "## Decisions and promises\nNone\n## Read first\nNone\n<!-- handoff complete -->\n"
@@ -41,10 +44,10 @@ def _root_hive(setup: SimpleNamespace, login_week_left: float) -> None:
             1,
             now,
             "allowed",
-            10.0,
+            FIVE_HOUR_USED,
             100.0 - week_left,
-            now // 1000 + 3600,
-            now // 1000 + 48 * 3600,
+            now // 1000 + FIVE_HOUR_RESET_S,
+            now // 1000 + WEEK_RESET_S,
         )
         setup.store.redis.hset(quota.latest_key("claude"), account, quota.encode(observation))
     observations = quota.QuotaObservations(setup.store, setup.config.slug, Mock(side_effect=AssertionError))
@@ -159,12 +162,14 @@ def _successor(setup: SimpleNamespace, shape: SimpleNamespace) -> Any:
 
 
 def _ledger() -> Any:
-    """The tick test's fake ledger, recording each notice the master step posts for the fixture swarm with its swarm
-    name, where the shared fake asserts the tick test's own swarm name."""
+    """The tick test's fake ledger for the fixture swarm: it records each notice the master step posts as its swarm and
+    text, and each alert the night watch raises as its source and text."""
     from tests.swarm.test_tick import FakeLedger
 
     ledger: Any = FakeLedger([])
+    ledger.alerts = []
     ledger.notify = lambda slug, text: ledger.notes.append((slug, text))
+    ledger.raise_alert = lambda slug, source, text: ledger.alerts.append((source, text))
     return ledger
 
 
@@ -210,21 +215,21 @@ def test_the_default_night_watch_refills_a_recycled_front_door_seat_at_ten_minut
     from scripts.swarm import capacity
     from scripts.swarm.health import merge_stall
     from scripts.tick.steps import masters
+    from tests.swarm.test_night_watch import QUIET
 
     shape = _deployed(setup, monkeypatch, login_week_left)
-    alerts: list[tuple[str, str]] = []
-    ledger = SimpleNamespace(raise_alert=lambda slug, source, text: alerts.append((source, text)))
+    ledger = _ledger()
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
-    monkeypatch.setattr(merge_stall, "observe", lambda repo, at: {**QUIET_MERGE, "at": at})
+    monkeypatch.setattr(merge_stall, "observe", lambda repo, at: {**QUIET, "at": at})
     monkeypatch.setattr(capacity, "ready_work", lambda slug, store, doc: ({}, {"eng": [], "ci": [], "plan": []}))
     assert "nightwatch" not in setup.store.config(shape.slug).gates
     passes = [
         masters._night_watch(
             shape.slug, setup.store, ledger, shape.runtime, {"tasks": []}, shape.now + minute * MINUTE, False
         )
-        for minute in range(0, 11, 2)
+        for minute in range(0, SEAT_MINUTES + 1, 2)
     ]
     successor = _successor(setup, shape)
-    assert passes[:-1] == [[], [], [], [], []]
+    assert passes[:-1] == [[]] * (SEAT_MINUTES // 2)
     assert passes[-1][0] == f"spawned master {successor.name}"
-    assert [source for source, _ in alerts] == ["seat"]
+    assert [source for source, _ in ledger.alerts] == ["seat"]
