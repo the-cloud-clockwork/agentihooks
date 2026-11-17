@@ -4,7 +4,7 @@
       "id": "balance-master-route",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",
-      "behaviour": "The balance row for the account a live front door master runs on carries the master mark followed by its route, the claude ai login or the token fallback, read from the master execution record whatever the account spelling, and shows no route while the swarm Redis is unreachable; the swarm status payload carries the same route on the front door master only, and the swarm panel master row shows it on its own line under its account, unclipped at 1920.",
+      "behaviour": "The balance row for the account a live front door master runs on carries the master mark followed by its route, the claude ai login or the token fallback, read from the master execution record whatever the account spelling, one route per account so a second front door master on the same account is not shown, and shows no route while the swarm Redis is unreachable; the swarm status payload carries the same route on the front door master only, and the swarm panel master row shows it on its own line under its account, unclipped at 1920.",
       "seam": "agents_quota.balance_table, the swarm status report agent entries and the swarm panel agentRows and agentRow master name cell",
       "tests": [
         "tests/test_agents_quota.py::test_balance_names_the_route_the_live_front_door_master_runs_on",
