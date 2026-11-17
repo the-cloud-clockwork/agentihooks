@@ -2754,6 +2754,7 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
+    pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
@@ -2961,9 +2962,11 @@ def dispatch(argv):
             run_control(store, args, who, handler)
         else:
             handler(store, args)
+        panic.settle()
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:
+        panic.settle()
         if handler is cmd_status and outage.show(args.slug, args.json):
             return 0
         return failed(args, who, exc)

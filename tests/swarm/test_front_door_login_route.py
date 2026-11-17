@@ -1,4 +1,6 @@
+from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -150,3 +152,67 @@ def test_custom_master_profile_keeps_the_existing_opt_in_login(tmp_path, monkeyp
     )
     assert _passed(seen[0])[:2] == ["--route", "interactive"]
     assert placed.route_kind == "interactive"
+
+
+def _forced_runner(
+    tmp_path: Path, lanes: dict[str, dict[str, str]], choose: Callable[..., tuple[str, str]]
+) -> tuple[runtime.HerdrRuntime, SimpleNamespace, list[list[str]]]:
+    seen: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runner = runtime.HerdrRuntime(home=tmp_path, run=run, choose=choose)
+    config = SimpleNamespace(
+        slug="proof", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes=lanes, autonomy="delegate"
+    )
+    return runner, config, seen
+
+
+@pytest.mark.feature("forced-master-start")
+@pytest.mark.parametrize(("task", "flags"), [({"forced": True}, ["--agentihooks-forced"]), ({}, [])])
+def test_a_forced_front_door_spawn_hands_the_claude_ai_route_the_forced_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: dict[str, bool], flags: list[str]
+) -> None:
+    monkeypatch.setattr(runtime.HerdrRuntime, "_master_account_spent", lambda self: False)
+    monkeypatch.setattr(runtime.affinity, "desired", lambda _: "")
+    runner, config, seen = _forced_runner(tmp_path, {"master": {"agent": "claude"}}, lambda *_: pytest.fail("token"))
+    runner.spawn(config, "master", "master@next", {"id": "master", "seat": "master@proof", **task})
+    passed = _passed(seen[0])
+    assert passed[:2] == ["--route", "claude-ai"]
+    assert [flag for flag in passed if flag == "--agentihooks-forced"] == flags
+    assert passed[2 : 2 + len(flags)] == flags
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_off_the_interactive_route_is_never_refused_all_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(runtime.affinity, "desired", lambda _: "codex")
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    monkeypatch.setattr(runtime.HerdrRuntime, "_master_account_spent", lambda self: False)
+    runner, config, seen = _forced_runner(tmp_path, {"master": {}}, lambda *_: ("codex", runtime.agent_choice.ALL_FULL))
+    with pytest.raises(runtime.SpawnError) as refused:
+        runner.spawn(config, "master", "master@next", {"id": "master", "seat": "master@proof"})
+    assert (str(refused.value), refused.value.status, seen) == (runtime.agent_choice.ALL_FULL, "unavailable", [])
+    placed = runner.spawn(config, "master", "master@next", {"id": "master", "seat": "master@proof", "forced": True})
+    assert (placed.harness, "--agentihooks-forced" in _passed(seen[0])) == ("codex", False)
+
+
+@pytest.mark.feature("forced-master-start")
+def test_an_interactive_route_spawn_is_never_refused_all_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    runner, config, seen = _forced_runner(
+        tmp_path, {"eng": {"agent": "claude"}}, lambda *_: ("claude", runtime.agent_choice.ALL_FULL)
+    )
+    placed = runner.spawn(config, "eng", "eng@a1b2c3-0001", {"id": "t1", "title": "x", "route_kind": "interactive"})
+    assert (placed.harness, placed.route_kind, _passed(seen[0])[:2]) == (
+        "claude",
+        "interactive",
+        ["--route", "interactive"],
+    )

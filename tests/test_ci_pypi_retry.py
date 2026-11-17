@@ -359,15 +359,16 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
 @pytest.mark.parametrize(
     "job", ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"]
 )
-def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
+def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job: str) -> None:
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
     names = [step.get("name") for step in steps]
     take = steps[names.index("Take the helper scripts from the workflow revision")]
     install = steps[names.index("Install dependencies")]
+    fetch = "git fetch --no-tags --depth=1" if job == "mutation-replan" else "git fetch --no-tags"
     assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
     assert take.get("if") == install.get("if")
     assert take["run"].splitlines() == [
-        'git fetch --no-tags origin "$GITHUB_SHA"',
+        f'{fetch} origin "$GITHUB_SHA"',
         'mkdir -p "$RUNNER_TEMP/workflow"',
         'git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"',
     ]

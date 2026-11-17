@@ -67,6 +67,13 @@ def test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection(monkeypat
     assert reads == [("demo", "freezes", True)]
 
 
+def test_an_alerts_read_asks_the_ledger_for_its_alert_collection_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [{"id": "a1", "source": "seat", "state": "open", "text": "no master"}]
+    reads = served(monkeypatch, rows)
+    assert ledger_client.LedgerClient().alerts("demo") == rows
+    assert reads == [("demo", "alerts", True)]
+
+
 def test_a_ledger_without_targeting_falls_back_to_filtering_its_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://github.com/o/r/pull/7"
     rows = [{"id": "t1", "pr_url": url}, {"id": "t2", "pr_url": url + "0"}, {"id": "t3", "split_pulls": [url]}]
