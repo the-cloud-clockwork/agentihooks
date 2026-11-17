@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -280,3 +281,17 @@ def test_a_claude_check_resolves_agentihooks_and_claude_under_the_systemd_defaul
 
     assert result.evidence == "Provider request succeeded"
     assert result.ok is True
+
+
+def test_a_claude_check_without_a_service_path_runs_on_the_user_folders_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PATH")
+    paths: list[str] = []
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        paths.append(kwargs["env"]["PATH"])
+        return subprocess.CompletedProcess(args, 0, '{"type":"result","result":"OK"}', "")
+
+    assert provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path, run).ok is True
+    assert paths == [user_folders("")]
