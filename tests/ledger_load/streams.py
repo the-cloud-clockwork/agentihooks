@@ -103,7 +103,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
             "X-Ledger-Token": gate.authority.agent_token(token, gate.SLUG, "ci@ab0000-0000"),
             "X-Ledger-Agent": "ci@ab0000-0000",
         }
-        api, _ = gate.front(write_base, read_base, credentials)
+        api = gate.Front(write_base, read_base, credentials)
         api.mutate(gate.SLUG, [{"op": "join", "id": "stream-load-join", "by": "ci@ab0000-0000", "role": "member"}])
         try:
             for thread in threads:

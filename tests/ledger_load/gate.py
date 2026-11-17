@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import BinaryIO, TextIO
+from typing import Any, BinaryIO, TextIO
 
 from scripts.swarm_ledger import api_service, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -399,18 +399,18 @@ def preflight(api: ResourceClient, name: str, item: str) -> None:
         raise SystemExit(f"write preflight refused: write rejected: {rejected}")
 
 
-def front(write_base: str, read_base: str, credentials: dict[str, str]) -> tuple[ResourceClient, ResourceClient]:
-    """One load client's writer and reader, routed as the ledger front routes them: every GET, the guard revision
-    reads of each write included, to the read only ledger server, and every POST to the ledger API service."""
-    read = ResourceClient(read_base, credentials, TIMEOUT_S)
-    write = ResourceClient(write_base, credentials, TIMEOUT_S)
-    writer = ResourceClient(
-        write_base,
-        credentials,
-        TIMEOUT_S,
-        lambda slug, path, payload: (read if payload is None else write).request(slug, path, payload),
-    )
-    return writer, read
+class Front(ResourceClient):
+    """One load client's writer, routed as the ledger front routes requests: every GET, the guard revision read of
+    each write included, to the read only ledger server, and every POST to the ledger API service."""
+
+    def __init__(self, write_base: str, read_base: str, credentials: dict[str, str]) -> None:
+        super().__init__(write_base, credentials, TIMEOUT_S)
+        self.read = ResourceClient(read_base, credentials, TIMEOUT_S)
+
+    def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if payload is None:
+            return self.read.request(slug, path)
+        return super().request(slug, path, payload)
 
 
 def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
@@ -420,9 +420,9 @@ def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) 
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
         credentials = {"X-Ledger-Token": authority.agent_token(token, SLUG, name), "X-Ledger-Agent": name}
-        writer, reader_client = front(write_base, read_base, credentials)
+        writer = Front(write_base, read_base, credentials)
         writer.mutate(SLUG, [{"op": "join", "id": f"join-{uuid.uuid4().hex[:10]}", "by": name, "role": "member"}])
-        apis.append((writer, reader_client, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
+        apis.append((writer, writer.read, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
     preflight(apis[0][0], apis[0][2], apis[0][3])
     began = time.monotonic()
     deadline = began + seconds

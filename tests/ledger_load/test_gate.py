@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm_ledger import ledger_link
-from scripts.swarm_ledger.api.client import Transport
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from tests.ledger_load import gate as ledger_load
 
@@ -565,10 +564,8 @@ def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
 
 def preflight_client(sent: list, refusal=None) -> type:
     class Api:
-        def __init__(
-            self, base: str, credentials: dict[str, str], timeout: float, transport: Transport | None = None
-        ) -> None:
-            pass
+        def __init__(self, write_base: str, read_base: str, credentials: dict[str, str]) -> None:
+            self.read = self
 
         def mutate(self, slug, operations):
             sent.append(operations[0]["op"])
@@ -588,7 +585,7 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
     sent = []
     monkeypatch.setattr(
         ledger_load,
-        "ResourceClient",
+        "Front",
         preflight_client(sent, lambda: urllib.error.HTTPError("http://x", 400, "Bad Request", {}, io.BytesIO(body))),
     )
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
@@ -601,7 +598,7 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
 
 def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     sent = []
-    monkeypatch.setattr(ledger_load, "ResourceClient", preflight_client(sent))
+    monkeypatch.setattr(ledger_load, "Front", preflight_client(sent))
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
     results = ledger_load.load(0, 0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
@@ -620,9 +617,9 @@ def test_a_load_writer_reads_its_guard_revisions_from_the_ledger_server_and_post
         return contextlib.nullcontext(io.BytesIO(b'{"revision": "r1", "data": {}}'))
 
     monkeypatch.setattr(ledger_link, "urlopen", urlopen)
-    writer, reader = ledger_load.front("http://api", "http://ledger", {"X-Ledger-Agent": "ci@ab0000-0000"})
+    writer = ledger_load.Front("http://api", "http://ledger", {"X-Ledger-Agent": "ci@ab0000-0000"})
     writer.mutate(ledger_load.SLUG, [{"op": "join", "id": "j", "by": "ci@ab0000-0000", "role": "member"}])
-    reader.request(ledger_load.SLUG, "tasks/t0")
+    writer.read.request(ledger_load.SLUG, "tasks/t0")
     assert sent == [
         ("GET", "http://ledger/api/v1/ledgers/load-gate/members"),
         ("POST", "http://api/api/v1/ledgers/load-gate/operations"),
