@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -198,6 +199,16 @@ def test_the_check_reads_each_database_through_before_sqlite_opens_it(
     assert coverage_check.problem(database) is None
     assert len(read_before_open) == 1
     assert read_before_open[0] >= database.stat().st_size
+
+
+def test_the_check_names_an_unreadable_database_instead_of_raising(tmp_path: Path) -> None:
+    database = tmp_path / "locked.coverage"
+    _record(database, {"tests/test_a.py::one|run": {"hooks/a.py": [(-1, 2), (2, -1)]}})
+    database.chmod(0)
+    if os.access(database, os.R_OK):
+        pytest.skip("this user reads a file that has no read permission")
+    assert coverage_check.problem(database)
+    assert coverage_check.main([str(database)]) == 1
 
 
 def test_the_unit_job_checks_its_coverage_database_before_uploading_it():

@@ -7285,7 +7285,7 @@
       "id": "coverage-check-reads-each-database-in-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dep-manifest-coverage-slow",
-      "behaviour": "The coverage database check reads each database file once from start to end before SQLite verifies its pages, so a downloaded shard database that has left the page cache costs one sequential read instead of one random disk read per page, and the dev push dep-manifest job, which checks every shard database, stays within its fifteen minute limit on a runner whose node disk is busy.",
+      "behaviour": "The coverage database check reads each database file fully before SQLite opens it, so a downloaded shard database that has left the page cache is read in one pass instead of page by page from a busy node disk.",
       "seam": "tests.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and tests.reused_coverage",
       "tests": [
         "tests/test_reused_coverage.py::test_the_check_reads_each_database_through_before_sqlite_opens_it"

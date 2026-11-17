@@ -9,21 +9,17 @@ TABLES = frozenset({"arc", "context", "file", "line_bits"})
 
 
 def problem(path: Path) -> str | None:
-    """Name what makes the coverage database at path unusable, or None.
-
-    The file is read once from start to end first, so a database that has left the page cache costs one
-    sequential read instead of one random disk read for every page the check visits.
-    """
+    """Name what makes the coverage database at path unusable, or None, after reading the file through."""
     if not path.is_file():
         return "missing"
-    with path.open("rb", buffering=0) as handle:
-        while handle.read(1 << 20):
-            pass
     try:
+        with path.open("rb", buffering=0) as handle:
+            while handle.read(1 << 20):
+                pass
         with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as db:
             integrity = db.execute("pragma integrity_check").fetchone()[0]
             tables = {name for (name,) in db.execute("select name from sqlite_master where type = 'table'")}
-    except sqlite3.DatabaseError as error:
+    except (sqlite3.DatabaseError, OSError) as error:
         return str(error)
     if integrity != "ok":
         return integrity
