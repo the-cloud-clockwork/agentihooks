@@ -505,6 +505,7 @@ def test_a_hive_syncs_only_the_worker_tasks_it_hosts(setup, homes, monkeypatch):
     assert synced == {"fixture": {"mine": {"latest_progress": "mine step"}}}
 
 
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it(
     setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -529,6 +530,7 @@ def test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it(
     assert json.loads(held) == {"progress.md": "admitted step\n"}
 
 
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes: SimpleNamespace) -> None:
     lines = {"progress.md": "hive step\n", "proof.md": "hive proof\n"}
     with at(homes.hive):
@@ -541,6 +543,7 @@ def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes:
     assert json.loads(setup.redis.get(ledger_workspace.files_key("host"))) == {}
 
 
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_hive_holding_no_files_for_a_task_leaves_its_copy_alone(
     setup: SimpleNamespace, homes: SimpleNamespace
 ) -> None:

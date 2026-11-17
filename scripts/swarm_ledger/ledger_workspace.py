@@ -3,8 +3,16 @@
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.swarm_ledger import plan_read, ports
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from redis import Redis
+
+    from scripts.swarm.store import AgentRecord
 
 PART_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,127}")
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
@@ -155,16 +163,27 @@ def files_key(hive):
     return f"{synced_key(hive)}:files"
 
 
-def sync(redis, hive, hosted, ttl):
-    copy, files = {}, {}
+def task_files_key(hive: str, slug: str, task_id: str) -> str:
+    """The key under the hive's own prefix that holds its latest copy of one task's work folder files."""
+    return f"{files_key(hive)}:{slug}:{task_id}"
+
+
+def sync(redis: "Redis", hive: str, hosted: list[tuple[str, str]], ttl: int) -> None:
+    """Publishes the hosted tasks' latest lines and files, and keeps each task's files under its own key for the files
+    TTL, so the copy outlives the hive hosting the task; a task holding no files leaves its copy as it was."""
+    copy: dict[str, dict[str, dict[str, str]]] = {}
+    files: dict[str, dict[str, dict[str, str]]] = {}
     for slug, task_id in hosted:
         copy.setdefault(slug, {})[task_id] = tails(slug, task_id)
-        files.setdefault(slug, {})[task_id] = contents(slug, task_id)
+        found = contents(slug, task_id)
+        files.setdefault(slug, {})[task_id] = found
+        if found:
+            redis.set(task_files_key(hive, slug, task_id), json.dumps(found), ex=FILES_SECONDS)
     redis.set(synced_key(hive), json.dumps(copy), ex=ttl)
     redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
 
 
-def latest(agents):
+def latest(agents: "Iterable[AgentRecord]") -> "dict[str, AgentRecord]":
     """Each task's live execution, else the one that started last."""
     ordered = sorted(agents, key=lambda agent: (agent.state not in ENDED, agent.started_at))
     return {agent.task: agent for agent in ordered}

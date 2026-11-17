@@ -29,6 +29,7 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
+WORK_FOLDER = "work-folder"
 
 
 def release_key(text: str) -> Version | None:
@@ -349,14 +350,17 @@ class Admission:
 
     def _seeds(self, slug: str, task: dict[str, Any], doc: dict[str, Any], name: str) -> dict[str, str]:
         """The files the hive writes into the task's work folder before the launch: steering from the task and the
-        latest copy that the hive of the task's previous agent synced."""
+        latest task copy synced by the hive that last launched the task, else by the hive of its previous agent, so a
+        predecessor retired before this admission still hands over its lines."""
         from scripts.swarm_ledger import ledger_workspace
 
         earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
         previous = max(earlier, key=lambda agent: agent.started_at, default=None)
-        held = self.store.redis.get(ledger_workspace.files_key(previous.hive)) if previous and previous.hive else None
-        synced: dict[str, dict[str, dict[str, str]]] = json.loads(held) if held else {}
-        return {**synced.get(slug, {}).get(task["id"], {}), "steering.md": ledger_workspace.steering(task, doc)}
+        redis = cast(Any, self.store).redis
+        hive = redis.get(self.store.key(slug, WORK_FOLDER, task["id"])) or (previous.hive if previous else "")
+        held = redis.get(ledger_workspace.task_files_key(hive, slug, task["id"])) if hive else None
+        synced: dict[str, str] = json.loads(held) if held else {}
+        return {**synced, "steering.md": ledger_workspace.steering(task, doc)}
 
     def _mark(self, slug: str, request: dict[str, Any], row: dict[str, Any], name: str) -> dict[str, Any] | None:
         """The ledger row once claimed by name with its portable work folder, a protected branch cleared and the lane
@@ -436,9 +440,11 @@ class Admission:
 
     def launched(self, slug: str, request: dict[str, Any]) -> bool:
         """Writes the launch decision the admitted hive reports onto its agent's record, with the overlays and profile
-        decision the hive placed; the hub launch check admission started stays as it is, so a late report never
-        restarts a judged check. False when the hive holds no admission for the offer or another agent now occupies
-        the admitted seat."""
+        decision the hive placed, and records that hive as the holder of the task's work folder for the next agent's
+        seeds; the hub launch check admission started stays as it is, so a late report never restarts a judged check.
+        False when the hive holds no admission for the offer or another agent now occupies the admitted seat."""
+        from scripts.swarm_ledger import ledger_workspace
+
         held = self.store.redis.get(self._key(slug, request))
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
@@ -451,6 +457,8 @@ class Admission:
         placed = {field: launch[field] for field in account_slots.LAUNCH_PLACEMENT if field in launch}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
             return False
+        folder = self.store.key(slug, WORK_FOLDER, request["task"])
+        cast(Any, self.store).redis.set(folder, request["hive"], ex=ledger_workspace.FILES_SECONDS)
         cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         return True
 
