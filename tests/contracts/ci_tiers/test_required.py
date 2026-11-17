@@ -127,6 +127,51 @@ def test_a_pull_request_skips_sonar_only_when_selection_marks_it_test_only(selec
     assert (outcome.returncode == 0) == passes, outcome.stdout + outcome.stderr
 
 
+@pytest.mark.parametrize(
+    "event,selection,load,passes",
+    [
+        ("pull_request", "run", "success", True),
+        ("pull_request", "run", "failure", False),
+        ("pull_request", "run", "skipped", False),
+        ("pull_request", "skip", "skipped", True),
+        ("pull_request", "skip", "success", False),
+        ("pull_request", "", "skipped", True),
+        ("pull_request", None, "skipped", True),
+        ("pull_request", None, "success", False),
+        ("merge_group", "run", "skipped", True),
+        ("merge_group", "run", "success", False),
+        ("push", "run", "success", True),
+        ("push", "skip", "skipped", False),
+    ],
+)
+def test_the_gate_requires_ledger_load_on_marked_pull_requests_and_keeps_queue_and_push_grading(
+    event: str, selection: str | None, load: str, passes: bool
+) -> None:
+    outputs = {"scope": "selected" if event == "pull_request" else ""}
+    if selection is not None:
+        outputs["ledger"] = selection
+    needs = {job: {"result": "success"} for job in (QUEUE if event == "merge_group" else SELECTED)} | {
+        "ledger-load": {"result": load},
+        "select": {"result": "success", "outputs": outputs},
+    }
+    [step] = ci_reuse.ledger_required(_gate_steps())
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(os.environ, EVENT=event, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", REUSED="false"),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == passes, outcome.stdout + outcome.stderr
+
+
+def test_the_ledger_requirement_rewrites_only_the_aggregation_run_once() -> None:
+    canonical = ci_reuse.gate_steps(queue_tier=True, consolidated=True, summary=True)
+    steps = ci_reuse.ledger_required(canonical)
+    assert steps[0]["run"].count('then ["ledger-load"] else [] end)') == 1
+    assert {**steps[0], "run": canonical[0]["run"]} == canonical[0]
+    assert steps[1:] == canonical[1:] and len(steps) > 1
+
+
 def test_duration_provenance_reads_the_base_and_records_the_queue_head():
     checkout, python, install, record, publish = ci_reuse.duration_provenance_steps()
     assert checkout["with"] == {

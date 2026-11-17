@@ -615,6 +615,46 @@ promotion, prompt and hand back is a tick journal line and an event on the seat 
 engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
 per agent, and the ledger page marks the agent row promoted.
 
+#### Critical mode after thirty minutes with no master
+
+The master fallback service (`agentihooks-master-fallback.service`, `python -m scripts.swarm.master_fallback`) runs a
+pass every minute on the master hive, outside the tick, so no tick step or placement refusal can stop it. Each pass
+first watches every swarm in `AGENTIHOOKS_MASTER_FALLBACK_SWARMS`, each in its own try, and only then runs the twenty
+minute start, which leaves a critical swarm alone. A running swarm whose front door seat has no bound master, meaning a
+live master on `master@<id>` that is working, or still starting with its own hooks beating since its launch, for
+`AGENTIHOOKS_MASTER_CRITICAL_MINUTES` (default 30) is critical:
+
+- The swarm's `master-critical` Redis record holds when the seat lost its master, when it turned critical and the last
+  ten forced starts. `swarm status` shows a `master critical` finding and `status --json` carries the record as
+  `master_critical`; the ledger page's swarm health panel lists the finding from the status each tick pass publishes.
+- A critical broadcast reaches every session on the master hive, and the ledger's front door `seat` alert is raised on
+  entry. The ledger keeps one open alert per source, so from the pass after a failed start an open seat alert that
+  says something else is closed and one naming the failure reason raised; a repeat of the same reason leaves that
+  alert open as it is.
+- The pass forces `agentihooks swarm <id> master up --replace` in a detached runner, through the pass's own
+  interpreter (`python -m scripts.install`) with `~/.local/bin` and the interpreter's folder ahead of the systemd
+  PATH. That command line start path never consults the controller's master placement refusal. It forces one start
+  per five minutes, and none while a front door master launched inside its start deadline may still bind.
+- The runner records each start's outcome with its time and exit status: started, or failed with the command's last
+  output line or launch error; a runner that cannot start fails its start in the same pass. A failed start, or one
+  whose master has not bound by the next retry, raises the critical broadcast again with that reason. The pass and
+  the runner read and write the record under one Redis lock per swarm, and a late runner never overwrites an outcome
+  the pass already recorded. No ledger call runs under that lock: the pass reads the ledger before taking it and
+  writes the seat alerts, read from the ledger's alerts alone, after releasing it. A runner whose record Redis or the
+  lock refuses prints the refusal, and the pass fails that start at its next retry.
+- Every pass stamps the swarm's watch beat and drops the beat of every swarm it no longer watches; `swarm status` shows
+  a `master watch` finding when the last pass failed or is five minutes old, so a stopped watchdog is visible too.
+
+A master binding the front door seat ends critical mode: the record and finding go away, a resolved broadcast
+replaces the critical one and the open seat alerts close. A swarm that is not running (stopped, stopping, paused or
+drained), or one sleeping with no work, leaves critical mode and is never forced. A swarm whose master retired has its
+ledger tasks read, so new work since the retirement keeps it awake, and a ledger it cannot read leaves it awake.
+
+```bash
+journalctl --user -u agentihooks-master-fallback.service --since "1 hour ago" | grep -E "critical|forced master up"
+agentihooks swarm <id> status --json | jq .master_critical
+```
+
 #### Orphan executions on a seat
 
 Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the
@@ -708,7 +748,16 @@ agentihooks swarm <id> set masters=2
 agentihooks swarm <id> master up --new
 # Or retire the front door and start a fresh one on master@<id>
 agentihooks swarm <id> master up --replace
+# Or replace it in the forced launch mode no quota floor refuses
+agentihooks swarm <id> master up --forced
 ```
+
+`master up --forced` and the night watch front door respawn launch the front door master in the forced mode. The
+tick master launch skips the session slot wait and asks placement with the forced task. Hive master selection then
+closes no Claude account at a quota floor, and herdr spawn never refuses the master as all full. The claude ai launch
+takes the token fallback on any login refusal, so a login held or at the master floor still starts a master, shown as
+`route=token-fallback`. Under forced, the token fallback takes the probed account with the most room even when every
+account is under its floor. The claude ai login reserve itself stays.
 
 ### Master pool
 
