@@ -396,9 +396,8 @@ class Admission:
         self.store.drop_agent(slug, name)
 
     def reopen(self, slug: str, request: dict) -> bool:
-        """Returns the task the asking hive's admission claimed to open and forgets that admission; with no admission
-        held, a dead lettered offer advances its task's claim generation instead. True only when an admission was
-        released."""
+        """Reopens the task the asking hive's admission claimed and forgets that admission, answering True only then;
+        with no admission held, a dead lettered offer advances its task's claim generation instead."""
         key = self._key(slug, request)
         held = self.store.redis.get(key)
         if not held:

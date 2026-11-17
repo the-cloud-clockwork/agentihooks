@@ -805,7 +805,9 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
 
 
 @pytest.mark.feature("dead-offer-generation")
-def test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term(rig):
+def test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term(
+    rig: SimpleNamespace,
+) -> None:
     import json
 
     from scripts.hive.spoke import claim_key
@@ -826,7 +828,7 @@ def test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_be
     assert claim(rig) == {"state": "dead"}
 
 
-def test_an_offer_meeting_a_withdrawn_claim_is_terminated_without_asking_the_hub(rig):
+def test_an_offer_meeting_a_withdrawn_claim_is_terminated_without_asking_the_hub(rig: SimpleNamespace) -> None:
     import json
 
     from scripts.hive.spoke import claim_key
@@ -901,7 +903,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             bus.close()
 
 
-@pytest.mark.parametrize("boundary", ["started", "dead", "reopen"])
+@pytest.mark.parametrize("boundary", ["started", "dead", "dead_lettered"])
 def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, boundary):
     from scripts.hive.spoke import Spoke
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -910,7 +912,7 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
         rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
     target = rig.bus.events if boundary == "started" else rig.bus.dead
     real_publish = target.publish
-    if boundary == "reopen":
+    if boundary == "dead_lettered":
         rig.tasks.dead_lettered.side_effect = RuntimeError("ledger unavailable")
     else:
         target.publish = Mock(side_effect=RuntimeError("bus unavailable"))
