@@ -24,7 +24,7 @@ outside the adapters that imports one of those packages.
 |---|---|---|
 | Ports | `scripts.swarm_ledger.ports` | The `Swarm`, `Hive` and `Hooks` protocols, the `BOUND` table, `bind()` and the accessors `swarm()`, `hive()` and `hooks()` |
 | Adapters | `scripts.swarm_ledger.adapters.swarm`, `.hive`, `.hooks` | One class per port; each property imports the real module when it is read and returns it |
-| Other adapters | `scripts.swarm_ledger.adapters.hive_ledger`, `.safety_nudge` | Re-export the hive ledger gateway and `report` from `scripts.swarm.hive_ledger`, and record a joining master in the safety nudge registry; the ledger CLI imports these two directly |
+| Other adapters | `scripts.swarm_ledger.adapters.safety_nudge` | Record a joining master in the safety nudge registry; the ledger CLI imports it directly |
 | Composition root | `scripts.swarm_ledger.composition` | `adapters()` builds one adapter per port; `wire()` binds them |
 | Import check | `tests/swarm_ledger/test_ledger_boundary.py` | Fails CI when a ledger module outside `adapters` imports the swarm, hive or hooks packages |
 | Port tests | `tests/swarm_ledger/test_ledger_ports.py` | Prove each adapter satisfies its protocol and that ledger code calls whatever is bound |
@@ -45,8 +45,7 @@ The swarm adapter also hands out `context_view`, which the brain context route r
 list it, so a fake swarm bound in a test needs it only when the test reaches that route.
 
 Adapter properties import on read, so importing the ledger package loads none of the swarm, hive or hooks modules
-until a ledger call needs one. The one exception is `adapters.hive_ledger`, which the ledger CLI module imports at
-module level and which loads `scripts.swarm.hive_ledger` with it.
+until a ledger call needs one.
 
 ## Binding
 

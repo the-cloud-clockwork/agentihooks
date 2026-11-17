@@ -1,8 +1,13 @@
+import io
 import json
 import os
 import threading
 import time
+import urllib.error
+from collections.abc import Callable
+from email.message import Message
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,10 +17,12 @@ import pytest
 
 from scripts.hive import auth as hive_auth
 from scripts.swarm import ledger_read, profile_choice, prompt
+from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import api_service, ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
+from scripts.tick.adapters import database_ledger
 from tests.swarm_ledger.ledger_front import Front
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
@@ -37,6 +44,7 @@ pytestmark = pytest.mark.unit
 PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"
 PROGRESS = "Reading the task through the hosted ledger"
+UNREACHABLE = "the ledger database refused the connection"
 
 
 def _hl():
@@ -367,6 +375,17 @@ def _update(fields, holder="engineer@323133-0300"):
     return {"op": "task_update", "id": "w-direct", "by": holder, "item": "tasks/t1", "fields": fields}
 
 
+def _unreachable(*_: object, **__: object) -> dict[str, object]:
+    raise OSError(UNREACHABLE)
+
+
+def _storage_refused(*_: object, **__: object) -> dict[str, object]:
+    body = json.dumps({"error": {"code": "storage_unavailable", "message": "the ledger storage is unavailable"}})
+    raise urllib.error.HTTPError(
+        f"/api/v1/ledgers/{SLUG}/operations", 503, "ledger refused", Message(), io.BytesIO(body.encode())
+    )
+
+
 def test_a_write_the_hosted_server_rejects_is_reported_rejected(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
     gate = Passing()
@@ -405,6 +424,44 @@ def test_a_task_the_hosted_server_lacks_reads_as_no_task(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
 
     assert _hosted_ledger(hosted).read(SLUG, "tasks/t9") == {"tasks": []}
+
+
+def test_an_unreachable_ledger_database_on_read_is_a_dependency_failure(
+    hosted: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ledger, "REMOTE_READ_PAUSE", 0)
+    monkeypatch.setattr(database_ledger, "request", _unreachable)
+
+    with pytest.raises(GrantRefused) as raised:
+        _hosted_ledger(hosted).read(SLUG, "tasks/t1")
+
+    assert raised.value.error_class == "dependency_unavailable"
+    assert str(raised.value) == f"the hosted ledger is unavailable: {UNREACHABLE}"
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [(_unreachable, UNREACHABLE), (_storage_refused, "HTTP Error 503: ledger refused")],
+    ids=["unreachable", "refused"],
+)
+def test_a_write_the_ledger_database_cannot_take_is_a_dependency_failure(
+    hosted: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Callable[..., dict[str, object]],
+    reason: str,
+) -> None:
+    _hold("engineer@323133-0300", tmp_path)
+
+    def fail() -> None:
+        monkeypatch.setattr(database_ledger, "request", failure)
+
+    with pytest.raises(GrantRefused) as raised:
+        _hosted_ledger(hosted).apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(fail))
+
+    assert raised.value.error_class == "dependency_unavailable"
+    assert str(raised.value) == f"the hosted ledger is unavailable: {reason}"
+    assert _held_task()["state"] == "claimed"
 
 
 def test_a_write_the_hosted_server_finds_malformed_is_an_invalid_request(hosted, tmp_path):
@@ -537,6 +594,17 @@ def test_the_prompt_summary_reads_the_close_summary_through_the_hosted_server(co
 
 def test_a_ledger_the_hosted_server_lacks_reads_as_empty(controller_reads):
     assert ledger_read.parts("absent-ledger", "overview", "phases") == {}
+
+
+def test_a_deployed_overview_read_the_ledger_cannot_answer_is_a_swarm_error(
+    controller_reads: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ledger, "resource", _unreachable)
+
+    with pytest.raises(SwarmError) as raised:
+        ledger_read.parts(SLUG, "overview")
+
+    assert str(raised.value) == f"the hosted ledger is unavailable for {SLUG}: {UNREACHABLE}"
 
 
 def test_an_operation_id_the_hosted_server_already_holds_for_other_content_is_an_operation_conflict(hosted, tmp_path):
