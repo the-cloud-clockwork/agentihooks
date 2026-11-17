@@ -634,7 +634,7 @@ def test_the_api_service_binds_its_own_address_and_names_it_in_the_start_line(
     )
 
 
-@pytest.mark.feature("compose-api-and-front-host-checks")
+@pytest.mark.feature("compose-api-health-and-front-proxy")
 def test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port(
     serving: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

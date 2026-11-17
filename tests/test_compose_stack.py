@@ -163,7 +163,7 @@ def test_the_front_routes_reads_to_the_ledger_and_writes_to_the_api() -> None:
     assert "GET|HEAD" in conf
 
 
-@pytest.mark.feature("compose-api-and-front-host-checks")
+@pytest.mark.feature("compose-api-health-and-front-proxy")
 @pytest.mark.parametrize(
     "conf",
     [
@@ -176,3 +176,14 @@ def test_the_front_forwards_the_host_the_client_sent_with_its_port(conf: str) ->
     text = (ROOT / conf).read_text()
     assert "proxy_set_header Host $http_host;" in text
     assert "$host;" not in text
+
+
+@pytest.mark.feature("compose-api-health-and-front-proxy")
+@pytest.mark.parametrize(
+    "conf", ["deploy/compose/ledger-front.conf", "scripts/swarm/stack/deploy/compose/ledger-front.conf"]
+)
+def test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time(conf: str) -> None:
+    text = (ROOT / conf).read_text()
+    assert "set $upstream http://swarm:8765;" in text
+    assert "set $upstream http://api:8766;" in text
+    assert "resolver 127.0.0.11 valid=1s;" in text
