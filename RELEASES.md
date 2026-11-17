@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.958 · 2026-11-17
+
+### 2026-11-17 · d796e1b488d6 · #11650 · @nestorcolt
+
+**Pin the pretend version on both hierarchy CPU proof installs**
+
+This change sets a pinned SETUPTOOLS_SCM_PRETEND_VERSION on the shared dependency install step for both the hierarchy-cpu load and hierarchy jobs, so the editable install skips setuptools_scm's git version-detection commands entirely. Those git calls had a 40 second subprocess timeout and had already hit it twice in four hours on anton-oss-batch runners, failing jobs before any probe or gate ran. Since no probe, gate, or ledger server reads the distribution version and both sides share one install, pinning it removes the flaky failure without affecting measurements, matching the same fix already applied to ledger-load and writer-lock.
+
 ## v2.17.957 · 2026-11-17
 
 ### 2026-11-16 · 9239e78e7ed3 · #11637 · @agenticore-app
