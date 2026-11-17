@@ -5376,7 +5376,8 @@
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor_does_not_explain",
-        "tests/hive/test_master_fallback_launch.py::test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed"
+        "tests/hive/test_master_fallback_launch.py::test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_reads_the_worker_drain_rule_of_the_row_harness"
       ]
     },
     {

@@ -560,6 +560,19 @@ def test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_dr
     assert placed == expected
 
 
+@pytest.mark.feature("hive-front-door-master-floor")
+@pytest.mark.parametrize(("harness", "closed"), [("claude", False), ("codex", True)])
+def test_a_master_reads_the_worker_drain_rule_of_the_row_harness(
+    monkeypatch: pytest.MonkeyPatch, harness: str, closed: bool
+) -> None:
+    from scripts.hive import launch
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    assert launch._master_closed(Account(harness, "login", "CLOSED", 0, 3, 50, 0)) is closed
+
+
 @pytest.mark.parametrize("login", [{}, {"claude": ""}])
 def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch, login):
     from scripts import claude_quota_balancer as balancer
