@@ -4613,11 +4613,15 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spares-fix-prs",
       "behaviour": "While fleet panic is on, the CI cancel sweep, run by the tick once a minute and by panic on, spares without any master registration every open promotion fixer task (promo-RUN-N) and troubleshooting crew fixer task (crew-STAMP-fix-N) of every swarm: in every panic repository it keeps the branch the task records, its repository branches and the worktree branch of the agent claiming it, which each swarm's tick pass records when it reads its pass document and drops once the swarm has no open fixer.",
       "seam": "The tick pass read of the pass document, the fixer branch record of each swarm, and the panic CI cancel sweep in the tick pass and the panic button",
+      "rules": [
+        "panic-sweep-spares-only-registered-fixes"
+      ],
       "tests": [
         "tests/swarm/test_panic.py::test_tick_pass_spares_every_swarms_recorded_fixer_branches_without_a_registration",
         "tests/swarm/test_panic.py::test_the_panic_button_spares_the_recorded_fixer_branches",
         "tests/swarm/test_panic.py::test_the_pass_read_records_the_open_fixer_branches_of_its_document",
-        "tests/swarm/test_panic.py::test_the_pass_read_drops_the_record_once_no_fixer_is_open"
+        "tests/swarm/test_panic.py::test_the_pass_read_drops_the_record_once_no_fixer_is_open",
+        "tests/swarm/test_panic.py::test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file"
       ]
     },
     {

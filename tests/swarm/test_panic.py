@@ -801,6 +801,17 @@ def test_the_pass_read_drops_the_record_once_no_fixer_is_open(
     assert store.redis.exists(store.key(SLUG, "panic-fixers")) == 0
 
 
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file() -> None:
+    from scripts.swarm import promotion_watch, troubleshooting_crew
+
+    crew = troubleshooting_crew.crew_id(1_794_870_000.0)
+    fixers = [f"{promotion_watch.TASK_PREFIX}43992907244-1", *troubleshooting_crew.numbered(crew, "fix", 2)]
+    others = [*troubleshooting_crew.numbered(crew, "scout", 1), f"{crew}-harden", "t-panic-spares-fix-prs"]
+    assert [panic.FIXER_TASK.fullmatch(task) is not None for task in fixers] == [True, True, True]
+    assert [panic.FIXER_TASK.fullmatch(task) is not None for task in [*others, "doc-promo-1-0"]] == [False] * 4
+
+
 def test_the_panic_button_cancels_and_prints(
     store: RedisStore,
     counted: list[tuple[str, float, dict[str, str]]],
