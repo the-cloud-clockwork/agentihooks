@@ -1,5 +1,5 @@
 """Night watch: each tick, with or without a master, holds the front door seat, the spawn path and the dev merge
-queue against a limit. Every action passes the night watch gate, log only by default; its findings show in every
+queue against a limit. Every action passes the night watch gate, deny by default; its findings show in every
 mode."""
 
 import json
