@@ -580,3 +580,25 @@ def test_hive_run_loads_the_operator_env_then_starts_the_lane_spokes_before_the_
 
     assert cli._daemon("run") == 0
     assert order == [("env",), ("lanes", True), ("telemetry",)]
+
+
+@pytest.mark.feature("hive-service-start-ensures-serena-router")
+def test_hive_run_ensures_the_serena_router_before_the_lane_spokes_and_starts_even_when_it_is_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import serena_router_daemon
+    from scripts.hive import cli, daemon
+
+    order: list[tuple[str, ...]] = []
+
+    def ensure() -> bool:
+        order.append(("router",))
+        return False
+
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: order.append(("env",)))
+    monkeypatch.setattr(serena_router_daemon, "ensure", ensure)
+    monkeypatch.setattr(lanes, "serve", lambda environ: order.append(("lanes",)))
+    monkeypatch.setattr(daemon, "run", lambda connect: order.append(("telemetry",)))
+
+    assert cli._daemon("run") == 0
+    assert order == [("env",), ("router",), ("lanes",), ("telemetry",)]
