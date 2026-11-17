@@ -237,13 +237,12 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes and the
-    runs on a fix's merge queue commit, merge commit or merged integration branch head; a fix branch link spares
-    its branch in its own repository and is never read as a pull request."""
+    runs on a fix's merge queue commit, merge commit or merged integration branch head; a fix spares its branch only
+    in its own repository, and a fix branch link is never read as a pull request."""
     from scripts.swarm.stack import GITHUB, repo_key
 
     named = [(fix, *branch_fix(fix)) for fix in fixes]
     changes = [fix_change(fix) for fix, _, branch in named if not branch]
-    branches = {change.head_branch for change in changes}
     commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
@@ -251,7 +250,9 @@ def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> lis
         rows = provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS))
         spared = commits | _fix_heads(rows, changes, repo)
         here = repo_key(f"{GITHUB}{repo}")
-        kept = branches | {branch for _, key, branch in named if key == here}
+        kept = {change.head_branch for change in changes if change.reference.repository == repo} | {
+            branch for _, key, branch in named if key == here
+        }
         for row in rows:
             if _spared(row, kept, spared):
                 continue

@@ -47,7 +47,7 @@ _GLOBAL_VALUES = {"git": _GIT_VALUES, "gh": frozenset({"-R", "--repo"})}
 _GH_REPO = re.compile(r"-R.*|--repo(=.*)?")
 _GIT_ENVIRONMENT = re.compile(r"\bGIT_(DIR|WORK_TREE|COMMON_DIR|NAMESPACE|CONFIG\w*)=")
 _ROUTED = re.compile(
-    r"remote\.origin\.(push|pushurl|mirror)=.*"
+    r"remote\.origin\.(push|pushurl|mirror)=.*|url\..+\.pushinsteadof=.*"
     r"|(remote\.pushdefault|branch\..+\.(remote|pushremote))=(?!origin$).*"
     r"|push\.default=(?!simple$|current$).*"
 )
@@ -267,8 +267,8 @@ def _destinations(refspecs: list[str]) -> tuple[str, ...]:
 
 def _routed(cwd: str) -> bool:
     """Return whether git config may send a push from the checkout to another remote or ref: a push refspec, push url
-    or mirror on origin, a push or tracking remote other than origin, or a push default other than simple or current;
-    a config that cannot be read counts as routed."""
+    or mirror on origin, a push url rewrite, a push or tracking remote other than origin, or a push default other than
+    simple or current; a config that cannot be read counts as routed."""
     lines = _git(cwd, "config", "--list").splitlines()
     return not lines or any(_ROUTED.fullmatch(line) for line in lines)
 

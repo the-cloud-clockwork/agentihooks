@@ -1194,6 +1194,7 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
         ("remote.origin.push", "+refs/heads/*:refs/heads/*", "git push origin fix-branch", True),
         ("remote.origin.pushurl", "https://github.com/someone/else.git", "git push origin fix-branch", True),
         ("remote.origin.mirror", "true", "git push origin fix-branch", True),
+        ("url.https://github.com/someone/.pushInsteadOf", "git@github.com:", "git push origin fix-branch", True),
         ("branch.fix-branch.remote", "upstream", "git push", True),
         ("branch.fix-branch.pushRemote", "elsewhere", "git push", True),
         ("remote.pushDefault", "elsewhere", "git push", True),
