@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import urllib.request
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -32,8 +33,15 @@ def _wait_listening(process: subprocess.Popen, port: int) -> None:
 
 
 @contextmanager
-def serving(source: Path, folder: Path, write_port: int, read_port: int):
-    env = {**os.environ, "LEDGER_DIR": str(folder), "SWARM_RELOAD": "0"}
+def serving(
+    source: Path, folder: Path, write_port: int, read_port: int
+) -> Iterator[tuple[subprocess.Popen, subprocess.Popen]]:
+    env = {
+        **os.environ,
+        "LEDGER_DIR": str(folder),
+        "SWARM_RELOAD": "0",
+        "CONDITIONS_TRUSTED_OWNERS": "The-Cloud-Clockwork",
+    }
     write_env = {**env, "LEDGER_API_HOST": "127.0.0.1", "LEDGER_API_PORT": str(write_port)}
     read_env = {**env, "LEDGER_PORT": str(read_port)}
     with (folder / "server.log").open("w") as log, (folder / "server-read.log").open("w") as read_log:

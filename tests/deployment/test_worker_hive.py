@@ -23,7 +23,16 @@ MOVED = "AGENTIHOOKS_HIVE_URL=https://tailnet.example:8770\n" + REFRESHED
 SAVED = {"refreshed": REFRESHED, "rejoined": OTHER, "moved": MOVED}
 
 
-def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
+def startup(
+    tmp_path: Path,
+    *,
+    credential: str = "mounted",
+    refuse: str = "",
+    ssh: bool = False,
+    sshd_dies: bool = False,
+    bundle: bool = False,
+    bundle_url: str = "",
+) -> tuple[subprocess.CompletedProcess[str], str, Path, Path]:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -42,6 +51,8 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
+        '  [[ -f "$AGENTIHOOKS_HOME/state-at-init.json" || ! -f "$AGENTIHOOKS_HOME/state.json" ]] || '
+        'cp "$AGENTIHOOKS_HOME/state.json" "$AGENTIHOOKS_HOME/state-at-init.json"\n'
         '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$*" != "init --bundle "* ]] || git -C "$3" rev-parse HEAD > "$AGENTIHOOKS_HOME/bundle-head-at-init"\n'
@@ -477,7 +488,7 @@ def test_a_kept_bundle_clone_that_cannot_fast_forward_is_logged_and_kept(tmp_pat
     assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
 
 
-def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):
+def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     origin = tmp_path / "linked-origin"
     origin.mkdir()
     subprocess.run(["git", "init", "--initial-branch=dev", str(origin)], check=True, capture_output=True)
@@ -511,8 +522,9 @@ def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeyp
     assert result.returncode == 0, result.stderr
     cloned = next((worker / "repos/.linked-profiles/memory").glob("*/profiles/memory"))
     assert (cloned / "profile.yml").read_text() == "name: memory\n"
-    registration = f"link-profile link {cloned} --name memory --no-append --no-init"
-    assert commands.splitlines().index(registration) < commands.splitlines().index("init")
+    registered = json.loads((home / "state-at-init.json").read_text())["linked_profiles"]
+    assert [(entry["name"], Path(entry["path"]).resolve()) for entry in registered] == [("memory", cloned.resolve())]
+    assert "init" in commands.splitlines()
     assert "HIVE_LINKED_PROFILES=" in (home / "hive-container.env").read_text()
 
 
