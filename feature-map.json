@@ -8521,6 +8521,17 @@
         "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
         "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
       ]
+    },
+    {
+      "id": "compose-stack-own-bus",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-compose-controller-bus-auth",
+      "behaviour": "The Compose swarm stack reads its bus backend and address only from the stack settings SWARM_BUS and SWARM_BUS_URL, defaulting to the stack's own NATS service. An agent shell that runs compose with its own Anton bus settings and credential leaves every stack service, the controller included, on the stack NATS, never on the Anton bus without its credential.",
+      "seam": "the shared x-swarm-env block of the Compose stack file and its swarm init copy",
+      "tests": [
+        "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
+        "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
+      ]
     }
   ],
   "unmapped_rules": [
