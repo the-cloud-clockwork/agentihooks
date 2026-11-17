@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.982 · 2026-11-17
+
+### 2026-11-17 · 90a4161d7d19 · #11811 · @nestorcolt
+
+**Compose stack keeps its own bus whatever shell runs compose**
+
+This change makes the Compose swarm stack always use its own NATS bus, controlled only by the stack's own `SWARM_BUS`/`SWARM_BUS_URL` settings, and stops it from picking up `AGENTIHOOKS_BUS`/`AGENTIHOOKS_BUS_URL` from whatever agent shell happens to run `swarm init`. Previously, shells exporting Anton bus credentials caused the controller to connect to the wrong NATS address without a credential, producing repeated `Authorization Violation` crashes and 404 restarts. With the fix, the controller reliably connects to its own `nats://nats:4222`, confirmed stable over a 30-minute soak with zero restarts and continuous scheduler writes.
+
+### 2026-11-17 · 090ab59a7974 · #11815 · @agenticore-app
+
+**Announce the protected grader blob that admits a one download test summary**
+
+This change registers a new accepted blob hash in `tests/registry/FROZEN_GATES.json` for `scripts/gate_protected.py`, corresponding to a grader variant that lets the `test-summary` job fetch all reports in a single download step instead of two, while still permitting the existing two-download approach. It introduces no behavioral change on its own, but it must land first so the upcoming grader update it admits can merge safely without failing the registry gate.
+
 ## v2.17.980 · 2026-11-17
 
 ### 2026-11-17 · a452ffe5b0bb · #11800 · @agenticore-app
