@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.962 · 2026-11-17
+
+### 2026-11-17 · d588a83a764d · #11699 · @nestorcolt
+
+**Anchor the pull request quiet hold at the last pull request change**
+
+The select job's quiet hold was computing its deadline from when its own shell started rather than from the pull request's actual last change, so every run waited the full configured quiet window regardless of how much time had already passed since the update—needlessly delaying downstream jobs that depend on select. This fix anchors the hold to `github.event.pull_request.updated_at`, waiting only the remaining time in the window, reading the head once, never exceeding the window, and still skipping entirely when the window is zero, while rejecting empty or malformed timestamps.
+
 ## v2.17.958 · 2026-11-17
 
 ### 2026-11-17 · d796e1b488d6 · #11650 · @nestorcolt
