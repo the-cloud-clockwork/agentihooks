@@ -34,7 +34,9 @@ def run(
     taken = taken_seats(store, slug, runtime.live_names())
     empty = [masters.seat(i) for i in range(2, count + 1) if seat_address(slug, masters.seat(i)) not in taken]
     for seat_name in empty:
-        if refused := seat_spawn.placed_elsewhere(runtime, MASTER, {"id": seat_name}):
+        if refused := seat_spawn.placed_elsewhere(
+            runtime, MASTER, {"id": seat_name, "seat": seat_address(slug, seat_name)}
+        ):
             actions += master_refusals.record(store, slug, seat_name, refused, now_ms)
             continue
         if refused := seat_spawn.no_slot(config, runtime, MASTER):

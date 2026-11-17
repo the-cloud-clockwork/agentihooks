@@ -39,6 +39,28 @@ def test_status_report_carries_each_agents_transport_capabilities(saved):
     }
 
 
+@pytest.mark.feature("balance-master-route")
+def test_status_report_carries_the_route_only_on_the_front_door_master(
+    saved: tuple[RedisStore, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, names = saved
+    door = AgentRecord(
+        "master@a1b2c3-0001",
+        "master",
+        "master",
+        harness="claude",
+        account="home",
+        seat="master@sw",
+        route_kind="master-login",
+    )
+    store.put_agent("sw", door)
+    monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: {*names.values(), door.name})
+
+    report = {a["name"]: a["route"] for a in status.status_report(store, "sw", {"tasks": []})["agents"]}
+
+    assert report == {door.name: "claude ai login", **dict.fromkeys(names.values(), "")}
+
+
 def test_status_report_carries_only_the_latest_hundred_ended_lives(saved):
     import json
 

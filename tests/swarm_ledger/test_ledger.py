@@ -175,6 +175,10 @@ def test_a_refused_artifact_without_a_reason_says_to_join_and_name_a_task(cli):
     ("argv", "entry"),
     [
         (["say", " Hi "], {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1", "to": "operator"}),
+        (
+            ["say", "Hi", "--reply-to", "m-1"],
+            {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1", "to": "operator", "reply_to": "m-1"},
+        ),
         (["comment", "tasks/t1", "Hi"], {"op": "add", "thread": "tasks/t1/comments", "text": "Hi", "by": "eng-1"}),
         (["edit", "chat", "m1", "Hi"], {"op": "edit", "thread": "chat", "id": "m1", "text": "Hi", "by": "eng-1"}),
     ],

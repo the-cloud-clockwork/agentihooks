@@ -65,7 +65,7 @@ from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import ASSIST, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, Runtime, agent_status
 from scripts.swarm_ledger import plan_shape
-from scripts.swarm_v2 import telemetry
+from scripts.swarm_v2 import front_door, telemetry
 from scripts.swarm_v2.reconciliation import accounts as account_reconciliation
 from scripts.swarm_v2.runtime import observe
 
@@ -347,6 +347,7 @@ def status_report(
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
+                "route": front_door.master_route(slug, a),
                 "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
