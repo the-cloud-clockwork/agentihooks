@@ -174,6 +174,20 @@ def test_swarm_status_reads_every_seat_across_hash_pages(store: RedisStore, monk
     assert sorted(line.split("  ")[1] for line in lines) == sorted(f"master-{index}@sw" for index in range(2, 14))
 
 
+def test_the_seat_pages_ask_for_the_row_cap(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    master_refusals.record(store, "sw", MASTER, REFUSED, MINUTE)
+    scan, counts = store.redis.hscan, []
+
+    def counted(key: str, cursor: int = 0, match: Any = None, count: Any = None) -> Any:
+        counts.append(count)
+        return scan(key, cursor, match=match, count=count)
+
+    monkeypatch.setattr(store.redis, "hscan", counted)
+
+    assert list(master_refusals.seats(store, "sw")) == [MASTER]
+    assert counts == [master_refusals.ROWS]
+
+
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
 def test_status_text_names_the_latest_master_placement_refusal(  # noqa: F811
     env: Any,  # noqa: F811
