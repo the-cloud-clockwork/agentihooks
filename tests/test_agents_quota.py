@@ -2,8 +2,7 @@ import json
 import os
 import re
 from dataclasses import replace
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
 
@@ -429,13 +428,22 @@ def test_an_interactive_master_already_listed_is_marked_and_not_listed_twice():
     assert plain[2].startswith("1  claude   home-login  subscription")
 
 
-def _front_door_store(monkeypatch: pytest.MonkeyPatch, agents: list["AgentRecord"]) -> None:
-    from scripts.swarm import store
+def _front_door_store(
+    monkeypatch: pytest.MonkeyPatch, agents: list["AgentRecord"], live: set[str] | None = None
+) -> None:
+    import fakeredis
 
-    client = object()
-    swarm = SimpleNamespace(slugs=lambda: ["sw"], agents=lambda slug: agents if slug == "sw" else [])
+    from scripts.swarm import store
+    from scripts.swarm.runtime import HerdrRuntime
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    swarm = store.RedisStore(client)
+    swarm.create(store.SwarmConfig("sw", "/r", 4, 0))
+    for agent in agents:
+        swarm.put_agent("sw", agent)
+    names = {agent.name for agent in agents} if live is None else live
     monkeypatch.setattr(store, "redis_client", lambda environ=None: client)
-    monkeypatch.setattr(store, "RedisStore", lambda redis: swarm if redis is client else None)
+    monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: names)
 
 
 def _balance_cells(
@@ -457,7 +465,7 @@ def _balance_cells(
 @pytest.mark.feature("balance-master-route")
 @pytest.mark.parametrize(
     ("route_kind", "route"),
-    [("master-login", "claude ai login"), ("interactive", "claude ai login"), ("subscription", "token fallback")],
+    [("master-login", "claude ai login"), ("interactive", "claude ai login")],
 )
 def test_balance_names_the_route_the_live_front_door_master_runs_on(
     monkeypatch: pytest.MonkeyPatch, route_kind: str, route: str
@@ -497,6 +505,7 @@ def test_balance_names_a_token_fallback_on_another_account_in_either_spelling(mo
         account="team-two",
         seat="master@sw",
         route_kind="subscription",
+        desired_route_kind="interactive",
     )
     _front_door_store(monkeypatch, [door])
     spare = ProbeResult("team_two", "allowed", "NORMAL", 60.0, QuotaWindow(30.0, 30_000), QuotaWindow(40.0, 90_000))
@@ -504,6 +513,58 @@ def test_balance_names_a_token_fallback_on_another_account_in_either_spelling(mo
     cells = _balance_cells(monkeypatch, MasterAccount("claude", "home", "max", INTERACTIVE), [spare])
 
     assert cells == {"team_two": "team_two MASTER (token fallback)", "home": "home MASTER max"}
+
+
+def _door(**fields: Any) -> "AgentRecord":
+    from scripts.swarm.store import AgentRecord
+
+    base: dict[str, Any] = {"harness": "claude", "account": "home", "seat": "master@sw", "route_kind": "master-login"}
+    return AgentRecord("master@a1b2c3-0001", "master", "master", **(base | fields))
+
+
+def _home_cell(monkeypatch: pytest.MonkeyPatch) -> str:
+    from scripts.routing.master_account import MasterAccount
+
+    home = ProbeResult("home", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
+    return _balance_cells(monkeypatch, MasterAccount("claude", "home", "max", SUBSCRIPTION), [home])["home"]
+
+
+@pytest.mark.feature("master-route-placement-fallback")
+@pytest.mark.parametrize("route_kind", ["master-login", "interactive"])
+def test_balance_names_a_login_launch_that_fell_back_to_a_token(
+    monkeypatch: pytest.MonkeyPatch, route_kind: str
+) -> None:
+    _front_door_store(monkeypatch, [_door(route_kind=route_kind, placement="fallback")])
+
+    assert _home_cell(monkeypatch) == "home MASTER max (token fallback)"
+
+
+@pytest.mark.feature("master-route-fallback-only-from-login")
+@pytest.mark.parametrize(
+    ("desired", "cell"), [("interactive", "home MASTER max (token fallback)"), ("", "home MASTER max")]
+)
+def test_balance_says_token_fallback_only_when_the_claude_ai_login_was_wanted(
+    monkeypatch: pytest.MonkeyPatch, desired: str, cell: str
+) -> None:
+    _front_door_store(monkeypatch, [_door(route_kind="subscription", desired_route_kind=desired)])
+
+    assert _home_cell(monkeypatch) == cell
+
+
+@pytest.mark.feature("master-route-live-masters-only")
+def test_balance_names_no_route_for_a_front_door_master_that_is_not_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    _front_door_store(monkeypatch, [_door()], live=set())
+
+    assert _home_cell(monkeypatch) == "home MASTER max"
+
+
+@pytest.mark.feature("master-route-acting-front-door")
+def test_balance_names_the_route_of_a_second_master_seat_acting_as_the_front_door(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _front_door_store(monkeypatch, [_door(seat="master-2@sw")])
+
+    assert _home_cell(monkeypatch) == "home MASTER max (claude ai login)"
 
 
 @pytest.mark.feature("balance-master-route")
