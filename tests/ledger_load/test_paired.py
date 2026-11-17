@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,54 @@ def test_both_hierarchy_cpu_installs_pin_the_pretend_version() -> None:
             install.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS")
             == "0.dev${{ github.run_number }}"
         )
+
+
+@pytest.mark.parametrize("stray", ["", "base", "head"])
+def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Path, stray: str) -> None:
+    load = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]["load"]
+    [command] = [step["run"] for step in load["steps"] if "tests.ledger_load.memory" in step.get("run", "")]
+    workspace = tmp_path / "workspace"
+    (workspace / "load-evidence").mkdir(parents=True)
+    for side in ("base", "head"):
+        (workspace / side).mkdir()
+        if side != stray:
+            package = workspace / side / "scripts" / "swarm_ledger"
+            package.mkdir(parents=True)
+            for module in (package.parent / "__init__.py", package / "__init__.py", package / "ledger_server.py"):
+                module.touch()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    python = binary / "python"
+    python.write_text('#!/usr/bin/env bash\n[[ "$1" != -c ]] || exec "$REAL_PYTHON" "$@"\necho "${PWD##*/} gate ran"\n')
+    python.chmod(0o755)
+    env = {name: value for name, value in os.environ.items() if name != "PYTHONPATH"}
+    other = {"base": "head", "head": "base"}.get(stray, "")
+    if other:
+        env["PYTHONPATH"] = str(workspace / other)
+    result = subprocess.run(
+        ["bash", "-e", "-c", command],
+        cwd=workspace,
+        env={
+            **env,
+            "PATH": f"{binary}:{env['PATH']}",
+            "REAL_PYTHON": sys.executable,
+            "GITHUB_WORKSPACE": str(workspace),
+            "PAIR": "1",
+            "BASE": "base",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    logs = sorted((workspace / "load-evidence").glob("*.log"))
+    ran = [path.stem for path in logs if "gate ran" in path.read_text()]
+    if stray:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"::error::load gate failed on {stray}" in result.stdout
+        assert ran == [other]
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert ran == ["base", "head"]
 
 
 def compare_mode() -> tuple[int, float]:
