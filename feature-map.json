@@ -10,6 +10,8 @@
         "tests/test_agents_quota.py::test_balance_names_the_route_the_live_front_door_master_runs_on",
         "tests/test_agents_quota.py::test_balance_names_a_token_fallback_on_another_account_in_either_spelling",
         "tests/test_agents_quota.py::test_balance_shows_no_route_while_the_swarm_redis_is_unreachable",
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_names_only_a_working_claude_front_door_masters_route",
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_every_swarms_front_door_route_by_its_account",
         "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_only_on_the_front_door_master",
         "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_carries_the_route_its_status_names",
         "tests/swarm_ledger/test_master_account_cell.py::test_the_master_name_cell_names_its_account_and_route"
