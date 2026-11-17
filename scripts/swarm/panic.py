@@ -16,7 +16,7 @@ import re
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -175,15 +175,18 @@ def fix_change(url: str) -> ChangeState:
 
 
 def fix_state(store: RedisStore | None, url: str) -> ChangeState:
-    """Return the state of fix pull request ``url``, kept under the fleet panic keys once it reads merged, since a
-    merged pull request never changes; an open one, or any read without a store, is read through the port."""
-    client = None if store is None else _client(store)
-    raw = None if client is None else client.hget(_key(MERGED_FIXES), url)
-    if raw is not None:
-        row = json.loads(raw)
+    """Return the state of fix pull request ``url``, kept under the fleet panic keys from the read that finds it
+    merged until panic releases, since a merged pull request never changes; an open one, a kept row whose fields no
+    longer match ChangeState, or any read without a store, is read through the port."""
+    if store is None:
+        return fix_change(url)
+    client = _client(store)
+    raw = client.hget(_key(MERGED_FIXES), url)
+    row: dict[str, Any] = {} if raw is None else json.loads(raw)
+    if set(row) == {field.name for field in fields(ChangeState)}:
         return ChangeState(ChangeRef(**row.pop("reference")), **row)
     found = fix_change(url)
-    if client is not None and found.merged:
+    if found.merged:
         client.hset(_key(MERGED_FIXES), url, json.dumps(asdict(found)))
     return found
 

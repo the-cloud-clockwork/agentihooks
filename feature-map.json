@@ -7836,13 +7836,14 @@
       "origin": "regression",
       "ordered_at": "2026-11-17",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-steps-abandoned",
-      "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a sweep run without the swarm store, as the panic button runs it, reads every fix.",
+      "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a kept row whose fields no longer match the change state is read again, and a sweep run without the swarm store, as the panic button runs it, reads every fix.",
       "seam": "scripts.swarm.panic.fix_state, read by scripts.swarm.panic.cancel_runs with the swarm store scripts.swarm.panic.tick_pass passes, and cleared by scripts.swarm.panic.release",
       "rules": ["panic-sweep-rereads-merged-fixes"],
       "tests": [
-        "tests/swarm/test_panic.py::test_cancel_runs_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
         "tests/swarm/test_panic.py::test_cancel_runs_without_a_store_reads_every_fix_every_sweep",
-        "tests/swarm/test_panic.py::test_tick_pass_keeps_a_merged_fix_until_panic_releases"
+        "tests/swarm/test_panic.py::test_a_merged_fix_is_read_again_after_panic_releases",
+        "tests/swarm/test_panic.py::test_a_kept_fix_row_of_another_shape_is_read_again"
       ]
     }
   ],

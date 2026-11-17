@@ -455,15 +455,18 @@ def _fix(url: str, merged: bool, commit: str) -> ChangeState:
 
 
 @pytest.mark.feature("panic-sweep-keeps-merged-fixes")
-def test_cancel_runs_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+def test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     merged, opened, commit = FIX, f"{FIX}0", "m" * 40
     reads = _fix_reads(monkeypatch, {merged}, commit)
-    runs = Runs({"o/a": [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]})
-    sweeps = [panic.cancel_runs([merged, opened], ["o/a"], runs, store) for _ in range(2)]
-    assert sweeps == [["o/a run 2 on feature"], ["o/a run 2 on feature"]]
+    monkeypatch.setattr(panic, "due_cancel", lambda store, now_ms: True)
+    rows = [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]
+    runs = Runs({repo: rows for repo in panic.REPOS})
+    panic.engage(store, "pressed", False, [merged, opened], 0)
+    sweeps = [panic.tick_pass(store, True, at, runs) for at in (1_000, 1_000 + panic.CANCEL_EVERY_MS)]
     assert reads == [merged, opened, opened]
+    assert sweeps == [[f"panic cancelled {repo} run 2 on feature" for repo in panic.REPOS]] * 2
     assert panic.fix_state(store, merged) == _fix(merged, True, commit)
     assert reads == [merged, opened, opened]
 
@@ -477,18 +480,30 @@ def test_cancel_runs_without_a_store_reads_every_fix_every_sweep(monkeypatch: py
 
 
 @pytest.mark.feature("panic-sweep-keeps-merged-fixes")
-def test_tick_pass_keeps_a_merged_fix_until_panic_releases(
+def test_a_merged_fix_is_read_again_after_panic_releases(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
-    kept = f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}"
+    monkeypatch.setattr(panic, "due_cancel", lambda store, now_ms: True)
     panic.engage(store, "pressed", False, [FIX], 0)
-    assert panic.tick_pass(store, True, 1_000, Runs({})) == []
+    for at in (1_000, 2_000):
+        panic.tick_pass(store, True, at, Runs({}))
     assert reads == [FIX]
-    assert list(store.redis.hgetall(kept)) == [FIX]
-    assert panic.release(store, 1_000)
-    assert store.redis.hgetall(kept) == {}
-    assert panic.state(store) is None
+    assert panic.release(store, 2_000)
+    panic.engage(store, "pressed", False, [FIX], 3_000)
+    panic.tick_pass(store, True, 3_000, Runs({}))
+    assert reads == [FIX, FIX]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_a_kept_fix_row_of_another_shape_is_read_again(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    commit = "m" * 40
+    reads = _fix_reads(monkeypatch, {FIX}, commit)
+    stale = {"reference": {"repository": "o/a", "number": 1}, "merged": True, "merge_commit": commit}
+    store.redis.hset(f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}", FIX, json.dumps(stale))
+    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    assert reads == [FIX]
 
 
 @pytest.mark.feature("panic-merged-fix-integration-head")
