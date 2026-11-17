@@ -4386,7 +4386,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-06",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
-      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session.",
+      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session through the interpreter's absolute path with the user's bin folder on PATH, so the start command runs under the systemd default PATH.",
       "seam": "python -m scripts.swarm.master_fallback run, pass and install",
       "tests": [
         "tests/swarm/test_master_fallback.py::test_no_master_for_the_window_starts_exactly_one_master",
@@ -4397,7 +4397,21 @@
         "tests/swarm/test_master_fallback.py::test_run_logs_a_timed_out_pass_and_goes_on",
         "tests/swarm/test_master_fallback.py::test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes",
         "tests/swarm/test_master_fallback.py::test_install_writes_and_restarts_the_service_and_retires_the_timer",
-        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session"
+        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session",
+        "tests/swarm/test_master_fallback.py::test_the_installed_unit_starts_master_up_under_the_systemd_default_path"
+      ]
+    },
+    {
+      "id": "swarm-master-critical",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-no-master-critical",
+      "behaviour": "Thirty minutes (AGENTIHOOKS_MASTER_CRITICAL_MINUTES) with no master bound on a running swarm's front door seat puts the swarm in critical mode, measured by the master fallback pass outside the tick: the swarm's master-critical record holds the outage start and critical time, swarm status shows a master critical finding and a master_critical key, and a critical broadcast is raised. While critical the pass forces agentihooks swarm SLUG master up --replace in a detached runner through the interpreter's absolute path, once per retry window while no master start is in flight, a start path the controller master placement refusal never reaches. The runner records each forced start's outcome with its time and reason, and a refused or failed start raises the critical broadcast again. A master binding the front door seat clears the record, the finding and the broadcasts.",
+      "seam": "python -m scripts.swarm.master_fallback pass and force, read through agentihooks swarm SLUG status",
+      "tests": [
+        "tests/swarm/test_master_critical.py::test_a_master_placement_refusal_for_thirty_minutes_puts_the_swarm_critical_and_forces_master_up",
+        "tests/swarm/test_master_critical.py::test_the_forced_master_up_starts_a_master_the_placement_refusal_cannot_block_and_its_bind_clears_critical",
+        "tests/swarm/test_master_critical.py::test_a_refused_forced_start_is_recorded_with_its_reason_and_time_and_raises_the_alert_again"
       ]
     },
     {

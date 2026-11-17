@@ -1,7 +1,10 @@
+import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -165,6 +168,44 @@ def test_start_launches_master_up_new_in_its_own_session(monkeypatch):
 
     assert master_fallback.start("sw") == 4321
     assert calls == [(["agentihooks", "swarm", "sw", "master", "up", "--new"], True)]
+
+
+SYSTEMD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
+
+
+def service_path() -> str:
+    return os.pathsep.join(folder for folder in SYSTEMD_PATH.split(":") if not (Path(folder) / "agentihooks").exists())
+
+
+@pytest.mark.feature("master-fallback-tick")
+def test_the_installed_unit_starts_master_up_under_the_systemd_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = str(Path(master_fallback.__file__).resolve().parents[2])
+    lines = master_fallback.unit_text(sys.executable, repo, {master_fallback.SWARMS: "sw"}).splitlines()
+    folder = next(line.removeprefix("WorkingDirectory=") for line in lines if line.startswith("WorkingDirectory="))
+    for line in lines:
+        if line.startswith("Environment="):
+            monkeypatch.setenv(*line.removeprefix("Environment=").split("=", 1))
+    monkeypatch.setenv("PATH", service_path())
+    monkeypatch.setenv("HOME", str(tmp_path))
+    started: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(
+        master_fallback,
+        "subprocess",
+        SimpleNamespace(Popen=lambda command, **options: started.append((command, options)) or SimpleNamespace(pid=9)),
+    )
+
+    assert master_fallback.start("sw") == 9
+
+    [(command, options)] = started
+    environ: dict[str, str] = options.get("env", dict(os.environ))
+    done = subprocess.run(
+        [*command[:-1], "--help"], cwd=folder, env=environ, capture_output=True, text=True, timeout=120, check=False
+    )
+    assert done.returncode == 0, done.stderr
+    assert "--replace" in done.stdout
+    assert command[-5:] == ["swarm", "sw", "master", "up", "--new"]
 
 
 @pytest.mark.feature("master-fallback-tick")
