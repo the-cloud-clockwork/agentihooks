@@ -169,22 +169,45 @@ def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Pa
         assert ran == ["base", "head"]
 
 
+OWN_CHECKOUT = (
+    "-c 'import pathlib, scripts.swarm_ledger.ledger_server as m; "
+    "assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'"
+)
+LOAD_GATES = ("tests.ledger_load.gate", "tests.ledger_load.memory")
+
+
+def guards_its_gate(script: str) -> bool:
+    """Whether a step script runs the own checkout assert before its load gate with nothing between them that
+    swallows the assert's failure."""
+    gate = min(script.index(module) for module in LOAD_GATES if module in script)
+    start = script.find(OWN_CHECKOUT)
+    between = script[start + len(OWN_CHECKOUT) : gate]
+    return 0 <= start < gate and "||" not in between and ";" not in between
+
+
+@pytest.mark.parametrize(
+    ("script", "guarded"),
+    [
+        (f"cd base && python {OWN_CHECKOUT} \\\n  && python -m tests.ledger_load.memory", True),
+        ("cd base && python -m tests.ledger_load.memory", False),
+        (f"cd base && python {OWN_CHECKOUT} || true\npython -m tests.ledger_load.memory", False),
+        (f"cd base && python {OWN_CHECKOUT}; python -m tests.ledger_load.memory", False),
+        (f"cd base && python -m tests.ledger_load.memory && python {OWN_CHECKOUT}", False),
+    ],
+)
+def test_the_guard_check_rejects_a_missing_late_or_swallowed_assert(script: str, guarded: bool) -> None:
+    assert guards_its_gate(script) is guarded
+
+
 def test_every_load_pair_runner_asserts_each_side_imports_its_own_checkout_before_its_gate() -> None:
-    own_checkout = (
-        "-c 'import pathlib, scripts.swarm_ledger.ledger_server as m; "
-        "assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'"
-    )
-    gates = ("tests.ledger_load.gate", "tests.ledger_load.memory")
     runners: dict[str, bool] = {}
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         for name, job in yaml.safe_load(path.read_text())["jobs"].items():
             for step in job.get("steps", []):
                 script = step.get("run", "")
-                gate = next((gate for gate in gates if gate in script), "")
-                if gate and "for side in" in script:
-                    runners[f"{path.name} {name}"] = 0 <= script.find(own_checkout) < script.index(gate)
-    assert {"hierarchy-cpu.yml load", "ledger-load.yml compare"} <= runners.keys()
-    assert all(runners.values()), runners
+                if "for side in" in script and any(module in script for module in LOAD_GATES):
+                    runners[f"{path.name} {name}"] = guards_its_gate(script)
+    assert runners == {"hierarchy-cpu.yml load": True, "ledger-load.yml compare": True}
 
 
 def compare_mode() -> tuple[int, float]:
