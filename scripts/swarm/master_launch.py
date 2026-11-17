@@ -15,6 +15,7 @@ from scripts.swarm import (
     capacity,
     effort_range,
     launch_check,
+    master_lock,
     master_start,
     model_pick,
     seat_spawn,
@@ -30,6 +31,7 @@ from scripts.swarm_v2 import masters as master_seats
 
 LAST, NEW, REPLACE = "last", "new", "replace"
 FORCED = "forced"
+STARTER = "master up"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
 QUESTION = (
     "  1) bring back the last master with its own conversation\n"
@@ -47,6 +49,7 @@ RESUMED = (
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
 LEAD_STARTING = ("starting", SUSPECT)
+OCCUPIED = "the front door seat {seat} is held by the live {name}, so no new master takes it"
 STARTING = (
     "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
     "other master starts; "
@@ -269,18 +272,37 @@ def _fresh(
     replace_live: bool = False,
     forced: bool = False,
 ) -> Launched:
+    """Start a new master under the swarm's master launch lock, refusing while another starter holds it."""
+    with master_lock.held(store, slug, STARTER) as refused:
+        if refused:
+            raise SwarmError(refused)
+        return _start_fresh(store, slug, runtime, at, live, replace_live, forced)
+
+
+def _start_fresh(
+    store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool, forced: bool
+) -> Launched:
     from scripts.swarm import tick_master
 
     tick_master.finish_dead_starting(store, slug, runtime, at)
     front = _front_doors(store, slug, live)
-    leads = front or _starting_leads(store, slug)
+    starting = _starting_leads(store, slug)
+    leads = front or starting
     if leads and not replace_live:
         count = master_seats.MasterSeats(store.redis).count(slug)
         if _free_seat(store, slug, live) > count:
             raise SwarmError(STARTING.format(name=leads[0].name, state=leads[0].state, count=count))
         return _beside(store, slug, runtime, at, live)
-    take_master.retired(store, slug, runtime, front)
+    take_master.retired(store, slug, runtime, front + [a for a in starting if a.name not in live])
+    seat = seat_address(slug, MASTER)
+    if (occupant := _seat_occupant(store, seat)) in runtime.live_names():
+        raise SwarmError(OCCUPIED.format(seat=seat, name=occupant))
     return _new(store, slug, runtime, at, forced)
+
+
+def _seat_occupant(store: Any, seat: str) -> str:
+    """The name holding ``seat`` in the seat registry, empty when nobody holds it."""
+    return store.seats.occupant(seat).occupant
 
 
 def up(
