@@ -136,6 +136,9 @@ def problems(chart: str) -> list[str]:
     unmarked = render(chart, *ENABLED, "--set", "hub.servingFile=")
     if unmarked.returncode == 0 or "hub.servingFile" not in unmarked.stderr:
         found.append("a hub without hub.servingFile renders a readiness probe that never passes")
+    overlaid = render(chart, *ENABLED, "--set", "hub.env.AGENTIHOOKS_HUB_SERVING_FILE=/elsewhere")
+    if overlaid.returncode or any(hub_problems(d) for d in hubs(overlaid.stdout)):
+        found.append("a hub.env entry for AGENTIHOOKS_HUB_SERVING_FILE moves the hub off the file its probe reads")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
     return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
