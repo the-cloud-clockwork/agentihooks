@@ -195,9 +195,14 @@ def spread_problems(chart: str) -> list[str]:
         found.append(f"the hub pods do not prefer a node without another hub: {affinity.get('podAntiAffinity')}")
     if "nodeAffinity" not in affinity:
         found.append("the hub pods lose the configured node affinity beside the spread preference")
+    labels = deployment["spec"]["template"]["metadata"]["labels"]
+    if not selector["matchLabels"].items() <= labels.items():
+        found.append(f"the spread term selects {selector['matchLabels']}, which the hub pod labels {labels} lack")
     single = render(chart, *ENABLED, "--set", "hub.replicas=1")
     spread = [d["spec"]["template"]["spec"].get("affinity", {}).get("podAntiAffinity") for d in hubs(single.stdout)]
-    if single.returncode or any(spread):
+    if single.returncode:
+        found.append(f"a single hub replica fails to render: {single.stderr.strip()}")
+    elif any(spread):
         found.append(f"a single hub replica renders a spread preference: {spread}")
     key = "hub.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]"
     given = ["--set", f"{key}.topologyKey=topology.kubernetes.io/zone"]
@@ -205,7 +210,9 @@ def spread_problems(chart: str) -> list[str]:
     kept = render(chart, *ENABLED, *given)
     rows = [d["spec"]["template"]["spec"].get("affinity", {}).get("podAntiAffinity") for d in hubs(kept.stdout)]
     wanted = {"topologyKey": "topology.kubernetes.io/zone", "labelSelector": {"matchLabels": {"team": "hub"}}}
-    if kept.returncode or rows != [{"requiredDuringSchedulingIgnoredDuringExecution": [wanted]}]:
+    if kept.returncode:
+        found.append(f"a hub with a pod anti affinity in hub.affinity fails to render: {kept.stderr.strip()}")
+    elif rows != [{"requiredDuringSchedulingIgnoredDuringExecution": [wanted]}]:
         found.append(f"a hub.affinity pod anti affinity renders as {rows}, expected it as given: {wanted}")
     return found
 
