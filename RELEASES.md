@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.975 · 2026-11-17
+
+### 2026-11-17 · ff1f8f1cf684 · #11503 · @agenticore-app
+
+**Re-mint the root hive bus credential when the member grant changes**
+
+This change fixes the bug where a root hive bus credential minted before a grant update kept silently failing stop passes with permissions violations until someone manually re-ran hive root-bus. Now hive run checks the stored credential's publish and subscribe permissions against what a fresh mint would grant for the current swarms, and automatically re-mints through the existing write path when they differ, logging either a re-mint or a kept decision to the journal. This removes the need for manual intervention after member grant changes and makes root hive restarts self-healing with visible, auditable outcomes.
+
 ## v2.17.974 · 2026-11-17
 
 ### 2026-11-17 · fffde5564802 · #11778 · @nestorcolt
