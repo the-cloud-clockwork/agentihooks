@@ -109,6 +109,18 @@ def test_each_load_pair_job_allows_as_long_as_the_hierarchy_job_that_runs_the_sa
     assert load["timeout-minutes"] >= hierarchy["timeout-minutes"]
 
 
+def test_both_hierarchy_cpu_installs_pin_the_pretend_version() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]
+    for name in ("load", "hierarchy"):
+        [install] = [
+            step for step in jobs[name]["steps"] if step.get("name") == "Install dependencies shared by both revisions"
+        ]
+        assert (
+            install.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS")
+            == "0.dev${{ github.run_number }}"
+        )
+
+
 def compare_mode() -> tuple[int, float]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]
     pairs = jobs.get("compare", {}).get("strategy", {}).get("matrix", {}).get("pair", [1, 2])

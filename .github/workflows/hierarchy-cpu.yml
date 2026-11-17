@@ -82,6 +82,8 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare identical hierarchy probes for base and head
         run: |
@@ -165,6 +167,8 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare the same load harness for base and head
         run: |
