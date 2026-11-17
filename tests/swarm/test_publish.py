@@ -1998,3 +1998,27 @@ def test_only_the_task_owner_can_publish(publication, fields):
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing(publication, monkeypatch):
+    import fakeredis
+
+    from hooks.context import blocker_window
+    from scripts.swarm import panic, publish, store
+    from scripts.swarm.store import RedisStore, SwarmError
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda environ=None: fake)
+    panic.engage(RedisStore(fake), "60 errors in the last hour", False, [], 0)
+    with pytest.raises(SwarmError) as refused:
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    frozen = blocker_window.FROZEN.format(reason="60 errors in the last hour")
+    assert (
+        str(refused.value) == f"{frozen}; Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
+    )
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(publication.root, "show", "HEAD:chosen.txt") == "after"
+    assert not (publication.root / ".git-gate-head").exists()
