@@ -49,6 +49,7 @@
         "tests/test_swarm_v2_front_door.py::test_the_master_route_follows_the_seat_the_tick_lead_rule_names",
         "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_the_lead_seat_when_no_master_seat_is_held",
         "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_of_a_second_master_seat_acting_as_the_front_door",
+        "tests/swarm/test_status_capabilities.py::test_status_report_names_the_lead_seat_route_when_no_master_seat_is_held",
         "tests/test_agents_quota.py::test_balance_names_the_route_of_a_second_master_seat_acting_as_the_front_door"
       ]
     },
