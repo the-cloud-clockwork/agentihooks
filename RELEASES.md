@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.970 · 2026-11-17
+
+### 2026-11-17 · 387cfd648df0 · #11688 · @agenticore-app
+
+**A forced master start is never refused by a quota floor**
+
+This change ensures that forcing a master start, whether via `master up --forced` or the night watch's automatic front door respawn, can never be blocked by quota floor logic. It threads a `forced` flag through the task, placement, hive selection, spawn, and claude ai launch paths so that session caps, account holds, and full-capacity refusals are bypassed, falling back to a token-based login when needed. This matters because previously a legitimate forced restart could silently fail due to quota checks meant for normal launches, leaving the front door master down when operators or automated watchdogs explicitly needed it back up.
+
 ## v2.17.968 · 2026-11-17
 
 ### 2026-11-17 · 16d74059273a · #11764 · @agenticore-app
