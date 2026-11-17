@@ -687,7 +687,7 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     began = time.monotonic()
     with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
-        ledger_load.load(0, 0, "token", os.getpid(), 15.0)
+        ledger_load.load(0, 0, "token", [os.getpid()], 15.0)
     assert time.monotonic() - began < 5
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
 
@@ -697,7 +697,7 @@ def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     monkeypatch.setattr(ledger_load, "Front", preflight_client(sent))
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
-    results = ledger_load.load(0, 0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    results = ledger_load.load(0, 0, "token", [os.getpid()], 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
     assert len(results["writes"]) == 2
     assert results["errors"] == []
