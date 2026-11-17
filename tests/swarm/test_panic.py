@@ -194,7 +194,7 @@ def test_a_tick_pass_records_whether_any_step_failed(store, counted, monkeypatch
     monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
-    seen: list[tuple[bool, int]] = []
+    seen: list[tuple[str, bool, int]] = []
     monkeypatch.setattr(panic, "tick_pass", lambda store, slug, ok, now: seen.append((slug, ok, now)) or ["x"])
     from scripts.swarm import timing
 
@@ -1469,7 +1469,6 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
 )
 @pytest.mark.feature("panic-fix-spare-reads-target")
 def test_a_push_git_config_may_route_elsewhere_stays_frozen(
-    bound: None,
     store: RedisStore,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1478,6 +1477,7 @@ def test_a_push_git_config_may_route_elsewhere_stays_frozen(
     command: str,
     frozen: bool,
 ) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     _branches(monkeypatch, {})
     panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
     cwd = _checkout(tmp_path / "fix", "fix-branch")
