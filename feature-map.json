@@ -7898,7 +7898,7 @@
       "id": "master-launch-lock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-7",
-      "behaviour": "Every master starter takes the swarm's one master launch lock, a Redis set if absent key with a five minute lease, before it reads who holds the master seats and keeps it through the launch: the tick master step, which the night watch respawn and the respawn and place master commands also run, and master up --new and --replace, which the master fallback and the critical watchdog run. A fallback starter racing the tick master step in one pass launches exactly one master; a starter that finds the lock held launches nothing and names the holder; the lock is released after a launch and after a failed one and never by a holder that lost it.",
+      "behaviour": "Every starter of a new front door master takes the swarm's one master launch lock, a Redis set if absent key with a five minute lease, before it reads who holds the master seats and keeps it through the launch: the tick master step, which the night watch respawn and the respawn and place master commands also run, and master up --new and --replace, which the master fallback and the critical watchdog run in their detached processes. A fallback starter racing the tick master step in one pass launches exactly one master; a starter that finds the lock held launches nothing and names the holder, or says its lease just ended; the lock is released after a launch and after a failed one and never by a holder that lost it, even when it changes hands during the release.",
       "seam": "scripts.swarm.master_lock.held, taken by scripts.tick.steps.masters._master and scripts.swarm.master_launch._fresh",
       "tests": [
         "tests/swarm/test_master_starters_race.py::test_a_fallback_starter_racing_the_tick_master_step_launches_exactly_one_master",
@@ -7906,6 +7906,8 @@
         "tests/swarm/test_master_lock.py::test_the_lock_is_the_swarm_key_set_if_absent_with_its_lease_and_holder",
         "tests/swarm/test_master_lock.py::test_the_lock_is_released_when_its_launch_raises",
         "tests/swarm/test_master_lock.py::test_a_lock_that_changed_hands_is_never_released_by_its_old_holder",
+        "tests/swarm/test_master_lock.py::test_a_lock_taken_over_during_its_release_is_left_to_its_new_holder",
+        "tests/swarm/test_master_lock.py::test_a_refusal_whose_holder_just_expired_says_so",
         "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_the_tick_master_step",
         "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_master_up",
         "tests/swarm/test_master_lock.py::test_the_tick_master_step_and_master_up_release_the_lock_after_their_launch"

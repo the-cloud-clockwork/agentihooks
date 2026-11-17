@@ -10,6 +10,7 @@ from typing import Any
 KEY = "master-launch-lock"
 LEASE_MS = 5 * 60 * 1000
 HELD = "the master launch lock of swarm {slug} is held by {holder}, so no second master starts"
+EXPIRED = "a starter whose lease just ended"
 
 
 def key(store: Any, slug: str) -> str:
@@ -23,8 +24,8 @@ def held(store: Any, slug: str, starter: str) -> Generator[str]:
     took the lock, else the refusal naming the starter that holds it; releases only the lock this call took."""
     token = f"{starter} {uuid.uuid4().hex}"
     if not store.redis.set(key(store, slug), token, nx=True, px=LEASE_MS):
-        holder = str(store.redis.get(key(store, slug))).rpartition(" ")[0]
-        yield HELD.format(slug=slug, holder=holder)
+        found = store.redis.get(key(store, slug))
+        yield HELD.format(slug=slug, holder=found.rpartition(" ")[0] if found else EXPIRED)
         return
     try:
         yield ""

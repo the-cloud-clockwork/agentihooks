@@ -60,6 +60,43 @@ def test_a_lock_that_changed_hands_is_never_released_by_its_old_holder(swarm: tu
 
 
 @pytest.mark.feature("master-launch-lock")
+def test_a_lock_taken_over_during_its_release_is_left_to_its_new_holder(
+    swarm: tuple[Any, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = swarm
+    pipeline = store.redis.pipeline
+
+    def racing() -> Any:
+        """A pipeline whose transaction starts only after another starter took the lock over."""
+        pipe = pipeline()
+        multi = pipe.multi
+
+        def taken() -> None:
+            """Take the lock over, then start the transaction."""
+            store.redis.set(master_lock.key(store, "sw"), "master up 2")
+            multi()
+
+        monkeypatch.setattr(pipe, "multi", taken)
+        return pipe
+
+    with master_lock.held(store, "sw", "tick master"):
+        monkeypatch.setattr(store.redis, "pipeline", racing)
+    assert held_by(store) == "master up 2"
+
+
+@pytest.mark.feature("master-launch-lock")
+def test_a_refusal_whose_holder_just_expired_says_so(
+    swarm: tuple[Any, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = swarm
+    monkeypatch.setattr(store.redis, "set", lambda *args, **kwargs: None)
+    with master_lock.held(store, "sw", "master up") as refused:
+        assert refused == (
+            "the master launch lock of swarm sw is held by a starter whose lease just ended, so no second master starts"
+        )
+
+
+@pytest.mark.feature("master-launch-lock")
 def test_a_held_lock_refuses_the_tick_master_step(swarm: tuple[Any, ResumingRuntime]) -> None:
     store, rt = swarm
     with master_lock.held(store, "sw", "master up"):
