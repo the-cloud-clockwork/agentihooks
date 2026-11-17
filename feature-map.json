@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "service-commands-run-through-interpreter",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-9",
+      "behaviour": "The hive bundle refresh, the hive linked profiles install, the claim watch and the quota prober's Claude provider check start agentihooks through their own interpreter with -P -m scripts.install, so each command resolves and runs under the default systemd PATH with no folder holding the agentihooks executable, from a folder outside the repository; the Claude provider check also puts the user bin folder and the interpreter's folder ahead of the service PATH so the claude command it starts resolves; a bare agentihooks command list in a service entry point is a Semgrep incident.",
+      "seam": "bundle_refresh.refresh on a manifest change, linked_profiles.install and claim_watch.check on a lost claim, each command run with --help under the systemd default PATH, and provider_probe.check for a Claude account run end to end under that PATH",
+      "rules": [
+        "service-bare-agentihooks-command"
+      ],
+      "tests": [
+        "tests/hive/test_bundle_refresh.py::test_the_deps_ensure_a_manifest_change_starts_resolves_under_the_systemd_default_path",
+        "tests/hive/test_linked_profiles.py::test_the_profile_link_command_resolves_under_the_systemd_default_path",
+        "tests/test_claim_watch.py::test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path",
+        "tests/swarm/test_provider_probe_contract.py::test_a_claude_check_runs_the_agentihooks_claude_command_under_the_systemd_default_path"
+      ]
+    },
+    {
       "id": "balance-master-route",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",
@@ -1941,6 +1957,29 @@
         "tests/tick/steps/test_masters_moved.py::test_run_group_runs_the_registered_steps_and_notes_the_left_box",
         "tests/tick/steps/test_masters_moved.py::test_print_actions_prints_actions_failures_and_the_held_exception",
         "tests/tick/steps/test_masters_moved.py::test_codex_hook_order_reports_the_hooks_it_restored"
+      ]
+    },
+    {
+      "id": "night-watch-gate-defaults-to-deny",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape of the swarm config: a swarm stored with no night watch mode in its gates, as swarm init stores it, reads the night watch gate as deny, so its night watch respawns an empty front door master seat at ten minutes and raises the seat alert instead of only logging a would-be respawn.",
+      "seam": "scripts.gates.enforcement.NIGHT_WATCH default mode through scripts.swarm.health.night_watch.run",
+      "tests": [
+        "tests/swarm/test_night_watch.py::test_the_night_watch_gate_defaults_to_deny",
+        "tests/swarm/test_night_watch.py::test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes"
+      ]
+    },
+    {
+      "id": "night-watch-respawns-by-default",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after a recycle handoff in a controller pod, the night watch at its default mode respawns the empty front door master seat at ten minutes through the tick's own master launch, the pod controller's fenced runtime, the controller's fleet account rows and a launch order root consumes, on root's claude ai login, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._night_watch through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_the_default_night_watch_refills_a_recycled_front_door_seat_at_ten_minutes_through_the_pod_controller"
       ]
     },
     {
@@ -4511,6 +4550,23 @@
       ]
     },
     {
+      "id": "panic-publish-holds",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-honours-panic",
+      "behaviour": "While fleet panic is on, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
+      "seam": "swarm publish before it grades and pushes, and the panic guard's push check it asks",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing",
+        "tests/swarm/test_publish.py::test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_any_branch_without_panic",
+        "tests/swarm/test_panic.py::test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",
@@ -6374,6 +6430,28 @@
       ]
     },
     {
+      "id": "front-door-launch-chain",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: the front door master launch the swarm runtime hands to init-agent reaches claude through the launcher script, the agentihooks claude entry and the claude ai login route with Remote Control on and no token variable in its environment, and the runtime records Remote Control on; a primary login at its week reserve hands the launch to the next stored login on the same route; an expired login reaches claude on the subscription token fallback without Remote Control, and the runtime records and reports that fallback.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.spawn through scripts.init_agent.main, scripts.install.cmd_claude and scripts.routing.claude_ai.launch_claude",
+      "tests": [
+        "tests/swarm/test_front_door_launch_chain.py::test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_control_and_no_token",
+        "tests/swarm/test_front_door_launch_chain.py::test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_next_login",
+        "tests/swarm/test_front_door_launch_chain.py::test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it"
+      ]
+    },
+    {
+      "id": "front-door-master-refill-deployed-shape",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after the front door master hands its seat off for a recycle, the tick master step places its successor through the pod controller's fenced runtime, the controller's fleet account rows, the hive launch selection and a launch order the root hive consumes, on root's master claude ai login slot, with no placement refusal and before the forcing window ends, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._tick_master through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts, scripts.hive.launch.HiveLaunch and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_the_forcing_window"
+      ]
+    },
+    {
       "id": "remote-control-token-fallback-reason",
       "origin": "inventory",
       "behaviour": "When a front door master asks for its native claude.ai login but the login chain lands on the subscription token fallback, its recorded Remote Control decision downgrades to off with reason subscription token fallback instead of staying on, both for a fresh launch and a resume, and a hive worker's acknowledgement carries the landed remote_control decision back to the controller's execution record.",
@@ -6502,6 +6580,21 @@
         "tests/swarm/test_github_reads.py::test_snapshot_serves_a_caller_given_ttl_past_the_default_run_ttl",
         "tests/swarm/test_ledger_events.py::test_views_batch_cache_outlives_the_default_run_ttl_on_the_given_ttl",
         "tests/swarm/test_pull_views.py::test_tick_view_batches_claimed_pull_requests_with_the_tick_view_ttl"
+      ]
+    },
+    {
+      "id": "controller-gh-token-in-process",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gh-token-in-process",
+      "behaviour": "A process that holds the GitHub App key in App mode, as the swarm controller does, runs every gh call of github_reads.rest on the real gh client with the installation token its own process minted and cached, keeping the read reserve check in process, so no Python token wrapper starts and no token is minted per call; a token it cannot mint or a read below the reserve is left to the gh wrapper unchanged, and a process without the key runs gh exactly as before.",
+      "seam": "scripts.swarm.github_reads.rest through scripts.swarm.github_reads._signed and scripts.github_app_cli.signed",
+      "tests": [
+        "tests/swarm/test_github_reads.py::test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token",
+        "tests/swarm/test_github_reads.py::test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper",
+        "tests/swarm/test_github_reads.py::test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged",
+        "tests/test_github_app_cli.py::test_signed_runs_the_wrapped_client_on_the_process_token_over_the_caller_environment",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_read_below_the_reserve_to_the_wrapper",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_token_the_process_cannot_mint_to_the_wrapper"
       ]
     },
     {

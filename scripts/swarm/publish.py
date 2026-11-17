@@ -7,6 +7,7 @@ import sys
 from contextlib import redirect_stderr
 from pathlib import Path
 
+from hooks.context import blocker_window
 from scripts import ci_prepush
 from scripts.gates import entry as gate_entry
 from scripts.swarm import continuation, git_https, naming, publish_queue, stack
@@ -409,7 +410,10 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
-def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
+def grade_and_push(root: Path, primary: Path, fields: dict[str, str], head: str) -> None:
+    held = blocker_window.held_push(str(root), fields["branch"])
+    if held:
+        raise SwarmError(held)
     python = gate_python(primary)
     source = root / "scripts" / "ci_prepush"
     if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():

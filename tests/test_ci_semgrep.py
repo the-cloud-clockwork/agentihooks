@@ -165,6 +165,26 @@ def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_ta
     assert fixture.count("# ok: tick-unbounded-store-read") == 10
 
 
+def test_ledger_write_rules_carry_no_exceptions() -> None:
+    source = (_ROOT / ".semgrep/ledger-server-writes.yml").read_text()
+    rules = {rule["id"]: rule for rule in yaml.safe_load(source)["rules"]}
+    assert sorted(rules) == ["ledger-client-in-process", "ledger-server-reads-only"]
+    assert all(rule["languages"] == ["python"] and rule["severity"] == "ERROR" for rule in rules.values())
+    assert "paths" not in rules["ledger-client-in-process"]
+    assert rules["ledger-server-reads-only"]["paths"] == {
+        "include": ["/scripts/swarm_ledger/ledger_server.py", "*.test.py"]
+    }
+    assert source.count("pattern-not") == 3
+    assert not (_ROOT / ".semgrep/ledger-server-writes-allowlist.json").exists()
+    fixture = (_ROOT / ".semgrep/ledger-server-writes.test.py").read_text()
+    assert fixture.count("# ruleid: ledger-server-reads-only") == 10
+    assert fixture.count("# ok: ledger-server-reads-only") == 3
+    assert fixture.count("# ruleid: ledger-client-in-process") == 8
+    assert fixture.count("# ok: ledger-client-in-process") == 4
+    incidents = yaml.safe_load((_ROOT / ".semgrep-incidents/ledger-server-write.yml").read_text())
+    assert [rule["id"] for rule in incidents["rules"]] == ["ledger-write-switch"]
+
+
 EXCEPTION_RULE = """rules:
   - id: planted-rule
     languages: [python]

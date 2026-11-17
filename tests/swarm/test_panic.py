@@ -1187,6 +1187,56 @@ def test_a_push_without_a_session_directory_stays_frozen(
     assert blocker_window._directory("", [str(fix)]) == ""
 
 
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_passes_any_branch_without_panic(store: RedisStore, tmp_path: Path) -> None:
+    cwd = _checkout(tmp_path / "other", "other-branch")
+    assert blocker_window.held_push(cwd, "other-branch") is None
+
+
+@pytest.mark.parametrize("fix", [FIX, BRANCH_FIX])
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fix: str
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [fix], 0)
+    cwd = _checkout(tmp_path / "work", "engineer-branch")
+    assert blocker_window.held_push(cwd, "fix-branch") is None
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_refuses_a_branch_no_fix_names(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX, BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.held_push(cwd, "other-branch") == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_refuses_a_fix_whose_config_routes_the_push(store: RedisStore, tmp_path: Path) -> None:
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    subprocess.run(["git", "-C", cwd, "config", "remote.origin.pushurl", "git@github.com:else/where.git"], check=True)
+    assert blocker_window.held_push(cwd, "fix-branch") == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_passes_when_the_store_cannot_be_reached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import store
+    from scripts.swarm.store import Unreachable
+
+    def connect() -> RedisStore:
+        raise Unreachable("Redis is unreachable")
+
+    monkeypatch.setattr(store, "connect", connect)
+    cwd = _checkout(tmp_path / "other", "other-branch")
+    assert blocker_window.held_push(cwd, "other-branch") is None
+
+
 @pytest.mark.parametrize("command", ["kubectl apply -f a.yaml", "git push && helm upgrade x y"])
 def test_a_fix_branch_session_still_waits_to_deploy(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
