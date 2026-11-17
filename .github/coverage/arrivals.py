@@ -40,6 +40,7 @@ PLAIN = re.compile(r"coverage-3\.12-(\d+)")
 BRANCH = re.compile(r"branch-coverage-3\.12-(\d+)-\d+")
 CARRIED = "branch-*/*/.coverage*"
 DATABASES = (".coverage", "reused-coverage/.coverage")
+OWNER = ("workflow_run_backend_id", "workflow_job_run_backend_id")
 
 
 class Service(Protocol):
@@ -101,6 +102,7 @@ class Results:
         self.base = base
         self.token = token
         self.ids = backend_ids(token)
+        self.owners: dict[str, dict[str, str]] = {}
 
     def call(self, method: str, body: dict[str, str]) -> dict[str, Any] | None:
         """Post one request; None when the service did not answer 200 with JSON."""
@@ -126,11 +128,14 @@ class Results:
             name, ident = artifact["name"], str(field(artifact, "database_id"))
             if int(ident) >= int(newest.get(name, "0")):
                 newest[name] = ident
+                self.owners[name] = {key: str(field(artifact, key)) for key in OWNER}
         return newest
 
     def fetch(self, name: str, folder: Path) -> bool:
-        """Download one artifact and unpack it into the folder; False leaves no folder behind."""
-        url = field(self.call("GetSignedArtifactURL", {"name": name}) or {}, "signed_url")
+        """Download one listed artifact, signed for the job that uploaded it, into the folder; False leaves no folder."""
+        if name not in self.owners:
+            return False
+        url = field(self.call("GetSignedArtifactURL", {**self.owners[name], "name": name}) or {}, "signed_url")
         if not isinstance(url, str) or not url:
             return False
         staged = folder.with_name(folder.name + PART)
