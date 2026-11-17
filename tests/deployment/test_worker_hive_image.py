@@ -667,7 +667,7 @@ def test_kind_proof_warms_redis_without_downloading_the_worker_base_twice() -> N
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
     assert lines.index('    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
-        '  kind delete cluster --name "$cluster"'
+        '  kind delete cluster --name "$cluster" || echo "kind could not delete $cluster; the proof keeps exit status $status" >&2'
     )
     assert lines.index('docker buildx imagetools inspect "$image" > "$out/image.txt"') < lines.index(
         'wait "$cluster_pid"'
