@@ -59,6 +59,10 @@ def enforce(store):
     store.update(SLUG, gates={"nightwatch": "enforce"})
 
 
+def observe(store):
+    store.update(SLUG, gates={"nightwatch": "observe"})
+
+
 class Rig:
     def __init__(self, refused="", respawns=("respawned the master",)):
         self.ledger, self.runtime, self.respawned, self.mailed, self.envs = Ledger(), Runtime(), [], [], []
@@ -93,11 +97,22 @@ def kinds(store):
     return [finding.kind for finding in night_watch.findings(store, SLUG)]
 
 
-def test_the_night_watch_gate_defaults_to_log_only():
-    assert catalog.defaults()["nightwatch"] == "observe"
+@pytest.mark.feature("night-watch-respawns-by-default")
+def test_the_night_watch_gate_defaults_to_deny():
+    assert catalog.defaults()["nightwatch"] == "enforce"
+
+
+@pytest.mark.feature("night-watch-respawns-by-default")
+def test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes(store):
+    assert "nightwatch" not in store.config(SLUG).gates
+    rig = Rig()
+    until(store, rig, NOW, NOW + 10 * MINUTE)
+    assert rig.respawned == [NOW + 10 * MINUTE]
+    assert [source for source, _ in rig.ledger.alerts] == ["seat"]
 
 
 def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode(store, tmp_path):
+    observe(store)
     rig = Rig()
     assert until(store, rig, NOW, NOW + 10 * MINUTE - 1) == []
     assert kinds(store) == []
@@ -137,6 +152,7 @@ def test_the_watch_respawns_an_empty_seat_at_most_three_times_an_hour(store):
 
 
 def test_the_log_counts_would_be_respawns_against_the_same_cap(store, tmp_path):
+    observe(store)
     rig = Rig()
     until(store, rig, NOW, NOW + 60 * MINUTE)
     assert [row["tool"] for row in gate_log.recent(SLUG, None, tmp_path)].count("respawn") == 3
@@ -286,6 +302,7 @@ def test_ready_work_held_by_host_room_raises_a_finding_naming_it_at_thirty_minut
 
 
 def test_ready_work_held_at_the_lane_cap_names_the_cap(store, monkeypatch):
+    observe(store)
     rig = Rig()
     held_master(store, rig.runtime)
     store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="working", started_at=NOW - MINUTE))
@@ -537,6 +554,7 @@ def test_a_second_merge_trigger_in_the_same_episode_replaces_the_alert(store, mo
 
 
 def test_a_logged_merge_stall_sends_no_email(store, monkeypatch, tmp_path):
+    observe(store)
     rig = Rig()
     held_master(store, rig.runtime)
     stalled(monkeypatch)

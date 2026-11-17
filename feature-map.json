@@ -1926,6 +1926,18 @@
       ]
     },
     {
+      "id": "night-watch-respawns-by-default",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: a swarm whose gates map names no night watch mode runs the night watch at deny, so an empty front door master seat is respawned at ten minutes and raises its seat alert instead of only logging a would-be respawn.",
+      "seam": "scripts.gates.enforcement.NIGHT_WATCH default mode through scripts.swarm.health.night_watch.run",
+      "tests": [
+        "tests/swarm/test_night_watch.py::test_the_night_watch_gate_defaults_to_deny",
+        "tests/swarm/test_night_watch.py::test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes"
+      ]
+    },
+    {
       "id": "swarm-night-watch-drill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
