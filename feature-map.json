@@ -6473,6 +6473,21 @@
       ]
     },
     {
+      "id": "controller-gh-token-in-process",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gh-token-in-process",
+      "behaviour": "A process that holds the GitHub App key in App mode, as the swarm controller does, runs every gh call of github_reads.rest on the real gh client with the installation token its own process minted and cached, keeping the read reserve check in process, so no Python token wrapper starts and no token is minted per call; a token it cannot mint or a read below the reserve is left to the gh wrapper unchanged, and a process without the key runs gh exactly as before.",
+      "seam": "scripts.swarm.github_reads.rest through scripts.swarm.github_reads._signed and scripts.github_app_cli.signed",
+      "tests": [
+        "tests/swarm/test_github_reads.py::test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token",
+        "tests/swarm/test_github_reads.py::test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper",
+        "tests/swarm/test_github_reads.py::test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged",
+        "tests/test_github_app_cli.py::test_signed_runs_the_wrapped_client_on_the_process_token_over_the_caller_environment",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_read_below_the_reserve_to_the_wrapper",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_token_the_process_cannot_mint_to_the_wrapper"
+      ]
+    },
+    {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
