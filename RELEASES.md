@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.971 · 2026-11-17
+
+### 2026-11-17 · 6f839f501806 · #11771 · @nestorcolt
+
+**Promotion fails at once when a job of its own graded run finished red**
+
+This change fixes `snapshotGradeComplete` in `.github/scripts/promote.cjs` so that when a job in the triggering run itself finishes with a conclusion other than success or skipped, promotion fails immediately and names the offending job and conclusion, rather than silently polling every five seconds until the thirty minute deadline expires. The outcome is unchanged—such runs never promote—but failures now surface in seconds instead of up to thirty minutes, and the `release-version` concurrency lock releases immediately, letting the next dev head start promotion sooner instead of being blocked behind a doomed wait.
+
+### 2026-11-17 · 37d9726252a5 · #11756 · @agenticore-app
+
+**Let the protected grader accept ledger load on pull requests that change the ledger server**
+
+This change updates the required-checks grader so that pull requests touching the ledger server must also pass a "ledger-load" check, by extending `ci_reuse.ledger_required` to append that requirement when selection marks a ledger change, while leaving merge-group and push grading untouched. The protected grader is updated to accept this new rendering and the corresponding `ledger` selection output. It is validated with red-then-green test runs and three review rounds, and doubles accepted renderings, roughly doubling grading time for the combination the Tests workflow uses, though results are cached per process.
+
 ## v2.17.970 · 2026-11-17
 
 ### 2026-11-17 · 387cfd648df0 · #11688 · @agenticore-app
