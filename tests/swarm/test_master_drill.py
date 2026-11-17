@@ -4,14 +4,16 @@ minutes of a drill clock."""
 
 import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from scripts.gates import log as gate_log
+from scripts.hive import reports
 from scripts.inbox.seats import seat_address
-from scripts.swarm import capacity, cli, master_drill
+from scripts.swarm import capacity, cli, master_drill, naming, reaper
 from scripts.swarm.health import merge_stall, night_watch
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MANUAL_SCALING, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -129,8 +131,12 @@ def successor(rig: SimpleNamespace) -> AgentRecord:
 
 @pytest.mark.feature("master-drill")
 def test_the_drill_retires_the_front_door_master_and_records_a_login_successor_forced_up_at_ten_minutes(
-    rig: SimpleNamespace,
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    home = tmp_path / "scratchpad" / "agentihooks" / naming.scratch_folder(SCRATCH, MASTER)
+    home.mkdir(parents=True)
+    monkeypatch.setattr(reaper, "SCRATCH", tmp_path / "scratchpad")
+    rig.store.update(SCRATCH, gates={"stall": "observe"})
     record = master_drill.run(drill(rig))
     found = successor(rig)
     assert record == {
@@ -154,7 +160,8 @@ def test_the_drill_retires_the_front_door_master_and_records_a_login_successor_f
     )
     assert OLD in rig.runtime.killed and OLD not in {agent.name for agent in rig.store.agents(SCRATCH)}
     assert json.loads(rig.store.redis.get(rig.store.key(SCRATCH, "master-drill"))) == record
-    assert rig.store.config(SCRATCH).gates["nightwatch"] == "enforce"
+    assert rig.store.config(SCRATCH).gates == {"stall": "observe", "nightwatch": "enforce"}
+    assert rig.runtime.homes[OLD] == [home.resolve()]
     assert rig.clock == [START + minute * MINUTE for minute in range(11)]
     assert [source for source, _ in rig.ledger.alerts] == ["seat"]
 
@@ -252,6 +259,21 @@ def test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recove
         "",
         False,
     )
+
+
+@pytest.mark.feature("master-drill")
+def test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_retire(rig: SimpleNamespace) -> None:
+    hived = "master@abc123-0003"
+    placed = AgentRecord(
+        hived, MASTER, MASTER, seat=front_door.seat(SCRATCH), started_at=NOW - 60 * MINUTE, hive="hive-a"
+    )
+    rig.store.start_execution(SCRATCH, placed)
+    report = {"observed_at": NOW, "names": ["eng@abc123-0009"]}
+    rig.store.redis.set(reports.key("hive-a"), json.dumps(report))
+    record = master_drill.run(drill(rig))
+    assert sorted(record["retired"]) == [OLD, hived]
+    assert rig.runtime.killed == [OLD] and hived not in {agent.name for agent in rig.store.agents(SCRATCH)}
+    assert (record["seated_minute"], record["recovered"]) == (10, True)
 
 
 @pytest.mark.feature("master-drill")

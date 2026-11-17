@@ -32,6 +32,7 @@
         "tests/swarm/test_master_drill.py::test_a_swarm_whose_master_retired_with_no_new_tasks_sleeps_through_the_drill",
         "tests/swarm/test_master_drill.py::test_a_task_added_since_the_master_retired_wakes_the_swarm_for_the_drill",
         "tests/swarm/test_master_drill.py::test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recovery",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_retire",
         "tests/swarm/test_master_drill.py::test_a_front_door_master_the_runtime_cannot_retire_refuses_the_drill",
         "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_swarm_that_is_not_a_scratch_proof_swarm_and_leaves_it_untouched",
         "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running_or_paused",

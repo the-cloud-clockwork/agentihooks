@@ -32,6 +32,9 @@ DRILL="$(cat <<'PY'
 import json
 import os
 import time
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 from scripts.swarm import master_drill
 from scripts.swarm.ledger_client import LedgerClient
@@ -46,24 +49,25 @@ store, slug, ledger = connect(), os.environ["SLUG"], LedgerClient(service=True)
 
 
 class StandIn:
-    def __init__(self):
-        self.live, self.launched = {OLD}, []
+    def __init__(self) -> None:
+        self.live: set[str] = {OLD}
+        self.launched: list[str] = []
 
-    def live_names(self):
+    def live_names(self) -> set[str]:
         return set(self.live)
 
-    def has_capacity(self, config):
+    def has_capacity(self, config: SwarmConfig) -> bool:
         return True
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Placed:
         self.live.add(name)
         self.launched.append(name)
         return Placed(pane_id=f"pane-{name}", harness="claude", account="login", route_kind="master-login")
 
-    def reported(self, agent):
+    def reported(self, agent: AgentRecord) -> bool:
         return agent.name in self.live
 
-    def retire(self, agent, homes=()):
+    def retire(self, agent: AgentRecord, homes: Sequence[Path] = ()) -> bool:
         self.live.discard(agent.name)
         return True
 

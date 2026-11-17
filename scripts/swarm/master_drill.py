@@ -11,7 +11,7 @@ from typing import Any
 from scripts.gates.enforcement import NIGHT_WATCH
 from scripts.swarm import lifetime as lifetime_module
 from scripts.swarm import naming, reaper, retire_watch
-from scripts.swarm.health import night_watch
+from scripts.swarm.health import night_watch as night_watch_module
 from scripts.swarm.health.findings import MINUTE_MS
 from scripts.swarm.master_start import seated
 from scripts.swarm.night_watch_drill import DRIVEN, ENFORCE, Drill, running
@@ -28,6 +28,7 @@ NOT_RETIRED = (
 )
 
 lifetime: Any = lifetime_module
+night_watch: Any = night_watch_module
 
 
 def refusal(drill: Drill) -> str:
@@ -39,8 +40,9 @@ def refusal(drill: Drill) -> str:
 
 
 def retire(drill: Drill) -> list[str]:
-    """Retire every front door master that has not finished through the runtime and drop its record, so the seat is
-    empty, and return their names; a master the runtime cannot retire refuses the drill and keeps its record."""
+    """Retire every front door master that has not finished through the runtime, or find its hive reports it gone, and
+    drop its record, so the seat is empty, and return their names. A master the runtime cannot retire refuses the drill
+    and keeps its record; masters retired before it stay retired."""
     retired: list[str] = []
     for agent in drill.store.agents(drill.slug):
         if agent.lane != MASTER or agent.state == "finished" or not front_door.holds(drill.slug, agent.seat):
@@ -65,14 +67,18 @@ def successor(drill: Drill) -> AgentRecord | None:
 
 
 def run(drill: Drill) -> dict[str, Any]:
-    """Retire the front door master, set the night watch gate to enforce and start its seat episode over, then pass the
-    night watch once a minute from thirty minutes back until a successor holds the seat; store the record."""
+    """Retire the front door master, set the night watch gate to enforce and start its seat episode and respawn budget
+    over, keeping its other episodes, then pass the night watch once a minute from thirty minutes back until a
+    successor holds the seat; store the record."""
     if why := refusal(drill):
         raise SwarmError(why)
     retired = retire(drill)
     gates: dict[str, str] = drill.store.config(drill.slug).gates
     drill.store.update(drill.slug, gates={**gates, NIGHT_WATCH.name: ENFORCE})
-    drill.store.redis.delete(drill.store.key(drill.slug, night_watch.KEY))
+    state: dict[str, Any] = night_watch.read(drill.store, drill.slug)
+    state.pop(night_watch.SEAT, None)
+    state.pop("respawns", None)
+    drill.store.redis.set(drill.store.key(drill.slug, night_watch.KEY), json.dumps(state))
     start = drill.now_ms - MINUTES * MINUTE_MS
     rows = {task["id"]: task for task in drill.doc["tasks"]}
     asleep = lifetime.sleeping(drill.slug, drill.store, rows)
