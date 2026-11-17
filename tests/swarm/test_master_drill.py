@@ -102,15 +102,16 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> SimpleNamespace:
     monkeypatch.setattr(merge_stall, "observe", lambda repo, at: {**QUIET, "at": at})
     monkeypatch.setattr(capacity, "ready_work", lambda slug, store, doc: ({}, {"eng": [], "ci": [], "plan": []}))
     seat_master(store, runtime, SCRATCH, OLD, front_door.seat(SCRATCH))
-    return SimpleNamespace(store=store, ledger=ledger, runtime=runtime, clock=[])
+    return SimpleNamespace(store=store, ledger=ledger, runtime=runtime, clock=[], docs=[])
 
 
 def drill(rig: SimpleNamespace, slug: str = SCRATCH, doc: dict[str, Any] | None = None) -> master_drill.Drill:
     """A drill on ``slug`` and ``doc``, by default a document with no tasks, through the tick's own night watch pass,
-    recording the clock of every pass."""
+    recording the clock and the ledger document of every pass."""
 
     def watch_pass(*args: Any) -> list[str]:
         rig.clock.append(args[5])
+        rig.docs.append(args[4])
         return masters._night_watch(*args)
 
     document = {"tasks": []} if doc is None else doc
@@ -164,6 +165,7 @@ def test_the_drill_retires_the_front_door_master_and_records_a_login_successor_f
     assert rig.store.config(SCRATCH).gates == {"stall": "observe", "nightwatch": "enforce"}
     assert rig.runtime.homes[OLD] == [home.resolve()]
     assert rig.clock == [START + minute * MINUTE for minute in range(11)]
+    assert rig.docs == [{"tasks": []}] * 11
     assert [source for source, _ in rig.ledger.alerts] == ["seat"]
 
 
