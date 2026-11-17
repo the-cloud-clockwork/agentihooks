@@ -2022,3 +2022,21 @@ def test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing(p
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
     assert git(publication.root, "show", "HEAD:chosen.txt") == "after"
     assert not (publication.root / ".git-gate-head").exists()
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch(publication, monkeypatch):
+    from hooks.context import blocker_window
+    from scripts.swarm import publish
+
+    asked = []
+
+    def held_push(cwd, branch):
+        asked.append((cwd, branch))
+
+    monkeypatch.setattr(blocker_window, "held_push", held_push)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert asked == [(str(publication.root), "engineer-test")]
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
