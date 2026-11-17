@@ -67,6 +67,7 @@ jobs:
     - name: Install dependencies
       if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
       env:
+        SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         PYTHON_PATH: ${{ steps.python.outputs.python-path }}
       run: 'uv venv --python "$PYTHON_PATH" "$HOME/venv"
 

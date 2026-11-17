@@ -1,0 +1,58 @@
+rules:
+  - id: feature-work-folder-follows-the-task
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-17 after the 16 November hive roll left successors on other hives with only steering: a hive
+      publishes the work folder of every execution it runs and keeps one copy per task under its own key, and the hub
+      seeds a successor from the hive that last launched the task. Consumer.sync_workspaces must take the host target,
+      else the hive on the execution record; ledger_workspace.sync must write each hosted task's copy under
+      task_files_key; Admission.launched must record the launching hive under WORK_FOLDER; Admission._seeds must read
+      that hive's task copy.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def sync_workspaces(...):
+                    ...
+              - pattern-not: |
+                  def sync_workspaces(...):
+                    ...
+                    $HOSTED = <... ($AGENT.runtime_target.get("host_id") or $AGENT.hive) == self.hive ...>
+                    ...
+          - patterns:
+              - pattern: |
+                  def sync(...):
+                    ...
+              - pattern-not: |
+                  def sync(...):
+                    ...
+                    for ... in hosted:
+                      ...
+                      $REDIS.set(task_files_key(...), ..., ex=FILES_SECONDS)
+                    ...
+          - patterns:
+              - pattern: |
+                  def launched(...):
+                    ...
+              - pattern-not: |
+                  def launched(...):
+                    ...
+                    $FOLDER = self.store.key($SLUG, WORK_FOLDER, ...)
+                    ...
+          - patterns:
+              - pattern: |
+                  def _seeds(...):
+                    ...
+              - pattern-not: |
+                  def _seeds(...):
+                    ...
+                    $HIVE = <... self.store.key($SLUG, WORK_FOLDER, ...) ...>
+                    $HELD = <... ledger_workspace.task_files_key(...) ...>
+                    ...
+    paths:
+      include:
+        - /scripts/hive/orders.py
+        - /scripts/swarm_ledger/ledger_workspace.py
+        - /scripts/hub/admission.py
+        - '*.test.py'

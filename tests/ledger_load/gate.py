@@ -3,6 +3,7 @@
 import argparse
 import ast
 import collections
+import importlib.util
 import inspect
 import itertools
 import json
@@ -14,15 +15,21 @@ import subprocess
 import sys
 import threading
 import time
+import types
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import BinaryIO, TextIO
+from typing import Any, BinaryIO, TextIO
 
-from scripts.swarm_ledger import api_service, ledger_server
+from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+
+if importlib.util.find_spec("scripts.swarm_ledger.api_service"):
+    from scripts.swarm_ledger import api_service
+else:
+    api_service = None
 
 authority, core = ledger_server.authority, ledger_server.core
 ROOT = Path(ledger_server.__file__).resolve().parents[2]
@@ -198,9 +205,17 @@ def write_every() -> float:
     return CLIENTS * 60 / (LIVE_PEAK_WRITES_PER_MINUTE * HEADROOM)
 
 
+def sweeper() -> types.ModuleType:
+    """The module whose loop sweeps the bin and expires alerts: the ledger API service, or the ledger server of a
+    revision from before the ledger write cutover."""
+    return api_service or ledger_server
+
+
 def duration() -> float:
-    interval = inspect.signature(api_service.upkeep).parameters["interval"].default
-    return (SWEEPS + 1) * api_service.BIN_SWEEP_EVERY * interval
+    owner = sweeper()
+    loop = owner.upkeep if api_service else owner.watch_ledgers
+    interval = inspect.signature(loop).parameters["interval"].default
+    return (SWEEPS + 1) * owner.BIN_SWEEP_EVERY * interval
 
 
 def busiest_window(samples: list[tuple[float, float]]) -> float | None:
@@ -229,7 +244,8 @@ def verdict(writes: list[float], expected: int, cores: float | None, errors: lis
 def unexpired(folder: Path, at: int) -> list[str]:
     """Alerts past their quiet hour that the expiry sweep should have closed during the load."""
     doc = SQLiteLedgerRepository(folder / DATABASE).export_document(SLUG)
-    return [alert["id"] for alert in doc.get("alerts", []) if api_service.ledger_alerts.expired(alert, at)]
+    alerts = sweeper().ledger_alerts
+    return [alert["id"] for alert in doc.get("alerts", []) if alerts.expired(alert, at)]
 
 
 def free_port() -> int:
@@ -307,6 +323,26 @@ def stop_server(server: subprocess.Popen) -> None:
         server.wait()
     if relay := RELAYS.pop(server.pid, None):
         relay.join()
+
+
+def start_servers(
+    folder: Path, write_port: int, read_port: int, log: TextIO, read_log: TextIO
+) -> list[subprocess.Popen]:
+    """The ledger API service taking writes, then the read only ledger server taking reads; on a revision from
+    before the ledger write cutover, the one ledger server that takes both."""
+    if api_service is None:
+        return [start_server(folder, write_port, log)]
+    return [
+        start_server(
+            folder,
+            write_port,
+            log,
+            argv=[sys.executable, "-m", "scripts.swarm_ledger.api_service", "--serve"],
+            extra_env={"LEDGER_API_HOST": "127.0.0.1", "LEDGER_API_PORT": str(write_port)},
+            cwd=str(ROOT),
+        ),
+        start_server(folder, read_port, read_log),
+    ]
 
 
 def client(
@@ -399,6 +435,20 @@ def preflight(api: ResourceClient, name: str, item: str) -> None:
         raise SystemExit(f"write preflight refused: write rejected: {rejected}")
 
 
+class Front(ResourceClient):
+    """One load client's writer, routed as the ledger front routes requests: every GET, the guard revision read of
+    each write included, to the read only ledger server, and every POST to the ledger API service."""
+
+    def __init__(self, write_base: str, read_base: str, credentials: dict[str, str]) -> None:
+        super().__init__(write_base, credentials, TIMEOUT_S)
+        self.read = ResourceClient(read_base, credentials, TIMEOUT_S)
+
+    def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if payload is None:
+            return self.read.request(slug, path)
+        return super().request(slug, path, payload)
+
+
 def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
     write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
     results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
@@ -406,10 +456,9 @@ def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) 
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
         credentials = {"X-Ledger-Token": authority.agent_token(token, SLUG, name), "X-Ledger-Agent": name}
-        writer = ResourceClient(write_base, credentials, TIMEOUT_S)
-        reader_client = ResourceClient(read_base, credentials, TIMEOUT_S)
+        writer = Front(write_base, read_base, credentials)
         writer.mutate(SLUG, [{"op": "join", "id": f"join-{uuid.uuid4().hex[:10]}", "by": name, "role": "member"}])
-        apis.append((writer, reader_client, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
+        apis.append((writer, writer.read, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
     preflight(apis[0][0], apis[0][2], apis[0][3])
     began = time.monotonic()
     deadline = began + seconds
@@ -437,24 +486,17 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     doc = full_size(core.now_ms())
     token = store(folder, doc)
     print(f"ledger {SLUG}: {len(doc['tasks'])} tasks, {size(doc)} bytes", flush=True)
-    write_port, read_port = free_port(), free_port()
+    write_port = free_port()
+    read_port = free_port() if api_service else write_port
     seconds = duration()
     log_path, read_log_path = folder / "server.log", folder / "server-read.log"
     with log_path.open("w") as log, read_log_path.open("w") as read_log:
-        write_server = start_server(
-            folder,
-            write_port,
-            log,
-            argv=[sys.executable, "-m", "scripts.swarm_ledger.api_service", "--serve"],
-            extra_env={"LEDGER_API_HOST": "127.0.0.1", "LEDGER_API_PORT": str(write_port)},
-            cwd=str(ROOT),
-        )
-        read_server = start_server(folder, read_port, read_log)
+        servers = start_servers(folder, write_port, read_port, log, read_log)
         try:
-            results = load(write_port, read_port, token, write_server.pid, seconds)
+            results = load(write_port, read_port, token, servers[0].pid, seconds)
         finally:
-            stop_server(read_server)
-            stop_server(write_server)
+            for server in reversed(servers):
+                stop_server(server)
     writes, cores = results["writes"], busiest_window(results["cpu"])
     expected = CLIENTS * math.ceil(seconds / write_every())
     problems = verdict(writes, expected, cores, results["errors"])
