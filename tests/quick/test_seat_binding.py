@@ -176,6 +176,17 @@ def test_a_relaunch_whose_agent_never_records_its_session_leaves_the_seat_pendin
 
 
 @pytest.mark.feature("quick-seat-binding")
+def test_a_relaunch_whose_agent_exits_never_waits_for_its_session(tmp_path: Path) -> None:
+    folder = _swarm(tmp_path, master_state=registry.PENDING)
+    naps: list[float] = []
+    outcome = launch.relaunch(
+        folder, "master", _home(tmp_path), bare=lambda pane: True, start=lambda a, e: 0, wait_s=0.0, sleep=naps.append
+    )
+    assert outcome == "exited" and naps == [launch.POLL_S]
+    assert _master(folder).state == registry.PENDING
+
+
+@pytest.mark.feature("quick-seat-binding")
 def test_an_unbound_relaunch_fails_the_command_loudly(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -208,6 +219,23 @@ def test_adopt_seats_a_live_session_started_outside_the_swarm(
     paths.handoff(folder, "master").write_text(HANDOFF)
     assert cli.main(["handoff"], unbound) == 0
     assert _master(folder).state == registry.PENDING
+
+
+@pytest.mark.feature("quick-seat-binding")
+def test_a_live_session_in_the_seats_own_pane_adopts_it_to_record_its_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = _swarm(tmp_path)
+    monkeypatch.setattr(cli.guard, "require", lambda environ: "w1:p8")
+    monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: Herdr({"w1:p8": False}))
+    here = {**_home(tmp_path), "HERDR_PANE_ID": "w1:p8", "CLAUDE_CODE_SESSION_ID": NEW}
+    assert cli.main(["relaunch", "master", "--folder", str(folder), "--adopt"], here) == 0
+    assert capsys.readouterr().out == "adopted\n"
+    assert (_master(folder).pane_id, _master(folder).session_id, _master(folder).state) == (
+        "w1:p8",
+        NEW,
+        registry.READY,
+    )
 
 
 @pytest.mark.feature("quick-seat-binding")
@@ -264,3 +292,42 @@ def test_adopt_with_no_session_id_seats_the_pane_alone(
     sub = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction))
     option = sub.choices["relaunch"]._option_string_actions["--adopt"]
     assert option.help == "Record this live session and its herdr pane as the seat's occupant"
+
+
+@pytest.mark.feature("quick-seat-binding")
+def test_bind_needs_the_seat_variables_a_pane_and_a_session_and_returns_the_recorded_seat(tmp_path: Path) -> None:
+    folder = _swarm(tmp_path, master_state=registry.LAUNCHING)
+    seated = {**_home(tmp_path), member.DIR_ENV: str(folder), member.SEAT_ENV: "master", "HERDR_PANE_ID": "w1:pA"}
+    assert member.bind(seated, "") is None
+    assert member.bind({**seated, "HERDR_PANE_ID": ""}, NEW) is None
+    assert member.bind({**_home(tmp_path), "HERDR_PANE_ID": "w1:p8"}, NEW) is None
+    assert (_master(folder).pane_id, _master(folder).session_id) == ("w1:p8", OLD)
+    found = member.bind(seated, NEW)
+    assert found is not None and found.folder == folder
+    assert (found.seat.seat, found.seat.pane_id, found.seat.session_id) == ("master", "w1:pA", NEW)
+    assert found.swarm.seat("master") == found.seat == _master(folder)
+
+
+@pytest.mark.feature("quick-seat-binding")
+def test_the_bind_wait_polls_each_interval_and_needs_a_session_other_than_the_predecessors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    folder = _swarm(tmp_path, master_state=registry.LAUNCHING)
+    before = _master(folder)
+    monkeypatch.setattr(launch, "POLL_S", 0.5)
+    naps: list[float] = []
+    assert launch.bound(folder, before, wait_s=2.0, sleep=naps.append) is False
+    assert naps == [0.5] * 4
+    registry.bind(folder, "master", "w1:p8", OLD)
+    assert launch.bound(folder, before, wait_s=0.0, sleep=naps.append) is False
+    registry.bind(folder, "master", "w1:p8", "")
+    assert launch.bound(folder, before, wait_s=0.0, sleep=naps.append) is False
+    assert launch.bound(tmp_path / "gone", before, wait_s=0.0, sleep=naps.append) is False
+
+    def later(seconds: float) -> None:
+        naps.append(seconds)
+        registry.bind(folder, "master", "w1:p8", NEW)
+
+    naps.clear()
+    assert launch.bound(folder, before, wait_s=2.0, sleep=later) is True
+    assert naps == [0.5]

@@ -94,6 +94,23 @@ def exited(
     return sorted(gone)
 
 
+def _recorded(folder: Path, before: registry.Seat) -> bool:
+    swarm = registry.load(folder)
+    seat = swarm.seat(before.seat) if swarm else None
+    return seat is not None and seat.session_id not in ("", before.session_id)
+
+
+def bound(
+    folder: Path, before: registry.Seat, *, wait_s: float = BIND_S, sleep: Callable[[float], None] = time.sleep
+) -> bool:
+    """Whether the seat's new agent recorded a session other than its predecessor's within ``wait_s``."""
+    for _ in range(round(wait_s / POLL_S)):
+        if _recorded(folder, before):
+            return True
+        sleep(POLL_S)
+    return _recorded(folder, before)
+
+
 def relaunch(
     folder: Path,
     seat_name: str,
@@ -107,7 +124,8 @@ def relaunch(
     """Start the successor of a pending seat once its pane is back at a bare shell; the outcome.
 
     The seat stays launching while the successor is watched for SETTLE_S seconds, whatever ``wait_s`` says; one whose
-    agent exits back to a bare shell in that window leaves the seat pending.
+    agent exits back to a bare shell in that window leaves the seat pending, and so does one whose agent never records
+    its own session in the seat within BIND_S seconds more.
     """
     taken = registry.take(folder, seat_name, registry.PENDING, registry.LAUNCHING)
     swarm = registry.load(folder)
@@ -119,15 +137,18 @@ def relaunch(
             registry.set_state(folder, seat_name, registry.PENDING)
             return "pane-busy"
         sleep(POLL_S)
-    code, gone = 1, True
+    ready = False
     try:
         code = start_seat(folder, swarm, taken, base, start)
         gone = code != 0 or bool(exited([taken], bare, sleep=sleep))
+        ready = not gone and bound(folder, taken, sleep=sleep)
     finally:
-        registry.set_state(folder, seat_name, registry.PENDING if gone else registry.READY)
+        registry.set_state(folder, seat_name, registry.READY if ready else registry.PENDING)
     if code != 0:
         return f"failed-{code}"
-    return "exited" if gone else "started"
+    if gone:
+        return "exited"
+    return "started" if ready else "unbound"
 
 
 def end_agent(name: str) -> None:
@@ -166,3 +187,21 @@ def force(
     finally:
         registry.set_state(folder, seat_name, registry.PENDING)
     return relaunch(folder, seat_name, base, bare=bare, start=start, sleep=sleep)
+
+
+def adopt(folder: Path, seat_name: str, pane_id: str, session_id: str, *, bare: Callable[[str], bool | None]) -> str:
+    """Make the live session in ``pane_id`` the seat's ready occupant; the outcome.
+
+    A pane another seat holds, a seat whose recorded pane still runs an agent and a seat being launched are never
+    adopted.
+    """
+    swarm = registry.load(folder)
+    seat = swarm.seat(seat_name) if swarm else None
+    if swarm is None or seat is None:
+        return "no-seat"
+    holder = swarm.at_pane(pane_id)
+    if holder is not None and holder.seat != seat_name:
+        return f"pane-of-{holder.seat}"
+    if seat.pane_id != pane_id and bare(seat.pane_id) is False:
+        return "occupied"
+    return "adopted" if registry.adopt(folder, seat_name, pane_id, session_id) else "launching"

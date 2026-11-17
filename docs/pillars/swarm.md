@@ -80,6 +80,11 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   never types into a pane at a bare shell, where herdr
   can still report the exited agent idle and the shell would run the text as a command, nor into a busy pane or
   one holding typed text. It never nudges the master and retries a prompt herdr did not take on the next round.
+- A relaunched seat's agent records its herdr pane and session id in the seat at its first hook, while the seat
+  reads launching, so it stays a member without its seat variables. A relaunch whose agent never records itself
+  leaves the seat pending and fails loudly. `agentihooks quick relaunch <seat> --folder <folder> --adopt`, run
+  from a live session, records that session and its pane as the seat's occupant; it never takes a launching seat,
+  a seat whose recorded pane still runs an agent, or another seat's pane.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
 
 ## Event driven engine

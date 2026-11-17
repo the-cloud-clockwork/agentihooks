@@ -8307,7 +8307,11 @@
         "tests/quick/test_seat_binding.py::test_a_relaunch_whose_agent_never_records_its_session_leaves_the_seat_pending",
         "tests/quick/test_seat_binding.py::test_an_unbound_relaunch_fails_the_command_loudly",
         "tests/quick/test_seat_binding.py::test_adopt_seats_a_live_session_started_outside_the_swarm",
-        "tests/quick/test_seat_binding.py::test_adopt_never_takes_a_launching_seat_a_seat_whose_agent_runs_or_another_seats_pane"
+        "tests/quick/test_seat_binding.py::test_adopt_never_takes_a_launching_seat_a_seat_whose_agent_runs_or_another_seats_pane",
+        "tests/quick/test_seat_binding.py::test_bind_needs_the_seat_variables_a_pane_and_a_session_and_returns_the_recorded_seat",
+        "tests/quick/test_seat_binding.py::test_the_bind_wait_polls_each_interval_and_needs_a_session_other_than_the_predecessors",
+        "tests/quick/test_seat_binding.py::test_a_relaunch_whose_agent_exits_never_waits_for_its_session",
+        "tests/quick/test_seat_binding.py::test_a_live_session_in_the_seats_own_pane_adopts_it_to_record_its_session"
       ]
     }
   ],
