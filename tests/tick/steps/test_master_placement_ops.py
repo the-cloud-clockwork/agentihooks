@@ -406,7 +406,22 @@ def test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced(monk
     assert said[0] == f"spawned master {_master_record().name}"
     assert asked == [{"forced": True}]
     assert [task.get("forced") for task in prepared] == [True]
-    assert ["forced" in call[1][3] for call in starts] == [False]
+    assert [call[1][3].get("forced") for call in starts] == [True]
+
+
+@pytest.mark.feature("forced-master-start")
+@pytest.mark.usefixtures("placed")
+def test_an_unforced_tick_replays_a_forced_pending_start_forced(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    starts, prepared = _placement(monkeypatch, calls, {"task": {"id": MASTER, "forced": True}})
+    asked: list[dict[str, bool]] = []
+    monkeypatch.setattr(tick.seat_spawn, "placed_elsewhere", lambda runtime, lane, task: asked.append(task) or "")
+    monkeypatch.setattr(tick.seat_spawn, "no_slot", lambda config, runtime, lane: "no session slot for the master")
+    config = SimpleNamespace(state="running")
+    said = masters._master("sw", config, _store(calls), _runtime(calls), NOW)
+    assert said[0] == f"spawned master {_master_record().name}"
+    assert (asked, [task["forced"] for task in prepared]) == ([{"forced": True}], [True])
+    assert [call[1][3]["forced"] for call in starts] == [True]
 
 
 @pytest.mark.feature("forced-master-start")

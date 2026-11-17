@@ -198,12 +198,13 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
         transfer = transfers.attach(store, slug, record)
         task = {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer}
         task = _filled(primed(store, slug, record.seat, task), config)
+        task = {**task, "forced": True} if forced else task
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
         capacity.feed_spent(runtime, store, at)
         if reader := getattr(runtime, "quota_capacity", None):
             reader(config, store.agents(slug), at / 1000)
-        placed = runtime.spawn(config, MASTER, name, {**task, "forced": True} if forced else task)
+        placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)

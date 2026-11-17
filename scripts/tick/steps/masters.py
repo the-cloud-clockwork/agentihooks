@@ -363,6 +363,7 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, force
     retired = store.key(slug, "retired-process")
     masters = [m for m in masters if tick.master_seats.is_lead(slug, m) and not store.redis.hexists(retired, m.name)]
     pending = tick.master_start.read(store, slug)
+    forced = forced or bool(pending.get("task", {}).get("forced"))
     if any(m.state != "finished" for m in masters) or tick.master_start.blocked(pending, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
@@ -395,10 +396,11 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, force
         from scripts.swarm import master_launch
 
         task = master_launch._filled(tick.master_move.pinned(store, slug, task, transfer), config)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType]
+        task = {**task, "forced": True} if forced else task  # pyright: ignore[reportUnknownVariableType]
         tick.master_start.begin(store, slug, record.name, task, now_ms)
         tick.affinity.handed_off(store, slug)
         launched.update(task)  # pyright: ignore[reportUnknownMemberType]
-        return {**task, "forced": True} if forced else task  # pyright: ignore[reportUnknownVariableType]
+        return task  # pyright: ignore[reportUnknownVariableType]
 
     try:
         record, placed = tick.seat_spawn.place(slug, config, store, runtime, tick.MASTER, now_ms, prepare)
