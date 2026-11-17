@@ -156,12 +156,13 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
             delivered = time.monotonic() - began
             if any(result["patches"] != len(writes) or result["errors"] for result in consumers):
                 raise RuntimeError(
-                    f"streams did not receive every write {gate.TIMEOUT_S:g} s after the window: {consumers}"
+                    f"streams did not receive every write {gate.TIMEOUT_S:g} s after the window, last write at"
+                    f" {last_write:.2f} s, waited to {delivered:.2f} s: {consumers}"
                 )
             if delivered - last_write > FOLLOW_PASS_S:
                 raise RuntimeError(
-                    f"streams received the last write {delivered - last_write:.2f} s after it, past one follow pass"
-                    f" of {FOLLOW_PASS_S:g} s"
+                    f"streams received the last write {delivered - last_write:.2f} s after it, last write at"
+                    f" {last_write:.2f} s, delivered at {delivered:.2f} s, past one follow pass of {FOLLOW_PASS_S:g} s"
                 )
             return {
                 "streams": streams,
