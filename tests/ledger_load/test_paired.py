@@ -109,6 +109,17 @@ def test_each_load_pair_job_allows_as_long_as_the_hierarchy_job_that_runs_the_sa
     assert load["timeout-minutes"] >= hierarchy["timeout-minutes"]
 
 
+def test_each_pair_install_pins_the_version_so_setuptools_scm_runs_no_git_status() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]
+    install = "Install dependencies shared by both revisions"
+    for name in ("hierarchy", "load"):
+        [step] = [step for step in jobs[name]["steps"] if step.get("name") == install]
+        assert (
+            step.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS") == "0.dev${{ github.run_number }}"
+        )
+        assert "-e '.[dev,all]'" in step["run"]
+
+
 def compare_mode() -> tuple[int, float]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]
     pairs = jobs.get("compare", {}).get("strategy", {}).get("matrix", {}).get("pair", [1, 2])
