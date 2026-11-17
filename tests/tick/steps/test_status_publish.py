@@ -1,6 +1,7 @@
 """The status publish tick step publishes the pass's health findings, else the last published ones, and leaves them
-for the status report to build only in a failed pass and before the swarm's first publish."""
+for the status report to build only in a failed pass or while the swarm has no published findings."""
 
+import json
 from importlib import import_module
 from typing import Any
 
@@ -95,3 +96,21 @@ def test_status_publish_keeps_the_findings_the_pass_stored(store: RedisStore, mo
     """A pass whose health findings step stored findings publishes those, never the last published ones."""
     published(store, LAST)
     assert publish(store, {"found": FOUND}, monkeypatch) == [FOUND]
+
+
+@pytest.mark.feature("tick-status-publish-last-findings")
+def test_status_publish_keeps_an_empty_list_the_pass_stored(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pass whose health findings step found nothing publishes no findings, never the last published ones."""
+    published(store, LAST)
+    assert publish(store, {"found": []}, monkeypatch) == [[]]
+
+
+@pytest.mark.feature("tick-status-publish-last-findings")
+@pytest.mark.parametrize("status", [{}, None], ids=["status without findings", "payload without status"])
+def test_status_publish_leaves_the_findings_to_the_report_when_the_last_publish_holds_none(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, status: dict[str, object] | None
+) -> None:
+    """A last published status without findings, or a payload without a status, leaves them for the report to build."""
+    payload = {"workspaces": {}} if status is None else {"status": status, "workspaces": {}}
+    store.redis.set(store.key(SLUG, "published"), json.dumps(payload))
+    assert publish(store, {}, monkeypatch) == [None]

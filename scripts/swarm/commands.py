@@ -121,9 +121,10 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 
 
 def published_findings(store: RedisStore, slug: str) -> list[dict[str, Any]] | None:
-    """Return the health findings of the status swarm ``slug`` last published, or None before its first publish."""
+    """Return the health findings of the status swarm ``slug`` last published, or None before its first publish or
+    when that status carries none."""
     raw = cast(str | None, store.redis.get(store.key(slug, "published")))  # pyright: ignore[reportUnknownMemberType]
-    return json.loads(raw)["status"].get("findings") if raw else None
+    return json.loads(raw or "{}").get("status", {}).get("findings")
 
 
 def view(store: RedisStore, slug: str) -> dict:

@@ -238,7 +238,7 @@ def early_end(store: Any, slug: str, missing: KeyError, left: list[str]) -> list
 def _status_publish(cli: Any, get: Get) -> None:
     """Publish the tick status with the health findings this pass found. A passing pass whose health step stored none
     publishes those of the last published status, so the closing lane never rebuilds them under its own budget; a
-    failed pass and the first publish leave them for the report to build."""
+    failed pass, or a swarm with no published findings yet, leaves them for the report to build."""
     found = get("box").get("found")
     if found is None and get("failure") is None:
         found = commands.published_findings(get("store"), get("slug"))
