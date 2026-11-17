@@ -5,7 +5,7 @@ rules:
     message: >-
       The panic tick pass runs at the end of every controller pass. Running the cancel sweep inside it, one gh call
       per open fix pull request, per panic repository run listing and per cancel, held each pass a median of 117 s,
-      at most 140 s, after its step graph while panic was on (issue 11692). Start the sweep from tick_pass on its own
+      up to 139.5 s, after its step graph while panic was on (issue 11692). Start the sweep from tick_pass on its own
       thread, one at a time, and let it report its lines through the callback the pass gives.
     paths:
       include:

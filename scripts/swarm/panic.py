@@ -328,9 +328,9 @@ def tick_pass(
     thread = Thread(target=_sweep, args=(current.fixes, ports, store, report), name="panic-sweep", daemon=True)
     try:
         thread.start()
-    except BaseException:
+    except RuntimeError as error:
         SWEEP.release()
-        raise
+        return [*actions, f"panic cancel failed: {error}"]
     return actions
 
 

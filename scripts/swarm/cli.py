@@ -2961,6 +2961,7 @@ def dispatch(argv):
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:
+        panic.settle()
         if handler is cmd_status and outage.show(args.slug, args.json):
             return 0
         return failed(args, who, exc)
