@@ -83,6 +83,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `AGENTIHOOKS_BUS_URL` | The NATS URL; default `nats://127.0.0.1:4222`. |
 | `AGENTIHOOKS_BUS_CREDENTIALS` | A NATS credentials file, or `openbao:<path>`, which reads that record's `credentials` field. |
 | `AGENTIHOOKS_BUS_BIND` | `1` binds to streams and buckets the hub created, without creating any itself. |
+| `AGENTIHOOKS_BUS_REPLICAS` | Replica count of every stream and bucket a provisioning bus creates; default `1`. At start it raises each stream holding fewer replicas in place and keeps a higher count. Set it to the server count of a NATS cluster; a single server refuses more than one. |
 
 A hive gets these settings from its invite. The hub operator runs `agentihooks hive invite <label> --bus-url <url>`.
 On the hive, `agentihooks hive join <invite>` writes `AGENTIHOOKS_BUS=nats` and the URL into `hive.env`. When the

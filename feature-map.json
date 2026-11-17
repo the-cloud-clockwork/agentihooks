@@ -7816,6 +7816,20 @@
         "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step",
         "tests/tick/test_step_failure.py::test_the_wrapper_asks_the_tick_sites_first_so_a_stopped_step_needing_a_raised_step_falls_too"
       ]
+    },
+    {
+      "id": "swarm-streams-hold-the-bus-replica-count",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-nats-replicas-spread-nodes",
+      "behaviour": "A provisioning bus creates every JetStream stream and key value bucket at the replica count of AGENTIHOOKS_BUS_REPLICAS, default one, and raises each existing stream holding fewer replicas in place with its messages, buckets outside the state limits included; a bus at a lower count keeps a stream's higher count, and any other configuration difference still fails the create.",
+      "seam": "scripts.events.config.BusConfig.replicas, scripts.events.nats_replicas.create and raise_all, observed through scripts.events.nats.open_bus with scoped views, queues and state buckets on a three server JetStream cluster",
+      "rules": ["bus-stream-created-without-replicas"],
+      "tests": [
+        "tests/events/test_nats_replicas.py::test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count",
+        "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
+        "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count",
+        "tests/events/test_nats_replicas.py::test_the_replica_count_defaults_to_one_and_comes_from_the_environment"
+      ]
     }
   ],
   "unmapped_rules": [
