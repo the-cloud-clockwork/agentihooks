@@ -1,13 +1,17 @@
 import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.hive import bundle_refresh
+from tests.helpers import service_path
 
 pytestmark = pytest.mark.unit
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
 ENSURE = (
-    ["agentihooks", "deps", "ensure", "--quiet"],
+    [sys.executable, "-P", "-m", "scripts.install", "deps", "ensure", "--quiet"],
     {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -42,11 +46,12 @@ def _hive(tmp_path, root, branch="dev", first="deps.json"):
 
 
 @pytest.fixture
-def ensures(monkeypatch):
-    calls, real = [], subprocess.Popen
+def ensures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], dict[str, Any]]]:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    real = subprocess.Popen
 
-    def popen(argv, *args, **kwargs):
-        if argv[:1] != ["agentihooks"]:
+    def popen(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if argv[-3:] != ["deps", "ensure", "--quiet"]:
             return real(argv, *args, **kwargs)
         calls.append((argv, kwargs))
 
@@ -154,13 +159,13 @@ def test_a_stuck_or_missing_git_never_stops_the_daemon(tmp_path, monkeypatch, en
     ]
 
 
-def test_a_missing_agentihooks_command_never_stops_the_daemon(tmp_path, monkeypatch):
+def test_a_missing_agentihooks_command_never_stops_the_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     remote, bundle, environ = _hive(tmp_path, tmp_path / "root")
     merged = _commit(remote, "deps.json", "wrapped gh")
     real = subprocess.Popen
 
-    def popen(argv, *args, **kwargs):
-        if argv[:1] == ["agentihooks"]:
+    def popen(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if argv[-3:] == ["deps", "ensure", "--quiet"]:
             raise FileNotFoundError("agentihooks")
         return real(argv, *args, **kwargs)
 
@@ -168,3 +173,18 @@ def test_a_missing_agentihooks_command_never_stops_the_daemon(tmp_path, monkeypa
 
     assert bundle_refresh.refresh(0.0, 900.0, environ) == 900.0
     assert _head(bundle) == merged
+
+
+@pytest.mark.feature("service-commands-run-through-interpreter")
+def test_the_deps_ensure_a_manifest_change_starts_resolves_under_the_systemd_default_path(
+    tmp_path: Path, ensures: list[tuple[list[str], dict[str, Any]]]
+) -> None:
+    remote, _, environ = _hive(tmp_path, tmp_path / "root")
+    _commit(remote, "deps.json", "wrapped gh")
+
+    assert bundle_refresh.refresh(0.0, 900.0, environ) == 900.0
+
+    [(argv, _)] = ensures
+    done = service_path.help_run(argv, tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert "ensure" in done.stdout

@@ -32,7 +32,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | master down | master seats | tick | 2 | 60 | drained resume | none | none |
 | master scale | master seats | tick | 2 | 60 | drained resume | none | none |
 | seat alarm | master seats | tick | 2 | 60 | ledger state | none | none |
-| tick master | master seats | tick | 2 | 60 | drained resume | none | none |
+| tick master | master seats | tick | 2 | 60 | drained resume | none | master-launch-lock |
 | master alarm | master watch | slow | 2 | 60 | none | none | none |
 | night watch | master watch | slow | 22 | 120 | ledger state, sleeping | none | none |
 | master stall | masters | slow | 2 | 60 | drained resume | none | none |
