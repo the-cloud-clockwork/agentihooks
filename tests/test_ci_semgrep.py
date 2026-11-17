@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -160,6 +161,113 @@ def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_ta
     fixture = (_ROOT / ".semgrep/tick-unbounded-read.test.py").read_text()
     assert fixture.count("# ruleid: tick-unbounded-store-read") == 12
     assert fixture.count("# ok: tick-unbounded-store-read") == 10
+
+
+EXCEPTION_RULE = """rules:
+  - id: planted-rule
+    languages: [python]
+    severity: ERROR
+    message: planted
+    patterns:
+      - pattern: planted(...)
+      - pattern-not: planted(1)
+    paths:
+      exclude: [/kept.py]
+"""
+GROWN_NOT = EXCEPTION_RULE.replace("planted(1)\n", "planted(1)\n      - pattern-not-inside: kept(...)\n")
+EXCEPTION_BASE: dict[str, str | None] = {
+    ".semgrep/planted-allowlist.json": '["/kept.py"]\n',
+    ".semgrep/features/planted.yml": EXCEPTION_RULE,
+    ".semgrep/features/planted.test.yaml": "rules:\n  - id: planted-rule\n    pattern-not: one\n",
+}
+EXCEPTION_CASES: dict[str, tuple[dict[str, str | None], int, str]] = {
+    "pattern-not-grows": (
+        {".semgrep/features/planted.yml": GROWN_NOT},
+        1,
+        "planted-rule pattern-not entries grew from 1 to 2",
+    ),
+    "path-exclude-grows": (
+        {".semgrep/features/planted.yml": EXCEPTION_RULE.replace("[/kept.py]", "[/kept.py, /new.py]")},
+        1,
+        "planted-rule path excludes grew from 1 to 2",
+    ),
+    "exceptions-shrink": (
+        {
+            ".semgrep/features/planted.yml": EXCEPTION_RULE.replace("      - pattern-not: planted(1)\n", "").replace(
+                "[/kept.py]", "[]"
+            )
+        },
+        0,
+        "Own rule exceptions: 0 pattern-not entries and 0 path excludes in 1 rules; the merge base holds 1 and 1 in 1 rules",
+    ),
+    "new-rule-starts-its-counts": (
+        {".semgrep-incidents/new.yml": GROWN_NOT.replace("planted-rule", "new-rule")},
+        0,
+        "Own rule exceptions: 3 pattern-not entries and 2 path excludes in 2 rules; the merge base holds 1 and 1 in 1 rules",
+    ),
+    "fixture-is-not-a-rule": (
+        {
+            ".semgrep/features/planted.test.yaml": "rules:\n  - id: planted-rule\n    pattern-not: one\n    pattern-not-inside: two\n"
+        },
+        0,
+        "Own rule exceptions: 1 pattern-not entries and 1 path excludes in 1 rules; the merge base holds 1 and 1 in 1 rules",
+    ),
+    "no-rule-file": (
+        {".semgrep/features/planted.yml": None},
+        1,
+        "No rule file under a .semgrep folder; the check graded nothing",
+    ),
+}
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _commit(repo: Path, files: dict[str, str | None], message: str) -> str:
+    for name, text in files.items():
+        path = repo / name
+        if text is None:
+            path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _run_exceptions_step(tmp_path: Path, head: dict[str, str | None]) -> subprocess.CompletedProcess[str]:
+    step = next(step for step in _jobs()["scan"]["steps"] if step.get("name") == "Rule exceptions only shrink")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "dev")
+    base = _commit(repo, EXCEPTION_BASE, "base")
+    _commit(repo, head, "head")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
+    (tools / "python").chmod(0o755)
+    env = {**os.environ, "BASE": base, "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"}
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+@pytest.mark.feature("semgrep-rule-exceptions-shrink")
+@pytest.mark.parametrize("head,code,line", list(EXCEPTION_CASES.values()), ids=list(EXCEPTION_CASES))
+def test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude(
+    tmp_path: Path, head: dict[str, str | None], code: int, line: str
+) -> None:
+    done = _run_exceptions_step(tmp_path, head)
+    assert done.returncode == code, done.stdout + done.stderr
+    assert line in done.stdout + done.stderr
+    assert ".semgrep/planted-allowlist.json exceptions: 1 of 1" in done.stdout
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():

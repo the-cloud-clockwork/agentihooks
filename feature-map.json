@@ -7961,6 +7961,16 @@
         "tests/swarm/test_master_replace.py::test_master_up_replace_retires_a_starting_front_door_master_before_it_starts_one",
         "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant"
       ]
+    },
+    {
+      "id": "semgrep-rule-exceptions-shrink",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-exceptions-shrink",
+      "behaviour": "The Semgrep scan step Rule exceptions only shrink counts, per rule id, the pattern-not, pattern-not-inside and pattern-not-regex entries at any depth and the paths.exclude entries of every rule file in each .semgrep folder at the merge base and on the head, fails naming each count of a rule the merge base holds that grew, lets a rule the merge base lacks start its counts, skips fixtures and is red when the head holds no rule file, so a pull request cannot add an exception inside a rule unseen.",
+      "seam": "The Semgrep scan step Rule exceptions only shrink run text, executed over a planted repository whose head changes one rule's exceptions",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
+      ]
     }
   ],
   "unmapped_rules": [
