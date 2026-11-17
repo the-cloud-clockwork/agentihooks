@@ -1,7 +1,11 @@
 import json
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -46,6 +50,57 @@ def test_stream_load_refuses_to_run_on_the_shared_machine(monkeypatch, tmp_path)
         streams.main(["--base", "base", "--head", "head", "--folder", str(tmp_path)])
     assert error.value.code == 2
     assert not (tmp_path / "streams.json").exists()
+
+
+LAG_S = 0.8
+
+
+class Lagging:
+    """A front and read server pair whose streams count each write LAG_S seconds after it is acknowledged."""
+
+    def __init__(self) -> None:
+        self.results: list[dict[str, Any]] = []
+
+    def consume(
+        self, base: str, token: str, ready: threading.Event, stop: threading.Event, result: dict[str, Any]
+    ) -> None:
+        result["snapshots"] += 1
+        self.results.append(result)
+        ready.set()
+
+    def mutate(self, slug: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
+        for result in self.results:
+            timer = threading.Timer(LAG_S, self.publish, args=(result,))
+            timer.daemon = True
+            timer.start()
+        return {"data": {"rejected": []}}
+
+    def publish(self, result: dict[str, Any]) -> None:
+        result["patches"] += 1
+
+
+@contextmanager
+def idle(*servers: object) -> Iterator[tuple[SimpleNamespace, SimpleNamespace]]:
+    """Stand in for the ledger API service and the read server without starting either."""
+    yield SimpleNamespace(pid=0), SimpleNamespace(pid=0)
+
+
+def test_the_delivery_check_waits_for_a_patch_published_after_the_measurement_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    server = Lagging()
+    monkeypatch.setattr(streams, "SECONDS", 1)
+    monkeypatch.setattr(streams, "WRITES_PER_SECOND", 2)
+    monkeypatch.setattr(streams, "serving", idle)
+    monkeypatch.setattr(streams, "consume", server.consume)
+    monkeypatch.setattr(streams.gate, "store", lambda folder, doc: "ledger-token")
+    monkeypatch.setattr(streams.gate, "cpu_seconds", lambda pid: 0.0)
+    monkeypatch.setattr(streams.gate, "Front", lambda write_base, read_base, credentials: server)
+
+    result = streams.measure(Path("head"), tmp_path / "case", {"tasks": []}, 1)
+
+    assert [consumer["patches"] for consumer in result["consumers"]] == [result["writes"]] == [2]
+    assert result["last_write_s"] < streams.SECONDS < result["delivered_s"] < streams.SECONDS + LAG_S
 
 
 def listener(variable: str) -> str:
