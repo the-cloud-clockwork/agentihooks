@@ -1,6 +1,27 @@
 {
   "features": [
     {
+      "id": "master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: agentihooks swarm SLUG master-drill retires the front door master of a running or paused scratch proof swarm through its runtime, leaving the seat empty, sets the night watch gate to enforce and steps the tick's own night watch pass once a minute on a drill clock from thirty minutes back; it stores and prints the minute a successor from the tick's own master launch holds the front door seat and that successor's route, recovered only for a claude ai login successor inside the thirty minutes. A live or stopped swarm, or a master the runtime cannot retire, is refused; a paused swarm stays paused.",
+      "seam": "scripts.swarm.master_drill.run and scripts.swarm.master_drill.command through the swarm command parser and scripts.tick.steps.masters._night_watch",
+      "tests": [
+        "tests/swarm/test_master_drill.py::test_the_drill_retires_the_front_door_master_and_records_a_login_successor_forced_up_at_ten_minutes",
+        "tests/swarm/test_master_drill.py::test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_successor_forced_up_at_the_thirtieth_minute_still_recovers",
+        "tests/swarm/test_master_drill.py::test_a_seat_left_empty_for_thirty_minutes_records_no_successor",
+        "tests/swarm/test_master_drill.py::test_the_drill_starts_the_night_watch_seat_episode_over",
+        "tests/swarm/test_master_drill.py::test_the_drill_drives_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_master_drill.py::test_only_live_front_door_masters_are_retired_and_only_a_front_door_master_succeeds",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_the_runtime_cannot_retire_refuses_the_drill",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_swarm_that_is_not_a_scratch_proof_swarm_and_leaves_it_untouched",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running_or_paused",
+        "tests/swarm/test_master_drill.py::test_the_master_drill_command_prints_the_record_of_a_drill_through_the_routed_runtime"
+      ]
+    },
+    {
       "id": "service-commands-run-through-interpreter",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-9",
