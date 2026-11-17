@@ -164,9 +164,10 @@ def test_swarm_status_names_each_seat_latest_refusal_with_its_time(store: RedisS
     assert master_refusals.status_lines(store, "other", MINUTE) == []
 
 
-def test_swarm_status_reads_every_seat_of_a_large_master_count(store: RedisStore) -> None:  # noqa: F811
+def test_swarm_status_reads_every_seat_across_hash_pages(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     for index in range(2, 14):
         master_refusals.record(store, "sw", f"master-{index}", "refused", MINUTE)
+    monkeypatch.setattr(master_refusals, "ROWS", 5)
 
     lines = master_refusals.status_lines(store, "sw", MINUTE)
 

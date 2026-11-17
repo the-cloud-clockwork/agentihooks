@@ -40,8 +40,14 @@ def read(store: Any, slug: str, seat: str) -> list[dict[str, Any]]:
 
 
 def seats(store: Any, slug: str) -> dict[str, list[dict[str, Any]]]:
-    """Every seat's kept refusal rows, by seat, read as one page of at most ROWS seats."""
-    _, fields = store.redis.hscan(store.key(slug, KEY), 0, count=ROWS)
+    """Every seat's kept refusal rows, by seat, paged ROWS seats at a time for at most ROWS pages."""
+    key, cursor = store.key(slug, KEY), 0
+    fields: dict[str, str] = {}
+    for _ in range(ROWS):
+        cursor, page = store.redis.hscan(key, cursor, count=ROWS)
+        fields.update(page)
+        if not cursor:
+            break
     return {seat: json.loads(raw) for seat, raw in fields.items()}
 
 
