@@ -66,11 +66,12 @@ class Swarms(Protocol):
 def master_routes(store: Swarms, live: Callable[[list[AgentRecord]], list[AgentRecord]]) -> dict[str, str]:
     """The route of every swarm's live front door master, keyed by the account it runs on; the seats are held over
     every record, as the tick holds them."""
-    routes: dict[str, str] = {}
+    doors: list[tuple[AgentRecord, str]] = []
     for slug in store.slugs():
         held = held_seats(store, slug)
-        routes.update({a.account: found for a in live(store.agents(slug)) if (found := master_route(slug, a, held))})
-    return routes
+        doors += [(agent, found) for agent in store.agents(slug) if (found := master_route(slug, agent, held))]
+    alive = {agent.name for agent in live([agent for agent, _ in doors])}
+    return {agent.account: found for agent, found in doors if agent.name in alive}
 
 
 def held_seats(store: Swarms, slug: str) -> list[str]:

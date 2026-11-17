@@ -18,8 +18,12 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
       "behaviour": "The tick recover master path keeps the route kind, account and placement of the execution record it adopts, and take master records the route kind its process environment variable names: interactive for the claude ai login, api for the API marker, subscription for a token or none.",
       "seam": "tick masters recover master and take_master.master_record",
+      "rules": [
+        "master-recover-drops-the-route"
+      ],
       "tests": [
         "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_the_route_account_and_placement_of_the_record_it_adopts",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_what_the_runtime_recovered_when_no_record_holds_the_seat",
         "tests/swarm/test_take_master.py::test_take_master_records_the_route_its_process_environment_names",
         "tests/context/test_account_sessions.py::test_the_process_route_comes_from_its_variable_names"
       ]

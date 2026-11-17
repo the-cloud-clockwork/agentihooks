@@ -489,6 +489,24 @@ def test_recover_master_keeps_the_route_account_and_placement_of_the_record_it_a
     )
 
 
+@pytest.mark.feature("master-route-writers-keep-the-route")
+def test_recover_master_keeps_what_the_runtime_recovered_when_no_record_holds_the_seat() -> None:
+    calls = Calls()
+    name = "master@abc123-0002"
+    recovered = tick.Placed("hand:p1", "claude", account="home", placement="forced", route_kind="master-login")
+    runtime = SimpleNamespace(live_names=lambda: {name}, recover=lambda found: recovered)
+
+    masters._recover_master("sw", SimpleNamespace(code=CODE), _store(calls), runtime, NOW)
+
+    [(_, (_, adopted)), _] = calls
+    assert (adopted.pane_id, adopted.account, adopted.placement, adopted.route_kind) == (
+        "hand:p1",
+        "home",
+        "forced",
+        "master-login",
+    )
+
+
 @pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_recover_master_takes_the_first_named_candidate_and_replaces_a_stale_execution_record() -> None:

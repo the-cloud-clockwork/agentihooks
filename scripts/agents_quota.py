@@ -459,8 +459,8 @@ def _master_routes() -> dict[str, str]:
     from scripts.swarm.store import RedisStore, redis_client  # pyright: ignore[reportUnknownVariableType]
     from scripts.swarm_v2 import front_door
 
-    runtime = HerdrRuntime()
     try:
+        runtime = HerdrRuntime()
         return front_door.master_routes(RedisStore(redis_client()), lambda agents: live_agents(agents, runtime))
     except (RedisError, OSError):
         return {}
