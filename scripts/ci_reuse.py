@@ -90,6 +90,11 @@ TEST_ONLY_SONAR = (
     ),
 )
 
+LEDGER_REQUIRED = (
+    '\n      + (if $mutation == "true"',
+    '\n      + (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)\n      + (if $mutation == "true"',
+)
+
 FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
 """
 
@@ -230,6 +235,11 @@ def test_only_sonar(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for old, new in TEST_ONLY_SONAR:
         run = run.replace(old, new)
     return [{**aggregation, "run": run}, *rest]
+
+
+def ledger_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": aggregation["run"].replace(*LEDGER_REQUIRED)}, *rest]
 
 
 def summary_steps() -> list[dict[str, Any]]:
