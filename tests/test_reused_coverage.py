@@ -1,7 +1,9 @@
 import json
+import sqlite3
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 from coverage import CoverageData
 
@@ -171,6 +173,31 @@ def test_the_check_names_a_truncated_or_tableless_database_and_passes_a_recorded
     assert coverage_check.problem(tmp_path / "absent.coverage") == "missing"
     assert coverage_check.main([str(good)]) == 0
     assert coverage_check.main([str(good), str(bad)]) == 1
+
+
+def _read_so_far() -> int:
+    lines = Path("/proc/self/io").read_text().splitlines()
+    return int(next(line.split(": ", 1)[1] for line in lines if line.startswith("rchar: ")))
+
+
+@pytest.mark.feature("coverage-check-reads-each-database-in-order")
+def test_the_check_reads_each_database_through_before_sqlite_opens_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "shard.coverage"
+    _record(database, {f"tests/test_a.py::case_{n}|run": {"hooks/a.py": [(-1, n), (n, -1)]} for n in range(1, 1000)})
+    connect = sqlite3.connect
+    start = _read_so_far()
+    read_before_open: list[int] = []
+
+    def opened(path: str, uri: bool = False) -> sqlite3.Connection:
+        read_before_open.append(_read_so_far() - start)
+        return connect(path, uri=uri)
+
+    monkeypatch.setattr(coverage_check.sqlite3, "connect", opened)
+    assert coverage_check.problem(database) is None
+    assert len(read_before_open) == 1
+    assert read_before_open[0] >= database.stat().st_size
 
 
 def test_the_unit_job_checks_its_coverage_database_before_uploading_it():
