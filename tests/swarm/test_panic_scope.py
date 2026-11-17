@@ -119,6 +119,7 @@ def test_a_legacy_fleet_panic_holds_only_the_swarm_its_reason_names(
     assert blocker_window.pretool("Bash", {"command": "git push"}, "held-session") == (None, frozen)
 
 
+@pytest.mark.feature("panic-holds-only-its-swarm")
 def test_the_tick_sweep_cancels_only_the_runs_of_the_held_swarms_agents(store: RedisStore) -> None:
     runs = Runs(_rows())
     reported: list[str] = []
