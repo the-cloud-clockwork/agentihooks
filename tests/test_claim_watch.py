@@ -13,7 +13,7 @@ from tests.helpers import service_path
 pytestmark = pytest.mark.unit
 
 NAME = "engineer@a1b2c3-0004"
-EXIT = [sys.executable, "-P", "-m", "scripts.install", "swarm", "sw", "--as", NAME, "exit"]
+INTERPRETER = [sys.executable, "-P", "-m", "scripts.install"]
 ENV = {
     "AGENTIHOOKS_SWARM": "sw",
     "AGENTIHOOKS_AGENT_NAME": NAME,
@@ -113,7 +113,7 @@ def test_a_new_claimant_stops_the_old_one_at_its_next_tool_call() -> None:
     assert redis.reads == [KEY]
     assert spawn.calls == [
         (
-            EXIT,
+            [*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"],
             {
                 "start_new_session": True,
                 "stdin": subprocess.DEVNULL,
@@ -134,7 +134,7 @@ def test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path(tm
     [(argv, _)] = spawn.calls
     done = service_path.help_run(argv, tmp_path)
     assert done.returncode == 0, done.stderr
-    assert "exit" in done.stdout
+    assert "agentihooks swarm" in done.stdout
 
 
 def test_the_claimant_itself_keeps_working() -> None:
@@ -319,7 +319,7 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
             {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/"}
         )
     assert redis.reads == [KEY]
-    assert [argv for argv, _ in spawn.calls] == [EXIT]
+    assert [argv for argv, _ in spawn.calls] == [[*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"]]
 
 
 @pytest.mark.wall_clock
@@ -357,7 +357,7 @@ def test_a_lost_pushed_claim_still_exits_through_the_swarm_gates(monkeypatch: py
     assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") == claim_watch.STOP.format(
         task="t1", slug="sw", owner=OTHER
     )
-    assert [argv for argv, _ in spawn.calls] == [EXIT]
+    assert [argv for argv, _ in spawn.calls] == [[*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"]]
 
 
 @pytest.mark.parametrize("session", [{}, {"session_id": "s1"}])
