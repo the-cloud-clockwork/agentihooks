@@ -7247,6 +7247,18 @@
       ]
     },
     {
+      "id": "proof-master-claude-launch-scratch-redis",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-keeps-proof-redis",
+      "behaviour": "agentihooks claude keeps a scratch proof swarm's AGENTIHOOKS_SWARM_REDIS_URL from its launcher over the env files it loads, so a master forced up on the proof swarm, its hooks and its commands read and bind on the proof Redis; every other env file value still overrides the shell, and a live swarm session takes the env file Redis.",
+      "seam": "scripts.install._load_claude_runtime_env as scripts.install.cmd_claude runs it before routing the session",
+      "tests": [
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_proof_master_on_the_scratch_redis",
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_live_swarm_session_on_the_env_file_redis"
+      ]
+    },
+    {
       "id": "hive-chart-capabilities",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-anton-hive-capability-chart",
