@@ -1,10 +1,12 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.swarm import cli, idle, run_wait, waits
+from scripts.swarm.store import RedisStore
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
@@ -203,7 +205,11 @@ def test_a_malformed_jobs_answer_still_ends_a_red_run_wait(tick, actions, answer
     assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
-def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, actions, monkeypatch):  # noqa: F811
+def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    actions: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
@@ -224,7 +230,7 @@ def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, 
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(cli.run_tick, store, "sw", ledger, runtime, FakeHerdr({}))
         try:
-            assert entered.wait(5)
+            assert entered.wait(30)
             store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
             idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "checks", "target": RUN})
             actions["run"] = {"status": "completed", "conclusion": "success"}

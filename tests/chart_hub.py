@@ -38,6 +38,10 @@ def hub_problems(deployment: dict) -> list[str]:
         found.append("the hub pods may run as root")
     if RELOAD in deployment["metadata"].get("annotations", {}):
         found.append("a hub without hub.secretEnv still carries a secret reload annotation")
+    strategy = deployment["spec"].get("strategy", {})
+    rolling = strategy.get("rollingUpdate", {})
+    if strategy.get("type") != "RollingUpdate" or rolling.get("maxSurge") != 0 or rolling.get("maxUnavailable") != 1:
+        found.append(f"the hub rollout adds a pod before an old one leaves: {strategy}")
     return found
 
 
@@ -116,6 +120,9 @@ def problems(chart: str) -> list[str]:
     if len(deployments) != 1:
         return [*found, f"an enabled hub renders {len(deployments)} hub Deployments, expected 1"]
     found += hub_problems(deployments[0])
+    single = render(chart, *ENABLED, "--set", "hub.replicas=1")
+    if single.returncode or any(d["spec"].get("strategy") for d in hubs(single.stdout)):
+        found.append("a single hub replica rolls out by taking the only hub down first")
     alone = render(chart, *ENABLED, "--set", "hiveOnly=true")
     if alone.returncode or hubs(alone.stdout):
         found.append("a hive only release renders the hub")
