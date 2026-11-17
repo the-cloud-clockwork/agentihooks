@@ -43,5 +43,6 @@ def test_the_master_row_carries_the_route_its_status_names() -> None:
 def test_the_master_name_cell_names_its_account_and_route() -> None:
     assert (
         'a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, '
-        "text: a.route ? `${a.account} · ${a.route}` : a.account })) : idCell(a.name)" in page_source()
+        'text: a.account }), ...(a.route ? [h("span", { class: "sw-sub", text: a.route })] : [])) : idCell(a.name)'
+        in page_source()
     )
