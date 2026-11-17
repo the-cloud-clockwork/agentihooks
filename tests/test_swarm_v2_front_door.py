@@ -75,7 +75,6 @@ DOOR = AgentRecord(
     [
         ({}, "claude ai login"),
         ({"route_kind": "interactive"}, "claude ai login"),
-        ({"route_kind": "subscription"}, "token fallback"),
         ({"route_kind": "api"}, ""),
         ({"seat": ""}, "claude ai login"),
         ({"seat": "master-2@sw"}, ""),
@@ -87,26 +86,91 @@ DOOR = AgentRecord(
 def test_the_master_route_names_only_a_working_claude_front_door_masters_route(
     change: dict[str, str], route: str
 ) -> None:
-    assert front_door.master_route("sw", replace(DOOR, **change)) == route
+    assert front_door.master_route("sw", replace(DOOR, **change), []) == route
+
+
+@pytest.mark.feature("master-route-placement-fallback")
+@pytest.mark.parametrize("route_kind", ["master-login", "interactive"])
+@pytest.mark.parametrize(
+    ("placement", "route"), [("fallback", "token fallback"), ("forced", "claude ai login"), ("", "claude ai login")]
+)
+def test_a_login_route_that_landed_on_a_token_reads_token_fallback(route_kind: str, placement: str, route: str) -> None:
+    assert front_door.master_route("sw", replace(DOOR, route_kind=route_kind, placement=placement), []) == route
+
+
+@pytest.mark.feature("master-route-fallback-only-from-login")
+@pytest.mark.parametrize(
+    ("change", "route"),
+    [
+        ({"route_kind": "subscription", "desired_route_kind": "interactive"}, "token fallback"),
+        ({"route_kind": "subscription"}, ""),
+        ({"route_kind": "subscription", "placement": "fallback"}, ""),
+        ({"route_kind": "api", "desired_route_kind": "interactive"}, ""),
+    ],
+)
+def test_the_master_route_says_fallback_only_when_the_claude_ai_login_was_wanted(
+    change: dict[str, str], route: str
+) -> None:
+    assert front_door.master_route("sw", replace(DOOR, **change), []) == route
+
+
+@pytest.mark.feature("master-route-acting-front-door")
+@pytest.mark.parametrize(
+    ("seat", "held", "route"),
+    [
+        ("master-2@sw", ["master-2@sw"], "claude ai login"),
+        ("master-2@sw", ["master@sw", "master-2@sw"], ""),
+        ("master@sw", ["master-2@sw"], ""),
+        ("master-3@sw", ["master-3@sw", "master-2@sw"], ""),
+        ("", ["master@a1b2c3-0001"], "claude ai login"),
+    ],
+)
+def test_the_master_route_follows_the_seat_the_tick_lead_rule_names(seat: str, held: list[str], route: str) -> None:
+    assert front_door.master_route("sw", replace(DOOR, seat=seat), held) == route
 
 
 @pytest.mark.feature("balance-master-route")
 def test_the_master_routes_name_every_swarms_front_door_route_by_its_account() -> None:
+    import fakeredis
+
     agents = {
         "sw": [
             DOOR,
             replace(DOOR, name="engineer@a1b2c3-0002", lane="eng", task="t1", seat="eng-1@sw", account="alpha"),
         ],
         "other": [
-            replace(DOOR, name="master@d4e5f6-0001", seat="master@other", account="beta", route_kind="subscription")
+            replace(
+                DOOR,
+                name="master@d4e5f6-0001",
+                seat="master@other",
+                account="beta",
+                route_kind="subscription",
+                desired_route_kind="interactive",
+            )
         ],
     }
-    store = SimpleNamespace(slugs=lambda: list(agents), agents=lambda slug: agents[slug])
+    store = SimpleNamespace(
+        redis=fakeredis.FakeRedis(decode_responses=True), slugs=lambda: list(agents), agents=lambda slug: agents[slug]
+    )
 
-    assert front_door.master_routes(cast(front_door.Swarms, store)) == {
+    assert front_door.master_routes(cast(front_door.Swarms, store), lambda found: found) == {
         "home": "claude ai login",
         "beta": "token fallback",
     }
+
+
+@pytest.mark.feature("master-route-live-masters-only")
+def test_the_master_routes_skip_a_front_door_master_the_live_rule_drops() -> None:
+    import fakeredis
+
+    agents = [DOOR, replace(DOOR, name="master@a1b2c3-0002", seat="master-2@sw", account="beta")]
+    store = SimpleNamespace(
+        redis=fakeredis.FakeRedis(decode_responses=True), slugs=lambda: ["sw"], agents=lambda slug: agents
+    )
+
+    routes = front_door.master_routes(cast(front_door.Swarms, store), lambda found: found[1:])
+
+    assert routes == {}
 
 
 def test_the_refusal_names_the_inbox_route_to_the_front_door():

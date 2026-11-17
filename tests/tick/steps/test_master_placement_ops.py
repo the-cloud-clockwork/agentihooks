@@ -468,6 +468,27 @@ def test_recover_master_prefers_the_seat_occupant_and_keeps_its_execution_record
     assert calls == [("put_agent", ("sw", replace(held, pane_id=f"placed {occupant}")))]
 
 
+@pytest.mark.feature("master-route-writers-keep-the-route")
+def test_recover_master_keeps_the_route_account_and_placement_of_the_record_it_adopts() -> None:
+    calls = Calls()
+    occupant = "master@abc123-0002"
+    held = _master_record(
+        occupant, harness="claude", account="home", placement="forced", route_kind="master-login", started_at=5
+    )
+    store = _store(calls, occupant=occupant, occupants={SEAT: held})
+    runtime = SimpleNamespace(live_names=lambda: {occupant}, recover=lambda name: tick.Placed("hand:p1", "claude"))
+
+    masters._recover_master("sw", SimpleNamespace(code=CODE), store, runtime, NOW)
+
+    [(_, (_, adopted))] = calls
+    assert (adopted.pane_id, adopted.account, adopted.placement, adopted.route_kind) == (
+        "hand:p1",
+        "home",
+        "forced",
+        "master-login",
+    )
+
+
 @pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_recover_master_takes_the_first_named_candidate_and_replaces_a_stale_execution_record() -> None:

@@ -690,6 +690,26 @@ def test_native_master_fallback_account_is_recorded_canonically(setup):
     assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == "token-account"
 
 
+@pytest.mark.feature("master-route-placement-fallback")
+def test_a_native_master_token_fallback_records_its_fallback_placement(setup):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive.orders import Ack, launch_target
+
+    order, admitted, task = headless_front_door_order(setup)
+    order = replace(order, hive="remote")
+    target = {"host_id": "remote", **launch_target(12, "fixture", {12: SimpleNamespace(start_time=34)})}
+    execution = {
+        "account": "token-account",
+        "placement": "fallback",
+        "profile_decision": {"validation": {"account": "token-account"}},
+    }
+    live = setup.launcher.record(admitted, order, Ack("live", target, execution=execution))
+    stored = setup.store.execution_registry.get(order.slug, admitted.execution_id)
+    assert (live.route_kind, live.placement, stored.placement) == ("master-login", "fallback", "fallback")
+
+
 def test_non_native_ack_cannot_replace_the_recorded_account(setup):
     from dataclasses import replace
 

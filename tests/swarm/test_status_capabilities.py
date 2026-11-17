@@ -61,6 +61,25 @@ def test_status_report_carries_the_route_only_on_the_front_door_master(
     assert report == {door.name: "claude ai login", **dict.fromkeys(names.values(), "")}
 
 
+@pytest.mark.feature("master-route-acting-front-door")
+@pytest.mark.parametrize(("lead", "route"), [(False, "claude ai login"), (True, "")])
+def test_status_report_carries_the_route_of_a_second_master_seat_acting_as_the_front_door(
+    saved: tuple[RedisStore, dict[str, str]], monkeypatch: pytest.MonkeyPatch, lead: bool, route: str
+) -> None:
+    store, names = saved
+    second = AgentRecord(
+        "master@a1b2c3-0002", "master", "master", harness="claude", seat="master-2@sw", route_kind="master-login"
+    )
+    first = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", seat="master@sw")
+    for agent in [second, first] if lead else [second]:
+        store.put_agent("sw", agent)
+    monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: {*names.values(), first.name, second.name})
+
+    report = {a["name"]: a["route"] for a in status.status_report(store, "sw", {"tasks": []})["agents"]}
+
+    assert report[second.name] == route
+
+
 def test_status_report_carries_only_the_latest_hundred_ended_lives(saved):
     import json
 
