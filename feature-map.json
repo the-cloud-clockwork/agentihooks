@@ -4166,7 +4166,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-ledger-watch-redis-acl",
       "behaviour": "A ledger watch on a remote host, such as a hive worker with no agent token, reads the ledger in process over the shared database every interval, each read taking only the changes since the export it holds, and prints each operator event once; it fetches no agent token, so the hive member Redis login never meets the hive credential store its ACL refuses, while a watch on a local host still follows the ledger server's event stream with its credentials.",
-      "seam": "scripts.swarm_ledger.watch_ledger.follow and polled, driven by scripts.swarm_ledger.watch_ledger.main",
+      "seam": "scripts.swarm_ledger.watch_ledger.held, follow and polled, driven by scripts.swarm_ledger.watch_ledger.main",
       "tests": [
         "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_operator_events_while_its_member_login_cannot_read_the_credential_store",
         "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_an_event_written_between_its_reads_once",

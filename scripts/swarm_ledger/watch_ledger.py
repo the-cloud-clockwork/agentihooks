@@ -85,16 +85,22 @@ def polled(slug: str, interval: float, kept: dict[Any, Any]) -> Iterator[tuple[s
         time.sleep(interval)
 
 
+def held(slug: str, headers: dict[str, str] | None) -> dict[str, str] | None:
+    """The credential headers a watcher reads with: none on a remote host, such as a hive worker, which polls the
+    ledger in process and so never fetches an agent token; else the headers it holds, or fresh ones."""
+    if ledger_link.remote(slug=slug):
+        return None
+    return headers or credentials(slug)
+
+
 def follow(
     slug: str, cursor: str | None, headers: dict[str, str] | None, interval: float, kept: dict[Any, Any]
-) -> tuple[Iterator[tuple[str, Any, str | None]], dict[str, str] | None]:
-    """The events a watcher takes and the credential headers they need: a remote host, such as a hive worker, polls
-    the ledger in process and needs none, so it never fetches an agent token; a local host follows the ledger
-    server's event stream."""
-    if ledger_link.remote(slug=slug):
-        return polled(slug, interval, kept), None
-    held = headers or credentials(slug)
-    return stream(slug, cursor, held), held
+) -> Iterator[tuple[str, Any, str | None]]:
+    """The events a watcher takes: the ledger polled in process when it reads with no credential headers, else the
+    ledger server's event stream read with them."""
+    if headers is None:
+        return polled(slug, interval, kept)
+    return stream(slug, cursor, headers)
 
 
 def say(text):
@@ -208,10 +214,10 @@ def main():
     while not stopping:
         alive(beat)
         try:
-            frames, headers = follow(args.slug, cursor, headers, args.interval, kept)
+            headers = held(args.slug, headers)
             if stopping:
                 continue
-            for name, data, event_id in frames:
+            for name, data, event_id in follow(args.slug, cursor, headers, args.interval, kept):
                 alive(beat)
                 watch.take(name, data)
                 cursor, failure = event_id or cursor, None

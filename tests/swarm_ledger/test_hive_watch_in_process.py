@@ -138,34 +138,40 @@ def test_a_hive_watch_prints_an_event_written_between_its_reads_once(
 ) -> None:
     comment(hive["slug"], "c-first", "first word")
 
-    out, _ = watched(monkeypatch, capsys, hive["slug"], lambda: comment(hive["slug"], "c-second", "second word"))
+    out, pauses = watched(monkeypatch, capsys, hive["slug"], lambda: comment(hive["slug"], "c-second", "second word"))
 
-    assert (out.count("[c-first]"), out.count("[c-second]")) == (1, 1)
+    assert (out.count("[c-first]"), out.count("[c-second]")) == (1, 1), (pauses, out)
     assert out.index("[c-first]") < out.index("[c-second]")
 
 
-@pytest.mark.feature("hive-watch-in-process")
 def test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledger_server_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     streamed: list[tuple[str, str | None, dict[str, str]]] = []
+    polls: list[tuple[str, float, dict[Any, Any]]] = []
 
     def stream(slug: str, cursor: str | None, headers: dict[str, str]) -> Iterator[tuple[str, Any, str | None]]:
         streamed.append((slug, cursor, headers))
         return iter(())
 
+    def polled(slug: str, interval: float, kept: dict[Any, Any]) -> Iterator[tuple[str, Any, None]]:
+        polls.append((slug, interval, kept))
+        return iter(())
+
     monkeypatch.setattr(watch_ledger, "stream", stream)
+    monkeypatch.setattr(watch_ledger, "polled", polled)
     monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {"X-Ledger-Token": f"for {slug}"})
     monkeypatch.setattr(watch_ledger.ledger_link, "remote", lambda environ=None, slug="": slug == "far")
 
-    _, headers = watch_ledger.follow("far", "c1", None, 7.0, {})
-    assert headers is None
+    assert watch_ledger.held("far", {"X-Ledger-Token": "kept"}) is None
+    assert watch_ledger.held("near", None) == {"X-Ledger-Token": "for near"}
+    assert watch_ledger.held("near", {"X-Ledger-Token": "kept"}) == {"X-Ledger-Token": "kept"}
+
+    kept: dict[Any, Any] = {("in-process", "far"): (3, {})}
+    assert list(watch_ledger.follow("far", "c1", None, 7.0, kept)) == []
+    assert polls == [("far", 7.0, kept)]
     assert streamed == []
 
-    _, headers = watch_ledger.follow("near", "c1", None, 7.0, {})
-    assert headers == {"X-Ledger-Token": "for near"}
-    assert streamed == [("near", "c1", {"X-Ledger-Token": "for near"})]
-
-    _, held = watch_ledger.follow("near", "c2", {"X-Ledger-Token": "kept"}, 7.0, {})
-    assert held == {"X-Ledger-Token": "kept"}
-    assert streamed[-1] == ("near", "c2", {"X-Ledger-Token": "kept"})
+    assert list(watch_ledger.follow("near", "c2", {"X-Ledger-Token": "kept"}, 7.0, kept)) == []
+    assert streamed == [("near", "c2", {"X-Ledger-Token": "kept"})]
+    assert len(polls) == 1
