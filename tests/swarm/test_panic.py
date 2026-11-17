@@ -52,8 +52,7 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float, dict[str,
 @pytest.fixture(autouse=True)
 def no_sweep_left() -> Iterator[None]:
     yield
-    with panic.SWEEP:
-        pass
+    _sweep_ended()
 
 
 class Runs:
@@ -112,11 +111,32 @@ def _passes(store: RedisStore, ok: int, bad: int, at: int) -> None:
         panic.count_pass(store, False, at)
 
 
+def _sweep_ended() -> None:
+    assert panic.SWEEP.acquire(timeout=HELD_S)
+    panic.SWEEP.release()
+
+
 def _tick(store: RedisStore, ok: bool, now_ms: int, ports: panic.Ports) -> list[str]:
     reported: list[str] = []
     actions = panic.tick_pass(store, ok, now_ms, reported.append, ports)
-    with panic.SWEEP:
-        return [*actions, *reported]
+    _sweep_ended()
+    return [*actions, *reported]
+
+
+class Held(FakeSourceControl):
+    def __init__(self, repository: str, gate: threading.Event, listed: list[str]) -> None:
+        super().__init__()
+        self.repository, self.gate, self.listed = repository, gate, listed
+
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
+        self.listed.append(self.repository)
+        if self.repository == panic.REPOS[0]:
+            self.gate.wait(HELD_S)
+        return (_row(1, "busy"),)
+
+
+def _held(gate: threading.Event, listed: list[str]) -> panic.Ports:
+    return lambda repository: Held(repository, gate, listed)
 
 
 def test_an_error_lands_on_the_otel_counter_by_swarm_and_category(store, counted):
@@ -835,6 +855,82 @@ def test_the_pass_ends_before_the_panic_cancel_sweep_it_starts(
     assert reported.wait(HELD_S)
     assert held == [True]
     assert actions == [f"panic cancelled {repo} run 1 on main" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_a_due_pass_starts_no_sweep_while_an_earlier_one_runs(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = set(threading.enumerate())
+    gate = threading.Event()
+    listed: list[str] = []
+    reported: list[str] = []
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
+    panic.engage(store, "pressed", False, [], 0)
+    try:
+        assert panic.tick_pass(store, True, 1_000, reported.append, _held(gate, listed)) == []
+        assert panic.tick_pass(store, True, 2_000, reported.append, _held(gate, listed)) == []
+        sweeps = [thread for thread in threading.enumerate() if thread.name == "panic-sweep" and thread not in before]
+    finally:
+        gate.set()
+    _sweep_ended()
+    assert [thread.daemon for thread in sweeps] == [True]
+    assert listed == list(panic.REPOS)
+    assert reported == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_a_sweep_thread_that_cannot_start_frees_the_sweep(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Unstartable(threading.Thread):
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    reported: list[str] = []
+    monkeypatch.setattr(panic, "Thread", Unstartable)
+    panic.engage(store, "pressed", False, [], 0)
+    with pytest.raises(RuntimeError, match="can't start new thread"):
+        panic.tick_pass(store, True, 1_000, reported.append, Runs({}))
+    assert panic.SWEEP.acquire(blocking=False)
+    panic.SWEEP.release()
+    assert reported == []
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_settle_returns_once_the_running_sweep_reported(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    gate, settled = threading.Event(), threading.Event()
+    listed: list[str] = []
+    reported: list[str] = []
+
+    def settle() -> None:
+        panic.settle()
+        settled.set()
+
+    panic.engage(store, "pressed", False, [], 0)
+    assert panic.tick_pass(store, True, 1_000, reported.append, _held(gate, listed)) == []
+    threading.Thread(target=settle).start()
+    try:
+        assert not settled.wait(0.2)
+    finally:
+        gate.set()
+    assert settled.wait(HELD_S)
+    assert reported == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_a_swarm_command_waits_for_the_panic_sweep_before_it_returns(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    printed: list[str] = []
+    monkeypatch.setattr(panic, "settle", lambda: printed.append(capsys.readouterr().out))
+    assert cli.main([SLUG, "panic"]) == 0
+    assert [json.loads(out)["panic"] for out in printed] == ["off"]
 
 
 @pytest.mark.feature("panic-fix-pull-request-head-in-its-repository")

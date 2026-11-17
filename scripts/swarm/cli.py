@@ -2957,6 +2957,7 @@ def dispatch(argv):
             run_control(store, args, who, handler)
         else:
             handler(store, args)
+        panic.settle()
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:

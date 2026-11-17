@@ -325,5 +325,16 @@ def tick_pass(
     current = state(store)
     if current is None or not due_cancel(store, now_ms) or not SWEEP.acquire(blocking=False):
         return actions
-    Thread(target=_sweep, args=(current.fixes, ports, store, report), name="panic-sweep", daemon=True).start()
+    thread = Thread(target=_sweep, args=(current.fixes, ports, store, report), name="panic-sweep", daemon=True)
+    try:
+        thread.start()
+    except BaseException:
+        SWEEP.release()
+        raise
     return actions
+
+
+def settle() -> None:
+    """Wait until no cancel sweep runs, so a command process exits only once the sweep its pass started reported."""
+    with SWEEP:
+        pass
