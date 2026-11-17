@@ -11,10 +11,11 @@ REQUIRED = {
     "swarm": "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev",
     "redis": "mirror.gcr.io/library/redis:7",
     "nats": "mirror.gcr.io/library/nats:2.15.1-alpine",
+    "nginx": "mirror.gcr.io/library/nginx:1.27-alpine",
 }
 
 
-@pytest.mark.parametrize("missing", ["", "swarm", "redis", "nats"])
+@pytest.mark.parametrize("missing", ["", "swarm", "redis", "nats", "nginx"])
 def test_smoke_selects_runtime_manifests_and_keeps_missing_images_red(tmp_path: Path, missing: str) -> None:
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -86,8 +87,9 @@ fi
         assert result.returncode == 0, result.stderr
         assert "Swarm container smoke passed" in result.stdout
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == 3
+        assert len(pulls) == 4
         assert all("@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
         assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
+        assert any("nginx:1.27-alpine@sha256:runtime" in call for call in pulls)
         assert any("agentihooks-swarm:dev@sha256:runtime" in call for call in pulls)

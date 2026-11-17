@@ -102,6 +102,18 @@ def placed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick, "placed_record", lambda record, placed: replace(record, pane_id=str(placed)))
 
 
+@contextmanager
+def _free_launch_lock(store: Any, slug: str, starter: str) -> Iterator[str]:
+    """Take no master launch lock: the lock has its own tests, and the recorded fake store keeps no Redis keys."""
+    yield ""
+
+
+@pytest.fixture(autouse=True)
+def free_launch_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run each master placement with a free launch lock, so the recorded writes are the placement's own."""
+    monkeypatch.setattr(masters, "master_lock", SimpleNamespace(held=_free_launch_lock))
+
+
 @pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize("name", MOVED)
 def test_tick_reexports_the_moved_master_operation(name: str) -> None:

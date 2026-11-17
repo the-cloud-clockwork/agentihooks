@@ -667,11 +667,37 @@ def test_kind_proof_warms_redis_without_downloading_the_worker_base_twice() -> N
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
     assert lines.index('    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
-        '  kind delete cluster --name "$cluster"'
+        '  kind delete cluster --name "$cluster" || echo "kind could not delete $cluster; the proof keeps exit status $status" >&2'
     )
     assert lines.index('docker buildx imagetools inspect "$image" > "$out/image.txt"') < lines.index(
         'wait "$cluster_pid"'
     )
+
+
+def run_cleanup(tmp_path: Path, status: int) -> tuple[int, list[str]]:
+    text = PROOF.read_text()
+    start = text.index("cleanup() {")
+    function = text[start : text.index("\n}\n", start) + 3]
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name in ("docker", "kubectl"):
+        (tools / name).write_text("#!/usr/bin/env bash\n")
+    (tools / "kind").write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$KIND_LOG"\nexit 1\n')
+    for tool in tools.iterdir():
+        tool.chmod(0o755)
+    log = tmp_path / "kind.log"
+    log.touch()
+    env = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "KIND_LOG": str(log)}
+    script = (
+        f"set -euo pipefail\ncluster=worker-hive-proof\nout={tmp_path}\n{function}trap cleanup EXIT\nexit {status}\n"
+    )
+    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+    return result.returncode, log.read_text().splitlines()
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_a_failed_kind_cluster_delete_keeps_the_proof_exit_status(tmp_path: Path, status: int) -> None:
+    assert run_cleanup(tmp_path, status) == (status, ["delete cluster --name worker-hive-proof"])
 
 
 def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():

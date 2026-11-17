@@ -79,9 +79,9 @@ fi
         assert "runtime images ready for startup" in result.stdout, result.stderr
         assert len(starts) == 1
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == {"hive-launch-smoke": 2, "compose-hive-smoke": 4}.get(script, 3)
+        assert len(pulls) == {"compose-hive-smoke": 4, "swarm-smoke": 4, "hive-launch-smoke": 2}[script]
         assert all("@sha256:runtime" in call for call in pulls)
-        if script == "compose-hive-smoke":
+        if script != "hive-launch-smoke":
             assert any("nginx:1.27-alpine@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
         if script != "hive-launch-smoke":

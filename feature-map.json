@@ -1,6 +1,54 @@
 {
   "features": [
     {
+      "id": "service-commands-run-through-interpreter",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-9",
+      "behaviour": "The hive bundle refresh, the hive linked profiles install, the claim watch and the quota prober's Claude provider check start agentihooks through their own interpreter with -P -m scripts.install, so each command resolves and runs under the default systemd PATH with no folder holding the agentihooks executable, from a folder outside the repository; the Claude provider check also puts the user bin folder and the interpreter's folder ahead of the service PATH so the claude command it starts resolves; a bare agentihooks command list in a service entry point is a Semgrep incident.",
+      "seam": "bundle_refresh.refresh on a manifest change, linked_profiles.install and claim_watch.check on a lost claim, each command run with --help under the systemd default PATH, and provider_probe.check for a Claude account run end to end under that PATH",
+      "rules": [
+        "service-bare-agentihooks-command"
+      ],
+      "tests": [
+        "tests/hive/test_bundle_refresh.py::test_the_deps_ensure_a_manifest_change_starts_resolves_under_the_systemd_default_path",
+        "tests/hive/test_linked_profiles.py::test_the_profile_link_command_resolves_under_the_systemd_default_path",
+        "tests/test_claim_watch.py::test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path",
+        "tests/swarm/test_provider_probe_contract.py::test_a_claude_check_runs_the_agentihooks_claude_command_under_the_systemd_default_path"
+      ]
+    },
+    {
+      "id": "balance-master-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",
+      "behaviour": "The balance row for the account a live front door master runs on carries the master mark followed by its route, the claude ai login or the token fallback, read from the master execution record whatever the account spelling, one route per account so a second front door master on the same account is not shown, and shows no route while the swarm Redis is unreachable; the swarm status payload carries the same route on the front door master only, and the swarm panel master row shows it on its own line under its account, unclipped at 1920.",
+      "seam": "agents_quota.balance_table, the swarm status report agent entries and the swarm panel agentRows and agentRow master name cell",
+      "tests": [
+        "tests/test_agents_quota.py::test_balance_names_the_route_the_live_front_door_master_runs_on",
+        "tests/test_agents_quota.py::test_balance_names_a_token_fallback_on_another_account_in_either_spelling",
+        "tests/test_agents_quota.py::test_balance_shows_no_route_while_the_swarm_redis_is_unreachable",
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_names_only_a_working_claude_front_door_masters_route",
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_every_swarms_front_door_route_by_its_account",
+        "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_only_on_the_front_door_master",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_carries_the_route_its_status_names",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_shows_its_route_on_its_own_line_at_1920",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_name_cell_names_its_account_and_route"
+      ]
+    },
+    {
+      "id": "serena-router-start-stops-waiting-on-an-exited-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-hive-proof-no-live-hive",
+      "behaviour": "Starting the Serena router without a systemd user session stops waiting the moment the router process it started exits before opening its port, and reports the router down with its exit status, while a router that still runs is waited on until its port opens. A hive pod with no serena binary therefore leaves the router start within seconds instead of ninety, writes its first heartbeat and registers as a live hive inside the worker hive pod proof's sixty second window.",
+      "seam": "serena_router_daemon.start on the pidfile path, which hive run reaches through serena_router_daemon.ensure",
+      "rules": [
+        "serena-router-start-waits-on-an-exited-router"
+      ],
+      "tests": [
+        "tests/test_serena_router_daemon.py::test_start_reports_the_router_down_as_soon_as_its_process_exits_before_opening_its_port",
+        "tests/test_serena_router_daemon.py::test_start_keeps_waiting_for_a_running_router_until_its_port_opens"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
@@ -47,6 +95,18 @@
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_adoption_sends_start_and_stop_to_the_bundle_swarm_service",
         "tests/swarm_ledger/test_server_compose.py::test_a_failed_pull_still_starts_the_service_on_its_local_image"
+      ]
+    },
+    {
+      "id": "compose-api-health-and-front-proxy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
+      "behaviour": "The ledger API service admits the Host its own health check sends, its loopback names on its own port, so the Compose API service turns healthy and the front starts. The Compose front resolves the swarm and api names through the Compose DNS at request time, so it reaches them and finds a recreated container. Every front config forwards each request with the Host the client sent, port included, so a client on the public URL's host and port passes the ledger server and API host checks.",
+      "seam": "scripts.swarm_ledger.api_service.serve, and the front nginx configs of the Compose stack, the swarm init stack and the local ledger Compose file",
+      "tests": [
+        "tests/test_swarm_v2_ledger_writer.py::test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port",
+        "tests/test_compose_stack.py::test_the_front_forwards_the_host_the_client_sent_with_its_port",
+        "tests/test_compose_stack.py::test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time"
       ]
     },
     {
@@ -1900,6 +1960,29 @@
       ]
     },
     {
+      "id": "night-watch-gate-defaults-to-deny",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape of the swarm config: a swarm stored with no night watch mode in its gates, as swarm init stores it, reads the night watch gate as deny, so its night watch respawns an empty front door master seat at ten minutes and raises the seat alert instead of only logging a would-be respawn.",
+      "seam": "scripts.gates.enforcement.NIGHT_WATCH default mode through scripts.swarm.health.night_watch.run",
+      "tests": [
+        "tests/swarm/test_night_watch.py::test_the_night_watch_gate_defaults_to_deny",
+        "tests/swarm/test_night_watch.py::test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes"
+      ]
+    },
+    {
+      "id": "night-watch-respawns-by-default",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after a recycle handoff in a controller pod, the night watch at its default mode respawns the empty front door master seat at ten minutes through the tick's own master launch, the pod controller's fenced runtime, the controller's fleet account rows and a launch order root consumes, on root's claude ai login, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._night_watch through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_the_default_night_watch_refills_a_recycled_front_door_seat_at_ten_minutes_through_the_pod_controller"
+      ]
+    },
+    {
       "id": "swarm-night-watch-drill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
@@ -2228,6 +2311,19 @@
       "seam": "The binding canary report the launch check confirms, the session heartbeat and the swarm handoff command",
       "tests": [
         "tests/features/test_harness.py::test_a_scripted_agent_reports_its_canary_beats_and_hands_off_through_the_ledger_server"
+      ]
+    },
+    {
+      "id": "feature-suite-pull-request-tier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-feature-suite-in-queue",
+      "behaviour": "Every pull request touching the ledger store, the tick, the scheduler, the controller, any module the feature suite imports directly, the agentihooks command line and handoff code its scripted agents run, the feature tests or the feature and writer lock workflows runs the feature suite on real Redis and Postgres through the writer lock workflow, which feeds Gate Required, so a change that breaks the suite cannot merge green and fail only at promotion.",
+      "seam": "writer-lock.yml features selection and caller, feature-suite.yml features job",
+      "tests": [
+        "tests/test_ci_feature_suite_pr.py::test_feature_suite_selection",
+        "tests/test_ci_feature_suite_pr.py::test_each_ledger_and_swarm_module_the_ledger_write_cutover_changed_selects_the_feature_suite",
+        "tests/test_ci_feature_suite_pr.py::test_every_module_the_feature_suite_imports_directly_selects_it",
+        "tests/test_ci_feature_suite_pr.py::test_the_feature_suite_feeds_the_required_gate_on_selected_pull_requests"
       ]
     },
     {
@@ -5391,6 +5487,25 @@
       ]
     },
     {
+      "id": "hive-front-door-master-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",
+      "behaviour": "The controller's master selection refuses a Claude login only at the master floor, its week at or under the primary login reserve or its five hour window at or under the hard five hour handoff, or for a closure the worker drain floor does not explain; a login the fleet capacity rows close at the worker drain floor alone still takes the front door master on its hive master login, a missing claude slot wait names each hosting hive master login at the master floor in whole percent, a master seat two and up is checked against its own seat, and a front door master is warned to hand off only at its master floor.",
+      "seam": "HiveLaunch master selection closed set over the fleet AccountRoute capacity rows",
+      "rules": ["master-closed-at-worker-drain-floor"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor_does_not_explain",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_reads_the_worker_drain_rule_of_the_row_harness",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_wait_other_than_a_missing_claude_slot_names_no_master_floor",
+        "tests/hive/test_master_fallback_launch.py::test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door",
+        "tests/hive/test_master_fallback_launch.py::test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain",
+        "tests/swarm/test_quota_handoff.py::test_a_front_door_master_is_warned_only_at_its_master_floor"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
@@ -6346,6 +6461,28 @@
         "tests/swarm_ledger/test_master_remote_control.py::test_only_a_master_with_a_recorded_decision_gets_the_remote_control_cell",
         "tests/swarm_ledger/test_master_remote_control.py::test_an_off_master_without_transport_shows_phone_access_unavailable_with_the_reason",
         "tests/swarm_ledger/test_master_remote_control.py::test_a_master_on_the_token_fallback_card_says_phone_access_unavailable"
+      ]
+    },
+    {
+      "id": "front-door-launch-chain",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: the front door master launch the swarm runtime hands to init-agent reaches claude through the launcher script, the agentihooks claude entry and the claude ai login route with Remote Control on and no token variable in its environment, and the runtime records Remote Control on; a primary login at its week reserve hands the launch to the next stored login on the same route; an expired login reaches claude on the subscription token fallback without Remote Control, and the runtime records and reports that fallback.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.spawn through scripts.init_agent.main, scripts.install.cmd_claude and scripts.routing.claude_ai.launch_claude",
+      "tests": [
+        "tests/swarm/test_front_door_launch_chain.py::test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_control_and_no_token",
+        "tests/swarm/test_front_door_launch_chain.py::test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_next_login",
+        "tests/swarm/test_front_door_launch_chain.py::test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it"
+      ]
+    },
+    {
+      "id": "front-door-master-refill-deployed-shape",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after the front door master hands its seat off for a recycle, the tick master step places its successor through the pod controller's fenced runtime, the controller's fleet account rows, the hive launch selection and a launch order the root hive consumes, on root's master claude ai login slot, with no placement refusal and before the forcing window ends, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._tick_master through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts, scripts.hive.launch.HiveLaunch and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_the_forcing_window"
       ]
     },
     {
@@ -7899,6 +8036,42 @@
         "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
         "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count",
         "tests/events/test_nats_replicas.py::test_the_replica_count_defaults_to_one_and_comes_from_the_environment"
+      ]
+    },
+    {
+      "id": "panic-sweep-keeps-merged-fixes",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-steps-abandoned",
+      "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a kept row whose fields no longer match the change state is read again, and a sweep run without the swarm store, as the panic button runs it, reads every fix.",
+      "seam": "scripts.swarm.panic.fix_state, read by scripts.swarm.panic.cancel_runs with the swarm store scripts.swarm.panic.tick_pass passes, and cleared by scripts.swarm.panic.release",
+      "rules": ["panic-sweep-rereads-merged-fixes"],
+      "tests": [
+        "tests/swarm/test_panic.py::test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_cancel_runs_without_a_store_reads_every_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_a_merged_fix_is_read_again_after_panic_releases",
+        "tests/swarm/test_panic.py::test_a_kept_fix_row_of_another_shape_is_read_again"
+      ]
+    },
+    {
+      "id": "master-launch-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-7",
+      "behaviour": "Every starter of a new front door master takes the swarm's one master launch lock, a Redis set if absent key with a five minute lease, before it reads who holds the master seats and keeps it through the launch: the tick master step, which the night watch respawn and the respawn and place master commands also run, and master up --new and --replace, which the master fallback and the critical watchdog run in their detached processes. A fallback starter racing the tick master step in one pass launches exactly one master; a starter that finds the lock held launches nothing and names the holder, or says its lease just ended; the lock is released after a launch and after a failed one and never by a holder that lost it, even when it changes hands during the release. Under the lock master up --replace retires a front door master that is still starting before it starts another, and master up never takes the front door seat from a live occupant.",
+      "seam": "scripts.swarm.master_lock.held, taken by scripts.tick.steps.masters._master and scripts.swarm.master_launch._fresh",
+      "tests": [
+        "tests/swarm/test_master_starters_race.py::test_a_fallback_starter_racing_the_tick_master_step_launches_exactly_one_master",
+        "tests/swarm/test_master_starters_race.py::test_the_tick_master_step_waits_while_master_up_launches",
+        "tests/swarm/test_master_lock.py::test_the_lock_is_the_swarm_key_set_if_absent_with_its_lease_and_holder",
+        "tests/swarm/test_master_lock.py::test_the_lock_is_released_when_its_launch_raises",
+        "tests/swarm/test_master_lock.py::test_a_lock_that_changed_hands_is_never_released_by_its_old_holder",
+        "tests/swarm/test_master_lock.py::test_a_lock_taken_over_during_its_release_is_left_to_its_new_holder",
+        "tests/swarm/test_master_lock.py::test_a_refusal_whose_holder_just_expired_says_so",
+        "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_the_tick_master_step",
+        "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_master_up",
+        "tests/swarm/test_master_lock.py::test_the_tick_master_step_and_master_up_release_the_lock_after_their_launch",
+        "tests/swarm/test_master_replace.py::test_master_up_replace_retires_a_starting_front_door_master_before_it_starts_one",
+        "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant"
       ]
     }
   ],

@@ -15,6 +15,7 @@ require_image() {
 }
 require_image mirror.gcr.io/library/redis:7
 require_image mirror.gcr.io/library/nats:2.15.1-alpine
+require_image mirror.gcr.io/library/nginx:1.27-alpine
 build=(--build)
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
