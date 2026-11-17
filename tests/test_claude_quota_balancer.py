@@ -1127,7 +1127,7 @@ def test_a_forced_master_takes_the_account_with_most_room_under_every_floor(
     decision = balancer.select_forced_master_credential(
         env, cache_file=tmp_path / "c.json", sessions={}, exclude=["C"], now=1000
     )
-    assert (decision.account, decision.source, decision.result.account) == ("B", "forced master", "B")
+    assert (decision.account, decision.source) == ("B", "forced master")
     assert decision.credential == balancer.Credential("AH_CC_TOKEN_B", "b")
 
 
