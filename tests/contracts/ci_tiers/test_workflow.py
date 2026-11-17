@@ -111,7 +111,9 @@ def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace]
     )
 
 
-def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritative: str = "") -> set[str]:
+def jobs_for(
+    event: str, base_ref: str = "dev", scope: str = "full", collected: str = "false", authoritative: str = ""
+) -> set[str]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     completed = {}
     pending = dict(jobs)
@@ -142,6 +144,7 @@ def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritati
                     sonar="run",
                     probe="true",
                     probe_shards="[0, 1]",
+                    collected=collected,
                     authoritative=authoritative if runs else "",
                 ),
             )
@@ -168,6 +171,11 @@ def test_each_event_runs_only_its_tier_jobs(event: str, expected: set[str]) -> N
         assert jobs_for(event) in (expected, expected | {"install-smoke"})
     else:
         assert jobs_for(event) == expected
+
+
+def test_a_plan_that_collected_the_stats_skips_the_stats_and_refine_jobs() -> None:
+    expected = (PULL_REQUEST | _planned_jobs("pull_request")) - {"mutation-stats", "mutation-refine"}
+    assert jobs_for("pull_request", collected="true") == expected
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
