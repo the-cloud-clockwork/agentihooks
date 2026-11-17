@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.972 · 2026-11-17
+
+### 2026-11-17 · 3948b5ec285a · #11755 · @agenticore-app
+
+**Take the ledger writer lock exclusive in the bin tidy only when something is due**
+
+This change fixes a contention problem where the periodic ledger bin tidy (run every 2 seconds) was grabbing the global writer lock exclusively just to check if anything needed cleaning up, even when nothing was due. Live monitoring showed this idle check regularly blocked real writers for seconds at a time, with some writes delayed over 9 seconds waiting behind it. Now the tidy first reads a lightweight snapshot without taking any lock, and only escalates to the exclusive lock when there's actually an expired or due ledger to process, cutting needless contention on every write across the system.
+
+### 2026-11-17 · 222ca85bf88d · #11741 · @agenticore-app
+
+**Panic holds only its own swarm and never blocks other swarms or unbound sessions**
+
+Panic now scopes strictly to the swarm that triggered it: state, error/pass counters, cancel throttle and fix cache are keyed by swarm slug, so blocker_window, push, rerun, dispatch, deploy and the cancel sweep only affect sessions and runs belonging to that swarm, leaving other swarms, unbound sessions and dev branches free to continue. Previously a panic could freeze or cancel work across the whole fleet; a legacy fleet-key migration and new regression tests, feature-map entry and semgrep rule guard against that recurring.
+
+### 2026-11-17 · b22015c7124f · #11742 · @agenticore-app
+
+**Promotion master drill forces a login successor into an emptied front door seat**
+
+This change adds an automated master drill that retires the front door master of a scratch proof swarm and verifies the night watch promotes a successor onto the claude.ai login within thirty minutes, surfacing the outcome as a stored record with retirement, timing, route, and recovery status. It ships as a new CLI command and a compose-based smoke test wired into the promotion pipeline, so regressions in master seat recovery are caught automatically before release rather than discovered live, closing out another seam of the master seat refill effort.
+
 ## v2.17.971 · 2026-11-17
 
 ### 2026-11-17 · 6f839f501806 · #11771 · @nestorcolt
