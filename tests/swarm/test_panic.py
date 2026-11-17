@@ -1,6 +1,7 @@
 import json
 import subprocess
 import threading
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from scripts.swarm.tick_watch import STALE_TICK, _alert
 from scripts.tick.adapters.fakes import Call, FakeSourceControl
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports.source_control import RepositoryRun
+from scripts.tick.ports.source_control import ChangeRef, ChangeState, RepositoryRun
 
 pytestmark = pytest.mark.unit
 
@@ -430,6 +431,89 @@ def test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit(monkeypatch: py
     monkeypatch.setattr(stack, "change", change)
     runs = Runs({"o/a": [RepositoryRun(1, "dev", "push", "in_progress", head_sha=commit)]})
     assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 1 on dev"]
+
+
+def _fix_reads(monkeypatch: pytest.MonkeyPatch, merged: set[str], commit: str) -> list[str]:
+    """Answer every fix pull request read with a state merged at ``commit`` for the urls in ``merged``, open for the
+    rest, and return the urls in the order they were read."""
+    from scripts.swarm import stack
+
+    reads: list[str] = []
+
+    def change(url: str, refused: str) -> ChangeState:
+        reads.append(url)
+        return _fix(url, url in merged, commit)
+
+    monkeypatch.setattr(stack, "change", change)
+    return reads
+
+
+def _fix(url: str, merged: bool, commit: str) -> ChangeState:
+    """Return the state of fix pull request ``url`` of o/a, merged at ``commit`` when ``merged``, else open."""
+    number = int(url.rsplit("/", 1)[1])
+    state = "closed" if merged else "open"
+    return ChangeState(
+        ChangeRef("o/a", number), state, "a" * 40, "dev", merged, url, f"fix-{number}", merge_commit=commit
+    )
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merged, opened, commit = FIX, f"{FIX}0", "m" * 40
+    reads = _fix_reads(monkeypatch, {merged}, commit)
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
+    rows = [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]
+    runs = Runs({repo: rows for repo in panic.REPOS})
+    panic.engage(store, "pressed", False, [merged, opened], 0)
+    sweeps = [panic.tick_pass(store, True, at, runs) for at in (1_000, 1_000 + panic.CANCEL_EVERY_MS)]
+    assert reads == [merged, opened, opened]
+    assert sweeps == [[f"panic cancelled {repo} run 2 on feature" for repo in panic.REPOS]] * 2
+    assert panic.fix_state(store, merged) == _fix(merged, True, commit)
+    assert reads == [merged, opened, opened]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_cancel_runs_without_a_store_reads_every_fix_every_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
+    for _ in range(2):
+        panic.cancel_runs([FIX], ["o/a"], Runs({}))
+    assert reads == [FIX, FIX]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_a_merged_fix_is_read_again_after_panic_releases(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
+    panic.engage(store, "pressed", False, [FIX], 0)
+    for at in (1_000, 2_000):
+        panic.tick_pass(store, True, at, Runs({}))
+    assert reads == [FIX]
+    assert panic.release(store, 2_000)
+    panic.engage(store, "pressed", False, [FIX], 3_000)
+    panic.tick_pass(store, True, 3_000, Runs({}))
+    assert reads == [FIX, FIX]
+
+
+@pytest.mark.parametrize("drift", ["state", "reference"])
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_a_kept_fix_row_of_another_shape_is_read_again(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    commit = "m" * 40
+    reads = _fix_reads(monkeypatch, {FIX}, commit)
+    stale = asdict(_fix(FIX, True, commit))
+    if drift == "state":
+        del stale["body"]
+    else:
+        stale["reference"]["owner"] = "o"
+    store.redis.hset(f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}", FIX, json.dumps(stale))
+    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    assert reads == [FIX]
 
 
 @pytest.mark.feature("panic-merged-fix-integration-head")
