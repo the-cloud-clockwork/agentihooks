@@ -50,6 +50,17 @@
       ]
     },
     {
+      "id": "compose-api-and-front-host-checks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
+      "behaviour": "The ledger API service admits the Host its own health check sends, its listening and loopback names on its own port, so the Compose API service turns healthy and the front starts; the front forwards each request with the Host the client sent, port included, so reads and writes through it pass the ledger server and API host checks.",
+      "seam": "scripts.swarm_ledger.api_service.serve, and the front nginx configs of the Compose stack, the swarm init stack and the local ledger Compose file",
+      "tests": [
+        "tests/test_swarm_v2_ledger_writer.py::test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port",
+        "tests/test_compose_stack.py::test_the_front_forwards_the_host_the_client_sent_with_its_port"
+      ]
+    },
+    {
       "id": "reload-successor-imports-hub-before-ready",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",

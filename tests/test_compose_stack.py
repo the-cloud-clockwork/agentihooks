@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
@@ -160,3 +161,18 @@ def test_the_front_routes_reads_to_the_ledger_and_writes_to_the_api() -> None:
     assert "http://swarm:8765" in conf
     assert "http://api:8766" in conf
     assert "GET|HEAD" in conf
+
+
+@pytest.mark.feature("compose-api-and-front-host-checks")
+@pytest.mark.parametrize(
+    "conf",
+    [
+        "deploy/compose/ledger-front.conf",
+        "scripts/swarm/stack/deploy/compose/ledger-front.conf",
+        "deploy/compose/ledger-local-front.conf.template",
+    ],
+)
+def test_the_front_forwards_the_host_the_client_sent_with_its_port(conf: str) -> None:
+    text = (ROOT / conf).read_text()
+    assert "proxy_set_header Host $http_host;" in text
+    assert "$host;" not in text

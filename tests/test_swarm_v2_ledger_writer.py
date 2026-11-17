@@ -633,6 +633,29 @@ def test_the_api_service_binds_its_own_address_and_names_it_in_the_start_line(
     )
 
 
+@pytest.mark.feature("compose-api-and-front-host-checks")
+def test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port(
+    serving: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    sent: list[tuple[int, str, str]] = []
+
+    def send(code: int, body: str, ctype: str) -> None:
+        sent.append((code, body, ctype))
+
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {"api:8766"})
+    monkeypatch.setattr(api_service, "HOST", "0.0.0.0")
+    monkeypatch.setattr(api_service, "PORT", 8766)
+    api_service.serve()
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
+    handler.headers, handler.path = {"Host": "127.0.0.1:8766"}, "/healthz"
+    monkeypatch.setattr(handler, "send", send)
+    handler.do_GET()
+    assert sent == [(200, json.dumps({"dir": str(serving)}), "application/json")]
+    assert server.ALLOWED_HOSTS == {"api:8766", "0.0.0.0:8766", "127.0.0.1:8766", "localhost:8766"}
+
+
 class Piped(io.StringIO):
     """A standard output piped to a supervisor: it records what it held at each flush."""
 
