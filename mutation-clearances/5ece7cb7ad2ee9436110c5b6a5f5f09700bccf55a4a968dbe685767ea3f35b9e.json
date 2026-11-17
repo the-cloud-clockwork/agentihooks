@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x_control:864244498a3e54f5553835a2c95d491d8e02ad7ca357f59e40f844a58b7ac1c0": {
+    "reader": "standards-reader",
+    "reason": "The X-Proof-Credential key goes into an email Message that proofs.control reads with headers.get, which ignores name case."
+  }
+}

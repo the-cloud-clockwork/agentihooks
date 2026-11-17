@@ -13,7 +13,7 @@ services:
       PYTHONPATH: ${LEDGER_CODE}
       LEDGER_DIR: ${LEDGER_DIR:?set by ledger_server.py --ensure}
       LEDGER_HOST: 127.0.0.1
-      LEDGER_PORT: ${LEDGER_PORT:-8765}
+      LEDGER_PORT: ${LEDGER_READ_PORT:-18765}
       AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
       AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-}
       # The certificate and key must sit under a mounted folder, such as ~/.agentihooks.
@@ -36,3 +36,52 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+  api:
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    command: [python, "${LEDGER_CODE}/scripts/swarm_ledger/api_service.py", --serve]
+    working_dir: ${LEDGER_CODE:?set by ledger_server.py --ensure}
+    user: ${LEDGER_UID:-1000}:${LEDGER_GID:-1000}
+    network_mode: host
+    pid: host
+    environment:
+      HOME: ${HOME}
+      PYTHONPATH: ${LEDGER_CODE}
+      LEDGER_DIR: ${LEDGER_DIR:?set by ledger_server.py --ensure}
+      LEDGER_API_HOST: 127.0.0.1
+      LEDGER_API_PORT: ${LEDGER_API_PORT:-8766}
+      AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
+      AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-}
+      LEDGER_TLS_CERT: ${LEDGER_TLS_CERT:-}
+      LEDGER_TLS_KEY: ${LEDGER_TLS_KEY:-}
+      MALLOC_ARENA_MAX: "2"
+    volumes:
+      - ${LEDGER_DIR}:${LEDGER_DIR}
+      - ${LEDGER_CODE}:${LEDGER_CODE}:ro
+      - ${HOME}/.agentihooks:${HOME}/.agentihooks
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 2
+    pids_limit: 200
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['LEDGER_API_PORT'] + '/healthz', timeout=2).read()"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+  front:
+    image: mirror.gcr.io/library/nginx:1.27-alpine
+    network_mode: host
+    environment:
+      LEDGER_PORT: ${LEDGER_PORT:-8765}
+      LEDGER_READ_PORT: ${LEDGER_READ_PORT:-18765}
+      LEDGER_API_PORT: ${LEDGER_API_PORT:-8766}
+      NGINX_ENVSUBST_FILTER: ^LEDGER_(PORT|READ_PORT|API_PORT)$$
+    volumes:
+      - ${LEDGER_CODE}/deploy/compose/ledger-local-front.conf.template:/etc/nginx/templates/default.conf.template:ro
+    restart: unless-stopped
+    depends_on:
+      ledger:
+        condition: service_healthy
+      api:
+        condition: service_healthy

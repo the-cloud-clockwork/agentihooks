@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_adopt_unrelayed:0573cd7f9abf96b8f3b90586b21add3e1f7b81b591c0b8261cf6dbaadf67d907": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns found unchanged at run time; the isinstance guard is unchanged and .items() is called on the same dict."
+  }
+}

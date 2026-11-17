@@ -1,0 +1,6 @@
+{
+  "tests/swarm/test_cli.py::test_set_refuses_an_api_address_that_is_not_a_plain_web_address[https://operator@swarm.example.test]": {
+    "reader": "standards-reader",
+    "reason": "The cutover switch is deleted: no api-url setting, ledger-ready key, scoped or configured ledger route, hosted lease route or serving switch remains; the lab-url refusal keeps the same five addresses and the API service lease keeps its own tests."
+  }
+}

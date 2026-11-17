@@ -20,7 +20,7 @@ from scripts.claude_quota_balancer import (
     _weight_text,
     account_cap,
 )
-from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot, account_key
 
 if TYPE_CHECKING:
     from scripts.codex_quota import CodexQuota
@@ -42,6 +42,7 @@ TOKEN_LOGIN = "agentihooks codex login {name}"
 NEXT_MARK = "(next)"
 RESERVED_MARK = "(reserved)"
 CURRENT_MARK = "(current)"
+MASTER_MARK = "MASTER"
 NO_CURRENT = ""
 CACHED = "cached"
 FABLE_COLUMNS = ["FABLE LEFT", "FABLE RESET"]
@@ -439,6 +440,29 @@ def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sess
     return marked
 
 
+def with_master_routes(rows: list[QuotaRow], routes: Mapping[str, str]) -> list[QuotaRow]:
+    """Mark each Claude row a live front door master runs on with the route it runs on."""
+    keyed = {account_key(account): route for account, route in routes.items()}
+    return [
+        replace(row, master=f"{row.master or MASTER_MARK} ({route})")
+        if row.agent == "claude" and (route := keyed.get(account_key(row.account)))
+        else row
+        for row in rows
+    ]
+
+
+def _master_routes() -> dict[str, str]:
+    from redis.exceptions import RedisError
+
+    from scripts.swarm.store import RedisStore, redis_client  # pyright: ignore[reportUnknownVariableType]
+    from scripts.swarm_v2 import front_door
+
+    try:
+        return front_door.master_routes(RedisStore(redis_client()))
+    except (RedisError, OSError):
+        return {}
+
+
 def router_environ(environ: MutableMapping[str, str]) -> MutableMapping[str, str]:
     from scripts import operator_env
 
@@ -567,6 +591,7 @@ def balance_table(
     observed = _observed(results, now, fable) if observed is None else observed
     claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
+    claude = with_master_routes(claude, _master_routes())
     holds = {harness: reservation.current(harness, os.environ) for harness in (("claude",) if fable else HARNESSES)}
     rows = with_reservations(claude + ([] if fable else _codex(now)), holds, now)
     table = _render_live(rows, sessions, now, fable, current)

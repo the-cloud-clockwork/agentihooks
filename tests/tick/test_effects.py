@@ -202,7 +202,7 @@ def test_the_pass_tools_wire_every_real_adapter_for_the_swarm(monkeypatch: pytes
     records = [SimpleNamespace(name="eng-1"), SimpleNamespace(name="eng-2")]
     store = SimpleNamespace(redis="redis", agents=lambda slug: records if slug == "sw" else [])
     tools = cli._pass_tools(store, "sw", "owner")  # pyright: ignore[reportPrivateUsage, reportArgumentType]
-    assert tools.ledger == ("ClientLedger", ("sw", ("resource_client", ("sw",), (("service", True),))), ())
+    assert tools.ledger == ("ClientLedger", ("sw", ("resource_client", ("sw",), ())), ())
     assert tools.coordination == ("StoreCoordination", (store, "sw", "owner"), ())
     assert tools.source_control == ("GitHubSourceControl", ("", "cwd", "dev"), ())
     assert tools.processes == ("PassProcesses", (), ())

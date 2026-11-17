@@ -965,6 +965,7 @@ jobs:
         name: Install dependencies
         if: steps.venv.outputs.cache-hit != 'true'
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
@@ -1240,6 +1241,7 @@ jobs:
       - name: Install dependencies
         if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
@@ -3335,6 +3337,8 @@ jobs:
 
       - name: Install the mutation gate for its self plant
         if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Prove the mutation gate kills with the real test and fails with a weakened one
@@ -3878,6 +3882,8 @@ jobs:
           enable-cache: false
 
       - name: Install duration collection dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore recent shard durations
@@ -4378,6 +4384,8 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -4585,6 +4593,8 @@ jobs:
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
       - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -4701,6 +4711,8 @@ jobs:
           git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
 
       - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -4846,6 +4858,8 @@ jobs:
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
       - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -5014,6 +5028,8 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"

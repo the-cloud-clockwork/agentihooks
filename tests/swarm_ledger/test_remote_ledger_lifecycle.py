@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import threading
 import urllib.error
 from unittest.mock import patch
 
@@ -10,6 +9,7 @@ import pytest
 from scripts.swarm import lease
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, LedgerUnreachable
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger.api import admin
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import bin_storage
@@ -26,9 +26,10 @@ live = authority_live
 @pytest.mark.parametrize("mode", ["compose", "distributed"])
 def test_remote_bin_uses_the_server_and_preserves_conditional_result(live, mode):
     original = bin_storage.bin_closed
+    calls: list[tuple[object, ...]] = []
 
-    def server_bin(*args, **kwargs):
-        assert threading.current_thread() is not threading.main_thread(), "client touched the ledger folder"
+    def server_bin(*args: object, **kwargs: object) -> bool:
+        calls.append(args)
         return original(*args, **kwargs)
 
     bin_storage.restore(SLUG)
@@ -41,14 +42,16 @@ def test_remote_bin_uses_the_server_and_preserves_conditional_result(live, mode)
         client = LedgerClient()
         assert client.bin_closed(SLUG, closed_at) is True
         assert client.bin_closed(SLUG, closed_at) is False
+    assert calls == [(SLUG, closed_at), (SLUG, closed_at)]
 
 
 @pytest.mark.parametrize("mode", ["compose", "distributed"])
 def test_remote_reopen_restores_on_the_server(live, mode):
     original = bin_storage.restore
+    calls: list[tuple[object, ...]] = []
 
-    def server_restore(*args, **kwargs):
-        assert threading.current_thread() is not threading.main_thread(), "client touched the ledger folder"
+    def server_restore(*args: object, **kwargs: object) -> bool:
+        calls.append(args)
         return original(*args, **kwargs)
 
     core.sync(SLUG, ops=[{"op": "close", "id": "close-for-remote", "by": "operator"}])
@@ -62,6 +65,7 @@ def test_remote_reopen_restores_on_the_server(live, mode):
         client.reopen(SLUG, "operator")
         assert client.closed(SLUG) is False
         assert client.binned(SLUG) is False
+    assert calls == [(SLUG,)]
     assert SLUG not in bin_storage.entries()
 
 
@@ -81,8 +85,14 @@ def test_remote_local_storage_calls_name_the_server_route(mode, operation):
 
 def test_remote_lifecycle_refusals_use_swarm_errors(live):
     with (
-        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
-        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": "wrong-token"}),
+        patch.dict(
+            os.environ,
+            {
+                "AGENTIHOOKS_DEPLOYMENT": "compose",
+                "AGENTIHOOKS_SWARM": "rig-grade-swarm",
+                "AGENTIHOOKS_AGENT_NAME": WORKER,
+            },
+        ),
         pytest.raises(LedgerRefused, match="403"),
     ):
         LedgerClient().bin_closed(SLUG, 1)
@@ -121,14 +131,14 @@ def test_remote_agent_can_reopen_but_cannot_bin(live, hive, mode):
         client = LedgerClient()
         client.reopen(SLUG, WORKER)
         assert client.binned(SLUG) is False
-        with pytest.raises(SystemExit, match="a remote ledger client cannot make service writes"):
-            LedgerClient(service=True).binned(SLUG)
         with pytest.raises(LedgerRefused, match="403"):
             client.bin_closed(SLUG, core.now_ms() + 1)
 
 
 @pytest.mark.parametrize("status", [None, 400, 500])
 def test_remote_lifecycle_outages_use_swarm_errors(live, status):
+    from scripts.tick.adapters import database_ledger
+
     failure = (
         OSError("offline")
         if status is None
@@ -136,8 +146,7 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, status):
     )
     with (
         patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
-        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": live["admin"]}),
-        patch("urllib.request.urlopen", side_effect=failure),
+        patch.object(database_ledger, "request", side_effect=failure),
         pytest.raises(SwarmError) as caught,
     ):
         LedgerClient().bin_closed(SLUG, 1)
@@ -172,7 +181,7 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, status):
 def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
     before = bin_storage.entries()
     with pytest.raises(APIError) as caught:
-        admin.lifecycle(server.api_services(), "", SLUG, payload)
+        admin.lifecycle(api_service.services(), "", SLUG, payload)
     assert caught.value.status == 400
     status, _, _ = send(
         live,
@@ -188,15 +197,17 @@ def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
 def test_lifecycle_action_results_and_authority(live):
     bin_storage.restore(SLUG)
     payload = {"action": "bin_closed", "closed_at": core.now_ms() + 1}
-    assert admin.lifecycle(server.api_services(), "", SLUG, payload) == {"data": True}
-    assert admin.lifecycle(server.api_services(), "", SLUG, payload) == {"data": False}
-    assert admin.lifecycle(server.api_services(), WORKER, SLUG, {"action": "binned"}) == {"data": True}
-    assert admin.lifecycle(server.api_services(), WORKER, SLUG, {"action": "restore"}) == {"data": True}
-    assert admin.lifecycle(server.api_services(), "", SLUG, {"action": "restore"}) == {"data": False}
-    assert admin.lifecycle(server.api_services(), "", SLUG, {"action": "binned"}) == {"data": False}
-    assert admin.lifecycle(server.api_services(), "", SLUG, {"action": "bin_closed", "closed_at": 1}) == {"data": False}
+    assert admin.lifecycle(api_service.services(), "", SLUG, payload) == {"data": True}
+    assert admin.lifecycle(api_service.services(), "", SLUG, payload) == {"data": False}
+    assert admin.lifecycle(api_service.services(), WORKER, SLUG, {"action": "binned"}) == {"data": True}
+    assert admin.lifecycle(api_service.services(), WORKER, SLUG, {"action": "restore"}) == {"data": True}
+    assert admin.lifecycle(api_service.services(), "", SLUG, {"action": "restore"}) == {"data": False}
+    assert admin.lifecycle(api_service.services(), "", SLUG, {"action": "binned"}) == {"data": False}
+    assert admin.lifecycle(api_service.services(), "", SLUG, {"action": "bin_closed", "closed_at": 1}) == {
+        "data": False
+    }
     with pytest.raises(APIError) as caught:
-        admin.lifecycle(server.api_services(), WORKER, SLUG, payload)
+        admin.lifecycle(api_service.services(), WORKER, SLUG, payload)
     assert caught.value.status == 403
     assert caught.value.envelope() == {
         "error": {
@@ -212,13 +223,13 @@ def test_lifecycle_controller_epoch_is_checked_before_storage(live, action):
     if action == "bin_closed":
         payload["closed_at"] = 1
     with patch.object(server.authority, "fence") as fence:
-        admin.lifecycle(server.api_services(), "", SLUG, payload)
+        admin.lifecycle(api_service.services(), "", SLUG, payload)
     fence.assert_called_once_with(SLUG, 1)
     with (
         patch.object(server.authority, "fence", side_effect=SwarmError("stale controller")),
         patch.object(bin_storage, "_transaction", side_effect=AssertionError("stale controller reached storage")),
         pytest.raises(APIError) as caught,
     ):
-        admin.lifecycle(server.api_services(), "", SLUG, payload)
+        admin.lifecycle(api_service.services(), "", SLUG, payload)
     assert caught.value.status == 409
     assert caught.value.envelope() == {"error": {"code": "stale_controller", "message": "stale controller"}}

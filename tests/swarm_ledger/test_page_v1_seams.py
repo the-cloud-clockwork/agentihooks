@@ -4,6 +4,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 from scripts.swarm import freeze
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger.api.resources import revision
 from scripts.swarm_ledger.repository import hierarchy
 from tests.swarm_ledger.ledger_page import MODULES, ledger_state, shell_html, show
@@ -220,7 +221,7 @@ def test_page_saves_apply_through_version_one(live):
 
 def test_swarm_controls_and_the_model_list_answer_through_version_one(live):
     status_body = {"config": {"slug": SLUG, "state": "paused"}}
-    with patch.object(server, "swarm_control", return_value=(status_body, None)) as control:
+    with patch.object(api_service, "swarm_control", return_value=(status_body, None)) as control:
         assert request(live, "PUT", "swarm/controls", {"action": "pause"}) == (200, status_body)
     control.assert_called_once_with(SLUG, ["pause"], "swarm")
     catalog = {"claude": [{"model": "opus"}], "codex": []}
@@ -233,7 +234,7 @@ def test_a_crossed_effort_range_is_refused_before_it_is_queued(live, monkeypatch
 
     config = SimpleNamespace(effort_min="low", effort_max="medium", lanes={})
     monkeypatch.setattr(server, "swarm_store", lambda: SimpleNamespace(config=lambda slug: config))
-    with patch.object(server, "swarm_control") as control:
+    with patch.object(api_service, "swarm_control") as control:
         status, error = request(live, "PUT", "swarm/controls", {"action": "set", "effort_min": "high"})
     assert (status, error["error"]["message"]) == (400, "effort-min high is above effort-max medium")
     control.assert_not_called()
@@ -244,7 +245,7 @@ def test_a_ceiling_alone_below_the_stored_floor_is_refused(live, monkeypatch):
 
     config = SimpleNamespace(effort_min="medium", effort_max="high", lanes={})
     monkeypatch.setattr(server, "swarm_store", lambda: SimpleNamespace(config=lambda slug: config))
-    with patch.object(server, "swarm_control") as control:
+    with patch.object(api_service, "swarm_control") as control:
         status, error = request(live, "PUT", "swarm/controls", {"action": "set", "effort_max": "low"})
     assert (status, error["error"]["message"]) == (400, "effort-min medium is above effort-max low")
     control.assert_not_called()
@@ -256,7 +257,7 @@ def test_a_set_without_efforts_is_queued_even_when_the_stored_range_is_crossed(l
     config = SimpleNamespace(effort_min="high", effort_max="low", lanes={})
     monkeypatch.setattr(server, "swarm_store", lambda: SimpleNamespace(config=lambda slug: config))
     status_body = {"config": {"slug": SLUG, "state": "running"}}
-    with patch.object(server, "swarm_control", return_value=(status_body, None)) as control:
+    with patch.object(api_service, "swarm_control", return_value=(status_body, None)) as control:
         assert request(live, "PUT", "swarm/controls", {"action": "set", "max_eng": 2}) == (200, status_body)
     control.assert_called_once()
 

@@ -6,16 +6,18 @@ from agents are refused.
 """
 
 import re
+from typing import Protocol
 
 from scripts.gates import log
 from scripts.gates.base import Who
 from scripts.inbox.seats import SeatRegistry, seat_address
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord
 
 NAME = "front-door"
 CHAT = "chat"
 CHAT_WRITES = ("add", "edit", "delete")
 NEEDS_OPERATOR = re.compile(r"^followups/[^/]+/needs_operator$")
+MASTER_ROUTES = {"master-login": "claude ai login", "interactive": "claude ai login", "subscription": "token fallback"}
 
 
 def seat(slug: str) -> str:
@@ -25,6 +27,30 @@ def seat(slug: str) -> str:
 def holds(slug: str, held: str) -> bool:
     """A master with no seat predates seats and holds the front door."""
     return held in ("", seat(slug))
+
+
+def master_route(slug: str, agent: AgentRecord) -> str:
+    """The route a working Claude front door master runs on, from its execution record; empty for other agents."""
+    door = agent.lane == MASTER and agent.state == "working" and agent.harness == "claude" and holds(slug, agent.seat)
+    return MASTER_ROUTES.get(agent.route_kind, "") if door else ""
+
+
+class Swarms(Protocol):
+    """The swarm store reads that list every swarm's agents."""
+
+    def slugs(self) -> list[str]: ...
+
+    def agents(self, slug: str) -> list[AgentRecord]: ...
+
+
+def master_routes(store: Swarms) -> dict[str, str]:
+    """The route of every swarm's working front door master, keyed by the account it runs on."""
+    return {
+        agent.account: found
+        for slug in store.slugs()
+        for agent in store.agents(slug)
+        if (found := master_route(slug, agent))
+    }
 
 
 def chat_write(op: dict) -> bool:

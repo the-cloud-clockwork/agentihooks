@@ -16,7 +16,7 @@ from tests.swarm_ledger.test_server_environment import ROOT, clean_environment, 
 
 SLUG = "single-writer"
 TOKEN = "single-writer-fixture-token"
-SERVER = ROOT / "scripts" / "swarm_ledger" / "ledger_server.py"
+SERVER = ROOT / "scripts" / "swarm_ledger" / "api_service.py"
 WAIT = 20
 
 
@@ -46,6 +46,8 @@ def environment(base: Path, folder: Path, port: int) -> dict:
         LEDGER_DIR=str(folder),
         LEDGER_HOST="127.0.0.1",
         LEDGER_PORT=str(port),
+        LEDGER_API_HOST="127.0.0.1",
+        LEDGER_API_PORT=str(port),
         SWARM_RELOAD="0",
     )
 
@@ -231,7 +233,7 @@ def run_case(case: str, base: Path) -> dict:
         observed = {"a": _positive, "b": _rejection, "c": _recovery}[case](base, ports)
     return {
         "case": f"T-SV2-LDG-04-{case.upper()}",
-        "evidence_class": "two real ledger server processes sharing one SQLite ledger folder; no Redis fixture",
+        "evidence_class": "two real ledger API service processes sharing one SQLite ledger folder; no Redis fixture",
         "observed": observed,
         "state": "passed",
     }

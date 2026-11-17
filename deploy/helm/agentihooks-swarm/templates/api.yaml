@@ -1,0 +1,145 @@
+{{- if and .Values.api.enabled (not .Values.hiveOnly) }}
+{{- $fullname := include "swarm.fullname" . }}
+{{- $host := printf "%s-api" $fullname }}
+{{- $port := int .Values.api.port }}
+{{- $replicas := int .Values.api.replicas }}
+{{- $secretNames := list }}
+{{- range .Values.ledger.secretEnv }}
+{{- $secretNames = append $secretNames .name }}
+{{- end }}
+{{- $shared := or (not (empty (get (.Values.ledger.env | default dict) "AGENTIHOOKS_SWARM_DATABASE_URL"))) (has "AGENTIHOOKS_SWARM_DATABASE_URL" $secretNames) }}
+{{- if not $shared }}
+{{- fail "api.enabled needs the shared database: set AGENTIHOOKS_SWARM_DATABASE_URL in ledger.env or ledger.secretEnv, since the api service writes the ledger over it" }}
+{{- end }}
+{{- if lt $replicas 1 }}
+{{- fail "api.replicas must be at least 1" }}
+{{- end }}
+{{- $tls := .Values.ledger.tls.secretName }}
+{{- if and .Values.api.podDisruptionBudget.enabled (gt $replicas 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $host }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  maxUnavailable: {{ .Values.api.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "api") | nindent 6 }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $host }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "swarm.selector" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $host }}
+  {{- with $tls }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ . | quote }}
+  {{- end }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.podLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: 20
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [python, -m, scripts.swarm_ledger.api_service, --serve]
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+          env:
+            {{- include "swarm.env" (dict "root" . "role" "ledger") | nindent 12 }}
+            - name: LEDGER_API_HOST
+              value: "0.0.0.0"
+            - name: LEDGER_API_PORT
+              value: {{ $port | quote }}
+            - name: LEDGER_DIR
+              value: /data
+            {{- if $tls }}
+            - name: LEDGER_TLS_CERT
+              value: /run/ledger-tls/tls.crt
+            - name: LEDGER_TLS_KEY
+              value: /run/ledger-tls/tls.key
+            {{- end }}
+            - name: MALLOC_ARENA_MAX
+              value: "2"
+            - name: SWARM_PUBLIC_URL
+              value: {{ .Values.ledger.publicUrl | default (ternary (printf "https://%s" .Values.ingress.host) (include "swarm.ledgerUrl" .) .Values.ingress.enabled) | quote }}
+            - name: SWARM_ALLOWED_HOSTS
+              value: {{ concat (list (printf "%s:%v,%s.%s:%v,%s.%s.svc:%v,%s.%s.svc.cluster.local:%v%s" $host $port $host .Release.Namespace $port $host .Release.Namespace $port $host .Release.Namespace $port (ternary (printf ",%s" .Values.ingress.host) "" .Values.ingress.enabled))) (.Values.ledger.allowedHosts | default list) | join "," | quote }}
+            {{- include "swarm.secretKeyEnv" .Values.ledger.secretEnv | nindent 12 }}
+            {{- include "swarm.extraEnv" .Values.ledger.env | nindent 12 }}
+            {{- include "swarm.secretKeyEnv" .Values.api.secretEnv | nindent 12 }}
+            {{- include "swarm.extraEnv" .Values.api.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          readinessProbe:
+            {{- include "swarm.healthzFor" (dict "port" $port "tls" (not (empty $tls))) | nindent 12 }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            {{- include "swarm.healthzFor" (dict "port" $port "tls" (not (empty $tls))) | nindent 12 }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if $tls }}
+            - name: ledger-tls
+              mountPath: /run/ledger-tls
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+        {{- if $tls }}
+        - name: ledger-tls
+          secret:
+            secretName: {{ $tls | quote }}
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        {{- end }}
+{{- end }}

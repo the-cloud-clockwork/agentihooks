@@ -142,7 +142,7 @@ def _limited_js(error_code: int) -> SimpleNamespace:
 def test_bounded_bucket_conflict_updates_only_the_limits() -> None:
     js = _limited_js(10058)
     found = asyncio.run(nats.provision_state(js, TIMERS))
-    js.create_key_value.assert_awaited_once_with(bucket=TIMERS, **nats.STATE_LIMITS[TIMERS])
+    js.create_key_value.assert_awaited_once_with(bucket=TIMERS, replicas=1, **nats.STATE_LIMITS[TIMERS])
     assert js.stream_info.await_args_list == [
         call(f"KV_{TIMERS}"),
         call(f"KV_{TIMERS}", subjects_filter=f"$KV.{TIMERS}.>"),

@@ -36,11 +36,11 @@ def main():
         "reply_to": args.reply_to,
     }
     try:
-        rejected = ledger.request(args.slug, [op], service=True)["rejected"]
+        rejected = ledger.request(args.slug, [op])["rejected"]
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        sys.exit(f"ledger server not answering on {ledger.base()}: {exc}")
+        sys.exit(f"the ledger database is not answering: {exc}")
     if rejected:
         sys.exit(f"message rejected: {rejected}")
     print(json.dumps({"posted": op["id"]}))

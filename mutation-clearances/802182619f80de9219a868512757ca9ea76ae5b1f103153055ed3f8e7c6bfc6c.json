@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_exchanged:07aacfe6cdc3a779471645083432213bd946e068285a196c633f0f0387c1be70": {
+    "reader": "standards-reader",
+    "reason": "exchanged stores Content-Type in an email Message whose get ignores name case; Message set appends, and the header read is unchanged."
+  }
+}

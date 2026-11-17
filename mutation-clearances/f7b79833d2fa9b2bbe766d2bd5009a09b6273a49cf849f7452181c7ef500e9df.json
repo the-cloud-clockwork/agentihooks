@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/hosted_ledger.py:scripts.swarm_v2.hosted_ledger.x\u01c1HostedLedger\u01c1client:66a4ccac1d28736bcbb9a4d6f51d58f47e645e8b5165e6db44724889ed91a964": {
+    "reader": "standards-reader",
+    "reason": "ledger.REQUEST_TIMEOUT is 10 and ResourceClient's default timeout is 10; with transport set, request() returns transport(...) before self.timeout is read."
+  }
+}

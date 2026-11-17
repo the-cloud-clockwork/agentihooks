@@ -40,9 +40,22 @@ spec:
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
       terminationGracePeriodSeconds: {{ $hub.terminationGracePeriodSeconds }}
-      {{- with $hub.affinity }}
+      {{- $spread := and (gt (int $hub.replicas) 1) (not (hasKey (default (dict) $hub.affinity) "podAntiAffinity")) }}
+      {{- if or $hub.affinity $spread }}
       affinity:
+        {{- with $hub.affinity }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $spread }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "swarm.selector" (dict "root" . "component" "hub") | nindent 20 }}
+        {{- end }}
       {{- end }}
       {{- with $hub.tolerations }}
       tolerations:
@@ -56,6 +69,7 @@ spec:
           command: [agentihooks, hub, run]
           env:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+            {{- include "swarm.databaseEnv" (dict "root" . "env" $hub.env "secretEnv" $hub.secretEnv) | nindent 12 }}
             - name: AGENTIHOOKS_BUS
               value: {{ $hub.bus.backend | quote }}
             {{- if $hub.bus.scoped }}

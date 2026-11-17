@@ -1142,16 +1142,16 @@ def test_capacity_comment_uses_controller_authority(monkeypatch):
 
     calls = []
 
-    def call(slug, ops, service):
-        calls.append((slug, ops, service))
+    def call(slug, ops):
+        calls.append((slug, ops))
         return {}
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
     client = ledger_client.LedgerClient()
     client.capacity_comment("sw", "e", "quota capacity changed", 1000)
     assert len(calls) == 1
-    slug, ops, service = calls[0]
-    assert slug == "sw" and service is True
+    slug, ops = calls[0]
+    assert slug == "sw"
     assert ops[0]["thread"] == "tasks/e/comments"
     assert ops[0]["by"] == "swarm"
     assert ops[0]["text"] == "quota capacity changed"
@@ -1167,7 +1167,7 @@ def test_the_capacity_comment_passes_the_ledger_schema(monkeypatch):
 
     sent = []
     monkeypatch.setattr(
-        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.extend(ops) or {})
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: sent.extend(ops) or {})
     )
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
@@ -1193,7 +1193,7 @@ def test_warned_capacity_comment_passes_the_ledger_schema(monkeypatch):
 
     sent = []
     monkeypatch.setattr(
-        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.extend(ops) or {})
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: sent.extend(ops) or {})
     )
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
@@ -1345,8 +1345,8 @@ def test_capacity_apply_preserves_saved_options_and_controller_evidence(tmp_path
     monkeypatch.setattr(capacity, "accounts", observations)
     calls = []
 
-    def call(slug, ops, service):
-        assert slug == "sw" and service is True
+    def call(slug, ops):
+        assert slug == "sw"
         calls.extend(ops)
         return {}
 

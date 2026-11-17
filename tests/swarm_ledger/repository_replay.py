@@ -41,14 +41,9 @@ def exchange(server, token, body=None, route=f"/api/{SLUG}", method=None):
         return {"status": response.status, "type": response.headers["Content-Type"], "body": body}
 
 
-def served(root: Path) -> tuple[ModuleType, type]:
-    """The ledger server module the replay patches and the handler that answers the replay: the ledger server's own
-    on a tree whose ledger server takes writes, else the ledger API service's write handler with the ledger server's
-    reads."""
-    if not (root / "scripts/swarm_ledger/api_service.py").is_file():
-        import ledger_server
-
-        return ledger_server, ledger_server.Handler
+def served() -> tuple[ModuleType, type]:
+    """The ledger server module the replay patches and the handler that answers the replay: the ledger API service's
+    write handler with the ledger server's reads."""
     package = importlib.import_module("scripts.swarm_ledger.ledger_server")
     writes = importlib.import_module("scripts.swarm_ledger.api_service")
     return package, type("Replay", (writes.WriteHandler,), {"do_GET": package.Handler.do_GET})
@@ -63,7 +58,7 @@ def record(root: Path, folder: Path) -> list:
     sys.path.insert(1, str(root))
     import ledger_core as core
 
-    ledger_server, handler = served(root)
+    ledger_server, handler = served()
     import new_ledger
 
     from scripts.inbox.store import InboxStore

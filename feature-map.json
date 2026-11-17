@@ -1,6 +1,51 @@
 {
   "features": [
     {
+      "id": "balance-master-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",
+      "behaviour": "The balance row for the account a live front door master runs on carries the master mark followed by its route, the claude ai login or the token fallback, read from the master execution record whatever the account spelling, one route per account so a second front door master on the same account is not shown, and shows no route while the swarm Redis is unreachable; the swarm status payload carries the same route on the front door master only, and the swarm panel master row shows it on its own line under its account, unclipped at 1920.",
+      "seam": "agents_quota.balance_table, the swarm status report agent entries and the swarm panel agentRows and agentRow master name cell",
+      "tests": [
+        "tests/test_agents_quota.py::test_balance_names_the_route_the_live_front_door_master_runs_on",
+        "tests/test_agents_quota.py::test_balance_names_a_token_fallback_on_another_account_in_either_spelling",
+        "tests/test_agents_quota.py::test_balance_shows_no_route_while_the_swarm_redis_is_unreachable",
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_names_only_a_working_claude_front_door_masters_route",
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_every_swarms_front_door_route_by_its_account",
+        "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_only_on_the_front_door_master",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_carries_the_route_its_status_names",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_shows_its_route_on_its_own_line_at_1920",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_name_cell_names_its_account_and_route"
+      ]
+    },
+    {
+      "id": "serena-router-start-stops-waiting-on-an-exited-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-hive-proof-no-live-hive",
+      "behaviour": "Starting the Serena router without a systemd user session stops waiting the moment the router process it started exits before opening its port, and reports the router down with its exit status, while a router that still runs is waited on until its port opens. A hive pod with no serena binary therefore leaves the router start within seconds instead of ninety, writes its first heartbeat and registers as a live hive inside the worker hive pod proof's sixty second window.",
+      "seam": "serena_router_daemon.start on the pidfile path, which hive run reaches through serena_router_daemon.ensure",
+      "rules": [
+        "serena-router-start-waits-on-an-exited-router"
+      ],
+      "tests": [
+        "tests/test_serena_router_daemon.py::test_start_reports_the_router_down_as_soon_as_its_process_exits_before_opening_its_port",
+        "tests/test_serena_router_daemon.py::test_start_keeps_waiting_for_a_running_router_until_its_port_opens"
+      ]
+    },
+    {
+      "id": "hive-service-start-ensures-serena-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
+      "behaviour": "The hive service starts or waits for the Serena router once, after it loads the operator env and before it starts the lane spokes and the beat loop that takes launch and resume orders, and it still starts when the router does not come up. An agent the hive resumes right after a pod start therefore finds the router serving when its session connects to Serena at startup.",
+      "seam": "hive run in the hive service, through serena_router_daemon.ensure",
+      "rules": [
+        "hive-service-start-before-serena-router"
+      ],
+      "tests": [
+        "tests/hive/test_lanes.py::test_hive_run_ensures_the_serena_router_before_the_lane_spokes_and_starts_even_when_it_is_down"
+      ]
+    },
+    {
       "id": "hive-spoke-launch-waits-for-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
@@ -34,6 +79,18 @@
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_adoption_sends_start_and_stop_to_the_bundle_swarm_service",
         "tests/swarm_ledger/test_server_compose.py::test_a_failed_pull_still_starts_the_service_on_its_local_image"
+      ]
+    },
+    {
+      "id": "compose-api-health-and-front-proxy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
+      "behaviour": "The ledger API service admits the Host its own health check sends, its loopback names on its own port, so the Compose API service turns healthy and the front starts. The Compose front resolves the swarm and api names through the Compose DNS at request time, so it reaches them and finds a recreated container. Every front config forwards each request with the Host the client sent, port included, so a client on the public URL's host and port passes the ledger server and API host checks.",
+      "seam": "scripts.swarm_ledger.api_service.serve, and the front nginx configs of the Compose stack, the swarm init stack and the local ledger Compose file",
+      "tests": [
+        "tests/test_swarm_v2_ledger_writer.py::test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port",
+        "tests/test_compose_stack.py::test_the_front_forwards_the_host_the_client_sent_with_its_port",
+        "tests/test_compose_stack.py::test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time"
       ]
     },
     {
@@ -214,6 +271,25 @@
         "tests/hub/test_admission.py::test_a_plan_task_steering_carries_its_phase_evidence",
         "tests/hub/test_admission.py::test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against",
         "tests/hive/test_lanes.py::test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn"
+      ]
+    },
+    {
+      "id": "work-folder-follows-the-task-across-hives",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-sync-across-hives",
+      "behaviour": "A task's progress and proof lines follow it to a successor on any hive: each hive syncs the work folder of every worker execution it runs, named by its host target, else by the hive on its record, so hub admissions and sessions the hive started itself are included, and keeps one copy per task under its own key for the files TTL after it stops hosting the task; the hub records the hive of each launched execution and seeds a successor from that hive's task copy, else from the hive of the task's previous agent, so after a hive roll and the predecessor's retirement the successor's folder on another hive holds every line synced before its admission, which is every line written up to one hive beat earlier.",
+      "seam": "Consumer.sync_workspaces, ledger_workspace.sync and task_files_key, Admission.launched and Admission._seeds",
+      "semgrep_rule": "feature-work-folder-follows-the-task",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it",
+        "tests/hive/test_prompt_transport.py::test_a_hive_syncs_the_work_folder_of_a_session_it_started_that_names_only_its_process",
+        "tests/hive/test_prompt_transport.py::test_a_task_copy_outlives_the_hive_hosting_it",
+        "tests/hive/test_prompt_transport.py::test_a_hive_holding_no_files_for_a_task_leaves_its_copy_alone",
+        "tests/hub/test_admission.py::test_a_launched_report_records_the_hive_holding_the_task_work_folder",
+        "tests/hub/test_admission.py::test_the_seeds_follow_the_hive_that_last_launched_the_task_after_its_agent_retired",
+        "tests/hub/test_admission.py::test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive",
+        "tests/hub/test_admission.py::test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy",
+        "tests/hub/test_admission.py::test_a_successor_on_another_hive_after_a_roll_receives_every_line"
       ]
     },
     {
@@ -3558,29 +3634,28 @@
     {
       "id": "ledger-join-past-talk",
       "origin": "inventory",
-      "behaviour": "A ledger join lands past pending talk while pending talk still holds other writes.",
+      "behaviour": "A ledger join lands in process past records waiting in the outbox and leaves them for the outbox replay.",
       "seam": "agentihooks ledger join",
       "tests": [
-        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk",
-        "tests/swarm_ledger/test_ledger.py::test_pending_talk_still_holds_other_writes"
+        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk"
       ]
     },
     {
       "id": "ledger-outbox",
       "origin": "inventory",
-      "behaviour": "Talk sent while the ledger server is stopped queues and lands once, in order, when it returns; reads and other writes fail and never overtake queued talk.",
+      "behaviour": "A ledger write a pass queues while the ledger database does not answer is held once and replays once, in the order it was queued, through the ledger API route code when it answers again; a write the route refuses on replay is set aside and reported.",
       "seam": "The ledger client outbox",
       "tests": [
-        "tests/swarm_ledger/test_ledger_outbox.py::test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_when_it_returns",
         "tests/swarm_ledger/test_ledger_outbox.py::test_a_replayed_record_lands_once_even_when_it_is_replayed_again",
-        "tests/swarm_ledger/test_ledger_outbox.py::test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped",
-        "tests/swarm_ledger/test_ledger_outbox.py::test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it"
+        "tests/swarm_ledger/test_ledger_outbox.py::test_records_queued_while_the_database_is_not_answering_land_once_in_order_when_it_answers",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_a_post_retried_while_the_server_is_down_waits_in_the_outbox_once"
       ]
     },
     {
       "id": "ledger-outbox-expiry",
       "origin": "inventory",
-      "behaviour": "A queued ledger record past the age limit is set aside as it was written; a stopped server never expires held talk.",
+      "behaviour": "A queued ledger record past the age limit is set aside as it was written; a ledger database outage never expires held talk.",
       "seam": "The ledger client outbox age limit",
       "tests": [
         "tests/swarm_ledger/test_ledger_outbox.py::test_an_expired_record_is_set_aside_as_it_was_written",
@@ -4628,8 +4703,8 @@
       "operator_words": "Isnt the tick or controller to be reading the db instead of the ledger? We had work for decoupling this, it is the main reason why we did the tick rework the ledger should be a presentation layer only no more.",
       "ordered_at": "2026-11-07",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
-      "behaviour": "While the database URL setting names the shared ledger database, a tick pass serves its ledger export, resource reads and operations in process through the ledger server's own route code over the shared ledger repository, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; without the setting the tick calls the ledger server.",
-      "seam": "scripts.tick.adapters.database_ledger.client, chosen by scripts.swarm_ledger.ledger_route.tick for the tick ledger port adapter and the pass LedgerClient",
+      "behaviour": "A tick pass serves its ledger export, resource reads and operations in process through the ledger API route code over the shared ledger store, judged as the swarm's own service, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; no setting or fallback sends a tick read or write to the ledger server.",
+      "seam": "scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
       "semgrep_rule": "feature-tick-database-ledger",
       "live_check": [
         "python",
@@ -4640,12 +4715,10 @@
         "tick-report"
       ],
       "tests": [
-        "tests/tick/test_database_ledger.py::test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set",
         "tests/tick/test_database_ledger.py::test_the_port_exports_the_ledger_with_the_ledger_server_down",
         "tests/tick/test_database_ledger.py::test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down",
         "tests/tick/test_database_ledger.py::test_a_stale_controller_write_is_refused_as_the_server_refuses_it",
         "tests/tick/test_database_ledger.py::test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down",
-        "tests/tick/test_database_ledger.py::test_outside_a_database_pass_the_port_still_calls_the_ledger_server",
         "tests/tick/test_database_ledger_routes.py::test_a_missing_ledger_answers_the_server_404_body",
         "tests/tick/test_database_ledger_routes.py::test_a_storage_failure_answers_the_server_500_body_and_logs_it",
         "tests/tick/test_database_ledger_routes.py::test_a_read_is_bounded_and_encoded_as_ascii_json",
@@ -4659,10 +4732,31 @@
         "tests/tick/test_database_ledger_routes.py::test_a_refused_request_raises_the_server_http_error",
         "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
         "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
-        "tests/tick/test_database_ledger_routes.py::test_the_ledger_client_is_the_database_client_inside_a_database_pass",
-        "tests/tick/test_database_ledger_routes.py::test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal",
-        "tests/tick/test_database_ledger_routes.py::test_a_tick_routed_call_keeps_its_own_ledger_route",
-        "tests/tick/test_database_ledger_routes.py::test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout"
+        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left"
+      ]
+    },
+    {
+      "id": "swarm-ledger-api-writes",
+      "origin": "operator",
+      "operator_words": "finish the API to database path so it works, shift every swarm write onto it, and remove the old ledger write path completely. No fallback, no switch, no dual mode, no allowlist, no workaround left behind.",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-cutover",
+      "behaviour": "Every swarm ledger read and write, the hub admission claim and its release included, runs the ledger API route code in process over the shared ledger store, judged as the acting name, a pinned agent or the swarm's own service, with no request to the ledger server; page writes reach the ledger API service, which migrates the shared schema and runs the write upkeep, while the ledger server answers every write method as unsupported; a hosted hub without the shared database setting refuses to start.",
+      "seam": "scripts.tick.adapters.database_ledger.client and request for every swarm client, scripts.swarm_ledger.api_service.WriteHandler for HTTP writes, and scripts.hub.runner.main for the hosted hub database check",
+      "semgrep_rule": "feature-ledger-api-writes",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.install",
+        "swarm",
+        "rig-grade-swarm",
+        "tick-report"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_the_hub_admission_claim_lands_in_the_ledger_store_with_no_ledger_server_request",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_a_stale_hub_claim_is_refused_by_the_route_with_no_ledger_server_request",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_the_ledger_server_answers_every_write_method_as_unsupported",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_a_hosted_hub_without_the_shared_database_refuses_to_start"
       ]
     },
     {
@@ -6210,15 +6304,14 @@
     {
       "id": "scratch-ledger-folder-skips-shared-database",
       "origin": "inventory",
-      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1, and the swarm lease's ledger address follows the same url() check so a scratch ledger's lease never routes through the shared server; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
-      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm.lease._address and scripts.swarm_ledger.storage.build",
+      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
+      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm_ledger.storage.build",
       "tests": [
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_folder",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_ignores_the_shared_database_url",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_uses_the_shared_database_only_when_asked",
         "tests/swarm_ledger/test_scratch_store.py::test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database",
-        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder",
-        "tests/swarm/test_lease.py::test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited"
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder"
       ]
     },
     {
@@ -7785,6 +7878,35 @@
         "tests/tick/test_step_failure.py::test_the_first_held_exception_stays_the_one_the_pass_ends_on",
         "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step",
         "tests/tick/test_step_failure.py::test_the_wrapper_asks_the_tick_sites_first_so_a_stopped_step_needing_a_raised_step_falls_too"
+      ]
+    },
+    {
+      "id": "swarm-streams-hold-the-bus-replica-count",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-nats-replicas-spread-nodes",
+      "behaviour": "A provisioning bus creates every JetStream stream and key value bucket at the replica count of AGENTIHOOKS_BUS_REPLICAS, default one, and raises each existing stream holding fewer replicas in place with its messages, buckets outside the state limits included; a bus at a lower count keeps a stream's higher count, and any other configuration difference still fails the create.",
+      "seam": "scripts.events.config.BusConfig.replicas, scripts.events.nats_replicas.create and raise_all, observed through scripts.events.nats.open_bus with scoped views, queues and state buckets on a three server JetStream cluster",
+      "rules": ["bus-stream-created-without-replicas"],
+      "tests": [
+        "tests/events/test_nats_replicas.py::test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count",
+        "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
+        "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count",
+        "tests/events/test_nats_replicas.py::test_the_replica_count_defaults_to_one_and_comes_from_the_environment"
+      ]
+    },
+    {
+      "id": "panic-sweep-keeps-merged-fixes",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-steps-abandoned",
+      "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a kept row whose fields no longer match the change state is read again, and a sweep run without the swarm store, as the panic button runs it, reads every fix.",
+      "seam": "scripts.swarm.panic.fix_state, read by scripts.swarm.panic.cancel_runs with the swarm store scripts.swarm.panic.tick_pass passes, and cleared by scripts.swarm.panic.release",
+      "rules": ["panic-sweep-rereads-merged-fixes"],
+      "tests": [
+        "tests/swarm/test_panic.py::test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_cancel_runs_without_a_store_reads_every_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_a_merged_fix_is_read_again_after_panic_releases",
+        "tests/swarm/test_panic.py::test_a_kept_fix_row_of_another_shape_is_read_again"
       ]
     }
   ],

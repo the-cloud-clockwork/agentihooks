@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_adopt_unrelayed:ddd4552f837cc46e06ad85adb21dcd5a448e7dcdb7cbc246ad236dae09267ebb": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns revisions unchanged at run time; the isinstance guard is unchanged."
+  }
+}

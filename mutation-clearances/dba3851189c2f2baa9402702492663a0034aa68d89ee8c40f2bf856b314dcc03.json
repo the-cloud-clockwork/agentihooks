@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_exchanged:f26c1637e513daf26b275816c7054197a8a35de5736f048969a1102c6074fea3": {
+    "reader": "standards-reader",
+    "reason": "exchanged stores Host in an email Message whose get ignores name case; routes.dispatch reads it with headers.get."
+  }
+}

@@ -19,7 +19,6 @@ from typing import Any, NoReturn, cast
 
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import (
-    ResourceClient,
     last_revision,
     patched,
     read_export_file,
@@ -219,7 +218,7 @@ def reads(ledger: object) -> bool:
     return type(ledger) is LedgerClient
 
 
-def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView | None:
+def start(slug: str, timeout: float | None = None) -> LedgerView | None:
     """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
     hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
@@ -227,7 +226,7 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
 
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
-    client = ResourceClient(base, ledger.credentials(slug, service), timeout or ledger.REQUEST_TIMEOUT)
+    client: Any = ledger.client(slug, timeout or ledger.REQUEST_TIMEOUT)
     path = view_file(base, slug, scheduler.runtime_dir())
 
     def refresh() -> LedgerView:

@@ -7,11 +7,12 @@ nav_order: 48
 # Shared ledger database sessions
 {: .no_toc }
 
-When `AGENTIHOOKS_SWARM_DATABASE_URL` is set, every ledger server and swarm process stores its ledgers in one shared
-Postgres database through `PostgresLedgerRepository`. Writers take turns through one writer lock. Every connection
-asks the server to end a session that stalls, so a client that dies or gives up while it holds or waits for that lock
-cannot stop ledger writes for every swarm on the database. The database also stores the oldest writer version it
-allows, and refuses ledger writes from older code that would make every replica rebuild a whole ledger.
+When `AGENTIHOOKS_SWARM_DATABASE_URL` is set, every ledger server, ledger API service and swarm process stores its
+ledgers in one shared Postgres database through `PostgresLedgerRepository`. Writers take turns through one writer
+lock. Every connection asks the server to end a session that stalls, so a client that dies or gives up while it
+holds or waits for that lock cannot stop ledger writes for every swarm on the database. The database also stores
+the oldest writer version it allows, and refuses ledger writes from older code that would make every replica
+rebuild a whole ledger.
 
 1. TOC
 {:toc}
@@ -46,8 +47,9 @@ The first four travel as `-c` startup options, so they apply to the session from
 change on the server. They override the server defaults for ledger sessions only; other clients of the same database
 keep the server's settings.
 
-The schema setup that runs once per database address per process lifts the statement limit for its own transaction
-with `SET LOCAL statement_timeout = 0`, because the first start after an upgrade can build row indexes over every
+The schema setup, which only the ledger API service runs (`PostgresLedgerRepository.migrate()`, once at its start,
+never from a plain `connect()`), lifts the statement limit for its own transaction with
+`SET LOCAL statement_timeout = 0`, because the first start after an upgrade can build row indexes over every
 stored ledger. It still takes the writer lock and still falls under the idle limit.
 
 ## What happens to a stalled writer
@@ -157,7 +159,7 @@ write names it in a ledger alert for the master.
 | Part | What it does |
 |---|---|
 | `writer_floor` table | One row, `name = 'ledger'`, holding the oldest writer version the database allows. |
-| Floor setup | The once per address schema setup runs `INSERT INTO writer_floor VALUES ('ledger', REQUIRED)` with `ON CONFLICT ... GREATEST(...)`, so a writer can raise the stored version but never lower it. |
+| Floor setup | The ledger API service's schema setup runs `INSERT INTO writer_floor VALUES ('ledger', REQUIRED)` with `ON CONFLICT ... GREATEST(...)`, so a writer can raise the stored version but never lower it. |
 | Writer version | Each connection sends `-c agentihooks.ledger_writer_version=VERSION` (see [Settings every connection sends](#settings-every-connection-sends)). Code from before the floor sends nothing and counts as version 0. |
 | Check in the writer | `PostgresLedgerRepository._write` reads the stored version inside the write transaction, under the writer lock, before it changes anything. Below it, the write is refused and nothing is written. |
 | `ledger_writer_floor` trigger | Runs `BEFORE UPDATE ON ledgers` for each row whose `generation` changes. It refuses the update when the session's writer version is below the stored version and no `row_changes` row exists for that ledger and the new generation. This catches code that has no check of its own. |
@@ -257,10 +259,10 @@ When a change makes an older writer harmful to replicas:
 
 1. In the Postgres repository module, raise `VERSION` and `REQUIRED` together to the new number and say what the
    version adds in the comment above them.
-2. Merge it to `dev`. The first process on the new code to set up the schema raises the stored floor; from then on
-   every writer below it is refused.
-3. Restart or update every ledger server on the shared database, workstation servers included. Watch for `writer`
-   alerts on the ledgers and run the refused writers query above.
+2. Merge it to `dev`. The ledger API service's next start on the new code migrates the schema and raises the stored
+   floor; from then on every writer below it is refused.
+3. Restart or update every ledger server and every ledger API service on the shared database, workstation ledgers
+   included. Watch for `writer` alerts on the ledgers and run the refused writers query above.
 
 Never raise `REQUIRED` above `VERSION`: that code would refuse its own writes.
 
@@ -302,10 +304,10 @@ The values are constants in the Postgres repository module (`LOCK_WAIT`, `LOCK_T
 | A holder shows `idle in transaction` for minutes | The session did not receive the settings, for example through a pooler that drops startup options, or the process predates this change | Run the `SHOW` check; restart the ledger server on current code; end the backend with `SELECT pg_terminate_backend(<pid>)` only as a stopgap |
 | `canceling statement due to statement timeout` in the server log | One statement ran past 60 seconds | Find the statement in `pg_stat_activity.query` while it runs and fix the query or its index in code |
 | Errors containing `terminating connection due to idle-in-transaction timeout` on a client | That client held a transaction open for 15 idle seconds | Look for work between statements in its transaction (file I/O, network calls) and move it outside |
-| Writes fail with `ledger writer version N is below version M, the oldest the shared database allows` | That ledger server runs code older than the stored writer floor | Pull current code on that host and restart its ledger server; confirm with the refused writers query |
-| A `writer` alert names `The ledger writer at <address> was refused` | A ledger server at that address tried to write on old code and is still connected | Update and restart the ledger server at that address, then close the alert |
+| Writes fail with `ledger writer version N is below version M, the oldest the shared database allows` | That host runs code older than the stored writer floor: the ledger API service, or a CLI, tick, hub or agent writing in process | Pull current code on that host and restart its ledger API service, or the process that made the write; confirm with the refused writers query |
+| A `writer` alert names `The ledger writer at <address> was refused` | A process at that address tried to write on old code and is still connected | Update and restart whatever is writing from that address, then close the alert |
 | Every write fails with the floor refusal right after a rollback | The release rolled back to is older than the floor a newer release stored | Roll forward to a release at or above the stored floor; lower it by hand only after every newer writer is gone |
-| Hosted ledger reads slow down after writes from one host, with no refusal | A writer bumps generations with no changed rows while the floor is not set, for example before the schema setup ran | Read the stored floor; restart any ledger server on floor code so its setup stores it |
+| Hosted ledger reads slow down after writes from one host, with no refusal | A writer bumps generations with no changed rows while the floor is not set, for example before the ledger API service's schema setup ran | Read the stored floor; restart the ledger API service on floor code so its setup stores it |
 
 ## Verification in CI
 

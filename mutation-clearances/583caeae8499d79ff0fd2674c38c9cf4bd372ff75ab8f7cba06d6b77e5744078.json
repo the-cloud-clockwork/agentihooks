@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.x\u01c1Admission\u01c1launched:ad0daae2d35745fdeb8acc175d6f8030d55b7530e255d0632eb476c786f22337": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: typing.cast returns its value unchanged at runtime, so only the type argument differs and no test can observe it; scripts/hub/admission.py imports cast from typing and nothing in the file defines or rebinds cast."
+  }
+}

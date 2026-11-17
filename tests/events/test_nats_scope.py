@@ -1,8 +1,9 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
+from nats.js.api import StreamConfig
 from nats.js.errors import NotFoundError
 
 from scripts.events import nats_scope
@@ -56,10 +57,13 @@ def test_scope_provisions_dedupe_and_buckets_then_reuses_owned_resources(monkeyp
     view = nats_scope.NatsScopedBus(root, "rig")
     assert view.events._log._swarm == "rig"
     assert view.dead._log._swarm == "rig"
-    assert [call.kwargs for call in root._js.add_stream.await_args_list] == [
-        {"name": stream_name("rig", "EVENTS"), "subjects": ["swarm.rig.events.>"], "duplicate_window": 12.345},
-        {"name": stream_name("rig", "DEAD"), "subjects": ["swarm.rig.dead.>"], "duplicate_window": 12.345},
-        {"name": stream_name("rig", "STOP"), "subjects": ["swarm.rig.stop.>"], "duplicate_window": 12.345},
+    assert root._js.add_stream.await_args_list == [
+        call(
+            StreamConfig(subjects=[f"swarm.rig.{resource.lower()}.>"], duplicate_window=12.345),
+            name=stream_name("rig", resource),
+            num_replicas=1,
+        )
+        for resource in ("EVENTS", "DEAD", "STOP")
     ]
     assert [call.args for call in store.call_args_list] == [(root, "rig", bucket) for bucket in SCOPED_STATE_BUCKETS]
     assert view.state("custom") is view.state("custom")

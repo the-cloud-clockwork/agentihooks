@@ -19,6 +19,7 @@ from scripts.swarm import cli, ledger_client
 from scripts.swarm.ledger_client import OFFLINE, LedgerClient, LedgerRefused, LedgerUnreachable
 from scripts.swarm_ledger.api import client as api
 from scripts.tick import view
+from scripts.tick.adapters import database_ledger
 
 PAUSE_S = 1.5
 SHORT_S = 0.3
@@ -97,7 +98,7 @@ def ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
 
     fake = SimpleNamespace(
         base=lambda slug: base,
-        credentials=lambda slug, service: {},
+        client=lambda slug, timeout: api.ResourceClient(base, {}, timeout),
         REQUEST_TIMEOUT=REQUEST_S,
         Missing=Missing,
         call=call,
@@ -154,9 +155,10 @@ def test_a_write_the_slow_server_does_not_answer_is_queued_locally(
 ) -> None:
     sent: list[tuple[str, list[dict[str, Any]] | None, bool]] = []
 
-    def stopped(slug: str, ops: list[dict[str, Any]] | None, service: bool = False) -> dict[str, Any]:
-        """Record the send, then exit as the ledger CLI does when the server stops answering."""
-        sent.append((slug, ops, service))
+    def stopped(slug: str, ops: list[dict[str, Any]] | None) -> dict[str, Any]:
+        """Record the send and whether it ran as the swarm's service, then exit as the ledger CLI does when the server
+        stops answering."""
+        sent.append((slug, ops, database_ledger.ACTING.get() == ""))
         raise SystemExit(f"ledger server not answering on {ledger.url}: timed out")
 
     monkeypatch.setattr(ledger, "call", stopped)
