@@ -151,7 +151,7 @@ def test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose(c
 @pytest.mark.feature("compose-stack-own-bus")
 def test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats() -> None:
     shell = {
-        "AGENTIHOOKS_BUS": "nats",
+        "AGENTIHOOKS_BUS": "memory",
         "AGENTIHOOKS_BUS_URL": "tls://swarm-internal.homeofanton.com:4222",
         "AGENTIHOOKS_BUS_CREDENTIALS": "/home/agent/.agentihooks/hive/bus.creds",
     }
