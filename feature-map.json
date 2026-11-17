@@ -4758,6 +4758,24 @@
       ]
     },
     {
+      "id": "panic-sweep-off-pass-thread",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-off-pass",
+      "behaviour": "While fleet panic is on, a controller pass starts the CI cancel sweep on its own daemon thread at most once a minute and never while an earlier sweep of the same process still runs, and ends without waiting for it; the sweep then reports each run it cancelled, or why it failed, as a swarm panic event of that pass's swarm, a sweep thread that cannot start is reported as a failed cancel and leaves the next pass free to sweep, and a swarm command process waits for a running sweep before it returns, whether its command succeeded or was refused.",
+      "seam": "The panic tick pass the spawn stall watch runs when a controller pass ends, and the swarm command entry point",
+      "rules": [
+        "panic-sweep-on-pass-thread"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_the_pass_ends_before_the_panic_cancel_sweep_it_starts",
+        "tests/swarm/test_panic.py::test_a_due_pass_starts_no_sweep_while_an_earlier_one_runs",
+        "tests/swarm/test_panic.py::test_a_sweep_thread_that_cannot_start_frees_the_sweep",
+        "tests/swarm/test_panic.py::test_settle_returns_once_the_running_sweep_reported",
+        "tests/swarm/test_panic.py::test_a_swarm_command_waits_for_the_running_panic_sweep_before_it_returns"
+      ]
+    },
+    {
       "id": "panic-spares-fixer-branches",
       "origin": "regression",
       "ordered_at": "2026-11-17",
