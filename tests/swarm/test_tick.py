@@ -992,6 +992,7 @@ def _told(inbox, item):
 
 def test_an_operator_line_with_no_live_master_posts_the_down_notice_and_reaches_the_new_master(store):
     from scripts.inbox.store import InboxStore
+    from scripts.swarm import master_refusals
     from scripts.swarm.tick import DOWN_TOLD, REDELIVERED
 
     inbox = InboxStore(store.redis)
@@ -1015,10 +1016,14 @@ def test_an_operator_line_with_no_live_master_posts_the_down_notice_and_reaches_
     assert ledger.notes.count(MASTER_DOWN) == 1
     later = inbox.send("operator", "master@sw", "still nobody?")
     tick("sw", store, ledger, runtime, down + 2)
-    assert ledger.notes.count(MASTER_DOWN) == 2
+    slot_wait = master_refusals.notice(store, "sw", MASTER_DOWN)
+    assert slot_wait.startswith(f"{MASTER_DOWN} The latest master placement refusal, at ")
+    assert slot_wait.endswith(": no session slot for the master, waiting.")
+    assert ledger.notes.count(MASTER_DOWN) == 1 and ledger.notes.count(slot_wait) == 1
     runtime.full = False
     actions = tick("sw", store, ledger, runtime, down + 3)
-    assert "spawned master master@a1b2c3-0002" in actions and ledger.notes.count(MASTER_DOWN) == 2
+    assert "spawned master master@a1b2c3-0002" in actions
+    assert ledger.notes.count(MASTER_DOWN) == 1 and ledger.notes.count(slot_wait) == 1
     mail = inbox.pending_mail("master@a1b2c3-0002")
     assert {i.id for i in mail if i.sender == "operator"} == {taken.id, unaddressed.id, later.id}
 

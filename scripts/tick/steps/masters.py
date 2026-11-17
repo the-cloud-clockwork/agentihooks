@@ -370,10 +370,10 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> An
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
     if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {}):
-        return master_refusals.refused(store, slug, refused, now_ms)
+        return master_refusals.record(store, slug, refused, now_ms)
     if refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER):
         store.redis.hset(tick.MASTER_WAITING, slug, now_ms)
-        return [refused]
+        return master_refusals.record(store, slug, refused, now_ms)
 
     launched = {}
 
@@ -410,7 +410,7 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> An
         if tick.seat_spawn.room_refused(exc):
             tick.transfers.detach(store, slug, record)
             tick.master_start.withdraw(store, slug, pending)
-            return master_refusals.refused(store, slug, f"the master waits: {exc}", now_ms)
+            return master_refusals.record(store, slug, f"the master waits: {exc}", now_ms)
         tick.transfers.failed(store, slug, record)
         tick.affinity.failed(store, slug, str(exc))
         return tick.master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)

@@ -66,9 +66,21 @@ def test_a_master_refused_room_on_every_hive_is_kept_with_its_reason(store: Redi
 
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_a_master_with_no_session_slot_is_kept_with_its_reason_and_its_wait_time(store: RedisStore) -> None:  # noqa: F811
+    from scripts.swarm.tick import MASTER_WAITING
+
+    actions = master_steps._master("sw", store.config("sw"), store, FakeRuntime(full=True), 5 * MINUTE)
+
+    reason = "no session slot for the master, waiting"
+    assert actions == [reason]
+    assert master_refusals.read(store, "sw") == [{"reason": reason, "since": 5 * MINUTE, "at": 5 * MINUTE, "passes": 1}]
+    assert store.redis.hget(MASTER_WAITING, "sw") == str(5 * MINUTE)
+
+
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
 def test_the_master_down_notice_names_the_latest_refusal(store: RedisStore) -> None:  # noqa: F811
     inbox, ledger = InboxStore(store.redis), tasks()
-    master_refusals.refused(store, "sw", REFUSED, 3 * MINUTE)
+    master_refusals.record(store, "sw", REFUSED, 3 * MINUTE)
     item = inbox.send("operator", "master@sw", "anyone there")
 
     actions = master_steps._master_down("sw", store.config("sw"), store, ledger, FakeRuntime(), 4 * MINUTE)
@@ -90,9 +102,9 @@ def test_the_master_down_notice_without_a_kept_refusal_is_unchanged(store: Redis
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
 def test_swarm_status_names_the_latest_refusal_with_its_time(store: RedisStore) -> None:  # noqa: F811
-    master_refusals.refused(store, "sw", "an older refusal", MINUTE)
+    master_refusals.record(store, "sw", "an older refusal", MINUTE)
     for at in (2 * MINUTE, 3 * MINUTE):
-        master_refusals.refused(store, "sw", REFUSED, at)
+        master_refusals.record(store, "sw", REFUSED, at)
 
     assert master_refusals.status_lines(store, "sw", 3 * MINUTE + 7 * MINUTE - 1) == [
         f"master placement refused  00:03 UTC  6 minutes ago  2 passes since 00:02 UTC  {REFUSED}"
@@ -101,20 +113,20 @@ def test_swarm_status_names_the_latest_refusal_with_its_time(store: RedisStore) 
 
 
 def test_a_refusal_row_is_kept_for_the_whole_finding_window(store: RedisStore) -> None:  # noqa: F811
-    master_refusals.refused(store, "sw", "first", MINUTE)
-    master_refusals.refused(store, "sw", "second", MINUTE + HOUR - 1)
+    master_refusals.record(store, "sw", "first", MINUTE)
+    master_refusals.record(store, "sw", "second", MINUTE + HOUR - 1)
 
     assert [row["reason"] for row in master_refusals.read(store, "sw")] == ["first", "second"]
     assert HOUR - MINUTE < store.redis.pttl(store.key("sw", master_refusals.KEY)) <= HOUR
 
-    master_refusals.refused(store, "sw", "third", MINUTE + HOUR)
+    master_refusals.record(store, "sw", "third", MINUTE + HOUR)
 
     assert [row["reason"] for row in master_refusals.read(store, "sw")] == ["second", "third"]
 
 
 def test_a_repeated_reason_extends_the_latest_row_only(store: RedisStore) -> None:  # noqa: F811
     for at, reason in ((MINUTE, "a"), (2 * MINUTE, "b"), (3 * MINUTE, "b")):
-        assert master_refusals.refused(store, "sw", reason, at) == [reason]
+        assert master_refusals.record(store, "sw", reason, at) == [reason]
 
     assert master_refusals.read(store, "sw") == [
         {"reason": "a", "since": MINUTE, "at": MINUTE, "passes": 1},

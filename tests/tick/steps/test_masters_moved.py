@@ -121,7 +121,11 @@ def inbox(monkeypatch: pytest.MonkeyPatch) -> type[_Inbox]:
 
 
 def _store(agents: list[AgentRecord] | None = None) -> SimpleNamespace:
-    return SimpleNamespace(redis="redis", agents=lambda slug: list(agents or []) if slug == "sw" else [])
+    return SimpleNamespace(
+        redis=SimpleNamespace(get=lambda key: None),
+        key=lambda slug, kind: f"{slug}/{kind}",
+        agents=lambda slug: list(agents or []) if slug == "sw" else [],
+    )
 
 
 @pytest.mark.feature("swarm-tick-masters-moved")

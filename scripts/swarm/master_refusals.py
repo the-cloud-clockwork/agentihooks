@@ -15,7 +15,7 @@ NOTICE = "{text} The latest master placement refusal, at {at} UTC: {reason}."
 LINE = "master placement refused  {at} UTC  {ago} minutes ago  {passes} passes since {since} UTC  {reason}"
 
 
-def refused(store: Any, slug: str, reason: str, now_ms: int) -> list[str]:
+def record(store: Any, slug: str, reason: str, now_ms: int) -> list[str]:
     """Keep the refusal and return it as the master step's action: a repeat of the latest reason extends its row, a
     new reason opens one, and a row last seen a whole window ago is dropped."""
     rows = read(store, slug)
@@ -31,7 +31,7 @@ def refused(store: Any, slug: str, reason: str, now_ms: int) -> list[str]:
 def read(store: Any, slug: str) -> list[dict[str, Any]]:
     """Every kept refusal row, oldest first."""
     raw = store.redis.get(store.key(slug, KEY))
-    return list[dict[str, Any]](json.loads(raw)) if raw else []
+    return json.loads(raw) if raw else []
 
 
 def latest(store: Any, slug: str) -> dict[str, Any]:

@@ -2433,14 +2433,16 @@
       "id": "swarm-master-placement-refusals-kept",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-2",
-      "behaviour": "Every master placement refusal returned by the tick master step is kept in swarm Redis with its reason and time for at least the sixty minute finding window. This covers the controller placement refusal and a hive room refusal. A repeat of the latest reason extends its row, and the record survives the pass, the status prune and the outage hand back. The status prune keeps the master placement wait row while the tick still sees it refused. The master down notice, the empty master seat finding through the launch refusal, and swarm status name the latest refusal reason and its time. On 17 November the front door master seat stayed empty four and a half hours, and its refusal lived only in controller output.",
+      "behaviour": "Every master placement refusal returned by the tick master step is kept in swarm Redis with its reason and time for at least the sixty minute finding window. This covers the controller placement refusal, the session slot wait and a hive room refusal. A repeat of the latest reason extends its row, and the record survives the pass, the status prune and the outage hand back. The status prune keeps the master placement wait row while the tick still sees it refused. The master down notice, the empty master seat finding through the launch refusal, and swarm status name the latest refusal reason and its time. On 17 November the front door master seat stayed empty four and a half hours, and its refusal lived only in controller output.",
       "seam": "the tick master step, scripts.swarm.master_refusals, placement_waits.prune, the master down step and tick_master._launch_refusal",
       "tests": [
         "tests/swarm/test_master_refusals.py::test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_back",
         "tests/swarm/test_master_refusals.py::test_a_master_refused_room_on_every_hive_is_kept_with_its_reason",
+        "tests/swarm/test_master_refusals.py::test_a_master_with_no_session_slot_is_kept_with_its_reason_and_its_wait_time",
         "tests/swarm/test_master_refusals.py::test_the_master_down_notice_names_the_latest_refusal",
         "tests/swarm/test_master_refusals.py::test_swarm_status_names_the_latest_refusal_with_its_time",
-        "tests/swarm/test_night_watch.py::test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty"
+        "tests/swarm/test_night_watch.py::test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty",
+        "tests/swarm/test_cli.py::test_status_text_names_the_latest_master_placement_refusal"
       ]
     },
     {
