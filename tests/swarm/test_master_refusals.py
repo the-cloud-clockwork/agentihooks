@@ -1,12 +1,12 @@
 """The tick keeps each master placement refusal with its reason and time, past its pass and past the outage hand back."""
 
-from importlib import import_module
 from typing import Any
 
 import pytest
 
+from scripts.hive import placement_waits
 from scripts.inbox.store import InboxStore
-from scripts.swarm import tick_master
+from scripts.swarm import master_refusals, tick_master
 from scripts.swarm.store import MASTER, RedisStore
 from scripts.swarm.tick import MASTER_DOWN, SpawnError, tick
 from scripts.tick.steps import masters as master_steps
@@ -16,7 +16,6 @@ MINUTE = 60_000
 HOUR = 3_600_000
 REFUSED = "the master lane runs on the workstation: no live hive takes master"
 ROOM = "no hive for master has room: every hive is full"
-master_refusals = import_module("scripts.swarm.master_refusals")
 
 
 class RefusingRuntime(FakeRuntime):
@@ -128,3 +127,16 @@ def test_a_repeated_reason_extends_the_latest_row_only(store: RedisStore) -> Non
 
 def test_the_launch_refusal_without_a_kept_refusal_says_no_master_launched(store: RedisStore) -> None:  # noqa: F811
     assert tick_master._launch_refusal(store, "sw") == tick_master.NO_LAUNCH
+
+
+def test_the_status_prune_keeps_the_master_wait_while_the_tick_still_sees_it_refused(store: RedisStore) -> None:  # noqa: F811
+    placement_waits.observe(store, "sw", MASTER, MASTER, REFUSED, MINUTE)
+    placement_waits.observe(store, "sw", "eng", "gone", REFUSED, MINUTE)
+
+    placement_waits.prune(store, "sw", [], MINUTE + placement_waits.FRESH_MS - 1)
+
+    assert set(placement_waits.read(store, "sw")) == {MASTER}
+
+    placement_waits.prune(store, "sw", [], MINUTE + placement_waits.FRESH_MS)
+
+    assert placement_waits.read(store, "sw") == {}

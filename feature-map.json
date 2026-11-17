@@ -2439,7 +2439,8 @@
         "tests/swarm/test_master_refusals.py::test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_back",
         "tests/swarm/test_master_refusals.py::test_a_master_refused_room_on_every_hive_is_kept_with_its_reason",
         "tests/swarm/test_master_refusals.py::test_the_master_down_notice_names_the_latest_refusal",
-        "tests/swarm/test_master_refusals.py::test_swarm_status_names_the_latest_refusal_with_its_time"
+        "tests/swarm/test_master_refusals.py::test_swarm_status_names_the_latest_refusal_with_its_time",
+        "tests/swarm/test_night_watch.py::test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty"
       ]
     },
     {

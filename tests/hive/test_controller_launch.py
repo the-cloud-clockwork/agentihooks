@@ -2204,7 +2204,7 @@ def test_wait_pruning_keeps_active_tasks_and_drops_removed_tasks(setup, state):
 
     for task in ("active", "settled", "removed"):
         placement_waits.observe(setup.store, setup.config.slug, "eng", task, placement.NO_UI_HIVE, 1000)
-    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}])
+    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}], 1000)
     assert list(placement_waits.read(setup.store, setup.config.slug)) == ["active"]
 
 

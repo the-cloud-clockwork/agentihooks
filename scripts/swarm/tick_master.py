@@ -9,7 +9,7 @@ from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import master_alarm, master_start
+from scripts.swarm import master_alarm, master_refusals, master_start
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
 
@@ -172,7 +172,7 @@ def _finish(store: RedisStore, slug: str, runtime: Any, now_ms: int, states: tup
     return actions
 
 
-def _launch_refusal(store, slug):
+def _launch_refusal(store: RedisStore, slug: str) -> str:
     if leads := _masters(store, slug):
         names = ", ".join(f"{a.name} ({a.state})" for a in leads)
         return f"master launch refused: unfinished lead {names}"
@@ -181,7 +181,7 @@ def _launch_refusal(store, slug):
         return f"master launch refused: startup pending for {name}"
     if pending.get("alerted"):
         return "master launch refused: startup retry backoff pending"
-    return NO_LAUNCH
+    return master_refusals.named(store, slug) or NO_LAUNCH
 
 
 def _bound(store: RedisStore, slug: str, runtime: Any, doc: dict) -> AgentRecord | None:

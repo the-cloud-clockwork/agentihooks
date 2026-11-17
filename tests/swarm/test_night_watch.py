@@ -786,6 +786,16 @@ def test_a_held_master_spawn_names_why_the_seat_stays_empty(store):
     assert finding.evidence == ("Why it stays empty: holding the master spawn: host full",)
 
 
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty(store):
+    from scripts.swarm import master_refusals
+
+    master_refusals.refused(store, SLUG, "no live hive takes master", NOW)
+    until(store, Rig(), NOW, NOW + 10 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Why it stays empty: master placement refused at 08:00 UTC: no live hive takes master",)
+
+
 def test_a_refused_respawn_is_reported_with_its_cause(store):
     enforce(store)
     rig = Rig(respawns=[])
