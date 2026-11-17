@@ -5366,6 +5366,19 @@
       ]
     },
     {
+      "id": "hive-front-door-master-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",
+      "behaviour": "The controller's master selection refuses a Claude login only at the master floor, the primary login reserve of the week, or for a closure the worker drain floor does not explain; a login the fleet capacity rows close at the worker drain floor alone, its week at or under ten percent or its five hour window at or under five percent, still takes the front door master on its hive master login, and a login at or under the master floor is refused with a wait reason naming it.",
+      "seam": "HiveLaunch master selection closed set over the fleet AccountRoute capacity rows",
+      "rules": ["master-closed-at-worker-drain-floor"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor_does_not_explain"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
