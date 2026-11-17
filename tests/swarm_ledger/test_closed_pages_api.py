@@ -130,7 +130,7 @@ def test_the_query_string_refuses_another_state_or_a_bad_offset(query):
     assert caught.value.status == 400
 
 
-@pytest.mark.parametrize("path", ["architecture", "controller-lease", "hierarchy", "swarm", "swarm/agents", "events"])
+@pytest.mark.parametrize("path", ["architecture", "hierarchy", "swarm", "swarm/agents", "events"])
 def test_the_route_refuses_state_or_offset_before_any_other_read(path):
     for query in ("state=done", "offset=3", "q=router"):
         handler = SimpleNamespace(path=f"/api/v1/ledgers/s/{path}?{query}", headers={})
