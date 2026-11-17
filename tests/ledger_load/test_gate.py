@@ -284,6 +284,84 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
+def test_the_harness_loads_on_a_base_revision_that_has_no_api_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+    import sys
+
+    import scripts.swarm_ledger
+
+    monkeypatch.delattr(scripts.swarm_ledger, "api_service", raising=False)
+    monkeypatch.setitem(sys.modules, "scripts.swarm_ledger.api_service", None)
+    spec = importlib.util.spec_from_file_location("base_load_gate", ledger_load.__file__)
+    assert spec is not None and spec.loader is not None
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+    assert harness.api_service is None
+
+
+@pytest.mark.parametrize("has_api_service", [True, False])
+def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledger_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_api_service: bool
+) -> None:
+    started: list[tuple[int, list[str] | None]] = []
+    stopped: list[SimpleNamespace] = []
+    loaded: list[tuple[int, int, int]] = []
+    ports = iter([8101, 8102])
+    results = {
+        "writes": [0.1] * 9 + [0.7],
+        "reads": [0.05] * 10,
+        "item_reads": [0.01] * 100,
+        "errors": [],
+        "cpu": [(0.0, 0.0), (float(ledger_load.CPU_WINDOW_S), 1.0)],
+        "resources": resource_samples(),
+    }
+
+    def start(folder: Path, port: int, log: object, argv: list[str] | None = None, **kwargs: object) -> SimpleNamespace:
+        started.append((port, argv))
+        return SimpleNamespace(pid=len(started))
+
+    def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
+        loaded.append((write_port, read_port, pid))
+        return results
+
+    if not has_api_service:
+        monkeypatch.setattr(ledger_load, "api_service", None)
+    monkeypatch.setattr(ledger_load, "full_size", lambda at: {"tasks": []})
+    monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
+    monkeypatch.setattr(ledger_load, "free_port", lambda: next(ports))
+    monkeypatch.setattr(ledger_load, "duration", lambda: 10.0)
+    monkeypatch.setattr(ledger_load, "start_server", start)
+    monkeypatch.setattr(ledger_load, "stop_server", stopped.append)
+    monkeypatch.setattr(ledger_load, "load", load)
+    monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
+    assert ledger_load.run(tmp_path) == ([], 0.7)
+    if has_api_service:
+        writes = started[0][1]
+        assert writes is not None and writes[-2:] == ["scripts.swarm_ledger.api_service", "--serve"]
+        assert started[1] == (8102, None)
+        assert loaded == [(8101, 8102, 1)]
+    else:
+        assert started == [(8101, None)]
+        assert loaded == [(8101, 8101, 1)]
+    assert [server.pid for server in stopped] == list(range(len(started), 0, -1))
+
+
+def test_a_base_without_the_api_service_times_its_sweeps_and_expiry_by_the_ledger_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ledger_load, "TASKS", 20)
+    monkeypatch.setattr(ledger_load, "LEDGER_BYTES", 0)
+    ledger_load.store(tmp_path, ledger_load.full_size(0))
+    alerts = SimpleNamespace(expired=lambda alert, at: alert["id"].endswith("1"))
+    base_server = SimpleNamespace(watch_ledgers=lambda interval=3.0: None, BIN_SWEEP_EVERY=4, ledger_alerts=alerts)
+    monkeypatch.setattr(ledger_load, "api_service", None)
+    monkeypatch.setattr(ledger_load, "ledger_server", base_server)
+    assert ledger_load.duration() == (ledger_load.SWEEPS + 1) * 4 * 3.0
+    stored = SQLiteLedgerRepository(tmp_path / DATABASE).export_document(ledger_load.SLUG)["alerts"]
+    expired = [alert["id"] for alert in stored if alert["id"].endswith("1")]
+    assert expired and ledger_load.unexpired(tmp_path, 0) == expired
+
+
 def test_the_load_server_trusts_its_writer_but_refuses_an_unrelated_project(monkeypatch, tmp_path):
     import os
     import subprocess
