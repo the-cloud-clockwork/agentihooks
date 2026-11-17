@@ -180,7 +180,9 @@ def _floored(waited: placement.Wait, rows: list[capacity.Account], hives: list[d
     slot for the master."""
     if waited.reason != NO_MASTER_SLOT:
         return waited
-    logins = {placement.account_key(hive["master_login"].get("claude", "")) for hive in hives}
+    logins = {
+        placement.account_key(hive["master_login"]["claude"]) for hive in hives if "claude" in hive["master_login"]
+    }
     floored = [
         MASTER_FLOOR.format(account=row.name, window=floor[0], left=floor[1])
         for row in rows

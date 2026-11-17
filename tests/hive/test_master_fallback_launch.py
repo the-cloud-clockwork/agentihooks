@@ -467,7 +467,7 @@ def test_a_master_skips_a_native_login_whose_claude_account_is_closed(setup: Any
 
 
 @pytest.mark.feature("hive-front-door-master-floor")
-@pytest.mark.parametrize(("five", "week"), [(80, 7), (80, 10), (80, 2.5), (3, 50)])
+@pytest.mark.parametrize(("five", "week"), [(80, 7), (80, 10), (80, 2.5), (3, 50), (1.5, 50)])
 def test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor(
     setup: Any, monkeypatch: pytest.MonkeyPatch, five: float, week: float
 ) -> None:
