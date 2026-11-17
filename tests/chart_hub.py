@@ -119,7 +119,7 @@ def problems(chart: str) -> list[str]:
     deployments = hubs(enabled.stdout)
     if len(deployments) != 1:
         return [*found, f"an enabled hub renders {len(deployments)} hub Deployments, expected 1"]
-    found += hub_problems(deployments[0])
+    found += hub_problems(deployments[0]) + spread_problems(chart)
     single = render(chart, *ENABLED, "--set", "hub.replicas=1")
     if single.returncode or any(d["spec"].get("strategy") for d in hubs(single.stdout)):
         found.append("a single hub replica rolls out by taking the only hub down first")
@@ -182,6 +182,34 @@ def receiver_release_problems(chart: str) -> list[str]:
     return found
 
 
+def spread_problems(chart: str) -> list[str]:
+    rendered = render(chart, *ENABLED)
+    if rendered.returncode:
+        return [f"an enabled hub fails to render: {rendered.stderr.strip()}"]
+    deployment = hubs(rendered.stdout)[0]
+    affinity = deployment["spec"]["template"]["spec"].get("affinity", {})
+    selector = {"matchLabels": deployment["spec"]["selector"]["matchLabels"]}
+    term = {"weight": 100, "podAffinityTerm": {"topologyKey": "kubernetes.io/hostname", "labelSelector": selector}}
+    found = []
+    if affinity.get("podAntiAffinity") != {"preferredDuringSchedulingIgnoredDuringExecution": [term]}:
+        found.append(f"the hub pods do not prefer a node without another hub: {affinity.get('podAntiAffinity')}")
+    if "nodeAffinity" not in affinity:
+        found.append("the hub pods lose the configured node affinity beside the spread preference")
+    single = render(chart, *ENABLED, "--set", "hub.replicas=1")
+    spread = [d["spec"]["template"]["spec"].get("affinity", {}).get("podAntiAffinity") for d in hubs(single.stdout)]
+    if single.returncode or any(spread):
+        found.append(f"a single hub replica renders a spread preference: {spread}")
+    key = "hub.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]"
+    given = ["--set", f"{key}.topologyKey=topology.kubernetes.io/zone"]
+    given += ["--set", f"{key}.labelSelector.matchLabels.team=hub"]
+    kept = render(chart, *ENABLED, *given)
+    rows = [d["spec"]["template"]["spec"].get("affinity", {}).get("podAntiAffinity") for d in hubs(kept.stdout)]
+    wanted = {"topologyKey": "topology.kubernetes.io/zone", "labelSelector": {"matchLabels": {"team": "hub"}}}
+    if kept.returncode or rows != [{"requiredDuringSchedulingIgnoredDuringExecution": [wanted]}]:
+        found.append(f"a hub.affinity pod anti affinity renders as {rows}, expected it as given: {wanted}")
+    return found
+
+
 if __name__ == "__main__":
     failures = problems(sys.argv[1])
     for line in failures:
@@ -189,6 +217,7 @@ if __name__ == "__main__":
     if failures:
         sys.exit(1)
     print(
-        "the hub renders two replicas of agentihooks hub run on the configured bus, and only outside a hive;"
+        "the hub renders two replicas of agentihooks hub run on the configured bus that prefer different nodes,"
+        " and only outside a hive;"
         " the GitHub webhook receiver renders beside it on the chart image with its secret by reference"
     )
