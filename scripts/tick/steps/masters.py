@@ -154,7 +154,7 @@ def _seat_alarm(tick: Any, get: Get) -> Any:
 
 
 def _dispatch_seat(tick: Any, get: Get) -> Any:
-    if tick.panic.state(get("store")) is not None:
+    if tick.panic.state(get("store"), get("slug")) is not None:
         return []
     return tick.skip_refused(
         SEAT.dispatch_seat.run,

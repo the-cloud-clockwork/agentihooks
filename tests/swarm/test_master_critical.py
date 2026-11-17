@@ -11,7 +11,9 @@ from unittest import mock
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from hooks.context import broadcast
+from scripts.hub import lifecycle  # noqa: F401
 from scripts.swarm import idle, ledger_client, master_critical, master_fallback, master_launch
 from scripts.swarm import runtime as runtime_module
 from scripts.swarm import store as store_module
@@ -154,6 +156,26 @@ def watched(store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     monkeypatch.setattr(broadcast, "create_broadcast", watched.alerts.create)
     monkeypatch.setattr(broadcast, "clear_broadcasts", watched.alerts.clear)
     return watched
+
+
+def test_a_fresh_worker_whose_first_pass_runs_under_the_patched_ledger_client_loads_the_lazy_imports() -> None:
+    probe = (
+        "from tests.swarm import test_master_critical\n"
+        "from scripts.swarm import ledger_client\n"
+        "ledger_client.LedgerClient = lambda: None\n"
+        "from scripts.hub.reconciler import admitted_agents, legacy_agents\n"
+        "from scripts.swarm.cli import _pass_tools\n"
+    )
+
+    loaded = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert loaded.returncode == 0, loaded.stderr
 
 
 def never_asked(prompt: str) -> str:

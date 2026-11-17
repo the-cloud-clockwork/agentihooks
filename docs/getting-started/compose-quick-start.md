@@ -14,7 +14,7 @@ Start the packaged swarm service bundle for **Claude Code and Codex**. It provid
 Install Python 3.12 or later, Docker with a running daemon, and the Docker Compose plugin. Install AgentiHooks:
 
 ```bash
-uv tool install agentihooks
+uv tool install "agentihooks[nats]"
 ```
 
 Agent hosts separately need Claude Code or Codex, authenticated accounts or API credentials, and their configuration bundle. The service containers do not inherit a host's CLI login.
