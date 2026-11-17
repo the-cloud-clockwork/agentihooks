@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.978 · 2026-11-17
+
+### 2026-11-17 · a2cc75fc5a60 · #11794 · @nestorcolt
+
+**Keep a proof swarm master on its scratch Redis through agentihooks claude**
+
+This fixes a bug where forcing a master up on a scratch proof swarm could start two masters bound to different Redis instances, because `agentihooks claude` overwrote the launcher's scratch Redis URL with the shared swarm Redis from env files before routing. Now `scripts.runtime_env.shell_kept` preserves the shell's scratch Redis setting specifically for proof swarms that exported one at launch, while live swarm sessions and all other env file values still behave as before.
+
 ## v2.17.975 · 2026-11-17
 
 ### 2026-11-17 · ff1f8f1cf684 · #11503 · @agenticore-app
