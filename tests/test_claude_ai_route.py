@@ -566,16 +566,23 @@ def test_a_forced_front_door_launch_at_the_master_floor_starts_on_the_token_fall
     _at_the_master_floor(monkeypatch)
     monkeypatch.setattr(account_sessions, "sessions_by_account", dict)
     picked: list[dict[str, object]] = []
+    closed = [
+        router.ProbeResult(account, "ok", "CLOSED", margin, router.QuotaWindow(), router.QuotaWindow(used))
+        for account, margin, used in (("spentatexample_com", 1.0, 99.0), ("workeratexample_com", 3.0, 97.0))
+    ]
 
     def master(environ: dict[str, str], **options: object) -> router.RouteDecision:
         picked.append(options)
-        return router.RouteDecision(
-            router.Credential("AH_CC_TOKEN_workeratexample_com", "routed"), None, "master", 6, 6
-        )
+        raise router.RoutingError("no Claude account has a free session under its quota band", closed)
 
     monkeypatch.setattr(router, "select_master_credential", master)
     report = tmp_path / "route"
-    claude_ai.launch_claude("/opt/claude", [FORCED, "--name", "master 1 · rig"], _front_door(rendered), str(report))
+    environ = {
+        **_front_door(rendered),
+        "AH_CC_TOKEN_spentatexample_com": "spent",
+        "AH_CC_TOKEN_workeratexample_com": "routed",
+    }
+    claude_ai.launch_claude("/opt/claude", [FORCED, "--name", "master 1 · rig"], environ, str(report))
     assert picked == [{"claude_bin": "/opt/claude", "sessions": {}, "exclude": (router.API_ACCOUNT,)}]
     assert report.read_text().splitlines() == [
         "status=routed",

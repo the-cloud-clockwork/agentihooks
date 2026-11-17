@@ -1882,7 +1882,7 @@ def test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home(
 
 
 @pytest.mark.feature("forced-master-start")
-def test_a_forced_master_token_launch_selects_under_every_floor(
+def test_a_forced_token_launch_asks_the_forced_credential_after_a_refusal(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from collections.abc import Mapping

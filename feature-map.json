@@ -949,14 +949,16 @@
         "tests/test_claude_ai_route.py::test_an_unforced_front_door_launch_at_the_master_floor_still_fails_the_route",
         "tests/test_claude_quota_balancer.py::test_a_forced_master_takes_the_account_with_most_room_under_every_floor",
         "tests/test_claude_quota_balancer.py::test_a_forced_master_with_every_account_excluded_still_fails",
-        "tests/test_master_claude_login.py::test_a_forced_master_token_launch_selects_under_every_floor",
+        "tests/test_master_claude_login.py::test_a_forced_token_launch_asks_the_forced_credential_after_a_refusal",
         "tests/swarm/test_front_door_login_route.py::test_a_forced_front_door_spawn_hands_the_claude_ai_route_the_forced_flag",
         "tests/swarm/test_front_door_login_route.py::test_a_forced_master_off_the_interactive_route_is_never_refused_all_full",
         "tests/swarm/test_master_launch.py::test_a_forced_master_replaces_the_live_front_door_and_launches_forced",
         "tests/swarm/test_master_launch.py::test_a_replacing_new_or_offered_master_launches_unforced",
         "tests/tick/steps/test_master_placement_ops.py::test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced",
         "tests/tick/steps/test_master_placement_ops.py::test_an_unforced_master_asks_placement_without_forced_and_waits_on_the_slot",
-        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed"
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_order_hands_forced_to_the_hive_runtime",
+        "tests/swarm/test_master_launch.py::test_forced_and_last_flags_exclude_each_other"
       ]
     },
     {

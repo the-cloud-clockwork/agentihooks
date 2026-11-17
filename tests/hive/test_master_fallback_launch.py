@@ -479,6 +479,45 @@ def test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed(set
     assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
 
 
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_order_hands_forced_to_the_hive_runtime(setup: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from hooks import config as hooks_config
+    from scripts.hive import orders
+    from scripts.swarm import lease, tick
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    task = master(setup)
+    monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    write_hive(setup, excluded=[], ui="yes", interactive={"claude": "account"})
+    name = setup.store.next_name(setup.config.slug, "master")
+    task.update(seat="master@fixture", controller_epoch=setup.held.epoch, route_kind="interactive", forced=True)
+    request = SpawnRequest(setup.store.config(setup.config.slug), "master", name, task)
+    admitted = setup.launcher.admit(request, setup.launcher.select(request.config, "master", task))
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "master",
+        "master",
+        "master",
+        "account",
+        "claude",
+        "interactive",
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+    )
+    runtime = Mock()
+    placed = tick.Placed("pane", "claude", "account", profile="master", profile_decision={"validation": {"pid": 12}})
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    runtime.namespace.return_value = "namespace"
+    runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
+    assert orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task).status == "live"
+    assert runtime.spawn.call_args.args[0].task["forced"] is True
+
+
 @pytest.mark.parametrize("login", [{}, {"claude": ""}])
 def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch, login):
     from scripts import claude_quota_balancer as balancer
