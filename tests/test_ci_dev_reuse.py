@@ -293,8 +293,9 @@ def test_workflow_preserves_downstream_artifacts() -> None:
     producer = "durations" if "durations" in jobs else "select"
     assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"
     assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
-    for job in ("sonar", "coverage-baseline", "refresh-durations", "flake-budget"):
+    for job in ("coverage-baseline", "refresh-durations", "flake-budget"):
         assert "unit" in jobs[job]["needs"]
+    assert any(step.get("name") == "Take each shard's coverage as it lands" for step in jobs["sonar"]["steps"])
 
 
 def test_a_reusing_leg_sets_up_the_python_its_coverage_steps_run() -> None:

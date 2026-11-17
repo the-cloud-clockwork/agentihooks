@@ -1,0 +1,20 @@
+rules:
+  - id: panic-holds-the-fleet
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Panic belongs to the swarm that pressed it. A panic read without the swarm slug, or a sweep without the
+      swarm's branch owner check, lets one swarm's panic freeze every agentihooks session and cancel every fleet
+      run. Read panic.state(store, slug), sweep with panic.tick_pass(store, slug, ok, now, report) and give
+      panic.cancel_runs the swarm's panic.owner(store, slug).
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - panic-holds-the-fleet.py
+    pattern-either:
+      - pattern: panic.state($STORE)
+      - pattern: $TICK.panic.state($STORE)
+      - pattern: panic.tick_pass($STORE, $OK, $NOW, $REPORT)
+      - pattern: panic.cancel_runs($FIXES, $REPOS, $PORTS)
+      - pattern: panic.cancel_runs($FIXES, $REPOS, $PORTS, store=$STORE)

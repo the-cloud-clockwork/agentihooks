@@ -137,11 +137,12 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     watching = threads[0].pop("kwargs")["stopping"]
     assert watching.is_set()
     assert threads[0]["target"].__wrapped__ is server.watch_ledgers
-    assert [{**t, "args": tuple(type(a) for a in t["args"])} for t in threads] == [
+    assert [{**t, "args": tuple(type(a) for a in t["args"])} for t in threads[:3]] == [
         {"target": threads[0]["target"], "args": (Server,), "daemon": True},
         {"target": server.answer_reloads, "args": (Server,), "daemon": True},
         {"target": server.refresh_streams, "args": (list,), "daemon": True},
     ]
+    assert [(t["target"].__wrapped__, t["daemon"]) for t in threads[3:]] == [(server.follow_shared, True)]
     assert steps == [
         "bind",
         "activate",

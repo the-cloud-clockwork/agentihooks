@@ -1,11 +1,13 @@
 """PreToolUse enforcement for sustained swarm blockers: a category stuck for an hour or more opens the master coding
 window automatically and injects a once-a-minute notice naming each sustained category, putting the master in
-troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
-session's pushes, reruns, dispatches and deploys; a session on a registered fix branch, or on the head branch of a
-registered fix pull request, keeps reruns in its repository and the pushes and dispatches that write only that branch.
-Swarm publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
+troubleshooting mode with every tool it needs. A swarm's panic opens the same window for its master and denies the
+pushes, reruns, dispatches and deploys of every other session bound to that swarm; sessions bound to another swarm
+and unbound sessions are never held. A session on a registered fix branch, or on the head branch of a registered fix
+pull request, keeps reruns in its repository and the pushes and dispatches that write only that branch. Swarm
+publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
 Fails open on a store error."""
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -22,12 +24,12 @@ NOTICE = (
     "BLOCKER QUEUE on swarm {slug}: {categories} sustained for an hour or more. Fix this now: the master coding "
     "window is open; troubleshoot and fix before any other work, and clear each category with "
     "agentihooks swarm {slug} blockers clear <category>. Stop everything unnecessary for the fix: "
-    "agentihooks swarm {slug} panic on --fix <pr url> pauses agent starts and cancels every CI run but the fix "
-    "and the merge queue, printing what it cancelled."
+    "agentihooks swarm {slug} panic on --fix <pr url> pauses the swarm's agent starts and cancels every CI run of its "
+    "agents but the fix and the merge queue, printing what it cancelled."
 )
 FROZEN = (
-    "BLOCKED: panic mode holds the fleet ({reason}). Pushes, reruns, dispatches and deploys wait until the master's "
-    "fix brings the fleet back to business as usual; agentihooks swarm <slug> panic status shows the level."
+    "BLOCKED: panic mode holds swarm {slug} ({reason}). Its sessions' pushes, reruns, dispatches and deploys wait "
+    "until the master's fix brings it back to business as usual; agentihooks swarm {slug} panic status shows the level."
 )
 _FROZEN_COMMANDS = (
     ("git", "push"),
@@ -110,7 +112,7 @@ def pretool(
     from scripts.swarm import blockers
 
     now_ms = _now_ms(store)
-    found = {**_sustained(store, slug, now_ms), **_panic_found(store, now_ms)}
+    found = {**_sustained(store, slug, now_ms), **_panic_found(store, slug, now_ms)}
     if not found:
         if master_coding.opened_for_blockers(session_id):
             master_coding.close(session_id)
@@ -122,21 +124,26 @@ def pretool(
     return notice, None
 
 
-def _panic_state(store: "RedisStore") -> "Panic | None":
+def _bound() -> str | None:
+    """Return the swarm this session is bound to; None or an empty name for a session outside every swarm."""
+    return os.environ.get("AGENTIHOOKS_SWARM")
+
+
+def _panic_state(store: "RedisStore", slug: str) -> "Panic | None":
     from redis.exceptions import RedisError
 
     from scripts.swarm import panic
 
     try:
-        return panic.state(store)
+        return panic.state(store, slug)
     except RedisError:
         return None
 
 
-def _panic_found(store: "RedisStore", now_ms: int) -> "dict[str, Blocker]":
+def _panic_found(store: "RedisStore", slug: str, now_ms: int) -> "dict[str, Blocker]":
     from scripts.swarm import blockers
 
-    current = _panic_state(store)
+    current = _panic_state(store, slug)
     if current is None:
         return {}
     return {"panic": blockers.Blocker("panic", current.since, now_ms, 0, current.reason)}
@@ -148,7 +155,8 @@ def _freezes(tokens: list[str]) -> bool:
 
 
 def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str) -> str | None:
-    if tool_name != "Bash":
+    slug = _bound()
+    if tool_name != "Bash" or not slug:
         return None
     from hooks.context.shell_commands import located
 
@@ -157,13 +165,13 @@ def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str) -> str | None:
     if not found:
         return None
     store = _store()
-    current = None if store is None else _panic_state(store)
+    current = None if store is None else _panic_state(store, slug)
     if current is None or (
         _GIT_ENVIRONMENT.search(command) is None
         and all(_spared(tokens, _directory(cwd, folders), current.fixes) for tokens, folders in found)
     ):
         return None
-    return FROZEN.format(reason=current.reason)
+    return FROZEN.format(slug=slug, reason=current.reason)
 
 
 def _directory(cwd: str, folders: list[str]) -> str:
@@ -324,15 +332,15 @@ def _registered(cwd: str, fixes: tuple[str, ...], branch: str) -> bool:
     return any(repo_key(url).startswith(changes) and _fix_branch(url) == branch for url in fixes)
 
 
-def held_push(cwd: str, branch: str) -> str | None:
-    """Return the panic refusal for a push to origin that writes branch from the checkout at cwd, or None when no
-    panic holds, the store cannot be read, or branch is a registered fix of that checkout's repository and git config
-    cannot route the push elsewhere."""
+def held_push(cwd: str, branch: str, slug: str) -> str | None:
+    """Return the panic refusal for a push of swarm ``slug`` to origin that writes branch from the checkout at cwd, or
+    None when no panic holds that swarm, the store cannot be read, or branch is a registered fix of that checkout's
+    repository and git config cannot route the push elsewhere."""
     store = _store()
-    current = None if store is None else _panic_state(store)
+    current = None if store is None else _panic_state(store, slug)
     if current is None or (_registered(cwd, current.fixes, branch) and not _routed(cwd)):
         return None
-    return FROZEN.format(reason=current.reason)
+    return FROZEN.format(slug=slug, reason=current.reason)
 
 
 def checked(payload: Any) -> str | None:

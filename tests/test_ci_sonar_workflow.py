@@ -14,7 +14,7 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_sonar_remains_required_during_promotion_trigger_rollout():
+def test_sonar_remains_required_during_promotion_trigger_rollout() -> None:
     workflow = _workflow()
     event = workflow[True]["pull_request"]
     assert set(event["branches"]) in ({"dev", "main"}, {"dev"})
@@ -23,7 +23,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict"]
     assert sonar["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -40,10 +40,10 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
 
 
-def test_sonar_gives_dev_push_runs_thirty_minutes_and_keeps_fifteen_elsewhere():
+def test_sonar_gives_dev_push_runs_seventy_five_minutes_and_keeps_sixty_elsewhere() -> None:
     assert (
         _workflow()["jobs"]["sonar"]["timeout-minutes"]
-        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 30 || 15 }}"
+        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 60 }}"
     )
 
 

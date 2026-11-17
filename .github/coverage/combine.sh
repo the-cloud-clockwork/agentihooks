@@ -31,7 +31,13 @@ lcov_pid=$!
 flat=$(mktemp -d)
 flattening=()
 for index in "${!reports[@]}"; do
-    python "$(dirname "$0")/flatten.py" "${reports[$index]}" "$flat/.coverage.$index" &
+    report="${reports[$index]}"
+    taken="$(dirname "$report")/flat-$(basename "$report")"
+    if [[ -s "$taken" ]]; then
+        mv "$taken" "$flat/.coverage.$index"
+        continue
+    fi
+    python "$(dirname "$0")/flatten.py" "$report" "$flat/.coverage.$index" &
     flattening+=($!)
 done
 for pid in "${flattening[@]}"; do wait "$pid"; done

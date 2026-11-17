@@ -203,7 +203,7 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
     finally:
         timing.ON_FAILURE.reset(token)
         report = partial(_panic_action, slug)
-        for line in panic.tick_pass(store, previous is None, clock(), report):
+        for line in panic.tick_pass(store, slug, previous is None, clock(), report):
             report(line)
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())
