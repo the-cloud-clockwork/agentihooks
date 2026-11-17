@@ -42,7 +42,7 @@ class LoginRuntime(FakeRuntime):
     def __init__(self, route: str, refused: int = 0) -> None:
         """Launch on ``route``, refuse the first ``refused`` slot checks and report every launch."""
         super().__init__()
-        self.route, self.refused, self.reports = route, refused, True
+        self.route, self.refused, self.reports, self.placement = route, refused, True, ""
         self.events: list[dict[str, Any]] = []
 
     def has_capacity(self, config: SwarmConfig) -> bool:
@@ -55,10 +55,11 @@ class LoginRuntime(FakeRuntime):
         return self.reports and agent.name in self.live
 
     def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Placed:
-        """Launch through the fake runtime, record a ledger write by the launched agent and report the named route."""
+        """Launch through the fake runtime, record a ledger write by the launched agent and report the named route and
+        placement."""
         placed: Placed = super().spawn(config, lane, name, task)
         self.events.append({"by": name, "at": NOW})
-        return replace(placed, route_kind=self.route)
+        return replace(placed, route_kind=self.route, placement=self.placement)
 
 
 def seat_master(
@@ -168,7 +169,7 @@ def test_the_drill_retires_the_front_door_master_and_records_a_login_successor_f
 
 @pytest.mark.feature("master-drill")
 def test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery(rig: SimpleNamespace) -> None:
-    rig.runtime.route = "subscription"
+    rig.runtime.placement = "fallback"
     record = master_drill.run(drill(rig))
     assert (record["seated_minute"], record["successor"]) == (10, successor(rig).name)
     assert (record["route"], record["recovered"]) == ("token fallback", False)

@@ -20,7 +20,7 @@ from scripts.swarm_v2 import front_door
 
 KEY = "master-drill"
 MINUTES = 30
-LOGIN = front_door.MASTER_ROUTES["master-login"]
+LOGIN = front_door.CLAUDE_AI_LOGIN
 NOT_SCRATCH = "{slug} is not a scratch proof swarm; the master drill never runs on a live swarm"
 NOT_RUNNING = "scratch swarm {slug} is {state}; the master drill runs on a running or paused scratch swarm"
 NOT_RETIRED = (
@@ -91,7 +91,7 @@ def run(drill: Drill) -> dict[str, Any]:
         actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
         found = successor(drill)
         minute += 1
-    route = front_door.master_route(drill.slug, found) if found else ""
+    route = front_door.master_route(drill.slug, found, front_door.held_seats(drill.store, drill.slug)) if found else ""
     record: dict[str, Any] = {
         "swarm": drill.slug,
         "at": drill.now_ms,
