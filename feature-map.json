@@ -4098,6 +4098,21 @@
       ]
     },
     {
+      "id": "uv-tool-install-nats-extra",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tool-install-nats-extra",
+      "behaviour": "Every uv tool install of the agentihooks CLI carries the nats extra, so a reinstall of the global tool venv keeps nats-py and launches with the NATS bus on still import the bus client: agentihooks init in a source checkout installs the editable tree as .[nats], the updater upgrades a uv tool install as agentihooks[nats], the nats extra in pyproject carries nats-py, and a uv tool install command list without the extra is a Semgrep incident.",
+      "seam": "install._install_cli_tool in a source checkout and updater.upgrade_command for a uv tool install, each read as the uv command it runs",
+      "rules": [
+        "uv-tool-install-without-nats-extra"
+      ],
+      "tests": [
+        "tests/test_cli_link.py::test_a_source_checkout_installs_the_editable_tree_with_the_nats_extra",
+        "tests/test_updater.py::test_a_uv_tool_upgrade_installs_the_package_with_the_nats_extra",
+        "tests/test_updater.py::test_the_nats_extra_the_tool_installs_carries_the_nats_client"
+      ]
+    },
+    {
       "id": "pypi-retry-attempt-timeout",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-index-retry-attempt-timeout",
@@ -5738,6 +5753,22 @@
         "tests/hive/test_master_placement.py::test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen",
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed",
         "tests/hive/test_master_fallback_launch.py::test_a_master_skips_a_native_login_whose_claude_account_is_closed"
+      ]
+    },
+    {
+      "id": "forced-master-drained-slots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-drained-accounts",
+      "behaviour": "A forced front door master on a hive with no Claude master login and no native login is placed on a subscription slot even when no Claude account has a free seat in the capacity rows, drained at a quota floor or full, and an account drained at the worker week floor gets its launch order at the slot cap its hive advertises; an account with a free seat is still taken first, a row of another harness never opens a claude slot, and an unforced master still waits with no claude slot.",
+      "seam": "HiveLaunch master selection account set over the fleet capacity rows, through send_order",
+      "rules": [
+        "master-slots-from-free-seats-alone"
+      ],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_takes_a_slot_without_a_free_seat_on_a_hive_without_a_login",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_takes_an_account_with_a_free_seat_before_a_drained_one",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_never_takes_a_claude_slot_on_another_harness_row",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_on_a_drained_account_gets_its_launch_order"
       ]
     },
     {
@@ -8393,6 +8424,18 @@
       "seam": "The Semgrep scan step Rule exceptions only shrink run text, executed over a planted repository whose head changes one rule's exceptions",
       "tests": [
         "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
+      ]
+    },
+    {
+      "id": "ci-stats-seed-download-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out and a failed pull request, run or artifact listing call are not retried, so the seed still skips a pull request past its budget.",
+      "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
+        "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
       ]
     }
   ],
