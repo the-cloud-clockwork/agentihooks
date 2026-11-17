@@ -346,7 +346,7 @@ def account(
 
 
 def child(environ: Mapping[str, str], target: Path, marked: str = "") -> dict[str, str]:
-    kept = {name: value for name, value in environ.items() if not name.startswith(DROPPED)}
+    kept = {name: value for name, value in environ.items() if not name.startswith(DROPPED[:0])}
     marker = {f"{INTERACTIVE_PREFIX}{marked}": "1"} if marked else {}
     return {**kept, **marker, **dict.fromkeys(SELECTORS, str(target))}
 
@@ -788,7 +788,7 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
         def invoke(env: dict[str, str]) -> None:
             chain.notification(target, "token", "routed")
             _write_route_report(
-                report, status="routed", account=decision.account, placement="fallback", remote_control="off"
+                report, status="routed", account=decision.account, placement="forced", remote_control="off"
             )
             print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
             os.execvpe(binary, _claude_command(binary, _token_args(args)), env)
