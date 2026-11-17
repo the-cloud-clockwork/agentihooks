@@ -283,6 +283,33 @@ def test_home_cells_escape_an_unknown_state(browser):
     assert re.search(r'<span class="state s-(&lt;|<)b(&gt;|>)" role="cell">&lt;b&gt;</span>', page)
 
 
+def test_a_file_page_preflight_gets_the_read_only_origin_and_private_network_headers() -> None:
+    import http.client
+    import threading
+
+    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
+    conn = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+    try:
+        conn.request(
+            "OPTIONS",
+            f"/api/v1/ledgers/{SLUG}/chat",
+            headers={"Origin": "null", "Access-Control-Request-Private-Network": "true"},
+        )
+        response = conn.getresponse()
+        assert response.status == 204
+        assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
+            ("Access-Control-Allow-Origin", "null"),
+            ("Access-Control-Allow-Methods", "GET"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"),
+            ("Access-Control-Allow-Private-Network", "true"),
+        ]
+    finally:
+        conn.close()
+        httpd.shutdown()
+        httpd.server_close()
+
+
 class Swarms:
     def __init__(self, known=(), error=None):
         self.known, self.error = set(known), error

@@ -93,8 +93,8 @@ creates the schema; only this service's `migrate()` does, at start.
 - `GET ledgers/{slug}/events` as server-sent events for the page, built from outbox events on the bus. The
   in-process `events.hub.Hub` moves here unchanged; replicas share nothing, so the client reconnects with
   `Last-Event-ID` and a cursor from another replica answers `410 cursor_expired`, as it does today across restarts.
-- Swarm controls: `swarm/controls`, `swarm/actions`, `lifecycle/actions`, `controller-lease`, proof ledgers, routing
-  settings, hives, monitor.
+- Swarm controls: `swarm/controls`, `swarm/actions`, `lifecycle/actions`, proof ledgers, routing settings, hives,
+  monitor.
 - Consumes outbox events for every side effect (task da3), idempotent by event id. The API relays the outbox table to
   the bus, as `outbox_host.running` does today; the app server subscribes on the bus and never reads the table.
 
@@ -134,7 +134,7 @@ Today every route below is served by one process, `ledger_server.Handler`, on po
 | `GET ledgers/{slug}/events` (SSE) | `routes.events` → `events.stream.serve` | Stream | App server |
 | `GET swarm`, `swarm/*`, `swarm/models`, `swarm/context/*`, `tasks/{id}/workspace`, legacy `GET /api/swarm/<slug>` | `resources.swarm_read`, `context_view.expand`, `workspace_tails` | Read, Redis | App server |
 | `PUT swarm/controls`, `POST swarm/actions`, legacy `PUT /api/swarm/<slug>` | `put_swarm`, `admin.control` | Swarm command | App server |
-| `POST lifecycle/actions`, `GET`/`POST controller-lease` | `admin.lifecycle`, `controller_lease` | Command, lease | App server |
+| `POST lifecycle/actions` | `admin.lifecycle` | Command | App server |
 | `GET`/`PATCH routing/settings`, `GET`/`PATCH hives/*`, `GET monitor` | `routing.settings`, `hives.route`, `monitor.route` | Read and write, Redis | App server |
 | `POST proof-ledgers/*` | `proofs.route` | Command | App server |
 | `GET`/`POST migrations/{slug}` | `storage_migration.hosted.route` | Import and capture | API, operator principal only |
