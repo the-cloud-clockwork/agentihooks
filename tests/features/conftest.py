@@ -131,8 +131,7 @@ def _stop(process: subprocess.Popen) -> None:
 
 @pytest.fixture
 def ledger(tmp_path: Path) -> Iterator[Ledger]:
-    """A seeded ledger in the Postgres service, its schema migrated as the ledger API service migrates it at start,
-    served by a ledger server subprocess on a spare port."""
+    """A seeded ledger in the Postgres service, served by a ledger server subprocess on a spare port."""
     address = postgres.url(os.environ)
     assert address, f"{postgres.URL} must name the Postgres service"
     postgres.PostgresLedgerRepository(address).migrate()
