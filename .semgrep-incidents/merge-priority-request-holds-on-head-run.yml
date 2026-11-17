@@ -13,8 +13,11 @@ rules:
         - merge-priority-request-holds-on-head-run.py
     patterns:
       - pattern-inside: |
-          def request(...):
+          def $REQUEST(...):
               ...
+      - metavariable-regex:
+          metavariable: $REQUEST
+          regex: ^request($|_)
       - pattern-either:
           - pattern: blocking(...)
           - pattern: $STORE.redis.hset($STORE.key($SLUG, PENDING), ...)
