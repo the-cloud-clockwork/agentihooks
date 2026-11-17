@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.968 · 2026-11-17
+
+### 2026-11-17 · 16d74059273a · #11764 · @agenticore-app
+
+**Announce the protected grader blobs that accept ledger load on ledger server pull requests**
+
+This change pre-registers two new blob hashes for `scripts/ci_reuse.py` and `scripts/gate_protected.py` in `tests/registry/FROZEN_GATES.json`, ahead of #11756 landing. The protected grader rejects any pull request that changes a frozen file to an unlisted blob, or that touches both the registry and a frozen file at once, so this announcement must merge first to let #11756's Gate Protected checks and registry tests pass cleanly.
+
+### 2026-11-17 · a5a2368228c2 · #11682 · @agenticore-app
+
+**Keep every master placement refusal with its reason and time**
+
+This change adds persistent tracking of why each master placement attempt was refused, storing reason, first/latest time, and pass count per seat in Redis, so operators can see exactly why a seat stays unfilled instead of losing that information to stdout or deleted status rows. Master down notices, the empty master seat finding, and `agentihooks swarm status` now report each seat's latest refusal with its age, while pruning only clears master wait rows once stale, preventing false missing-hive alerts and silent data loss during outages like the November 17 front door placement failures.
+
+### 2026-11-17 · 3192757f158c · #11746 · @agenticore-app
+
+**A forced front door master passes a refused hive launch slot reservation**
+
+This change fixes a bug where a forced master login on a hive token slot that was already full or capped at zero would be wrongly rejected with "account reservation is full," leaving the master seat empty. `HiveLaunch.send_order` now skips the refusal check when the task is forced, deferring the slot accounting until `HiveLaunch.complete` acknowledges with the slot name, at which point the reservation is properly recorded. This ensures forced masters can always claim their seat, while unforced requests still correctly respect capacity limits.
+
+### 2026-11-17 · e081f495fe5f · #11686 · @agenticore-app
+
+**Master route label follows the route the master really landed on**
+
+This change fixes the master route label shown in balance and on the master card so it reflects the route the master process actually landed on, rather than defaulting to a stale or incorrect value. It tightens how writers record route kind, account, and placement during tick recovery and take-master, restricts token fallback display to cases where claude ai login was actually desired, and ensures only live, acting front-door masters contribute their route to the balance view. Five new feature-map guards and a Semgrep rule prevent regressions where recovery logic silently drops the real route.
+
 ## v2.17.967 · 2026-11-17
 
 ### 2026-11-17 · 83fab3803c73 · #11704 · @agenticore-app
