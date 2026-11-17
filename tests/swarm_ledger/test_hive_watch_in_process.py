@@ -15,7 +15,11 @@ from scripts.swarm.keyspace import ROOT
 from scripts.swarm_ledger import storage, watch_ledger
 
 NAME = "engineer@323133-0901"
-CONTENT = {"title": "Hive watch", "overview": "o", "phases": [{"title": "Watch", "description": "d"}]}
+CONTENT = {
+    "title": "Hive watch",
+    "overview": "o",
+    "phases": [{"title": "Watch", "description": "d"}, {"title": "Read", "description": "d"}],
+}
 READS = frozenset({"GET", "HGET", "HMGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "TTL"})
 CREDENTIAL_STORE = f"{auth.PREFIX}:state:credentials:current"
 
@@ -50,10 +54,12 @@ def member_login(server: Any, admin: Any, member_id: str) -> Any:
     return login
 
 
-def comment(slug: str, comment_id: str, text: str) -> None:
-    """An operator comment on the ledger's first phase, written to the shared ledger store."""
+def comment(slug: str, comment_id: str, text: str, phase: str = "p1") -> None:
+    """An operator comment on one of the ledger's phases, written to the shared ledger store; a later comment by the
+    same author on the same phase amends this one, so each new event goes on a phase of its own."""
     _, rejected = storage.default().apply_ops(
-        slug, ops=[{"op": "add", "id": comment_id, "by": "operator", "thread": "phases/p1/comments", "text": text}]
+        slug,
+        ops=[{"op": "add", "id": comment_id, "by": "operator", "thread": f"phases/{phase}/comments", "text": text}],
     )
     assert rejected == []
 
@@ -138,12 +144,15 @@ def test_a_hive_watch_prints_an_event_written_between_its_reads_once(
 ) -> None:
     comment(hive["slug"], "c-first", "first word")
 
-    out, pauses = watched(monkeypatch, capsys, hive["slug"], lambda: comment(hive["slug"], "c-second", "second word"))
+    out, pauses = watched(
+        monkeypatch, capsys, hive["slug"], lambda: comment(hive["slug"], "c-second", "second word", "p2")
+    )
 
     assert (out.count("[c-first]"), out.count("[c-second]")) == (1, 1), (pauses, out)
     assert out.index("[c-first]") < out.index("[c-second]")
 
 
+@pytest.mark.feature("hive-watch-in-process")
 def test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledger_server_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
