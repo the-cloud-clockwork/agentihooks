@@ -29,6 +29,7 @@ from scripts.swarm import (
     ledger_probe,
     lifecycle,
     live_binding,
+    master_critical,
     outage,
     overlays,
     quota_view,
@@ -108,7 +109,7 @@ def findings(
         passing = checks.cached_green(store.redis, store.key(slug, "checks"))
     else:
         pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
-    placement_waits.prune(store, slug, tasks)
+    placement_waits.prune(store, slug, tasks, now_ms())
     events = [
         *events,
         *(
@@ -153,6 +154,7 @@ def findings(
         + spawn_stall.findings(store, slug)
         + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
+        + master_critical.findings(store, slug, now_ms())
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
@@ -329,6 +331,7 @@ def status_report(
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
     visible = live_agents(store.agents(slug), runtime or HerdrRuntime())
+    held = front_door.held_seats(store, slug)
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
@@ -347,7 +350,7 @@ def status_report(
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
-                "route": front_door.master_route(slug, a),
+                "route": front_door.master_route(slug, a, held),
                 "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
@@ -359,6 +362,7 @@ def status_report(
             for a in visible
         ],
         "outages": outage.open_records(slug),
+        "master_critical": master_critical.read(store, slug),
         "outbox": outbox.status(),
         "lab": lab_capacity.status(store, slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),

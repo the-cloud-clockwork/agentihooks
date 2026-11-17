@@ -1130,6 +1130,7 @@ def test_a_forced_master_takes_the_account_with_most_room_under_every_floor(
     decision = balancer.forced_credential(env, refused, ["C"])
     assert (decision.account, decision.source) == ("B", "forced master")
     assert decision.credential == balancer.Credential("AH_CC_TOKEN_B", "b")
+    assert decision.result == next(result for result in refused.results if result.account == "B")
     assert balancer.forced_credential(env, refused, []).credential == balancer.Credential("AH_CC_TOKEN_C", "c")
 
 

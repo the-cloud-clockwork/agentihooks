@@ -64,6 +64,50 @@ def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     assert stored.profile_decision["master_placement"] == admitted.profile_decision["master_placement"]
 
 
+def order_on_a_slot(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, cap: int, held: int, forced: bool
+) -> tuple[Any, list[Any]]:
+    """Send a front door master's launch order on a hive token slot with ``cap`` seats, ``held`` of them reserved."""
+    from scripts.hive.launch import Selection
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "seat": "master@fixture", "forced": forced, "controller_epoch": setup.held.epoch}
+    slot = {"harness": "claude", "account": "account", "kind": "subscription", "cap": cap}
+    write_hive(setup, excluded=[], ui="yes", slots=[slot])
+    for index in range(held):
+        assert setup.launcher.slots.reserve("claude:account", f"held-{index}", 6, 300000)
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, Selection)
+    sent: list[Any] = []
+    monkeypatch.setattr(setup.launcher, "answer", lambda request, order: sent.append(order))
+    return setup.launcher.send_order(request, selected, task), sent
+
+
+@pytest.mark.feature("forced-master-slot-reservation")
+@pytest.mark.parametrize(("cap", "held"), [(0, 0), (1, 1)], ids=["capped-at-zero", "every-seat-held"])
+def test_a_forced_front_door_master_passes_a_refused_launch_slot_reservation(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, cap: int, held: int
+) -> None:
+    _, sent = order_on_a_slot(setup, monkeypatch, cap, held, True)
+    assert [(order.slot, order.route_kind, order.hive) for order in sent] == [("account", "subscription", "remote")]
+    assert setup.launcher.slots.acknowledge(sent[0].execution_id, "claude:account") is True
+    assert setup.launcher.slots.counts() == {"claude:account": held + 1}
+
+
+@pytest.mark.feature("forced-master-slot-reservation")
+@pytest.mark.parametrize(("cap", "held"), [(0, 0), (1, 1)], ids=["capped-at-zero", "every-seat-held"])
+def test_an_unforced_front_door_master_is_still_refused_at_a_full_launch_slot_reservation(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, cap: int, held: int
+) -> None:
+    from scripts.hive.launch import ACCOUNT_FULL
+    from scripts.swarm_v2.runtime.base import Status
+
+    outcome, sent = order_on_a_slot(setup, monkeypatch, cap, held, False)
+    detail = f"{ACCOUNT_FULL}: account=claude:account sessions={held} cap={cap} five_left=80 week_left=80"
+    assert (outcome.status, outcome.detail, sent) == (Status.UNAVAILABLE, detail, [])
+
+
 @pytest.mark.parametrize("fallback", ["the task is pinned to remote", ""])
 def test_an_acknowledged_and_ended_execution_keeps_its_placement_fallback(setup, fallback):
     from dataclasses import replace
@@ -1018,6 +1062,28 @@ def test_native_master_fallback_account_is_recorded_canonically(setup):
     live = setup.launcher.record(admitted, order, ack)
     assert live.account == "token-account"
     assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == "token-account"
+
+
+@pytest.mark.feature("master-route-placement-fallback")
+def test_a_native_master_token_fallback_records_its_fallback_placement(setup):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from scripts.hive.orders import Ack, launch_target
+
+    order, admitted, task = headless_front_door_order(setup)
+    order = replace(order, hive="remote")
+    table = cast(Any, {12: SimpleNamespace(start_time=34)})
+    target = {"host_id": "remote", **launch_target(12, "fixture", table)}
+    execution = {
+        "account": "token-account",
+        "placement": "fallback",
+        "profile_decision": {"validation": {"account": "token-account"}},
+    }
+    live = setup.launcher.record(admitted, order, Ack("live", target, execution=execution))
+    stored = setup.store.execution_registry.get(order.slug, admitted.execution_id)
+    assert (live.route_kind, live.placement, stored.placement) == ("master-login", "fallback", "fallback")
 
 
 def test_non_native_ack_cannot_replace_the_recorded_account(setup):

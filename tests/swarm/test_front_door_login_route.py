@@ -200,3 +200,19 @@ def test_a_forced_master_off_the_interactive_route_is_never_refused_all_full(
     assert (str(refused.value), refused.value.status, seen) == (runtime.agent_choice.ALL_FULL, "unavailable", [])
     placed = runner.spawn(config, "master", "master@next", {"id": "master", "seat": "master@proof", "forced": True})
     assert (placed.harness, "--agentihooks-forced" in _passed(seen[0])) == ("codex", False)
+
+
+@pytest.mark.feature("forced-master-start")
+def test_an_interactive_route_spawn_is_never_refused_all_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    runner, config, seen = _forced_runner(
+        tmp_path, {"eng": {"agent": "claude"}}, lambda *_: ("claude", runtime.agent_choice.ALL_FULL)
+    )
+    placed = runner.spawn(config, "eng", "eng@a1b2c3-0001", {"id": "t1", "title": "x", "route_kind": "interactive"})
+    assert (placed.harness, placed.route_kind, _passed(seen[0])[:2]) == (
+        "claude",
+        "interactive",
+        ["--route", "interactive"],
+    )

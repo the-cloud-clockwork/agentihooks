@@ -169,6 +169,15 @@ def pid_account(pid: int, proc: Path = _PROC, accounts: Mapping[str, str] | None
     return routed.get(_env_fingerprint(pid, proc, f"{TOKEN_PREFIX}{account}"), account)
 
 
+def pid_route(pid: int, proc: Path = _PROC) -> str:
+    """Route kind of the agent process ``pid`` from its variable names: api, interactive for a claude ai login, else
+    subscription."""
+    names = _env_names(pid, proc)
+    if API_MARKER in names:
+        return API_ACCOUNT
+    return "interactive" if any(name.startswith(INTERACTIVE_PREFIX) for name in names) else "subscription"
+
+
 def session_account(pid: int, proc: Path = _PROC) -> str:
     """Account of the agent process ``pid``; this process's environment when /proc is unavailable."""
     if (proc / str(pid) / "environ").exists():
