@@ -211,6 +211,7 @@ def _lease_watch(tmp_path: Path, kubectl: str, lease: str) -> tuple[int, str, fl
     return status, errors.read_text(), time.monotonic() - started
 
 
+@pytest.mark.wall_clock
 def test_the_first_controller_restart_ends_the_lease_wait_at_once(tmp_path: Path) -> None:
     status, errors, seconds = _lease_watch(tmp_path, "echo 1", "sleep 60")
     assert status == 143
@@ -229,6 +230,7 @@ def test_the_lease_wait_keeps_its_own_verdict_until_the_controller_restarts(tmp_
     assert "restarted" not in errors
 
 
+@pytest.mark.wall_clock
 def test_the_proof_moves_on_when_the_lease_exec_ends_without_waiting_for_a_restart_read(tmp_path: Path) -> None:
     status, errors, seconds = _lease_watch(tmp_path, "sleep 10; echo 0", "sleep 0.2")
     assert status == 0
