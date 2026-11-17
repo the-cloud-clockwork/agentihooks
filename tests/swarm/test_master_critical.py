@@ -11,7 +11,9 @@ from unittest import mock
 
 import pytest
 
+import scripts.swarm.cli  # noqa: F401
 from hooks.context import broadcast
+from scripts.hub import lifecycle  # noqa: F401
 from scripts.swarm import idle, ledger_client, master_critical, master_fallback, master_launch
 from scripts.swarm import runtime as runtime_module
 from scripts.swarm import store as store_module
