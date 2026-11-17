@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ HOUR = panic.HOUR_MS
 WINDOW = panic.WINDOW_MS
 FIX = "https://github.com/the-cloud-clockwork/agentihooks/pull/1"
 BRANCH_FIX = "https://github.com/the-cloud-clockwork/agentihooks/tree/fix-branch"
+HELD_S = 5.0
 
 
 @pytest.fixture
@@ -694,6 +696,48 @@ def test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository(
         "panic cancelled the-cloud-clockwork/antoncore run 3 on pr-branch",
     ]
     assert asked == [FIX]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_the_pass_ends_before_the_panic_cancel_sweep_it_starts(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.tick.adapters import github
+
+    gate, reported = threading.Event(), threading.Event()
+    held: list[bool] = []
+    actions: list[str] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        repository, listing, _ = args[1].removeprefix("repos/").partition("/actions/runs?")
+        if listing and repository == panic.REPOS[0]:
+            held.append(gate.wait(HELD_S))
+        body = json.dumps({"workflow_runs": [_api_run(1, "busy")]}) if listing else ""
+        return subprocess.CompletedProcess(args, 0, body, "")
+
+    def emit(stream: object, line: str) -> None:
+        if '"event": "swarm_panic",' in line:
+            actions.append(json.loads(line)["action"])
+            if len(actions) == len(panic.REPOS):
+                reported.set()
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    monkeypatch.setattr(timing, "emit", emit)
+    monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
+    panic.engage(store, "pressed", False, [], 0)
+    try:
+        with spawn_stall.watch(store, SLUG, None, lambda: 1_000, None):
+            pass
+        early = list(actions)
+    finally:
+        gate.set()
+    assert early == []
+    assert reported.wait(HELD_S)
+    assert held == [True]
+    assert actions == [f"panic cancelled {repo} run 1 on main" for repo in panic.REPOS]
 
 
 @pytest.mark.feature("panic-fix-pull-request-head-in-its-repository")
