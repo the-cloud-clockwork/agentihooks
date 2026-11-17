@@ -8293,6 +8293,22 @@
       "tests": [
         "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
       ]
+    },
+    {
+      "id": "quick-seat-binding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch-unbound",
+      "behaviour": "A quick seat stays bound to its live session: the agent a relaunch starts records its herdr pane and session id in the seat at its first hook while the seat is launching, so it stays a member, receives room notices and HANDOFF PREPARATION and hands off even without its seat variables; a relaunch whose agent never records its session leaves the seat pending and fails the command loudly instead of reading ready; quick relaunch <seat> --adopt records the calling live session and its pane as the seat's ready occupant, and never takes a launching seat, a seat whose recorded pane still runs an agent, or a pane another seat holds.",
+      "seam": "scripts.quick.registry bind and adopt, scripts.quick.member bind, hooks.context.quick_swarm refocus, scripts.quick.launch relaunch, bound and adopt, and agentihooks quick relaunch --adopt",
+      "tests": [
+        "tests/quick/test_seat_binding.py::test_a_relaunched_master_in_a_new_pane_records_it_and_stays_a_member_without_its_variables",
+        "tests/quick/test_seat_binding.py::test_a_relaunched_seat_whose_session_lacks_its_variables_is_told_to_hand_off",
+        "tests/quick/test_seat_binding.py::test_only_a_launching_seat_named_by_the_session_variables_records_its_pane_and_session",
+        "tests/quick/test_seat_binding.py::test_a_relaunch_whose_agent_never_records_its_session_leaves_the_seat_pending",
+        "tests/quick/test_seat_binding.py::test_an_unbound_relaunch_fails_the_command_loudly",
+        "tests/quick/test_seat_binding.py::test_adopt_seats_a_live_session_started_outside_the_swarm",
+        "tests/quick/test_seat_binding.py::test_adopt_never_takes_a_launching_seat_a_seat_whose_agent_runs_or_another_seats_pane"
+      ]
     }
   ],
   "unmapped_rules": [
