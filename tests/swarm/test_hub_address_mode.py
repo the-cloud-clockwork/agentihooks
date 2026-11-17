@@ -6,7 +6,7 @@ from scripts.scheduler import core, service
 from scripts.swarm import cli, controller, stack_env, store
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_link, ledger_route
+from scripts.swarm_ledger import ledger_link
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -116,18 +116,3 @@ def test_the_scheduler_runtime_folder_counts_a_hub_address_with_no_mode_as_remot
 
     assert hosted.parent == local == pinned
 
-
-def test_the_ledger_route_ignores_the_local_api_address_under_a_hub_address_with_no_mode(hub, swarm_store, monkeypatch):
-    swarm_store.redis.hset(swarm_store.key("sw", "config"), "api_url", "http://127.0.0.1:8765")
-    assert ledger_route.configured(swarm_store, "sw") == ""
-
-    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
-    assert ledger_route.configured(swarm_store, "sw") == "http://127.0.0.1:8765"
-
-
-def test_a_ledger_session_on_a_hub_address_with_no_mode_never_reads_the_local_store(hub, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
-    monkeypatch.setattr(ledger_route.ports, "swarm", lambda: pytest.fail("a remote session must not open the store"))
-
-    with ledger_route.session("sw"):
-        assert ledger_route.url("sw") == ""

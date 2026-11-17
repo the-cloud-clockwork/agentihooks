@@ -53,37 +53,6 @@ def now_ms(store: RedisStore) -> int:
     return document.now_ms()
 
 
-def _address(slug: str) -> str:
-    """The ledger route the lease goes through; none once the shared swarm database is configured."""
-    from scripts.swarm_ledger.ledger_route import url
-    from scripts.swarm_ledger.repository import postgres
-
-    return "" if postgres.url(os.environ) else url(slug)
-
-
-def _remote(slug, action, fields=None):
-    import urllib.error
-
-    from scripts.swarm.ledger_client import _ledger
-    from scripts.swarm_ledger.api.client import ResourceClient, failure
-
-    ledger = _ledger()
-    payload = None if action == "current" else {"action": action, **fields}
-    path = "controller-lease" if payload is None else "controller-lease/actions"
-    try:
-        return ResourceClient(_address(slug), ledger.credentials(slug, service=payload is not None)).request(
-            slug, path, payload
-        )["data"]
-    except urllib.error.HTTPError as exc:
-        replay, error = failure(exc)
-        refused = SwarmError if replay.code < 500 else LeaseUnavailable
-        raise refused(
-            f"hosted controller lease refused: {replay.code} {error.get('code', '')} {error.get('message', '')}"
-        ) from None
-    except OSError as exc:
-        raise LeaseUnavailable(f"hosted controller lease is unavailable: {exc}") from exc
-
-
 def _recorded(doc: dict) -> Lease | None:
     return Lease(**doc["lease"]) if doc["lease"] else None
 
@@ -101,17 +70,11 @@ def _hold(doc: dict, held: Lease) -> Lease:
 
 
 def current(store: RedisStore, slug: str) -> Lease | None:
-    if _address(slug):
-        data = _remote(slug, "current")
-        return Lease(**data) if data is not None else None
     cheap = document.read_lease(store, slug)
     return _live(cheap if cheap is not None else document.read(store, slug), now_ms(store))
 
 
 def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
-    if _address(slug):
-        data = _remote(slug, "acquire", {"owner": owner})
-        return Lease(**data) if data is not None else None
     from scripts.swarm.commands import hive_id
 
     host = store.redis.get(store.key(slug, "controller-host"))
@@ -136,13 +99,6 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
 
 
 def transfer(store: RedisStore, slug: str, owner: str, source_epoch: int, expected_epoch: int) -> Lease:
-    if _address(slug):
-        return Lease(
-            **_remote(
-                slug, "transfer", {"owner": owner, "source_epoch": source_epoch, "expected_epoch": expected_epoch}
-            )
-        )
-
     def move(doc: dict[str, Any]) -> Any:
         at = now_ms(store)
         if doc["legacy_owner"]:
@@ -169,9 +125,6 @@ def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Calla
     """Commits change only while held, a lease or its epoch, is the live controller lease; None writes unfenced."""
     if held is None:
         return document.write(store, slug, change)
-    if _address(slug):
-        _check({"lease": _remote(slug, "current")}, now_ms(store), held)
-        return document.write(store, slug, change)
 
     def guarded(doc: dict[str, Any]) -> Any:
         _check(doc, now_ms(store), held)
@@ -187,9 +140,6 @@ def require(store: RedisStore, slug: str, held: Lease) -> None:
 
 
 def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
-    if _address(slug):
-        return Lease(**_remote(slug, "renew", {"owner": held.owner, "epoch": held.epoch}))
-
     cheap = document.read_lease(store, slug)
     if cheap is not None:
         at = now_ms(store)
@@ -286,9 +236,6 @@ def held_pass(store: RedisStore, slug: str, held: Lease) -> Generator[None]:
 
 
 def release(store: RedisStore, slug: str, held: Lease) -> bool:
-    if _address(slug):
-        return _remote(slug, "release", {"owner": held.owner, "epoch": held.epoch})
-
     def drop(doc: dict[str, Any]) -> Any:
         _check(doc, now_ms(store), held)
         doc["lease"] = None

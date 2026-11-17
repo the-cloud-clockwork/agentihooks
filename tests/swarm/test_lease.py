@@ -98,22 +98,6 @@ def test_renewal_and_release_read_the_clock_of_their_own_store(store, monkeypatc
     assert fencing.read(store, "sw")["lease"] is None
 
 
-def test_a_hosted_fenced_write_checks_the_hosted_lease(store, monkeypatch):
-    from dataclasses import asdict
-
-    held = lease.Lease("home", 1, 10**13)
-    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example" if slug == "sw" else "")
-    monkeypatch.setattr(
-        lease,
-        "_remote",
-        lambda slug, action, fields=None: asdict(held) if (slug, action, fields) == ("sw", "current", None) else None,
-    )
-    monkeypatch.setattr(lease, "now_ms", lambda given: 1000 if given is store else 10**14)
-
-    assert lease.fenced(store, "sw", held, lambda doc: doc.update(epoch=7) or "done") == "done"
-    assert fencing.read(store, "sw")["epoch"] == 7
-
-
 def test_legacy_owner_keeps_ownership_until_expiry(store, monkeypatch):
     monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
     store.redis.set(store.key("sw", "control-owner"), "legacy")
@@ -529,37 +513,4 @@ def test_the_controller_marks_each_swarm_for_one_lease_ttl_as_it_ticks_it(store,
     assert lease.acquire(store, "proof", "controller-hive").owner == "controller-hive"
 
 
-def test_the_lease_holds_through_the_shared_database_with_the_ledger_server_unreachable(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from scripts.swarm_ledger import ledger_route
-    from scripts.swarm_ledger.api import client
 
-    def unreachable(*args: object) -> None:
-        raise OSError("timed out")
-
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
-    monkeypatch.setattr(client.ResourceClient, "request", unreachable)
-    with ledger_route.scoped("sw", "https://ledger.example"):
-        held = lease.acquire(store, "sw", "home")
-        assert held is not None
-        assert lease.current(store, "sw") == held
-        assert lease.renew(store, "sw", held).epoch == held.epoch
-        assert lease.fenced(store, "sw", held, lambda doc: "written") == "written"
-        assert lease.release(store, "sw", held) is True
-        assert lease.current(store, "sw") is None
-
-
-@pytest.mark.parametrize(("folder", "address"), [("scratchpad/proof/ledger", "https://ledger.example"), ("ledger", "")])
-@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
-def test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, folder: str, address: str
-) -> None:
-    from pathlib import Path
-
-    from scripts.swarm_ledger import ledger_route
-
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
-    monkeypatch.setenv("LEDGER_DIR", str((Path.home() if folder.startswith("scratchpad") else tmp_path) / folder))
-    with ledger_route.scoped("sw", "https://ledger.example/"):
-        assert lease._address("sw") == address

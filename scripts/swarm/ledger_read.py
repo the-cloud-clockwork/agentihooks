@@ -1,4 +1,5 @@
-"""A ledger's overview and phases: from the ledger folder on a local host, through the hosted ledger server when deployed."""
+"""A ledger's overview and phases: from the ledger folder on a local host, through the ledger API route code over
+the shared database when deployed."""
 
 import os
 
@@ -18,13 +19,11 @@ def parts(slug: str, *keys: str) -> dict:
 def _hosted(slug: str, keys: tuple) -> dict:
     from scripts.swarm_ledger import ledger
 
-    credential = os.environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
-    headers = {"X-Controller-Credential": credential} if credential else None
     try:
-        metadata = ledger.resource(slug, "metadata", headers=headers)
+        metadata = ledger.resource(slug, "metadata")
         found = {key: metadata[key] for key in keys if key in metadata}
         if "phases" in keys:
-            found["phases"] = ledger.resource(slug, "phases", collection=True, headers=headers)
+            found["phases"] = ledger.resource(slug, "phases", collection=True)
     except (OSError, SystemExit) as error:
         if getattr(error, "code", None) != 404:
             raise SwarmError(f"the hosted ledger is unavailable for {slug}: {error}") from None

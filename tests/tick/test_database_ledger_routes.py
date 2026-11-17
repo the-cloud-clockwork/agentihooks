@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_route
+from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api import task_list
 from scripts.tick.adapters import database_ledger
 
@@ -225,17 +225,6 @@ def test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal(
     monkeypatch.setattr(ledger, "request", refuse)
     with pytest.raises(SystemExit, match="^server refused: 409 busy$"):
         ledger.database_call("sw", None, False)
-
-
-@pytest.mark.feature("swarm-tick-database-ledger")
-def test_a_tick_routed_call_keeps_its_own_ledger_route(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ledger_route, "configured", lambda store, slug: "http://hive-ledger")
-
-    @ledger_route.tick
-    def probe(store: object, slug: str) -> str:
-        return ledger_route.url(slug)
-
-    assert probe(object(), "sw") == "http://hive-ledger"
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")
