@@ -412,7 +412,7 @@ def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
 def test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe(monkeypatch, hive, tmp_path):
     mark = tmp_path / "hub.serving"
     seen = []
-    monkeypatch.setenv(runner.SERVING_ENV, str(mark))
+    monkeypatch.setenv("AGENTIHOOKS_HUB_SERVING_FILE", str(mark))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
     monkeypatch.delenv("LEDGER_URL", raising=False)
     monkeypatch.setattr(runner.slots, "serve", lambda bus, admitter: seen.append(("slots", mark.exists())))
