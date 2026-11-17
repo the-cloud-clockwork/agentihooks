@@ -150,6 +150,16 @@
       ]
     },
     {
+      "id": "hub-ready-only-when-serving",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2600",
+      "behaviour": "The swarm chart sets AGENTIHOOKS_HUB_SERVING_FILE on the hub container and gives it a readiness probe that passes only while that file exists, so the one pod at a time hub rollout terminates the last old hub pod only after a new hub pod has subscribed to slots.",
+      "seam": "hub container env and readinessProbe in the swarm chart hub Deployment",
+      "tests": [
+        "tests/test_swarm_chart_hub_readiness.py::test_the_hub_turns_ready_only_once_its_serving_file_exists"
+      ]
+    },
+    {
       "id": "controller-waits-ride-out-redis-outage",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-controller-redis-grace",

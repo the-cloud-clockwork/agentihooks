@@ -31,6 +31,10 @@ def hub_problems(deployment: dict) -> list[str]:
     bus = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats.swarm:4222"}
     if {name: env.get(name) for name in bus} != bus:
         found.append(f"the hub bus env is {[env.get(name) for name in bus]}, expected {list(bus.values())}")
+    serving = env.get("AGENTIHOOKS_HUB_SERVING_FILE")
+    probe = container.get("readinessProbe", {}).get("exec", {}).get("command")
+    if not serving or probe != ["test", "-f", serving]:
+        found.append(f"the hub turns ready on {probe} instead of its serving file {serving}")
     labels = deployment["spec"]["template"]["metadata"]["labels"]
     if labels.get("app.kubernetes.io/component") != "hub":
         found.append("the hub pods are not labelled with the hub component")
@@ -224,7 +228,8 @@ if __name__ == "__main__":
     if failures:
         sys.exit(1)
     print(
-        "the hub renders two replicas of agentihooks hub run on the configured bus that prefer different nodes,"
+        "the hub renders two replicas of agentihooks hub run on the configured bus that prefer different nodes"
+        " and turn ready only once they serve,"
         " and only outside a hive;"
         " the GitHub webhook receiver renders beside it on the chart image with its secret by reference"
     )
