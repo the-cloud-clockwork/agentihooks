@@ -6713,6 +6713,16 @@
       ]
     },
     {
+      "id": "folder-ledger-server-follows-other-writers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-load-streams-lost-patch",
+      "behaviour": "A read only ledger server on a ledger folder runs the stored ledger follow loop, so a write another process stores there, the ledger API service or an agent running the route code in process, reaches every open page stream within one follow pass instead of waiting for the server's next read of that ledger.",
+      "seam": "scripts.swarm_ledger.ledger_server.serve and follow_shared over scripts.swarm_ledger.events.publishing.Publishing",
+      "tests": [
+        "tests/swarm_ledger/test_folder_store.py::test_the_folder_ledger_server_publishes_a_write_another_process_stored_without_a_read"
+      ]
+    },
+    {
       "id": "redis-command-map-caller-argument-typing",
       "origin": "inventory",
       "behaviour": "The Redis command map types an unannotated function, method, staticmethod or constructor parameter as a Redis client when a caller inside the program passes it one, by position or keyword, keeping that typing local to the callee so the same parameter name is not treated as a client everywhere, and a getattr call naming its method with a literal string maps to the Redis command it sends; the receiver fixpoint pass stops once a pass changes nothing.",
