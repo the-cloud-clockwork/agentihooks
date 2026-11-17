@@ -60,6 +60,7 @@ class Ledger:
         self.raised: list[str] = []
         self.closed: list[tuple[str, str]] = []
         self.broken = False
+        self.refuses_raise = False
 
     def tasks(self, slug: str) -> list[dict[str, Any]]:
         assert slug == "sw"
@@ -69,7 +70,7 @@ class Ledger:
 
     def raise_alert(self, slug: str, source: str, text: str) -> None:
         assert (slug, source) == ("sw", "seat")
-        if self.broken:
+        if self.broken or self.refuses_raise:
             raise OSError("the ledger is unreachable")
         self.raised.append(text)
         if not any(alert["source"] == source and alert.get("state") != "done" for alert in self.held):
@@ -345,7 +346,7 @@ def test_a_failed_forced_start_is_retried_once_per_retry_window(
     at = critical(store, forced)
     master_critical.ended(store, "sw", at, 1, "boom\n", at + MINUTE)
 
-    assert watch(store, at + master_critical.RETRY_MS - 1, forced) == []
+    assert watch(store, at + master_critical.RETRY_MS - 1, forced) == [RAISED]
     assert watch(store, at + master_critical.RETRY_MS, forced) == ["forced master up of swarm sw: runner 3", RAISED]
     assert forced.calls == [("sw", at), ("sw", at + master_critical.RETRY_MS)]
     assert [row["outcome"] for row in master_critical.read(store, "sw")["attempts"]] == ["failed", ""]
@@ -414,9 +415,13 @@ def test_a_failed_start_replaces_the_open_seat_alert_with_one_naming_its_reason(
     master_critical.ended(store, "sw", at, 1, "boom", at + MINUTE)
     still = master_critical.SEAT_STILL.format(slug="sw", reason="boom")
 
-    lines = watch(store, at + master_critical.RETRY_MS, Forced(), ledger=ledger)
-
-    assert lines == ["forced master up of swarm sw: runner 3", "closed the seat alert seat-1 of swarm sw", RAISED]
+    assert watch(store, at + 2 * MINUTE, Forced(), ledger=ledger) == [
+        "closed the seat alert seat-1 of swarm sw",
+        RAISED,
+    ]
+    assert watch(store, at + master_critical.RETRY_MS, Forced(), ledger=ledger) == [
+        "forced master up of swarm sw: runner 3"
+    ]
     assert ledger.closed == [("seat-1", master_critical.REPLACED.format(text=still))]
     assert [(alert["id"], alert["state"], alert["text"]) for alert in ledger.held] == [
         ("seat-1", "done", master_critical.CRITICAL.format(slug="sw", minutes=30)),
@@ -444,6 +449,31 @@ def test_a_repeated_failure_reason_keeps_its_seat_alert_and_a_new_reason_replace
     still = master_critical.SEAT_STILL.format(slug="sw", reason="no room")
     assert lines[-2:] == ["closed the seat alert seat-2 of swarm sw", RAISED]
     assert [(alert["id"], alert["state"], alert["text"]) for alert in ledger.held][-1] == ("seat-3", "open", still)
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_a_refused_raise_after_a_replaced_seat_alert_names_the_close_and_the_next_pass_raises_it(
+    store: RedisStore,  # noqa: F811
+    alerts: Alerts,
+) -> None:
+    ledger = Ledger()
+    at = critical(store, Forced(), ledger)
+    master_critical.ended(store, "sw", at, 1, "boom", at + MINUTE)
+    ledger.refuses_raise = True
+
+    assert watch(store, at + 2 * MINUTE, Forced(), ledger=ledger) == [
+        "closed the seat alert seat-1 of swarm sw",
+        "the ledger did not take the seat alert of swarm sw: OSError: the ledger is unreachable",
+    ]
+
+    ledger.refuses_raise = False
+    assert watch(store, at + 3 * MINUTE, Forced(), ledger=ledger) == [RAISED]
+    assert ledger.held[-1] == {
+        "id": "seat-2",
+        "source": "seat",
+        "state": "open",
+        "text": master_critical.SEAT_STILL.format(slug="sw", reason="boom"),
+    }
 
 
 @pytest.mark.feature("swarm-master-critical")

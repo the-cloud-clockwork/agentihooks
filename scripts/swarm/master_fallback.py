@@ -16,6 +16,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from redis.exceptions import RedisError
+
 from scripts.swarm import master_critical
 
 MINUTES = "AGENTIHOOKS_MASTER_FALLBACK_MINUTES"
@@ -86,8 +88,6 @@ def forced(slug: str, at: int, environ: Mapping[str, str]) -> None:
     """Run master up --replace for a critical swarm, bounded by a timeout, and record its exit status and last
     output against the forced start made at `at`; a record that Redis or the record lock refuses is printed instead,
     and the pass fails that start at its next retry."""
-    from redis.exceptions import RedisError
-
     from scripts.swarm.store import connect  # pyright: ignore[reportUnknownVariableType]
 
     try:

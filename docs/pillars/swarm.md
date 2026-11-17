@@ -628,8 +628,9 @@ live master on `master@<id>` that is working, or still starting with its own hoo
   ten forced starts. `swarm status` shows a `master critical` finding and `status --json` carries the record as
   `master_critical`; the ledger page's swarm health panel lists the finding from the status each tick pass publishes.
 - A critical broadcast reaches every session on the master hive, and the ledger's front door `seat` alert is raised on
-  entry. The ledger keeps one open alert per source, so a failed start closes an open seat alert that says something
-  else and raises one naming the failure reason; a repeat of the same reason leaves that alert open as it is.
+  entry. The ledger keeps one open alert per source, so from the pass after a failed start an open seat alert that
+  says something else is closed and one naming the failure reason raised; a repeat of the same reason leaves that
+  alert open as it is.
 - The pass forces `agentihooks swarm <id> master up --replace` in a detached runner, through the pass's own
   interpreter (`python -m scripts.install`) with `~/.local/bin` and the interpreter's folder ahead of the systemd
   PATH. That command line start path never consults the controller's master placement refusal. It forces one start

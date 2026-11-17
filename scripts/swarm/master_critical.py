@@ -227,18 +227,18 @@ def _critical(store: Any, slug: str, state: dict[str, Any], now_ms: int, force: 
     attempts: list[dict[str, Any]] = state.setdefault("attempts", [])
     last = attempts[-1] if attempts else None
     if (last and now_ms - last["at"] < RETRY_MS) or _starting(store, slug, now_ms):
-        return Change(lines, seat)
-    if last:
-        if last["outcome"] != FAILED:
-            lines.append(_failed(slug, state, last, NO_BIND if last["outcome"] == STARTED else NO_OUTCOME, now_ms))
-        seat = SEAT_STILL.format(slug=slug, reason=last["reason"])
+        return Change(lines, _still(slug, last) or seat)
+    if last and last["outcome"] != FAILED:
+        lines.append(_failed(slug, state, last, NO_BIND if last["outcome"] == STARTED else NO_OUTCOME, now_ms))
     state["attempts"] = [*attempts, {"at": now_ms, "outcome": "", "reason": ""}][-KEPT:]
     _save(store, slug, state)
     lines.append(_start_runner(slug, state, now_ms, force))
-    newest = state["attempts"][-1]
-    if newest["outcome"] == FAILED:
-        seat = SEAT_STILL.format(slug=slug, reason=newest["reason"])
-    return Change(lines, seat)
+    return Change(lines, _still(slug, state["attempts"][-1]) or _still(slug, last) or seat)
+
+
+def _still(slug: str, attempt: dict[str, Any] | None) -> str:
+    """The seat alert text naming a failed forced start's reason, empty for no attempt or one that did not fail."""
+    return SEAT_STILL.format(slug=slug, reason=attempt["reason"]) if attempt and attempt["outcome"] == FAILED else ""
 
 
 def _start_runner(slug: str, state: dict[str, Any], now_ms: int, force: Callable[[str, int], int]) -> str:
@@ -259,16 +259,18 @@ def _seat(ledger: Any, slug: str, change: Change) -> list[str]:
 def _seat_alert(ledger: Any, slug: str, text: str) -> list[str]:
     """Put text on the ledger's open front door seat alert. The ledger keeps one open alert per source and ignores a
     raise while one is open, so an open seat alert with other text is closed first and a new one raised in its place,
-    and one that already carries text stays as it is; a ledger that cannot take it is named in the pass output."""
+    and one that already carries text stays as it is; a ledger that cannot take it is named in the pass output,
+    after any alert it closed."""
+    closed: list[str] = []
     try:
         opened = _open_seat_alerts(ledger, slug)
         if any(alert.get("text") == text for alert in opened):
             return []
-        lines = _close(ledger, slug, opened, REPLACED.format(text=text))
+        closed = _close(ledger, slug, opened, REPLACED.format(text=text))
         ledger.raise_alert(slug, SEAT, text)
     except (SwarmError, OSError) as error:
-        return [f"the ledger did not take the seat alert of swarm {slug}: {type(error).__name__}: {error}"]
-    return [*lines, f"raised the seat alert of swarm {slug}"]
+        return [*closed, f"the ledger did not take the seat alert of swarm {slug}: {type(error).__name__}: {error}"]
+    return [*closed, f"raised the seat alert of swarm {slug}"]
 
 
 def _close_seat_alerts(ledger: Any, slug: str, outcome: str) -> list[str]:
