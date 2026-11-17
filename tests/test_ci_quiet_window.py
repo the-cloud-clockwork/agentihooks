@@ -112,3 +112,12 @@ def test_quiet_window_reads_nothing_once_the_pull_request_changed_a_window_ago(t
 
 def test_quiet_window_holds_only_the_rest_of_the_window_since_the_pull_request_changed(tmp_path: Path) -> None:
     assert _run_quiet_window(tmp_path, "60", ["a" * 40, "b" * 40], fake_sleep=False, updated_at=_stamp(57)) == (0, 1)
+
+
+def test_quiet_window_holds_at_most_the_window_for_a_change_stamped_ahead_of_the_runner_clock(tmp_path: Path) -> None:
+    assert _run_quiet_window(tmp_path, "2", ["a" * 40], fake_sleep=False, updated_at=_stamp(-60)) == (0, 1)
+
+
+@pytest.mark.parametrize("updated_at", ["", "soon", "2026-13-45T25:61:61Z"])
+def test_quiet_window_refuses_an_unreadable_change_time(tmp_path: Path, updated_at: str) -> None:
+    assert _run_quiet_window(tmp_path, "30", ["a" * 40], fake_sleep=True, updated_at=updated_at) == (1, 0)

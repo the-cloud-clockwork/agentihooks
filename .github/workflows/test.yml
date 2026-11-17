@@ -829,8 +829,15 @@ jobs:
             echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 60, not $QUIET"
             exit 1
           fi
-          echo "Pull request $PULL last changed at $UPDATED_AT; the hold starts at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          deadline=$((SECONDS + QUIET))
+          if [[ -z "$UPDATED_AT" ]] || ! changed="$(date -d "$UPDATED_AT" +%s)"; then
+            echo "::error::Cannot read when pull request $PULL last changed from '$UPDATED_AT'"
+            exit 1
+          fi
+          now="$(date +%s)"
+          age=$((now - changed))
+          [[ "$age" -ge 0 ]] || age=0
+          echo "Pull request $PULL last changed at $UPDATED_AT, $age seconds before the hold"
+          deadline=$((SECONDS + QUIET - age))
           while [[ "$SECONDS" -lt "$deadline" ]]; do
             pause=$((deadline - SECONDS))
             [[ "$pause" -le 5 ]] || pause=5
