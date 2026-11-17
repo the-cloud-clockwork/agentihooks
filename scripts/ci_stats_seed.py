@@ -19,6 +19,7 @@ MERGED = re.compile(r"\(#(\d+)\)$")
 DEPTH = 50
 BUDGET = 300.0
 TIMEOUT = 120
+RETRY_DELAYS = (5, 10, 20)
 
 
 def api(path: str, binary: bool = False, deadline: float = math.inf) -> Any:
@@ -44,6 +45,22 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
     return [int(match.group(1)) for subject in subjects if (match := MERGED.search(subject))]
 
 
+def download(item: dict[str, Any], deadline: float) -> bytes:
+    """Return one stats artifact's zip, downloading it again after each wait in RETRY_DELAYS while a download fails,
+    and raise naming the artifact and the last error once every download failed; a timeout is never retried."""
+    waits = list(RETRY_DELAYS)
+    while True:
+        try:
+            return api(f"actions/artifacts/{item['id']}/zip", binary=True, deadline=deadline)
+        except subprocess.CalledProcessError as error:
+            if not waits:
+                raise RuntimeError(
+                    f"Mutation stats seed: every download of {item['name']} ({item['id']}) failed: "
+                    f"{error.stderr.decode().rstrip()}"
+                ) from error
+            time.sleep(waits.pop(0))
+
+
 def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.inf) -> int:
     try:
         sha = api(f"pulls/{number}", deadline=deadline)["head"]["sha"]
@@ -59,7 +76,7 @@ def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.i
         written, pointers = 0, set[str]()
         try:
             for item in sorted(found, key=lambda item: item["id"]):
-                archive = api(f"actions/artifacts/{item['id']}/zip", binary=True, deadline=deadline)
+                archive = download(item, deadline)
                 with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
                     for name in zipped.namelist():
                         base = Path(name).name
