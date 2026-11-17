@@ -367,13 +367,7 @@ def test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits
         },
     )
     assert module.verify("owner/repo", "head", waits=120) == ""
-    assert calls == [
-        LISTING,
-        CHECKS,
-        "repos/owner/repo/actions/runs/44161874082",
-        "repos/owner/repo/actions/runs/44161884281",
-        jobs,
-    ]
+    assert calls == [LISTING, CHECKS, "repos/owner/repo/actions/runs/44161884281", jobs]
     assert sleeps == []
 
 
@@ -387,7 +381,12 @@ def test_check_runs_of_other_runs_are_read_once_and_never_pass(monkeypatch: pyte
         monkeypatch,
         {
             LISTING: [{"workflow_runs": []}],
-            CHECKS: [{"check_runs": [{"details_url": LINK.format(run["id"], 9)} for run in others]}],
+            CHECKS: [
+                {
+                    "check_runs": [{"details_url": LINK.format(run["id"], 9)} for run in others]
+                    + [{"details_url": "https://github.com/owner/repo/actions/runs/24x/job/9"}]
+                }
+            ],
             **{f"repos/owner/repo/actions/runs/{run['id']}": [run] for run in others},
         },
     )
@@ -395,16 +394,16 @@ def test_check_runs_of_other_runs_are_read_once_and_never_pass(monkeypatch: pyte
     assert calls == [
         LISTING,
         CHECKS,
-        "repos/owner/repo/actions/runs/21",
-        "repos/owner/repo/actions/runs/22",
         "repos/owner/repo/actions/runs/23",
+        "repos/owner/repo/actions/runs/22",
+        "repos/owner/repo/actions/runs/21",
         LISTING,
         CHECKS,
     ]
     assert sleeps == [4]
 
 
-def test_a_tests_run_listed_after_a_run_already_read_is_found(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_tests_run_found_through_check_runs_on_a_later_poll_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     gate = {"details_url": LINK.format(21, 1)}
     jobs = "repos/owner/repo/actions/runs/31/jobs?filter=latest&per_page=1"
     module, calls, sleeps = _answer(
@@ -428,3 +427,43 @@ def test_a_tests_run_listed_after_a_run_already_read_is_found(monkeypatch: pytes
         jobs,
     ]
     assert sleeps == [4]
+
+
+def test_the_check_runs_lookup_follows_the_requested_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    listing = "repos/owner/repo/actions/workflows/test.yml/runs?head_sha=head&event=push&per_page=1"
+    jobs = "repos/owner/repo/actions/runs/31/jobs?filter=latest&per_page=1"
+    module, calls, sleeps = _answer(
+        monkeypatch,
+        {
+            listing: [{"workflow_runs": []}],
+            CHECKS: [{"check_runs": [{"details_url": LINK.format(31, 1)}, {"details_url": LINK.format(32, 2)}]}],
+            "repos/owner/repo/actions/runs/31": [_run(31, ".github/workflows/test.yml", "push")],
+            "repos/owner/repo/actions/runs/32": [_run(32, ".github/workflows/test.yml", "pull_request")],
+            jobs: [{"total_count": 1}],
+        },
+    )
+    assert module.verify("owner/repo", "head", event="push") == ""
+    assert calls == [listing, CHECKS, "repos/owner/repo/actions/runs/32", "repos/owner/repo/actions/runs/31", jobs]
+    assert sleeps == []
+
+
+def test_the_newest_tests_run_named_by_check_runs_is_read_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    cancelled = {
+        **_run(9, ".github/workflows/test.yml", "pull_request"),
+        "status": "completed",
+        "conclusion": "cancelled",
+    }
+    jobs = "repos/owner/repo/actions/runs/31/jobs?filter=latest&per_page=1"
+    module, calls, sleeps = _answer(
+        monkeypatch,
+        {
+            LISTING: [{"workflow_runs": []}],
+            CHECKS: [{"check_runs": [{"details_url": LINK.format(9, 1)}, {"details_url": LINK.format(31, 2)}]}],
+            "repos/owner/repo/actions/runs/9": [cancelled],
+            "repos/owner/repo/actions/runs/31": [_run(31, ".github/workflows/test.yml", "pull_request")],
+            jobs: [{"total_count": 1}],
+        },
+    )
+    assert module.verify("owner/repo", "head") == ""
+    assert calls == [LISTING, CHECKS, "repos/owner/repo/actions/runs/31", jobs]
+    assert sleeps == []

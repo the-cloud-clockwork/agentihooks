@@ -15,17 +15,17 @@ def _api(endpoint: str) -> dict[str, Any]:
     )
 
 
-def _checked_runs(repository: str, head: str, event: str, others: set[str]) -> list[dict[str, Any]]:
-    """Return the head's Tests run named by its check runs, reading each run id in ``others`` no more than once."""
+def _checked_runs(repository: str, head: str, event: str, rejected: set[str]) -> list[dict[str, Any]]:
+    """Return the head's newest Tests run named by its check runs, adding each other run read to ``rejected``."""
     checks = _api(f"repos/{repository}/commits/{head}/check-runs?per_page=100")["check_runs"]
     links = (RUN_LINK.search(check["details_url"]) for check in checks if check["details_url"])
-    for run_id in dict.fromkeys(link.group(1) for link in links if link):
-        if run_id in others:
+    for run_id in sorted({link.group(1) for link in links if link}, key=int, reverse=True):
+        if run_id in rejected:
             continue
         run = _api(f"repos/{repository}/actions/runs/{run_id}")
         if run["path"] == WORKFLOW and run["event"] == event and run["head_sha"] == head:
             return [run]
-        others.add(run_id)
+        rejected.add(run_id)
     return []
 
 
@@ -42,12 +42,12 @@ def verify(
     The run comes from the run listing, or from the head's check runs while the listing omits it.
     """
     problem = "Tests run is missing for this head."
-    others: set[str] = set()
+    rejected: set[str] = set()
     for poll in range(max(attempts, waits)):
         runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
             "workflow_runs"
         ]
-        matching = [run for run in runs if run["head_sha"] == head] or _checked_runs(repository, head, event, others)
+        matching = [run for run in runs if run["head_sha"] == head] or _checked_runs(repository, head, event, rejected)
         if matching:
             run = matching[0]
             completed = run["status"] == "completed"
