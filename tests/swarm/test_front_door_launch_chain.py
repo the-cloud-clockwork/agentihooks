@@ -130,6 +130,21 @@ def test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_contro
 
 
 @pytest.mark.feature("front-door-launch-chain")
+def test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_next_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executed: list[Exec]
+) -> None:
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 1.0 if account == "oneatexample_com" else 90.0)
+    placed = _front_door(tmp_path)
+    ((_, argv, environ),) = executed
+    assert environ["CLAUDE_CONFIG_DIR"] == str(login.home(2))
+    assert not [name for name in environ if name == "CLAUDE_CODE_OAUTH_TOKEN" or name.startswith("AH_CC_TOKEN_")]
+    at = argv.index("--remote-control")
+    assert argv[at : at + 4] == RC
+    assert (placed.route_kind, placed.account) == ("interactive", "twoatexample_com")
+    assert placed.remote_control == {"state": "on", "detail": TITLE}
+
+
+@pytest.mark.feature("front-door-launch-chain")
 def test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executed: list[Exec]
 ) -> None:

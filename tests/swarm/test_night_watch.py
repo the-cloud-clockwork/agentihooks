@@ -59,7 +59,7 @@ def enforce(store):
     store.update(SLUG, gates={"nightwatch": "enforce"})
 
 
-def observe(store):
+def observe(store: RedisStore) -> None:
     store.update(SLUG, gates={"nightwatch": "observe"})
 
 
@@ -98,12 +98,12 @@ def kinds(store):
 
 
 @pytest.mark.feature("night-watch-respawns-by-default")
-def test_the_night_watch_gate_defaults_to_deny():
+def test_the_night_watch_gate_defaults_to_deny() -> None:
     assert catalog.defaults()["nightwatch"] == "enforce"
 
 
 @pytest.mark.feature("night-watch-respawns-by-default")
-def test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes(store):
+def test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes(store: RedisStore) -> None:
     assert "nightwatch" not in store.config(SLUG).gates
     rig = Rig()
     until(store, rig, NOW, NOW + 10 * MINUTE)

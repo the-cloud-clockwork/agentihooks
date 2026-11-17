@@ -93,6 +93,11 @@ class FakeLedger(LedgerItems):
         assert slug == "sw"
         self.notes.append(text)
 
+    def raise_alert(self, slug: str, source: str, text: str) -> None:
+        """Record each ledger alert the night watch raises, as its source and text."""
+        assert slug == "sw"
+        self.alerts = [*getattr(self, "alerts", []), (source, text)]
+
     def mark_swarm(self, slug):
         self.swarm_sized.append(slug)
 

@@ -225,7 +225,6 @@ def test_a_forced_launch_with_no_hook_promotes_after_the_startup_deadline(store)
 
 def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store):  # noqa: F811
     runtime, ledger = outage(store, startup=False)
-    store.update("sw", gates={"nightwatch": "observe"})
     runtime.broken, runtime.registered = False, set()
     spawn, budget = runtime.spawn, {"state": "pending", "report": "/r.json", "deadline_ms": 660_000}
 
