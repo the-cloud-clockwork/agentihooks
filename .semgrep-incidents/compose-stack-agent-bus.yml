@@ -1,0 +1,15 @@
+rules:
+  - id: compose-stack-agent-bus
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      The Compose swarm stack reads a bus setting from the shell that runs compose. Every agent shell on a hive exports
+      AGENTIHOOKS_BUS and AGENTIHOOKS_BUS_URL for the Anton bus, and compose never passes their credential into the
+      stack, so on 17 November the stack controller crash looped on Authorization Violation against the Anton bus.
+      Interpolate the stack-scoped SWARM_BUS and SWARM_BUS_URL settings instead.
+    paths:
+      include:
+        - /compose.yaml
+        - /scripts/swarm/stack/**/*.yaml
+        - '**/compose-stack-agent-bus.test.yaml'
+    pattern-regex: '\$\{AGENTIHOOKS_BUS\w*'

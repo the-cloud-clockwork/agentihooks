@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ def test_the_controller_and_hive_keep_scheduler_state_in_the_nats_bucket():
     for name in ("controller", "hive"):
         environment = SERVICES[name]["environment"]
         assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}"
-        assert environment["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+        assert environment["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
         assert SERVICES[name]["depends_on"]["nats"]["condition"] == "service_healthy"
     assert "--jetstream" in SERVICES["nats"]["command"]
 
@@ -124,13 +125,48 @@ def test_nats_service_runs_the_pinned_server_with_jetstream_on_a_volume():
 
 def test_swarm_services_reach_nats_through_the_bus_setting():
     shared = COMPOSE["x-swarm-env"]
-    assert shared["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}"
-    assert shared["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+    assert shared["AGENTIHOOKS_BUS"] == "${SWARM_BUS:-nats}"
+    assert shared["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
     for name in ("swarm", "controller", "hive"):
         service = SERVICES[name]
-        assert service["environment"]["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}", name
-        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}", name
+        assert service["environment"]["AGENTIHOOKS_BUS"] == "${SWARM_BUS:-nats}", name
+        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}", name
         assert service["depends_on"]["nats"]["condition"] == "service_healthy", name
+
+
+@pytest.mark.feature("compose-stack-own-bus")
+@pytest.mark.parametrize(
+    "compose_file",
+    sorted(
+        str(path.relative_to(ROOT))
+        for path in [ROOT / "compose.yaml", *(ROOT / "scripts/swarm/stack").rglob("*.yaml")]
+        if path.is_file()
+    ),
+)
+def test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose(compose_file: str) -> None:
+    text = (ROOT / compose_file).read_text()
+    assert "${AGENTIHOOKS_BUS" not in text, compose_file
+
+
+@pytest.mark.feature("compose-stack-own-bus")
+def test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats() -> None:
+    shell = {
+        "AGENTIHOOKS_BUS": "nats",
+        "AGENTIHOOKS_BUS_URL": "tls://swarm-internal.homeofanton.com:4222",
+        "AGENTIHOOKS_BUS_CREDENTIALS": "/home/agent/.agentihooks/hive/bus.creds",
+    }
+    environment = SERVICES["controller"]["environment"]
+    resolved = {key: _interpolate(str(environment[key]), shell) for key in ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL")}
+    assert resolved == {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats:4222"}
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in environment
+
+
+def _interpolate(value: str, shell: dict[str, str]) -> str:
+    """Resolve a Compose ${NAME:-default} value the way Compose does against the calling shell."""
+    match = re.fullmatch(r"\$\{(\w+):-([^}]*)\}", value)
+    if not match:
+        return value
+    return shell.get(match.group(1)) or match.group(2)
 
 
 def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
