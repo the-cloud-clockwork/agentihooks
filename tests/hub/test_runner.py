@@ -1,6 +1,7 @@
 import hashlib
 import signal
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -406,6 +407,26 @@ def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
     monkeypatch.setattr(runner, "Interval", lambda *args, **kwargs: pytest.fail("a single pass started a keeper"))
     monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {"page": ["handled"]})
     assert runner.main(["run", "--once"]) == 0
+
+
+@pytest.mark.feature("hub-serving-readiness")
+@pytest.mark.parametrize("stale", [True, False])
+def test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe(
+    monkeypatch: pytest.MonkeyPatch, hive: Any, tmp_path: Path, stale: bool
+) -> None:
+    mark = tmp_path / "hub.serving"
+    if stale:
+        mark.touch()
+    seen = []
+    monkeypatch.setenv("AGENTIHOOKS_HUB_SERVING_FILE", str(mark))
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner.slots, "serve", lambda bus, admitter: seen.append(("slots", mark.exists())))
+    monkeypatch.setattr(runner.exits, "serve", lambda bus: seen.append(("exits", mark.exists())))
+    monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {"page": ["handled"]})
+    assert runner.main(["run", "--once"]) == 0
+    assert seen == [("slots", False), ("exits", False)]
+    assert mark.is_file()
 
 
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
