@@ -224,6 +224,10 @@ def test_an_explicit_lane_effort_never_calls_the_classifier(monkeypatch):
     ("harness", "lane_model", "expected"),
     [
         ("codex", "opus", "gpt-6-sol"),
+        ("codex", "sonnet", "gpt-6-sol"),
+        ("codex", "haiku", "gpt-6-sol"),
+        ("codex", "fable", "gpt-6-sol"),
+        ("codex", "claude-opus-5-5", "gpt-6-sol"),
         ("claude", "opus", "opus"),
         ("codex", "gpt-6.1-sol", "gpt-6.1-sol"),
     ],
@@ -234,6 +238,16 @@ def test_lane_model_matches_harness_before_explicit_effort_returns(
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
     picked = model_pick.pick(harness, {"model": lane_model, "effort": "xhigh"}, {}, {}, default_model="gpt-6-sol")
     assert picked == ModelPick(expected, "xhigh")
+
+
+@pytest.mark.feature("lane-model-harness-compatibility")
+def test_a_claude_lane_model_without_a_swarm_default_takes_the_codex_launch_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
+    environ = {"AGENTIHOOKS_CODEX_MODEL": "gpt-6-luna"}
+    picked = model_pick.pick("codex", {"model": "opus", "effort": "high"}, {}, environ)
+    assert picked == ModelPick("gpt-6-luna", "high")
 
 
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):
