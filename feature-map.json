@@ -5477,6 +5477,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-slot-reservation",
       "behaviour": "A forced front door master's hive launch order goes out on a token slot the hive caps at zero or whose seats are all held, and its acknowledgement writes the slot's live row so the master counts against the account; an unforced master on that slot is still refused as account reservation is full.",
       "seam": "HiveLaunch.send_order against LaunchSlots.reserve_reading and LaunchSlots.acknowledge",
+      "rules": ["forced-master-slot-reservation-refused"],
       "tests": [
         "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_passes_a_refused_launch_slot_reservation",
         "tests/hive/test_master_fallback_launch.py::test_an_unforced_front_door_master_is_still_refused_at_a_full_launch_slot_reservation"

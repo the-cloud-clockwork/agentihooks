@@ -747,7 +747,7 @@ class HiveLaunch:
             reading = self.slots.reserve_reading(
                 f"{account.harness}:{account.name}", admitted.execution_id, account.cap, TTL_MS
             )
-            if not reading.accepted:
+            if not reading.accepted and not request.task.get("forced"):
                 refused = (
                     f"{ACCOUNT_FULL}: account={account.harness}:{account.name} "
                     f"sessions={reading.sessions} cap={account.cap} "
