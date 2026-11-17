@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.957 · 2026-11-17
+
+### 2026-11-16 · 9239e78e7ed3 · #11637 · @agenticore-app
+
+**Roll the swarm hub out by taking an old pod out first**
+
+When the hub Deployment has two or more replicas, it now rolls out by removing one old pod and starting its replacement before touching the next, instead of surging a third pod first. This matters because raising the hub's memory request (antoncore#1796) closes k8s-worker-1 to hubs, leaving little spare CPU on the remaining nodes; a surge pod could sit Pending for long stretches, stalling rollouts. With a single replica the chart still uses the default surge strategy so the only hub is never taken down. A new chart test enforces this behavior.
+
+### 2026-11-16 · c222feb44320 · #11639 · @nestorcolt
+
+**Give the run wait timer test thirty seconds to reach the snapshot step**
+
+This change raises the timeout in `test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked` from 5 to 30 seconds, matching the bound already used in sibling tick-thread tests. The old 5-second wait was too tight under real-world CPU slowdown, causing the test to flake on CI (observed 7.17s to reach the snapshot step despite a 60s critical-lane deadline). The assertion logic itself is unchanged; this only widens the margin so legitimate slow passes don't fail spuriously.
+
 ## v2.17.955 · 2026-11-16
 
 ### 2026-11-16 · 8c4dbb4e9608 · #11631 · @agenticore-app
