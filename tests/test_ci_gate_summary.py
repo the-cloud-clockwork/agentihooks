@@ -95,6 +95,17 @@ def test_test_summary_never_delays_required_grading():
     assert all("test-summary" not in job.get("needs", []) for job in jobs.values())
 
 
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+def test_the_test_summary_downloads_every_report_in_one_step() -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["test-summary"]["steps"]
+    downloads = [step for step in steps if str(step.get("uses")).startswith("actions/download-artifact@")]
+    assert [step["name"] for step in downloads] == [
+        "Download this run's test reports",
+        "Download this run's test reports, attempt 2",
+    ]
+    assert [step["with"] for step in downloads] == [{"pattern": "{durations,flakes}-3.*", "path": "test-reports"}] * 2
+
+
 def test_selected_tests_publish_the_existing_duration_and_flake_formats():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     steps = workflow["jobs"]["unit-selected"]["steps"]
