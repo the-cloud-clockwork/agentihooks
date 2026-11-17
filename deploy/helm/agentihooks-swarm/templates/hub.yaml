@@ -83,10 +83,10 @@ spec:
             - name: AGENTIHOOKS_BUS_URL
               value: {{ . | quote }}
             {{- end }}
-            - name: AGENTIHOOKS_HUB_SERVING_FILE
-              value: {{ $hub.servingFile | quote }}
             {{- include "swarm.extraEnv" $hub.env | nindent 12 }}
             {{- include "swarm.secretKeyEnv" $hub.secretEnv | nindent 12 }}
+            - name: AGENTIHOOKS_HUB_SERVING_FILE
+              value: {{ $hub.servingFile | quote }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           readinessProbe:
             exec:
