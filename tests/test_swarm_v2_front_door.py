@@ -1,9 +1,13 @@
 import json
+from dataclasses import replace
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.gates import log
+from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_v2 import front_door
@@ -52,6 +56,57 @@ def test_the_front_door_is_the_bare_master_seat():
         False,
         False,
     ]
+
+
+DOOR = AgentRecord(
+    "master@a1b2c3-0001",
+    "master",
+    "master",
+    harness="claude",
+    account="home",
+    seat="master@sw",
+    route_kind="master-login",
+)
+
+
+@pytest.mark.feature("balance-master-route")
+@pytest.mark.parametrize(
+    ("change", "route"),
+    [
+        ({}, "claude ai login"),
+        ({"route_kind": "interactive"}, "claude ai login"),
+        ({"route_kind": "subscription"}, "token fallback"),
+        ({"route_kind": "api"}, ""),
+        ({"seat": ""}, "claude ai login"),
+        ({"seat": "master-2@sw"}, ""),
+        ({"lane": "eng"}, ""),
+        ({"state": "finished"}, ""),
+        ({"harness": "codex"}, ""),
+    ],
+)
+def test_the_master_route_names_only_a_working_claude_front_door_masters_route(
+    change: dict[str, str], route: str
+) -> None:
+    assert front_door.master_route("sw", replace(DOOR, **change)) == route
+
+
+@pytest.mark.feature("balance-master-route")
+def test_the_master_routes_name_every_swarms_front_door_route_by_its_account() -> None:
+    agents = {
+        "sw": [
+            DOOR,
+            replace(DOOR, name="engineer@a1b2c3-0002", lane="eng", task="t1", seat="eng-1@sw", account="alpha"),
+        ],
+        "other": [
+            replace(DOOR, name="master@d4e5f6-0001", seat="master@other", account="beta", route_kind="subscription")
+        ],
+    }
+    store = SimpleNamespace(slugs=lambda: list(agents), agents=lambda slug: agents[slug])
+
+    assert front_door.master_routes(cast(front_door.Swarms, store)) == {
+        "home": "claude ai login",
+        "beta": "token fallback",
+    }
 
 
 def test_the_refusal_names_the_inbox_route_to_the_front_door():
