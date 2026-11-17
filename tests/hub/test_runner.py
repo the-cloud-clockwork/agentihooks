@@ -1,6 +1,7 @@
 import hashlib
 import signal
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -409,8 +410,11 @@ def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
 
 
 @pytest.mark.feature("hub-serving-readiness")
-def test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe(monkeypatch, hive, tmp_path):
+def test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe(
+    monkeypatch: pytest.MonkeyPatch, hive: Any, tmp_path: Path
+) -> None:
     mark = tmp_path / "hub.serving"
+    mark.touch()
     seen = []
     monkeypatch.setenv("AGENTIHOOKS_HUB_SERVING_FILE", str(mark))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")

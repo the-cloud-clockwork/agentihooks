@@ -221,6 +221,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("action", choices=("run",))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    serving = os.environ.get(SERVING_ENV)
+    if serving:
+        Path(serving).unlink(missing_ok=True)
     if cast(Any, ledger_link).remote() and not storage.shared():
         print(
             f"hub: a hosted hub writes task claims in process over the shared database and needs {postgres.URL}",
@@ -238,7 +241,6 @@ def main(argv: list[str]) -> int:
     source = None if config.backend == "memory" else readiness.Source()
     slots.serve(bus, admitter=Admission(source=source))
     exits.serve(bus)
-    serving = os.environ.get(SERVING_ENV)
     if serving:
         Path(serving).touch()
     hub = HubRunner(bus, registry.configured(bus, source=source), holder)
