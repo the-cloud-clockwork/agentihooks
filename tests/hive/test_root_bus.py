@@ -640,3 +640,66 @@ def test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint(
         "hive kept the stored root bus credential (the hub record lists no member swarms for hive member root; "
         "it mints no unscoped bus credential)\n"
     )
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_keeps_a_root_credential_whose_grant_matches_a_fresh_mint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    root_bus.write(home, signer, "root")
+    creds = home / "root-bus" / "bus.creds"
+    stored = creds.read_text()
+    monkeypatch.delenv("AGENTIHOOKS_BUS_SWARMS", raising=False)
+    monkeypatch.setattr(cli, "_signer", lambda: signer)
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", None, "telemetry"]
+    assert creds.read_text() == stored
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_reads_no_signer_without_a_stored_root_credential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    read: list[str] = []
+    monkeypatch.delenv("AGENTIHOOKS_BUS_SWARMS", raising=False)
+    monkeypatch.setattr(cli, "_signer", lambda: read.append("signer"))
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert read == []
+    assert served == ["env", None, "telemetry"]
+    assert not (home / "root-bus").exists()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_keeps_the_stored_root_credential_when_no_signer_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    root_bus.write(home, signer, "root")
+    creds = _stored(home, signer, _without_stop_grants(signer))
+    stored = creds.read_text()
+    monkeypatch.delenv("AGENTIHOOKS_BUS_SWARMS", raising=False)
+    monkeypatch.delenv(nats_grant.SIGNER_ENV, raising=False)
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", None, "telemetry"]
+    assert creds.read_text() == stored
+    assert capsys.readouterr().err == (
+        "hive kept the stored root bus credential (AGENTIHOOKS_NATS_SIGNER names no hub NATS signer)\n"
+    )
