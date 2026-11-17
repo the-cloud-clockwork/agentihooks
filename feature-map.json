@@ -6469,6 +6469,16 @@
       ]
     },
     {
+      "id": "promotion-red-graded-job-fails-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
+      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
+      "seam": "snapshotGradeComplete in .github/scripts/promote.cjs, driven by the promotion API contract harness tests/contracts/promotion/promote.cjs",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+      ]
+    },
+    {
       "id": "ledger-write-substep-timing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
@@ -6700,6 +6710,16 @@
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_uses_the_shared_database_only_when_asked",
         "tests/swarm_ledger/test_scratch_store.py::test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder"
+      ]
+    },
+    {
+      "id": "folder-ledger-server-follows-other-writers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-load-streams-lost-patch",
+      "behaviour": "A read only ledger server on a ledger folder runs the stored ledger follow loop, so a write another process stores there, the ledger API service or an agent running the route code in process, reaches every open page stream within one follow pass instead of waiting for the server's next read of that ledger.",
+      "seam": "scripts.swarm_ledger.ledger_server.serve and follow_shared over scripts.swarm_ledger.events.publishing.Publishing",
+      "tests": [
+        "tests/swarm_ledger/test_folder_store.py::test_the_folder_ledger_server_publishes_a_write_another_process_stored_without_a_read"
       ]
     },
     {
