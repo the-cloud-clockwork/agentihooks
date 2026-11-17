@@ -8,6 +8,8 @@ from chart_workers import merged
 CA_DIR = "/run/secrets/terminal-ca"
 CA_ENV = "AGENTIHOOKS_TERMINAL_CA_KEY"
 CA_VOLUME = "terminal-ca"
+DATABASE_URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
+DATABASE_READERS = {"controller", "hub", "worker", "worker-hive"}
 
 
 def pods(node: object) -> Iterator[dict]:
@@ -63,6 +65,10 @@ def is_ledger(document: dict, container: dict) -> bool:
     )
 
 
+def reads_database(document: dict, container: dict) -> bool:
+    return document["kind"] == "Deployment" and container["name"] in DATABASE_READERS
+
+
 OWNERS = {"controller": is_controller, "ledger": is_ledger}
 
 
@@ -70,10 +76,13 @@ def entry_problems(documents: list, entry: dict, others: set[str], role: str) ->
     secret, held, problems = entry["secretName"], [], []
     for document, pod, container in containers(documents):
         found = references(pod, container, secret)
+        owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
         if found and OWNERS[role](document, container):
             held += [item for item in found if item.get("name") not in others]
+        elif found and role == "ledger" and entry["name"] == DATABASE_URL and reads_database(document, container):
+            if found != [expected_reference(entry)]:
+                problems.append(f"{owner} references {secret} as {found}, expected {[expected_reference(entry)]}")
         elif found:
-            owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
             problems.append(f"{owner} references the {role} only Secret {secret}")
     if held != [expected_reference(entry)]:
         problems.append(f"the {role} container references {secret} as {held}, expected {[expected_reference(entry)]}")

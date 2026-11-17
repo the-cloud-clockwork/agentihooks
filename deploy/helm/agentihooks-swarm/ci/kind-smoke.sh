@@ -180,11 +180,12 @@ helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
 planted="$(helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
   --set 'secretEnv[0].name=AGENTIHOOKS_SWARM_DATABASE_URL' --set 'secretEnv[0].secretName=swarm-ledger-database' \
   --set 'secretEnv[0].key=url' | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" "$ledger_values" 2>&1 >/dev/null || true)"
-if [[ $planted != *"container controller references the ledger only Secret swarm-ledger-database"* ]]; then
-  printf 'the chart check did not flag a planted shared reference to the ledger only Secret: %s\n' "$planted" >&2
+if [[ $planted != *"Deployment $release-controller container wait references the ledger only Secret swarm-ledger-database"* \
+  || $planted != *"Deployment $release-controller container controller references swarm-ledger-database as"* ]]; then
+  printf 'the chart check did not flag a planted shared reference to the ledger database Secret: %s\n' "$planted" >&2
   exit 1
 fi
-printf 'only the ledger container reads the ledger secret env\n'
+printf 'only the ledger container and the database readers read the ledger secret env\n'
 printf 'the TLS ledger rolls when its TLS secret renews and a plain ledger watches no secret\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
