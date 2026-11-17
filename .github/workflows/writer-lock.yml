@@ -114,10 +114,11 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           FEATURE_INPUTS: >-
             scripts/swarm_ledger/*.py scripts/swarm/store.py scripts/swarm/lease.py scripts/swarm/ledger_*.py
-            scripts/tick/* scripts/swarm/tick*.py scripts/swarm/scheduled_tick.py scripts/scheduler/*
+            scripts/tick/* scripts/swarm/tick*.py scripts/swarm/scheduled_tick.py scripts/swarm/controller.py scripts/scheduler/*
             scripts/swarm/cli.py scripts/swarm/idle.py scripts/swarm/launch_check.py scripts/swarm/promotion_watch.py
             scripts/events/redis_state.py scripts/hive/headroom.py scripts/init_agent.py scripts/profiles/binding.py
-            tests/features/* tests/swarm/test_tick.py .github/workflows/feature-suite.yml .github/workflows/writer-lock.yml
+            scripts/install.py scripts/handoff/* tests/features/* tests/swarm/test_tick.py
+            .github/workflows/feature-suite.yml .github/workflows/writer-lock.yml
         run: |
           base=$(git merge-base "$PR_BASE" "$PR_HEAD")
           git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/features-changed"

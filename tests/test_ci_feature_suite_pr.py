@@ -9,18 +9,12 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
-CUTOVER = (
-    "scripts/hive/auth.py",
-    "scripts/hub/runner.py",
-    "scripts/packaging/compose-hive-smoke.sh",
-    "scripts/packaging/stability-smoke.sh",
+CUTOVER_MODULES = (
     "scripts/swarm/cli.py",
     "scripts/swarm/lease.py",
     "scripts/swarm/ledger_client.py",
     "scripts/swarm/ledger_cutover.py",
     "scripts/swarm/ledger_read.py",
-    "scripts/swarm/stack/compose.yaml",
-    "scripts/swarm/stack_init.py",
     "scripts/swarm/store.py",
     "scripts/swarm_ledger/adapters/swarm.py",
 )
@@ -69,7 +63,7 @@ def module_file(dotted: str) -> str | None:
 
 
 def imported_files() -> set[str]:
-    """Return the repository file of every module that the feature suite imports."""
+    """Return the file of each module a feature suite file imports by absolute name, without following its imports."""
     found: set[str] = set()
     for path in (ROOT / "tests/features").rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
@@ -101,6 +95,9 @@ def imported_files() -> set[str]:
         ("scripts/tick/engine.py", "true"),
         ("scripts/tick/steps/agents.py", "true"),
         ("scripts/scheduler/core.py", "true"),
+        ("scripts/swarm/controller.py", "true"),
+        ("scripts/install.py", "true"),
+        ("scripts/handoff/envelope.py", "true"),
         ("tests/features/test_tick_pass.py", "true"),
         (".github/workflows/feature-suite.yml", "true"),
         (".github/workflows/writer-lock.yml", "true"),
@@ -117,12 +114,14 @@ def test_feature_suite_selection(path: str, expected: str, tmp_path: Path) -> No
 
 
 @pytest.mark.feature("feature-suite-pull-request-tier")
-def test_the_ledger_write_cutover_selects_the_feature_suite(tmp_path: Path) -> None:
-    assert selected(list(CUTOVER), tmp_path) == "due=true\n"
+def test_each_ledger_and_swarm_module_the_ledger_write_cutover_changed_selects_the_feature_suite(
+    tmp_path: Path,
+) -> None:
+    assert [module for module in CUTOVER_MODULES if selected([module], tmp_path) != "due=true\n"] == []
 
 
 @pytest.mark.feature("feature-suite-pull-request-tier")
-def test_every_module_the_feature_suite_imports_selects_it(tmp_path: Path) -> None:
+def test_every_module_the_feature_suite_imports_directly_selects_it(tmp_path: Path) -> None:
     files = imported_files()
     assert {
         "scripts/swarm/store.py",
