@@ -14,6 +14,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
+UPLOADER = {"workflow_run_backend_id": "run-1", "workflow_job_run_backend_id": "job-9"}
 
 
 def _arrivals() -> ModuleType:
@@ -282,12 +283,12 @@ def results() -> Iterator[tuple[str, list[tuple[str, str, dict[str, object]]]]]:
             if method == "ListArtifacts":
                 answer: dict[str, object] = {
                     "artifacts": [
-                        {"name": "coverage-3.12-1", "database_id": "41"},
-                        {"name": "flakes-3.12-1", "database_id": "40"},
-                        {"name": "flakes-3.12-1", "database_id": "44"},
+                        {"name": "coverage-3.12-1", "database_id": "41", **UPLOADER},
+                        {"name": "flakes-3.12-1", "database_id": "40", **UPLOADER},
+                        {"name": "flakes-3.12-1", "database_id": "44", **UPLOADER},
                     ]
                 }
-            elif body["name"] == "coverage-3.12-1":
+            elif body == {**UPLOADER, "name": "coverage-3.12-1"}:
                 answer = {"signed_url": f"http://{self.headers['Host']}/blob"}
             else:
                 self.send_response(404)
@@ -334,19 +335,27 @@ def test_the_results_service_lists_each_name_once_at_its_newest_id(
 def test_a_fetched_artifact_is_unpacked_into_its_own_folder(
     results: tuple[str, list[tuple[str, str, dict[str, object]]]], tmp_path: Path
 ) -> None:
-    base, calls = results
+    base, _ = results
     out = tmp_path / "artifacts"
     out.mkdir()
     folder = out / "coverage-3.12-1"
-    assert arrivals.Results(base, _token("run-1", "job-2")).fetch("coverage-3.12-1", folder) is True
+    service = arrivals.Results(base, _token("run-1", "job-2"))
+    assert service.listed() is not None
+    assert service.fetch("coverage-3.12-1", folder) is True
     assert (folder / ".coverage").read_text() == "database"
     assert (folder / "reused-coverage/.coverage").read_text() == "reused"
-    assert calls[0][2] == {
-        "workflow_run_backend_id": "run-1",
-        "workflow_job_run_backend_id": "job-2",
-        "name": "coverage-3.12-1",
-    }
     assert sorted(path.name for path in out.iterdir()) == ["coverage-3.12-1"]
+
+
+def test_a_download_is_signed_for_the_job_that_uploaded_the_artifact(
+    results: tuple[str, list[tuple[str, str, dict[str, object]]]], tmp_path: Path
+) -> None:
+    base, calls = results
+    service = arrivals.Results(base, _token("run-1", "job-2"))
+    service.listed()
+    service.fetch("coverage-3.12-1", tmp_path / "coverage-3.12-1")
+    assert calls[1][0] == "/twirp/github.actions.results.api.v1.ArtifactService/GetSignedArtifactURL"
+    assert calls[1][2] == {**UPLOADER, "name": "coverage-3.12-1"}
 
 
 def test_an_artifact_the_service_does_not_sign_is_not_fetched(
