@@ -229,7 +229,8 @@ def _signed(command: list[str], options: dict[str, Any]) -> tuple[list[str], dic
         return command, options
     from scripts import github_app_cli
 
-    found = github_app_cli.signed(command, options.get("env") or os.environ)
+    base = options.get("env")
+    found = github_app_cli.signed(command, os.environ if base is None else base)
     if found is None:
         return command, options
     return found[0], {**options, "env": found[1]}

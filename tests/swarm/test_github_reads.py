@@ -651,8 +651,14 @@ def test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged(
     calls: list[tuple[list[str], dict[str, Any]]] = []
     github_reads.rest("tick", ["api", "repos/o/r/pulls/1"], _recorder(calls), text=True)
     github_reads.rest("tick", ["api", "rate_limit"], _recorder(calls))
-    assert calls == [(["gh", "api", "repos/o/r/pulls/1"], {"text": True}), (["gh", "api", "rate_limit"], {})]
+    github_reads.rest("tick", ["api", "rate_limit"], _recorder(calls), env={})
+    assert calls == [
+        (["gh", "api", "repos/o/r/pulls/1"], {"text": True}),
+        (["gh", "api", "rate_limit"], {}),
+        (["gh", "api", "rate_limit"], {"env": {}}),
+    ]
     assert [call.args for call in signed.call_args_list] == [
         (["gh", "api", "repos/o/r/pulls/1"], os.environ),
         (["gh", "api", "rate_limit"], os.environ),
+        (["gh", "api", "rate_limit"], {}),
     ]
