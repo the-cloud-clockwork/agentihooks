@@ -1,8 +1,12 @@
 import json
+import shlex
 import subprocess
+from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
+import yaml
 
 
 def _verify(monkeypatch, runs, jobs):
@@ -269,3 +273,31 @@ def test_command_passes_the_started_run_wait(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(ci_tests_start, "verify", verify)
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head", "--waits", "120"]) == 0
     assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 120})]
+
+
+@pytest.mark.feature("gate-protected-waits-out-a-held-tests-run")
+def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gate Protected run 44083781252 began polling 21 s into its job; Tests run 44083790532 listed jobs 328 s in."""
+    from scripts import ci_tests_start
+
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/gate-protected.yml"
+    grade = yaml.safe_load(workflow.read_text())["jobs"]["grade"]
+    line = next(
+        line for step in grade["steps"] for line in step.get("run", "").splitlines() if "scripts.ci_tests_start" in line
+    )
+    names = {"$GITHUB_REPOSITORY": "owner/repo", "$HEAD_SHA": "head"}
+    now = 21.0
+
+    def api(endpoint: str) -> dict[str, Any]:
+        if "/jobs?" in endpoint:
+            return {"total_count": int(now >= 328)}
+        return {"workflow_runs": [{"id": 44083790532, "head_sha": "head", "status": "pending", "conclusion": None}]}
+
+    def sleep(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    monkeypatch.setattr(ci_tests_start, "_api", api)
+    monkeypatch.setattr(ci_tests_start.time, "sleep", sleep)
+    assert ci_tests_start.main([names.get(word, word) for word in shlex.split(line)[3:]]) == 0
+    assert now <= grade["timeout-minutes"] * 60
