@@ -694,12 +694,14 @@ def test_native_master_fallback_account_is_recorded_canonically(setup):
 def test_a_native_master_token_fallback_records_its_fallback_placement(setup):
     from dataclasses import replace
     from types import SimpleNamespace
+    from typing import Any, cast
 
     from scripts.hive.orders import Ack, launch_target
 
     order, admitted, task = headless_front_door_order(setup)
     order = replace(order, hive="remote")
-    target = {"host_id": "remote", **launch_target(12, "fixture", {12: SimpleNamespace(start_time=34)})}
+    table = cast(Any, {12: SimpleNamespace(start_time=34)})
+    target = {"host_id": "remote", **launch_target(12, "fixture", table)}
     execution = {
         "account": "token-account",
         "placement": "fallback",

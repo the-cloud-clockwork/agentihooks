@@ -458,7 +458,7 @@ def _master_routes() -> dict[str, str]:
     from scripts.swarm_v2 import front_door
 
     try:
-        return front_door.master_routes(RedisStore(redis_client()))
+        return front_door.master_routes(RedisStore(redis_client()), lambda found: found)
     except (RedisError, OSError):
         return {}
 

@@ -347,7 +347,7 @@ def status_report(
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
-                "route": front_door.master_route(slug, a),
+                "route": front_door.master_route(slug, a, []),
                 "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [

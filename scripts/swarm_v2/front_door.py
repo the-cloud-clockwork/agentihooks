@@ -6,6 +6,7 @@ from agents are refused.
 """
 
 import re
+from collections.abc import Callable
 from typing import Protocol
 
 from scripts.gates import log
@@ -29,7 +30,7 @@ def holds(slug: str, held: str) -> bool:
     return held in ("", seat(slug))
 
 
-def master_route(slug: str, agent: AgentRecord) -> str:
+def master_route(slug: str, agent: AgentRecord, held: list[str]) -> str:
     """The route a working Claude front door master runs on, from its execution record; empty for other agents."""
     door = agent.lane == MASTER and agent.state == "working" and agent.harness == "claude" and holds(slug, agent.seat)
     return MASTER_ROUTES.get(agent.route_kind, "") if door else ""
@@ -43,13 +44,13 @@ class Swarms(Protocol):
     def agents(self, slug: str) -> list[AgentRecord]: ...
 
 
-def master_routes(store: Swarms) -> dict[str, str]:
+def master_routes(store: Swarms, live: Callable[[list[AgentRecord]], list[AgentRecord]]) -> dict[str, str]:
     """The route of every swarm's working front door master, keyed by the account it runs on."""
     return {
         agent.account: found
         for slug in store.slugs()
         for agent in store.agents(slug)
-        if (found := master_route(slug, agent))
+        if (found := master_route(slug, agent, []))
     }
 
 
