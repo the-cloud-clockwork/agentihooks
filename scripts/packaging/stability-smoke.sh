@@ -61,6 +61,20 @@ create(slug, {"title": "Stability proof", "phases": [{"title": "Hold every stabi
 store.create(SwarmConfig(slug, "/data", 2, 0, state="paused"))
 print(f"created swarm {slug} with its ledger")
 PY
+if ! python3 - "$slug" <<'PY'
+import os
+import sys
+import urllib.request
+
+base, slug = f"http://127.0.0.1:{os.environ['SWARM_PORT']}", sys.argv[1]
+for route in ("/healthz", "/api/v1/ledgers", f"/{slug}"):
+    with urllib.request.urlopen(base + route, timeout=5) as response:
+        print(f"GET {route} through the front: {response.status}, {len(response.read())} bytes")
+PY
+then
+  "${compose[@]}" logs --tail 40 front swarm >&2 || true
+  exit 1
+fi
 
 docker run -d --name "$run-member" --network "${run}_default" -v "$tls/ca.pem:/tls/ca.pem:ro" \
   -v "${run}_swarm-data:/data" -e LEDGER_DIR=/data \
