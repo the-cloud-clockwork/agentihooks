@@ -1,7 +1,9 @@
+import http.client
 import inspect
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -284,11 +286,9 @@ def test_home_cells_escape_an_unknown_state(browser):
 
 
 def test_a_file_page_preflight_gets_the_read_only_origin_and_private_network_headers() -> None:
-    import http.client
-    import threading
-
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
+    thread = threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True)
+    thread.start()
     conn = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
     try:
         conn.request(
@@ -308,6 +308,7 @@ def test_a_file_page_preflight_gets_the_read_only_origin_and_private_network_hea
         conn.close()
         httpd.shutdown()
         httpd.server_close()
+        thread.join(timeout=5)
 
 
 class Swarms:
