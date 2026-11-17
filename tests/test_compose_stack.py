@@ -158,9 +158,23 @@ def test_the_front_routes_reads_to_the_ledger_and_writes_to_the_api() -> None:
     assert front["depends_on"]["swarm"]["condition"] == "service_healthy"
     assert front["depends_on"]["api"]["condition"] == "service_healthy"
     conf = (ROOT / "deploy/compose/ledger-front.conf").read_text()
-    assert "http://swarm:8765" in conf
+    assert "${SWARM_LEDGER_SCHEME}://swarm:8765" in conf
     assert "http://api:8766" in conf
     assert "GET|HEAD" in conf
+
+
+def test_the_front_proxies_reads_with_the_scheme_the_swarm_serves() -> None:
+    front = SERVICES["front"]
+    assert front["environment"] == {"SWARM_LEDGER_SCHEME": "${SWARM_LEDGER_SCHEME:-http}"}
+    assert front["volumes"] == ["./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro"]
+    smoke = (ROOT / "scripts/packaging/stability-smoke.sh").read_text()
+    override = yaml.safe_load(smoke.split("<<'YAML'\n", 1)[1].split("\nYAML\n", 1)[0])["services"]
+    assert override["swarm"]["environment"]["LEDGER_TLS_CERT"] == "/tls/cert.pem"
+    assert override["front"]["environment"] == {"SWARM_LEDGER_SCHEME": "https"}
+    read = smoke.split("if ! python3 - \"$slug\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    assert "http://127.0.0.1:{os.environ['SWARM_PORT']}" in read
+    assert 'for route in ("/healthz", "/api/v1/ledgers", f"/{slug}"):' in read
+    assert smoke.index(read) < smoke.index('docker run -d --name "$run-member"')
 
 
 @pytest.mark.feature("compose-api-health-and-front-proxy")
@@ -184,6 +198,6 @@ def test_the_front_forwards_the_host_the_client_sent_with_its_port(conf: str) ->
 )
 def test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time(conf: str) -> None:
     text = (ROOT / conf).read_text()
-    assert "set $upstream http://swarm:8765;" in text
+    assert "set $upstream ${SWARM_LEDGER_SCHEME}://swarm:8765;" in text
     assert "set $upstream http://api:8766;" in text
     assert "resolver 127.0.0.11 valid=1s;" in text
