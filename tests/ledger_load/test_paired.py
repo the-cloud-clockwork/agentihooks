@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,94 @@ def test_both_hierarchy_cpu_installs_pin_the_pretend_version() -> None:
             install.get("env", {}).get("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS")
             == "0.dev${{ github.run_number }}"
         )
+
+
+@pytest.mark.parametrize(("stray", "other"), [("", ""), ("base", "head"), ("head", "base")])
+def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Path, stray: str, other: str) -> None:
+    load = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]["load"]
+    [command] = [step["run"] for step in load["steps"] if "tests.ledger_load.memory" in step.get("run", "")]
+    workspace = tmp_path / "workspace"
+    (workspace / "load-evidence").mkdir(parents=True)
+    for side in ("base", "head"):
+        (workspace / side).mkdir()
+        if side != stray:
+            package = workspace / side / "scripts" / "swarm_ledger"
+            package.mkdir(parents=True)
+            for module in (package.parent / "__init__.py", package / "__init__.py", package / "ledger_server.py"):
+                module.touch()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    python = binary / "python"
+    python.write_text('#!/usr/bin/env bash\n[[ "$1" != -c ]] || exec "$REAL_PYTHON" "$@"\necho "${PWD##*/} gate ran"\n')
+    python.chmod(0o755)
+    env = {name: value for name, value in os.environ.items() if name != "PYTHONPATH"}
+    if other:
+        env["PYTHONPATH"] = str(workspace / other)
+    result = subprocess.run(
+        ["bash", "-e", "-c", command],
+        cwd=workspace,
+        env={
+            **env,
+            "PATH": f"{binary}:{env['PATH']}",
+            "REAL_PYTHON": sys.executable,
+            "GITHUB_WORKSPACE": str(workspace),
+            "PAIR": "1",
+            "BASE": "base",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    logs = sorted((workspace / "load-evidence").glob("*.log"))
+    ran = [path.stem for path in logs if "gate ran" in path.read_text()]
+    if stray:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"::error::load gate failed on {stray}" in result.stdout
+        assert ran == [other]
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert ran == ["base", "head"]
+
+
+OWN_CHECKOUT = (
+    "-c 'import pathlib, scripts.swarm_ledger.ledger_server as m; "
+    "assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'"
+)
+LOAD_GATES = ("tests.ledger_load.gate", "tests.ledger_load.memory")
+
+
+def guards_its_gate(script: str) -> bool:
+    """Whether a step script runs the own checkout assert before its load gate with nothing between them that
+    swallows the assert's failure."""
+    gate = min(script.index(module) for module in LOAD_GATES if module in script)
+    start = script.find(OWN_CHECKOUT)
+    between = script[start + len(OWN_CHECKOUT) : gate]
+    return 0 <= start < gate and "||" not in between and ";" not in between
+
+
+@pytest.mark.parametrize(
+    ("script", "guarded"),
+    [
+        (f"cd base && python {OWN_CHECKOUT} \\\n  && python -m tests.ledger_load.memory", True),
+        ("cd base && python -m tests.ledger_load.memory", False),
+        (f"cd base && python {OWN_CHECKOUT} || true\npython -m tests.ledger_load.memory", False),
+        (f"cd base && python {OWN_CHECKOUT}; python -m tests.ledger_load.memory", False),
+        (f"cd base && python -m tests.ledger_load.memory && python {OWN_CHECKOUT}", False),
+    ],
+)
+def test_the_guard_check_rejects_a_missing_late_or_swallowed_assert(script: str, guarded: bool) -> None:
+    assert guards_its_gate(script) is guarded
+
+
+def test_every_load_pair_runner_asserts_each_side_imports_its_own_checkout_before_its_gate() -> None:
+    runners: dict[str, bool] = {}
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for name, job in yaml.safe_load(path.read_text())["jobs"].items():
+            for step in job.get("steps", []):
+                script = step.get("run", "")
+                if "for side in" in script and any(module in script for module in LOAD_GATES):
+                    runners[f"{path.name} {name}"] = guards_its_gate(script)
+    assert runners == {"hierarchy-cpu.yml load": True, "ledger-load.yml compare": True}
 
 
 def compare_mode() -> tuple[int, float]:

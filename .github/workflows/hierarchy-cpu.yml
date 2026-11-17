@@ -190,7 +190,9 @@ jobs:
           pids=()
           for side in "${order[@]}"; do
             mkdir -p "$GITHUB_WORKSPACE/load-home/$side"
-            ( cd "$side" && REDIS_URL="redis://127.0.0.1:6379/$database" \
+            ( cd "$side" \
+              && python -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__' \
+              && REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_HOME="$GITHUB_WORKSPACE/load-home/$side" \
               python -m tests.ledger_load.memory \
