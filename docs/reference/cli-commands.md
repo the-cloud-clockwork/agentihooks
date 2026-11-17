@@ -7,7 +7,7 @@ parent: Reference
 # CLI Commands
 {: .no_toc }
 
-The `agentihooks` CLI is installed globally via `uv tool install --editable .` as part of `agentihooks init`. All subcommands are idempotent.
+The `agentihooks` CLI is installed globally via `uv tool install --editable .[nats]` as part of `agentihooks init`, so the tool venv carries the NATS bus client. All subcommands are idempotent.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -45,7 +45,7 @@ agentihooks init [--bundle <path>] [--profile <name>]
 6. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> each profile in chain)
 7. Writes `~/.claude/CLAUDE.md` -- single profile: file copy; chained profiles: concatenated with `---` separators and `<!-- profile: name -->` markers
 8. Installs MCPs (agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
-9. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
+9. Installs the `agentihooks` CLI globally via `uv tool install --editable .[nats]`
 10. Writes managed bashrc block (`agentienv` function + `agenti` alias)
 
 Step 8 has one extra behaviour when `MCP_TRANSPORT` names a network transport:

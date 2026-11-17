@@ -562,6 +562,88 @@ def test_a_forced_master_order_hands_forced_to_the_hive_runtime(setup: Any, monk
     assert runtime.spawn.call_args.args[0].task["forced"] is True
 
 
+@pytest.mark.feature("forced-master-drained-slots")
+@pytest.mark.parametrize(
+    "row", [("CLOSED", 0, 80, 7, 0), ("CLOSED", 0, 3, 50, 0), ("CLOSED", 0, 80, 1, 0), ("OPEN", 6, 80, 80, 6)]
+)
+@pytest.mark.parametrize(
+    ("forced", "expected"),
+    [(True, ("remote", "account", "subscription")), (False, "no hive for master advertises a claude slot")],
+)
+def test_a_forced_front_door_master_takes_a_slot_without_a_free_seat_on_a_hive_without_a_login(
+    setup: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    row: tuple[str, int, float, float, int],
+    forced: bool,
+    expected: tuple[str, str, str] | str,
+) -> None:
+    from scripts.hive import placement
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    task = {**master(setup), "seat": "master@fixture", "forced": forced}
+    setup.herdr._quota_accounts = [Account("claude", "account", *row)]
+    selected = setup.launcher.select(setup.config, "master", task)
+    placed = (
+        selected.reason
+        if isinstance(selected, placement.Wait)
+        else (selected.hive, selected.account.name, selected.route_kind)
+    )
+    assert placed == expected
+
+
+@pytest.mark.feature("forced-master-drained-slots")
+def test_a_forced_front_door_master_takes_an_account_with_a_free_seat_before_a_drained_one(setup: Any) -> None:
+    from scripts.swarm.capacity import Account
+
+    task = {**master(setup), "seat": "master@fixture", "forced": True}
+    slots = [{"harness": "claude", "account": name, "kind": "subscription"} for name in ("account", "spare")]
+    write_hive(setup, excluded=[], ui="yes", slots=slots)
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "CLOSED", 0, 80, 7, 0),
+        Account("claude", "spare", "OPEN", 0, 80, 80, 6),
+    ]
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "spare", "subscription")
+
+
+@pytest.mark.feature("forced-master-drained-slots")
+def test_a_forced_front_door_master_never_takes_a_claude_slot_on_another_harness_row(setup: Any) -> None:
+    from scripts.hive import placement
+    from scripts.swarm.capacity import Account
+
+    task = {**master(setup), "seat": "master@fixture", "forced": True}
+    setup.herdr._quota_accounts = [Account("codex", "account", "CLOSED", 0, None, 7, 0)]
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
+        "no hive for master advertises a claude slot"
+    )
+
+
+@pytest.mark.feature("forced-master-drained-slots")
+def test_a_forced_front_door_master_on_a_drained_account_gets_its_launch_order(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import session_bands
+    from scripts.hive.launch import Selection
+    from scripts.hive.orders import LaunchOrder
+    from scripts.swarm.capacity import Account
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "seat": "master@fixture", "forced": True, "controller_epoch": setup.held.epoch}
+    advertised = session_bands.scaled_cap(80, 7, session_bands.hive_ceiling({}))
+    slot = {"harness": "claude", "account": "account", "kind": "subscription", "cap": advertised}
+    write_hive(setup, excluded=[], ui="yes", slots=[slot])
+    setup.herdr._quota_accounts = [Account("claude", "account", "CLOSED", 0, 80, 7, 0)]
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, Selection)
+    sent: list[LaunchOrder] = []
+    monkeypatch.setattr(setup.launcher, "answer", lambda request, order: sent.append(order))
+    setup.launcher.send_order(request, selected, task)
+    assert [(order.slot, order.route_kind, order.hive) for order in sent] == [("account", "subscription", "remote")]
+
+
 @pytest.mark.feature("hive-front-door-master-floor")
 @pytest.mark.parametrize(("five", "week"), [(80, 7), (80, 10), (80, 2.5), (3, 50), (1.5, 50)])
 def test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor(

@@ -55,7 +55,7 @@ The full list, all of which a harness must redirect before calling
 | `AGENTIHOOKS_ROOT` | the repo itself — used as `cwd` for `uv tool install/uninstall` |
 
 `AGENTIHOOKS_ROOT` is the sharp one: **every** `init` shells a real
-`uv tool install --editable --force .` gated only by it, and `uninstall_global`
+`uv tool install --editable --force .[nats]` gated only by it, and `uninstall_global`
 shells a real `uv tool uninstall`. Neither is gated by `CLAUDE_HOME`, so a
 harness that redirects only the CLAUDE paths still uninstalls the developer's
 CLI for real.
