@@ -144,7 +144,7 @@ def test_a_pull_request_skips_sonar_only_when_selection_marks_it_test_only(selec
         ("push", "skip", "skipped", False),
     ],
 )
-def test_a_pull_request_requires_ledger_load_only_when_selection_marks_a_ledger_server_change(
+def test_the_gate_requires_ledger_load_on_marked_pull_requests_and_keeps_queue_and_push_grading(
     event: str, selection: str | None, load: str, passes: bool
 ) -> None:
     outputs = {"scope": "selected" if event == "pull_request" else ""}
