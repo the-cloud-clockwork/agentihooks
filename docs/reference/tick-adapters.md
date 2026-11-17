@@ -552,6 +552,18 @@ mapped to the task that removes its whole hash reads or unpaged key scans. A uni
 `tests/test_ci_semgrep.py` requires every entry to be one `.py` path with no wildcard, and names files that have left
 the list, such as `scripts/swarm/stack.py`, so they cannot return.
 
+The same step also counts the exceptions written inside each rule. Per rule
+id it counts the `pattern-not`, `pattern-not-inside` and `pattern-not-regex` entries at any depth and the
+`paths.exclude` entries of every rule file in each `.semgrep*` folder, fixtures named `*.test.yml` or `*.test.yaml`
+aside, at the merge base of the head and the base and at the head. It prints
+`Own rule exceptions: <head counts> ...; the merge base holds <base counts>` and fails with
+`<rule id> pattern-not entries grew from <base> to <head>` or `<rule id> path excludes grew from <base> to <head>`
+for each count of a rule the merge base holds that rose. The rule counts use the merge base, so a branch is never red
+for an exception `dev` removed after it branched. A rule id the merge base lacks starts its own counts, so a renamed
+rule starts over, and a head with no rule fails with
+`No own Semgrep rule under a .semgrep folder; the check graded nothing`. `.semgrepignore` entries and inline `nosemgrep`
+comments are outside the count.
+
 The list holds two files: `scripts/tick/adapters/github.py`, the adapter, and `scripts/swarm/github_reads.py`, the
 audited runner the adapter calls, which builds each `gh` command with the adapter's `command`. Every swarm caller has
 moved onto port tools; the unit test pins the list to exactly those two paths and names each moved file, so none can

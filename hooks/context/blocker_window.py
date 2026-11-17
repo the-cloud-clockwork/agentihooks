@@ -3,6 +3,7 @@ window automatically and injects a once-a-minute notice naming each sustained ca
 troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
 session's pushes, reruns, dispatches and deploys; a session on a registered fix branch, or on the head branch of a
 registered fix pull request, keeps reruns in its repository and the pushes and dispatches that write only that branch.
+Swarm publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
 Fails open on a store error."""
 
 import re
@@ -299,14 +300,20 @@ def _fix_branch(url: str) -> str:
 def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -> bool:
     """Return whether the session works in the repository and on the branch of a registered fix, a fix branch link
     naming both or a fix pull request whose head branch it is, and every ref the command names is that branch."""
-    from scripts.swarm import panic
-    from scripts.swarm.stack import repo_key
-
     if not (cwd and fixes):
         return False
     branch = _git(cwd, "branch", "--show-current")
     if not branch or any(target not in (branch, f"refs/heads/{branch}") for target in targets):
         return False
+    return _registered(cwd, fixes, branch)
+
+
+def _registered(cwd: str, fixes: tuple[str, ...], branch: str) -> bool:
+    """Return whether branch is a registered fix of the repository origin names in the checkout at cwd: a fix branch
+    link naming both, or a fix pull request whose head branch it is."""
+    from scripts.swarm import panic
+    from scripts.swarm.stack import repo_key
+
     origin = _git(cwd, "remote", "get-url", "origin")
     if not origin:
         return False
@@ -315,6 +322,17 @@ def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -
         return True
     changes = f"{repository}/pull/"
     return any(repo_key(url).startswith(changes) and _fix_branch(url) == branch for url in fixes)
+
+
+def held_push(cwd: str, branch: str) -> str | None:
+    """Return the panic refusal for a push to origin that writes branch from the checkout at cwd, or None when no
+    panic holds, the store cannot be read, or branch is a registered fix of that checkout's repository and git config
+    cannot route the push elsewhere."""
+    store = _store()
+    current = None if store is None else _panic_state(store)
+    if current is None or (_registered(cwd, current.fixes, branch) and not _routed(cwd)):
+        return None
+    return FROZEN.format(reason=current.reason)
 
 
 def checked(payload: Any) -> str | None:

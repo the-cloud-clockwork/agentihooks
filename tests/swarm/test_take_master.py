@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -68,6 +69,29 @@ def test_take_master_records_the_model_and_effort_the_session_launched_with(take
     [master] = [a for a in store.agents("sw") if a.lane == "master"]
     assert (master.harness, master.model, master.effort) == ("codex", "gpt-6.1-sol", "high")
     assert master.started_at > 0
+
+
+@pytest.mark.feature("master-route-writers-keep-the-route")
+@pytest.mark.parametrize(
+    ("names", "route_kind"),
+    [
+        (b"AH_ROUTE_INTERACTIVE_home=1", "interactive"),
+        (b"AH_ROUTE_API=1", "api"),
+        (b"AH_CC_TOKEN_alpha=set", "subscription"),
+        (b"PATH=/bin", "subscription"),
+    ],
+)
+def test_take_master_records_the_route_its_process_environment_names(
+    taker: tuple[Any, ...], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, names: bytes, route_kind: str
+) -> None:
+    store = taker[0]
+    proc = tmp_path / "proc"
+    (proc / "4242").mkdir(parents=True)
+    (proc / "4242" / "environ").write_bytes(names + b"\0HOME=/home/taker\0")
+    monkeypatch.setattr(take_master, "PROC", proc)
+    assert run("sw", "take-master") == 0
+    [master] = [a for a in store.agents("sw") if a.lane == "master"]
+    assert master.route_kind == route_kind
 
 
 def test_take_master_reads_the_harness_from_the_binding_when_the_process_names_none(taker, monkeypatch):

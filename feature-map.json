@@ -1,6 +1,70 @@
 {
   "features": [
     {
+      "id": "master-route-placement-fallback",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "A front door master whose launch decided the claude ai login, master-login or interactive, but recorded the placement fallback reads token fallback in balance and on the master card, and a hive launch record keeps the placement the hive acknowledged so a hive master-login token fallback is recorded at all.",
+      "seam": "front_door.master_route, agents_quota.balance_table and HiveRuntime.record",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_a_login_route_that_landed_on_a_token_reads_token_fallback",
+        "tests/test_agents_quota.py::test_balance_names_a_login_launch_that_fell_back_to_a_token",
+        "tests/hive/test_master_fallback_launch.py::test_a_native_master_token_fallback_records_its_fallback_placement"
+      ]
+    },
+    {
+      "id": "master-route-writers-keep-the-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "The tick recover master path keeps the route kind, account and placement of the execution record it adopts, and take master records the route kind its process environment variable names: interactive for the claude ai login, api for the API marker, subscription for a token or none.",
+      "seam": "tick masters recover master and take_master.master_record",
+      "rules": [
+        "master-recover-drops-the-route"
+      ],
+      "tests": [
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_the_route_account_and_placement_of_the_record_it_adopts",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_what_the_runtime_recovered_when_no_record_holds_the_seat",
+        "tests/swarm/test_take_master.py::test_take_master_records_the_route_its_process_environment_names",
+        "tests/context/test_account_sessions.py::test_the_process_route_comes_from_its_variable_names"
+      ]
+    },
+    {
+      "id": "master-route-live-masters-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "Balance names a route only for a front door master the swarm status liveness rule keeps, so a working record whose process is gone shows no route, while the front door seat is still decided over every record as the tick decides it.",
+      "seam": "front_door.master_routes and agents_quota.balance_table",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_skip_a_front_door_master_the_live_rule_drops",
+        "tests/test_agents_quota.py::test_balance_names_no_route_for_a_front_door_master_that_is_not_live"
+      ]
+    },
+    {
+      "id": "master-route-acting-front-door",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "The master route belongs to the seat the tick lead rule names over the held master seats: the lead seat while it is held, else the lowest numbered held master seat, so a second master seat acting as the front door shows its route in balance and the swarm status payload and a seat that is not acting shows none.",
+      "seam": "front_door.master_route, the swarm status report agent entries and agents_quota.balance_table",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_follows_the_seat_the_tick_lead_rule_names",
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_the_lead_seat_when_no_master_seat_is_held",
+        "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_of_a_second_master_seat_acting_as_the_front_door",
+        "tests/swarm/test_status_capabilities.py::test_status_report_names_the_lead_seat_route_when_no_master_seat_is_held",
+        "tests/test_agents_quota.py::test_balance_names_the_route_of_a_second_master_seat_acting_as_the_front_door"
+      ]
+    },
+    {
+      "id": "master-route-fallback-only-from-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "The master route says token fallback only when the claude ai login was the desired route, a login route kind that fell back or a desired route kind of interactive that landed on a token; a token or API route kind with no login desire, including the default route kind of a record no launch wrote, shows no route.",
+      "seam": "front_door.master_route and agents_quota.balance_table",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_says_fallback_only_when_the_claude_ai_login_was_wanted",
+        "tests/test_agents_quota.py::test_balance_says_token_fallback_only_when_the_claude_ai_login_was_wanted"
+      ]
+    },
+    {
       "id": "service-commands-run-through-interpreter",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-9",
@@ -2500,6 +2564,24 @@
       ]
     },
     {
+      "id": "swarm-master-placement-refusals-kept",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-2",
+      "behaviour": "Every placement refusal a master seat meets in the tick, from the front door master step and from the master fill of later seats, is kept in swarm Redis per seat with its reason, first and latest time and pass count for a day. This covers the controller placement refusal, the session slot wait and a hive room refusal. A repeat of the seat's latest reason extends its row, and each seat keeps its newest hundred rows. The record survives the pass, the status prune and the outage hand back. The status prune keeps every master seat's placement wait row while the tick still sees it refused. The master down notice and the empty master seat finding name the front door seat's latest refusal with its age and time, and swarm status names each seat's latest refusal. On 17 November the front door master seat stayed empty four and a half hours, and its refusal lived only in controller output.",
+      "seam": "the tick master step and master fill through the fenced runtime, scripts.swarm.master_refusals, placement_waits.prune through status.findings, the master down step, tick_master._launch_refusal and swarm status",
+      "tests": [
+        "tests/swarm/test_master_refusals.py::test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_back",
+        "tests/swarm/test_master_refusals.py::test_a_fenced_master_refusal_is_kept_through_the_master_step_status_findings_and_prune",
+        "tests/swarm/test_master_refusals.py::test_a_master_refused_room_on_every_hive_is_kept_with_its_reason",
+        "tests/swarm/test_master_refusals.py::test_a_master_with_no_session_slot_is_kept_with_its_reason_and_its_wait_time",
+        "tests/swarm/test_master_refusals.py::test_every_master_seat_keeps_its_own_refusals",
+        "tests/swarm/test_master_refusals.py::test_the_master_down_notice_names_the_latest_refusal_with_its_age",
+        "tests/swarm/test_master_refusals.py::test_swarm_status_names_each_seat_latest_refusal_with_its_time",
+        "tests/swarm/test_master_refusals.py::test_status_text_names_the_latest_master_placement_refusal",
+        "tests/swarm/test_night_watch.py::test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty"
+      ]
+    },
+    {
       "id": "swarm-seat-priming",
       "origin": "inventory",
       "behaviour": "A successor is primed from its seat with the handoff, recaps in order and learned notes, and missing pieces are named.",
@@ -4601,6 +4683,23 @@
       ]
     },
     {
+      "id": "panic-publish-holds",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-honours-panic",
+      "behaviour": "While fleet panic is on, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
+      "seam": "swarm publish before it grades and pushes, and the panic guard's push check it asks",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing",
+        "tests/swarm/test_publish.py::test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_any_branch_without_panic",
+        "tests/swarm/test_panic.py::test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",
@@ -4707,6 +4806,25 @@
       "tests": [
         "tests/swarm/test_panic.py::test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered",
         "tests/swarm/test_panic.py::test_the_gate_required_run_name_names_the_branch_the_sweep_keeps"
+      ]
+    },
+    {
+      "id": "panic-spares-fixer-branches",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spares-fix-prs",
+      "behaviour": "While fleet panic is on, the CI cancel sweep, run by the tick once a minute and by panic on, spares without any master registration every open promotion fixer task (promo-RUN-N) and troubleshooting crew fixer task (crew-STAMP-fix-N) of every swarm: in every panic repository it keeps the branch the task records, its repository branches and the worktree branch of the agent claiming it, which each swarm's tick pass records when it reads its pass document, drops when it finds no open fixer and lets lapse fifteen minutes after the last pass that wrote it.",
+      "seam": "The tick pass read of the pass document, the fixer branch record of each swarm, and the panic CI cancel sweep in the tick pass and the panic button",
+      "rules": [
+        "panic-sweep-spares-only-registered-fixes"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_tick_pass_spares_every_swarms_recorded_fixer_branches_without_a_registration",
+        "tests/swarm/test_panic.py::test_the_panic_button_spares_the_recorded_fixer_branches",
+        "tests/swarm/test_panic.py::test_the_pass_read_records_the_open_fixer_branches_of_its_document",
+        "tests/swarm/test_panic.py::test_the_pass_read_drops_the_record_once_no_fixer_is_open",
+        "tests/swarm/test_panic.py::test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file",
+        "tests/swarm/test_panic.py::test_the_pass_read_writes_the_fixer_record_to_expire_after_fixers_ms"
       ]
     },
     {
@@ -5503,6 +5621,18 @@
         "tests/hive/test_master_fallback_launch.py::test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door",
         "tests/hive/test_master_fallback_launch.py::test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain",
         "tests/swarm/test_quota_handoff.py::test_a_front_door_master_is_warned_only_at_its_master_floor"
+      ]
+    },
+    {
+      "id": "forced-master-slot-reservation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-slot-reservation",
+      "behaviour": "A forced front door master's hive launch order goes out on a token slot the hive caps at zero or whose seats are all held, and its acknowledgement writes the slot's live row so the master counts against the account; an unforced master on that slot is still refused as account reservation is full.",
+      "seam": "HiveLaunch.send_order against LaunchSlots.reserve_reading and LaunchSlots.acknowledge",
+      "rules": ["forced-master-slot-reservation-refused"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_passes_a_refused_launch_slot_reservation",
+        "tests/hive/test_master_fallback_launch.py::test_an_unforced_front_door_master_is_still_refused_at_a_full_launch_slot_reservation"
       ]
     },
     {
@@ -6614,6 +6744,21 @@
         "tests/swarm/test_github_reads.py::test_snapshot_serves_a_caller_given_ttl_past_the_default_run_ttl",
         "tests/swarm/test_ledger_events.py::test_views_batch_cache_outlives_the_default_run_ttl_on_the_given_ttl",
         "tests/swarm/test_pull_views.py::test_tick_view_batches_claimed_pull_requests_with_the_tick_view_ttl"
+      ]
+    },
+    {
+      "id": "controller-gh-token-in-process",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gh-token-in-process",
+      "behaviour": "A process that holds the GitHub App key in App mode, as the swarm controller does, runs every gh call of github_reads.rest on the real gh client with the installation token its own process minted and cached, keeping the read reserve check in process, so no Python token wrapper starts and no token is minted per call; a token it cannot mint or a read below the reserve is left to the gh wrapper unchanged, and a process without the key runs gh exactly as before.",
+      "seam": "scripts.swarm.github_reads.rest through scripts.swarm.github_reads._signed and scripts.github_app_cli.signed",
+      "tests": [
+        "tests/swarm/test_github_reads.py::test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token",
+        "tests/swarm/test_github_reads.py::test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper",
+        "tests/swarm/test_github_reads.py::test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged",
+        "tests/test_github_app_cli.py::test_signed_runs_the_wrapped_client_on_the_process_token_over_the_caller_environment",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_read_below_the_reserve_to_the_wrapper",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_token_the_process_cannot_mint_to_the_wrapper"
       ]
     },
     {
@@ -8072,6 +8217,16 @@
         "tests/swarm/test_master_lock.py::test_the_tick_master_step_and_master_up_release_the_lock_after_their_launch",
         "tests/swarm/test_master_replace.py::test_master_up_replace_retires_a_starting_front_door_master_before_it_starts_one",
         "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant"
+      ]
+    },
+    {
+      "id": "semgrep-rule-exceptions-shrink",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-exceptions-shrink",
+      "behaviour": "The Semgrep scan step Rule exceptions only shrink counts, per rule id, the pattern-not, pattern-not-inside and pattern-not-regex entries at any depth and the paths.exclude entries of every rule file in each .semgrep folder at the merge base and on the head, fails naming each count of a rule the merge base holds that grew, lets a rule id the merge base lacks start its counts, skips fixtures and is red when the head holds no rule, so an exception added inside an existing rule turns the step red.",
+      "seam": "The Semgrep scan step Rule exceptions only shrink run text, executed over a planted repository whose head changes one rule's exceptions",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
       ]
     }
   ],
