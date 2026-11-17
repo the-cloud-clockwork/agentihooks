@@ -644,7 +644,9 @@ def test_hive_run_re_mints_a_root_credential_whose_subscribe_grant_alone_differs
 
 
 @pytest.mark.feature("hive-root-bus-re-mint")
-@pytest.mark.parametrize("stored", ["not a creds file", nkey.creds("a.e30.c", nkey.create(nkey.USER).seed)])
+@pytest.mark.parametrize(
+    "stored", ["not a creds file", nkey.creds("a.e30.c", nkey.create(nkey.USER).seed)], ids=["garbled", "no-nats-claim"]
+)
 def test_hive_run_re_mints_a_root_credential_that_does_not_decode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], stored: str
 ) -> None:
