@@ -885,6 +885,11 @@ def test_the_pass_read_drops_the_record_once_no_fixer_is_open(
     assert store.redis.exists(store.key(SLUG, "panic-fixers")) == 0
 
 
+def test_fixer_links_keeps_the_fixers_listed_after_a_skipped_task() -> None:
+    rows = [*_fixer_rows()[3:], *_fixer_rows()[:1]]
+    assert panic.fixer_links(rows) == _fixer_links("ci-323133-5149")
+
+
 @pytest.mark.feature("panic-spares-fixer-branches")
 def test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file() -> None:
     from scripts.swarm import promotion_watch, troubleshooting_crew
