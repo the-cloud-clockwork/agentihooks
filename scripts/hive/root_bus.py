@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 from dotenv import dotenv_values
 
@@ -47,13 +46,13 @@ def stale(home: Path, signer: nats_grant.Signer, member_id: str) -> bool:
     """
     try:
         stored = nkey.parse_creds((Path(home) / FOLDER / CREDS_FILE).read_text())[0]
-        granted = cast("dict[str, object]", nkey.claims(stored)["nats"])  # pyright: ignore[reportUnknownMemberType]
+        granted = nkey.claims(stored)["nats"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     except (KeyError, ValueError):
         return True
     swarms = nats_grant.require_listed(signer, member_id)
     user = nats_grant.member_user(signer, member_id)
-    fresh = cast("dict[str, object]", nats_grant.member_claims(user.public, swarms, member=member_id))  # pyright: ignore[reportUnknownMemberType]
-    return any(granted.get(key) != fresh[key] for key in ("pub", "sub"))
+    fresh = nats_grant.member_claims(user.public, swarms, member=member_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return any(granted.get(key) != fresh[key] for key in ("pub", "sub"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def refresh(home: Path, signer: Callable[[], nats_grant.Signer | None], member_id: str) -> Path | None:
