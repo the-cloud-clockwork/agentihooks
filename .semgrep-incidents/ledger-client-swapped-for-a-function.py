@@ -1,3 +1,6 @@
+from unittest import mock
+from unittest.mock import patch
+
 import pytest
 
 import scripts.swarm.ledger_client as client_module
@@ -61,6 +64,46 @@ def test_module_function_swap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ledger_client, "LedgerClient", refuse)
 
 
+def test_closure_function_swap(monkeypatch: pytest.MonkeyPatch) -> None:
+    def client() -> Ledger:
+        return Ledger()
+
+    def swap() -> None:
+        # ruleid: ledger-client-swapped-for-a-function
+        monkeypatch.setattr(ledger_client, "LedgerClient", client)
+
+    swap()
+
+
+def test_mock_patch_swap() -> None:
+    # ruleid: ledger-client-swapped-for-a-function
+    with patch("scripts.swarm.ledger_client.LedgerClient", lambda: Ledger()):
+        pass
+    # ruleid: ledger-client-swapped-for-a-function
+    with mock.patch("scripts.swarm.ledger_client.LedgerClient", new=refuse):
+        pass
+
+
+def test_mock_patch_object_swap() -> None:
+    # ruleid: ledger-client-swapped-for-a-function
+    with patch.object(ledger_client, "LedgerClient", lambda: Ledger()):
+        pass
+    # ruleid: ledger-client-swapped-for-a-function
+    with mock.patch.object(client_module, "LedgerClient", new=refuse):
+        pass
+
+
+# ruleid: ledger-client-swapped-for-a-function
+@patch("scripts.swarm.ledger_client.LedgerClient", lambda: Ledger())
+def test_decorated_patch_swap() -> None:
+    pass
+
+
+def test_assignment_swap() -> None:
+    # ruleid: ledger-client-swapped-for-a-function
+    ledger_client.LedgerClient = lambda: Ledger()
+
+
 def test_class_swap(monkeypatch: pytest.MonkeyPatch) -> None:
     # ok: ledger-client-swapped-for-a-function
     monkeypatch.setattr(ledger_client, "LedgerClient", Ledger)
@@ -76,3 +119,28 @@ def test_importer_binding_swap(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_method_swap(monkeypatch: pytest.MonkeyPatch) -> None:
     # ok: ledger-client-swapped-for-a-function
     monkeypatch.setattr(ledger_client.LedgerClient, "_call", lambda self, *args: {})
+
+
+def test_mock_patch_class_swap() -> None:
+    # ok: ledger-client-swapped-for-a-function
+    with patch("scripts.swarm.ledger_client.LedgerClient", Ledger):
+        pass
+    # ok: ledger-client-swapped-for-a-function
+    with patch.object(ledger_client, "LedgerClient", new=client_class(Ledger())):
+        pass
+    # ok: ledger-client-swapped-for-a-function
+    with patch("scripts.swarm.cli.LedgerClient", lambda: Ledger()):
+        pass
+
+
+def built() -> Ledger:
+    def made() -> Ledger:
+        return Ledger()
+
+    return made()
+
+
+def test_sibling_scope_name_swap(monkeypatch: pytest.MonkeyPatch) -> None:
+    made = client_class(built())
+    # ok: ledger-client-swapped-for-a-function
+    monkeypatch.setattr(ledger_client, "LedgerClient", made)
