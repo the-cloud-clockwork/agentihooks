@@ -367,7 +367,9 @@ def test_a_task_whose_offer_dead_lettered_at_its_current_generation_is_placed_on
     monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
     monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
     configs = SimpleNamespace(
-        slugs=lambda: [SLUG], config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine="events")
+        slugs=lambda: [SLUG],
+        config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine="events"),
+        redis=rig.redis,
     )
     runtime = Mock()
     runtime.spawn.return_value = Outcome(

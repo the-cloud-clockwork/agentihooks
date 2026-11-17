@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 
 from hooks.context import broadcast
+from scripts.hub import reconciler  # noqa: F401
 from scripts.swarm import idle, ledger_client, master_critical, master_fallback, master_launch
 from scripts.swarm import runtime as runtime_module
 from scripts.swarm import store as store_module
