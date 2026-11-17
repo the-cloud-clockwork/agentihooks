@@ -565,16 +565,30 @@ def test_a_forced_front_door_master_takes_an_account_with_a_free_seat_before_a_d
 
 
 @pytest.mark.feature("forced-master-drained-slots")
+def test_a_forced_front_door_master_never_takes_a_claude_slot_on_another_harness_row(setup: Any) -> None:
+    from scripts.hive import placement
+    from scripts.swarm.capacity import Account
+
+    task = {**master(setup), "seat": "master@fixture", "forced": True}
+    setup.herdr._quota_accounts = [Account("codex", "account", "CLOSED", 0, None, 7, 0)]
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
+        "no hive for master advertises a claude slot"
+    )
+
+
+@pytest.mark.feature("forced-master-drained-slots")
 def test_a_forced_front_door_master_on_a_drained_account_gets_its_launch_order(
     setup: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts import session_bands
     from scripts.hive.launch import Selection
     from scripts.hive.orders import LaunchOrder
     from scripts.swarm.capacity import Account
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
     task = {**master(setup), "seat": "master@fixture", "forced": True, "controller_epoch": setup.held.epoch}
-    slot = {"harness": "claude", "account": "account", "kind": "subscription", "cap": 6}
+    advertised = session_bands.scaled_cap(80, 7, session_bands.hive_ceiling({}))
+    slot = {"harness": "claude", "account": "account", "kind": "subscription", "cap": advertised}
     write_hive(setup, excluded=[], ui="yes", slots=[slot])
     setup.herdr._quota_accounts = [Account("claude", "account", "CLOSED", 0, 80, 7, 0)]
     request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
