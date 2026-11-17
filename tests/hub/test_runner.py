@@ -410,11 +410,13 @@ def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
 
 
 @pytest.mark.feature("hub-serving-readiness")
+@pytest.mark.parametrize("stale", [True, False])
 def test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe(
-    monkeypatch: pytest.MonkeyPatch, hive: Any, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, hive: Any, tmp_path: Path, stale: bool
 ) -> None:
     mark = tmp_path / "hub.serving"
-    mark.touch()
+    if stale:
+        mark.touch()
     seen = []
     monkeypatch.setenv("AGENTIHOOKS_HUB_SERVING_FILE", str(mark))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
