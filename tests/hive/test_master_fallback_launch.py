@@ -510,6 +510,58 @@ def test_a_master_skips_a_native_login_whose_claude_account_is_closed(setup: Any
     assert setup.launcher.select(setup.config, "master", task).account.name == chosen
 
 
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed(setup: Any) -> None:
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account("claude", "native", "CLOSED", 0, 80, 1, 0),
+    ]
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
+    selected = setup.launcher.select(setup.config, "master", {**master(setup), "forced": True})
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_order_hands_forced_to_the_hive_runtime(setup: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from hooks import config as hooks_config
+    from scripts.hive import orders
+    from scripts.swarm import lease, tick
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    task: dict[str, Any] = {**master(setup), "seat": "master@fixture", "route_kind": "interactive", "forced": True}
+    task["controller_epoch"] = setup.held.epoch
+    monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    write_hive(setup, excluded=[], ui="yes", interactive={"claude": "account"})
+    name = setup.store.next_name(setup.config.slug, "master")
+    request = SpawnRequest(setup.store.config(setup.config.slug), "master", name, task)
+    admitted = setup.launcher.admit(request, setup.launcher.select(request.config, "master", task))
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "master",
+        "master",
+        "master",
+        "account",
+        "claude",
+        "interactive",
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+    )
+    runtime = Mock()
+    placed = tick.Placed("pane", "claude", "account", profile="master", profile_decision={"validation": {"pid": 12}})
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    runtime.namespace.return_value = "namespace"
+    runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
+    assert orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task).status == "live"
+    assert runtime.spawn.call_args.args[0].task["forced"] is True
+
+
 @pytest.mark.feature("hive-front-door-master-floor")
 @pytest.mark.parametrize(("five", "week"), [(80, 7), (80, 10), (80, 2.5), (3, 50), (1.5, 50)])
 def test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor(
