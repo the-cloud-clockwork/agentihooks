@@ -1708,21 +1708,6 @@ def test_status_text_names_the_promoted_engineer(env, capsys):
     assert "promoted  engineer@a1b2c3-0001  restoring the master: master spawn failed: boom" in out
 
 
-@pytest.mark.feature("swarm-master-placement-refusals-kept")
-def test_status_text_names_the_latest_master_placement_refusal(env, capsys, monkeypatch):
-    from scripts.swarm import master_refusals
-
-    store, _, _ = env
-    run("sw", "create", "--repo", "/repo")
-    master_refusals.record(store, "sw", "no live hive takes master", 180_000)
-    monkeypatch.setattr(cli, "now_ms", lambda: 600_000)
-    run("sw", "status")
-    out = capsys.readouterr().out.splitlines()
-    assert (
-        "master placement refused  00:03 UTC  7 minutes ago  1 passes since 00:03 UTC  no live hive takes master" in out
-    )
-
-
 def test_status_text_logs_a_base_miss_as_enforced_with_a_finding(env, capsys):
     from scripts.swarm import launch_check
 

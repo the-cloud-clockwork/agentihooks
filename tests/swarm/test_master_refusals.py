@@ -6,10 +6,11 @@ import pytest
 
 from scripts.hive import placement_waits
 from scripts.inbox.store import InboxStore
-from scripts.swarm import master_refusals, tick_master
+from scripts.swarm import cli, master_refusals, tick_master
 from scripts.swarm.store import MASTER, RedisStore
 from scripts.swarm.tick import MASTER_DOWN, SpawnError, tick
 from scripts.tick.steps import masters as master_steps
+from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
 MINUTE = 60_000
@@ -110,6 +111,23 @@ def test_swarm_status_names_the_latest_refusal_with_its_time(store: RedisStore) 
         f"master placement refused  00:03 UTC  6 minutes ago  2 passes since 00:02 UTC  {REFUSED}"
     ]
     assert master_refusals.status_lines(store, "other", MINUTE) == []
+
+
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_status_text_names_the_latest_master_placement_refusal(  # noqa: F811
+    env: Any,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    master_refusals.record(swarm, "sw", "no live hive takes master", 3 * MINUTE)
+    monkeypatch.setattr(cli, "now_ms", lambda: 10 * MINUTE)
+
+    run("sw", "status")
+
+    line = "master placement refused  00:03 UTC  7 minutes ago  1 passes since 00:03 UTC  no live hive takes master"
+    assert line in capsys.readouterr().out.splitlines()
 
 
 def test_a_refusal_row_is_kept_for_the_whole_finding_window(store: RedisStore) -> None:  # noqa: F811
