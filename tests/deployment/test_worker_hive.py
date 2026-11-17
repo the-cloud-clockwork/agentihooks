@@ -23,7 +23,16 @@ MOVED = "AGENTIHOOKS_HIVE_URL=https://tailnet.example:8770\n" + REFRESHED
 SAVED = {"refreshed": REFRESHED, "rejoined": OTHER, "moved": MOVED}
 
 
-def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
+def startup(
+    tmp_path: Path,
+    *,
+    credential: str = "mounted",
+    refuse: str = "",
+    ssh: bool = False,
+    sshd_dies: bool = False,
+    bundle: bool = False,
+    bundle_url: str = "",
+) -> tuple[subprocess.CompletedProcess[str], str, Path, Path]:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -479,7 +488,7 @@ def test_a_kept_bundle_clone_that_cannot_fast_forward_is_logged_and_kept(tmp_pat
     assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
 
 
-def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):
+def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     origin = tmp_path / "linked-origin"
     origin.mkdir()
     subprocess.run(["git", "init", "--initial-branch=dev", str(origin)], check=True, capture_output=True)

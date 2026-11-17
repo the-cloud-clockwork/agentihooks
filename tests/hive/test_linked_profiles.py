@@ -49,17 +49,19 @@ def test_hive_setup_publishes_linked_profile_origins_and_relative_locations(tmp_
     ]
 
 
-def test_profile_install_clones_and_registers_the_alias_before_init(tmp_path, monkeypatch):
+def test_profile_install_clones_and_registers_the_alias_before_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import linked_profiles
 
     _, repo = source(tmp_path)
     root = tmp_path / "hive"
     root.mkdir()
     spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
-    commands = []
+    commands: list[list[str]] = []
     run = subprocess.run
 
-    def execute(argv, **kwargs):
+    def execute(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         commands.append(argv)
         if "link-profile" in argv:
             return subprocess.CompletedProcess(argv, 0)
@@ -181,15 +183,17 @@ def test_a_cloned_profile_symlink_cannot_escape_its_repository(tmp_path):
 
 
 @pytest.mark.parametrize("change", ["advance", "ref", "url"])
-def test_install_honors_updated_sources_on_a_persistent_hive(tmp_path, monkeypatch, change):
+def test_install_honors_updated_sources_on_a_persistent_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
     from scripts.hive import linked_profiles
 
     _, repo = source(tmp_path)
     spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
-    commands = []
+    commands: list[list[str]] = []
     run = subprocess.run
 
-    def execute(argv, **kwargs):
+    def execute(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if "link-profile" in argv:
             commands.append(argv)
             return subprocess.CompletedProcess(argv, 0)
@@ -216,7 +220,9 @@ def test_install_honors_updated_sources_on_a_persistent_hive(tmp_path, monkeypat
     assert (commands[-1][LINKED] == previous) is (change == "advance")
 
 
-def test_install_accepts_uppercase_profile_names_and_propagates_registration_failure(tmp_path, monkeypatch):
+def test_install_accepts_uppercase_profile_names_and_propagates_registration_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import linked_profiles
 
     _, repo = source(tmp_path)
@@ -242,15 +248,17 @@ def test_install_stops_before_registration_when_clone_fails(tmp_path, monkeypatc
     assert refused.value.cmd[:2] == ["git", "clone"]
 
 
-def test_install_refuses_a_diverged_checkout_instead_of_registering_stale_profiles(tmp_path, monkeypatch):
+def test_install_refuses_a_diverged_checkout_instead_of_registering_stale_profiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import linked_profiles
 
     _, repo = source(tmp_path)
     spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
-    commands = []
+    commands: list[list[str]] = []
     run = subprocess.run
 
-    def execute(argv, **kwargs):
+    def execute(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if "link-profile" in argv:
             commands.append(argv)
             return subprocess.CompletedProcess(argv, 0)
