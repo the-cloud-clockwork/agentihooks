@@ -41,9 +41,15 @@ def write(home: Path, signer: nats_grant.Signer, member_id: str) -> Path:
 
 
 def stale(home: Path, signer: nats_grant.Signer, member_id: str) -> bool:
-    """Whether the publish or subscribe grant of the credential stored under home differs from a fresh mint."""
-    stored = nkey.parse_creds((Path(home) / FOLDER / CREDS_FILE).read_text())[0]
-    granted = cast("dict[str, object]", nkey.claims(stored)["nats"])  # pyright: ignore[reportUnknownMemberType]
+    """Whether the publish or subscribe grant of the credential stored under home differs from a fresh mint.
+
+    A stored credential that does not decode counts as differing, so the re-mint replaces it.
+    """
+    try:
+        stored = nkey.parse_creds((Path(home) / FOLDER / CREDS_FILE).read_text())[0]
+        granted = cast("dict[str, object]", nkey.claims(stored)["nats"])  # pyright: ignore[reportUnknownMemberType]
+    except (KeyError, ValueError):
+        return True
     swarms = nats_grant.require_listed(signer, member_id)
     user = nats_grant.member_user(signer, member_id)
     fresh = cast("dict[str, object]", nats_grant.member_claims(user.public, swarms, member=member_id))  # pyright: ignore[reportUnknownMemberType]

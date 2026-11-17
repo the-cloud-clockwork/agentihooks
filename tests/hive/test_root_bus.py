@@ -644,6 +644,31 @@ def test_hive_run_re_mints_a_root_credential_whose_subscribe_grant_alone_differs
 
 
 @pytest.mark.feature("hive-root-bus-re-mint")
+@pytest.mark.parametrize("stored", ["not a creds file", nkey.creds("a.e30.c", nkey.create(nkey.USER).seed)])
+def test_hive_run_re_mints_a_root_credential_that_does_not_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], stored: str
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    env = root_bus.write(home, signer, "root")
+    creds = home / "root-bus" / "bus.creds"
+    creds.write_text(stored)
+    for key, value in dotenv_values(env).items():
+        monkeypatch.setenv(key, value or "")
+    monkeypatch.setattr(cli, "_signer", lambda: signer)
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", "alpha", "telemetry"]
+    assert _granted(creds) == _fresh(signer)
+    assert capsys.readouterr().err == (
+        f"hive re-minted the root bus credential in {env}: its grant differed from a fresh mint\n"
+    )
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
 def test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
