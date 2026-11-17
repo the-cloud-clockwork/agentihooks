@@ -3,6 +3,7 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 from scripts.hive import admission, placement_waits
@@ -176,6 +177,11 @@ def deliver(store, slug: str, ledger, at: int) -> None:
         save(store, slug, state)
 
 
+def _panic_action(slug: str, line: str) -> None:
+    """Print one panic action of the pass of swarm ``slug`` as a swarm panic event."""
+    timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
+
+
 @contextmanager
 def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], runtime: Any) -> Iterator[None]:
     previous = None
@@ -196,8 +202,9 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         yield
     finally:
         timing.ON_FAILURE.reset(token)
-        for line in panic.tick_pass(store, previous is None, clock()):
-            timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
+        report = partial(_panic_action, slug)
+        for line in panic.tick_pass(store, previous is None, clock(), report):
+            report(line)
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())
         if found := findings(store, slug):

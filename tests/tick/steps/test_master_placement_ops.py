@@ -1,6 +1,7 @@
 """The master placement operations live in the masters step module, reach tick names through the tick module, and
 the swarm tick module re-exports each one."""
 
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -23,6 +24,12 @@ MOVED = ("_master", "_recover_master", "_retire_master", "respawn_master", "plac
 SEAT = "master@sw"
 CODE = "abc123"
 NOW = 1_000
+DAY = 86_400_000
+
+
+def _kept(reason: str) -> str:
+    """The master refusal record a first refusal with ``reason`` at ``NOW`` writes."""
+    return json.dumps([{"reason": reason, "since": NOW, "at": NOW, "passes": 1}])
 
 
 class Calls(list[tuple[Any, ...]]):
@@ -69,7 +76,12 @@ def _store(
 ) -> Any:
     """Return a store holding ``agents`` whose writes are recorded."""
     redis = SimpleNamespace(
-        hdel=calls.fn("hdel"), hset=calls.fn("hset"), delete=calls.fn("delete"), hexists=lambda key, field: False
+        hdel=calls.fn("hdel"),
+        hset=calls.fn("hset"),
+        delete=calls.fn("delete"),
+        hexists=lambda key, field: False,
+        hget=lambda key, field: None,
+        pexpire=calls.fn("pexpire"),
     )
     seats = SimpleNamespace(occupant=lambda seat: SimpleNamespace(occupant=occupant), occupy=calls.fn("occupy"))
     return SimpleNamespace(
@@ -277,7 +289,12 @@ def test_a_master_without_a_slot_is_recorded_as_waiting(monkeypatch: pytest.Monk
     _seats(monkeypatch, slot="no slot for the master")
     config = SimpleNamespace(state="running")
     assert masters._master("sw", config, _store(calls), _runtime(calls), NOW) == ["no slot for the master"]
-    assert calls == [("hdel", (tick.MASTER_WAITING, "sw")), ("hset", (tick.MASTER_WAITING, "sw", NOW))]
+    assert calls == [
+        ("hdel", (tick.MASTER_WAITING, "sw")),
+        ("hset", (tick.MASTER_WAITING, "sw", NOW)),
+        ("hset", ("sw/master-refusals", MASTER, _kept("no slot for the master"))),
+        ("pexpire", ("sw/master-refusals", DAY)),
+    ]
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
@@ -309,7 +326,12 @@ def test_a_master_refused_for_room_withdraws_its_start(monkeypatch: pytest.Monke
     store = _store(calls)
     config = SimpleNamespace(state="running")
     assert masters._master("sw", config, store, _runtime(calls), NOW) == ["the master waits: no room"]
-    assert calls[1:] == [("drop_agent", ("sw", record.name)), ("detach", (store, "sw", record))]
+    assert calls[1:] == [
+        ("drop_agent", ("sw", record.name)),
+        ("detach", (store, "sw", record)),
+        ("hset", ("sw/master-refusals", MASTER, _kept("the master waits: no room"))),
+        ("pexpire", ("sw/master-refusals", DAY)),
+    ]
     assert starts == [("withdraw", (store, "sw", {"task": {"id": MASTER}}))]
 
 
@@ -403,6 +425,51 @@ def test_a_reported_master_is_working_and_clears_its_start(monkeypatch: pytest.M
         ("clear_handoff", ("sw", MASTER)),
         ("hdel", ("sw/launch-assignments", MASTER)),
     ]
+
+
+@pytest.mark.feature("forced-master-start")
+@pytest.mark.usefixtures("placed")
+def test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    starts, prepared = _placement(monkeypatch, calls, {})
+    asked: list[dict[str, bool]] = []
+    monkeypatch.setattr(tick.seat_spawn, "placed_elsewhere", lambda runtime, lane, task: asked.append(task) or "")
+    monkeypatch.setattr(tick.seat_spawn, "no_slot", lambda config, runtime, lane: "no session slot for the master")
+    config = SimpleNamespace(state="running")
+    said = masters._master("sw", config, _store(calls), _runtime(calls), NOW, forced=True)
+    assert said[0] == f"spawned master {_master_record().name}"
+    assert asked == [{"forced": True}]
+    assert [task.get("forced") for task in prepared] == [True]
+    assert [call[1][3].get("forced") for call in starts] == [True]
+
+
+@pytest.mark.feature("forced-master-start")
+@pytest.mark.usefixtures("placed")
+def test_an_unforced_tick_replays_a_forced_pending_start_forced(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = Calls()
+    starts, prepared = _placement(monkeypatch, calls, {"task": {"id": MASTER, "forced": True}})
+    asked: list[dict[str, bool]] = []
+    monkeypatch.setattr(tick.seat_spawn, "placed_elsewhere", lambda runtime, lane, task: asked.append(task) or "")
+    monkeypatch.setattr(tick.seat_spawn, "no_slot", lambda config, runtime, lane: "no session slot for the master")
+    config = SimpleNamespace(state="running")
+    said = masters._master("sw", config, _store(calls), _runtime(calls), NOW)
+    assert said[0] == f"spawned master {_master_record().name}"
+    assert (asked, [task["forced"] for task in prepared]) == ([{"forced": True}], [True])
+    assert [call[1][3]["forced"] for call in starts] == [True]
+
+
+@pytest.mark.feature("forced-master-start")
+def test_an_unforced_master_asks_placement_without_forced_and_waits_on_the_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = Calls()
+    _, prepared = _placement(monkeypatch, calls, {})
+    asked: list[dict[str, bool]] = []
+    monkeypatch.setattr(tick.seat_spawn, "placed_elsewhere", lambda runtime, lane, task: asked.append(task) or "")
+    monkeypatch.setattr(tick.seat_spawn, "no_slot", lambda config, runtime, lane: "no session slot for the master")
+    config = SimpleNamespace(state="running")
+    said = masters._master("sw", config, _store(calls), _runtime(calls), NOW)
+    assert (said, asked, prepared) == (["no session slot for the master"], [{}], [])
 
 
 @pytest.mark.feature("swarm-tick-master-placement")

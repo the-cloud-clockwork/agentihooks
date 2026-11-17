@@ -659,7 +659,7 @@ def test_the_tick_respawns_the_front_door_past_spent_retries(store, monkeypatch)
     monkeypatch.setattr(night_watch, "run", run_watch)
     tick._night_watch(SLUG, store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
     assert seen["respawn"] == ["launched"]
-    assert called == [{}]
+    assert called == [{"forced": True}]
     assert not store.redis.exists(store.key(SLUG, "master-start"))
 
 
@@ -803,6 +803,17 @@ def test_a_held_master_spawn_names_why_the_seat_stays_empty(store):
     until(store, rig, NOW, NOW + 10 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Why it stays empty: holding the master spawn: host full",)
+
+
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty(store):
+    from scripts.swarm import master_refusals
+
+    master_refusals.record(store, SLUG, "master", "no live hive takes master", NOW)
+    until(store, Rig(), NOW, NOW + 10 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    why = "master placement last refused 10 minutes ago, at 08:00 UTC: no live hive takes master"
+    assert finding.evidence == (f"Why it stays empty: {why}",)
 
 
 def test_a_refused_respawn_is_reported_with_its_cause(store):
