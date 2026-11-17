@@ -158,6 +158,16 @@ def _successor(setup: SimpleNamespace, shape: SimpleNamespace) -> Any:
     return successor
 
 
+def _ledger() -> Any:
+    """The tick test's fake ledger, recording each notice the master step posts for the fixture swarm with its swarm
+    name, where the shared fake asserts the tick test's own swarm name."""
+    from tests.swarm.test_tick import FakeLedger
+
+    ledger: Any = FakeLedger([])
+    ledger.notify = lambda slug, text: ledger.notes.append((slug, text))
+    return ledger
+
+
 @pytest.mark.feature("front-door-master-refill-deployed-shape")
 @pytest.mark.parametrize("login_week_left", WEEKS, ids=WEEK_IDS)
 def test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_the_forcing_window(
@@ -165,16 +175,16 @@ def test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_
 ) -> None:
     from scripts.swarm import controller, tick, tick_master
     from scripts.tick.steps import masters
-    from tests.swarm.test_tick import FakeLedger
 
     shape = _deployed(setup, monkeypatch, login_week_left)
+    ledger = _ledger()
     window = tick_master.down_minutes(os.environ)
     passes: list[list[str]] = []
     for minute in range(int(window) + 1):
         values = {
             "slug": shape.slug,
             "store": setup.store,
-            "ledger": FakeLedger([]),
+            "ledger": ledger,
             "runtime": shape.runtime,
             "now_ms": shape.now + minute * MINUTE,
             "config": setup.store.config(shape.slug),
@@ -185,6 +195,7 @@ def test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_
             break
     refused = controller.WORKSTATION.format(lane="master")
     assert [action for actions in passes for action in actions if action.startswith(refused)] == []
+    assert ledger.notes == []
     successor = _successor(setup, shape)
     assert passes[-1] == [f"spawned master {successor.name}"]
     assert len(passes) - 1 < window
