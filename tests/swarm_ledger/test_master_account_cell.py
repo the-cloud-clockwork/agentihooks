@@ -40,12 +40,19 @@ def test_the_master_row_carries_the_route_its_status_names() -> None:
 
 
 @pytest.mark.feature("balance-master-route")
-def test_the_master_row_shows_its_route_on_its_own_line_at_1920() -> None:
+@pytest.mark.parametrize(
+    ("account", "lines"),
+    [
+        ("nestor_coltatgmail_com", ["nestor_coltatgmail_com", "claude ai login", "root"]),
+        ("", ["claude ai login", "root"]),
+    ],
+)
+def test_the_master_row_shows_its_route_on_its_own_line_at_1920(account: str, lines: list[str]) -> None:
     master = {
         "name": "master@a1b2c3-0001",
         "lane": "master",
         "status": "working",
-        "account": "nestor_coltatgmail_com",
+        "account": account,
         "route": "claude ai login",
         "hive": "root",
     }
@@ -62,17 +69,18 @@ def test_the_master_row_shows_its_route_on_its_own_line_at_1920() -> None:
         show(page, shell_html(), ledger=ledger_state(doc), swarm=swarm)
         page.get_by_role("tab", name="Swarm", exact=False).click()
         row = page.locator("#swarm-agents tr").first
-        lines = row.locator(".sw-sub").all_inner_texts()
+        shown = row.locator(".sw-sub").all_inner_texts()
         clipped = row.locator(".sw-sub").evaluate_all("subs => subs.map((sub) => sub.scrollWidth > sub.clientWidth)")
         page.close()
-    assert lines == ["nestor_coltatgmail_com", "claude ai login", "root"]
-    assert clipped[1] is False
+    assert shown == lines
+    assert clipped[lines.index("claude ai login")] is False
 
 
 @pytest.mark.feature("balance-master-route")
 def test_the_master_name_cell_names_its_account_and_route() -> None:
+    source = page_source()
+    assert "(nameCell(a)), a.lane," in source
     assert (
-        'a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, '
-        'text: a.account }), ...(a.route ? [h("span", { class: "sw-sub", text: a.route })] : [])) : idCell(a.name)'
-        in page_source()
+        'const subs = [a.account && h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account }), '
+        'a.route && h("span", { class: "sw-sub", text: a.route })].filter(Boolean);' in source
     )
