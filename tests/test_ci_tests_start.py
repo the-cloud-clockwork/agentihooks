@@ -299,5 +299,7 @@ def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(monkeyp
 
     monkeypatch.setattr(ci_tests_start, "_api", api)
     monkeypatch.setattr(ci_tests_start.time, "sleep", sleep)
-    assert ci_tests_start.main([names.get(word, word) for word in shlex.split(line)[3:]]) == 0
+    words = shlex.split(line)
+    arguments = [names.get(word, word) for word in words[words.index("scripts.ci_tests_start") + 1 :]]
+    assert ci_tests_start.main(arguments) == 0
     assert now <= grade["timeout-minutes"] * 60
