@@ -2754,6 +2754,7 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
+    pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")

@@ -226,7 +226,7 @@ def _night_watch(slug: Any, store: Any, ledger: Any, runtime: Any, doc: Any, now
         if tick.master_start.read(store, slug).get("alerted"):
             store.redis.delete(store.key(slug, "master-start"))
         with tick.PLACING:
-            return tick._master(slug, store.config(slug), store, runtime, now_ms)
+            return tick._master(slug, store.config(slug), store, runtime, now_ms, forced=True)
 
     return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
 
@@ -370,13 +370,13 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
     return [f"adopted live master {name}"]
 
 
-def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
+def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool = False) -> Any:
     """Start the front door master under the swarm's master launch lock, so no other starter launches one at once."""
     with master_lock.held(store, slug, STARTER) as refused:
-        return [refused] if refused else _launch_master(slug, config, store, runtime, now_ms)
+        return [refused] if refused else _launch_master(slug, config, store, runtime, now_ms, forced)
 
 
-def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
+def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool) -> Any:
     store.redis.hdel(tick.MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == tick.MASTER]
@@ -387,13 +387,14 @@ def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any
     retired = store.key(slug, "retired-process")
     masters = [m for m in masters if tick.master_seats.is_lead(slug, m) and not store.redis.hexists(retired, m.name)]
     pending = tick.master_start.read(store, slug)
+    forced = forced or bool(pending.get("task", {}).get("forced"))
     if any(m.state != "finished" for m in masters) or tick.master_start.blocked(pending, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
-    if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {}):
+    if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {"forced": True} if forced else {}):
         return master_refusals.record(store, slug, tick.MASTER, refused, now_ms)
-    if refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER):
+    if not forced and (refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER)):
         store.redis.hset(tick.MASTER_WAITING, slug, now_ms)
         return master_refusals.record(store, slug, tick.MASTER, refused, now_ms)
 
@@ -419,6 +420,7 @@ def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any
         from scripts.swarm import master_launch
 
         task = master_launch._filled(tick.master_move.pinned(store, slug, task, transfer), config)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType]
+        task = {**task, "forced": True} if forced else task  # pyright: ignore[reportUnknownVariableType]
         tick.master_start.begin(store, slug, record.name, task, now_ms)
         tick.affinity.handed_off(store, slug)
         launched.update(task)  # pyright: ignore[reportUnknownMemberType]
