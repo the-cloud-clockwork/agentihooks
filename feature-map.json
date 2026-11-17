@@ -5741,6 +5741,22 @@
       ]
     },
     {
+      "id": "forced-master-drained-slots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-drained-accounts",
+      "behaviour": "A forced front door master on a hive with no Claude master login and no native login is placed on a subscription slot even when no Claude account has a free seat in the capacity rows, drained at a quota floor or full, and an account drained at the worker week floor gets its launch order at the slot cap its hive advertises; an account with a free seat is still taken first, a row of another harness never opens a claude slot, and an unforced master still waits with no claude slot.",
+      "seam": "HiveLaunch master selection account set over the fleet capacity rows, through send_order",
+      "rules": [
+        "master-slots-from-free-seats-alone"
+      ],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_takes_a_slot_without_a_free_seat_on_a_hive_without_a_login",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_takes_an_account_with_a_free_seat_before_a_drained_one",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_never_takes_a_claude_slot_on_another_harness_row",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_on_a_drained_account_gets_its_launch_order"
+      ]
+    },
+    {
       "id": "hive-front-door-master-floor",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",

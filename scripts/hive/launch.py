@@ -492,7 +492,8 @@ class HiveLaunch:
     ) -> Selection | placement.Wait:
         """Place the master ``task`` on a hive, refusing every Claude account closed for a master, at the master floor
         or for a reason the worker drain floor does not explain, unless the task is a forced start, and every
-        ``harness:account`` key in ``refused`` whose reservation already turned this launch away."""
+        ``harness:account`` key in ``refused`` whose reservation already turned this launch away. A slot is taken on an
+        account with a free seat; a forced start takes any Claude account's slot when no account has one."""
         front = front_door.holds(self.slug, task.get("seat", ""))
         closed = frozenset(
             placement.account_key(row.name)
@@ -502,6 +503,8 @@ class HiveLaunch:
         accounts = {
             placement.account_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)
         }
+        if not accounts and task.get("forced"):
+            accounts = {placement.account_key(row.name): row for row in rows if row.harness == "claude"}
         available = [
             {**hive, "slots": [slot for slot in hive["slots"] if placement.account_key(slot["account"]) in accounts]}
             for hive in _master_logins(hives, front)
