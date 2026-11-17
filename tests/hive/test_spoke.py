@@ -405,6 +405,100 @@ def test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer(rig:
     assert rig.tasks.request.call_count == 2
 
 
+@pytest.mark.feature("hub-admission-unanswered-asks-again")
+def test_an_unanswered_admit_asks_the_hub_again_and_launches_after_the_hub_withdrew_the_offer(
+    rig: SimpleNamespace,
+) -> None:
+    from unittest.mock import call
+
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("request to 'slots.rig.hive-a' timed out"), rig.request]
+
+    assert rig.spoke.poll() == "retry"
+    assert claim(rig) == {"owner": "hive-a", "state": "asked"}
+    assert rig.queue.withdraw(lambda event: True) == 1
+
+    assert rig.spoke.poll() == "started"
+
+    assert rig.tasks.request.call_args_list == [call(rig.event), call(rig.event)]
+    rig.tasks.reopen.assert_not_called()
+    rig.runtime.spawn.assert_called_once()
+    rig.tasks.launched.assert_called_once()
+    assert claim(rig)["state"] == "started"
+    assert rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value == b"{}"
+
+
+@pytest.mark.feature("hub-admission-unanswered-asks-again")
+@pytest.mark.parametrize("again", ["unanswered", "held"])
+def test_an_admit_asked_again_without_an_answer_stays_asked_and_takes_no_new_work(
+    rig: SimpleNamespace, again: str
+) -> None:
+    from scripts.hive import admission
+
+    later = {
+        "unanswered": admission.Unanswered("timed out"),
+        "held": admission.Held("another admission for the hive is in progress"),
+    }[again]
+    rig.tasks.request.side_effect = [admission.Unanswered("timed out"), later, rig.request]
+    assert rig.spoke.poll() == "retry"
+    rig.queue.take = Mock(wraps=rig.queue.take)
+
+    assert rig.spoke.poll() == "busy"
+
+    rig.queue.take.assert_not_called()
+    assert claim(rig) == {"owner": "hive-a", "state": "asked"}
+    assert rig.spoke.poll() == "started"
+    rig.tasks.reopen.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-unanswered-asks-again")
+def test_an_admit_asked_again_that_the_hub_refuses_is_withdrawn_and_its_offer_terminated(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("timed out"), None]
+    assert rig.spoke.poll() == "retry"
+
+    assert rig.spoke.poll() == "withdrawn"
+
+    assert claim(rig) == {"state": "withdrawn"}
+    assert rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value == b"{}"
+    rig.runtime.spawn.assert_not_called()
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "withdrawn"
+    assert rig.queue.take(0) is None
+
+
+@pytest.mark.feature("hub-admission-unanswered-asks-again")
+def test_an_admit_asked_again_whose_launch_fails_reopens_the_offer(rig: SimpleNamespace) -> None:
+    from scripts.hive import admission
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.tasks.request.side_effect = [admission.Unanswered("timed out"), rig.request]
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    assert rig.spoke.poll() == "retry"
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.reopen.assert_called_once_with(rig.event)
+    rig.tasks.failed.assert_not_called()
+    assert claim(rig) == {"state": "ready"}
+    assert rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value == b"{}"
+
+
+@pytest.mark.feature("hub-admission-unanswered-asks-again")
+def test_a_pending_claim_whose_ask_is_still_running_is_not_asked_again(rig: SimpleNamespace) -> None:
+    pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"})
+    before = pending.get(rig.spoke._pending_key)
+
+    assert rig.spoke.poll() == "busy"
+
+    rig.tasks.request.assert_not_called()
+    assert pending.get(rig.spoke._pending_key) == before
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
 def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):
