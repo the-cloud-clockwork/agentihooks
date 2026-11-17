@@ -19,6 +19,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+from threading import Lock, Thread
 from typing import Any, cast
 
 from scripts.swarm import naming
@@ -59,6 +60,7 @@ FIXERS = "panic-fixers"
 FIXERS_MS = 15 * 60 * 1000
 DONE = "done"
 Ports = Callable[[str], SourceControl]
+SWEEP = Lock()
 
 
 @dataclass(frozen=True)
@@ -336,16 +338,45 @@ def due_cancel(store: RedisStore, now_ms: int) -> bool:
     return bool(_client(store).set(_key("cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
 
 
-def tick_pass(store: RedisStore, ok: bool, now_ms: int, ports: Ports = port) -> list[str]:
-    """Counts the pass, runs the alarm and, while panic holds, cancels the fleet's other CI runs once a minute, sparing
-    the registered fixes and the fixer branches every swarm recorded."""
+def _swept(fixes: Iterable[str], ports: Ports, store: RedisStore) -> list[str]:
+    """Return the lines of one cancel sweep sparing ``fixes`` and the fixer branches every swarm recorded: each run
+    it cancelled, or why it failed."""
+    try:
+        return [f"panic cancelled {line}" for line in cancel_runs((*fixes, *fixers(store)), REPOS, ports, store)]
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
+        return [f"panic cancel failed: {error}"]
+
+
+def _sweep(fixes: Iterable[str], ports: Ports, store: RedisStore, report: Callable[[str], None]) -> None:
+    """Report each line of one cancel sweep, then free SWEEP, which tick_pass took for it."""
+    try:
+        for line in _swept(fixes, ports, store):
+            report(line)
+    finally:
+        SWEEP.release()
+
+
+def tick_pass(
+    store: RedisStore, ok: bool, now_ms: int, report: Callable[[str], None], ports: Ports = port
+) -> list[str]:
+    """Counts the pass and runs the alarm and, while panic holds, starts the cancel sweep once a minute on its own
+    thread unless an earlier sweep still runs, returning without waiting for it; the sweep reports each run it
+    cancelled, or why it failed, through ``report``."""
     count_pass(store, ok, now_ms)
     actions = [changed] if (changed := alarm(store, now_ms)) else []
     current = state(store)
-    if current is None or not due_cancel(store, now_ms):
+    if current is None or not due_cancel(store, now_ms) or not SWEEP.acquire(blocking=False):
         return actions
+    thread = Thread(target=_sweep, args=(current.fixes, ports, store, report), name="panic-sweep", daemon=True)
     try:
-        cancelled = cancel_runs((*current.fixes, *fixers(store)), REPOS, ports, store)
-    except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
+        thread.start()
+    except RuntimeError as error:
+        SWEEP.release()
         return [*actions, f"panic cancel failed: {error}"]
-    return [*actions, *(f"panic cancelled {line}" for line in cancelled)]
+    return actions
+
+
+def settle() -> None:
+    """Wait until no cancel sweep runs, so a command process exits only once the sweep its pass started reported."""
+    with SWEEP:
+        pass

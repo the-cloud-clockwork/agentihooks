@@ -4221,7 +4221,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
-      - name: Install dependencies
+      - &mutation-planning-install
+        name: Install dependencies
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
@@ -4596,13 +4597,7 @@ jobs:
           mkdir -p .workflow-revision
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
-      - name: Install dependencies
-        env:
-          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
-        run: |
-          locked=.
-          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
-          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - *mutation-planning-install
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.selection == 'true'
@@ -4837,7 +4832,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v5
@@ -4852,7 +4847,7 @@ jobs:
 
       - name: Take the helper scripts from the workflow revision
         run: |
-          git fetch --no-tags origin "$GITHUB_SHA"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
@@ -4861,13 +4856,7 @@ jobs:
           mkdir -p .workflow-revision
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
-      - name: Install dependencies
-        env:
-          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
-        run: |
-          locked=.
-          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
-          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - *mutation-planning-install
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4

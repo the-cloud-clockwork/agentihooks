@@ -29,6 +29,7 @@ from scripts.swarm import (
     ledger_probe,
     lifecycle,
     live_binding,
+    master_critical,
     outage,
     overlays,
     quota_view,
@@ -108,7 +109,7 @@ def findings(
         passing = checks.cached_green(store.redis, store.key(slug, "checks"))
     else:
         pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
-    placement_waits.prune(store, slug, tasks)
+    placement_waits.prune(store, slug, tasks, now_ms())
     events = [
         *events,
         *(
@@ -153,6 +154,7 @@ def findings(
         + spawn_stall.findings(store, slug)
         + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
+        + master_critical.findings(store, slug, now_ms())
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
@@ -360,6 +362,7 @@ def status_report(
             for a in visible
         ],
         "outages": outage.open_records(slug),
+        "master_critical": master_critical.read(store, slug),
         "outbox": outbox.status(),
         "lab": lab_capacity.status(store, slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
