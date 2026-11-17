@@ -1,6 +1,7 @@
 import json
 import subprocess
 import threading
+from collections.abc import Iterator
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,13 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float, dict[str,
     calls: list[tuple[str, float, dict[str, str]]] = []
     monkeypatch.setattr(otel, "add_counter", lambda name, value, attrs: calls.append((name, value, attrs)))
     return calls
+
+
+@pytest.fixture(autouse=True)
+def no_sweep_left() -> Iterator[None]:
+    yield
+    with panic.SWEEP:
+        pass
 
 
 class Runs:
@@ -102,6 +110,13 @@ def _passes(store: RedisStore, ok: int, bad: int, at: int) -> None:
         panic.count_pass(store, True, at)
     for _ in range(bad):
         panic.count_pass(store, False, at)
+
+
+def _tick(store: RedisStore, ok: bool, now_ms: int, ports: panic.Ports) -> list[str]:
+    reported: list[str] = []
+    actions = panic.tick_pass(store, ok, now_ms, reported.append, ports)
+    with panic.SWEEP:
+        return [*actions, *reported]
 
 
 def test_an_error_lands_on_the_otel_counter_by_swarm_and_category(store, counted):
@@ -183,7 +198,7 @@ def test_a_tick_pass_records_whether_any_step_failed(store, counted, monkeypatch
     monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
     seen: list[tuple[bool, int]] = []
-    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append((ok, now)) or ["x"])
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now, report: seen.append((ok, now)) or ["x"])
     from scripts.swarm import timing
 
     with spawn_stall.watch(store, SLUG, None, lambda: 7_000, None):
@@ -467,7 +482,7 @@ def test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
     rows = [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]
     runs = Runs({repo: rows for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [merged, opened], 0)
-    sweeps = [panic.tick_pass(store, True, at, runs) for at in (1_000, 1_000 + panic.CANCEL_EVERY_MS)]
+    sweeps = [_tick(store, True, at, runs) for at in (1_000, 1_000 + panic.CANCEL_EVERY_MS)]
     assert reads == [merged, opened, opened]
     assert sweeps == [[f"panic cancelled {repo} run 2 on feature" for repo in panic.REPOS]] * 2
     assert panic.fix_state(store, merged) == _fix(merged, True, commit)
@@ -490,11 +505,11 @@ def test_a_merged_fix_is_read_again_after_panic_releases(
     monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
     panic.engage(store, "pressed", False, [FIX], 0)
     for at in (1_000, 2_000):
-        panic.tick_pass(store, True, at, Runs({}))
+        _tick(store, True, at, Runs({}))
     assert reads == [FIX]
     assert panic.release(store, 2_000)
     panic.engage(store, "pressed", False, [FIX], 3_000)
-    panic.tick_pass(store, True, 3_000, Runs({}))
+    _tick(store, True, 3_000, Runs({}))
     assert reads == [FIX, FIX]
 
 
@@ -698,15 +713,15 @@ def test_port_answers_the_repository_through_the_source_control_adapter(
 def test_tick_pass_cancels_once_a_minute_while_panic_holds(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [], 0)
-    first = panic.tick_pass(store, True, 1_000, runs)
+    first = _tick(store, True, 1_000, runs)
     assert first == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
-    assert panic.tick_pass(store, True, 1_000 + panic.CANCEL_EVERY_MS - 1, runs) == []
+    assert _tick(store, True, 1_000 + panic.CANCEL_EVERY_MS - 1, runs) == []
     assert len(runs.cancelled()) == len(panic.REPOS)
 
 
 def test_tick_pass_without_panic_cancels_nothing(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
-    assert panic.tick_pass(store, True, 1_000, runs) == []
+    assert _tick(store, True, 1_000, runs) == []
     assert runs.calls() == []
     assert panic.level(store, 1_000) == 1.0
 
@@ -714,14 +729,14 @@ def test_tick_pass_without_panic_cancels_nothing(store, counted):
 def test_tick_pass_engages_and_cancels_in_one_pass(store, counted):
     _errors(store, panic.THRESHOLD, 1_000)
     runs = Runs({})
-    assert panic.tick_pass(store, False, 1_000, runs) == [f"panic engaged: {panic.THRESHOLD} errors in the last hour"]
+    assert _tick(store, False, 1_000, runs) == [f"panic engaged: {panic.THRESHOLD} errors in the last hour"]
     assert panic.level(store, 1_000) == 0.0
 
 
 def test_tick_pass_reports_a_failed_cancel(store, counted):
     panic.engage(store, "pressed", False, [], 0)
 
-    found = panic.tick_pass(store, True, 1_000, lambda repository: Broken())
+    found = _tick(store, True, 1_000, lambda repository: Broken())
     assert len(found) == 1
     assert found[0].startswith("panic cancel failed: ")
 
@@ -736,9 +751,7 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
         raise SwarmError(f"{refused}: boom")
 
     monkeypatch.setattr(stack, "change", unreadable)
-    assert panic.tick_pass(store, True, 1_000, Runs({})) == [
-        f"panic cancel failed: cannot read pull request {FIX}: boom"
-    ]
+    assert _tick(store, True, 1_000, Runs({})) == [f"panic cancel failed: cannot read pull request {FIX}: boom"]
 
 
 @pytest.mark.parametrize(
@@ -770,7 +783,7 @@ def test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository(
     asked = _branches(monkeypatch, {FIX: "pr-branch"})
     runs = Runs({repo: [_row(1, "busy"), _row(2, "fix-branch"), _row(3, "pr-branch")] for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [FIX, BRANCH_FIX], 0)
-    assert panic.tick_pass(store, True, 1_000, runs) == [
+    assert _tick(store, True, 1_000, runs) == [
         "panic cancelled the-cloud-clockwork/agentihooks run 1 on busy",
         "panic cancelled the-cloud-clockwork/agentihooks-bundle run 1 on busy",
         "panic cancelled the-cloud-clockwork/agentihooks-bundle run 2 on fix-branch",
@@ -1749,7 +1762,7 @@ def _quiet_watch(monkeypatch: pytest.MonkeyPatch, seen: list[bool]) -> None:
     monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
-    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append(ok) or [])
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now, report: seen.append(ok) or [])
 
 
 def test_a_pending_hive_launch_and_a_full_reservation_fail_no_step(
