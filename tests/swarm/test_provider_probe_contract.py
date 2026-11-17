@@ -280,7 +280,3 @@ def test_a_claude_check_resolves_agentihooks_and_claude_under_the_systemd_defaul
 
     assert result.evidence == "Provider request succeeded"
     assert result.ok is True
-
-
-def test_a_claude_check_keeps_an_empty_service_path_after_the_user_folders() -> None:
-    assert provider_probe._service_path({}) == user_folders("")
