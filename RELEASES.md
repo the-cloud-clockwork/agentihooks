@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.965 · 2026-11-17
+
+### 2026-11-17 · bedb09d6bbc1 · #11678 · @nestorcolt
+
+**Master seat refill and claude.ai login launch proven by deployed-shape tests**
+
+This change adds deployed-shape tests that catch the master seat refill and claude.ai login outage seen on 17 November, when the front door seat sat empty for hours despite forty green feature-map entries. It makes night watch enforcement the default so an empty seat respawns and alerts rather than just logging, and adds coverage for the login launch chain and refill through the pod controller's fleet accounts and quota rows. These guards would have failed on the day of the incident, closing the gap that let the underlying bug (fixed separately) go undetected.
+
+### 2026-11-17 · 96a53d47501c · #11690 · @nestorcolt
+
+**No service starts agentihooks by bare name: bundle refresh, linked profiles, claim watch**
+
+This change fixes four places that launched the agentihooks tool by its bare command name—hive's bundle refresh, linked profiles install, claim watch in the agent hook, and the quota prober's Claude check—which silently failed under systemd's default PATH, the same defect that caused the earlier master outage. They now invoke it as `sys.executable -P -m scripts.install ...`, matching the pattern already used elsewhere, so these services resolve the command reliably regardless of PATH. The prober's Claude check also now prioritizes the user bin and interpreter folders on PATH. A Semgrep rule guards against this bare-name pattern reappearing.
+
 ## v2.17.963 · 2026-11-17
 
 ### 2026-11-17 · 95405e26e12c · #11708 · @agenticore-app
