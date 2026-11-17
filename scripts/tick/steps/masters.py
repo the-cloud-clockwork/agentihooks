@@ -343,7 +343,10 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
     record = store.execution_occupants(slug).get(seat)
     if not record or record.name != name:
         record = AgentRecord(name, tick.MASTER, tick.MASTER, started_at=now_ms, seat=seat)  # pyright: ignore[reportUnknownArgumentType]
-    store.put_agent(slug, tick.placed_record(record, runtime.recover(name)))
+    adopted = tick.placed_record(record, runtime.recover(name))
+    store.put_agent(
+        slug, replace(adopted, account=record.account, placement=record.placement, route_kind=record.route_kind)
+    )
     for agent in agents:
         if agent.name not in live and agent.state != "finished":
             store.drop_agent(slug, agent.name)

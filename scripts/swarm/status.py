@@ -329,6 +329,7 @@ def status_report(
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
     visible = live_agents(store.agents(slug), runtime or HerdrRuntime())
+    held = front_door.held_seats(store, slug)
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
@@ -347,7 +348,7 @@ def status_report(
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
-                "route": front_door.master_route(slug, a, []),
+                "route": front_door.master_route(slug, a, held),
                 "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [

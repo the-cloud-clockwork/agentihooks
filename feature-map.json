@@ -20,7 +20,8 @@
       "seam": "tick masters recover master and take_master.master_record",
       "tests": [
         "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_the_route_account_and_placement_of_the_record_it_adopts",
-        "tests/swarm/test_take_master.py::test_take_master_records_the_route_its_process_environment_names"
+        "tests/swarm/test_take_master.py::test_take_master_records_the_route_its_process_environment_names",
+        "tests/context/test_account_sessions.py::test_the_process_route_comes_from_its_variable_names"
       ]
     },
     {

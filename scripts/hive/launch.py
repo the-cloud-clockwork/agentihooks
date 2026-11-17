@@ -901,6 +901,7 @@ class HiveLaunch:
         live = replace(
             agent,
             account=account,
+            placement=ack.execution.get("placement", agent.placement),
             runtime_target=ack.target,
             state="working",
             pane_id=ack.execution.get("pane_id", agent.pane_id),
