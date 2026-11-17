@@ -5255,7 +5255,7 @@ def _load_claude_runtime_env(*, shell_wins: bool = False) -> None:
     if env_file.is_file():
         from dotenv import dotenv_values
 
-        shell = set(os.environ) if shell_wins else set()
+        shell = set(os.environ) if shell_wins else runtime_env.shell_kept(os.environ)
         companions = [f for f in sorted(env_file.parent.glob("*.env")) if f != env_file]
         for f in [env_file, *companions]:
             for k, v in dotenv_values(f).items():
