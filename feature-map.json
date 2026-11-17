@@ -6336,6 +6336,17 @@
       ]
     },
     {
+      "id": "front-door-launch-chain",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: the front door master launch the swarm runtime hands to init-agent reaches claude through the launcher script, the agentihooks claude entry and the claude ai login route with Remote Control on and no token variable in its environment, and the runtime records Remote Control on; an expired login reaches claude on the subscription token fallback without Remote Control, and the runtime records and reports that fallback.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.spawn through scripts.init_agent.main, scripts.install.cmd_claude and scripts.routing.claude_ai.launch_claude",
+      "tests": [
+        "tests/swarm/test_front_door_launch_chain.py::test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_control_and_no_token",
+        "tests/swarm/test_front_door_launch_chain.py::test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it"
+      ]
+    },
+    {
       "id": "remote-control-token-fallback-reason",
       "origin": "inventory",
       "behaviour": "When a front door master asks for its native claude.ai login but the login chain lands on the subscription token fallback, its recorded Remote Control decision downgrades to off with reason subscription token fallback instead of staying on, both for a fresh launch and a resume, and a hive worker's acknowledgement carries the landed remote_control decision back to the controller's execution record.",
