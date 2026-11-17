@@ -71,12 +71,14 @@ def _claude_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swarm: str) 
 def test_agentihooks_claude_starts_a_proof_master_on_the_scratch_redis(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts import runtime_env
     from scripts.swarm import store
 
     started = _claude_launch(tmp_path, monkeypatch, PROOF)
     assert started["AGENTIHOOKS_SWARM_REDIS_URL"] == SCRATCH
     assert store.redis_url(started) == SCRATCH
     assert started[THRESHOLD] == "99"
+    assert runtime_env.shell_kept(started) == {"AGENTIHOOKS_SWARM_REDIS_URL"}
 
 
 @pytest.mark.feature("proof-master-claude-launch-scratch-redis")
