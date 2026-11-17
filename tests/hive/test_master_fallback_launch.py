@@ -502,6 +502,8 @@ def test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason(
     setup.herdr._quota_accounts = [
         Account("claude", "account", "room", 0, 80, 80, 6),
         Account("claude", "login", "CLOSED", 0, 80, week, 0),
+        Account("claude", "spare", "OPEN", 0, 80, 1, 6),
+        Account("codex", "spare", "CLOSED", 0, None, 1, 0),
     ]
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
         f"no hive for master advertises a claude slot; login is at the master floor with {shown}% of its week left"
@@ -527,6 +529,35 @@ def test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
         "no hive for master advertises a claude slot"
     )
+
+
+@pytest.mark.feature("hive-front-door-master-floor")
+@pytest.mark.parametrize(
+    ("spare", "expected"),
+    [
+        (True, ("remote", "account", "subscription")),
+        (False, "no hive for master advertises a claude slot"),
+    ],
+)
+def test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, spare: bool, expected: tuple[str, str, str] | str
+) -> None:
+    from scripts.hive import placement
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    task = {**master(setup), "seat": "master-2@fixture"}
+    master_login_hive(setup)
+    drained = Account("claude", "login", "CLOSED", 0, 80, 7, 0)
+    setup.herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6), drained] if spare else [drained]
+    selected = setup.launcher.select(setup.config, "master", task)
+    placed = (
+        selected.reason
+        if isinstance(selected, placement.Wait)
+        else (selected.hive, selected.account.name, selected.route_kind)
+    )
+    assert placed == expected
 
 
 @pytest.mark.parametrize("login", [{}, {"claude": ""}])

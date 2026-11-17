@@ -3,10 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A master selection must not take its closed accounts from the capacity row state alone. The fleet rows close an
-      account at the worker drain floor, ten percent of the week, so the front door master lost its hive master login
-      for hours while that login still had seven percent of its week left. Close an account for a master only at the
-      master floor, the primary login reserve, or for a closure the worker drain floor does not explain.
+      A master selection must not take its closed accounts from the capacity row state alone, because the fleet rows
+      close an account at the worker drain floor. Close a Claude login for a master only at the master floor, the
+      primary login reserve, or for a closure the worker drain floor does not explain.
     paths:
       include:
         - /scripts/hive/
