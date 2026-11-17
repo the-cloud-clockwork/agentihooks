@@ -109,7 +109,7 @@ def test_each_load_pair_job_allows_as_long_as_the_hierarchy_job_that_runs_the_sa
     assert load["timeout-minutes"] >= hierarchy["timeout-minutes"]
 
 
-def test_both_pair_jobs_install_with_the_pretend_version_and_never_ask_git() -> None:
+def test_both_hierarchy_cpu_installs_pin_the_pretend_version() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]
     for name in ("load", "hierarchy"):
         [install] = [
