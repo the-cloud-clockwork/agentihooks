@@ -90,7 +90,7 @@ class SeatRegistry:
         pipe.watch(self.key(address))
         return _occupancy(pipe.hgetall(self.key(address)))
 
-    def occupant(self, address):
+    def occupant(self, address: str) -> Occupancy:
         return _occupancy(self.redis.hgetall(self.key(address)))
 
     def seat_of(self, name: str, reader: Any = None) -> str:

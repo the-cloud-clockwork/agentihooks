@@ -47,6 +47,7 @@ RESUMED = (
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
 LEAD_STARTING = ("starting", SUSPECT)
+OCCUPIED = "the front door seat {seat} is held by the live {name}, so no new master takes it"
 STARTING = (
     "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
     "other master starts; "
@@ -272,13 +273,17 @@ def _start_fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[
 
     tick_master.finish_dead_starting(store, slug, runtime, at)
     front = _front_doors(store, slug, live)
-    leads = front or _starting_leads(store, slug)
+    starting = _starting_leads(store, slug)
+    leads = front or starting
     if leads and not replace_live:
         count = master_seats.MasterSeats(store.redis).count(slug)
         if _free_seat(store, slug, live) > count:
             raise SwarmError(STARTING.format(name=leads[0].name, state=leads[0].state, count=count))
         return _beside(store, slug, runtime, at, live)
-    take_master.retired(store, slug, runtime, front)
+    take_master.retired(store, slug, runtime, front + [a for a in starting if a.name not in live])
+    seat = seat_address(slug, MASTER)
+    if (occupant := store.seats.occupant(seat).occupant) in runtime.live_names():
+        raise SwarmError(OCCUPIED.format(seat=seat, name=occupant))
     return _new(store, slug, runtime, at)
 
 
