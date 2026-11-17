@@ -540,7 +540,8 @@ class _Wrapper:
         return True
 
     def _read(self) -> bool:
-        """End the pass when the ledger is binned or gone, else read its pass state and clear the halt marks."""
+        """End the pass when the ledger is binned or gone, else read its pass state, record its open fixer branches for
+        the panic sweep and clear the halt marks."""
         store, slug, ledger = self.store, self.slug, self.ledger
         if timing.call(ledger.binned, slug):
             self.ended = _bin_stop(store, slug, ledger, self.state["runtime"])
@@ -553,6 +554,7 @@ class _Wrapper:
                 [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
             )
             return False
+        panic.keep_fixers(store, slug, self.box["doc"]["tasks"])
         store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
         return True
 
@@ -1846,14 +1848,15 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     """The panic button: on, pressed by the master or the operator, stops agent starts and cancels CI runs but the
-    checked fixes, off clears it once stable."""
+    checked fixes and the fixer branches every swarm recorded, off clears it once stable."""
     now = now_ms()
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
             panic.check_fix(fix)
         found = panic.engage(store, args.slug, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port, panic.owner(store, args.slug))
+        owns = panic.owner(store, args.slug)
+        cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port, owns)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":

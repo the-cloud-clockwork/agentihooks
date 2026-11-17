@@ -1,7 +1,7 @@
 """Swarm panic mode: each swarm's error counter over the last hour, the alarm that engages that swarm's panic at
-THRESHOLD errors, the CI cancellation that frees runners from the swarm's own runs for the named fix, and the
-business-as-usual level that releases it. A panic holds only its swarm; the legacy fleet record reads as panic for the
-swarm its reason names.
+THRESHOLD errors, the CI cancellation that frees runners from the swarm's own runs for the named fixes and every
+swarm's open fixer tasks, and the business-as-usual level that releases it. A panic holds only its swarm; the legacy
+fleet record reads as panic for the swarm its reason names.
 
 THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet, measured
 when one swarm ran; each swarm's own count is held to it.
@@ -21,8 +21,9 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from scripts.swarm import naming
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
@@ -56,6 +57,10 @@ ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
 MERGED_FIXES = "merged-fixes"
 LEGACY_REASON = re.compile(r"pressed on swarm (\S+)")
+FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+-fix-[0-9]+")
+FIXERS = "panic-fixers"
+FIXERS_MS = 15 * 60 * 1000
+DONE = "done"
 Ports = Callable[[str], SourceControl]
 
 
@@ -267,6 +272,41 @@ def check_fix(fix: str) -> None:
         raise SwarmError(f"{fix} names {named}, which panic never spares")
 
 
+def fixer_links(tasks: Iterable[dict[str, Any]]) -> list[str]:
+    """Return, in every panic repository, the branch links of each open promotion fixer task (promo-RUN-N) and
+    troubleshooting crew fixer task (crew-STAMP-fix-N) in ``tasks``: the branch the task records, its repository
+    branches and the worktree branch of the agent claiming it, which exists from the claim on, before any push; a
+    protected branch is never named."""
+    from scripts.swarm.stack import GITHUB
+
+    branches: set[str] = set()
+    for row in tasks:
+        if row.get("state") == DONE or FIXER_TASK.fullmatch(str(row.get("id"))) is None:
+            continue
+        recorded: dict[str, str] = row.get("repository_branches") or {}
+        branches |= {row.get("branch") or "", *recorded.values(), naming.plain(row.get("claimed_by") or "")}
+    return sorted(f"{GITHUB}{repo}/tree/{branch}" for repo in REPOS for branch in branches - {"", *PROTECTED})
+
+
+def keep_fixers(store: RedisStore, slug: str, tasks: Iterable[dict[str, Any]]) -> None:
+    """Records the fixer branch links ``fixer_links`` names in the tasks of swarm ``slug`` for every later cancel
+    sweep, and drops the record once there are none, so a swarm without an open fixer keeps no record; a record no
+    pass writes again lapses after FIXERS_MS, so a stopped or binned swarm stops sparing its branches."""
+    key, links = store.key(slug, FIXERS), fixer_links(tasks)
+    if links:
+        _client(store).set(key, json.dumps(links), px=FIXERS_MS)
+    else:
+        _client(store).delete(key)
+
+
+def fixers(store: RedisStore) -> set[str]:
+    """Return the fixer branch links the last tick pass of every swarm recorded."""
+    found: set[str] = set()
+    for slug in cast(list[str], store.slugs()):  # pragma: no mutate
+        found.update(json.loads(_client(store).get(store.key(slug, FIXERS)) or "[]"))
+    return found
+
+
 def _fix_triggered(row: RepositoryRun, branches: set[str]) -> bool:
     """Return whether the run is a workflow run event run whose run-name names, after its last " for ", one of the
     fix branches as the head branch of the run that triggered it."""
@@ -351,14 +391,14 @@ def due_cancel(store: RedisStore, slug: str, now_ms: int) -> bool:
 
 def tick_pass(store: RedisStore, slug: str, ok: bool, now_ms: int, ports: Ports = port) -> list[str]:
     """Counts the swarm's pass, runs its alarm and, while its panic holds, cancels its agents' other CI runs once a
-    minute."""
+    minute, sparing the registered fixes and the fixer branches every swarm recorded."""
     count_pass(store, slug, ok, now_ms)
     actions = [changed] if (changed := alarm(store, slug, now_ms)) else []
     current = state(store, slug)
     if current is None or not due_cancel(store, slug, now_ms):
         return actions
     try:
-        cancelled = cancel_runs(current.fixes, REPOS, ports, owner(store, slug), (store, slug))
+        cancelled = cancel_runs((*current.fixes, *fixers(store)), REPOS, ports, owner(store, slug), (store, slug))
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]

@@ -117,7 +117,7 @@ def space(repo, code, slug=""):
     return slug if PROOF_RE.fullmatch(slug) else f"{repo_name(repo)}-{code}"
 
 
-def plain(name):
+def plain(name: str) -> str:
     """The name for places that refuse an at sign: git branches, worktree folders and herdr agent names."""
     return name.replace("@", "-")
 
