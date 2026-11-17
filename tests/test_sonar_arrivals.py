@@ -335,7 +335,9 @@ def test_a_fetched_artifact_is_unpacked_into_its_own_folder(
     results: tuple[str, list[tuple[str, str, dict[str, object]]]], tmp_path: Path
 ) -> None:
     base, calls = results
-    folder = tmp_path / "coverage-3.12-1"
+    out = tmp_path / "artifacts"
+    out.mkdir()
+    folder = out / "coverage-3.12-1"
     assert arrivals.Results(base, _token("run-1", "job-2")).fetch("coverage-3.12-1", folder) is True
     assert (folder / ".coverage").read_text() == "database"
     assert (folder / "reused-coverage/.coverage").read_text() == "reused"
@@ -344,15 +346,17 @@ def test_a_fetched_artifact_is_unpacked_into_its_own_folder(
         "workflow_job_run_backend_id": "job-2",
         "name": "coverage-3.12-1",
     }
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["coverage-3.12-1"]
+    assert sorted(path.name for path in out.iterdir()) == ["coverage-3.12-1"]
 
 
 def test_an_artifact_the_service_does_not_sign_is_not_fetched(
     results: tuple[str, list[tuple[str, str, dict[str, object]]]], tmp_path: Path
 ) -> None:
     base, _ = results
-    assert arrivals.Results(base, _token("run-1", "job-2")).fetch("missing", tmp_path / "missing") is False
-    assert list(tmp_path.iterdir()) == []
+    out = tmp_path / "artifacts"
+    out.mkdir()
+    assert arrivals.Results(base, _token("run-1", "job-2")).fetch("missing", out / "missing") is False
+    assert list(out.iterdir()) == []
 
 
 def test_an_unreachable_service_answers_no_listing() -> None:

@@ -66,7 +66,7 @@ class Timer(Protocol):
         ...
 
 
-class Wall:
+class Wall(Timer):
     """The monotonic clock and a real sleep."""
 
     def now(self) -> float:

@@ -119,7 +119,7 @@ scan database for that build would lose those associations.
 ### Taking coverage as shards land
 
 The `sonar` job needs only `select`, `reuse`, `admission` and `lab-verdict`, so it
-starts beside the unit shards on an `anton-oss-light` runner. Its runner wait,
+starts beside the unit shards on a runner of class `light`. Its runner wait,
 checkout and carried coverage finish while the shards run. A light runner
 requests a quarter CPU, so the waiting job keeps no standard runner from the
 shards. `Take each shard's coverage as it lands` runs
