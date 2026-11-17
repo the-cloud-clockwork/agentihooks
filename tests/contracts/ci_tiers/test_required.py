@@ -127,6 +127,36 @@ def test_a_pull_request_skips_sonar_only_when_selection_marks_it_test_only(selec
     assert (outcome.returncode == 0) == passes, outcome.stdout + outcome.stderr
 
 
+@pytest.mark.parametrize(
+    "selection,load,passes",
+    [
+        ("run", "success", True),
+        ("run", "failure", False),
+        ("run", "skipped", False),
+        ("skip", "skipped", True),
+        ("skip", "success", False),
+        ("", "skipped", True),
+    ],
+)
+def test_a_pull_request_requires_ledger_load_only_when_selection_marks_a_ledger_server_change(
+    selection: str, load: str, passes: bool
+) -> None:
+    needs = {job: {"result": "success"} for job in SELECTED} | {
+        "ledger-load": {"result": load},
+        "select": {"result": "success", "outputs": {"scope": "selected", "ledger": selection}},
+    }
+    [step] = ci_reuse.ledger_required(_gate_steps())
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(
+            os.environ, EVENT="pull_request", NEEDS=json.dumps(needs), MUTATION="true", KIND="false", REUSED="false"
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == passes, outcome.stdout + outcome.stderr
+
+
 def test_duration_provenance_reads_the_base_and_records_the_queue_head():
     checkout, python, install, record, publish = ci_reuse.duration_provenance_steps()
     assert checkout["with"] == {
