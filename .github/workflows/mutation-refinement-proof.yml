@@ -12,92 +12,208 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  planning:
+  refine:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        repeat: [1, 2, 3]
+    env:
+      SOURCE_RUN: "44118668170"
+      BASES: 4a742999ceb69cab7cfacf9ebe660250e4bf8073
+      MUTATION_SHARD_CPU_QUOTA: "3"
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: 74f587181bce30950f1f656d374beaaf02f414e8
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+
       - uses: astral-sh/setup-uv@v10.2.0
         with:
-          version: '0.12.23'
-          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
+
+      - name: Take the helper scripts from the workflow revision
+        run: |
+          git fetch --no-tags origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
+
       - name: Install dependencies
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: mutation-selection
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+
+      - name: Download the shared mutation stats
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+
+      - name: Keep identical inputs for the full install
+        run: cp -a .mutation-stats "$RUNNER_TEMP/full-stats"
+
+      - name: Refine mutation shards with the planning install
+        run: |
+          status=0
+          python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats > "$RUNNER_TEMP/planning.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/planning.log"
+          echo "$status" > "$RUNNER_TEMP/planning.status"
+
+      - name: Install the full editable dependency set
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
-        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
-      - name: Prepare identical refinement inputs
+        run: uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Refine mutation shards with the full install
         run: |
-          mkdir -p .refinement-proof
-          cat > .refinement-proof/run.py <<'PY'
+          status=0
+          python -m scripts.ci_mutation.measured --bases "$BASES" --stats "$RUNNER_TEMP/full-stats" > "$RUNNER_TEMP/full.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/full.log"
+          echo "$status" > "$RUNNER_TEMP/full.status"
+
+      - name: Download the source run's measured plan
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: mutation-measured-plan
+          path: source-plan
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+
+      - name: Compare the plans
+        run: |
+          cmp "$RUNNER_TEMP/planning.status" "$RUNNER_TEMP/full.status"
+          cmp "$RUNNER_TEMP/planning.log" "$RUNNER_TEMP/full.log"
+          cmp .mutation-stats/plan.json "$RUNNER_TEMP/full-stats/plan.json"
+          echo "Exit $(cat "$RUNNER_TEMP/planning.status"); the planning install and the full install wrote identical output and byte identical measured plans"
+          python - .mutation-stats/plan.json source-plan/plan.json <<'PY'
           import json
           import sys
           from pathlib import Path
-          from time import perf_counter
-          from unittest.mock import patch
 
-          from scripts.ci_mutation import measured
-          from scripts.ci_mutation.selection import selected_mutants
-          from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+          ours, source = (json.loads(Path(path).read_text()) for path in sys.argv[1:])
+          print(f"Source run measured shards {source['shards']}; proof measured shards {ours['shards']}")
+          print(f"Same assignments as the source run: {ours['assignments'] == source['assignments']}")
+          PY
 
-          mode = sys.argv[1]
-          root = Path.cwd()
-          selected = {
-              path: (set(range(1, len((root / path).read_text().splitlines()) + 1)), ['tests/test_sample.py'])
-              for path in ['hooks/hook_manager.py', 'scripts/ci_mutation/identity.py']
-          }
-          stats = SharedStats(root / '.refinement-proof/stats', 'same-head')
-          for index, path in enumerate(selected):
-              scope = {path: selected[path]}
-              write_part(stats.group(index).folder / 'part-0.json', stats_key(stats.head, scope), (0, 1), [])
-          started = perf_counter()
-          if mode == 'before':
-              with patch.object(measured, 'selected_mutant_names', lambda *args: selected_mutants(*args)[1]):
-                  plan = measured.refine_plan(root, selected, stats)
-          else:
-              plan = measured.refine_plan(root, selected, stats)
-          seconds = perf_counter() - started
-          folder = root / '.refinement-proof'
-          (folder / f'{mode}.json').write_text(json.dumps(plan, sort_keys=True))
-          (folder / f'{mode}.txt').write_text(''.join(f'{name}\n' for name in sorted(plan['assignments'])))
-          (folder / f'{mode}-seconds.json').write_text(json.dumps(seconds))
-          print(f'{mode}: {seconds:.6f} seconds; {len(plan["assignments"])} selected mutants')
-          PY
-      - name: Baseline refinement planning
-        env:
-          MUTATION_SHARD_CPU_QUOTA: "3"
-        run: PYTHONPATH=. python .refinement-proof/run.py before
-      - name: Optimized refinement planning
-        env:
-          MUTATION_SHARD_CPU_QUOTA: "3"
-        run: PYTHONPATH=. python .refinement-proof/run.py after
-      - name: Compare every selected mutant and assignment
-        run: |
-          diff -u .refinement-proof/before.txt .refinement-proof/after.txt
-          diff -u .refinement-proof/before.json .refinement-proof/after.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          folder = Path('.refinement-proof')
-          before = json.loads((folder / 'before-seconds.json').read_text())
-          after = json.loads((folder / 'after-seconds.json').read_text())
-          assert after < before, (before, after)
-          print(f'Planning: {before:.6f} -> {after:.6f} seconds; selected mutant and assignment diffs empty')
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
+  replan:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      SOURCE_RUN: "44108003001"
+      MUTATION_SHARD_CPU_QUOTA: "3"
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: refinement-proof-${{ matrix.repeat }}
-          path: .refinement-proof/
+          fetch-depth: 1
+          ref: 58401af13fd4b0745d707a974acb766764932ce5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Take the helper scripts from the workflow revision
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
+
+      - name: Take the upload action from the workflow revision
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
+
+      - name: Install dependencies
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
+
+      - name: Download the measured mutation plan
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: mutation-measured-plan
+          path: .mutation-stats
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+
+      - name: Download the early mutation results
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: mutation-probe-*
+          path: .mutation-stats
+          merge-multiple: true
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+
+      - name: Keep identical inputs for the full install
+        run: cp -a .mutation-stats "$RUNNER_TEMP/full-stats"
+
+      - name: Size the shards with the planning install
+        run: |
+          status=0
+          python -m scripts.ci_mutation.probed --stats .mutation-stats --budget 1080 > "$RUNNER_TEMP/planning.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/planning.log"
+          echo "$status" > "$RUNNER_TEMP/planning.status"
+
+      - name: Upload the probed mutation plan
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: refinement-proof-probed-plan
+          path: .mutation-stats/plan.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Install the full editable dependency set
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Size the shards with the full install
+        run: |
+          status=0
+          python -m scripts.ci_mutation.probed --stats "$RUNNER_TEMP/full-stats" --budget 1080 > "$RUNNER_TEMP/full.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/full.log"
+          echo "$status" > "$RUNNER_TEMP/full.status"
+
+      - name: Download the source run's probed plan
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: mutation-plan-probed
+          path: source-plan
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+
+      - name: Compare the plans
+        run: |
+          cmp "$RUNNER_TEMP/planning.status" "$RUNNER_TEMP/full.status"
+          cmp "$RUNNER_TEMP/planning.log" "$RUNNER_TEMP/full.log"
+          cmp .mutation-stats/plan.json "$RUNNER_TEMP/full-stats/plan.json"
+          echo "Exit $(cat "$RUNNER_TEMP/planning.status"); the planning install and the full install wrote identical output and byte identical probed plans"
+          python - .mutation-stats/plan.json source-plan/plan.json <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          ours, source = (json.loads(Path(path).read_text()) for path in sys.argv[1:])
+          print(f"Source run probed shards {source['shards']}; proof probed shards {ours['shards']}")
+          print(f"Same assignments as the source run: {ours['assignments'] == source['assignments']}")
+          PY
