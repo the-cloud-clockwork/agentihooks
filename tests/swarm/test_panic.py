@@ -855,7 +855,8 @@ def _read_pass(store: RedisStore, monkeypatch: pytest.MonkeyPatch, document: dic
 def test_tick_pass_spares_every_swarms_recorded_fixer_branches_without_a_registration(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
 ) -> None:
-    for slug in ("other", "third"):
+    for slug, code in (("other", "d4e5f6"), ("third", "a7b8c9")):
+        store.names.mint = lambda code=code: code
         store.create(SwarmConfig(slug, "/repo", max_eng=1, max_ci=1))
     _record(store, SLUG, f"ci-{CODE}-5149", f"ci-{CODE}-5150")
     _record(store, "other", f"engineer-{CODE}-10087")
