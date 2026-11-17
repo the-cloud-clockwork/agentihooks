@@ -19,7 +19,7 @@ def _checked_runs(repository: str, head: str, event: str, rejected: set[str]) ->
     """Return the head's newest Tests run named by its check runs, adding each other run read to ``rejected``."""
     checks = _api(f"repos/{repository}/commits/{head}/check-runs?per_page=100")["check_runs"]
     links = (RUN_LINK.search(check["details_url"]) for check in checks if check["details_url"])
-    for run_id in sorted({link.group(1) for link in links if link}, key=int, reverse=True):
+    for run_id in sorted((link.group(1) for link in links if link), key=int, reverse=True):
         if run_id in rejected:
             continue
         run = _api(f"repos/{repository}/actions/runs/{run_id}")

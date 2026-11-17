@@ -4024,10 +4024,12 @@
       "id": "gate-protected-finds-the-tests-run-through-check-runs",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-find-run-by-checks",
-      "behaviour": "Gate Protected finds a pull request head's Tests run through the head commit's check runs while the GitHub run listing still omits that run, reading each other workflow run those check runs name once, so a clean head whose Tests run already runs with jobs passes the gate instead of failing with the Tests run missing.",
+      "behaviour": "Gate Protected finds a pull request head's newest Tests run through the head commit's check runs while the GitHub run listing still omits that run, reading each other workflow run those check runs name once, so a clean head whose Tests run already runs with jobs passes the gate instead of failing with the Tests run missing.",
       "seam": "ci_tests_start.verify and the check runs lookup it falls back to",
       "tests": [
-        "tests/test_ci_tests_start.py::test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits_it"
+        "tests/test_ci_tests_start.py::test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits_it",
+        "tests/test_ci_tests_start.py::test_check_runs_of_other_runs_are_read_once_and_never_pass",
+        "tests/test_ci_tests_start.py::test_the_newest_tests_run_named_by_check_runs_is_read_first"
       ]
     },
     {

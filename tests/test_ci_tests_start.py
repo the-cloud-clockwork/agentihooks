@@ -371,6 +371,7 @@ def test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits
     assert sleeps == []
 
 
+@pytest.mark.feature("gate-protected-finds-the-tests-run-through-check-runs")
 def test_check_runs_of_other_runs_are_read_once_and_never_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     others = [
         _run(21, ".github/workflows/gate-protected.yml", "pull_request"),
@@ -404,15 +405,15 @@ def test_check_runs_of_other_runs_are_read_once_and_never_pass(monkeypatch: pyte
 
 
 def test_a_tests_run_found_through_check_runs_on_a_later_poll_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    gate = {"details_url": LINK.format(21, 1)}
-    jobs = "repos/owner/repo/actions/runs/31/jobs?filter=latest&per_page=1"
+    gate = {"details_url": LINK.format(31, 1)}
+    jobs = "repos/owner/repo/actions/runs/21/jobs?filter=latest&per_page=1"
     module, calls, sleeps = _answer(
         monkeypatch,
         {
             LISTING: [{"workflow_runs": []}],
-            CHECKS: [{"check_runs": [gate]}, {"check_runs": [gate, {"details_url": LINK.format(31, 2)}]}],
-            "repos/owner/repo/actions/runs/21": [_run(21, ".github/workflows/gate-protected.yml", "pull_request")],
-            "repos/owner/repo/actions/runs/31": [_run(31, ".github/workflows/test.yml", "pull_request")],
+            CHECKS: [{"check_runs": [gate]}, {"check_runs": [gate, {"details_url": LINK.format(21, 2)}]}],
+            "repos/owner/repo/actions/runs/31": [_run(31, ".github/workflows/gate-protected.yml", "pull_request")],
+            "repos/owner/repo/actions/runs/21": [_run(21, ".github/workflows/test.yml", "pull_request")],
             jobs: [{"total_count": 1}],
         },
     )
@@ -420,10 +421,10 @@ def test_a_tests_run_found_through_check_runs_on_a_later_poll_passes(monkeypatch
     assert calls == [
         LISTING,
         CHECKS,
-        "repos/owner/repo/actions/runs/21",
+        "repos/owner/repo/actions/runs/31",
         LISTING,
         CHECKS,
-        "repos/owner/repo/actions/runs/31",
+        "repos/owner/repo/actions/runs/21",
         jobs,
     ]
     assert sleeps == [4]
@@ -447,23 +448,24 @@ def test_the_check_runs_lookup_follows_the_requested_event(monkeypatch: pytest.M
     assert sleeps == []
 
 
+@pytest.mark.feature("gate-protected-finds-the-tests-run-through-check-runs")
 def test_the_newest_tests_run_named_by_check_runs_is_read_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    cancelled = {
-        **_run(9, ".github/workflows/test.yml", "pull_request"),
-        "status": "completed",
-        "conclusion": "cancelled",
-    }
-    jobs = "repos/owner/repo/actions/runs/31/jobs?filter=latest&per_page=1"
+    newest = 44161884281
+    cancelled = {"status": "completed", "conclusion": "cancelled"}
+    jobs = f"repos/owner/repo/actions/runs/{newest}/jobs?filter=latest&per_page=1"
     module, calls, sleeps = _answer(
         monkeypatch,
         {
             LISTING: [{"workflow_runs": []}],
-            CHECKS: [{"check_runs": [{"details_url": LINK.format(9, 1)}, {"details_url": LINK.format(31, 2)}]}],
-            "repos/owner/repo/actions/runs/9": [cancelled],
-            "repos/owner/repo/actions/runs/31": [_run(31, ".github/workflows/test.yml", "pull_request")],
+            CHECKS: [{"check_runs": [{"details_url": LINK.format(run, 1)} for run in (9, newest - 1, newest)]}],
+            "repos/owner/repo/actions/runs/9": [{**_run(9, ".github/workflows/test.yml", "pull_request"), **cancelled}],
+            f"repos/owner/repo/actions/runs/{newest - 1}": [
+                {**_run(newest - 1, ".github/workflows/test.yml", "pull_request"), **cancelled}
+            ],
+            f"repos/owner/repo/actions/runs/{newest}": [_run(newest, ".github/workflows/test.yml", "pull_request")],
             jobs: [{"total_count": 1}],
         },
     )
     assert module.verify("owner/repo", "head") == ""
-    assert calls == [LISTING, CHECKS, "repos/owner/repo/actions/runs/31", jobs]
+    assert calls == [LISTING, CHECKS, f"repos/owner/repo/actions/runs/{newest}", jobs]
     assert sleeps == []
