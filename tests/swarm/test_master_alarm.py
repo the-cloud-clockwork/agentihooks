@@ -60,6 +60,7 @@ def test_every_live_agent_gets_one_notice_on_a_failed_launch(store):  # noqa: F8
 
 def test_the_alarm_is_sent_once_per_outage_not_every_tick(store):  # noqa: F811
     runtime, ledger = broken_outage(doctored(store))
+    store.update("sw", gates={"nightwatch": "observe"})
     for at in range(1 + DOWN, 3 * DOWN, 60_000):
         tick("sw", store, ledger, runtime, at)
     assert runtime.master_spawns > 2

@@ -179,6 +179,7 @@ def test_a_merge_observation_outage_keeps_the_open_merge_alert(store, monkeypatc
 
 
 def test_an_episode_logged_before_the_gate_moves_to_deny_raises_its_alert_then(store):
+    observe(store)
     rig = Rig()
     until(store, rig, NOW, NOW + 10 * MINUTE)
     assert rig.ledger.alerts == []
