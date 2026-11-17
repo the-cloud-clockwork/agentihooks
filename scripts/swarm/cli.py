@@ -1856,20 +1856,21 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
             panic.check_fix(fix)
-        found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port)
+        found = panic.engage(store, args.slug, f"pressed on swarm {args.slug}", False, args.fix, now)
+        owns = panic.owner(store, args.slug)
+        cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port, owns)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":
-        if not panic.release(store, now):
+        if not panic.release(store, args.slug, now):
             raise SwarmError(
-                f"panic holds: business as usual is at {panic.level(store, now):.2f} with "
-                f"{panic.errors_since(store, now - panic.WINDOW_MS)} errors in the last 15 minutes; it clears at "
-                f"{panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
+                f"panic holds: business as usual is at {panic.level(store, args.slug, now):.2f} with "
+                f"{panic.errors_since(store, args.slug, now - panic.WINDOW_MS)} errors in the last 15 minutes; it "
+                f"clears at {panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
             )
         print(json.dumps({"panic": "off"}))
         return
-    current = panic.state(store)
+    current = panic.state(store, args.slug)
     print(
         json.dumps(
             {
@@ -1877,9 +1878,9 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
                 "since": current.since if current else None,
                 "reason": current.reason if current else "",
                 "fixes": list(current.fixes) if current else [],
-                "errors_last_hour": panic.errors_by_category(store, now - panic.HOUR_MS),
+                "errors_last_hour": panic.errors_by_category(store, args.slug, now - panic.HOUR_MS),
                 "threshold": panic.THRESHOLD,
-                "level": round(panic.level(store, now), 3),
+                "level": round(panic.level(store, args.slug, now), 3),
             }
         )
     )
@@ -2723,7 +2724,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import night_watch_drill, tick_report
+    from scripts.swarm import master_drill, night_watch_drill, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2738,8 +2739,9 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "night-watch-drill"):
-        sub.add_parser(plain).set_defaults(handler={"night-watch-drill": night_watch_drill.command}.get(plain))
+    drills = {"night-watch-drill": night_watch_drill.command, "master-drill": master_drill.command}
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", *drills):
+        sub.add_parser(plain).set_defaults(handler=drills.get(plain))
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
     close = sub.add_parser("close")
@@ -2754,6 +2756,7 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
+    pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
@@ -2961,9 +2964,11 @@ def dispatch(argv):
             run_control(store, args, who, handler)
         else:
             handler(store, args)
+        panic.settle()
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:
+        panic.settle()
         if handler is cmd_status and outage.show(args.slug, args.json):
             return 0
         return failed(args, who, exc)

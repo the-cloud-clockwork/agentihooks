@@ -1,4 +1,6 @@
+from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import ledger_bin as domain
 import ledger_core as core
@@ -6,7 +8,7 @@ import ledger_media
 
 from scripts.swarm_ledger import ports, request_metrics
 
-from .sqlite import BEGIN_IMMEDIATE
+from .sqlite import BEGIN, BEGIN_IMMEDIATE
 
 
 def _repository():
@@ -25,6 +27,34 @@ def _transaction():
     with request_metrics.locked(domain.LOCK), repository.connect() as connection, connection:
         request_metrics.begin(connection, BEGIN_IMMEDIATE)
         yield repository, connection
+
+
+@contextmanager
+def _reading() -> Iterator[tuple[Any, Any]]:
+    """A read snapshot of the shared repository that takes no writer lock."""
+    repository = _repository()
+    with repository.connect() as connection, connection:
+        connection.execute(BEGIN)
+        yield repository, connection
+
+
+def _expired(found: dict[str, Any], now: int) -> list[str]:
+    """Binned ledgers kept past the bin's days, in name order."""
+    return sorted(
+        slug for slug, at in found.items() if isinstance(at, int) and now - at > domain.KEEP_DAYS * domain.DAY_MS
+    )
+
+
+def _due(repository: Any, connection: Any, now: int) -> tuple[dict[str, Any], list[str]]:
+    """The bin registry and the small ledgers it does not hold that are finished or idle."""
+    found, marks = repository.registry("bin", connection), repository.registry("restored", connection)
+    return found, [
+        s["slug"]
+        for s in repository.summaries(connection)
+        if s["slug"] not in found
+        and s["size"] == "small"
+        and domain.idle_due(s["finished"], s["updated_at"] or s["created_at"] or 0, now, marks.get(s["slug"]))
+    ]
 
 
 def _registry(name):
@@ -74,13 +104,14 @@ def bin_closed(slug, closed_at, now=None):
         return True
 
 
-def purge_expired(now=None):
+def purge_expired(now: int | None = None) -> list[str]:
     now = core.now_ms() if now is None else now
+    with _reading() as (repository, connection):
+        if not _expired(repository.registry("bin", connection), now):
+            return []
     with _transaction() as (repository, connection):
         found = repository.registry("bin", connection)
-        expired = sorted(
-            slug for slug, at in found.items() if isinstance(at, int) and now - at > domain.KEEP_DAYS * domain.DAY_MS
-        )
+        expired = _expired(found, now)
         for slug in expired:
             repository.purge(slug, connection)
             del found[slug]
@@ -92,17 +123,14 @@ def purge_expired(now=None):
     return expired
 
 
-def auto_bin(now=None):
+def auto_bin(now: int | None = None) -> list[str]:
     now = core.now_ms() if now is None else now
+    with _reading() as (repository, connection):
+        _, binned = _due(repository, connection, now)
+        if not binned:
+            return []
     with _transaction() as (repository, connection):
-        found, marks = repository.registry("bin", connection), repository.registry("restored", connection)
-        binned = [
-            s["slug"]
-            for s in repository.summaries(connection)
-            if s["slug"] not in found
-            and s["size"] == "small"
-            and domain.idle_due(s["finished"], s["updated_at"] or s["created_at"] or 0, now, marks.get(s["slug"]))
-        ]
+        found, binned = _due(repository, connection, now)
         for slug in binned:
             found[slug] = now
         if binned:

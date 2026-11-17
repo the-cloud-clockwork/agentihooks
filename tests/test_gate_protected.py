@@ -671,6 +671,34 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or
     assert problems == (["The head changes the durations provenance context outputs."] if red else [])
 
 
+@pytest.mark.parametrize(
+    ("base_outputs", "head_outputs", "red"),
+    [
+        ({}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({"sonar": "${{ steps.select.outputs.sonar }}"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({}, {"ledger": "run"}, True),
+        ({"ledger": "run"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, True),
+        ({}, {"ledger": "${{ steps.select.outputs.ledger }}", "extra": "1"}, True),
+    ],
+)
+def test_protected_select_outputs_admit_adding_the_ledger_mark_only_while_the_base_has_none(
+    base_outputs: dict[str, str], head_outputs: dict[str, str], red: bool
+) -> None:
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {"legs": "${{ steps.select.outputs.legs }}", **base_outputs},
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["outputs"].update(head_outputs)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
+    assert problems == (["The head changes the durations provenance context outputs."] if red else [])
+
+
 def test_protected_durations_outputs_may_not_drop_the_unused_select_file_outputs():
     from scripts import ci_reuse
 
@@ -1267,6 +1295,24 @@ def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_tes
     assert '- (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)' in gate["steps"][0]["run"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, policy)
+    assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_the_tests_gate_may_require_ledger_load_when_selection_marks_a_ledger_server_change(weakened: bool) -> None:
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["select"]["outputs"]["ledger"] = "${{ steps.select.outputs.ledger }}"
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.ledger_required(gate["steps"])
+    assert '+ (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)' in gate["steps"][0]["run"]
+    if weakened:
+        gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('["ledger-load"] else []', "[] else []")
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, policy)

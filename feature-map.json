@@ -17,6 +17,46 @@
       ]
     },
     {
+      "id": "compose-master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: the promotion swarm smoke runs the compose master drill in the built swarm image on its own ports: a scratch proof swarm with a live front door master, retired by the master drill, with a stand-in claude that reports the claude ai login route; the smoke fails unless the tick's night watch forced up a successor that held the front door seat on the claude ai login within thirty minutes.",
+      "seam": "scripts/packaging/compose-master-drill.sh through the swarm smoke workflow and scripts.swarm.master_drill.run",
+      "tests": [
+        "tests/test_compose_master_drill.py::test_the_swarm_image_job_runs_the_master_drill_on_the_built_image",
+        "tests/test_compose_master_drill.py::test_the_master_drill_binds_ports_apart_from_every_other_compose_scenario",
+        "tests/test_compose_master_drill.py::test_the_master_drill_retires_a_live_front_door_master_through_the_tick_night_watch_with_a_login_stand_in",
+        "tests/test_compose_master_drill.py::test_the_master_drill_fails_unless_a_login_successor_held_the_seat_within_thirty_minutes"
+      ]
+    },
+    {
+      "id": "master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: agentihooks swarm SLUG master-drill retires the front door master of a running or paused scratch proof swarm through its runtime, leaving the seat empty, sets the night watch gate to enforce and steps the tick's own night watch pass once a minute on a drill clock from thirty minutes back; it stores and prints the minute a successor from the tick's own master launch holds the front door seat and that successor's route, recovered only for a claude ai login successor inside the thirty minutes. A live or stopped swarm, or a master the runtime cannot retire, is refused; a paused swarm stays paused.",
+      "seam": "scripts.swarm.master_drill.run and scripts.swarm.master_drill.command through the swarm command parser and scripts.tick.steps.masters._night_watch",
+      "tests": [
+        "tests/swarm/test_master_drill.py::test_the_drill_retires_the_front_door_master_and_records_a_login_successor_forced_up_at_ten_minutes",
+        "tests/swarm/test_master_drill.py::test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_working_codex_successor_on_the_login_route_kind_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_successor_forced_up_at_the_thirtieth_minute_still_recovers",
+        "tests/swarm/test_master_drill.py::test_a_seat_left_empty_for_thirty_minutes_records_no_successor",
+        "tests/swarm/test_master_drill.py::test_the_drill_starts_the_night_watch_seat_episode_over",
+        "tests/swarm/test_master_drill.py::test_the_drill_drives_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_master_drill.py::test_only_unfinished_front_door_masters_are_retired_and_only_a_front_door_master_succeeds",
+        "tests/swarm/test_master_drill.py::test_a_swarm_whose_master_retired_with_no_new_tasks_sleeps_through_the_drill",
+        "tests/swarm/test_master_drill.py::test_a_task_added_since_the_master_retired_wakes_the_swarm_for_the_drill",
+        "tests/swarm/test_master_drill.py::test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recovery",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_retire",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_the_runtime_cannot_retire_refuses_the_drill",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_swarm_that_is_not_a_scratch_proof_swarm_and_leaves_it_untouched",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running_or_paused",
+        "tests/swarm/test_master_drill.py::test_the_master_drill_command_prints_the_record_of_a_drill_through_the_routed_runtime"
+      ]
+    },
+    {
       "id": "master-route-placement-fallback",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
@@ -1030,6 +1070,33 @@
       "tests": [
         "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
         "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
+      "id": "forced-master-start",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-6",
+      "behaviour": "A forced master start, agentihooks swarm SLUG master up --forced or the night watch front door respawn, is never refused by a quota floor: the master task carries forced, the tick master launch skips the session slot wait and asks placement with the forced task, hive master selection closes no Claude account at a floor, herdr spawn never refuses all full and hands the claude ai route --agentihooks-forced, the claude ai launch takes the token fallback on any login refusal, reported as route token fallback and placement fallback, and the token fallback takes the probed account with the most room when every account is under its floor. An unforced launch keeps every floor.",
+      "seam": "master_launch.up forced choice, masters._master forced and the night watch respawn, HiveLaunch master selection, HerdrRuntime.spawn, routing.claude_ai.launch_claude, master_claude_login.launch_token and claude_quota_balancer.forced_credential",
+      "tests": [
+        "tests/test_claude_ai_route.py::test_a_forced_front_door_launch_at_the_master_floor_starts_on_the_token_fallback",
+        "tests/test_claude_ai_route.py::test_a_forced_launch_hands_the_token_fallback_a_forced_start_without_the_flag",
+        "tests/test_claude_ai_route.py::test_a_forced_launch_outside_the_front_door_also_takes_the_token_fallback",
+        "tests/test_claude_ai_route.py::test_an_unforced_front_door_launch_at_the_master_floor_still_fails_the_route",
+        "tests/test_claude_quota_balancer.py::test_a_forced_master_takes_the_account_with_most_room_under_every_floor",
+        "tests/test_claude_quota_balancer.py::test_a_forced_master_with_every_account_excluded_still_fails",
+        "tests/test_master_claude_login.py::test_a_forced_token_launch_asks_the_forced_credential_after_a_refusal",
+        "tests/swarm/test_front_door_login_route.py::test_a_forced_front_door_spawn_hands_the_claude_ai_route_the_forced_flag",
+        "tests/swarm/test_front_door_login_route.py::test_a_forced_master_off_the_interactive_route_is_never_refused_all_full",
+        "tests/swarm/test_front_door_login_route.py::test_an_interactive_route_spawn_is_never_refused_all_full",
+        "tests/swarm/test_master_launch.py::test_a_forced_master_replaces_the_live_front_door_and_launches_forced",
+        "tests/swarm/test_master_launch.py::test_a_replacing_new_or_offered_master_launches_unforced",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced",
+        "tests/tick/steps/test_master_placement_ops.py::test_an_unforced_master_asks_placement_without_forced_and_waits_on_the_slot",
+        "tests/tick/steps/test_master_placement_ops.py::test_an_unforced_tick_replays_a_forced_pending_start_forced",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_order_hands_forced_to_the_hive_runtime",
+        "tests/swarm/test_master_launch.py::test_forced_and_last_flags_exclude_each_other"
       ]
     },
     {
@@ -3934,6 +4001,16 @@
       ]
     },
     {
+      "id": "gate-protected-waits-out-a-held-tests-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-waits-jobs",
+      "behaviour": "Gate Protected keeps polling a pull request head's Tests run that exists but lists no jobs, such as a run held behind the cancelled run of the previous head in the pull request's Tests concurrency group, for 120 polls five seconds apart inside a 25 minute grade job. A head whose Tests run lists its first job five and a half minutes after that run was created therefore passes the gate instead of turning red.",
+      "seam": "Gate Protected grade job timeout and the --waits it passes to ci_tests_start.main and verify",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
@@ -4194,6 +4271,21 @@
         "tests/swarm_ledger/test_ledger_bin.py::test_a_closed_ledger_goes_to_the_bin_at_the_given_time",
         "tests/swarm_ledger/test_ledger_bin.py::test_a_restore_at_or_after_the_close_keeps_the_ledger_out",
         "tests/swarm_ledger/test_ledger_bin.py::test_closing_again_after_a_restore_bins_it_again"
+      ]
+    },
+    {
+      "id": "ledger-bin-tidy-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2592",
+      "behaviour": "A bin tidy pass with nothing to bin or purge takes no exclusive writer lock, so it never stalls ledger writers; a pass with work still bins or purges under the writer lock.",
+      "seam": "The ledger bin tidy and its writer lock",
+      "tests": [
+        "tests/swarm_ledger/test_bin_storage.py::test_an_idle_tidy_pass_takes_no_exclusive_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_at_exactly_the_kept_days_is_kept_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_an_expired_bin_entry_is_purged_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_ledger_due_for_the_bin_is_binned_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_recent_restore_keeps_an_old_ledger_out_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_without_a_time_is_never_purged"
       ]
     },
     {
@@ -4580,7 +4672,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-06",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
-      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session.",
+      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session through the interpreter's absolute path with the user's bin folder on PATH, so the start command runs under the systemd default PATH.",
       "seam": "python -m scripts.swarm.master_fallback run, pass and install",
       "tests": [
         "tests/swarm/test_master_fallback.py::test_no_master_for_the_window_starts_exactly_one_master",
@@ -4591,7 +4683,58 @@
         "tests/swarm/test_master_fallback.py::test_run_logs_a_timed_out_pass_and_goes_on",
         "tests/swarm/test_master_fallback.py::test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes",
         "tests/swarm/test_master_fallback.py::test_install_writes_and_restarts_the_service_and_retires_the_timer",
-        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session"
+        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session",
+        "tests/swarm/test_master_fallback.py::test_the_installed_unit_starts_master_up_under_the_systemd_default_path"
+      ]
+    },
+    {
+      "id": "swarm-master-critical",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-no-master-critical",
+      "behaviour": "Thirty minutes (AGENTIHOOKS_MASTER_CRITICAL_MINUTES) with no master bound on a running swarm's front door seat, a live master that is working or still starting with its hooks beating since launch, puts the swarm in critical mode, measured by the master fallback pass outside the tick, first in each pass and in its own try per swarm: the swarm's master-critical record holds the outage start and critical time, swarm status shows a master critical finding and a master_critical key, a critical broadcast is raised and the ledger's front door seat alert is raised. While critical the pass forces agentihooks swarm SLUG master up --replace in a detached runner through the interpreter's absolute path, once per retry window while no master start is in flight, a start path the controller master placement refusal never reaches, and the twenty minute fallback start leaves the swarm alone. The runner records each forced start's outcome with its time, exit status and reason under the swarm's record lock, never over an outcome already recorded; a runner that cannot start fails its start in the same pass, and a refused or failed start raises the critical broadcast again and, from the next pass, replaces an open seat alert of other text with one naming its reason, which a repeat of that reason leaves in place; a raise the ledger refuses after the replaced alert closed is named after that close and tried again the next pass. No ledger call runs while the record lock is held: the ledger is read before the lock and the seat alerts, read from the ledger's alerts alone, are written after it; a runner whose record Redis or the lock refuses prints the refusal and the pass fails that start at its retry. A master binding the front door seat clears the record, the finding, the broadcasts and the open seat alerts; a swarm that is not running, or sleeps with no work by its ledger tasks, leaves critical mode and is never forced. Every pass stamps the swarm's watch beat and drops the beat of every swarm it no longer watches, and a failed or five minute old beat is a master watch status finding.",
+      "seam": "python -m scripts.swarm.master_fallback pass and force, read through agentihooks swarm SLUG status",
+      "tests": [
+        "tests/swarm/test_master_critical.py::test_a_master_placement_refusal_for_thirty_minutes_puts_the_swarm_critical_and_forces_master_up",
+        "tests/swarm/test_master_critical.py::test_the_forced_master_up_starts_a_master_the_placement_refusal_cannot_block_and_its_bind_clears_critical",
+        "tests/swarm/test_master_critical.py::test_a_refused_forced_start_is_recorded_with_its_reason_and_time_and_raises_the_alert_again",
+        "tests/swarm/test_master_critical.py::test_the_swarm_turns_critical_at_its_threshold_and_forces_master_up",
+        "tests/swarm/test_master_critical.py::test_the_critical_alert_counts_the_minutes_since_the_outage_began",
+        "tests/swarm/test_master_critical.py::test_a_failed_forced_start_is_retried_once_per_retry_window",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_with_no_bound_master_by_the_retry_counts_as_failed",
+        "tests/swarm/test_master_critical.py::test_each_failed_forced_start_raises_the_ledger_seat_alert_again",
+        "tests/swarm/test_master_critical.py::test_a_ledger_that_refuses_the_seat_alert_is_named_and_the_watch_goes_on",
+        "tests/swarm/test_master_critical.py::test_a_runner_that_cannot_start_fails_its_forced_start_in_the_same_pass",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_is_recorded_before_its_runner_starts",
+        "tests/swarm/test_master_critical.py::test_a_front_door_master_still_starting_holds_the_forced_start_until_its_deadline",
+        "tests/swarm/test_master_critical.py::test_only_a_front_door_master_that_is_not_finished_holds_the_forced_start",
+        "tests/swarm/test_master_critical.py::test_only_a_live_working_master_on_the_front_door_seat_ends_critical_mode",
+        "tests/swarm/test_master_critical.py::test_a_starting_front_door_master_whose_hooks_beat_since_its_launch_holds_the_seat",
+        "tests/swarm/test_master_critical.py::test_a_live_working_front_door_master_ends_critical_mode",
+        "tests/swarm/test_master_critical.py::test_a_ledger_that_cannot_close_the_seat_alert_is_named_and_critical_mode_still_ends",
+        "tests/swarm/test_master_critical.py::test_a_master_binding_before_the_threshold_ends_the_outage_without_an_alert",
+        "tests/swarm/test_master_critical.py::test_a_swarm_that_is_not_running_leaves_critical_mode_and_is_never_forced",
+        "tests/swarm/test_master_critical.py::test_a_sleeping_swarm_never_turns_critical",
+        "tests/swarm/test_master_critical.py::test_a_retired_swarm_with_new_work_counts_its_outage_and_keeps_its_retired_record",
+        "tests/swarm/test_master_critical.py::test_a_retired_swarm_whose_ledger_cannot_be_read_stays_awake",
+        "tests/swarm/test_master_critical.py::test_the_record_keeps_the_last_ten_forced_starts",
+        "tests/swarm/test_master_critical.py::test_the_pass_and_the_runner_each_hold_the_record_lock",
+        "tests/swarm/test_master_critical.py::test_a_held_record_lock_keeps_the_pass_from_writing",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_ending_records_its_outcome",
+        "tests/swarm/test_master_critical.py::test_a_late_runner_never_overwrites_a_recorded_outcome",
+        "tests/swarm/test_master_critical.py::test_the_critical_finding_names_the_outage_and_the_last_forced_start",
+        "tests/swarm/test_master_critical.py::test_a_watch_that_failed_or_stopped_is_a_status_finding",
+        "tests/swarm/test_master_critical.py::test_the_forced_runner_runs_master_up_replace_bounded_with_the_launch_env",
+        "tests/swarm/test_master_critical.py::test_the_forced_runner_records_a_launch_that_could_not_run",
+        "tests/swarm/test_master_critical.py::test_a_failed_start_replaces_the_open_seat_alert_with_one_naming_its_reason",
+        "tests/swarm/test_master_critical.py::test_a_repeated_failure_reason_keeps_its_seat_alert_and_a_new_reason_replaces_it",
+        "tests/swarm/test_master_critical.py::test_a_refused_raise_after_a_replaced_seat_alert_names_the_close_and_the_next_pass_raises_it",
+        "tests/swarm/test_master_critical.py::test_no_ledger_call_runs_while_the_record_lock_is_held",
+        "tests/swarm/test_master_critical.py::test_a_forced_runner_refused_the_record_lock_prints_the_refusal_and_leaves_the_start_to_the_retry",
+        "tests/swarm/test_master_critical.py::test_a_pass_drops_the_watch_beat_of_a_swarm_the_fallback_no_longer_watches",
+        "tests/swarm/test_master_fallback.py::test_a_forced_master_up_runs_its_own_runner_in_its_own_session",
+        "tests/swarm/test_master_fallback.py::test_the_twenty_minute_start_leaves_a_critical_swarm_to_the_forced_start",
+        "tests/swarm/test_master_fallback.py::test_each_watched_swarm_gets_its_own_critical_watch_and_watch_beat"
       ]
     },
     {
@@ -4662,6 +4805,32 @@
         "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
         "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
         "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
+      "id": "panic-holds-only-its-swarm",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-swarm-scoped",
+      "behaviour": "Panic belongs to the swarm that pressed it: its push, rerun, dispatch and deploy freeze holds only sessions bound to that swarm, sessions bound to another swarm and unbound sessions keep every command, the sweep cancels only runs on worktree branches of that swarm's agents and the runs those branches triggered, and a legacy fleet panic holds only the swarm its reason names.",
+      "seam": "the blocker window PreToolUse hook, swarm panic on and the tick pass panic sweep",
+      "tests": [
+        "tests/swarm/test_panic_scope.py::test_panic_on_one_swarm_leaves_other_swarms_and_unbound_sessions_free",
+        "tests/swarm/test_panic_scope.py::test_the_panic_button_cancels_only_the_runs_of_its_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_panic_holds_only_the_swarm_its_reason_names",
+        "tests/swarm/test_panic_scope.py::test_the_tick_sweep_cancels_only_the_runs_of_the_held_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_the_owner_names_only_branches_of_the_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_swarm_without_a_code_owns_no_branch",
+        "tests/swarm/test_panic_scope.py::test_one_swarms_errors_and_failed_passes_reach_only_its_own_panic",
+        "tests/swarm/test_panic_scope.py::test_each_swarm_keeps_its_own_cancel_minute",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_the_legacy_fleet_record_only_for_the_swarm_it_names",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_only_its_own_swarms_kept_fixes",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_record_naming_no_swarm_holds_none",
+        "tests/swarm/test_panic_scope.py::test_an_unbound_session_never_reads_panic",
+        "tests/swarm/test_panic_scope.py::test_swarm_publish_holds_only_the_panicking_swarms_push",
+        "tests/swarm/test_panic_scope.py::test_another_swarms_panic_opens_no_window_for_this_master",
+        "tests/swarm/test_panic_scope.py::test_the_panic_messages_name_the_held_swarm",
+        "tests/gates/test_push_stop.py::test_another_swarms_panic_leaves_the_stop_hook_pushing"
       ]
     },
     {
@@ -4771,6 +4940,24 @@
       "tests": [
         "tests/swarm/test_panic.py::test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered",
         "tests/swarm/test_panic.py::test_the_gate_required_run_name_names_the_branch_the_sweep_keeps"
+      ]
+    },
+    {
+      "id": "panic-sweep-off-pass-thread",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-off-pass",
+      "behaviour": "While fleet panic is on, a controller pass starts the CI cancel sweep on its own daemon thread at most once a minute and never while an earlier sweep of the same process still runs, and ends without waiting for it; the sweep then reports each run it cancelled, or why it failed, as a swarm panic event of that pass's swarm, a sweep thread that cannot start is reported as a failed cancel and leaves the next pass free to sweep, and a swarm command process waits for a running sweep before it returns, whether its command succeeded or was refused.",
+      "seam": "The panic tick pass the spawn stall watch runs when a controller pass ends, and the swarm command entry point",
+      "rules": [
+        "panic-sweep-on-pass-thread"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_the_pass_ends_before_the_panic_cancel_sweep_it_starts",
+        "tests/swarm/test_panic.py::test_a_due_pass_starts_no_sweep_while_an_earlier_one_runs",
+        "tests/swarm/test_panic.py::test_a_sweep_thread_that_cannot_start_frees_the_sweep",
+        "tests/swarm/test_panic.py::test_settle_returns_once_the_running_sweep_reported",
+        "tests/swarm/test_panic.py::test_a_swarm_command_waits_for_the_running_panic_sweep_before_it_returns"
       ]
     },
     {
@@ -7313,6 +7500,16 @@
       "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
+      ]
+    },
+    {
+      "id": "coverage-check-reads-each-database-in-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dep-manifest-coverage-slow",
+      "behaviour": "The coverage database check reads each database file fully before SQLite opens it, so a downloaded shard database that has left the page cache is read in one pass instead of page by page from a busy node disk.",
+      "seam": "tests.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and tests.reused_coverage",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_check_reads_each_database_through_before_sqlite_opens_it"
       ]
     },
     {
