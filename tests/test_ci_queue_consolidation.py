@@ -9,7 +9,7 @@ def jobs(name):
     return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"]
 
 
-def test_container_proofs_share_one_runner_without_losing_commands():
+def test_container_proofs_share_one_runner_without_losing_commands() -> None:
     smoke = jobs("swarm-smoke.yml")
     assert list(smoke) == ["smoke"]
     steps = smoke["smoke"]["steps"]
@@ -32,10 +32,14 @@ redis=$!
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
   docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
 nats=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nginx:1.27-alpine &&
+  docker tag public.ecr.aws/docker/library/nginx:1.27-alpine mirror.gcr.io/library/nginx:1.27-alpine &
+nginx=$!
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
   docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
 wait "$nats" || status=$?
+wait "$nginx" || status=$?
 wait "$build" || status=$?
 exit "$status"
 """,
