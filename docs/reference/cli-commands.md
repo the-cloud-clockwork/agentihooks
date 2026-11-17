@@ -763,6 +763,7 @@ agentihooks quick room                    # the room lines sent to this seat sin
 agentihooks quick handoff [<doc>]         # accept this seat's Handoff v2; the successor starts in this pane
 agentihooks quick relaunch <seat> --folder <quick folder>   # start a pending seat's successor
 agentihooks quick relaunch <seat> --folder <quick folder> --force   # end a live but unusable agent, keep its pane, start again
+agentihooks quick relaunch <seat> --folder <quick folder> --adopt   # seat this live session and its pane as the seat's occupant
 agentihooks quick tick                    # one quick tick round, as the hourly safety nudge round runs it
 agentihooks quick stop                    # remove the room and the registry; seat folders stay
 ```
