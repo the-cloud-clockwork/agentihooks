@@ -282,9 +282,14 @@ def _start_fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front + [a for a in starting if a.name not in live])
     seat = seat_address(slug, MASTER)
-    if (occupant := store.seats.occupant(seat).occupant) in runtime.live_names():
+    if (occupant := _seat_occupant(store, seat)) in runtime.live_names():
         raise SwarmError(OCCUPIED.format(seat=seat, name=occupant))
     return _new(store, slug, runtime, at)
+
+
+def _seat_occupant(store: Any, seat: str) -> str:
+    """The name holding ``seat`` in the seat registry, empty when nobody holds it."""
+    return store.seats.occupant(seat).occupant
 
 
 def up(store, slug, runtime, at, choice, ask, say):
