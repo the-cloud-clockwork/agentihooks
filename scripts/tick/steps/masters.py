@@ -352,7 +352,7 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
     return [f"adopted live master {name}"]
 
 
-def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
+def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool = False) -> Any:
     store.redis.hdel(tick.MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == tick.MASTER]

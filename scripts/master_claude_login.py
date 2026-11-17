@@ -770,7 +770,7 @@ def trust_launch_folder(environ: Mapping[str, str], target: Path) -> None:
         print(f"[agenti] Claude does not trust {Path.cwd()} ({why}); {WAIT_NOTICE}", file=sys.stderr)
 
 
-def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
+def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str, forced: bool = False) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
     from scripts.claude_quota_balancer import API_ACCOUNT, RoutingError, launch_environment, select_master_credential

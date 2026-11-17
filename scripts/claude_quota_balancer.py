@@ -877,6 +877,11 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
         )
 
 
+def select_forced_master_credential(environ: Mapping[str, str], **options: Any) -> RouteDecision:
+    """A forced master start takes the master credential."""
+    return select_master_credential(environ, **options)
+
+
 def select_launch_credential(
     environ: Mapping[str, str],
     *,

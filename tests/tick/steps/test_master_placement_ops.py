@@ -393,6 +393,8 @@ def test_a_reported_master_is_working_and_clears_its_start(monkeypatch: pytest.M
     ]
 
 
+@pytest.mark.feature("forced-master-start")
+@pytest.mark.usefixtures("placed")
 def test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     starts, prepared = _placement(monkeypatch, calls, {})
