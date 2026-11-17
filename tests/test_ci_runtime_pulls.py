@@ -432,8 +432,10 @@ def test_swarm_smoke_loads_saved_runtime_images_before_any_pull_reuses_them() ->
     assert save["with"]["key"] == steps[names.index("Restore the runtime images saved on dev")]["with"]["key"]
 
 
-@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "build"])
-def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
+@pytest.mark.parametrize(
+    "failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "nginx:1.27-alpine", "build"]
+)
+def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path: Path, failure: str) -> None:
     log = tmp_path / "docker.log"
     tools = tools_with(
         tmp_path,
@@ -490,9 +492,10 @@ fi
     assert (sync / "redis:7").exists()
     assert (sync / "redis:7-alpine").exists()
     assert (sync / "nats:2.15.1-alpine").exists()
+    assert (sync / "nginx:1.27-alpine").exists()
     assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
         f"public.ecr.aws/docker/library/{image}"
-        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine")
+        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "nginx:1.27-alpine")
         if image != failure
     }
 
@@ -509,12 +512,16 @@ def test_the_ready_list_reuses_every_runtime_image_the_parallel_smokes_pull(tmp_
     for script in parallel["run"].split()[2:]:
         text = (ROOT / script).read_text()
         names = dict(re.findall(r"^(\w+)=(\S+)$", text, re.M))
-        pulled |= {
-            names.get(image.strip('"$'), image)
-            for image in re.findall(
-                r"^(?:bash scripts/packaging/pull-runtime-image\.sh|require_image) (\S+)$", text, re.M
-            )
-        }
+        block = ""
+        for line in text.splitlines():
+            if line in ('if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then', "require_image() {"):
+                block = line
+            elif block and line in ("else", "fi", "}"):
+                block = "else" if line == "else" else ""
+            elif found := re.fullmatch(r"(?:bash scripts/packaging/pull-runtime-image\.sh|require_image) (\S+)", line):
+                pulled.add(names.get(found[1].strip('"$'), found[1]))
+            elif re.search(r"pull-runtime-image\.sh|require_image", line):
+                assert block in ("else", "require_image() {"), (script, line)
     assert pulled
     assert pulled <= set(re.findall(r"docker tag \S+ (mirror\.gcr\.io/library/\S+)", build)), pulled
     tools = tools_with(
