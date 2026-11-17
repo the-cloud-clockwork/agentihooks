@@ -505,6 +505,52 @@ def test_a_hive_syncs_only_the_worker_tasks_it_hosts(setup, homes, monkeypatch):
     assert synced == {"fixture": {"mine": {"latest_progress": "mine step"}}}
 
 
+def test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it(
+    setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    agents = [
+        replace(setup.agent, task="admitted", runtime_target={}),
+        replace(setup.agent, task="admitted-elsewhere", hive="other", runtime_target={}),
+        replace(setup.agent, task="targeted"),
+    ]
+    monkeypatch.setattr(setup.consumer.store, "agents", lambda slug: agents)
+    monkeypatch.setattr(setup.consumer.store, "slugs", lambda: ["fixture"])
+    with at(homes.hive):
+        for task in ("admitted", "admitted-elsewhere", "targeted"):
+            ledger_workspace.materialize("fixture", task, {"progress.md": f"{task} step\n"})
+        setup.consumer.sync_workspaces(45)
+    synced = json.loads(setup.redis.get(ledger_workspace.files_key("host")))
+    assert synced == {
+        "fixture": {"admitted": {"progress.md": "admitted step\n"}, "targeted": {"progress.md": "targeted step\n"}}
+    }
+    held = setup.redis.get(f"{ledger_workspace.files_key('host')}:fixture:admitted")
+    assert json.loads(held) == {"progress.md": "admitted step\n"}
+
+
+def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes: SimpleNamespace) -> None:
+    lines = {"progress.md": "hive step\n", "proof.md": "hive proof\n"}
+    with at(homes.hive):
+        ledger_workspace.materialize("fixture", "task", lines)
+        ledger_workspace.sync(setup.redis, "host", [("fixture", "task")], 45)
+        ledger_workspace.sync(setup.redis, "host", [], 45)
+    key = f"{ledger_workspace.files_key('host')}:fixture:task"
+    assert json.loads(setup.redis.get(key)) == lines
+    assert 0 < setup.redis.ttl(key) <= ledger_workspace.FILES_SECONDS
+    assert json.loads(setup.redis.get(ledger_workspace.files_key("host"))) == {}
+
+
+def test_a_hive_holding_no_files_for_a_task_leaves_its_copy_alone(
+    setup: SimpleNamespace, homes: SimpleNamespace
+) -> None:
+    key = f"{ledger_workspace.files_key('host')}:fixture:task"
+    setup.redis.set(key, json.dumps({"progress.md": "kept\n"}))
+    with at(homes.hive):
+        ledger_workspace.sync(setup.redis, "host", [("fixture", "task")], 45)
+    assert json.loads(setup.redis.get(key)) == {"progress.md": "kept\n"}
+
+
 def test_the_opening_is_built_for_the_lane_on_the_controller(setup, homes, monkeypatch):
     from dataclasses import replace
 
