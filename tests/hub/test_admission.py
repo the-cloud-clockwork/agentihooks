@@ -51,6 +51,13 @@ def ask(**fields):
     return {"hive": "hive-a", "task": "t1", "lane": "eng", "generation": 0, **fields}
 
 
+def task_copy(hive: str) -> str:
+    """The key under its own prefix where a hive keeps its copy of task t1's work folder."""
+    from scripts.swarm_ledger import ledger_workspace
+
+    return f"{ledger_workspace.files_key(hive)}:{SLUG}:t1"
+
+
 @pytest.mark.feature("swarm-claim-lives")
 @pytest.mark.parametrize("lives", [3, 4])
 def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives, capsys):
@@ -1538,13 +1545,12 @@ def test_an_admitted_task_carries_its_territory_overlaps_and_its_group(rig: Simp
 def test_the_seeds_carry_the_folder_the_previous_agents_hive_synced(rig: SimpleNamespace) -> None:
     from scripts.hive import orders
     from scripts.swarm.store import AgentRecord
-    from scripts.swarm_ledger import ledger_workspace
 
     named = rig.store.next_name(SLUG, "eng", 1)
     earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", state="starting", started_at=1, hive="hive-b")
     rig.store.start_execution(SLUG, earlier, "")
-    synced = {SLUG: {"t1": {"progress.md": "- earlier step\n", "steering.md": "stale"}}}
-    rig.store.redis.set(ledger_workspace.files_key("hive-b"), json.dumps(synced))
+    synced = {"progress.md": "- earlier step\n", "steering.md": "stale"}
+    rig.store.redis.set(task_copy("hive-b"), json.dumps(synced))
 
     admitted = rig.admitter.admit(SLUG, ask())
 
@@ -1675,18 +1681,123 @@ def test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_conti
 def test_the_seeds_follow_the_most_recently_started_earlier_agent(rig: SimpleNamespace) -> None:
     from scripts.hive import orders
     from scripts.swarm.store import AgentRecord
-    from scripts.swarm_ledger import ledger_workspace
 
     for started, hive in ((1, "hive-c"), (5, "hive-b")):
         named = rig.store.next_name(SLUG, "eng", started)
         record = AgentRecord(named, "eng", "t1", seat=f"eng-{started + 7}@sw", started_at=started, hive=hive)
         rig.store.start_execution(SLUG, record, "")
-        copy = {SLUG: {"t1": {"progress.md": f"- step on {hive}\n"}}}
-        rig.store.redis.set(ledger_workspace.files_key(hive), json.dumps(copy))
+        copy = {"progress.md": f"- step on {hive}\n"}
+        rig.store.redis.set(task_copy(hive), json.dumps(copy))
 
     admitted = rig.admitter.admit(SLUG, ask())
 
     assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-b\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_a_launched_report_records_the_hive_holding_the_task_work_folder(rig: SimpleNamespace) -> None:
+    key = rig.store.key(SLUG, "work-folder", "t1")
+    rig.admitter.admit(SLUG, ask())
+    assert rig.store.redis.get(key) is None
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert rig.store.redis.get(key) == "hive-a"
+    assert rig.store.redis.ttl(key) == -1
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_seeds_follow_the_hive_that_last_launched_the_task_after_its_agent_retired(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+
+    copy = {"progress.md": "- step on hive-b\n", "proof.md": "- proof on hive-b\n"}
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+    rig.store.redis.set(task_copy("hive-b"), json.dumps(copy))
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS] == {**copy, "steering.md": "# t1: title t1\n"}
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+
+    named = rig.store.next_name(SLUG, "eng", 1)
+    earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", started_at=1, hive="hive-c")
+    rig.store.start_execution(SLUG, earlier, "")
+    for hive in ("hive-b", "hive-c"):
+        copy = {"progress.md": f"- step on {hive}\n"}
+        rig.store.redis.set(task_copy(hive), json.dumps(copy))
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-b\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+
+    named = rig.store.next_name(SLUG, "eng", 1)
+    earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", started_at=1, hive="hive-c")
+    rig.store.start_execution(SLUG, earlier, "")
+    rig.store.redis.set(task_copy("hive-c"), json.dumps({"progress.md": "- step on hive-c\n"}))
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-c\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_a_successor_on_another_hive_after_a_roll_receives_every_line(rig: SimpleNamespace, tmp_path: Any) -> None:
+    from dataclasses import replace
+    from pathlib import Path
+    from unittest.mock import Mock, patch
+
+    from scripts.hive import lanes, orders
+
+    homes = {hive: tmp_path / hive for hive in ("hive-a", "hive-b")}
+    for home in homes.values():
+        home.mkdir()
+
+    def on(hive: str) -> Any:
+        return patch.object(Path, "home", return_value=homes[hive])
+
+    def beat() -> None:
+        orders.Consumer(rig.store.redis, "hive-a", Mock()).sync_workspaces(45)
+
+    first = rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+    with on("hive-a"):
+        folder = Path(lanes.placed(SLUG, first["task"])["workspace"])
+        (folder / "progress.md").write_text("- step one\n", encoding="utf-8")
+        (folder / "proof.md").write_text("- proof one\n", encoding="utf-8")
+        beat()
+        with (folder / "progress.md").open("a", encoding="utf-8") as fh:
+            fh.write("- step written just before the roll\n")
+        agent = rig.store.execution_registry.get(SLUG, first["task"]["execution_id"])
+        rig.store.execution_registry.update(SLUG, replace(agent, state="finished"))
+        beat()
+        expected = {name: (folder / name).read_text(encoding="utf-8") for name in ("progress.md", "proof.md")}
+    rig.store.release(SLUG, "t1", first["name"])
+    rig.store.drop_agent(SLUG, first["name"])
+    with on("hive-a"):
+        beat()
+    rig.rows["t1"].update(state="open", claimed_by="")
+
+    second = rig.admitter.admit(SLUG, ask(hive="hive-b", generation=1))
+
+    with on("hive-b"):
+        moved = Path(lanes.placed(SLUG, second["task"])["workspace"])
+        assert {name: (moved / name).read_text(encoding="utf-8") for name in expected} == expected
+        assert (moved / "steering.md").read_text(encoding="utf-8") == "# t1: title t1\n"
 
 
 @pytest.mark.feature("hub-admission-claim-context")
