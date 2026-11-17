@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.974 · 2026-11-17
+
+### 2026-11-17 · fffde5564802 · #11778 · @nestorcolt
+
+**Mutation stats seed harvest retries one failed artifact download**
+
+This change makes the mutation-stats-seed harvest resilient to a single flaky gh download: when fetching a mutation-test-stats-cache artifact fails, it now retries up to three more times with 5, 10, and 20 second waits, each capped at the seed's deadline, before giving up with a clear error naming the artifact, its id, and gh's last message. Timeouts and the pull request, run, and artifact listing calls remain unretried, so existing budget-skip behavior is unchanged. This fixes a real incident where one transient gh exit 1 on a valid, unexpired artifact crashed the harvest and stalled promotion for thirty minutes.
+
+### 2026-11-17 · 15272385078f · #11768 · @agenticore-app
+
+**The agentihooks uv tool install carries the nats extra**
+
+This change fixes a three-hour outage where the agentihooks uv tool venv was rebuilt without the nats extra, causing ModuleNotFoundError crashes whenever AGENTIHOOKS_BUS=nats. Both install paths—`scripts.install._install_cli_tool` and `scripts.updater.upgrade_command("uv-tool")`—now explicitly install with the `[nats]` extra. A new Semgrep incident rule catches any future `uv tool install` command missing `[nats]` or `[all]`, and all install docs and quick-start guides across the repo now reference the correct extra-qualified install command, preventing recurrence.
+
+### 2026-11-17 · 5f9e01207cdb · #11743 · @agenticore-app
+
+**A forced front door master takes a slot when no account has a free seat**
+
+This change fixes master selection so a forced front door master can still claim a slot when every Claude account is drained or full, rather than waiting indefinitely because the selection logic only kept accounts with free seats and discarded all other hive slots. Accounts with a genuinely free seat are still chosen first, and an unforced master still waits as before. A drained account's launch order now correctly uses the slot cap its hive advertises. This closes a real deadlock scenario proven in #11738, with new tests and a Semgrep rule guarding against the filter regressing.
+
+### 2026-11-17 · 97d0fe379e17 · #11786 · @nestorcolt
+
+**Load the hub lifecycle and swarm cli before the master critical fixture patches LedgerClient**
+
+This change fixes a flaky test failure where modules that lazily bind `LedgerClient` at import time (`scripts.hub.lifecycle` via `scripts.hub.reconciler`, and `scripts.swarm.queue_priority` via `scripts.swarm.cli`) could be first imported inside an xdist worker after the `watched` fixture had already patched `LedgerClient` with a lambda, causing a `TypeError` since `LedgerClient | None` can't be evaluated against a function. By eagerly importing `scripts.swarm.cli` and `scripts.hub.lifecycle` at the top of the test module, every worker binds the real `LedgerClient` class before any fixture patches it, preventing the type error and the resulting test failures seen in merge group runs.
+
 ## v2.17.972 · 2026-11-17
 
 ### 2026-11-17 · 3948b5ec285a · #11755 · @agenticore-app
