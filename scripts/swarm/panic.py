@@ -183,7 +183,8 @@ def fix_state(store: RedisStore | None, url: str) -> ChangeState:
     client = _client(store)
     raw = client.hget(_key(MERGED_FIXES), url)
     row: dict[str, Any] = {} if raw is None else json.loads(raw)
-    if set(row) == {field.name for field in fields(ChangeState)}:
+    shaped = set(row) == {field.name for field in fields(ChangeState)}
+    if shaped and set(row["reference"]) == {field.name for field in fields(ChangeRef)}:
         return ChangeState(ChangeRef(**row.pop("reference")), **row)
     found = fix_change(url)
     if found.merged:

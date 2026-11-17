@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -460,7 +461,7 @@ def test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
 ) -> None:
     merged, opened, commit = FIX, f"{FIX}0", "m" * 40
     reads = _fix_reads(monkeypatch, {merged}, commit)
-    monkeypatch.setattr(panic, "due_cancel", lambda store, now_ms: True)
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
     rows = [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]
     runs = Runs({repo: rows for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [merged, opened], 0)
@@ -484,7 +485,7 @@ def test_a_merged_fix_is_read_again_after_panic_releases(
     store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
-    monkeypatch.setattr(panic, "due_cancel", lambda store, now_ms: True)
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
     panic.engage(store, "pressed", False, [FIX], 0)
     for at in (1_000, 2_000):
         panic.tick_pass(store, True, at, Runs({}))
@@ -495,11 +496,18 @@ def test_a_merged_fix_is_read_again_after_panic_releases(
     assert reads == [FIX, FIX]
 
 
+@pytest.mark.parametrize("drift", ["state", "reference"])
 @pytest.mark.feature("panic-sweep-keeps-merged-fixes")
-def test_a_kept_fix_row_of_another_shape_is_read_again(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_kept_fix_row_of_another_shape_is_read_again(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
     commit = "m" * 40
     reads = _fix_reads(monkeypatch, {FIX}, commit)
-    stale = {"reference": {"repository": "o/a", "number": 1}, "merged": True, "merge_commit": commit}
+    stale = asdict(_fix(FIX, True, commit))
+    if drift == "state":
+        del stale["body"]
+    else:
+        stale["reference"]["owner"] = "o"
     store.redis.hset(f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}", FIX, json.dumps(stale))
     assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
     assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
