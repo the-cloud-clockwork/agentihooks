@@ -266,7 +266,7 @@ def test_codex_valid_answer_survives_an_unrelated_completed_item(tmp_path):
 
 
 @pytest.mark.feature("service-commands-run-through-interpreter")
-def test_a_claude_check_resolves_agentihooks_and_claude_under_the_systemd_default_path(
+def test_a_claude_check_runs_the_agentihooks_claude_command_under_the_systemd_default_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tools = Path.home() / ".local" / "bin"

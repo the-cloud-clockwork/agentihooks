@@ -13,7 +13,7 @@
         "tests/hive/test_bundle_refresh.py::test_the_deps_ensure_a_manifest_change_starts_resolves_under_the_systemd_default_path",
         "tests/hive/test_linked_profiles.py::test_the_profile_link_command_resolves_under_the_systemd_default_path",
         "tests/test_claim_watch.py::test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path",
-        "tests/swarm/test_provider_probe_contract.py::test_a_claude_check_resolves_agentihooks_and_claude_under_the_systemd_default_path"
+        "tests/swarm/test_provider_probe_contract.py::test_a_claude_check_runs_the_agentihooks_claude_command_under_the_systemd_default_path"
       ]
     },
     {
