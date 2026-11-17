@@ -42,6 +42,7 @@ TOKEN_LOGIN = "agentihooks codex login {name}"
 NEXT_MARK = "(next)"
 RESERVED_MARK = "(reserved)"
 CURRENT_MARK = "(current)"
+MASTER_MARK = "MASTER"
 NO_CURRENT = ""
 CACHED = "cached"
 FABLE_COLUMNS = ["FABLE LEFT", "FABLE RESET"]
@@ -440,11 +441,11 @@ def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sess
 
 
 def with_master_routes(rows: list[QuotaRow], routes: Mapping[str, str]) -> list[QuotaRow]:
-    """Append the route each live front door master runs on to the master mark of its account's Claude row."""
+    """Mark each Claude row a live front door master runs on with the route it runs on."""
     keyed = {account_key(account): route for account, route in routes.items()}
     return [
-        replace(row, master=f"{row.master} ({keyed[key]})".lstrip())
-        if row.agent == "claude" and (key := account_key(row.account)) in keyed
+        replace(row, master=f"{row.master or MASTER_MARK} ({route})")
+        if row.agent == "claude" and (route := keyed.get(account_key(row.account)))
         else row
         for row in rows
     ]

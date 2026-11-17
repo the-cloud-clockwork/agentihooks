@@ -503,7 +503,7 @@ def test_balance_names_a_token_fallback_on_another_account_in_either_spelling(mo
 
     cells = _balance_cells(monkeypatch, MasterAccount("claude", "home", "max", INTERACTIVE), [spare])
 
-    assert cells == {"team_two": "team_two (token fallback)", "home": "home MASTER max"}
+    assert cells == {"team_two": "team_two MASTER (token fallback)", "home": "home MASTER max"}
 
 
 @pytest.mark.feature("balance-master-route")
