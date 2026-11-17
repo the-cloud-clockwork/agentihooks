@@ -5,7 +5,7 @@ import socket
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from scripts.hive import registry
 from scripts.swarm import bottleneck_status, execution_card, lease
@@ -123,8 +123,8 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 def published_findings(store: RedisStore, slug: str) -> list[dict[str, Any]] | None:
     """Return the health findings of the status swarm ``slug`` last published, or None before its first publish or
     when that status carries none."""
-    raw = cast(str | None, store.redis.get(store.key(slug, "published")))  # pyright: ignore[reportUnknownMemberType]
-    return json.loads(raw or "{}").get("status", {}).get("findings")
+    raw = store.redis.get(store.key(slug, "published"))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return json.loads(raw or "{}").get("status", {}).get("findings")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def view(store: RedisStore, slug: str) -> dict:
