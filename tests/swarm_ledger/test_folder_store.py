@@ -220,6 +220,8 @@ class Stopped(BaseException):
 def test_the_folder_ledger_server_publishes_a_write_another_process_stored_without_a_read(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """served() records the startup threads with threading.Thread replaced; undoing its patches before the follow
+    pass gives the publisher its real worker thread and the server module its real globals."""
     from scripts.swarm_ledger import ledger_server as server
 
     threads, _ = served(monkeypatch, tmp_path)
