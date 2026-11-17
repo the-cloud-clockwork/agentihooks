@@ -4550,6 +4550,23 @@
       ]
     },
     {
+      "id": "panic-publish-holds",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-honours-panic",
+      "behaviour": "While fleet panic is on, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
+      "seam": "swarm publish before it grades and pushes, and the panic guard's push check it asks",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing",
+        "tests/swarm/test_publish.py::test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_any_branch_without_panic",
+        "tests/swarm/test_panic.py::test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",
