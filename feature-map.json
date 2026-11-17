@@ -3918,6 +3918,16 @@
       ]
     },
     {
+      "id": "gate-protected-waits-out-a-held-tests-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-waits-jobs",
+      "behaviour": "Gate Protected keeps polling a pull request head's Tests run that exists but lists no jobs, such as a run held behind the cancelled run of the previous head in the pull request's Tests concurrency group, for 120 polls five seconds apart inside a 25 minute grade job. A head whose Tests run lists its first job five and a half minutes after that run was created therefore passes the gate instead of turning red.",
+      "seam": "Gate Protected grade job timeout and the --waits it passes to ci_tests_start.main and verify",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
