@@ -37,6 +37,7 @@ PREFLIGHT_PATHS = [".github/workflows/**"]
 EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
+LEDGER_SELECT_OUTPUT = {"ledger": "${{ steps.select.outputs.ledger }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
@@ -100,11 +101,13 @@ def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> l
                                 shape(
                                     required(
                                         lab(
-                                            ci_reuse.gate_steps(
-                                                **form,
-                                                summary=summary,
-                                                docs=docs,
-                                                watcher_loss=watcher_loss,
+                                            ledger(
+                                                ci_reuse.gate_steps(
+                                                    **form,
+                                                    summary=summary,
+                                                    docs=docs,
+                                                    watcher_loss=watcher_loss,
+                                                )
                                             )
                                         )
                                     )
@@ -135,6 +138,7 @@ def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> l
         for watcher_loss in (False, True)
         for required in requirements
         for lab in (list[dict[str, Any]], ci_reuse.lab_verdict)
+        for ledger in (list[dict[str, Any]], ci_reuse.ledger_required)
         for rerun in (list, ci_reuse.lost_rerun)
         for shape in (list, ci_reuse.inline_mutation)
         for finish in (list, ci_reuse.pipefail_summary)
@@ -229,6 +233,8 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
                 and producer.get(field) == trimmed
                 or "sonar" not in outputs
                 and producer.get(field) == outputs | SONAR_SELECT_OUTPUT
+                or "ledger" not in outputs
+                and producer.get(field) == outputs | LEDGER_SELECT_OUTPUT
             )
         )
     ]
