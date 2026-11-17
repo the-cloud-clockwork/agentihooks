@@ -29,6 +29,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -42,6 +44,7 @@ from scripts.swarm_ledger.events import Expired, patch  # noqa: E402
 from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 
 STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
+IN_PROCESS = "in-process"
 
 
 def credentials(slug):
@@ -69,6 +72,29 @@ def request(slug, cursor, headers):
     if cursor:
         headers["Last-Event-ID"] = cursor
     return f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events", headers
+
+
+def polled(slug: str, interval: float, kept: dict[Any, Any]) -> Iterator[tuple[str, dict[str, Any], None]]:
+    """Yield the ledger as a snapshot every interval seconds, read in process over the shared database as every other
+    non browser read is; kept holds the last export, so each later read takes only the changes since it."""
+    from scripts.tick.adapters import database_ledger
+
+    client = database_ledger.client(IN_PROCESS, STREAM_TIMEOUT_S)
+    while True:
+        yield "snapshot", {"ledger": client.export(slug, kept)}, None
+        time.sleep(interval)
+
+
+def follow(
+    slug: str, cursor: str | None, headers: dict[str, str] | None, interval: float, kept: dict[Any, Any]
+) -> tuple[Iterator[tuple[str, Any, str | None]], dict[str, str] | None]:
+    """The events a watcher takes and the credential headers they need: a remote host, such as a hive worker, polls
+    the ledger in process and needs none, so it never fetches an agent token; a local host follows the ledger
+    server's event stream."""
+    if ledger_link.remote(slug=slug):
+        return polled(slug, interval, kept), None
+    held = headers or credentials(slug)
+    return stream(slug, cursor, held), held
 
 
 def say(text):
@@ -178,13 +204,14 @@ def main():
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, stop)
     headers, cursor, failure = None, None, None
+    kept: dict[Any, Any] = {}
     while not stopping:
         alive(beat)
         try:
-            headers = headers or credentials(args.slug)
+            frames, headers = follow(args.slug, cursor, headers, args.interval, kept)
             if stopping:
                 continue
-            for name, data, event_id in stream(args.slug, cursor, headers):
+            for name, data, event_id in frames:
                 alive(beat)
                 watch.take(name, data)
                 cursor, failure = event_id or cursor, None
