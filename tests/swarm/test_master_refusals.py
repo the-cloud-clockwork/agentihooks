@@ -126,6 +126,27 @@ def test_every_master_seat_keeps_its_own_refusals(store: RedisStore) -> None:  #
     assert master_refusals.read(store, "sw", MASTER) == []
 
 
+def test_master_fill_reports_every_refused_seat(store: RedisStore) -> None:  # noqa: F811
+    MasterSeats(store.redis).set_count("sw", 3)
+
+    assert master_fill.run("sw", store.config("sw"), store, RefusingRuntime(), {}, MINUTE) == [REFUSED, REFUSED]
+    assert [master_refusals.read(store, "sw", seat) for seat in (SEAT_TWO, "master-3")] == [
+        [row(REFUSED, MINUTE, MINUTE)],
+        [row(REFUSED, MINUTE, MINUTE)],
+    ]
+
+
+def test_a_forced_launch_that_starts_nothing_names_the_kept_refusal_with_its_age(store: RedisStore) -> None:  # noqa: F811
+    master_refusals.record(store, "sw", MASTER, REFUSED, 4 * MINUTE)
+    tick_master._save(store, "sw", {"since": 1})
+
+    actions = tick_master.run("sw", store, tasks(), FakeRuntime(), 5 * MINUTE + 1, lambda: [], {})
+
+    failure = f"master placement last refused 1 minutes ago, at 00:04 UTC: {REFUSED}"
+    assert actions == ["master down 5 minutes, forced a master launch", failure, "no live engineer to promote"]
+    assert tick_master.read(store, "sw")["failure"] == failure
+
+
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
 def test_the_master_down_notice_names_the_latest_refusal_with_its_age(store: RedisStore) -> None:  # noqa: F811
     inbox, ledger = InboxStore(store.redis), tasks()
