@@ -101,6 +101,7 @@ def test_the_delivery_check_waits_for_a_patch_published_after_the_measurement_wi
 
     assert [consumer["patches"] for consumer in result["consumers"]] == [result["writes"]] == [2]
     assert result["last_write_s"] < streams.SECONDS < result["delivered_s"] < streams.SECONDS + LAG_S
+    assert result["delivered_s"] - result["last_write_s"] < streams.FOLLOW_PASS_S
 
 
 def listener(variable: str) -> str:
