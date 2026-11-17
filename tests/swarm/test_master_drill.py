@@ -271,7 +271,7 @@ def test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_
     report = {"observed_at": NOW, "names": ["eng@abc123-0009"]}
     rig.store.redis.set(reports.key("hive-a"), json.dumps(report))
     record = master_drill.run(drill(rig))
-    assert sorted(record["retired"]) == [OLD, hived]
+    assert sorted(record["retired"]) == sorted([OLD, hived])
     assert rig.runtime.killed == [OLD] and hived not in {agent.name for agent in rig.store.agents(SCRATCH)}
     assert (record["seated_minute"], record["recovered"]) == (10, True)
 
