@@ -675,6 +675,7 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or
     ("base_outputs", "head_outputs", "red"),
     [
         ({}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({"sonar": "${{ steps.select.outputs.sonar }}"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
         ({}, {"ledger": "run"}, True),
         ({"ledger": "run"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, True),
         ({}, {"ledger": "${{ steps.select.outputs.ledger }}", "extra": "1"}, True),
