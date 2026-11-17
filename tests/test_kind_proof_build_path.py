@@ -180,13 +180,46 @@ def test_controller_setup_runs_beside_the_lease_proof_and_finishes_before_the_up
     assert [_at(text) for text in order] == sorted(_at(text) for text in order)
 
 
-def test_one_exec_waits_for_the_lease_and_its_renewal():
-    watch = SCRIPT[_at("python - <<'LEASE'\nimport dataclasses") : _at("pkill -STOP")]
+def test_one_exec_waits_for_the_lease_and_its_renewal() -> None:
+    watch = SCRIPT[_at("python - <<'LEASE' &\nimport dataclasses") : _at("pkill -STOP")]
     assert "controller lease: " in watch
     assert "controller lease renewed: " in watch
     assert 'held["expires_at"] > first["expires_at"]' in watch
     assert "sleep 1" not in watch
     assert "current = lease.current(connect(), slug)\n        except Exception:\n            current = None" in watch
+
+
+def _lease_watch(tmp_path: Path, kubectl: str, lease: str) -> subprocess.CompletedProcess[str]:
+    """Runs the kind proof's controller restart watch against a fake kubectl running ``kubectl``, with the
+    background command ``lease`` standing in for the lease exec."""
+    watch = SCRIPT[_at("lease_wait=$!\n") : _at('wait "$lease_wait"\n') + len('wait "$lease_wait"\n')]
+    fake = tmp_path / "kubectl"
+    fake.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{tmp_path}/calls"\n{kubectl}\n')
+    fake.chmod(0o755)
+    return subprocess.run(
+        ["bash", "-c", f"set -euo pipefail\ncontroller=(-l controller)\n{lease} &\n{watch}"],
+        env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+
+def test_the_first_controller_restart_ends_the_lease_wait_at_once(tmp_path: Path) -> None:
+    done = _lease_watch(tmp_path, "echo 1", "sleep 60")
+    assert done.returncode == 1
+    assert "the controller restarted 1 times while the proof waited for its lease" in done.stderr
+    assert (tmp_path / "calls").read_text() == (
+        "get pods -l controller --field-selector=status.phase=Running "
+        "-o jsonpath={.items[0].status.containerStatuses[0].restartCount}\n"
+    )
+
+
+@pytest.mark.parametrize("kubectl", ["echo 0", "exit 1"])
+def test_the_lease_wait_keeps_its_own_verdict_until_the_controller_restarts(tmp_path: Path, kubectl: str) -> None:
+    done = _lease_watch(tmp_path, kubectl, "bash -c 'sleep 0.3; exit 3'")
+    assert done.returncode == 3
+    assert "restarted" not in done.stderr
 
 
 def test_every_controller_probe_still_runs_and_fails_the_proof() -> None:
