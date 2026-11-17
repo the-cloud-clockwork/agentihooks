@@ -40,7 +40,7 @@ def publish(
     handed the publisher."""
     calls: list[Any] = []
 
-    def handed(store: Any, slug: str, doc: Any, view: Any, failure: Any, found: Any) -> None:
+    def handed(_store: Any, _slug: str, _doc: Any, _view: Any, _failure: Any, found: Any) -> None:
         calls.append(found)
 
     monkeypatch.setattr(cli, "_publish_tick_status", handed)
