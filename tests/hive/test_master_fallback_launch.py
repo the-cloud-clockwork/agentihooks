@@ -488,11 +488,11 @@ def test_a_forced_master_order_hands_forced_to_the_hive_runtime(setup: Any, monk
     from scripts.swarm import lease, tick
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
-    task = master(setup)
+    task: dict[str, Any] = {**master(setup), "seat": "master@fixture", "route_kind": "interactive", "forced": True}
+    task["controller_epoch"] = setup.held.epoch
     monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", True)
     write_hive(setup, excluded=[], ui="yes", interactive={"claude": "account"})
     name = setup.store.next_name(setup.config.slug, "master")
-    task.update(seat="master@fixture", controller_epoch=setup.held.epoch, route_kind="interactive", forced=True)
     request = SpawnRequest(setup.store.config(setup.config.slug), "master", name, task)
     admitted = setup.launcher.admit(request, setup.launcher.select(request.config, "master", task))
     order = orders.LaunchOrder(
