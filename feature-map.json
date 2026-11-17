@@ -4411,7 +4411,18 @@
       "tests": [
         "tests/swarm/test_master_critical.py::test_a_master_placement_refusal_for_thirty_minutes_puts_the_swarm_critical_and_forces_master_up",
         "tests/swarm/test_master_critical.py::test_the_forced_master_up_starts_a_master_the_placement_refusal_cannot_block_and_its_bind_clears_critical",
-        "tests/swarm/test_master_critical.py::test_a_refused_forced_start_is_recorded_with_its_reason_and_time_and_raises_the_alert_again"
+        "tests/swarm/test_master_critical.py::test_a_refused_forced_start_is_recorded_with_its_reason_and_time_and_raises_the_alert_again",
+        "tests/swarm/test_master_critical.py::test_the_swarm_turns_critical_at_its_threshold_and_forces_master_up",
+        "tests/swarm/test_master_critical.py::test_a_failed_forced_start_is_retried_once_per_retry_window",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_with_no_bound_master_by_the_retry_counts_as_failed",
+        "tests/swarm/test_master_critical.py::test_a_front_door_master_still_starting_holds_the_forced_start_until_its_deadline",
+        "tests/swarm/test_master_critical.py::test_a_live_working_front_door_master_ends_critical_mode",
+        "tests/swarm/test_master_critical.py::test_a_stopped_swarm_leaves_critical_mode_and_is_never_forced",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_ending_records_its_outcome",
+        "tests/swarm/test_master_critical.py::test_the_critical_finding_names_the_outage_and_the_last_forced_start",
+        "tests/swarm/test_master_critical.py::test_the_forced_runner_runs_master_up_replace_bounded_with_the_launch_env",
+        "tests/swarm/test_master_critical.py::test_the_forced_runner_records_a_launch_that_could_not_run",
+        "tests/swarm/test_master_fallback.py::test_a_forced_master_up_runs_its_own_runner_in_its_own_session"
       ]
     },
     {

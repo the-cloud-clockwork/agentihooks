@@ -615,6 +615,33 @@ promotion, prompt and hand back is a tick journal line and an event on the seat 
 engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
 per agent, and the ledger page marks the agent row promoted.
 
+#### Critical mode after thirty minutes with no master
+
+The master fallback service (`agentihooks-master-fallback.service`, `python -m scripts.swarm.master_fallback`) runs a
+pass every minute on the master hive, outside the tick, so no tick step or placement refusal can stop it. Each pass
+watches every swarm in `AGENTIHOOKS_MASTER_FALLBACK_SWARMS`. A running swarm whose front door seat has no bound master,
+meaning a live, working master on `master@<id>`, for `AGENTIHOOKS_MASTER_CRITICAL_MINUTES` (default 30) is critical:
+
+- The swarm's `master-critical` Redis record holds when the seat lost its master, when it turned critical and the last
+  ten forced starts. `swarm status` shows a `master critical` finding, which the ledger page's swarm health panel
+  lists, and `status --json` carries the record as `master_critical`.
+- A critical broadcast reaches every session on the master hive.
+- The pass forces `agentihooks swarm <id> master up --replace` in a detached runner, through the pass's own
+  interpreter (`python -m scripts.install`) with `~/.local/bin` and the interpreter's folder ahead of the systemd
+  PATH. That command line start path never consults the controller's master placement refusal. It forces one start
+  per five minutes, and none while a front door master launched inside its start deadline may still bind.
+- The runner records each start's outcome with its time: started, or failed with the command's last output line
+  or launch error. A failed start, or one whose master has not bound by the next retry, raises the critical
+  broadcast again with that reason.
+
+A master binding the front door seat ends critical mode: the record and finding go away, and a resolved broadcast
+replaces the critical one. A stopped swarm, or one sleeping with no work, leaves critical mode and is never forced.
+
+```bash
+journalctl --user -u agentihooks-master-fallback.service --since "1 hour ago" | grep -E "critical|forced master up"
+agentihooks swarm <id> status --json | jq .master_critical
+```
+
 #### Orphan executions on a seat
 
 Every seat has one current execution in the swarm's execution registry. A new launch on a seat names the

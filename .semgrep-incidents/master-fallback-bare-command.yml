@@ -1,0 +1,15 @@
+rules:
+  - id: master-fallback-bare-command
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The master fallback runs a bare agentihooks command. Its systemd user unit has no ~/.local/bin on PATH, so on
+      17 November every fallback master start failed with FileNotFoundError while the front door seat of
+      rig-grade-swarm sat empty from 01:59 to 06:44 UTC. Build the command with master_up, which runs this
+      interpreter with -m scripts.install, and launch it with launch_env.
+    paths:
+      include:
+        - /scripts/swarm/master_fallback.py
+        - /scripts/swarm/master_critical.py
+        - master-fallback-bare-command.py
+    pattern: '["agentihooks", ...]'

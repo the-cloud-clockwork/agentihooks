@@ -157,17 +157,52 @@ class Done(Exception):
 
 
 @pytest.mark.feature("master-fallback-tick")
-def test_start_launches_master_up_new_in_its_own_session(monkeypatch):
+def test_start_launches_master_up_new_in_its_own_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = []
 
-    def popen(command, start_new_session):
-        calls.append((command, start_new_session))
+    def popen(command: list[str], start_new_session: bool, env: dict[str, str]) -> SimpleNamespace:
+        calls.append((command, start_new_session, env))
         return SimpleNamespace(pid=4321)
 
-    monkeypatch.setattr(master_fallback.subprocess, "Popen", popen)
+    monkeypatch.setattr(master_fallback, "subprocess", SimpleNamespace(Popen=popen))
+    monkeypatch.setattr(master_fallback.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
     assert master_fallback.start("sw") == 4321
-    assert calls == [(["agentihooks", "swarm", "sw", "master", "up", "--new"], True)]
+    [(command, session, env)] = calls
+    assert command == [sys.executable, "-m", "scripts.install", "swarm", "sw", "master", "up", "--new"]
+    assert session is True
+    assert env["PATH"] == os.pathsep.join(
+        [str(tmp_path / ".local" / "bin"), str(Path(sys.executable).parent), "/usr/bin:/bin"]
+    )
+    assert {key: value for key, value in env.items() if key != "PATH"} == {
+        key: value for key, value in os.environ.items() if key != "PATH"
+    }
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_a_forced_master_up_runs_its_own_runner_in_its_own_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def popen(command: list[str], start_new_session: bool) -> SimpleNamespace:
+        calls.append((command, start_new_session))
+        return SimpleNamespace(pid=77)
+
+    monkeypatch.setattr(master_fallback, "subprocess", SimpleNamespace(Popen=popen))
+
+    assert master_fallback.force("sw", 1_801_000) == 77
+    assert calls == [([sys.executable, "-m", "scripts.swarm.master_fallback", "force", "sw", "1801000"], True)]
+
+
+def test_a_launch_keeps_an_empty_service_path_after_the_user_folders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(master_fallback.Path, "home", lambda: tmp_path)
+
+    assert master_fallback.launch_env({"A": "1"}) == {
+        "A": "1",
+        "PATH": os.pathsep.join([str(tmp_path / ".local" / "bin"), str(Path(sys.executable).parent), ""]),
+    }
 
 
 SYSTEMD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
@@ -310,15 +345,23 @@ def test_a_pass_starts_a_master_and_saves_its_state(tmp_path, monkeypatch, capsy
     state = tmp_path / "state" / "fallback.json"
     state.parent.mkdir()
     state.write_text('{"sw": 0}')
+    held, seen = Store({"sw": []}), []
     monkeypatch.setattr(runtime, "HerdrRuntime", Herdr)
-    monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
+    monkeypatch.setattr(store, "connect", lambda: held)
     monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
+    monkeypatch.setattr(
+        master_fallback,
+        "critical",
+        lambda found, environ, live, now_ms: seen.append((found, environ, live, now_ms)) or ["critical line"],
+    )
+    env = {master_fallback.SWARMS: "sw"}
 
-    master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
+    master_fallback.pass_once(env, state)
 
-    assert capsys.readouterr().out == '{"swarm": "sw", "master_up": 77, "at": 1200000}\n'
+    assert capsys.readouterr().out == '{"swarm": "sw", "master_up": 77, "at": 1200000}\ncritical line\n'
     assert master_fallback.load(state) == {"sw": 1200000}
+    assert seen == [(held, env, set(), 1200000)]
 
 
 def test_a_failed_pass_is_logged_and_saves_nothing(tmp_path, monkeypatch, capsys):
@@ -342,6 +385,7 @@ def test_a_first_pass_makes_every_missing_state_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
     monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
+    monkeypatch.setattr(master_fallback, "critical", lambda found, environ, live, now_ms: [])
     state = tmp_path / "home" / ".agentihooks" / "fallback.json"
 
     master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
@@ -388,6 +432,7 @@ def test_a_pass_flushes_each_master_it_started(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
     monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
+    monkeypatch.setattr(master_fallback, "critical", lambda found, environ, live, now_ms: [])
 
     master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
 
