@@ -58,7 +58,7 @@ def landed(decided: dict[str, str], placement: str) -> dict[str, str]:
 def arguments(decided: Mapping) -> list[str]:
     if decided.get("state") != "on":
         return []
-    return ["--remote-control-session-name-prefix", name_prefix()]
+    return ["--remote-control", decided["detail"], "--remote-control-session-name-prefix", name_prefix()]
 
 
 def line(agent: Mapping) -> str:
