@@ -6388,6 +6388,16 @@
       ]
     },
     {
+      "id": "promotion-red-graded-job-fails-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
+      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
+      "seam": "snapshotGradeComplete in .github/scripts/promote.cjs, driven by the promotion API contract harness tests/contracts/promotion/promote.cjs",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+      ]
+    },
+    {
       "id": "ledger-write-substep-timing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
