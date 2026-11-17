@@ -276,14 +276,17 @@ def test_command_passes_the_started_run_wait(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.feature("gate-protected-waits-out-a-held-tests-run")
-def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Gate Protected run 44083781252 began polling 21 s into its job; Tests run 44083790532 listed jobs 328 s in."""
+@pytest.mark.parametrize("status", ["queued", "in_progress", "pending"])
+def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """Polling from 21 s into the grade job, a Tests run that lists its first job at 328 s passes before the timeout."""
     from scripts import ci_tests_start
 
     workflow = Path(__file__).resolve().parents[1] / ".github/workflows/gate-protected.yml"
     grade = yaml.safe_load(workflow.read_text())["jobs"]["grade"]
     line = next(
-        line for step in grade["steps"] for line in step.get("run", "").splitlines() if "scripts.ci_tests_start" in line
+        text for step in grade["steps"] for text in step.get("run", "").splitlines() if "scripts.ci_tests_start" in text
     )
     names = {"$GITHUB_REPOSITORY": "owner/repo", "$HEAD_SHA": "head"}
     now = 21.0
@@ -291,7 +294,7 @@ def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(monkeyp
     def api(endpoint: str) -> dict[str, Any]:
         if "/jobs?" in endpoint:
             return {"total_count": int(now >= 328)}
-        return {"workflow_runs": [{"id": 44083790532, "head_sha": "head", "status": "pending", "conclusion": None}]}
+        return {"workflow_runs": [{"id": 11, "head_sha": "head", "status": status, "conclusion": None}]}
 
     def sleep(seconds: float) -> None:
         nonlocal now
@@ -300,6 +303,8 @@ def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(monkeyp
     monkeypatch.setattr(ci_tests_start, "_api", api)
     monkeypatch.setattr(ci_tests_start.time, "sleep", sleep)
     words = shlex.split(line)
-    arguments = [names.get(word, word) for word in words[words.index("scripts.ci_tests_start") + 1 :]]
+    arguments = [
+        names[word] if word.startswith("$") else word for word in words[words.index("scripts.ci_tests_start") + 1 :]
+    ]
     assert ci_tests_start.main(arguments) == 0
     assert now <= grade["timeout-minutes"] * 60
