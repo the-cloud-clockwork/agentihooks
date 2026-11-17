@@ -5,7 +5,18 @@ FLOOR = 2.0
 
 
 def _master_closed(row: Any) -> bool:
+    # ok: master-closed-at-worker-drain-floor
     return row.state == CLOSED and row.week_left <= FLOOR
+
+
+def _master_closed_bare(row: Any) -> bool:
+    # ruleid: master-closed-at-worker-drain-floor
+    return row.state == CLOSED
+
+
+def _master_closed_quoted(row: Any) -> bool:
+    # ruleid: master-closed-at-worker-drain-floor
+    return row.state == "CLOSED"
 
 
 def _master_selection_drained(rows: list[Any]) -> frozenset[str]:

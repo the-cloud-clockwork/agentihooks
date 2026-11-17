@@ -488,9 +488,17 @@ def test_the_front_door_master_places_on_its_master_login_closed_only_by_the_wor
 
 
 @pytest.mark.feature("hive-front-door-master-floor")
-@pytest.mark.parametrize(("week", "reserve", "shown"), [(2.0, "2", "2"), (1.5, "2", "1.5"), (7.0, "8", "7")])
+@pytest.mark.parametrize(
+    ("five", "week", "reserve", "named"),
+    [
+        (80, 2.0, "2", "2% of its week"),
+        (80, 1.4, "2", "1% of its week"),
+        (80, 7.0, "8", "7% of its week"),
+        (1.0, 50, "2", "1% of its five hour window"),
+    ],
+)
 def test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason(
-    setup: Any, monkeypatch: pytest.MonkeyPatch, week: float, reserve: str, shown: str
+    setup: Any, monkeypatch: pytest.MonkeyPatch, five: float, week: float, reserve: str, named: str
 ) -> None:
     from scripts.hive import placement
     from scripts.routing.reservation import PRIMARY_RESERVE_ENV
@@ -501,13 +509,94 @@ def test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason(
     master_login_hive(setup)
     setup.herdr._quota_accounts = [
         Account("claude", "account", "room", 0, 80, 80, 6),
-        Account("claude", "login", "CLOSED", 0, 80, week, 0),
+        Account("claude", "login", "CLOSED", 0, five, week, 0),
         Account("claude", "spare", "OPEN", 0, 80, 1, 6),
-        Account("codex", "spare", "CLOSED", 0, None, 1, 0),
+        Account("claude", "other", "CLOSED", 0, 80, 1, 0),
+        Account("codex", "login", "CLOSED", 0, None, 1, 0),
     ]
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
-        f"no hive for master advertises a claude slot; login is at the master floor with {shown}% of its week left"
+        f"no hive for master advertises a claude slot; login is at the master floor with {named} left"
     )
+
+
+@pytest.mark.feature("hive-front-door-master-floor")
+def test_a_master_wait_other_than_a_missing_claude_slot_names_no_master_floor(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import placement
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, excluded=[], ui="yes", master_login={"claude": "login"}, repos=[])
+    setup.herdr._quota_accounts = [Account("claude", "login", "CLOSED", 0, 80, 1, 0)]
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
+        "no hive for master lists the repo agentihooks"
+    )
+
+
+@pytest.mark.feature("hive-front-door-master-floor")
+def test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+    from scripts.swarm import controller
+    from scripts.swarm.capacity import Account
+    from scripts.swarm_v2 import master_fill
+    from scripts.swarm_v2.masters import MasterSeats
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
+    master(setup)
+    MasterSeats(setup.store.redis).set_count(setup.config.slug, 2)
+    write_hive(
+        setup,
+        excluded=[],
+        ui="yes",
+        master_login={"claude": "login"},
+        slots=[{"harness": "claude", "account": "login", "kind": "subscription", "cap": 4}],
+    )
+    setup.herdr._quota_accounts = [Account("claude", "login", "CLOSED", 0, 80, 7, 0)]
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    actions = master_fill.run(setup.config.slug, setup.config, setup.store, fenced, {}, 1)
+    assert actions == ["the workstation hive spawns master work: no hive for master advertises a claude slot"]
+
+
+@pytest.mark.feature("hive-front-door-master-floor")
+def test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+    from scripts.swarm import controller, lease
+    from scripts.swarm_v2 import quota
+    from scripts.swarm_v2.kubernetes import approved
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    now = lease.now_ms(setup.store)
+    observations = quota.QuotaObservations(setup.store, setup.config.slug, Mock(), clock=lambda: now)
+    observation = quota.Observation(
+        "login", "claude", "exe-" + "0" * 32, 1, now, "allowed", 10.0, 93.0, now // 1000 + 3600, now // 1000 + 172800
+    )
+    setup.store.redis.hset(quota.latest_key("claude"), "login", quota.encode(observation))
+    fleet = approved.FleetAccounts(approved.AccountRoute(lambda: frozenset({"login"}), observations, dict, "claude"), 6)
+    assert [(row.state, row.cap, row.week_left) for row in fleet({}, now / 1000, False)] == [("CLOSED", 0, 7.0)]
+    setup.herdr._quota_accounts = None
+    setup.herdr.quota_accounts = lambda environ, at, refresh: fleet({}, at, refresh)
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "distributed")
+    assert fenced.placement_refusal("master", task) == ""
+    selected = fenced.runtime.hive_launch.select(setup.config, "master", task)
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "login", "master-login")
 
 
 @pytest.mark.feature("hive-front-door-master-floor")

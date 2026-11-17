@@ -10,13 +10,24 @@ rules:
       include:
         - /scripts/hive/
         - master-closed-at-worker-drain-floor.py
-    patterns:
-      - pattern-inside: |
-          def $SELECTION(...):
-              ...
-      - metavariable-regex:
-          metavariable: $SELECTION
-          regex: ^_master_selection
-      - pattern-either:
-          - pattern: $ROW.state == CLOSED
-          - pattern: $ROW.state == "CLOSED"
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def $SELECTION(...):
+                  ...
+          - metavariable-regex:
+              metavariable: $SELECTION
+              regex: ^_master_selection
+          - pattern-either:
+              - pattern: $ROW.state == CLOSED
+              - pattern: $ROW.state == "CLOSED"
+      - patterns:
+          - pattern-inside: |
+              def $CLOSED(...):
+                  ...
+          - metavariable-regex:
+              metavariable: $CLOSED
+              regex: ^_master_closed
+          - pattern-either:
+              - pattern: return $ROW.state == CLOSED
+              - pattern: return $ROW.state == "CLOSED"
