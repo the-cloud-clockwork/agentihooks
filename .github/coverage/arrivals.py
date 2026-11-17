@@ -23,7 +23,6 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -53,6 +52,30 @@ class Service(Protocol):
     def fetch(self, name: str, folder: Path) -> bool:
         """Unpack one artifact into the folder and say whether it did."""
         ...
+
+
+class Timer(Protocol):
+    """The clock the wait reads and the pause it takes between listings."""
+
+    def now(self) -> float:
+        """Return the current time in seconds."""
+        ...
+
+    def pause(self, seconds: float) -> None:
+        """Wait the given seconds."""
+        ...
+
+
+class Wall:
+    """The monotonic clock and a real sleep."""
+
+    def now(self) -> float:
+        """Return the monotonic clock in seconds."""
+        return time.monotonic()
+
+    def pause(self, seconds: float) -> None:
+        """Sleep the given seconds."""
+        time.sleep(seconds)
 
 
 def backend_ids(token: str) -> dict[str, str]:
@@ -192,18 +215,11 @@ def advance(flattening: Flattening | None, queue: list[Path]) -> Flattening | No
 
 
 def arrive(
-    service: Service,
-    shards: int,
-    scope: str,
-    attempt: int,
-    out: Path,
-    seconds: float,
-    clock: Callable[[], float] = time.monotonic,
-    pause: Callable[[float], None] = time.sleep,
+    service: Service, shards: int, scope: str, attempt: int, out: Path, seconds: float, timer: Timer
 ) -> list[int]:
     """Take each shard's coverage as it lands; return the shards still running when the wait ran out."""
     out.mkdir(parents=True, exist_ok=True)
-    start = clock()
+    start = timer.now()
     taken: set[str] = set()
     first: dict[str, str] | None = None
     left = list(range(1, shards + 1))
@@ -218,12 +234,12 @@ def arrive(
                     continue
                 taken.add(name)
                 queue.extend(databases(out / name))
-                print(f"{name} landed {clock() - start:.0f} s into the wait", flush=True)
+                print(f"{name} landed {timer.now() - start:.0f} s into the wait", flush=True)
             left = pending(listed, first, taken, scope, shards, attempt)
-        if not left or clock() - start >= seconds:
+        if not left or timer.now() - start >= seconds:
             break
         flattening = advance(flattening, queue)
-        pause(INTERVAL)
+        timer.pause(INTERVAL)
     if flattening is not None:
         flattening.stop()
     return left
@@ -238,7 +254,7 @@ def main() -> int:
         return 1
     shards = int(os.environ["SHARDS"])
     service = Results(base, token)
-    left = arrive(service, shards, os.environ["SCOPE"], int(os.environ["GITHUB_RUN_ATTEMPT"]), OUT, WAIT)
+    left = arrive(service, shards, os.environ["SCOPE"], int(os.environ["GITHUB_RUN_ATTEMPT"]), OUT, WAIT, Wall())
     if left:
         named = ", ".join(map(str, left))
         print(f"::warning::Shards {named} had not ended after {WAIT // 60} minutes; the merge names their coverage.")

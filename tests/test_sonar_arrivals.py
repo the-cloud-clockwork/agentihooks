@@ -54,22 +54,30 @@ class Clock:
     """A clock that moves only when the wait pauses."""
 
     def __init__(self) -> None:
-        self.now = 0.0
+        self.moment = 0.0
         self.pauses: list[float] = []
 
-    def __call__(self) -> float:
-        return self.now
+    def now(self) -> float:
+        return self.moment
 
     def pause(self, seconds: float) -> None:
         self.pauses.append(seconds)
-        self.now += seconds
+        self.moment += seconds
+
+
+class RealTime(Clock):
+    """A moving clock whose pauses also give running processes a moment of real time."""
+
+    def pause(self, seconds: float) -> None:
+        super().pause(seconds)
+        time.sleep(0.01)
 
 
 def _arrive(
     tmp_path: Path, service: Service, shards: int, scope: str = "full", attempt: int = 1, seconds: float = 600
 ) -> tuple[list[int], Clock]:
     clock = Clock()
-    left = arrivals.arrive(service, shards, scope, attempt, tmp_path / "shards", seconds, clock, clock.pause)
+    left = arrivals.arrive(service, shards, scope, attempt, tmp_path / "shards", seconds, clock)
     return left, clock
 
 
@@ -123,7 +131,7 @@ def test_the_wait_returns_the_shards_still_running_when_it_runs_out(tmp_path: Pa
     service = Service([{"coverage-3.12-2": "1"}])
     left, clock = _arrive(tmp_path, service, 3, seconds=2.5 * arrivals.INTERVAL)
     assert left == [1, 3]
-    assert clock.now == 3 * arrivals.INTERVAL
+    assert clock.moment == 3 * arrivals.INTERVAL
 
 
 def test_an_unanswered_listing_is_asked_again(tmp_path: Path) -> None:
@@ -197,13 +205,7 @@ def _stub_flatten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocked: bool
 
 
 def _arrive_in_real_time(tmp_path: Path, service: Service, shards: int) -> list[int]:
-    clock = Clock()
-
-    def pause(seconds: float) -> None:
-        clock.pause(seconds)
-        time.sleep(0.01)
-
-    return arrivals.arrive(service, shards, "full", 1, tmp_path / "shards", 600, clock, pause)
+    return arrivals.arrive(service, shards, "full", 1, tmp_path / "shards", 600, RealTime())
 
 
 def test_databases_it_holds_are_flattened_beside_them_while_shards_run(
