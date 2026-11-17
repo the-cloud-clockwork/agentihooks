@@ -66,6 +66,18 @@ def successor(drill: Drill) -> AgentRecord | None:
     return next(holders, None)
 
 
+def watch(drill: Drill, store: Any, start: int, asleep: bool) -> tuple[list[str], int | None]:
+    """Pass the tick's night watch once a minute on the drill clock from ``start`` until a successor holds the front
+    door seat, at most thirty minutes on: the actions it took and the minute the seat was held, or no minute."""
+    actions: list[str] = []
+    for minute in range(MINUTES + 1):
+        at = start + minute * MINUTE_MS
+        actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
+        if successor(drill) is not None:
+            return actions, minute
+    return actions, None
+
+
 def run(drill: Drill) -> dict[str, Any]:
     """Retire the front door master, set the night watch gate to enforce and start its seat episode and respawn budget
     over, keeping its other episodes, then pass the night watch once a minute from thirty minutes back until a
@@ -82,16 +94,9 @@ def run(drill: Drill) -> dict[str, Any]:
     start = drill.now_ms - MINUTES * MINUTE_MS
     rows = {task["id"]: task for task in drill.doc["tasks"]}
     asleep = lifetime.sleeping(drill.slug, drill.store, rows)
-    store = running(drill.store, drill.slug)
-    actions: list[str] = []
-    found: AgentRecord | None = None
-    minute = 0
-    while found is None and minute <= MINUTES:
-        at = start + minute * MINUTE_MS
-        actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
-        found = successor(drill)
-        minute += 1
-    route = front_door.master_route(drill.slug, found, front_door.held_seats(drill.store, drill.slug)) if found else ""
+    actions, minute = watch(drill, running(drill.store, drill.slug), start, asleep)
+    found = successor(drill)
+    route = front_door.landed(found) if found and found.state == "working" and found.harness == "claude" else ""
     record: dict[str, Any] = {
         "swarm": drill.slug,
         "at": drill.now_ms,
@@ -99,7 +104,7 @@ def run(drill: Drill) -> dict[str, Any]:
         "mode": ENFORCE,
         "retired": retired,
         "actions": actions,
-        "seated_minute": minute - 1 if found else None,
+        "seated_minute": minute,
         "successor": found.name if found else "",
         "route": route,
         "recovered": route == LOGIN,
