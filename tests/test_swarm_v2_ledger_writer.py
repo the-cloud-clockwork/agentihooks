@@ -9,6 +9,7 @@ import sys
 import threading
 from collections.abc import Callable
 from contextlib import nullcontext
+from email.message import Message
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock
@@ -648,8 +649,10 @@ def test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port(
     monkeypatch.setattr(api_service, "HOST", "0.0.0.0")
     monkeypatch.setattr(api_service, "PORT", 8766)
     api_service.serve()
+    headers = Message()
+    headers["Host"] = "127.0.0.1:8766"
     handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
-    handler.headers, handler.path = {"Host": "127.0.0.1:8766"}, "/healthz"
+    handler.headers, handler.path = headers, "/healthz"
     monkeypatch.setattr(handler, "send", send)
     handler.do_GET()
     assert sent == [(200, json.dumps({"dir": str(serving)}), "application/json")]
