@@ -17,7 +17,7 @@ import re
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,7 +25,7 @@ from scripts.swarm import naming
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
-from scripts.tick.ports.source_control import ChangeState, RepositoryRun
+from scripts.tick.ports.source_control import ChangeRef, ChangeState, RepositoryRun
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -53,6 +53,7 @@ FIX_LINK = re.compile(
 )
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
+MERGED_FIXES = "merged-fixes"
 FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+-fix-[0-9]+")
 FIXERS = "panic-fixers"
 DONE = "done"
@@ -146,7 +147,7 @@ def release(store: RedisStore, now_ms: int) -> bool:
     """Turns panic off only when the fleet is stable and back at RELEASE_LEVEL of business as usual."""
     if not stable(store, now_ms):
         return False
-    _client(store).delete(_key("panic"))
+    _client(store).delete(_key("panic"), _key(MERGED_FIXES))
     return True
 
 
@@ -176,6 +177,24 @@ def fix_change(url: str) -> ChangeState:
     from scripts.swarm import stack
 
     return stack.change(url, f"cannot read pull request {url}")
+
+
+def fix_state(store: RedisStore | None, url: str) -> ChangeState:
+    """Return the state of fix pull request ``url``, kept under the fleet panic keys from the read that finds it
+    merged until panic releases, since a merged pull request never changes; an open one, a kept row whose fields no
+    longer match ChangeState, or any read without a store, is read through the port."""
+    if store is None:
+        return fix_change(url)
+    client = _client(store)
+    raw = client.hget(_key(MERGED_FIXES), url)
+    row: dict[str, Any] = {} if raw is None else json.loads(raw)
+    shaped = set(row) == {field.name for field in fields(ChangeState)}
+    if shaped and set(row["reference"]) == {field.name for field in fields(ChangeRef)}:
+        return ChangeState(ChangeRef(**row.pop("reference")), **row)
+    found = fix_change(url)
+    if found.merged:
+        client.hset(_key(MERGED_FIXES), url, json.dumps(asdict(found)))
+    return found
 
 
 def fix_branch(url: str) -> str:
@@ -284,15 +303,16 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
     return (queued | set(heads.values())) - {""}
 
 
-def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
+def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports, store: RedisStore | None = None) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes, the
     workflow run event runs a fix's run triggered and the runs on a fix's merge queue commit, merge commit or merged
     integration branch head; a fix pull request spares its head branch and a fix branch link its branch only in its
-    own repository, and a branch link is never read as a pull request."""
+    own repository, and a branch link is never read as a pull request. With ``store`` a merged fix pull request is
+    read once and kept, so each sweep reads only the open ones."""
     from scripts.swarm.stack import GITHUB, repo_key
 
     named = [(fix, *branch_fix(fix)) for fix in fixes]
-    changes = [fix_change(fix) for fix, _, branch in named if not branch]
+    changes = [fix_state(store, fix) for fix, _, branch in named if not branch]
     commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
@@ -323,7 +343,7 @@ def tick_pass(store: RedisStore, ok: bool, now_ms: int, ports: Ports = port) -> 
     if current is None or not due_cancel(store, now_ms):
         return actions
     try:
-        cancelled = cancel_runs((*current.fixes, *fixers(store)), REPOS, ports)
+        cancelled = cancel_runs((*current.fixes, *fixers(store)), REPOS, ports, store)
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]

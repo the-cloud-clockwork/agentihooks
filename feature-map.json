@@ -5402,6 +5402,25 @@
       ]
     },
     {
+      "id": "hive-front-door-master-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",
+      "behaviour": "The controller's master selection refuses a Claude login only at the master floor, its week at or under the primary login reserve or its five hour window at or under the hard five hour handoff, or for a closure the worker drain floor does not explain; a login the fleet capacity rows close at the worker drain floor alone still takes the front door master on its hive master login, a missing claude slot wait names each hosting hive master login at the master floor in whole percent, a master seat two and up is checked against its own seat, and a front door master is warned to hand off only at its master floor.",
+      "seam": "HiveLaunch master selection closed set over the fleet AccountRoute capacity rows",
+      "rules": ["master-closed-at-worker-drain-floor"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor_does_not_explain",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_reads_the_worker_drain_rule_of_the_row_harness",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_wait_other_than_a_missing_claude_slot_names_no_master_floor",
+        "tests/hive/test_master_fallback_launch.py::test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door",
+        "tests/hive/test_master_fallback_launch.py::test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain",
+        "tests/swarm/test_quota_handoff.py::test_a_front_door_master_is_warned_only_at_its_master_floor"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
@@ -7910,6 +7929,21 @@
         "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
         "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count",
         "tests/events/test_nats_replicas.py::test_the_replica_count_defaults_to_one_and_comes_from_the_environment"
+      ]
+    },
+    {
+      "id": "panic-sweep-keeps-merged-fixes",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-steps-abandoned",
+      "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a kept row whose fields no longer match the change state is read again, and a sweep run without the swarm store, as the panic button runs it, reads every fix.",
+      "seam": "scripts.swarm.panic.fix_state, read by scripts.swarm.panic.cancel_runs with the swarm store scripts.swarm.panic.tick_pass passes, and cleared by scripts.swarm.panic.release",
+      "rules": ["panic-sweep-rereads-merged-fixes"],
+      "tests": [
+        "tests/swarm/test_panic.py::test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_cancel_runs_without_a_store_reads_every_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_a_merged_fix_is_read_again_after_panic_releases",
+        "tests/swarm/test_panic.py::test_a_kept_fix_row_of_another_shape_is_read_again"
       ]
     }
   ],
