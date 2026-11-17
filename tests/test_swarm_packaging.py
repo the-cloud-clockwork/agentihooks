@@ -1,9 +1,12 @@
 import ast
 import importlib.metadata
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
+
+import pytest
 
 
 def test_ledger_dependencies_exclude_workstation_tools():
@@ -68,6 +71,7 @@ def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
     return third_party
 
 
+@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy imports mutmut at module level")
 def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> None:
     root = Path(__file__).parents[1]
     lock = (root / "docker/swarm/requirements.lock").read_text()
