@@ -6536,6 +6536,16 @@
       ]
     },
     {
+      "id": "promotion-graded-jobs-gate-or-exempt",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-side-job-contract",
+      "behaviour": "Every job of the Tests workflow that promotion grades either sits in the Promotion ready needs, directly or through another job, or is named on the promote script's exempt list, whose side jobs the every job rule skips whatever their state, so a side job such as the mutation stats seed or the test summary never holds the release.",
+      "seam": "EXEMPT and settled in .github/scripts/promote.cjs against the promotion-ready needs of .github/workflows/test.yml",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list"
+      ]
+    },
+    {
       "id": "ledger-write-substep-timing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",

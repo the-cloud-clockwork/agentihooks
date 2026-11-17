@@ -1,3 +1,5 @@
+import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,6 +24,26 @@ def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
     assert "needs.gate-required.result == 'success'" in promote["if"]
     assert "!contains(needs.*.result, 'failure')" in promote["if"]
     assert "!contains(needs.*.result, 'cancelled')" in promote["if"]
+
+
+@pytest.mark.feature("promotion-graded-jobs-gate-or-exempt")
+def test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    script = json.dumps(str(ROOT / ".github/scripts/promote.cjs"))
+    listed = subprocess.run(
+        ["node", "-p", f"JSON.stringify(require({script}).EXEMPT ?? [])"], capture_output=True, text=True, check=True
+    )
+    exempt = set(json.loads(listed.stdout))
+    gating = _needed(jobs, "promotion-ready")
+    assert sorted(set(jobs) - gating - exempt - {"promotion-ready", "promote"}) == []
+    assert sorted((exempt - set(jobs)) | (exempt & gating)) == []
+    assert sorted(name for name in exempt if {"name", "strategy", "uses"} & set(jobs[name])) == []
+
+
+def _needed(jobs: dict[str, Any], name: str) -> set[str]:
+    needs = jobs[name].get("needs", [])
+    direct = {needs} if isinstance(needs, str) else set(needs)
+    return direct.union(*(_needed(jobs, need) for need in direct))
 
 
 def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pull_requests_or_the_queue():
