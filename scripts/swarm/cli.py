@@ -2719,7 +2719,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import night_watch_drill, tick_report
+    from scripts.swarm import master_drill, night_watch_drill, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2734,8 +2734,9 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "night-watch-drill"):
-        sub.add_parser(plain).set_defaults(handler={"night-watch-drill": night_watch_drill.command}.get(plain))
+    drills = {"night-watch-drill": night_watch_drill.command, "master-drill": master_drill.command}
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", *drills):
+        sub.add_parser(plain).set_defaults(handler=drills.get(plain))
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
     close = sub.add_parser("close")

@@ -55,6 +55,7 @@ exit "$status"
         "compose-hive-smoke",
         "compose-task-smoke",
         "compose-recovery-drill",
+        "compose-master-drill",
         "stability-smoke",
     ):
         assert build < next(
@@ -71,6 +72,7 @@ exit "$status"
         "compose-hive-smoke",
         "compose-task-smoke",
         "compose-recovery-drill",
+        "compose-master-drill",
         "stability-smoke",
     ],
 )

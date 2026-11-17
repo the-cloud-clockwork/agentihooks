@@ -38,18 +38,24 @@ class LoginRuntime(FakeRuntime):
     ``refused`` session slots it is asked for."""
 
     def __init__(self, route: str, refused: int = 0) -> None:
-        """Launch on ``route`` and refuse the first ``refused`` slot checks."""
+        """Launch on ``route``, refuse the first ``refused`` slot checks and report every launch."""
         super().__init__()
-        self.route, self.refused = route, refused
+        self.route, self.refused, self.reports = route, refused, True
+        self.events: list[dict[str, Any]] = []
 
     def has_capacity(self, config: SwarmConfig) -> bool:
         """Record the check and refuse it while refused checks remain."""
         self.capacity_for.append(config.slug)
         return len(self.capacity_for) > self.refused
 
+    def reported(self, agent: AgentRecord) -> bool:
+        """Whether a live launched agent reported, while the test lets launches report."""
+        return self.reports and agent.name in self.live
+
     def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Placed:
-        """Launch through the fake runtime and report the named route."""
+        """Launch through the fake runtime, record a ledger write by the launched agent and report the named route."""
         placed: Placed = super().spawn(config, lane, name, task)
+        self.events.append({"by": name, "at": NOW})
         return replace(placed, route_kind=self.route)
 
 
@@ -96,14 +102,16 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> SimpleNamespace:
     return SimpleNamespace(store=store, ledger=ledger, runtime=runtime, clock=[])
 
 
-def drill(rig: SimpleNamespace, slug: str = SCRATCH) -> master_drill.Drill:
-    """A drill on ``slug`` through the tick's own night watch pass, recording the clock of every pass."""
+def drill(rig: SimpleNamespace, slug: str = SCRATCH, doc: dict[str, Any] | None = None) -> master_drill.Drill:
+    """A drill on ``slug`` and ``doc``, by default a document with no tasks, through the tick's own night watch pass,
+    recording the clock of every pass."""
 
     def watch_pass(*args: Any) -> list[str]:
         rig.clock.append(args[5])
         return masters._night_watch(*args)
 
-    return master_drill.Drill(rig.store, slug, rig.ledger, rig.runtime, {"tasks": []}, NOW, watch_pass)
+    document = {"tasks": []} if doc is None else doc
+    return master_drill.Drill(rig.store, slug, rig.ledger, rig.runtime, document, NOW, watch_pass)
 
 
 def successor(rig: SimpleNamespace) -> AgentRecord:
@@ -111,7 +119,10 @@ def successor(rig: SimpleNamespace) -> AgentRecord:
     (found,) = [
         agent
         for agent in rig.store.agents(SCRATCH)
-        if agent.lane == MASTER and agent.name != OLD and front_door.holds(SCRATCH, agent.seat)
+        if agent.lane == MASTER
+        and agent.name != OLD
+        and agent.state != "finished"
+        and front_door.holds(SCRATCH, agent.seat)
     ]
     return found
 
@@ -142,7 +153,7 @@ def test_the_drill_retires_the_front_door_master_and_records_a_login_successor_f
         START + 10 * MINUTE,
     )
     assert OLD in rig.runtime.killed and OLD not in {agent.name for agent in rig.store.agents(SCRATCH)}
-    assert json.loads(rig.store.redis.get(rig.store.key(SCRATCH, master_drill.KEY))) == record
+    assert json.loads(rig.store.redis.get(rig.store.key(SCRATCH, "master-drill"))) == record
     assert rig.store.config(SCRATCH).gates["nightwatch"] == "enforce"
     assert rig.clock == [START + minute * MINUTE for minute in range(11)]
     assert [source for source, _ in rig.ledger.alerts] == ["seat"]
@@ -199,14 +210,48 @@ def test_the_drill_drives_a_paused_scratch_swarm_and_leaves_it_paused(rig: Simpl
 
 
 @pytest.mark.feature("master-drill")
-def test_only_live_front_door_masters_are_retired_and_only_a_front_door_master_succeeds(rig: SimpleNamespace) -> None:
+def test_only_unfinished_front_door_masters_are_retired_and_only_a_front_door_master_succeeds(
+    rig: SimpleNamespace,
+) -> None:
     second = seat_master(
         rig.store, rig.runtime, SCRATCH, "master@abc123-0002", seat_address(SCRATCH, master_seats.seat(2))
     )
+    ended = seat_master(rig.store, rig.runtime, SCRATCH, "master@abc123-0000", front_door.seat(SCRATCH), "finished")
+    rig.runtime.live.discard(ended)
     record = master_drill.run(drill(rig))
     names = {agent.name for agent in rig.store.agents(SCRATCH)}
-    assert record["retired"] == [OLD] and second in names and second not in rig.runtime.killed
+    assert record["retired"] == [OLD] and {second, ended} <= names
+    assert rig.runtime.killed == [OLD] and second in rig.runtime.live
     assert (record["seated_minute"], record["successor"]) == (10, successor(rig).name)
+
+
+@pytest.mark.feature("master-drill")
+def test_a_swarm_whose_master_retired_with_no_new_tasks_sleeps_through_the_drill(rig: SimpleNamespace) -> None:
+    rig.store.redis.set(rig.store.key(SCRATCH, "master-retired-tasks"), json.dumps(["t1"]))
+    record = master_drill.run(drill(rig, doc={"tasks": [{"id": "t1"}]}))
+    assert (record["retired"], record["seated_minute"], record["recovered"]) == ([OLD], None, False)
+    assert rig.runtime.masters == []
+
+
+@pytest.mark.feature("master-drill")
+def test_a_task_added_since_the_master_retired_wakes_the_swarm_for_the_drill(rig: SimpleNamespace) -> None:
+    rig.store.redis.set(rig.store.key(SCRATCH, "master-retired-tasks"), json.dumps(["t1"]))
+    record = master_drill.run(drill(rig, doc={"tasks": [{"id": "t1"}, {"id": "t2"}]}))
+    assert (record["seated_minute"], record["recovered"]) == (10, True)
+
+
+@pytest.mark.feature("master-drill")
+def test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recovery(rig: SimpleNamespace) -> None:
+    rig.runtime.reports = False
+    record = master_drill.run(drill(rig, doc={"tasks": [], "_meta": {"events": rig.runtime.events}}))
+    found = successor(rig)
+    assert found.state == "starting"
+    assert (record["seated_minute"], record["successor"], record["route"], record["recovered"]) == (
+        10,
+        found.name,
+        "",
+        False,
+    )
 
 
 @pytest.mark.feature("master-drill")
@@ -214,7 +259,9 @@ def test_a_front_door_master_the_runtime_cannot_retire_refuses_the_drill(rig: Si
     rig.runtime.stuck.add(OLD)
     with pytest.raises(SwarmError) as refused:
         master_drill.run(drill(rig))
-    assert str(refused.value) == master_drill.NOT_RETIRED.format(name=OLD, slug=SCRATCH)
+    assert str(refused.value) == (
+        f"the runtime could not retire the front door master {OLD} of {SCRATCH}; the master drill needs an empty seat"
+    )
     assert OLD in {agent.name for agent in rig.store.agents(SCRATCH)}
     assert rig.clock == [] and rig.store.redis.get(rig.store.key(SCRATCH, master_drill.KEY)) is None
 
@@ -227,7 +274,7 @@ def test_the_drill_refuses_a_swarm_that_is_not_a_scratch_proof_swarm_and_leaves_
     name = seat_master(rig.store, rig.runtime, slug, f"master@{slug}", front_door.seat(slug))
     with pytest.raises(SwarmError) as refused:
         master_drill.run(drill(rig, slug))
-    assert str(refused.value) == master_drill.NOT_SCRATCH.format(slug=slug)
+    assert str(refused.value) == f"{slug} is not a scratch proof swarm; the master drill never runs on a live swarm"
     assert name in rig.runtime.live and name in {agent.name for agent in rig.store.agents(slug)}
     assert "nightwatch" not in rig.store.config(slug).gates and rig.clock == []
     assert rig.store.redis.get(rig.store.key(slug, master_drill.KEY)) is None
@@ -239,7 +286,9 @@ def test_the_drill_refuses_a_scratch_swarm_that_is_not_running_or_paused(rig: Si
     rig.store.update(SCRATCH, state=state)
     with pytest.raises(SwarmError) as refused:
         master_drill.run(drill(rig))
-    assert str(refused.value) == master_drill.NOT_RUNNING.format(slug=SCRATCH, state=state)
+    assert str(refused.value) == (
+        f"scratch swarm {SCRATCH} is {state}; the master drill runs on a running or paused scratch swarm"
+    )
     assert OLD in rig.runtime.live and "nightwatch" not in rig.store.config(SCRATCH).gates and rig.clock == []
 
 
