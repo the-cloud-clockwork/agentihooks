@@ -1879,3 +1879,33 @@ def test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home(
     projects = json.loads((Path(homes[0]) / login.CONFIG).read_text())["projects"]
     assert projects[str(scratch.resolve())] == {"hasTrustDialogAccepted": True}
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_token_launch_selects_under_every_floor(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Callable, Mapping
+
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", dict)
+    chosen: list[str] = []
+
+    def selector(source: str) -> Callable[..., router.RouteDecision]:
+        def select(environ: Mapping[str, str], **options: object) -> router.RouteDecision:
+            chosen.append(source)
+            return router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "x"), None, source)
+
+        return select
+
+    monkeypatch.setattr(router, "select_master_credential", selector("master"))
+    monkeypatch.setattr(router, "select_forced_master_credential", selector("forced"))
+    monkeypatch.setattr(account_slots, "execute", lambda *args, **kwargs: None)
+    login.launch_token("/opt/claude", [], _environ(rendered), "", forced=True)
+    login.launch_token("/opt/claude", [], _environ(rendered), "")
+    assert chosen == ["forced", "master"]

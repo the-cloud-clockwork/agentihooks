@@ -466,6 +466,19 @@ def test_a_master_skips_a_native_login_whose_claude_account_is_closed(setup: Any
     assert setup.launcher.select(setup.config, "master", task).account.name == chosen
 
 
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed(setup: Any) -> None:
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account("claude", "native", "CLOSED", 0, 80, 3, 0),
+    ]
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
+    selected = setup.launcher.select(setup.config, "master", {**master(setup), "forced": True})
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
+
+
 @pytest.mark.parametrize("login", [{}, {"claude": ""}])
 def test_a_rejected_account_does_not_remove_a_hive_without_a_private_login(setup, monkeypatch, login):
     from scripts import claude_quota_balancer as balancer
