@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "tick-status-publish-last-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
+      "behaviour": "Status publish publishes the health findings the pass stored, else the findings of the swarm's last published status, and leaves them for the status report to build only before the swarm's first publish, so the closing lane never repeats the whole findings build under its own budget, which abandoned it at its eleven second budget after controller rollouts.",
+      "seam": "report._status_publish with commands.published_findings, run by engine.run_group on the closing group",
+      "tests": [
+        "tests/tick/steps/test_status_publish.py::test_status_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_publishes_the_last_findings_when_the_pass_stored_none",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_before_the_first_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_the_findings_the_pass_stored"
+      ]
+    },
+    {
       "id": "master-route-placement-fallback",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
