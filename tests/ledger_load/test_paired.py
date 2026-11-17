@@ -122,8 +122,8 @@ def test_both_hierarchy_cpu_installs_pin_the_pretend_version() -> None:
         )
 
 
-@pytest.mark.parametrize("stray", ["", "base", "head"])
-def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Path, stray: str) -> None:
+@pytest.mark.parametrize(("stray", "other"), [("", ""), ("base", "head"), ("head", "base")])
+def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Path, stray: str, other: str) -> None:
     load = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())["jobs"]["load"]
     [command] = [step["run"] for step in load["steps"] if "tests.ledger_load.memory" in step.get("run", "")]
     workspace = tmp_path / "workspace"
@@ -141,7 +141,6 @@ def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Pa
     python.write_text('#!/usr/bin/env bash\n[[ "$1" != -c ]] || exec "$REAL_PYTHON" "$@"\necho "${PWD##*/} gate ran"\n')
     python.chmod(0o755)
     env = {name: value for name, value in os.environ.items() if name != "PYTHONPATH"}
-    other = {"base": "head", "head": "base"}.get(stray, "")
     if other:
         env["PYTHONPATH"] = str(workspace / other)
     result = subprocess.run(
@@ -168,6 +167,24 @@ def test_a_load_side_that_imports_the_other_checkout_fails_the_pair(tmp_path: Pa
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert ran == ["base", "head"]
+
+
+def test_every_load_pair_runner_asserts_each_side_imports_its_own_checkout_before_its_gate() -> None:
+    own_checkout = (
+        "-c 'import pathlib, scripts.swarm_ledger.ledger_server as m; "
+        "assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__'"
+    )
+    gates = ("tests.ledger_load.gate", "tests.ledger_load.memory")
+    runners: dict[str, bool] = {}
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for name, job in yaml.safe_load(path.read_text())["jobs"].items():
+            for step in job.get("steps", []):
+                script = step.get("run", "")
+                gate = next((gate for gate in gates if gate in script), "")
+                if gate and "for side in" in script:
+                    runners[f"{path.name} {name}"] = 0 <= script.find(own_checkout) < script.index(gate)
+    assert {"hierarchy-cpu.yml load", "ledger-load.yml compare"} <= runners.keys()
+    assert all(runners.values()), runners
 
 
 def compare_mode() -> tuple[int, float]:
