@@ -628,6 +628,83 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
     assert rig.admitter.reopen(SLUG, ask()) is False
 
 
+@pytest.mark.feature("dead-offer-generation")
+def test_a_dead_lettered_reopen_with_no_admission_held_advances_the_claim_generation(rig: SimpleNamespace) -> None:
+    rig.rows["t1"]["claim_generation"] = 4
+
+    assert rig.admitter.reopen(SLUG, ask(generation=4, dead=True)) is False
+
+    row = rig.rows["t1"]
+    assert (row["state"], row.get("claimed_by", ""), row["claim_generation"]) == ("open", "", 5)
+    assert rig.ledger.writes == [
+        (SLUG, "t1", {"claim_generation": 5}, ("open",), {"claimed_by": "", "claim_generation": 4})
+    ]
+    assert rig.admitter.reopen(SLUG, ask(generation=3, dead=True)) is False
+    assert row["claim_generation"] == 5
+    assert rig.admitter.reopen(SLUG, ask(generation=5, dead=True)) is False
+    assert row["claim_generation"] == 6
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+
+
+def test_a_reopen_with_no_admission_held_advances_nothing_unless_its_offer_dead_lettered(rig: SimpleNamespace) -> None:
+    assert rig.admitter.reopen(SLUG, ask()) is False
+    assert rig.admitter.reopen(SLUG, ask(dead=False)) is False
+
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"].get("claim_generation", 0) == 0
+
+
+def test_a_dead_lettered_reopen_of_a_claimed_task_advances_nothing(rig: SimpleNamespace) -> None:
+    rig.rows["t1"].update(state="claimed", claimed_by="engineer-1", claim_generation=2)
+
+    assert rig.admitter.reopen(SLUG, ask(generation=1, dead=True)) is False
+
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claim_generation"]) == ("claimed", 2)
+
+
+def test_a_dead_lettered_reopen_leaves_the_admission_another_hive_holds(rig: SimpleNamespace) -> None:
+    name = rig.admitter.admit(SLUG, ask(hive="hive-b"))["name"]
+    writes = len(rig.ledger.writes)
+
+    assert rig.admitter.reopen(SLUG, ask(dead=True)) is False
+
+    assert rig.ledger.writes[writes:] == []
+    assert rig.store.claimant(SLUG, "t1") == name
+
+
+def test_a_dead_lettered_reopen_of_its_own_admission_releases_it(rig: SimpleNamespace) -> None:
+    name = rig.admitter.admit(SLUG, ask())["name"]
+
+    assert rig.admitter.reopen(SLUG, ask(dead=True)) is True
+
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.ledger.writes[-1] == (
+        SLUG,
+        "t1",
+        {"state": "open", "claimed_by": ""},
+        ("claimed", "pr"),
+        {"claimed_by": name},
+    )
+
+
+def test_a_refused_generation_advance_is_logged_and_answered_false(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    def refuse(*args: Any, **kwargs: Any) -> dict:
+        raise LedgerRefused("ledger sw refused: task_update may set only")
+
+    rig.ledger.update_task = refuse
+
+    assert rig.admitter.reopen(SLUG, ask(generation=2, dead=True)) is False
+    assert capsys.readouterr().err.splitlines() == [
+        "hub: events reopen swarm=sw task=t1 generation=2: claim generation not advanced, "
+        "ledger sw refused: task_update may set only"
+    ]
+
+
 @pytest.mark.feature("hub-admission-late-answer-keeps-claim")
 def test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
