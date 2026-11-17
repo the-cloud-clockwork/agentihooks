@@ -27,8 +27,6 @@ def cli(monkeypatch, ledger_port, capsys):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
-    monkeypatch.setattr(server, "relay_to_inbox", lambda *args: None)
-    monkeypatch.setattr(server, "doctor_phrase", lambda *args: None)
 
     def invoke(*options):
         monkeypatch.setattr(sys, "argv", ["ledger", "--slug", slug, "--as", "liaison", *options])

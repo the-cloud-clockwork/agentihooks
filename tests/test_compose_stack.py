@@ -42,7 +42,7 @@ def test_redis_starts_from_an_acl_file_with_optional_tls():
 
 
 def test_published_ports_bind_to_the_swarm_bind_address():
-    for name in ("swarm", "redis", "hive"):
+    for name in ("front", "redis", "hive"):
         for port in SERVICES[name]["ports"]:
             assert port.startswith("${SWARM_BIND:-127.0.0.1}:"), (name, port)
 
@@ -84,6 +84,7 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     assert shipped == [
         "compose.yaml",
         "deploy/compose/adopt.yaml",
+        "deploy/compose/ledger-front.conf",
         "deploy/compose/ledger-tailnet.conf.template",
         "deploy/compose/redis/healthcheck.sh",
         "deploy/compose/redis/start.sh",
@@ -95,7 +96,7 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
         assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
     check = (ROOT / "deploy/compose/redis/healthcheck.sh").read_text()
     assert 'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli' in check and "--pass" not in check
-    for service in ("swarm", "controller", "hive"):
+    for service in ("swarm", "api", "controller", "hive"):
         assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"
 
 
@@ -137,3 +138,25 @@ def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
     assert pull in smoke
     assert smoke.index(pull) < smoke.index('"$work/venv/bin/agentihooks" swarm init')
     assert "grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.'" in smoke
+
+
+def test_the_api_service_runs_the_write_process_against_the_shared_database() -> None:
+    api = SERVICES["api"]
+    assert api["command"] == ["python", "-m", "scripts.swarm_ledger.api_service", "--serve"]
+    assert api["environment"]["LEDGER_API_HOST"] == "0.0.0.0"
+    assert api["environment"]["LEDGER_API_PORT"] == "8766"
+    assert api["environment"]["AGENTIHOOKS_SWARM_DATABASE_URL"] == "${AGENTIHOOKS_SWARM_DATABASE_URL:-}"
+    assert "ports" not in api
+    assert api["depends_on"]["redis"]["condition"] == "service_healthy"
+
+
+def test_the_front_routes_reads_to_the_ledger_and_writes_to_the_api() -> None:
+    front = SERVICES["front"]
+    assert front["ports"] == ["${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"]
+    assert "ports" not in SERVICES["swarm"]
+    assert front["depends_on"]["swarm"]["condition"] == "service_healthy"
+    assert front["depends_on"]["api"]["condition"] == "service_healthy"
+    conf = (ROOT / "deploy/compose/ledger-front.conf").read_text()
+    assert "http://swarm:8765" in conf
+    assert "http://api:8766" in conf
+    assert "GET|HEAD" in conf

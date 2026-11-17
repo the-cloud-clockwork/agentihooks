@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from tests.ledger_load import gate as ledger_load
 
@@ -61,8 +60,10 @@ def test_alerts_past_their_quiet_hour_left_open_after_the_load_are_named(tmp_pat
 
 
 def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
-    interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
-    period = ledger_server.BIN_SWEEP_EVERY * interval
+    from scripts.swarm_ledger import api_service
+
+    interval = inspect.signature(api_service.upkeep).parameters["interval"].default
+    period = api_service.BIN_SWEEP_EVERY * interval
     assert ledger_load.duration() >= ledger_load.SWEEPS * period + period / 2
 
 
@@ -276,9 +277,9 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
     monkeypatch.setattr(ledger_load, "free_port", lambda: 0)
     monkeypatch.setattr(ledger_load, "duration", lambda: 10.0)
-    monkeypatch.setattr(ledger_load, "start_server", lambda folder, port, log: SimpleNamespace(pid=1))
+    monkeypatch.setattr(ledger_load, "start_server", lambda folder, port, log, *args, **kwargs: SimpleNamespace(pid=1))
     monkeypatch.setattr(ledger_load, "stop_server", lambda server: None)
-    monkeypatch.setattr(ledger_load, "load", lambda port, token, pid, seconds: results)
+    monkeypatch.setattr(ledger_load, "load", lambda write_port, read_port, token, pid, seconds: results)
     monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
@@ -420,10 +421,12 @@ def test_a_partially_missing_resource_budget_is_red():
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
+    from scripts.swarm_ledger import api_service
+
     at = 10 * ledger_load.ALERT_QUIET_MS
     alerts = [ledger_load.alert(n, at) for n in range(ledger_load.ALERTS)]
-    assert any(ledger_server.ledger_alerts.expired(alert, at) for alert in alerts)
-    assert not all(ledger_server.ledger_alerts.expired(alert, at) for alert in alerts if alert["state"] == "open")
+    assert any(api_service.ledger_alerts.expired(alert, at) for alert in alerts)
+    assert not all(api_service.ledger_alerts.expired(alert, at) for alert in alerts if alert["state"] == "open")
 
 
 def test_the_generated_ledger_reaches_the_target_size(monkeypatch):
@@ -493,7 +496,7 @@ def test_a_client_stops_at_the_deadline_without_sleeping_toward_a_write_it_will_
     monkeypatch.setattr(ledger_load, "time", clock)
     results = {"writes": [], "reads": [], "errors": []}
     deadline = 2.5 * ledger_load.write_every()
-    ledger_load.client(Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)
+    ledger_load.client(Api(), Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)  # pyright: ignore[reportArgumentType]
     assert (len(results["writes"]), len(results["reads"]), results["errors"]) == (3, 3, [])
     assert clock.now <= deadline
 
@@ -585,7 +588,7 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     began = time.monotonic()
     with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
-        ledger_load.load(0, "token", os.getpid(), 15.0)
+        ledger_load.load(0, 0, "token", os.getpid(), 15.0)
     assert time.monotonic() - began < 5
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
 
@@ -595,7 +598,7 @@ def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     monkeypatch.setattr(ledger_load, "ResourceClient", preflight_client(sent))
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
-    results = ledger_load.load(0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    results = ledger_load.load(0, 0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
     assert len(results["writes"]) == 2
     assert results["errors"] == []

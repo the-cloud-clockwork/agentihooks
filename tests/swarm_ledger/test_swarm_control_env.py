@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from scripts.swarm import command_runner, commands
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 
 EXE = "/opt/bin/agentihooks"
 
@@ -32,7 +32,7 @@ def calls(monkeypatch):
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
     monkeypatch.setattr(ledger_server, "swarm_status", lambda slug: {"swarm": slug})
     monkeypatch.setattr(
-        ledger_server, "terminate_control", lambda slug, name: seen["terminate"].append((slug, name)) or ({}, "")
+        api_service, "terminate_control", lambda slug, name: seen["terminate"].append((slug, name)) or ({}, "")
     )
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1-0001")
@@ -40,7 +40,7 @@ def calls(monkeypatch):
 
 
 def test_a_page_control_runs_the_swarm_command_as_the_unpinned_operator(calls):
-    assert ledger_server.swarm_control("demo", ["pause"]) == ({"swarm": "demo"}, "")
+    assert api_service.swarm_control("demo", ["pause"]) == ({"swarm": "demo"}, "")
     assert calls["run"] == []
     command_runner.consume(calls["store"], "demo")
     [(argv, env)] = calls["run"]
@@ -55,8 +55,8 @@ def test_a_page_control_runs_the_swarm_command_as_the_unpinned_operator(calls):
 
 
 def test_only_a_swarm_terminate_goes_to_the_terminate_control(calls):
-    assert ledger_server.swarm_control("demo", ["terminate", "engineer@a1-0002"]) == ({}, "")
-    assert ledger_server.swarm_control("demo", ["terminate", "x"], command="doctor") == ({"swarm": "demo"}, "")
+    assert api_service.swarm_control("demo", ["terminate", "engineer@a1-0002"]) == ({}, "")
+    assert api_service.swarm_control("demo", ["terminate", "x"], command="doctor") == ({"swarm": "demo"}, "")
     assert calls["terminate"] == [("demo", "engineer@a1-0002")]
     command_runner.consume(calls["store"], "demo")
     assert [argv for argv, _ in calls["run"]] == [[EXE, "doctor", "demo", "terminate", "x"]]
@@ -64,7 +64,7 @@ def test_only_a_swarm_terminate_goes_to_the_terminate_control(calls):
 
 def test_a_missing_agentihooks_names_the_path(calls, monkeypatch):
     monkeypatch.setattr(command_runner.shutil, "which", lambda name: None)
-    assert ledger_server.swarm_control("demo", ["pause"]) == ({"swarm": "demo"}, "")
+    assert api_service.swarm_control("demo", ["pause"]) == ({"swarm": "demo"}, "")
     assert command_runner.consume(calls["store"], "demo") == ["control swarm failed"]
     assert commands.rows(calls["store"], "demo")[0]["error"] == "agentihooks is not on PATH"
     assert calls["run"] == []

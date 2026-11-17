@@ -65,12 +65,12 @@ def hive(monkeypatch):
 
 @pytest.fixture
 def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
-    from scripts.swarm_ledger.api import client
+    from scripts.tick.adapters import database_ledger
 
     reads = []
 
     class Slow:
-        def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
+        def __init__(self, base: str, credentials: dict, timeout: float = 10, transport: object = None) -> None:
             self.timeout = timeout
 
         def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
@@ -81,7 +81,7 @@ def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
             return [self.request(slug, path)]
 
     module = ledger_client._ledger()
-    monkeypatch.setattr(client, "ResourceClient", Slow)
+    monkeypatch.setattr(database_ledger, "ResourceClient", Slow)
     monkeypatch.setattr(module.ledger_link, "remote", lambda environ=None, slug="": True)
     monkeypatch.setattr(module, "base", lambda slug="": "http://hosted.test")
     monkeypatch.setattr(module, "credentials", lambda slug, service=False: {})
@@ -440,7 +440,7 @@ def test_a_bounded_read_forwards_the_service_and_collection_choice(monkeypatch: 
 
     assert client.tasks("sw") == []
     assert calls == [
-        ("sw", "tasks", {"service": True, "collection": True, "timeout": 2, "attempts": 1}),
+        ("sw", "tasks", {"collection": True, "timeout": 2, "attempts": 1}),
     ]
 
 

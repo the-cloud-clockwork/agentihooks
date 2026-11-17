@@ -1,10 +1,16 @@
+import io
 import json
 import os
+import re
+import signal
 import socket
 import sqlite3
+import sys
 import threading
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -393,49 +399,261 @@ def _ledger_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard: None) -> Path:
+    from scripts.swarm_ledger import api_service
+    from scripts.swarm_ledger.repository import legacy
+
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setattr(server, "metrics_journal", lambda *args: None)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
     monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
-    monkeypatch.setattr(server.legacy, "adopt", Mock())
+    monkeypatch.setattr(legacy, "adopt", Mock())
+    monkeypatch.setattr(api_service.signal, "signal", lambda signum, handler: None)
     return tmp_path
 
 
-def test_a_second_server_on_a_held_folder_exits_before_touching_it(serving, lease):
+def test_a_second_api_service_on_a_held_folder_exits_before_touching_it(serving: Path, lease: object) -> None:
+    from scripts.swarm_ledger import api_service
+    from scripts.swarm_ledger.repository import legacy
+
     with pytest.raises(SystemExit) as stopped:
-        server.serve()
+        api_service.serve()
     assert stopped.value.code == (
         f"ledger folder {serving} already has an active writer, pid 4242 on writer-a; a second writer is refused"
     )
-    server.legacy.adopt.assert_not_called()
+    legacy.adopt.assert_not_called()
     server.ThreadingHTTPServer.assert_not_called()
     assert not (serving / ".server.pid").exists()
 
 
-def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(serving):
+def test_the_api_service_holds_the_lease_while_it_serves_and_releases_it_after(serving: Path) -> None:
+    from scripts.swarm_ledger import api_service
+    from scripts.swarm_ledger.repository import legacy
+
     seen = []
 
-    def serve_forever(poll_interval):
+    def serve_forever(poll_interval: float) -> None:
         seen.append(ledger_writer.holder(serving)["pid"])
         with pytest.raises(ledger_writer.WriterConflict):
             ledger_writer.WriterLease(serving).acquire(OTHER)
 
     server.ThreadingHTTPServer.return_value.serve_forever.side_effect = serve_forever
-    server.serve()
+    api_service.serve()
     assert seen == [os.getpid()]
-    server.legacy.adopt.assert_called_once_with(server.stored)
+    legacy.adopt.assert_called_once_with(server.stored)
     successor = ledger_writer.WriterLease(serving).acquire(OTHER)
     successor.release()
 
 
-def test_a_server_on_the_shared_database_serves_beside_a_held_folder(serving, lease, monkeypatch):
+def test_an_api_service_on_the_shared_database_migrates_and_serves_beside_a_held_folder(
+    serving: Path, lease: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    stored = Mock()
+    monkeypatch.setattr(server, "stored", stored)
     monkeypatch.setenv(server.storage.postgres.URL, "postgresql://ledger.invalid/swarm")
-    server.serve()
+    api_service.serve()
+    stored.migrate.assert_called_once_with()
     server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with(server.POLL_S)
     assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
     assert ledger_writer.conflicts_total(serving) == 0
+
+
+class Lease:
+    """A writer lease that records each acquire's wait and is held when it names a holder."""
+
+    def __init__(self, holder: dict | None = None) -> None:
+        self.holder = holder
+        self.waits: list[float] = []
+
+    def acquire(self, claimant: dict, wait: float) -> "Lease":
+        self.waits.append(wait)
+        if self.holder is not None:
+            raise ledger_writer.WriterConflict(Path("/ledgers"), self.holder)
+        return self
+
+
+def test_a_free_lease_is_taken_on_the_first_try() -> None:
+    from scripts.swarm_ledger import api_service
+
+    lease = Lease()
+    api_service.take_lease(lease, ledger_writer)
+    assert lease.waits == [0.0]
+
+
+def test_a_fresh_server_refuses_a_held_lease_at_once() -> None:
+    from scripts.swarm_ledger import api_service
+
+    lease = Lease(CLAIMANT)
+    with pytest.raises(SystemExit, match="pid 4242 on writer-a; a second writer is refused"):
+        api_service.take_lease(lease, ledger_writer)
+    assert lease.waits == [0.0]
+
+
+def test_the_api_service_releases_the_lease_only_after_its_requests_end(serving: Path) -> None:
+    from scripts.swarm_ledger import api_service
+
+    held = []
+    httpd: Mock = cast(Mock, server.ThreadingHTTPServer).return_value
+    httpd.server_close.side_effect = lambda: held.append(ledger_writer.holder(serving)["pid"])
+    api_service.serve()
+    assert held == [os.getpid()]
+    ledger_writer.WriterLease(serving).acquire(OTHER).release()
+
+
+def test_a_failed_api_service_still_releases_the_lease(serving: Path) -> None:
+    from scripts.swarm_ledger import api_service
+
+    httpd: Mock = cast(Mock, server.ThreadingHTTPServer).return_value
+    httpd.serve_forever.side_effect = OSError("disk full")
+    with pytest.raises(OSError, match="disk full"):
+        api_service.serve()
+    ledger_writer.WriterLease(serving).acquire(OTHER).release()
+
+
+def answered(monkeypatch: pytest.MonkeyPatch, path: str, refused: bool = False) -> list[tuple[int, str, str]]:
+    """What the API service's GET handler sends for path, as status, body and content type."""
+    from scripts.swarm_ledger import api_service
+
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
+    sent: list[tuple[int, str, str]] = []
+
+    def refuse() -> bool:
+        return refused
+
+    def send(code: int, body: str, ctype: str) -> None:
+        sent.append((code, body, ctype))
+
+    handler.path = path
+    monkeypatch.setattr(handler, "refused", refuse)
+    monkeypatch.setattr(handler, "send", send)
+    handler.do_GET()
+    return sent
+
+
+@pytest.mark.parametrize("path", ["/healthz", "/healthz?probe=1?again=2"])
+def test_the_api_service_health_probe_names_its_ledger_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, path: str
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    monkeypatch.setattr(api_service.core, "LEDGER_DIR", tmp_path)
+    assert answered(monkeypatch, path) == [(200, json.dumps({"dir": str(tmp_path)}), "application/json")]
+
+
+def test_the_api_service_sends_reads_to_the_ledger_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert answered(monkeypatch, "/api/v1/ledgers/rig/tasks") == [
+        (404, "the ledger API service takes writes; read from the ledger server", "text/plain")
+    ]
+
+
+def test_a_refused_health_probe_sends_nothing_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert answered(monkeypatch, "/healthz", refused=True) == []
+
+
+def test_the_api_service_command_wires_the_services_and_then_serves(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger import api_service, composition
+
+    steps: list[str] = []
+    monkeypatch.setattr(composition, "wire", lambda: steps.append("wire"))
+    monkeypatch.setattr(api_service, "serve", lambda: steps.append("serve"))
+    api_service.main(["--serve"])
+    assert steps == ["wire", "serve"]
+
+
+def test_the_api_service_command_refuses_to_run_without_serve(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm_ledger import api_service, composition
+
+    steps: list[str] = []
+    monkeypatch.setattr(composition, "wire", lambda: steps.append("wire"))
+    monkeypatch.setattr(api_service, "serve", lambda: steps.append("serve"))
+    with pytest.raises(SystemExit) as stopped:
+        api_service.main([])
+    assert stopped.value.code == 2
+    assert capsys.readouterr().err.endswith(": error: --serve is the only mode\n")
+    assert steps == []
+
+
+def test_the_api_service_command_help_names_the_service_and_its_one_mode(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm_ledger import api_service
+
+    with pytest.raises(SystemExit) as stopped:
+        api_service.main(["--help"])
+    assert stopped.value.code == 0
+    shown = capsys.readouterr().out
+    assert "\nThe ledger API service: every ledger write over HTTP.\n" in shown
+    assert re.search(r"^  --serve +run in the foreground$", shown, re.MULTILINE)
+
+
+def test_the_start_line_names_each_method_a_handler_answers_in_a_fixed_order() -> None:
+    from scripts.swarm_ledger import api_service
+
+    every = type("Every", (), {f"do_{method}": None for method in ("OPTIONS", "PATCH", "PUT", "POST", "GET")})
+    assert api_service.answered(every) == "GET, POST, PUT, PATCH, OPTIONS"
+    assert api_service.answered(type("Neither", (), {})) == ""
+
+
+@pytest.mark.parametrize(("tls", "scheme"), [(None, "http"), (object(), "https")])
+def test_the_api_service_binds_its_own_address_and_names_it_in_the_start_line(
+    serving: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tls: object, scheme: str
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    nested = serving / "a" / "b"
+    handlers: list[tuple[int, Callable[[int, object], None]]] = []
+
+    def retrying(job: object) -> tuple[str, object]:
+        return ("retrying", job)
+
+    def record(signum: int, handler: Callable[[int, object], None]) -> None:
+        handlers.append((signum, handler))
+
+    monkeypatch.setattr(server.core, "LEDGER_DIR", nested)
+    monkeypatch.setattr(api_service.WriteHandler, "tls", tls)
+    monkeypatch.setattr(server, "retrying", retrying)
+    monkeypatch.setattr(api_service.signal, "signal", record)
+    api_service.serve()
+    built = cast(Mock, server.ThreadingHTTPServer)
+    built.assert_called_once_with(
+        (api_service.HOST, api_service.PORT), api_service.WriteHandler, bind_and_activate=False
+    )
+    thread = cast(Mock, server.threading.Thread)
+    upkeep = next(call for call in thread.call_args_list if call.kwargs.get("target") == retrying(api_service.upkeep))
+    assert upkeep.kwargs["daemon"] is True
+    assert [type(argument) for argument in upkeep.kwargs["args"]] == [threading.Event]
+    assert [signum for signum, _ in handlers] == [signal.SIGTERM]
+    handlers[0][1](signal.SIGTERM, None)
+    thread.assert_called_with(target=built.return_value.shutdown, daemon=True)
+    assert capsys.readouterr().out == (
+        f"ledger API service on {scheme}://{api_service.HOST}:{api_service.PORT} answering "
+        f"GET, POST, PUT, PATCH, OPTIONS, dir {nested}\n"
+    )
+
+
+class Piped(io.StringIO):
+    """A standard output piped to a supervisor: it records what it held at each flush."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[str] = []
+
+    def flush(self) -> None:
+        self.flushed.append(self.getvalue())
+
+
+def test_the_api_service_flushes_its_start_line_to_a_supervisor_reading_a_pipe(
+    serving: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    piped = Piped()
+    monkeypatch.setattr(sys, "stdout", piped)
+    api_service.serve()
+    assert piped.flushed == [piped.getvalue()]
+    assert piped.flushed[0].startswith("ledger API service on ")
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

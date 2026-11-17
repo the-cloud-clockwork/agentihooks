@@ -180,15 +180,15 @@ def test_the_entry_of_an_operator_write_is_its_list_and_id(event, entry):
 def test_relay_comment_posts_an_answer_to_the_operator_on_the_entry_with_the_service_credential(monkeypatch):
     calls = []
 
-    def call(slug, ops, service):
-        calls.append((slug, ops, service))
+    def call(slug, ops):
+        calls.append((slug, ops))
         return {"rejected": []}
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
     client = ledger_client.LedgerClient()
     client.relay_comment("demo", "notes/n-1", "holding page changes", "master@a1b2c3-0002", "a1b2c3d4e5f6")
-    [(slug, [op], service)] = calls
-    assert (slug, service) == ("demo", True)
+    [(slug, [op])] = calls
+    assert slug == "demo"
     assert op == {
         "op": "add",
         "id": "a1b2c3d4e5f6",

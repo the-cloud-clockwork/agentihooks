@@ -20,11 +20,12 @@ import uuid
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 
 authority, core = ledger_server.authority, ledger_server.core
+ROOT = Path(ledger_server.__file__).resolve().parents[2]
 SLUG = "load-gate"
 TASKS = 1000
 PHASES = 60
@@ -198,8 +199,8 @@ def write_every() -> float:
 
 
 def duration() -> float:
-    interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
-    return (SWEEPS + 1) * ledger_server.BIN_SWEEP_EVERY * interval
+    interval = inspect.signature(api_service.upkeep).parameters["interval"].default
+    return (SWEEPS + 1) * api_service.BIN_SWEEP_EVERY * interval
 
 
 def busiest_window(samples: list[tuple[float, float]]) -> float | None:
@@ -228,7 +229,7 @@ def verdict(writes: list[float], expected: int, cores: float | None, errors: lis
 def unexpired(folder: Path, at: int) -> list[str]:
     """Alerts past their quiet hour that the expiry sweep should have closed during the load."""
     doc = SQLiteLedgerRepository(folder / DATABASE).export_document(SLUG)
-    return [alert["id"] for alert in doc.get("alerts", []) if ledger_server.ledger_alerts.expired(alert, at)]
+    return [alert["id"] for alert in doc.get("alerts", []) if api_service.ledger_alerts.expired(alert, at)]
 
 
 def free_port() -> int:
@@ -237,16 +238,25 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
-def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
+def start_server(
+    folder: Path,
+    port: int,
+    log: TextIO,
+    argv: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    cwd: str | None = None,
+) -> subprocess.Popen:
     env = {
         **os.environ,
         "LEDGER_DIR": str(folder),
         "LEDGER_PORT": str(port),
         "SWARM_RELOAD": "0",
         "CONDITIONS_TRUSTED_OWNERS": "The-Cloud-Clockwork",
+        **(extra_env or {}),
     }
     server = subprocess.Popen(
-        [sys.executable, ledger_server.__file__, "--serve"],
+        argv or [sys.executable, ledger_server.__file__, "--serve"],
+        cwd=cwd,
         env=env,
         stdout=log,
         stderr=subprocess.PIPE,
@@ -299,7 +309,9 @@ def stop_server(server: subprocess.Popen) -> None:
         relay.join()
 
 
-def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
+def client(
+    writer: ResourceClient, reader: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict
+) -> None:
     for n in itertools.count():
         began = start + n * write_every()
         if began >= deadline:
@@ -308,13 +320,13 @@ def client(api: ResourceClient, name: str, item: str, start: float, deadline: fl
         op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
             sent = time.monotonic()
-            reply = api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
+            reply = writer.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
             if rejected := (reply.get("data") or reply).get("rejected"):
                 raise ValueError(f"write rejected: {rejected}")
             results["writes"].append(time.monotonic() - sent)
             read = time.monotonic()
-            api.request(SLUG, item)
-            api.request(SLUG, "tasks?limit=100")
+            reader.request(SLUG, item)
+            reader.request(SLUG, "tasks?limit=100")
             results["reads"].append(time.monotonic() - read)
         except Exception as exc:  # every failure is a red request, whatever raised it
             results["errors"].append(f"{name}: {type(exc).__name__}: {exc}")
@@ -387,17 +399,18 @@ def preflight(api: ResourceClient, name: str, item: str) -> None:
         raise SystemExit(f"write preflight refused: write rejected: {rejected}")
 
 
-def load(port: int, token: str, pid: int, seconds: float) -> dict:
-    base = f"http://127.0.0.1:{port}"
+def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
+    write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
     results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
     apis = []
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
         credentials = {"X-Ledger-Token": authority.agent_token(token, SLUG, name), "X-Ledger-Agent": name}
-        api = ResourceClient(base, credentials, TIMEOUT_S)
-        api.mutate(SLUG, [{"op": "join", "id": f"join-{uuid.uuid4().hex[:10]}", "by": name, "role": "member"}])
-        apis.append((api, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
-    preflight(*apis[0])
+        writer = ResourceClient(write_base, credentials, TIMEOUT_S)
+        reader_client = ResourceClient(read_base, credentials, TIMEOUT_S)
+        writer.mutate(SLUG, [{"op": "join", "id": f"join-{uuid.uuid4().hex[:10]}", "by": name, "role": "member"}])
+        apis.append((writer, reader_client, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
+    preflight(apis[0][0], apis[0][2], apis[0][3])
     began = time.monotonic()
     deadline = began + seconds
     threads = [
@@ -406,11 +419,12 @@ def load(port: int, token: str, pid: int, seconds: float) -> dict:
     ]
     threads += [
         threading.Thread(
-            target=reader, args=(api, single_items(n), began + n / CLIENTS / READS_PER_SECOND, deadline, results)
+            target=reader,
+            args=(reader_client, single_items(n), began + n / CLIENTS / READS_PER_SECOND, deadline, results),
         )
-        for n, (api, _, _) in enumerate(apis)
+        for n, (_, reader_client, _, _) in enumerate(apis)
     ]
-    threads.append(threading.Thread(target=watcher, args=(base, {"X-Ledger-Token": token}, deadline, results)))
+    threads.append(threading.Thread(target=watcher, args=(read_base, {"X-Ledger-Token": token}, deadline, results)))
     threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results)))
     for thread in threads:
         thread.start()
@@ -423,15 +437,24 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     doc = full_size(core.now_ms())
     token = store(folder, doc)
     print(f"ledger {SLUG}: {len(doc['tasks'])} tasks, {size(doc)} bytes", flush=True)
-    port = free_port()
+    write_port, read_port = free_port(), free_port()
     seconds = duration()
-    log_path = folder / "server.log"
-    with log_path.open("w") as log:
-        server = start_server(folder, port, log)
+    log_path, read_log_path = folder / "server.log", folder / "server-read.log"
+    with log_path.open("w") as log, read_log_path.open("w") as read_log:
+        write_server = start_server(
+            folder,
+            write_port,
+            log,
+            argv=[sys.executable, "-m", "scripts.swarm_ledger.api_service", "--serve"],
+            extra_env={"LEDGER_API_HOST": "127.0.0.1", "LEDGER_API_PORT": str(write_port)},
+            cwd=str(ROOT),
+        )
+        read_server = start_server(folder, read_port, read_log)
         try:
-            results = load(port, token, server.pid, seconds)
+            results = load(write_port, read_port, token, write_server.pid, seconds)
         finally:
-            stop_server(server)
+            stop_server(read_server)
+            stop_server(write_server)
     writes, cores = results["writes"], busiest_window(results["cpu"])
     expected = CLIENTS * math.ceil(seconds / write_every())
     problems = verdict(writes, expected, cores, results["errors"])
@@ -439,7 +462,7 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     item_reads, expected_reads = results["item_reads"], CLIENTS * math.ceil(seconds * READS_PER_SECOND)
     if len(item_reads) < MIN_WRITES * expected_reads:
         problems.append(f"{len(item_reads)} single resource reads completed of {expected_reads} expected")
-    if "Exception in thread" in (server_log := log_path.read_text()):
+    if "Exception in thread" in (server_log := log_path.read_text() + read_log_path.read_text()):
         problems.append("a ledger server background thread died")
     if stale := unexpired(folder, core.now_ms()):
         problems.append(f"the expiry sweep left {len(stale)} alerts past their quiet hour open")

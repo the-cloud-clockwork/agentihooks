@@ -3,21 +3,17 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Ordered 2026-11-07, the tick reads and writes the shared database instead of the ledger server: the tick route
-      runs its pass inside database_ledger.scoped() or as the swarm's own service through database_ledger.acting(""),
-      the tick ledger port builds the database client while database_ledger.serving() or through ledger.client and
-      builds no ResourceClient of its own outside that branch, and ledger.client returns the database client.
+      Ordered 2026-11-07 and 2026-11-16, the tick and every swarm client read and write the shared database through
+      the ledger API route code run in process and never through the ledger server: the tick route runs its pass
+      inside database_ledger.acting(""), the swarm's own service, the tick ledger port builds its client with
+      ledger.client and builds no ResourceClient of its own, and ledger.client returns the in process database
+      client with no other path.
     patterns:
       - pattern-either:
           - patterns:
               - pattern: |
                   def routed(store, slug, *args, **kwargs):
                     ...
-              - pattern-not: |
-                  def routed(store, slug, *args, **kwargs):
-                    ...
-                    with $ROUTE, database_ledger.scoped():
-                      ...
               - pattern-not: |
                   def routed(store, slug, *args, **kwargs):
                     ...
@@ -30,12 +26,6 @@ rules:
               - pattern-not: |
                   def build(remaining: float) -> ResourceClient:
                     ...
-                    if database_ledger.serving():
-                      return database_ledger.client(...)
-                    ...
-              - pattern-not: |
-                  def build(remaining: float) -> ResourceClient:
-                    ...
                     $BUILT: ResourceClient = ledger.client(...)
                     return $BUILT
           - patterns:
@@ -43,24 +33,15 @@ rules:
                   def build(remaining: float) -> ResourceClient:
                     ...
               - pattern: ResourceClient(...)
-              - pattern-not-inside: |
-                  if database_ledger.serving():
-                    return database_ledger.client(...)
-                  ...
-                  return ResourceClient(...)
           - patterns:
               - pattern: |
                   def client(...):
                     ...
               - pattern-not: |
                   def client(...):
-                    ...
-                    if database_ledger.serving():
-                      return database_ledger.client(...)
-                    ...
-              - pattern-not: |
-                  def client(...):
-                    ...
+                    "..."
+                    from scripts.tick.adapters import database_ledger
+
                     return database_ledger.client(...)
     paths:
       include:

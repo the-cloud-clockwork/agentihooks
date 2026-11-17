@@ -22,14 +22,14 @@ BOOT = """
 import json, shutil, sys, threading, time
 from pathlib import Path
 from http.server import ThreadingHTTPServer
-sys.path.insert(0, str(Path(sys.argv[1]) / 'scripts' / 'swarm_ledger'))
-import ledger_core, new_ledger
+from scripts.swarm_ledger import api_service, ledger_core, ledger_server, new_ledger
 ledger_core.LEDGER_DIR = Path(sys.argv[2])
-import ledger_server
 for name in ('agentihooks', 'claude', 'gh'):
     assert shutil.which(name) is None
 new_ledger.create('sw', {'title': 'Remote controls', 'overview': 'Control the owning hive', 'phases': [{'title': 'Controls', 'description': 'Remote tick'}]})
-server = ThreadingHTTPServer(('127.0.0.1', 0), ledger_server.Handler)
+class Front(api_service.WriteHandler):
+    do_GET = ledger_server.Handler.do_GET
+server = ThreadingHTTPServer(('127.0.0.1', 0), Front)
 ledger_server.ALLOWED_HOSTS.add(f'127.0.0.1:{server.server_address[1]}')
 ledger_server.ALLOWED_ORIGINS.add(f'http://127.0.0.1:{server.server_address[1]}')
 token = ledger_server.repository.token('sw')

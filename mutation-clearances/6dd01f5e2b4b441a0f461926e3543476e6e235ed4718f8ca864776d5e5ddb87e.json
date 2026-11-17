@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x\u01c1Exchange\u01c1refused:9800daa43d2f172f4f4bf64c4d76562b04070f3d0dc60a2ca09ea70f79455583": {
+    "reader": "standards-reader",
+    "reason": "Exchange.headers is always an email Message built by database_ledger (three construction sites), whose get ignores name case, so X-LEDGER-AGENT and X-Ledger-Agent read one header."
+  }
+}

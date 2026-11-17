@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_serve:5f86d5f938f5ddd49ef3f2b06c9ad4ed58712e39f2a0af4c3a0e514e82d71927": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns outbox_host unchanged at run time, so the with statement calls the same running method."
+  }
+}

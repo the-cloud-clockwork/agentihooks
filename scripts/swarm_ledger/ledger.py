@@ -102,7 +102,6 @@ import itertools
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import urllib.error
@@ -110,8 +109,6 @@ import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
-
-from scripts.swarm_ledger import ledger_route
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -129,7 +126,6 @@ import watch_ledger  # noqa: E402
 from scripts.gates.base import Who
 from scripts.inbox import outbox
 from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage, workflow_task
-from scripts.swarm_ledger.adapters import hive_ledger
 from scripts.swarm_ledger.repository import postgres
 
 repository = storage.default()
@@ -140,7 +136,6 @@ REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
 WRITE_TIMEOUT = postgres.LOCK_TRIES * postgres.LOCK_WAIT + REQUEST_TIMEOUT
 EXPORT_TIMEOUT = 30
-TALK_OPS = ("answer", "add_item", "relay")
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
@@ -156,11 +151,11 @@ OBJECT_FORMS = {
 
 
 def base(slug=""):
-    return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)
+    return BASE or ledger_link.base(slug=slug)
 
 
 def credentials(slug, service=False):
-    from scripts.swarm_ledger.authority_context import tick_headers
+    from scripts.swarm_ledger.authority_context import REMOTE_SERVICE, tick_headers
 
     who = Who.from_env()
     if ledger_link.remote(slug=slug):
@@ -171,7 +166,7 @@ def credentials(slug, service=False):
         if controller and not who.pinned:
             return {"X-Controller-Credential": controller}
         if service:
-            sys.exit("a remote ledger client cannot make service writes; the operator credential stays on its host")
+            sys.exit(REMOTE_SERVICE)
         if not who.pinned:
             raise unauthenticated(
                 "a remote ledger client needs a pinned agent identity; the operator credential stays on its host"
@@ -189,9 +184,11 @@ def local_credentials(slug, agent, service):
 
 
 def replay(slug: str, ops: list[Any], agent: str, service: bool) -> dict[str, Any]:
-    from scripts.swarm_ledger.api.client import ResourceClient
+    """Apply queued ``ops`` as the caller that queued them: ``agent`` when it wrote as itself, else the service."""
+    from scripts.tick.adapters import database_ledger
 
-    return ResourceClient(base(slug), local_credentials(slug, agent, service), WRITE_TIMEOUT).mutate(slug, ops)
+    with database_ledger.acting("" if service or not agent else agent):
+        return client(slug, WRITE_TIMEOUT).mutate(slug, ops)
 
 
 def derived_token(slug, name):
@@ -201,8 +198,9 @@ def derived_token(slug, name):
     return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
-def launch_token(slug, name):
-    from scripts.swarm_ledger.api.client import ResourceClient
+def launch_token(slug: str, name: str) -> str:
+    """The agent token the ledger API issues ``name`` for ``slug`` against this hive's credential."""
+    from scripts.tick.adapters import database_ledger
 
     credential = os.environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
     if not credential:
@@ -210,62 +208,50 @@ def launch_token(slug, name):
             "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
             "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive add"
         )
-    client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
+    headers = {"X-Hive-Credential": credential, "X-Ledger-Agent": name}
     try:
-        return retried(lambda: client.request(slug, "agent-token", {}), REMOTE_READ_ATTEMPTS)["data"]["token"]
+        issued = database_ledger.exchanged("POST", f"/api/v1/ledgers/{slug}/agent-token", {}, headers)
     except urllib.error.HTTPError as exc:
         if exc.code not in (401, 403):
             raise
-        raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
+        raise unauthenticated(f"the ledger API refused the hive credential: {exc.code}") from None
+    return str(issued["data"]["token"])
 
 
-def client(
-    slug: str, service: bool = False, timeout: float = REQUEST_TIMEOUT, headers: dict[str, str] | None = None
-) -> Any:
-    """The ledger API client for slug: in process over the shared database inside a database pass, else HTTP."""
-    from scripts.swarm_ledger.api.client import ResourceClient
+def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
+    """The ledger API client for slug: the ledger API route code run in this process over the shared database."""
     from scripts.tick.adapters import database_ledger
 
-    if database_ledger.serving():
-        return database_ledger.client(base(slug), timeout)
-    return ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
+    return database_ledger.client(base(slug), timeout)
 
 
-def request(
-    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float | None = None
-) -> dict[str, Any]:
-    """One ledger read or write; unless a timeout is given, a write waits out the server's writer lock budget."""
+def request(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
+    """One ledger read or write; unless a timeout is given, a write waits out the writer lock budget."""
     if timeout is None:
         timeout = REQUEST_TIMEOUT if ops is None else WRITE_TIMEOUT
-    found = client(slug, service, timeout)
+    found = client(slug, timeout)
     return found.snapshot(slug) if ops is None else found.mutate(slug, ops)
 
 
 def resource(
     slug: str,
     path: str,
-    service: bool = False,
     collection: bool = False,
-    headers: dict | None = None,
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
+    """One resource or collection of ledger slug, read again while the database answers a storage failure."""
+
     def read() -> Any:
-        found = client(slug, service, timeout, headers)
+        found = client(slug, timeout)
         return found.collection(slug, path) if collection else found.request(slug, path)["data"]
 
-    return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
+    return retried(read, attempts)
 
 
-def export(slug: str, service: bool = False) -> dict:
-    from scripts.swarm_ledger.api.client import ResourceClient
-
-    def read():
-        return ResourceClient(base(slug), credentials(slug, service), EXPORT_TIMEOUT).request(slug, "export", {})[
-            "data"
-        ]
-
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
+def export(slug: str) -> dict:
+    """The whole export of ledger slug, read again while the database answers a storage failure."""
+    return retried(lambda: client(slug, EXPORT_TIMEOUT).request(slug, "export", {})["data"], REMOTE_READ_ATTEMPTS)
 
 
 class Missing(SystemExit):
@@ -285,62 +271,21 @@ def ledger_remote_auth_failures_total() -> int:
     return sum(AUTH_FAILURES.values())
 
 
-def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
-    """One ledger read or write: in process over the shared database inside a database pass, else to the server."""
-    from scripts.tick.adapters import database_ledger
-
-    return (database_call if database_ledger.serving() else server_call)(slug, ops, service)
-
-
-def server_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
-    if ledger_link.remote(slug=slug):
-        return remote_call(slug, ops, service)
-    talking = talk(ops)
-    joining = bool(ops) and len(ops) == 1 and ops[0]["op"] == "join"
-    if outbox.waiting("ledger"):
-        outbox.flush(None)
-    if ops and not joining and outbox.waiting("ledger"):
-        if not talking:
-            sys.exit(
-                f"ledger talk queued while the server was down still waits in {outbox.path()}; retry once it lands"
-            )
-        return queue(slug, ops, service)
+def call(slug: str, ops: list[dict[str, Any]] | None = None) -> dict:
+    """One ledger read or write through the ledger API route code over the shared database: a missing ledger exits as
+    Missing, an unreachable database with the OS error, any other refusal with the route's answer."""
     try:
-        return request(slug, ops, service)
+        return request(slug, ops)
     except urllib.error.HTTPError as exc:
-        sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
-    except OSError:
-        if not repository.exists(slug):
+        if exc.code == 404 and "ledger_missing" in refusal_text(exc):
             raise Missing(f"ledger {slug} does not exist") from None
-        if os.environ.get("LEDGER_AUTOSTART") != "0":
-            subprocess.run(
-                [sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True
-            )
-    try:
-        return request(slug, ops, service)
-    except urllib.error.HTTPError as exc:
-        sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
-    except OSError as exc:
-        if talking or joining:
-            return queue(slug, ops, service)
-        sys.exit(f"ledger server not answering on {base()}: {exc}")
-
-
-def database_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
-    """One ledger read or write in process over the shared database, a refusal exiting as the server's."""
-    try:
-        return request(slug, ops, service)
-    except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
+    except OSError as exc:
+        sys.exit(f"ledger server not answering on {base(slug)}: {exc}")
 
 
-def talk(ops: list[dict[str, Any]] | None) -> bool:
-    return bool(ops) and all(
-        o["op"] in TALK_OPS or (o["op"] == "add" and "by" in o and not o.get("attachments")) for o in ops
-    )
-
-
-def queue(slug, ops, service):
+def queue(slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+    """Hold ``ops`` in the local outbox while the ledger database does not answer, replayed once it does."""
     if outbox.holds(ops[0]["id"]):
         return {"queued": ops[0]["id"]}
     who = Who.from_env()
@@ -348,25 +293,8 @@ def queue(slug, ops, service):
         outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))
     except outbox.OutboxFull as exc:
         sys.exit(str(exc))
-    print(
-        f"ledger server not answering on {base()}: queued locally, it replays when the server returns", file=sys.stderr
-    )
+    print("the ledger database is not answering: queued locally, it replays when it answers", file=sys.stderr)
     return {"queued": ops[0]["id"]}
-
-
-def remote_call(slug, ops, service):
-    deliver = functools.partial(request, slug, ops, service)
-    try:
-        answer = retried(deliver, REMOTE_READ_ATTEMPTS if ops is None else 1)
-    except urllib.error.HTTPError as exc:
-        if ops is not None and exc.code in hive_ledger.GATEWAY:
-            hive_ledger.report(exc.code)
-        sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
-    except OSError as exc:
-        sys.exit(f"ledger server not answering on {base()}: {exc}")
-    if ops is not None:
-        hive_ledger.report(None)
-    return answer
 
 
 def retried(read, attempts):
@@ -541,21 +469,13 @@ def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
     )
 
 
-def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
-    req = urllib.request.Request(
-        f"{base()}/api/v1/ledgers/{slug}/uploads/{route}",
-        data=Path(path).read_bytes(),
-        headers={
-            **credentials(slug),
-            "X-Ledger-Agent": name,
-            "Content-Type": "application/octet-stream",
-            **extra,
-        },
-        method="POST",
-    )
+def upload(slug: str, name: str, path: str, route: str, extra: dict[str, str]) -> dict[str, Any]:
+    """Store one file on the ledger in process through its upload route, a refusal exiting with the route's answer."""
+    from scripts.tick.adapters import database_ledger
+
+    headers = {"X-Ledger-Agent": name, "Content-Type": "application/octet-stream", **extra}
     try:
-        with ledger_link.urlopen(req, REQUEST_TIMEOUT) as resp:
-            return json.loads(resp.read())
+        return database_ledger.upload(slug, route, Path(path).read_bytes(), headers)
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused the file: {exc.code} {exc.read().decode(errors='replace')}")
 
@@ -1220,8 +1140,7 @@ def main():
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
-    with ledger_route.session(args.slug):
-        globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
 
 if __name__ == "__main__":

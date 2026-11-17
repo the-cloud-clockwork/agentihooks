@@ -6,14 +6,14 @@ from scripts.swarm import ledger_client
 def test_relay_posts_the_senders_chat_line_with_the_service_credential(monkeypatch):
     calls = []
 
-    def call(slug, ops, service):
-        calls.append((slug, ops, service))
+    def call(slug, ops):
+        calls.append((slug, ops))
         return {"rejected": []}
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
     ledger_client.LedgerClient().relay("demo", "the docs are merged", "master@a1b2c3-0002")
-    [(slug, [op], service)] = calls
-    assert (slug, service) == ("demo", True)
+    [(slug, [op])] = calls
+    assert slug == "demo"
     assert {k: v for k, v in op.items() if k != "id"} == {
         "op": "add",
         "by": "master@a1b2c3-0002",
@@ -26,8 +26,8 @@ def test_relay_posts_the_senders_chat_line_with_the_service_credential(monkeypat
 def test_relay_keeps_the_outgoing_inbox_identifier_for_reconciliation(monkeypatch):
     calls = []
 
-    def call(slug, ops, service):
-        calls.append((slug, ops, service))
+    def call(slug, ops):
+        calls.append((slug, ops))
         return {"rejected": []}
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
@@ -45,7 +45,6 @@ def test_relay_keeps_the_outgoing_inbox_identifier_for_reconciliation(monkeypatc
                     "to": "operator",
                 }
             ],
-            True,
         )
     ]
 
@@ -53,7 +52,7 @@ def test_relay_keeps_the_outgoing_inbox_identifier_for_reconciliation(monkeypatc
 def test_relay_without_an_inbox_identifier_keeps_distinct_chat_writes(monkeypatch):
     writes = []
 
-    def call(slug, ops, service):
+    def call(slug, ops):
         writes.extend(ops)
         return {"rejected": []}
 
@@ -68,7 +67,7 @@ def test_relay_without_an_inbox_identifier_keeps_distinct_chat_writes(monkeypatc
 def test_notify_posts_a_swarm_notice_for_the_panel(monkeypatch):
     calls = []
 
-    def call(slug, ops, service):
+    def call(slug, ops):
         calls.append((slug, ops))
         return {"rejected": []}
 

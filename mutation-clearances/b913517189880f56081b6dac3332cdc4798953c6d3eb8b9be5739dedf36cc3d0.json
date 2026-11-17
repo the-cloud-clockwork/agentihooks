@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload:902ca5adf00488b20c01838927165c086cdd3c63cfb3e3889cc5ecbb8079af9a": {
+    "reader": "standards-reader",
+    "reason": "upload stores each dict key in an email Message whose get ignores name case; no extra key collides with Content-Type."
+  }
+}

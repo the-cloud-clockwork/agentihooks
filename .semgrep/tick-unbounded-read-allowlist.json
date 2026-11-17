@@ -10,7 +10,6 @@
   "/scripts/swarm/health/verdicts.py": "t-bounded-reads-watches",
   "/scripts/swarm/idle.py": "t-bounded-reads-watches",
   "/scripts/swarm/incidents.py": "t-bounded-reads-watches",
-  "/scripts/swarm/ledger_cutover.py": "t-bounded-reads-store",
   "/scripts/swarm/ledger_events.py": "t-bounded-reads-views",
   "/scripts/swarm/ledger_probe.py": "t-bounded-reads-views",
   "/scripts/swarm/lifecycle.py": "t-bounded-reads-watches",

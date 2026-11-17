@@ -18,33 +18,48 @@ SECONDS = 30
 WRITES_PER_SECOND = 2
 
 
+def _wait_listening(process: subprocess.Popen, port: int) -> None:
+    deadline = time.monotonic() + gate.SERVER_WAIT_S
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"server exited with {process.returncode}")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.2)
+    raise TimeoutError("server did not listen")
+
+
 @contextmanager
-def serving(source: Path, folder: Path, port: int):
-    env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
-    with (folder / "server.log").open("w") as log:
-        process = subprocess.Popen(
-            [sys.executable, str(source / "scripts/swarm_ledger/ledger_server.py"), "--serve"],
+def serving(source: Path, folder: Path, write_port: int, read_port: int):
+    env = {**os.environ, "LEDGER_DIR": str(folder), "SWARM_RELOAD": "0"}
+    write_env = {**env, "LEDGER_API_HOST": "127.0.0.1", "LEDGER_API_PORT": str(write_port)}
+    read_env = {**env, "LEDGER_PORT": str(read_port)}
+    with (folder / "server.log").open("w") as log, (folder / "server-read.log").open("w") as read_log:
+        write_process = subprocess.Popen(
+            [sys.executable, "-m", "scripts.swarm_ledger.api_service", "--serve"],
             cwd=source,
-            env=env,
+            env=write_env,
             stdout=log,
             stderr=log,
             stdin=subprocess.DEVNULL,
         )
+        read_process = subprocess.Popen(
+            [sys.executable, str(source / "scripts/swarm_ledger/ledger_server.py"), "--serve"],
+            cwd=source,
+            env=read_env,
+            stdout=read_log,
+            stderr=read_log,
+            stdin=subprocess.DEVNULL,
+        )
         try:
-            deadline = time.monotonic() + gate.SERVER_WAIT_S
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise RuntimeError(f"server exited with {process.returncode}")
-                try:
-                    with socket.create_connection(("127.0.0.1", port), timeout=1):
-                        break
-                except OSError:
-                    time.sleep(0.2)
-            else:
-                raise TimeoutError("server did not listen")
-            yield process
+            _wait_listening(write_process, write_port)
+            _wait_listening(read_process, read_port)
+            yield write_process, read_process
         finally:
-            gate.stop_server(process)
+            gate.stop_server(read_process)
+            gate.stop_server(write_process)
 
 
 def consume(base: str, token: str, ready: threading.Event, stop: threading.Event, result: dict) -> None:
@@ -73,22 +88,22 @@ def consume(base: str, token: str, ready: threading.Event, stop: threading.Event
 def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
     folder.mkdir(parents=True)
     token = gate.store(folder, doc)
-    port = gate.free_port()
-    base = f"http://127.0.0.1:{port}"
+    write_port, read_port = gate.free_port(), gate.free_port()
+    write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
     consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": []} for _ in range(streams)]
     ready = [threading.Event() for _ in consumers]
     stop = threading.Event()
     threads = [
-        threading.Thread(target=consume, args=(base, token, event, stop, result), daemon=True)
+        threading.Thread(target=consume, args=(read_base, token, event, stop, result), daemon=True)
         for event, result in zip(ready, consumers, strict=True)
     ]
     writes = []
-    with serving(source, folder, port) as server:
+    with serving(source, folder, write_port, read_port) as (write_server, read_server):
         credentials = {
             "X-Ledger-Token": gate.authority.agent_token(token, gate.SLUG, "ci@ab0000-0000"),
             "X-Ledger-Agent": "ci@ab0000-0000",
         }
-        api = gate.ResourceClient(base, credentials, gate.TIMEOUT_S)
+        api = gate.ResourceClient(write_base, credentials, gate.TIMEOUT_S)
         api.mutate(gate.SLUG, [{"op": "join", "id": "stream-load-join", "by": "ci@ab0000-0000", "role": "member"}])
         try:
             for thread in threads:
@@ -96,7 +111,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
             for event, result in zip(ready, consumers, strict=True):
                 if not event.wait(gate.SERVER_WAIT_S) or result["snapshots"] != 1:
                     raise RuntimeError(f"stream did not receive its snapshot: {result}")
-            began, initial_cpu = time.monotonic(), gate.cpu_seconds(server.pid)
+            began, initial_cpu = time.monotonic(), gate.cpu_seconds(write_server.pid)
             for n in range(SECONDS * WRITES_PER_SECOND):
                 time.sleep(max(0, began + n / WRITES_PER_SECOND - time.monotonic()))
                 sent = time.monotonic()
@@ -117,7 +132,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                 writes.append(time.monotonic() - sent)
             time.sleep(max(0, began + SECONDS - time.monotonic()))
             elapsed = time.monotonic() - began
-            cpu = gate.cpu_seconds(server.pid) - initial_cpu
+            cpu = gate.cpu_seconds(write_server.pid) - initial_cpu
             if any(result["patches"] != len(writes) or result["errors"] for result in consumers):
                 raise RuntimeError(f"streams did not receive every write: {consumers}")
             return {

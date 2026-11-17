@@ -1,7 +1,5 @@
-import io
 import json
 import re
-import urllib.error
 from collections.abc import Callable
 
 import pytest
@@ -71,7 +69,7 @@ def cli(monkeypatch, tmp_path):
     def run(argv, reply):
         sent = []
 
-        def request(slug, ops=None, service=False):
+        def request(slug, ops=None):
             assert slug == "s"
             sent.extend(ops or [])
             ids = [op["id"] for op in ops or []]
@@ -116,28 +114,6 @@ def test_join_lands_past_pending_talk(
     assert sent[0]["by"] == "eng-1"
     assert json.loads(capsys.readouterr().out) == {"joined": "eng-1", "slug": "s", "role": "member"}
     assert outbox.path().read_text() == before
-
-
-@pytest.mark.parametrize(
-    "ops",
-    [
-        [],
-        [{"op": "leave", "id": "leave", "by": "eng-1"}],
-        [{"op": "join", "id": "join", "by": "eng-1"}, {"op": "leave", "id": "leave", "by": "eng-1"}],
-    ],
-)
-@pytest.mark.feature("ledger-join-past-talk")
-def test_pending_talk_still_holds_other_writes(monkeypatch: pytest.MonkeyPatch, ops: list[dict]) -> None:
-    from scripts.inbox import outbox
-
-    monkeypatch.setattr(outbox, "waiting", lambda lane: lane == "ledger")
-    monkeypatch.setattr(outbox, "flush", lambda store: None)
-    if ops:
-        with pytest.raises(SystemExit, match="still waits in"):
-            ledger.call("s", ops)
-    else:
-        monkeypatch.setattr(ledger, "request", lambda slug, ops, service: {"read": slug})
-        assert ledger.call("s", ops) == {"read": "s"}
 
 
 @pytest.mark.parametrize("argv", WRITES, ids=" ".join)
@@ -268,39 +244,3 @@ def test_task_set_refuses_a_whole_object_naming_the_dotted_form(cli, monkeypatch
         cli(["task", "set", "t1", value], applied)
     assert sent == []
     assert f"one {name}.KEY=VALUE pair per key among {allowed}, e.g. {form}, not {name}=VALUE" in str(stop.value.code)
-
-
-def refusing(code):
-    def refuse(*_):
-        raise urllib.error.HTTPError("https://ledger.test/sw", code, "refused", {}, io.BytesIO(b"refused"))
-
-    return refuse
-
-
-def test_a_remote_write_reports_its_gateway_failure_and_its_success_but_a_read_reports_nothing(monkeypatch):
-    reported = []
-    monkeypatch.setattr(ledger.hive_ledger, "report", reported.append)
-    monkeypatch.setattr(ledger, "request", refusing(502))
-    with pytest.raises(SystemExit, match="server refused: 502"):
-        ledger.remote_call("sw", [{"op": "comment"}], False)
-    assert reported == [502]
-    monkeypatch.setattr(ledger, "request", lambda *_: {"ok": True})
-    assert ledger.remote_call("sw", [{"op": "comment"}], False) == {"ok": True}
-    assert reported == [502, None]
-    assert ledger.remote_call("sw", None, False) == {"ok": True}
-    assert reported == [502, None]
-    monkeypatch.setattr(ledger, "REMOTE_READ_ATTEMPTS", 1)
-    monkeypatch.setattr(ledger, "request", refusing(502))
-    with pytest.raises(SystemExit, match="server refused: 502"):
-        ledger.remote_call("sw", None, False)
-    assert reported == [502, None]
-
-
-@pytest.mark.parametrize("code", [404, 500])
-def test_a_remote_write_refused_without_a_gateway_error_reports_nothing(monkeypatch, code):
-    reported = []
-    monkeypatch.setattr(ledger.hive_ledger, "report", reported.append)
-    monkeypatch.setattr(ledger, "request", refusing(code))
-    with pytest.raises(SystemExit, match=f"server refused: {code}"):
-        ledger.remote_call("sw", [{"op": "comment"}], False)
-    assert reported == []

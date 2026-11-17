@@ -6,7 +6,7 @@ nav_order: 25
 
 # Hosted ledger auth
 
-The ledger server decides who each request acts for in `ledger_authority.caller`. The page server, the `/api/v1` routes, routing settings and proof credentials all go through it. `SWARM_AUTH_MODE` selects the mode.
+The ledger server and the ledger API service decide who each real HTTP request acts for in `ledger_authority.caller`. The page server, the `/api/v1` GET routes the ledger server answers, the `/api/v1` write routes the ledger API service answers, routing settings and proof credentials all go through it. `SWARM_AUTH_MODE` selects the mode. An `agentihooks ledger` command, the swarm tick, the hub and a hive's agents run the same route code in process against the shared ledger database instead of sending an HTTP request, so no credential in this page applies to them: the call is judged by the pinned agent name or by `database_ledger.acting`, never refused for a missing or wrong token. Only the page's own reads and writes, the live event stream (`agentihooks ledger watch`), a `/healthz` probe and a proof ledger's own controls still travel as HTTP and carry these credentials.
 
 | Variable | Mode | Meaning |
 |---|---|---|
@@ -130,29 +130,34 @@ A workstation swarm, its agents and the ledger hooks reach a hosted ledger by en
 | `SWARM_URL` | Address of the hosted ledger, such as `https://swarm.example.com`. Set, it makes every ledger client remote, as any non-local `AGENTIHOOKS_DEPLOYMENT` already does: the CLI, the swarm tick and the session hook never start or restart a local ledger server. In a session bound to a swarm (`AGENTIHOOKS_SWARM`), it makes only that swarm's ledger remote; a call for another slug is remote only when `LEDGER_URL` or the deployment mode says so, and then still goes to `SWARM_URL`, even when `LEDGER_URL` is set, because `SWARM_URL` wins the address. `LEDGER_URL` remains the fallback; set with no `AGENTIHOOKS_DEPLOYMENT`, it also makes the client remote, and only `AGENTIHOOKS_DEPLOYMENT=local` keeps it local. |
 | `AGENTIHOOKS_LEDGER_AGENT_TOKEN` | The agent's own token, sent with its pinned name. |
 | `SWARM_SECRET` | When the client holds it and no agent token is set, the client derives the token for its own name. The swarm tick derives each spawned agent's token; neither the secret nor the tick's own agent token reaches a spawned agent. |
-| `SWARM_ACCESS_CLIENT_ID`, `SWARM_ACCESS_CLIENT_SECRET` | Cloudflare service token for machines off the tailnet; `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` are read when these are unset. Both parts set, every API request, upload, event stream, proof ledger call and health probe carries `CF-Access-Client-Id`, `CF-Access-Client-Secret` and `User-Agent: agentihooks-swarm`, because Cloudflare refuses Python's default user agent with error 1010. |
+| `SWARM_ACCESS_CLIENT_ID`, `SWARM_ACCESS_CLIENT_SECRET` | Cloudflare service token for machines off the tailnet; `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` are read when these are unset. Both parts set, every request that still travels as HTTP — the event stream, a plan artifact fetch and a health probe — carries `CF-Access-Client-Id`, `CF-Access-Client-Secret` and `User-Agent: agentihooks-swarm`, because Cloudflare refuses Python's default user agent with error 1010. |
 | `LEDGER_CA_PEM` | The PEM of the CA that signed the ledger's certificate. Set, it is the only CA an https ledger request trusts. |
 | `LEDGER_CA_FILE` | Without `LEDGER_CA_PEM`, a CA file trusted beside the system roots. Defaults to `ledger-ca.pem` in the agentihooks home, which `agentihooks init` writes from OpenBao `k8s/agentihooks-swarm-ledger-ca`, field `ca.crt`, when `OPENBAO_URL` and `OPENBAO_TOKEN` are set. |
 
 Every reader of `ledger_link.remote` treats `SWARM_URL`, and `LEDGER_URL` with no `AGENTIHOOKS_DEPLOYMENT`, as a non-local deployment (the full order is in [Client mode resolution](deployment-modes.md#client-mode-resolution)), so a process with it set never accepts page-derived agent tokens. A herdr pane gets its token from the launcher, which exports it after sourcing the operator's env files and unsets `SWARM_SECRET`.
 
-The tick's own service writes still need `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, checked against the hosted ledger's Redis.
+The credential-selection rule below, and the table above, describe what still travels as a real network request: the
+event stream (`agentihooks ledger watch`) and a `/healthz` probe. An ordinary ledger read or write, and an upload,
+run the ledger API route code in process against the shared database and carry no credential at all; they are
+judged by the pinned agent name or by `database_ledger.acting`. The tick's own service writes still need
+`AGENTIHOOKS_CONTROLLER_CREDENTIAL`, checked against the hosted ledger's Redis, and a proof ledger's own controls
+keep a credential check even running in process, because they issue and exchange a short lived proof credential
+rather than trusting the ambient principal.
 
 ### Which credential a remote client sends
 
-A remote client picks the first that applies:
+A remote client picks the first that applies, for the calls that still travel as HTTP:
 
 1. The tick credential `X-Ledger-Tick`, inside a swarm tick that holds the server secret.
 2. `X-Controller-Credential` from `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, when the process has no pinned agent.
 3. For a pinned agent, `X-Ledger-Token` with `X-Ledger-Agent`. The token is `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without it, the client derives one from `SWARM_SECRET`; without either, it asks the ledger for a `hive.` token with the hive credential `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` that `agentihooks hive add` delivers.
 
-A remote client refuses, before any request:
+Deriving a credential this way refuses, before any request:
 
-- a write that needs the operator credential: `a remote ledger client cannot make service writes; the operator credential stays on its host`;
 - a process without a pinned agent, which needs both `AGENTIHOOKS_SWARM` and `AGENTIHOOKS_AGENT_NAME`, and with no controller credential: `unauthenticated: a remote ledger client needs a pinned agent identity; the operator credential stays on its host`;
 - a pinned agent with no token, no secret and no hive credential: `unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive add`.
 
-A remote read is tried three times, pausing 0.5 and then 1 second, on a connection error or a 5xx answer; a write is sent once. A request times out after 10 seconds. A `403` whose body carries `Missing or wrong ledger credential` ends the command with `unauthenticated: the ledger server refused the credential`; a `401` or `403` to the hive token request ends it with `unauthenticated: the ledger server refused the hive credential: <status>`. Remote writes never queue in the local outbox: an unreachable ledger ends the command with `ledger server not answering on <address>`.
+A remote read is tried three times, pausing 0.5 and then 1 second, on a connection error or a 5xx answer. A request times out after 10 seconds. A `403` whose body carries `Missing or wrong ledger credential` ends the command with `unauthenticated: the ledger server refused the credential`; a `401` or `403` to the hive token request ends it with `unauthenticated: the ledger server refused the hive credential: <status>`. An unreachable ledger server ends an event-stream watch with `ledger server not answering on <address>`.
 
 ### Workstation swarm on the hosted ledger
 
