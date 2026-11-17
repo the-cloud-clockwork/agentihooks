@@ -58,6 +58,7 @@ class ScopedStateStore:
                 subjects=[f"{subject(self._swarm, 'state', self._bucket)}.>"],
                 max_msgs_per_subject=HISTORY,
                 metadata={IMPORT_PENDING: "true"} if importing else None,
+                num_replicas=self._root._config.replicas,
             )
 
     def _subject(self, key: str) -> str:
