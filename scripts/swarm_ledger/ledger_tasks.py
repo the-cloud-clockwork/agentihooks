@@ -107,6 +107,11 @@ SWARM = "swarm"
 RANK_AUTHORS = ("operator", SWARM, "dispatcher")
 RANK_LANES = ("master", "dispatch")
 QUOTED = "task_update takes quote, the operator's words, only with a rank"
+GENERATION = "claim_generation"
+ADVANCED = (
+    "claim_generation may be set only on a task if_state names open and if_match names unclaimed, "
+    "to one above the claim_generation if_match names"
+)
 UNRELAYED_TASK = "a rank relay refused: the task does not exist"
 UNRELAYED_ROLE = (
     "a rank relay refused: {by} is not the ledger's orchestrator; only the master relays the operator's rank, "
@@ -168,14 +173,16 @@ def check(op):
     if not ITEM_RE.match(str(op.get("item"))) or not isinstance(fields, dict) or not fields:
         raise ValueError("task_update needs item tasks/<id> and fields")
     check_difficulty(fields)
-    strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS + OBJECT_FIELDS + BOOL_FIELDS + NUMBER_FIELDS}
-    if set(fields) - set(UPDATABLE) or not all(isinstance(v, str) for v in strings.values()):
+    typed = LIST_FIELDS + OBJECT_FIELDS + BOOL_FIELDS + NUMBER_FIELDS + (GENERATION,)
+    strings = {k: v for k, v in fields.items() if k not in typed}
+    if set(fields) - {*UPDATABLE, GENERATION} or not all(isinstance(v, str) for v in strings.values()):
         raise ValueError(
             f"task_update may set only {UPDATABLE}, as strings, {LIST_FIELDS} as lists or {OBJECT_FIELDS} as objects"
         )
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
     check_guards(op)
+    check_generation(op)
     check_quote(op)
     check_lists(fields)
     check_review_rounds(fields)
@@ -209,6 +216,19 @@ def check_guards(op: dict) -> None:
     if not isinstance(members, list) or not all(isinstance(m, str) and ID_RE.match(m) for m in members):
         raise ValueError("if_match group_members must list task ids")
     check_review_guards(expected)
+
+
+def check_generation(op: dict[str, Any]) -> None:
+    """A task update sets the claim generation only on an open task its guard names unclaimed, and only one above
+    the claim generation its if_match names, so an offer that dead lettered unclaimed retires its claim key without a
+    change of claimant and never strands a holder's claim."""
+    if GENERATION not in op["fields"]:
+        return
+    expected = op.get("if_match", {})
+    value, guard = op["fields"][GENERATION], expected.get(GENERATION)
+    unclaimed = op.get("if_state") == ["open"] and expected.get("claimed_by") == ""
+    if not unclaimed or type(value) is not int or type(guard) is not int or value != guard + 1:
+        raise ValueError(ADVANCED)
 
 
 def _guarded(task: dict[str, Any], op: dict[str, Any]) -> bool:

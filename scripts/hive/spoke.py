@@ -25,6 +25,11 @@ class Tasks(Protocol):
 
     def reopen(self, event: Envelope) -> None: ...
 
+    def dead_lettered(self, event: Envelope) -> None:
+        """Asks the hub to reopen a dead lettered offer, which advances its task's claim generation when no
+        admission is held, so the next offer carries a fresh claim key."""
+        ...
+
     def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
 
     def launched(self, event: Envelope, placed: Any) -> None: ...
@@ -203,8 +208,7 @@ class Spoke:
             delivery.nak(self.config.policy.ack_wait_ms)
             return waiting
         if prior.get("state") in ("dead", "withdrawn"):
-            delivery.term()
-            return prior["state"]
+            return self._ended(delivery, prior["state"])
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
         if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED):
@@ -239,6 +243,15 @@ class Spoke:
         delivery.ack()
         self._report_launch(event, launch)
         return "started"
+
+    def _ended(self, delivery: Delivery, state: str) -> str:
+        """Terms an offer whose claim at this generation is dead or withdrawn; a dead claim first asks the hub to
+        advance the task's claim generation, so a task whose offer dead lettered unadmitted is offered again under a
+        fresh claim key."""
+        if state == "dead":
+            self.tasks.dead_lettered(delivery.event)
+        delivery.term()
+        return state
 
     def _ask_again(
         self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
@@ -398,7 +411,7 @@ class Spoke:
         else:
             raise StateConflict
         self.bus.dead.publish(f"dead.{event.swarm}", letter)
-        self.tasks.reopen(event)
+        self.tasks.dead_lettered(event)
         claims.update(key, json.dumps({"state": "dead"}).encode(), revision)
 
     def _exhaust(self, delivery: Delivery) -> str:
