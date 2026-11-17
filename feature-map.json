@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "serena-router-start-stops-waiting-on-an-exited-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-hive-proof-no-live-hive",
+      "behaviour": "Starting the Serena router without a systemd user session stops waiting the moment the router process it started exits before opening its port, and reports the router down with its exit status, while a router that still runs is waited on until its port opens. A hive pod with no serena binary therefore leaves the router start within seconds instead of ninety, writes its first heartbeat and registers as a live hive inside the worker hive pod proof's sixty second window.",
+      "seam": "serena_router_daemon.start on the pidfile path, which hive run reaches through serena_router_daemon.ensure",
+      "rules": [
+        "serena-router-start-waits-on-an-exited-router"
+      ],
+      "tests": [
+        "tests/test_serena_router_daemon.py::test_start_reports_the_router_down_as_soon_as_its_process_exits_before_opening_its_port",
+        "tests/test_serena_router_daemon.py::test_start_keeps_waiting_for_a_running_router_until_its_port_opens"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
