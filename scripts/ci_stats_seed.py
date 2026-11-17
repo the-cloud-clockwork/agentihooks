@@ -46,19 +46,22 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
 
 
 def download(item: dict[str, Any], deadline: float) -> bytes:
-    """Return one stats artifact's zip, downloading it again after each wait in RETRY_DELAYS while a download fails,
-    and raise naming the artifact and the last error once every download failed; a timeout is never retried."""
-    waits = list(RETRY_DELAYS)
-    while True:
+    """Return one stats artifact's zip, downloading it again after each wait in RETRY_DELAYS, cut short at the
+    deadline, while a download fails, and raise naming the artifact and the last error when the final download fails
+    too; a timeout is never retried."""
+    path = f"actions/artifacts/{item['id']}/zip"
+    for wait in RETRY_DELAYS:
         try:
-            return api(f"actions/artifacts/{item['id']}/zip", binary=True, deadline=deadline)
-        except subprocess.CalledProcessError as error:
-            if not waits:
-                raise RuntimeError(
-                    f"Mutation stats seed: every download of {item['name']} ({item['id']}) failed: "
-                    f"{error.stderr.decode().rstrip()}"
-                ) from error
-            time.sleep(waits.pop(0))
+            return api(path, binary=True, deadline=deadline)
+        except subprocess.CalledProcessError:
+            time.sleep(min(wait, max(0.0, deadline - time.monotonic())))
+    try:
+        return api(path, binary=True, deadline=deadline)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            f"Mutation stats seed: every download of {item['name']} ({item['id']}) failed: "
+            f"{error.stderr.decode().rstrip()}"
+        ) from error
 
 
 def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.inf) -> int:

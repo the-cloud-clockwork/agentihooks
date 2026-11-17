@@ -254,7 +254,10 @@ def test_harvest_fails_when_github_cannot_answer(tmp_path, monkeypatch):
 
 
 @pytest.mark.feature("ci-stats-seed-download-retry")
-def test_harvest_downloads_a_failed_artifact_again_after_a_wait(folder, monkeypatch):
+@pytest.mark.parametrize(("now", "waited"), [(0.0, 5), (40.0, 2.0), (45.0, 0.0)])
+def test_harvest_downloads_a_failed_artifact_again_after_a_wait(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, now: float, waited: float
+) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
@@ -262,9 +265,10 @@ def test_harvest_downloads_a_failed_artifact_again_after_a_wait(folder, monkeypa
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
-    downloads, slept = [], []
+    downloads: list[tuple[str, float | None]] = []
+    slept: list[float] = []
 
-    def api(path, binary=False, deadline=None):
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
         if not binary:
             return responses[path]
         downloads.append((path, deadline))
@@ -273,16 +277,18 @@ def test_harvest_downloads_a_failed_artifact_again_after_a_wait(folder, monkeypa
         return _archive({"x.index": "k", f"{KEEP}.json": "{}"})
 
     monkeypatch.setattr(seed, "api", api)
-    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append))
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: now))
 
     assert seed.harvest(7, folder, set(), 42.0) == 2
     assert downloads == [("actions/artifacts/5/zip", 42.0)] * 2
-    assert slept == [5]
+    assert slept == [waited]
     assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "x.index"]
 
 
 @pytest.mark.feature("ci-stats-seed-download-retry")
-def test_harvest_fails_naming_the_artifact_once_every_download_failed(folder, monkeypatch):
+def test_harvest_fails_naming_the_artifact_once_every_download_failed(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
@@ -293,33 +299,73 @@ def test_harvest_fails_naming_the_artifact_once_every_download_failed(folder, mo
             ]
         },
     }
-    failures, downloads, slept = [], [], []
+    failure = subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Bad Gateway (HTTP 502)\n")
+    downloads: list[tuple[str, float | None]] = []
+    slept: list[float] = []
 
-    def api(path, binary=False, deadline=None):
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
         if not binary:
             return responses[path]
-        downloads.append(path)
+        downloads.append((path, deadline))
         if path == "actions/artifacts/6/zip":
-            failures.append(
-                subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Bad Gateway (HTTP 502)\n")
-            )
-            raise failures[-1]
+            raise failure
         return _archive({"x.index": "k"})
 
     monkeypatch.setattr(seed, "api", api)
-    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append))
-    taken = set()
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+    taken: set[str] = set()
 
     with pytest.raises(RuntimeError) as error:
-        seed.harvest(7, folder, taken)
+        seed.harvest(7, folder, taken, 42.0)
 
     assert str(error.value) == (
         "Mutation stats seed: every download of mutation-test-stats-cache-1 (6) failed: gh: Bad Gateway (HTTP 502)"
     )
-    assert error.value.__cause__ is failures[-1]
-    assert downloads == ["actions/artifacts/5/zip", *["actions/artifacts/6/zip"] * 4]
+    assert error.value.__cause__ is failure
+    assert downloads == [("actions/artifacts/5/zip", 42.0), *[("actions/artifacts/6/zip", 42.0)] * 4]
     assert slept == [5, 10, 20]
     assert taken == {"x.index"}
+
+
+@pytest.mark.feature("ci-stats-seed-download-retry")
+@pytest.mark.parametrize(
+    ("failing", "failure"),
+    [
+        ("actions/artifacts/5/zip", subprocess.TimeoutExpired(["gh", "api"], 0)),
+        (
+            "actions/runs/1/artifacts?per_page=100",
+            subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Bad Gateway (HTTP 502)\n"),
+        ),
+    ],
+)
+def test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, failing: str, failure: subprocess.SubprocessError
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100": {
+            "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
+        },
+    }
+    calls: list[str] = []
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        calls.append(path)
+        if path == failing:
+            raise failure
+        return _archive({"x.index": "k"}) if binary else responses[path]
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+
+    with pytest.raises(type(failure)) as error:
+        seed.harvest(7, folder, set())
+
+    assert error.value is failure
+    assert calls.count(failing) == 1
+    assert slept == []
 
 
 def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
