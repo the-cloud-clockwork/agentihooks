@@ -84,7 +84,10 @@ def force(slug: str, at: int) -> int:
 
 def forced(slug: str, at: int, environ: Mapping[str, str]) -> None:
     """Run master up --replace for a critical swarm, bounded by a timeout, and record its exit status and last
-    output against the forced start made at `at`."""
+    output against the forced start made at `at`; a record that Redis or the record lock refuses is printed instead,
+    and the pass fails that start at its next retry."""
+    from redis.exceptions import RedisError
+
     from scripts.swarm.store import connect  # pyright: ignore[reportUnknownVariableType]
 
     try:
@@ -99,15 +102,21 @@ def forced(slug: str, at: int, environ: Mapping[str, str]) -> None:
         code, output = done.returncode, f"{done.stdout}\n{done.stderr}"
     except (OSError, subprocess.SubprocessError) as error:
         code, output = -1, f"{type(error).__name__}: {error}"
-    store: Any = connect()
-    print(master_critical.ended(store, slug, at, code, output, int(time.time() * 1000)))
+    try:
+        store: Any = connect()
+        line = master_critical.ended(store, slug, at, code, output, int(time.time() * 1000))
+    except RedisError as error:
+        line = json.dumps({"swarm": slug, "forced_at": at, "error": f"{type(error).__name__}: {error}"})
+    print(line)
 
 
 def critical(store: Any, ledger: Any, environ: Mapping[str, str], live: set[str], now_ms: int) -> list[str]:
     """The critical no master watch over every watched swarm, each in its own try so one swarm's error never stops
-    another's watch; stamps each swarm's watch beat and returns one line per state change, forced start and error."""
+    another's watch; stamps each swarm's watch beat, drops the beat of every swarm it no longer watches, and returns
+    one line per state change, forced start and error."""
     lines: list[str] = []
-    for slug in swarms(environ):
+    watched = swarms(environ)
+    for slug in watched:
         error = ""
         try:
             lines += master_critical.watch(store, ledger, slug, live, now_ms, environ, force)
@@ -115,6 +124,7 @@ def critical(store: Any, ledger: Any, environ: Mapping[str, str], live: set[str]
             error = f"{type(failure).__name__}: {failure}"
             lines.append(json.dumps({"swarm": slug, "error": error}))
         master_critical.beat(store, slug, now_ms, error)
+    master_critical.unwatch(store, watched)
     return lines
 
 

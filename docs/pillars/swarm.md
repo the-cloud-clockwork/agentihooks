@@ -628,7 +628,8 @@ live master on `master@<id>` that is working, or still starting with its own hoo
   ten forced starts. `swarm status` shows a `master critical` finding and `status --json` carries the record as
   `master_critical`; the ledger page's swarm health panel lists the finding from the status each tick pass publishes.
 - A critical broadcast reaches every session on the master hive, and the ledger's front door `seat` alert is raised on
-  entry and again with each failed start.
+  entry. The ledger keeps one open alert per source, so a failed start closes an open seat alert that says something
+  else and raises one naming the failure reason; a repeat of the same reason leaves that alert open as it is.
 - The pass forces `agentihooks swarm <id> master up --replace` in a detached runner, through the pass's own
   interpreter (`python -m scripts.install`) with `~/.local/bin` and the interpreter's folder ahead of the systemd
   PATH. That command line start path never consults the controller's master placement refusal. It forces one start
@@ -637,9 +638,11 @@ live master on `master@<id>` that is working, or still starting with its own hoo
   output line or launch error; a runner that cannot start fails its start in the same pass. A failed start, or one
   whose master has not bound by the next retry, raises the critical broadcast again with that reason. The pass and
   the runner read and write the record under one Redis lock per swarm, and a late runner never overwrites an outcome
-  the pass already recorded.
-- Every pass stamps the swarm's watch beat; `swarm status` shows a `master watch` finding when the last pass failed or
-  is five minutes old, so a stopped watchdog is visible too.
+  the pass already recorded. No ledger call runs under that lock: the pass reads the ledger before taking it and
+  writes the seat alerts, read from the ledger's alerts alone, after releasing it. A runner whose record Redis or the
+  lock refuses prints the refusal, and the pass fails that start at its next retry.
+- Every pass stamps the swarm's watch beat and drops the beat of every swarm it no longer watches; `swarm status` shows
+  a `master watch` finding when the last pass failed or is five minutes old, so a stopped watchdog is visible too.
 
 A master binding the front door seat ends critical mode: the record and finding go away, a resolved broadcast
 replaces the critical one and the open seat alerts close. A swarm that is not running (stopped, stopping, paused or

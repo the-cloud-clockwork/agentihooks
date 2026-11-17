@@ -160,14 +160,20 @@ def test_each_watched_swarm_gets_its_own_critical_watch_and_watch_beat(monkeypat
     def beat(found: Any, slug: str, now_ms: int, error: str) -> None:
         beats.append((found, slug, now_ms, error))
 
+    def unwatch(found: Any, watched: list[str]) -> None:
+        unwatched.append((found, watched))
+
+    unwatched: list[tuple[Any, list[str]]] = []
     monkeypatch.setattr(master_critical, "watch", watch)
     monkeypatch.setattr(master_critical, "beat", beat)
+    monkeypatch.setattr(master_critical, "unwatch", unwatch)
 
     assert master_fallback.critical(held, ledger, env, {"m"}, 5) == [
         '{"swarm": "gone", "error": "KeyError: \'gone\'"}',
         "sw watched",
     ]
     assert beats == [(held, "gone", 5, "KeyError: 'gone'"), (held, "sw", 5, "")]
+    assert unwatched == [(held, ["gone", "sw"])]
 
 
 @pytest.mark.feature("master-fallback-tick")

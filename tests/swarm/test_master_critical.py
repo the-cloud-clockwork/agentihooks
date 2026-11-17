@@ -16,7 +16,7 @@ from scripts.swarm import idle, ledger_client, master_critical, master_fallback,
 from scripts.swarm import runtime as runtime_module
 from scripts.swarm import store as store_module
 from scripts.swarm.status import status_report
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
@@ -56,7 +56,7 @@ class Alerts:
 class Ledger:
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = rows or []
-        self.alerts: list[dict[str, Any]] = []
+        self.held: list[dict[str, Any]] = []
         self.raised: list[str] = []
         self.closed: list[tuple[str, str]] = []
         self.broken = False
@@ -72,25 +72,52 @@ class Ledger:
         if self.broken:
             raise OSError("the ledger is unreachable")
         self.raised.append(text)
-        if not any(alert["state"] != "done" for alert in self.alerts):
-            self.alerts.append({"id": f"seat-{len(self.alerts) + 1}", "source": "seat", "state": "open"})
+        if not any(alert["source"] == source and alert.get("state") != "done" for alert in self.held):
+            self.held.append({"id": f"seat-{len(self.held) + 1}", "source": source, "state": "open", "text": text})
 
-    def state(self, slug: str) -> dict[str, Any]:
+    def alerts(self, slug: str) -> list[dict[str, Any]]:
         assert slug == "sw"
         if self.broken:
             raise OSError("the ledger is unreachable")
-        return {"alerts": self.alerts}
+        return [dict(alert) for alert in self.held]
 
     def close_alert(self, slug: str, alert_id: str, outcome: str) -> None:
         assert slug == "sw"
         self.closed.append((alert_id, outcome))
+        next(alert for alert in self.held if alert["id"] == alert_id)["state"] = "done"
+
+
+class LockWatching(Ledger):
+    def __init__(self, swarm_store: RedisStore, rows: list[dict[str, Any]]) -> None:
+        super().__init__(rows)
+        self.store = swarm_store
+        self.calls: list[tuple[str, int]] = []
+
+    def seen(self, call: str) -> None:
+        self.calls.append((call, self.store.redis.exists(self.store.key("sw", master_critical.LOCK))))
+
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
+        self.seen("tasks")
+        return super().tasks(slug)
+
+    def alerts(self, slug: str) -> list[dict[str, Any]]:
+        self.seen("alerts")
+        return super().alerts(slug)
+
+    def raise_alert(self, slug: str, source: str, text: str) -> None:
+        self.seen("raise_alert")
+        super().raise_alert(slug, source, text)
+
+    def close_alert(self, slug: str, alert_id: str, outcome: str) -> None:
+        self.seen("close_alert")
+        super().close_alert(slug, alert_id, outcome)
 
 
 class Watched:
     def __init__(self, held: RedisStore, state: Path) -> None:
         self.store, self.state = held, state
         self.herdr: Any = MasterRefused()
-        self.ledger, self.alerts, self.seats = tasks(), Alerts(), Ledger()
+        self.ledger, self.alerts, self.seats = tasks(("t1", "eng")), Alerts(), Ledger()
         self.forced: list[tuple[str, int]] = []
         self.started: list[str] = []
         self.at = START
@@ -115,6 +142,7 @@ class Watched:
 
 @pytest.fixture
 def watched(store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Watched:  # noqa: F811
+    store.update("sw", max_eng=0, max_ci=0)
     watched = Watched(store, tmp_path / "fallback.json")
     monkeypatch.setattr(runtime_module, "HerdrRuntime", lambda: watched.herdr)
     monkeypatch.setattr(store_module, "connect", lambda: store)
@@ -281,8 +309,8 @@ def test_the_swarm_turns_critical_at_its_threshold_and_forces_master_up(
 
     assert lines == [
         "swarm sw is critical: no bound front door master since 1970-01-01 00:00Z",
-        RAISED,
         "forced master up of swarm sw: runner 3",
+        RAISED,
     ]
     assert forced.calls == [("sw", START + 2 * MINUTE)]
     assert alerts.raised == [("critical", text)]
@@ -318,7 +346,7 @@ def test_a_failed_forced_start_is_retried_once_per_retry_window(
     master_critical.ended(store, "sw", at, 1, "boom\n", at + MINUTE)
 
     assert watch(store, at + master_critical.RETRY_MS - 1, forced) == []
-    assert watch(store, at + master_critical.RETRY_MS, forced) == [RAISED, "forced master up of swarm sw: runner 3"]
+    assert watch(store, at + master_critical.RETRY_MS, forced) == ["forced master up of swarm sw: runner 3", RAISED]
     assert forced.calls == [("sw", at), ("sw", at + master_critical.RETRY_MS)]
     assert [row["outcome"] for row in master_critical.read(store, "sw")["attempts"]] == ["failed", ""]
 
@@ -342,8 +370,8 @@ def test_a_forced_start_with_no_bound_master_by_the_retry_counts_as_failed(
 
     assert watch(store, retry, forced) == [
         f"forced master up of swarm sw at 1970-01-01 00:30Z failed: {reason}",
-        RAISED,
         "forced master up of swarm sw: runner 3",
+        RAISED,
     ]
     assert master_critical.read(store, "sw")["attempts"] == [
         {"at": at, "outcome": "failed", "reason": reason, "ended_at": retry, **({} if code is None else {"code": 0})},
@@ -364,15 +392,74 @@ def test_each_failed_forced_start_raises_the_ledger_seat_alert_again(
     ledger = Ledger()
     at = critical(store, Forced(), ledger)
     master_critical.ended(store, "sw", at, 1, "boom", at + MINUTE)
-    ledger.alerts[0]["state"] = "done"
+    ledger.held[0]["state"] = "done"
 
     watch(store, at + master_critical.RETRY_MS, Forced(), ledger=ledger)
 
     assert ledger.raised == [
         master_critical.CRITICAL.format(slug="sw", minutes=30),
-        master_critical.STILL.format(slug="sw", at="1970-01-01 00:30Z", reason="boom"),
+        master_critical.SEAT_STILL.format(slug="sw", reason="boom"),
     ]
-    assert [alert["id"] for alert in ledger.alerts] == ["seat-1", "seat-2"]
+    assert [alert["id"] for alert in ledger.held] == ["seat-1", "seat-2"]
+    assert ledger.closed == []
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_a_failed_start_replaces_the_open_seat_alert_with_one_naming_its_reason(
+    store: RedisStore,  # noqa: F811
+    alerts: Alerts,
+) -> None:
+    ledger = Ledger()
+    at = critical(store, Forced(), ledger)
+    master_critical.ended(store, "sw", at, 1, "boom", at + MINUTE)
+    still = master_critical.SEAT_STILL.format(slug="sw", reason="boom")
+
+    lines = watch(store, at + master_critical.RETRY_MS, Forced(), ledger=ledger)
+
+    assert lines == ["forced master up of swarm sw: runner 3", "closed the seat alert seat-1 of swarm sw", RAISED]
+    assert ledger.closed == [("seat-1", master_critical.REPLACED.format(text=still))]
+    assert [(alert["id"], alert["state"], alert["text"]) for alert in ledger.held] == [
+        ("seat-1", "done", master_critical.CRITICAL.format(slug="sw", minutes=30)),
+        ("seat-2", "open", still),
+    ]
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_a_repeated_failure_reason_keeps_its_seat_alert_and_a_new_reason_replaces_it(
+    store: RedisStore,  # noqa: F811
+    alerts: Alerts,
+) -> None:
+    ledger, retry = Ledger(), master_critical.RETRY_MS
+    at = critical(store, Forced(), ledger)
+    for step, reason in enumerate(("boom", "boom")):
+        master_critical.ended(store, "sw", at + step * retry, 1, reason, at + step * retry + MINUTE)
+        watch(store, at + (step + 1) * retry, Forced(), ledger=ledger)
+
+    assert [(alert["id"], alert["state"]) for alert in ledger.held] == [("seat-1", "done"), ("seat-2", "open")]
+    assert len(ledger.raised) == 2
+
+    master_critical.ended(store, "sw", at + 2 * retry, 1, "no room", at + 2 * retry + MINUTE)
+    lines = watch(store, at + 3 * retry, Forced(), ledger=ledger)
+
+    still = master_critical.SEAT_STILL.format(slug="sw", reason="no room")
+    assert lines[-2:] == ["closed the seat alert seat-2 of swarm sw", RAISED]
+    assert [(alert["id"], alert["state"], alert["text"]) for alert in ledger.held][-1] == ("seat-3", "open", still)
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_no_ledger_call_runs_while_the_record_lock_is_held(store: RedisStore, alerts: Alerts) -> None:  # noqa: F811
+    store.redis.set(store.key("sw", "master-retired-tasks"), '["t1"]')
+    ledger = LockWatching(store, [{"id": "t1"}, {"id": "t2"}])
+    at = critical(store, Forced(), ledger)
+    master_critical.ended(store, "sw", at, 1, "boom", at + MINUTE)
+    watch(store, at + master_critical.RETRY_MS, Forced(), ledger=ledger)
+    name = front_door(store)
+
+    watch(store, at + master_critical.RETRY_MS + MINUTE, Forced(), {name}, ledger)
+
+    assert {call for call, _ in ledger.calls} == {"tasks", "alerts", "raise_alert", "close_alert"}
+    assert [call for call, held in ledger.calls if held] == []
+    assert master_critical.read(store, "sw") == {}
 
 
 @pytest.mark.feature("swarm-master-critical")
@@ -386,7 +473,7 @@ def test_a_ledger_that_refuses_the_seat_alert_is_named_and_the_watch_goes_on(
 
     lines = watch(store, CRITICAL_AT, forced, ledger=ledger)
 
-    assert lines[1] == "the ledger did not take the seat alert of swarm sw: OSError: the ledger is unreachable"
+    assert lines[-1] == "the ledger did not take the seat alert of swarm sw: OSError: the ledger is unreachable"
     assert forced.calls == [("sw", CRITICAL_AT)]
 
 
@@ -398,12 +485,13 @@ def test_a_runner_that_cannot_start_fails_its_forced_start_in_the_same_pass(
     def broken(slug: str, at: int) -> int:
         raise FileNotFoundError(2, "No such file or directory")
 
-    reason = "FileNotFoundError: [Errno 2] No such file or directory"
-    watch(store, START, Forced())
+    reason, ledger = "FileNotFoundError: [Errno 2] No such file or directory", Ledger()
+    watch(store, START, Forced(), ledger=ledger)
 
-    lines = watch(store, CRITICAL_AT, broken)
+    lines = watch(store, CRITICAL_AT, broken, ledger=ledger)
 
-    assert lines[-1] == f"forced master up of swarm sw at 1970-01-01 00:30Z failed: {reason}"
+    assert lines[1:] == [f"forced master up of swarm sw at 1970-01-01 00:30Z failed: {reason}", RAISED]
+    assert ledger.raised == [master_critical.SEAT_STILL.format(slug="sw", reason=reason)]
     assert master_critical.read(store, "sw")["attempts"] == [
         {"at": CRITICAL_AT, "outcome": "failed", "reason": reason, "ended_at": CRITICAL_AT}
     ]
@@ -522,7 +610,7 @@ def test_a_live_working_front_door_master_ends_critical_mode(
 ) -> None:
     ledger = Ledger()
     at = critical(store, Forced(), ledger)
-    ledger.alerts += [{"id": "seat-0", "source": "seat", "state": "done"}, {"id": "spawn-1", "source": "spawn"}]
+    ledger.held += [{"id": "seat-0", "source": "seat", "state": "done"}, {"id": "spawn-1", "source": "spawn"}]
     name = front_door(store, seat=seat)
     cleared = f"Swarm sw is out of critical mode: master {name} bound the front door seat."
 
@@ -893,3 +981,55 @@ def test_the_forced_runner_records_a_launch_that_could_not_run(
     [attempt] = master_critical.read(store, "sw")["attempts"]
     assert (attempt["reason"], attempt["code"]) == (reason, -1)
     assert capsys.readouterr().out == f"forced master up of swarm sw at 1970-01-01 00:30Z failed: {reason}\n"
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_a_forced_runner_refused_the_record_lock_prints_the_refusal_and_leaves_the_start_to_the_retry(
+    store: RedisStore,  # noqa: F811
+    alerts: Alerts,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    at = critical(store, Forced())
+    monkeypatch.setattr(master_critical, "WAIT_S", 0.05)
+    held = store.redis.lock(store.key("sw", master_critical.LOCK), timeout=5)
+    assert held.acquire(blocking=False)
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, '{"master": "master@a1b2c3-0002"}\n', "")
+
+    monkeypatch.setattr(store_module, "connect", lambda: store)
+    monkeypatch.setattr(
+        master_fallback, "subprocess", SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)
+    )
+
+    master_fallback.forced("sw", at, {})
+
+    held.release()
+    printed = json.loads(capsys.readouterr().out)
+    assert (sorted(printed), printed["swarm"], printed["forced_at"]) == (["error", "forced_at", "swarm"], "sw", at)
+    assert printed["error"].startswith("LockError: ")
+    assert master_critical.read(store, "sw")["attempts"] == [{"at": at, "outcome": "", "reason": ""}]
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_a_pass_drops_the_watch_beat_of_a_swarm_the_fallback_no_longer_watches(
+    store: RedisStore,  # noqa: F811
+    alerts: Alerts,
+) -> None:
+    store.create(SwarmConfig("old", "/repo", max_eng=0, max_ci=0))
+    master_critical.beat(store, "old", START, "")
+
+    master_fallback.critical(store, Ledger(), ENV, set(), CRITICAL_AT)
+
+    assert master_critical.findings(store, "old", CRITICAL_AT) == []
+    assert store.redis.get(store.key("old", master_critical.BEAT)) is None
+    assert json.loads(store.redis.get(store.key("sw", master_critical.BEAT))) == {"at": CRITICAL_AT, "error": ""}
+
+
+def test_with_every_swarm_watched_no_watch_beat_is_dropped(store: RedisStore) -> None:  # noqa: F811
+    master_critical.beat(store, "sw", START, "")
+
+    master_critical.unwatch(store, ["sw"])
+
+    assert json.loads(store.redis.get(store.key("sw", master_critical.BEAT))) == {"at": START, "error": ""}
