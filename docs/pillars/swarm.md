@@ -619,23 +619,32 @@ per agent, and the ledger page marks the agent row promoted.
 
 The master fallback service (`agentihooks-master-fallback.service`, `python -m scripts.swarm.master_fallback`) runs a
 pass every minute on the master hive, outside the tick, so no tick step or placement refusal can stop it. Each pass
-watches every swarm in `AGENTIHOOKS_MASTER_FALLBACK_SWARMS`. A running swarm whose front door seat has no bound master,
-meaning a live, working master on `master@<id>`, for `AGENTIHOOKS_MASTER_CRITICAL_MINUTES` (default 30) is critical:
+first watches every swarm in `AGENTIHOOKS_MASTER_FALLBACK_SWARMS`, each in its own try, and only then runs the twenty
+minute start, which leaves a critical swarm alone. A running swarm whose front door seat has no bound master, meaning a
+live master on `master@<id>` that is working, or still starting with its own hooks beating since its launch, for
+`AGENTIHOOKS_MASTER_CRITICAL_MINUTES` (default 30) is critical:
 
 - The swarm's `master-critical` Redis record holds when the seat lost its master, when it turned critical and the last
-  ten forced starts. `swarm status` shows a `master critical` finding, which the ledger page's swarm health panel
-  lists, and `status --json` carries the record as `master_critical`.
-- A critical broadcast reaches every session on the master hive.
+  ten forced starts. `swarm status` shows a `master critical` finding and `status --json` carries the record as
+  `master_critical`; the ledger page's swarm health panel lists the finding from the status each tick pass publishes.
+- A critical broadcast reaches every session on the master hive, and the ledger's front door `seat` alert is raised on
+  entry and again with each failed start.
 - The pass forces `agentihooks swarm <id> master up --replace` in a detached runner, through the pass's own
   interpreter (`python -m scripts.install`) with `~/.local/bin` and the interpreter's folder ahead of the systemd
   PATH. That command line start path never consults the controller's master placement refusal. It forces one start
   per five minutes, and none while a front door master launched inside its start deadline may still bind.
-- The runner records each start's outcome with its time: started, or failed with the command's last output line
-  or launch error. A failed start, or one whose master has not bound by the next retry, raises the critical
-  broadcast again with that reason.
+- The runner records each start's outcome with its time and exit status: started, or failed with the command's last
+  output line or launch error; a runner that cannot start fails its start in the same pass. A failed start, or one
+  whose master has not bound by the next retry, raises the critical broadcast again with that reason. The pass and
+  the runner read and write the record under one Redis lock per swarm, and a late runner never overwrites an outcome
+  the pass already recorded.
+- Every pass stamps the swarm's watch beat; `swarm status` shows a `master watch` finding when the last pass failed or
+  is five minutes old, so a stopped watchdog is visible too.
 
-A master binding the front door seat ends critical mode: the record and finding go away, and a resolved broadcast
-replaces the critical one. A stopped swarm, or one sleeping with no work, leaves critical mode and is never forced.
+A master binding the front door seat ends critical mode: the record and finding go away, a resolved broadcast
+replaces the critical one and the open seat alerts close. A swarm that is not running (stopped, stopping, paused or
+drained), or one sleeping with no work, leaves critical mode and is never forced. A swarm whose master retired has its
+ledger tasks read, so new work since the retirement keeps it awake, and a ledger it cannot read leaves it awake.
 
 ```bash
 journalctl --user -u agentihooks-master-fallback.service --since "1 hour ago" | grep -E "critical|forced master up"

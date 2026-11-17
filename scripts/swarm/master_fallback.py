@@ -1,9 +1,11 @@
 """Master fallback tick: a small loop on the master hive, waiting a minute on the agentihooks scheduler between passes,
 that starts a new master for a swarm that has had no live master for AGENTIHOOKS_MASTER_FALLBACK_MINUTES (default 20),
-whether or not the main tick runs. Each pass also runs the critical no master watch of master_critical, which forces
-master up for a swarm whose front door seat has had no bound master for thirty minutes. It reads only the swarm's
-master records and the local live agent names, and acts only through agentihooks swarm master up, run through this
-interpreter with the user's bin folder on PATH so the systemd service finds every command a launch runs."""
+whether or not the main tick runs. Each pass first runs the critical no master watch of master_critical over every
+watched swarm, each in its own try, which forces master up for a running swarm whose front door seat has had no bound
+master for thirty minutes; the twenty minute start leaves a critical swarm to it. It reads the swarm's master records,
+the local live agent names and, for a swarm whose master retired, its ledger tasks, and acts only through agentihooks
+swarm master up, run through this interpreter with the user's bin folder on PATH so the systemd service finds every
+command a launch runs."""
 
 import json
 import os
@@ -15,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm import master_critical
-from scripts.swarm.master_critical import QUIET
 
 MINUTES = "AGENTIHOOKS_MASTER_FALLBACK_MINUTES"
 SWARMS = "AGENTIHOOKS_MASTER_FALLBACK_SWARMS"
@@ -27,6 +28,7 @@ SYSTEMCTL_TIMEOUT_S = 60
 MODULE = "scripts.swarm.master_fallback"
 UNIT = "agentihooks-master-fallback"
 STATE = Path.home() / ".agentihooks" / "master-fallback.json"
+QUIET = ("stopped", "stopping")
 
 
 def minutes(environ: Mapping[str, str]) -> float:
@@ -98,14 +100,22 @@ def forced(slug: str, at: int, environ: Mapping[str, str]) -> None:
     except (OSError, subprocess.SubprocessError) as error:
         code, output = -1, f"{type(error).__name__}: {error}"
     store: Any = connect()
-    print(master_critical.ended(store, slug, at, code, output, int(time.time() * 1000)), flush=True)
+    print(master_critical.ended(store, slug, at, code, output, int(time.time() * 1000)))
 
 
-def critical(store: Any, environ: Mapping[str, str], live: set[str], now_ms: int) -> list[str]:
-    """The critical no master watch over every watched swarm; returns one line per state change and forced start."""
-    return [
-        line for slug in swarms(environ) for line in master_critical.watch(store, slug, live, now_ms, environ, force)
-    ]
+def critical(store: Any, ledger: Any, environ: Mapping[str, str], live: set[str], now_ms: int) -> list[str]:
+    """The critical no master watch over every watched swarm, each in its own try so one swarm's error never stops
+    another's watch; stamps each swarm's watch beat and returns one line per state change, forced start and error."""
+    lines: list[str] = []
+    for slug in swarms(environ):
+        error = ""
+        try:
+            lines += master_critical.watch(store, ledger, slug, live, now_ms, environ, force)
+        except Exception as failure:
+            error = f"{type(failure).__name__}: {failure}"
+            lines.append(json.dumps({"swarm": slug, "error": error}))
+        master_critical.beat(store, slug, now_ms, error)
+    return lines
 
 
 def check(
@@ -120,7 +130,7 @@ def check(
     limit_ms, live = int(minutes(environ) * 60 * 1000), live_names()
     lines: list[str] = []
     for slug in swarms(environ):
-        if store.config(slug).state in QUIET:
+        if store.config(slug).state in QUIET or master_critical.active(store, slug):
             down_since.pop(slug, None)
             continue
         if step(slug, master_live(store, slug, live), now_ms, down_since, limit_ms):
@@ -143,8 +153,9 @@ def run(environ: Mapping[str, str]) -> None:
 
 
 def pass_once(environ: Mapping[str, str], state: Path = STATE) -> None:
-    """One fallback pass: start a master where the window ran out, save the outage starts, then run the critical
-    no master watch."""
+    """One fallback pass: run the critical no master watch first, then start a master where the window ran out and
+    save the outage starts."""
+    from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.store import connect  # pyright: ignore[reportUnknownVariableType]
 
@@ -153,12 +164,12 @@ def pass_once(environ: Mapping[str, str], state: Path = STATE) -> None:
         runtime: Any = HerdrRuntime()
         store: Any = connect()
         now_ms = int(time.time() * 1000)
+        for line in critical(store, LedgerClient(), environ, runtime.live_names(), now_ms):
+            print(line, flush=True)
         for line in check(store, environ, runtime.live_names, now_ms, down_since, start):
             print(line, flush=True)
         state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(json.dumps(down_since))
-        for line in critical(store, environ, runtime.live_names(), now_ms):
-            print(line, flush=True)
     except Exception as error:
         print(json.dumps({"error": f"{type(error).__name__}: {error}"}), flush=True)
 
@@ -208,7 +219,7 @@ def main(argv: list[str]) -> None:
     if argv == ["pass"]:
         pass_once(os.environ)
         return
-    if argv[:1] == ["force"] and len(argv) == 3:
+    if argv[:1] == ["force"]:
         forced(argv[1], int(argv[2]), os.environ)
         return
     run(os.environ)

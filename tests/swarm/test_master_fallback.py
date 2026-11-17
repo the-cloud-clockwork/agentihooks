@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import master_fallback
+from scripts.swarm import ledger_client, master_critical, master_fallback
 
 pytestmark = pytest.mark.unit
 MINUTE = 60_000
@@ -29,12 +29,20 @@ class Config:
 class Store:
     agents_by_slug: dict = field(default_factory=dict)
     states: dict = field(default_factory=dict)
+    records: dict = field(default_factory=dict)
 
     def agents(self, slug):
         return self.agents_by_slug.get(slug, [])
 
     def config(self, slug):
         return Config(self.states.get(slug, "running"))
+
+    def key(self, slug: str, name: str) -> str:
+        return f"{slug}:{name}"
+
+    @property
+    def redis(self) -> SimpleNamespace:
+        return SimpleNamespace(get=self.records.get)
 
 
 def _launches(code=0):
@@ -125,6 +133,41 @@ def test_a_stopped_swarm_does_not_end_the_pass_for_the_swarms_after_it():
         '{"swarm": "b", "master_up": 5, "at": 3600000}'
     ]
     assert started == ["b"]
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_the_twenty_minute_start_leaves_a_critical_swarm_to_the_forced_start() -> None:
+    held = Store({"sw": []}, records={"sw:master-critical": '{"since": 0, "critical_at": 1800000}'})
+    down = {"sw": 0}
+    started, launch = _launches(3)
+    env = {master_fallback.SWARMS: "sw", master_fallback.MINUTES: "20"}
+
+    assert master_fallback.check(held, env, set, 40 * MINUTE, down, launch) == []
+    assert (started, down) == ([], {})
+
+
+@pytest.mark.feature("swarm-master-critical")
+def test_each_watched_swarm_gets_its_own_critical_watch_and_watch_beat(monkeypatch: pytest.MonkeyPatch) -> None:
+    held, ledger, beats = Store(), object(), []
+    env = {master_fallback.SWARMS: "gone,sw"}
+
+    def watch(found: Any, used: Any, slug: str, live: set[str], now_ms: int, environ: Any, force: Any) -> list[str]:
+        assert (found, used, live, now_ms, environ, force) == (held, ledger, {"m"}, 5, env, master_fallback.force)
+        if slug == "gone":
+            raise KeyError("gone")
+        return [f"{slug} watched"]
+
+    def beat(found: Any, slug: str, now_ms: int, error: str) -> None:
+        beats.append((found, slug, now_ms, error))
+
+    monkeypatch.setattr(master_critical, "watch", watch)
+    monkeypatch.setattr(master_critical, "beat", beat)
+
+    assert master_fallback.critical(held, ledger, env, {"m"}, 5) == [
+        '{"swarm": "gone", "error": "KeyError: \'gone\'"}',
+        "sw watched",
+    ]
+    assert beats == [(held, "gone", 5, "KeyError: 'gone'"), (held, "sw", 5, "")]
 
 
 @pytest.mark.feature("master-fallback-tick")
@@ -335,33 +378,36 @@ def test_run_logs_a_timed_out_pass_and_goes_on(monkeypatch, capsys):
     assert capsys.readouterr().out == '{"error": "pass timed out after 50s"}\n'
 
 
-def test_a_pass_starts_a_master_and_saves_its_state(tmp_path, monkeypatch, capsys):
+def test_a_pass_starts_a_master_and_saves_its_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm import runtime, store
 
     class Herdr:
-        def live_names(self):
+        def live_names(self) -> set[str]:
             return set()
 
     state = tmp_path / "state" / "fallback.json"
     state.parent.mkdir()
     state.write_text('{"sw": 0}')
-    held, seen = Store({"sw": []}), []
+    held, ledger, seen = Store({"sw": []}), object(), []
     monkeypatch.setattr(runtime, "HerdrRuntime", Herdr)
     monkeypatch.setattr(store, "connect", lambda: held)
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
     monkeypatch.setattr(
         master_fallback,
         "critical",
-        lambda found, environ, live, now_ms: seen.append((found, environ, live, now_ms)) or ["critical line"],
+        lambda *passed: seen.append(passed) or ["critical line"],
     )
     env = {master_fallback.SWARMS: "sw"}
 
     master_fallback.pass_once(env, state)
 
-    assert capsys.readouterr().out == '{"swarm": "sw", "master_up": 77, "at": 1200000}\ncritical line\n'
+    assert capsys.readouterr().out == 'critical line\n{"swarm": "sw", "master_up": 77, "at": 1200000}\n'
     assert master_fallback.load(state) == {"sw": 1200000}
-    assert seen == [(held, env, set(), 1200000)]
+    assert seen == [(held, ledger, env, set(), 1200000)]
 
 
 def test_a_failed_pass_is_logged_and_saves_nothing(tmp_path, monkeypatch, capsys):
@@ -379,13 +425,14 @@ def test_a_failed_pass_is_logged_and_saves_nothing(tmp_path, monkeypatch, capsys
     assert not (tmp_path / "fallback.json").exists()
 
 
-def test_a_first_pass_makes_every_missing_state_folder(tmp_path, monkeypatch):
+def test_a_first_pass_makes_every_missing_state_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import runtime, store
 
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
     monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
+    monkeypatch.setattr(ledger_client, "LedgerClient", object)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
-    monkeypatch.setattr(master_fallback, "critical", lambda found, environ, live, now_ms: [])
+    monkeypatch.setattr(master_fallback, "critical", lambda found, ledger, environ, live, now_ms: [])
     state = tmp_path / "home" / ".agentihooks" / "fallback.json"
 
     master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
@@ -421,7 +468,9 @@ def test_the_loop_and_a_pass_flush_every_line_they_log(tmp_path, monkeypatch):
     assert printed == [{"flush": True}, {"flush": True}]
 
 
-def test_a_pass_flushes_each_master_it_started(tmp_path, monkeypatch):
+def test_a_pass_flushes_each_master_it_started_and_each_critical_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import runtime, store
 
     printed = []
@@ -430,10 +479,14 @@ def test_a_pass_flushes_each_master_it_started(tmp_path, monkeypatch):
     monkeypatch.setattr(master_fallback, "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
     monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
+    monkeypatch.setattr(ledger_client, "LedgerClient", object)
     monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
-    monkeypatch.setattr(master_fallback, "critical", lambda found, environ, live, now_ms: [])
+    monkeypatch.setattr(master_fallback, "critical", lambda found, ledger, environ, live, now_ms: ["critical line"])
 
     master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
 
-    assert printed == [(('{"swarm": "sw", "master_up": 77, "at": 1200000}',), {"flush": True})]
+    assert printed == [
+        (("critical line",), {"flush": True}),
+        (('{"swarm": "sw", "master_up": 77, "at": 1200000}',), {"flush": True}),
+    ]
