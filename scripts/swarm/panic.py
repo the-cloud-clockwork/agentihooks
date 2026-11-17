@@ -56,6 +56,7 @@ TOOL_SECONDS = 60.0
 MERGED_FIXES = "merged-fixes"
 FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+-fix-[0-9]+")
 FIXERS = "panic-fixers"
+FIXERS_MS = 15 * 60 * 1000
 DONE = "done"
 Ports = Callable[[str], SourceControl]
 
@@ -250,10 +251,11 @@ def fixer_links(tasks: Iterable[dict[str, Any]]) -> list[str]:
 
 def keep_fixers(store: RedisStore, slug: str, tasks: Iterable[dict[str, Any]]) -> None:
     """Records the fixer branch links ``fixer_links`` names in the tasks of swarm ``slug`` for every later cancel
-    sweep, and drops the record once there are none, so a swarm without an open fixer keeps no record."""
+    sweep, and drops the record once there are none, so a swarm without an open fixer keeps no record; a record no
+    pass writes again lapses after FIXERS_MS, so a stopped or binned swarm stops sparing its branches."""
     key, links = store.key(slug, FIXERS), fixer_links(tasks)
     if links:
-        _client(store).set(key, json.dumps(links))
+        _client(store).set(key, json.dumps(links), px=FIXERS_MS)
     else:
         _client(store).delete(key)
 

@@ -554,7 +554,7 @@ class _Wrapper:
                 [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
             )
             return False
-        panic.keep_fixers(store, slug, self.box["doc"].get("tasks", []))
+        panic.keep_fixers(store, slug, self.box["doc"]["tasks"])
         store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
         return True
 

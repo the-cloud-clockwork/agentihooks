@@ -892,8 +892,25 @@ def test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_f
     crew = troubleshooting_crew.crew_id(1_794_870_000.0)
     fixers = [f"{promotion_watch.TASK_PREFIX}43992907244-1", *troubleshooting_crew.numbered(crew, "fix", 2)]
     others = [*troubleshooting_crew.numbered(crew, "scout", 1), f"{crew}-harden", "t-panic-spares-fix-prs"]
+    malformed = ["doc-promo-1-0", "promo--0", "promo-1-", "promo-x-0", "crew-fix-1", "crew-1-fix-"]
     assert [panic.FIXER_TASK.fullmatch(task) is not None for task in fixers] == [True, True, True]
-    assert [panic.FIXER_TASK.fullmatch(task) is not None for task in [*others, "doc-promo-1-0"]] == [False] * 4
+    assert [panic.FIXER_TASK.fullmatch(task) is not None for task in [*others, *malformed]] == [False] * 9
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_a_fixer_record_lapses_unless_a_later_pass_writes_it_again(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[dict[str, Any]] = []
+    original = store.redis.set
+
+    def recording(name: str, value: str, **options: Any) -> Any:
+        sent.append(options)
+        return original(name, value, **options)
+
+    monkeypatch.setattr(store.redis, "set", recording)
+    _read_pass(store, monkeypatch, {"tasks": _fixer_rows()[:1]})
+    assert sent == [{"px": panic.FIXERS_MS}]
 
 
 def test_the_panic_button_cancels_and_prints(
