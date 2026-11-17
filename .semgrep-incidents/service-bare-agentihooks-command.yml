@@ -12,6 +12,7 @@ rules:
         - /scripts/hive/
         - /scripts/swarm/master_fallback.py
         - /scripts/swarm/master_critical.py
+        - /scripts/swarm/provider_probe.py
         - /hooks/context/claim_watch.py
         - service-bare-agentihooks-command.py
     pattern: '["agentihooks", ...]'

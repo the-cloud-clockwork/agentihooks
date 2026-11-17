@@ -4,15 +4,16 @@
       "id": "service-commands-run-through-interpreter",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-9",
-      "behaviour": "The hive bundle refresh, the hive linked profiles install and the claim watch start agentihooks through their own interpreter with -P -m scripts.install, so each command resolves and runs under the default systemd PATH with no folder holding the agentihooks executable, from a folder outside the repository; a bare agentihooks command list in a service entry point is a Semgrep incident.",
-      "seam": "bundle_refresh.refresh on a manifest change, linked_profiles.install and claim_watch.check on a lost claim, each command run with --help under the systemd default PATH",
+      "behaviour": "The hive bundle refresh, the hive linked profiles install, the claim watch and the quota prober's Claude provider check start agentihooks through their own interpreter with -P -m scripts.install, so each command resolves and runs under the default systemd PATH with no folder holding the agentihooks executable, from a folder outside the repository; the Claude provider check also puts the user bin folder and the interpreter's folder ahead of the service PATH so the claude command it starts resolves; a bare agentihooks command list in a service entry point is a Semgrep incident.",
+      "seam": "bundle_refresh.refresh on a manifest change, linked_profiles.install and claim_watch.check on a lost claim, each command run with --help under the systemd default PATH, and provider_probe.check for a Claude account run end to end under that PATH",
       "rules": [
         "service-bare-agentihooks-command"
       ],
       "tests": [
         "tests/hive/test_bundle_refresh.py::test_the_deps_ensure_a_manifest_change_starts_resolves_under_the_systemd_default_path",
         "tests/hive/test_linked_profiles.py::test_the_profile_link_command_resolves_under_the_systemd_default_path",
-        "tests/test_claim_watch.py::test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path"
+        "tests/test_claim_watch.py::test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path",
+        "tests/swarm/test_provider_probe_contract.py::test_a_claude_check_resolves_agentihooks_and_claude_under_the_systemd_default_path"
       ]
     },
     {
