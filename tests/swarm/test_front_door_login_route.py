@@ -203,7 +203,10 @@ def test_a_forced_master_off_the_interactive_route_is_never_refused_all_full(
 
 
 @pytest.mark.feature("forced-master-start")
-def test_an_interactive_route_spawn_is_never_refused_all_full(tmp_path: Path) -> None:
+def test_an_interactive_route_spawn_is_never_refused_all_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
     runner, config, seen = _forced_runner(
         tmp_path, {"eng": {"agent": "claude"}}, lambda *_: ("claude", runtime.agent_choice.ALL_FULL)
     )
