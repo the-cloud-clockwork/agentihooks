@@ -941,8 +941,8 @@ def warm_streams(environ=os.environ) -> list[str]:
     return warmed
 
 
-def follow_shared(interval=FOLLOW_S):
-    """Publish each watched ledger's newer stored generation, whichever host wrote it to the shared database."""
+def follow_shared(interval: float = FOLLOW_S) -> None:
+    """Publish each watched ledger's newer stored generation, whichever process wrote it to the store."""
     while True:
         for slug in () if core.LOCK.locked() else HUB.watched():
             try:
@@ -1001,8 +1001,7 @@ def serve() -> None:
     threading.Thread(target=retrying(watch_ledgers), args=(server,), kwargs={"stopping": watching}, daemon=True).start()
     threading.Thread(target=answer_reloads, args=(server,), daemon=True).start()
     threading.Thread(target=refresh_streams, args=(warmed if carried is None else carried,), daemon=True).start()
-    if storage.shared():
-        threading.Thread(target=retrying(follow_shared), daemon=True).start()
+    threading.Thread(target=retrying(follow_shared), daemon=True).start()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     LOADED_CODE.capture()
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST, files=LOADED_CODE.files)
