@@ -75,7 +75,6 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     files = sources(head) if files is None else sorted(files)
     if not files:
         return {}
-    floor = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     size = math.ceil(len(files) / math.ceil(len(files) / _RUN))
     root = head.resolve()
     counts: dict[str, int] = {}
@@ -85,7 +84,7 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
                 path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
                 counts[path] = counts.get(path, 0) + 1
     peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    if peak > floor and peak >= _PEAK_KIB:
+    if peak >= _PEAK_KIB:
         raise GradeError(
             f"basedpyright peaked at {peak // 1024} MB of resident memory, at or past the {_PEAK_KIB // 1024} MB "
             "where it empties its type cache and can count other errors on another runner; "

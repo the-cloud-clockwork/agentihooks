@@ -5766,7 +5766,7 @@
       "tests": [
         "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
         "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
-        "tests/test_type_gate.py::test_a_checker_peak_under_the_line_or_set_before_the_measurement_is_kept"
+        "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
       ]
     },
     {

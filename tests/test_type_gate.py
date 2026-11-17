@@ -581,12 +581,10 @@ def test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_
     assert [path for checked in runs for path in checked] == files
 
 
-def _peaks(monkeypatch: pytest.MonkeyPatch, floor: int, peak: int) -> None:
-    readings = iter([floor, peak])
-
+def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:
     def getrusage(who: int) -> SimpleNamespace:
         assert who == resource.RUSAGE_CHILDREN
-        return SimpleNamespace(ru_maxrss=next(readings))
+        return SimpleNamespace(ru_maxrss=kib)
 
     monkeypatch.setattr(resource, "getrusage", getrusage)
 
@@ -597,7 +595,7 @@ def test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is
 ) -> None:
     head = _tree(tmp_path, {})
     _fake_checker(monkeypatch, [])
-    _peaks(monkeypatch, 1, 4493897)
+    _peak(monkeypatch, 4493897)
     with pytest.raises(type_gate.GradeError) as refused:
         type_gate.measure(head)
     assert str(refused.value) == (
@@ -607,13 +605,12 @@ def test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is
 
 
 @pytest.mark.feature("type-gate-repeatable-counts")
-@pytest.mark.parametrize(("floor", "peak"), [(1, 4493896), (4493897, 4493897)])
-def test_a_checker_peak_under_the_line_or_set_before_the_measurement_is_kept(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, floor: int, peak: int
+def test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     head = _tree(tmp_path, {})
     _fake_checker(monkeypatch, [{"file": str(head / "hooks/__init__.py"), "severity": "error"}])
-    _peaks(monkeypatch, floor, peak)
+    _peak(monkeypatch, 4493896)
     assert type_gate.measure(head) == {"hooks/__init__.py": 1}
 
 
