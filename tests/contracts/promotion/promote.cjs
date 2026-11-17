@@ -445,7 +445,7 @@ test('never releases a selected grade whose readiness is revoked before merge', 
   assert.equal(f.outputs.main, undefined);
 });
 
-test('keeps waiting on a selected newer grade whose run has a red job', async () => {
+test('fails at once naming a side job already red in the picked newer grade', async () => {
   const f = batchFixture();
   const paginate = f.github.paginate;
   f.github.paginate = async (method, args) => {
@@ -453,8 +453,8 @@ test('keeps waiting on a selected newer grade whose run has a red job', async ()
     return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
       [...result, { name: 'test-summary', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
   };
-  await assert.rejects(promote(f), /thirty minutes/);
-  assert.equal(f.now(), 1800000);
+  await assert.rejects(promote(f), /Graded run jobs did not pass: test-summary cancelled$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.equal(f.outputs.main, undefined);
 });
