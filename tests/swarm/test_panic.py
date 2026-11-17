@@ -708,6 +708,99 @@ def test_cancel_runs_spares_a_fix_pull_request_head_only_in_its_repository(monke
     assert asked == [FIX]
 
 
+def _fixer_rows() -> list[dict[str, Any]]:
+    return [
+        {"id": "promo-43992907244-1", "state": "claimed", "claimed_by": "ci@323133-5149", "branch": "ci-323133-5149"},
+        {
+            "id": "promo-43992907244-0",
+            "state": "pr",
+            "claimed_by": "ci@323133-5153",
+            "branch": "ci-323133-5150",
+            "repository_branches": {"/home/hive/dev/antoncore": "ci-323133-5150-2"},
+        },
+        {"id": "crew-1116073743-fix-1", "state": "claimed", "claimed_by": "engineer@323133-10087"},
+        {"id": "crew-1116073743-scout-1", "state": "claimed", "claimed_by": "ci@323133-5140", "branch": "ci-1"},
+        {"id": "promo-43913675090-0", "state": "done", "claimed_by": "ci@323133-5084", "branch": "ci-323133-5084"},
+        {"id": "t-panic-spares-fix-prs", "state": "claimed", "claimed_by": "ci@323133-5155", "branch": "ci-2"},
+        {"id": "promo-1-0", "state": "open", "branch": "dev", "repository_branches": {"/home/hive/dev/x": "main"}},
+    ]
+
+
+def _fixer_links(*branches: str) -> list[str]:
+    return sorted(f"https://github.com/{repo}/tree/{branch}" for repo in panic.REPOS for branch in branches)
+
+
+def _record(store: RedisStore, slug: str, *branches: str) -> None:
+    store.redis.set(store.key(slug, "panic-fixers"), json.dumps(_fixer_links(*branches)))
+
+
+def _read_pass(store: RedisStore, monkeypatch: pytest.MonkeyPatch, document: dict[str, Any]) -> dict[str, Any]:
+    class Ledger:
+        def binned(self, slug: str) -> bool:
+            return False
+
+    monkeypatch.setattr(cli.ledger_client, "pass_state", lambda ledger, slug: document)
+    wrapper: Any = object.__new__(cli._Wrapper)
+    wrapper.state = {"store": store, "slug": SLUG, "ledger": Ledger()}
+    wrapper.box = {}
+    assert cli._Wrapper._read(wrapper) is True
+    return wrapper.box
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_tick_pass_spares_every_swarms_recorded_fixer_branches_without_a_registration(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    for slug in ("other", "third"):
+        store.create(SwarmConfig(slug, "/repo", max_eng=1, max_ci=1))
+    _record(store, SLUG, "ci-323133-5149", "ci-323133-5150")
+    _record(store, "other", "engineer-323133-10087")
+    panic.engage(store, "pressed", False, [], 0)
+    branches = ("busy", "ci-323133-5149", "ci-323133-5150", "engineer-323133-10087", "ci-2")
+    runs = Runs({repo: [_row(n, branch) for n, branch in enumerate(branches)] for repo in panic.REPOS})
+    assert panic.tick_pass(store, True, 1_000, runs) == [
+        f"panic cancelled {repo} run {n} on {branches[n]}" for repo in panic.REPOS for n in (0, 4)
+    ]
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_panic_button_spares_the_recorded_fixer_branches(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    _record(store, SLUG, "ci-323133-5149")
+    runs = Runs({repo: [_row(7, "busy"), _row(8, "ci-323133-5149")] for repo in panic.REPOS})
+    monkeypatch.setattr(panic, "port", runs)
+    args = cli.build_parser().parse_args([SLUG, "panic", "on", "--fix", FIX])
+    args.handler(store, args)
+    out = json.loads(capsys.readouterr().out)
+    assert out["fixes"] == [FIX]
+    assert out["cancelled"] == [f"{repo} run 7 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_pass_read_records_the_open_fixer_branches_of_its_document(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = {"tasks": _fixer_rows()}
+    assert _read_pass(store, monkeypatch, document)["doc"] is document
+    assert json.loads(store.redis.get(store.key(SLUG, "panic-fixers")) or "[]") == _fixer_links(
+        "ci-323133-5149", "ci-323133-5150", "ci-323133-5150-2", "ci-323133-5153", "engineer-323133-10087"
+    )
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_pass_read_drops_the_record_once_no_fixer_is_open(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _record(store, SLUG, "ci-323133-5149")
+    _read_pass(store, monkeypatch, {"tasks": _fixer_rows()[3:]})
+    assert store.redis.exists(store.key(SLUG, "panic-fixers")) == 0
+
+
 def test_the_panic_button_cancels_and_prints(
     store: RedisStore,
     counted: list[tuple[str, float, dict[str, str]]],
