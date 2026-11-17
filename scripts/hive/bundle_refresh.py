@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def refresh(last: float, now: float, environ: Mapping[str, str]) -> float:
         )
         if _manifest(bundle) != before:
             subprocess.Popen(
-                ["agentihooks", "deps", "ensure", "--quiet"],
+                [sys.executable, "-P", "-m", "scripts.install", "deps", "ensure", "--quiet"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
