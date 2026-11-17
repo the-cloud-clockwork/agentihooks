@@ -1,1 +1,0 @@
-The promote job fails at once, naming each job and its result, when a job of its own graded run already finished without passing, instead of polling for thirty minutes while it holds the release group.

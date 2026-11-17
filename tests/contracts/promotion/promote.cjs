@@ -127,7 +127,7 @@ test('never reports a passing snapshot grade for a failed original grade', async
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
-for (const conclusion of ['failure', 'cancelled', 'timed_out']) {
+for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'stale']) {
   test(`fails at once when a job of its own graded run ended ${conclusion}`, async () => {
     const f = fixture();
     f.jobs.push({ id: 75, run_id: 42, name: 'mutation-stats-seed', status: 'completed', conclusion });
