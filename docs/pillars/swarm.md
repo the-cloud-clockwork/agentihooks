@@ -84,7 +84,7 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   reads launching, so it stays a member without its seat variables. A relaunch whose agent never records itself
   leaves the seat pending and fails loudly. `agentihooks quick relaunch <seat> --folder <folder> --adopt`, run
   from a live session, records that session and its pane as the seat's occupant; it never takes a launching seat,
-  a seat whose recorded pane still runs an agent, or another seat's pane.
+  a seat whose recorded pane herdr shows running an agent, or another seat's pane.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
 
 ## Event driven engine

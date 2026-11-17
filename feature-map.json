@@ -8298,7 +8298,7 @@
       "id": "quick-seat-binding",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch-unbound",
-      "behaviour": "A quick seat stays bound to its live session: the agent a relaunch starts records its herdr pane and session id in the seat at its first hook while the seat is launching, so it stays a member, receives room notices and HANDOFF PREPARATION and hands off even without its seat variables; a relaunch whose agent never records its session leaves the seat pending and fails the command loudly instead of reading ready; quick relaunch <seat> --adopt records the calling live session and its pane as the seat's ready occupant, and never takes a launching seat, a seat whose recorded pane still runs an agent, or a pane another seat holds.",
+      "behaviour": "A quick seat stays bound to its live session: the agent a relaunch starts records its herdr pane and session id in the seat at its first hook while the seat is launching, so it stays a member, receives room notices and HANDOFF PREPARATION and hands off even without its seat variables; a relaunch whose agent never records its session leaves the seat pending and fails the command loudly instead of reading ready; quick relaunch <seat> --adopt records the calling live session and its pane as the seat's ready occupant, and never takes a launching seat, a seat whose recorded pane herdr shows running an agent, or a pane another seat holds.",
       "seam": "scripts.quick.registry bind and adopt, scripts.quick.member bind, hooks.context.quick_swarm refocus, scripts.quick.launch relaunch, bound and adopt, and agentihooks quick relaunch --adopt",
       "tests": [
         "tests/quick/test_seat_binding.py::test_a_relaunched_master_in_a_new_pane_records_it_and_stays_a_member_without_its_variables",
@@ -8311,7 +8311,9 @@
         "tests/quick/test_seat_binding.py::test_bind_needs_the_seat_variables_a_pane_and_a_session_and_returns_the_recorded_seat",
         "tests/quick/test_seat_binding.py::test_the_bind_wait_polls_each_interval_and_needs_a_session_other_than_the_predecessors",
         "tests/quick/test_seat_binding.py::test_a_relaunch_whose_agent_exits_never_waits_for_its_session",
-        "tests/quick/test_seat_binding.py::test_a_live_session_in_the_seats_own_pane_adopts_it_to_record_its_session"
+        "tests/quick/test_seat_binding.py::test_a_live_session_in_the_seats_own_pane_adopts_it_to_record_its_session",
+        "tests/quick/test_seat_binding.py::test_adopt_of_a_seat_the_swarm_lacks_is_refused",
+        "tests/quick/test_seat_binding.py::test_adopt_with_no_session_id_seats_the_pane_alone"
       ]
     }
   ],

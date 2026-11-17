@@ -140,7 +140,7 @@ def test_only_a_launching_seat_named_by_the_session_variables_records_its_pane_a
     seated = {**_home(tmp_path), member.DIR_ENV: str(folder), member.SEAT_ENV: "master"}
     assert quick_swarm.refocus(NEW, "prompt", seated) != ""
     assert (_master(folder).pane_id, _master(folder).session_id) == ("w1:p8", OLD)
-    quick_swarm.refocus("", "prompt", {**seated, "HERDR_PANE_ID": "w1:pA"})
+    assert quick_swarm.refocus("", "prompt", {**seated, "HERDR_PANE_ID": "w1:pA"}) == ""
     assert (_master(folder).pane_id, _master(folder).session_id) == ("w1:p8", OLD)
     quick_swarm.refocus(NEW, "prompt", {**_home(tmp_path), "HERDR_PANE_ID": "w1:p8"})
     assert _master(folder).session_id == OLD
@@ -265,6 +265,7 @@ def test_adopt_never_takes_a_launching_seat_a_seat_whose_agent_runs_or_another_s
     assert registry.load(folder) == before
 
 
+@pytest.mark.feature("quick-seat-binding")
 def test_adopt_of_a_seat_the_swarm_lacks_is_refused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -277,6 +278,7 @@ def test_adopt_of_a_seat_the_swarm_lacks_is_refused(
     assert capsys.readouterr().out == "no-seat\n"
 
 
+@pytest.mark.feature("quick-seat-binding")
 def test_adopt_with_no_session_id_seats_the_pane_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -330,4 +332,8 @@ def test_the_bind_wait_polls_each_interval_and_needs_a_session_other_than_the_pr
 
     naps.clear()
     assert launch.bound(folder, before, wait_s=2.0, sleep=later) is True
+    assert naps == [0.5]
+    registry.bind(folder, "master", "w1:p8", OLD)
+    naps.clear()
+    assert launch.bound(folder, before, wait_s=0.5, sleep=later) is True
     assert naps == [0.5]
