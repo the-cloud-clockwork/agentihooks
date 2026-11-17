@@ -5817,6 +5817,19 @@
       ]
     },
     {
+      "id": "dead-offer-generation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-offer-generation",
+      "behaviour": "An offer that dead letters while the hub holds no admission for it advances its open, unclaimed task's claim generation by one, and a delivery that meets a dead claim marker asks the hub for that advance before it is terminated, so the task's next offer carries a fresh claim key and is placed on a later pass instead of being terminated forever.",
+      "seam": "Spoke._finish_dead and Spoke._ended through LaneTasks.dead_lettered against Admission.reopen and the ledger task_update claim generation advance",
+      "rules": ["dead-letter-reopen-keeps-generation"],
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_a_task_whose_offer_dead_lettered_at_its_current_generation_is_placed_on_a_later_pass",
+        "tests/hub/test_admission.py::test_a_dead_lettered_reopen_with_no_admission_held_advances_the_claim_generation",
+        "tests/hive/test_spoke.py::test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term"
+      ]
+    },
+    {
       "id": "forced-master-slot-reservation",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-slot-reservation",
