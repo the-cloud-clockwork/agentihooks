@@ -107,8 +107,10 @@ def start(python: str = sys.executable) -> int:
     if mcp_daemon.port_open(HOST, port()):
         print(f"serena router already running at {base_url()}")
         return 0
-    router = None if mcp_daemon._systemctl_usable() else _start_pidfile(python)
-    error = _start_systemd(python) if router is None else ""
+    if mcp_daemon._systemctl_usable():
+        router, error = None, _start_systemd(python)
+    else:
+        router, error = _start_pidfile(python), ""
     if error:
         print(f"serena router failed to start: {error}", file=sys.stderr)
         return 1
