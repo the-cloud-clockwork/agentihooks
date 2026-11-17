@@ -8266,6 +8266,17 @@
       "tests": [
         "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
       ]
+    },
+    {
+      "id": "ci-stats-seed-download-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out is not retried, so the seed still skips that pull request.",
+      "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
+        "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed"
+      ]
     }
   ],
   "unmapped_rules": [
