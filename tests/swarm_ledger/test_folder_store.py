@@ -135,10 +135,12 @@ def test_the_outbox_host_runs_a_relay_for_a_repository_flagged_remote(monkeypatc
     assert (built, closed) == ([outbox_host.PRUNE_EVERY, outbox_host.INTERVAL], [repository])
 
 
-def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[list[dict], list[float]]:
-    """Run the ledger server's startup on the folder backend with an API address set, and return the threads it
-    started and the waits of every writer lease it took."""
+def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, api: bool = False) -> tuple[list[dict], list[float]]:
+    """Run the ledger server's startup, or the ledger API service's when ``api``, on the folder backend with an API
+    address set, and return the threads it started and the waits of every writer lease it took."""
+    from scripts.swarm_ledger import api_service
     from scripts.swarm_ledger import ledger_server as server
+    from scripts.swarm_ledger.repository import legacy
 
     threads, waits = [], []
 
@@ -186,19 +188,29 @@ def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[list[dict],
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: server.threading.Event())
     monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
-    monkeypatch.setattr(server.legacy, "adopt", lambda repository: None)
+    monkeypatch.setattr(legacy, "adopt", lambda repository: None)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server.storage, "shared", lambda: None)
-    server.serve()
+    if api:
+        monkeypatch.setattr(api_service.signal, "signal", lambda signum, handler: None)
+        api_service.serve()
+    else:
+        server.serve()
     return threads, waits
 
 
-def test_the_ledger_server_takes_the_folder_writer_lease_with_an_api_address_set(
+def test_the_api_service_takes_the_folder_writer_lease_without_a_shared_database(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _, waits = served(monkeypatch, tmp_path)
+    _, waits = served(monkeypatch, tmp_path, api=True)
 
     assert waits == [0.0]
+
+
+def test_the_ledger_server_takes_no_writer_lease(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, waits = served(monkeypatch, tmp_path)
+
+    assert waits == []
 
 
 def test_the_ledger_server_follows_no_shared_database_with_an_api_address_set(

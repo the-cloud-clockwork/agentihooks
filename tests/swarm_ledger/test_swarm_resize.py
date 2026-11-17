@@ -17,6 +17,7 @@ import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 
 browser = chromium_browser
 SLUGS = ("resize-one-2026-10-06", "resize-two-2026-10-06")
@@ -51,7 +52,7 @@ def base(ledger_dir):
         html_path, _ = legacy_page.paths(slug, core)
         html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         core.sync(slug)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     port = httpd.server_address[1]
     hosts = {f"127.0.0.1:{port}"}
     with pytest.MonkeyPatch.context() as patch:

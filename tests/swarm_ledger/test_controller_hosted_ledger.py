@@ -12,8 +12,7 @@ import pytest
 
 from scripts.hive import auth as hive_auth
 from scripts.swarm import ledger_read, profile_choice, prompt
-from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger, ledger_close, ledger_server
+from scripts.swarm_ledger import api_service, ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
@@ -37,7 +36,6 @@ pytestmark = pytest.mark.unit
 PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"
 PROGRESS = "Reading the task through the hosted ledger"
-REFUSED_CONNECTION = "the hosted ledger is unavailable: <urlopen error [Errno 111] Connection refused>"
 
 
 def _hl():
@@ -62,8 +60,8 @@ def hosted(store, ledger_dir):
         patch("scripts.swarm.store.redis_client", return_value=store.redis),
         patch("hooks._redis.get_redis", return_value=None),
         patch("scripts.gates.talk.Budget._marks", return_value=None),
-        patch.object(ledger_server, "relay_to_inbox", return_value=None),
-        patch.object(ledger_server, "doctor_phrase", return_value=None),
+        patch.object(api_service, "relay_to_inbox", return_value=None),
+        patch.object(api_service, "doctor_phrase", return_value=None),
         patch.object(ledger_server, "ALLOWED_HOSTS", {host}),
         patch.dict(os.environ, {**remote, **PINNED}),
     ):
@@ -97,11 +95,7 @@ def _hold(holder, tmp_path, overview=OVERVIEW, phases=(LEDGER_PHASE,)):
 
 
 def _hosted_ledger(hosted):
-    return _hl().HostedLedger(hosted.remote["LEDGER_URL"], hosted.remote[_cs().CREDENTIAL_ENV], hosted.store)
-
-
-def _closed():
-    return f"http://127.0.0.1:{_free_port()}"
+    return _hl().HostedLedger(hosted.remote["LEDGER_URL"], hosted.store)
 
 
 def _held_task():
@@ -157,10 +151,7 @@ def test_the_deployed_controller_keeps_no_ledger_folder_and_takes_no_writer_leas
     _read(deployed)
 
     assert (deployed.service.writer, deployed.service.ledger_folder) == (None, None)
-    assert (deployed.service.hosted_ledger.base, deployed.service.hosted_ledger.credential) == (
-        os.environ["LEDGER_URL"],
-        os.environ[_cs().CREDENTIAL_ENV],
-    )
+    assert deployed.service.hosted_ledger.base == os.environ["LEDGER_URL"]
     assert not deployed.folder.exists()
 
 
@@ -409,60 +400,10 @@ def test_a_task_changed_between_read_and_write_is_a_revision_conflict(hosted, tm
     }
 
 
-def test_a_refused_controller_credential_on_write_is_a_dependency_failure(hosted, tmp_path):
-    _hold("engineer@323133-0300", tmp_path)
-    hosted_ledger = _hosted_ledger(hosted)
-
-    def forget():
-        hosted_ledger.credential = "wrong"
-
-    with pytest.raises(GrantRefused) as raised:
-        hosted_ledger.apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(forget))
-
-    assert raised.value.error_class == "dependency_unavailable"
-    assert str(raised.value) == "the hosted ledger is unavailable: HTTP Error 403: Forbidden"
-    assert _held_task()["state"] == "claimed"
-
-
-def test_an_unreachable_hosted_server_on_write_is_a_dependency_failure(hosted, tmp_path):
-    _hold("engineer@323133-0300", tmp_path)
-    hosted_ledger = _hosted_ledger(hosted)
-
-    def vanish():
-        hosted_ledger.base = _closed()
-
-    with pytest.raises(GrantRefused) as raised:
-        hosted_ledger.apply_ops(SLUG, ops=[_update({"state": "pr"})], gate=Passing(vanish))
-
-    assert raised.value.error_class == "dependency_unavailable"
-    assert str(raised.value) == REFUSED_CONNECTION
-    assert _held_task()["state"] == "claimed"
-
-
-def test_an_unreachable_hosted_server_on_read_is_a_dependency_failure(hosted):
-    with pytest.raises(GrantRefused) as raised:
-        _hl().HostedLedger(_closed(), hosted.remote[_cs().CREDENTIAL_ENV], hosted.store).read(SLUG, "tasks/t1")
-
-    assert raised.value.error_class == "dependency_unavailable"
-    assert str(raised.value) == REFUSED_CONNECTION
-
-
 def test_a_task_the_hosted_server_lacks_reads_as_no_task(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
 
     assert _hosted_ledger(hosted).read(SLUG, "tasks/t9") == {"tasks": []}
-
-
-def test_a_refused_controller_credential_on_read_is_a_dependency_failure(hosted, tmp_path):
-    _hold("engineer@323133-0300", tmp_path)
-
-    with pytest.raises(GrantRefused) as raised:
-        _hl().HostedLedger(hosted.remote["LEDGER_URL"], "wrong", hosted.store).read(SLUG, "tasks/t1")
-
-    assert raised.value.error_class == "dependency_unavailable"
-    assert str(raised.value) == (
-        "the hosted ledger is unavailable: unauthenticated: the ledger server refused the credential"
-    )
 
 
 def test_a_write_the_hosted_server_finds_malformed_is_an_invalid_request(hosted, tmp_path):
@@ -595,17 +536,6 @@ def test_the_prompt_summary_reads_the_close_summary_through_the_hosted_server(co
 
 def test_a_ledger_the_hosted_server_lacks_reads_as_empty(controller_reads):
     assert ledger_read.parts("absent-ledger", "overview", "phases") == {}
-
-
-def test_an_unreachable_hosted_server_fails_the_intent_read_as_a_swarm_error(controller_reads):
-    os.environ["LEDGER_URL"] = _closed()
-
-    with pytest.raises(SwarmError) as raised:
-        ledger_read.parts(SLUG, "overview", "phases")
-
-    assert str(raised.value) == (
-        f"the hosted ledger is unavailable for {SLUG}: <urlopen error [Errno 111] Connection refused>"
-    )
 
 
 def test_an_operation_id_the_hosted_server_already_holds_for_other_content_is_an_operation_conflict(hosted, tmp_path):

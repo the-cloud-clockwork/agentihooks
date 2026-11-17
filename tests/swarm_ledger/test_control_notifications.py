@@ -7,7 +7,6 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 
 import ledger_core as core
-import ledger_server as server
 import new_ledger
 import pytest
 
@@ -15,6 +14,8 @@ from scripts.doctor import cli as doctor
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from scripts.swarm.health.findings import Finding
+from scripts.swarm_ledger import api_service
+from scripts.swarm_ledger import ledger_server as server
 from tests.swarm.test_control_notifications import controls as controls
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
@@ -56,7 +57,7 @@ def page(controls, monkeypatch):
 
     monkeypatch.setattr(server.subprocess, "run", run)
     monkeypatch.setattr(server, "swarm_status", lambda slug: {"config": {"state": store.config(slug).state}})
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), api_service.WriteHandler)  # pyright: ignore[reportArgumentType]
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
 

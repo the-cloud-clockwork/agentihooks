@@ -85,6 +85,7 @@ def test_a_whole_store_writer_and_a_ledger_writer_exclude_each_other():
 def test_a_cold_command_reads_credentials_while_the_writer_lock_is_held(monkeypatch: pytest.MonkeyPatch) -> None:
     slug = f"credentials-{uuid.uuid4().hex[:12]}"
     repository = postgres.PostgresLedgerRepository(URL)
+    repository.migrate()
     repository.import_document(slug, STATE)
     token = repository.token(slug)
     cold = postgres.PostgresLedgerRepository(URL)

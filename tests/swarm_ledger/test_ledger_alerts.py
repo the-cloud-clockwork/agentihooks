@@ -14,7 +14,7 @@ import new_ledger  # noqa: E402
 from scripts.inbox.seats import seat_address  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
-from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
+from scripts.swarm_ledger import api_service, ledger, ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
@@ -129,8 +129,8 @@ def test_malformed_alert_ops_are_refused(op):
 def test_each_new_alert_reaches_its_target_inbox_once(inbox):
     state = make_ledger(LONG)
     master = seat_address(SLUG, MASTER)
-    ledger_server.deliver_alerts(SLUG, state)
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     [item] = inbox.inbox(master)
     assert state["alerts"][0]["id"] in item.text and state["alerts"][0]["text"] in item.text
     assert item.sender == ledger_alerts.SENDER
@@ -139,7 +139,7 @@ def test_each_new_alert_reaches_its_target_inbox_once(inbox):
 def test_a_refusal_without_a_live_writer_reaches_the_master_inbox(inbox):
     make_ledger()
     state = refuse_a_plan()
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     [item] = inbox.inbox(seat_address(SLUG, MASTER))
     assert state["alerts"][0]["text"] in item.text
 
@@ -151,7 +151,7 @@ def test_the_page_header_renders_no_ledger_warnings():
 
 def test_the_cli_claims_and_closes_an_alert_as_its_caller(monkeypatch):
     sent = []
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None, service=False: sent.extend(ops or []) or {})
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.extend(ops or []) or {})
     for argv in (["alert", "claim", "al-1-0"], ["alert", "close", "al-1-0", "Trimmed the phase"]):
         ledger.cmd_alert(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", *argv]))
     assert [(o["op"], o["target"], o["by"], o.get("outcome")) for o in sent] == [
@@ -167,14 +167,14 @@ def test_the_cli_claims_and_closes_an_alert_as_its_caller(monkeypatch):
 def test_the_cli_lists_only_open_and_claimed_alerts(monkeypatch, capsys):
     rows = [{"id": "a", "state": "open"}, {"id": "b", "state": "claimed"}, {"id": "c", "state": "done"}]
     asked = []
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None, service=False: asked.append(slug) or {"alerts": rows})
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: asked.append(slug) or {"alerts": rows})
     ledger.cmd_alert(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "alert", "list"]))
     assert asked == [SLUG]
     assert capsys.readouterr().out == json.dumps(rows[:2], indent=2) + "\n"
 
 
 def test_the_cli_prints_the_alert_and_the_action_it_took(monkeypatch, capsys):
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None, service=False: {})
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {})
     for argv in (["alert", "claim", "al-1-0"], ["alert", "close", "al-1-0", "Trimmed"]):
         ledger.cmd_alert(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", *argv]))
     assert capsys.readouterr().out.splitlines() == [
@@ -329,7 +329,7 @@ def test_delivery_marks_each_alert_sent_for_thirty_days_and_skips_claimed_and_se
 def test_alerts_from_an_earlier_sync_are_not_sent_again(inbox, capsys):
     make_ledger(LONG)
     state, _ = sync(ops=[{"op": "add", "thread": "notes", "id": "n1", "text": "Later note"}])
-    assert ledger_server.deliver_alerts(SLUG, state) == []
+    assert api_service.deliver_alerts(SLUG, state) == []
     assert inbox.inbox(seat_address(SLUG, MASTER)) == []
     assert capsys.readouterr().err == ""
 
@@ -339,7 +339,7 @@ def test_a_finished_master_is_not_the_alert_address(inbox):
         SLUG, AgentRecord(name="master@old", lane=MASTER, task="", state="finished", seat="old-seat")
     )
     state = make_ledger(LONG)
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     assert len(inbox.inbox(seat_address(SLUG, MASTER))) == 1
     assert inbox.inbox("old-seat") == []
 
@@ -350,13 +350,13 @@ def test_an_unreachable_inbox_leaves_the_write_standing(monkeypatch, capsys):
 
     monkeypatch.setattr("scripts.inbox.store.connect", refuse)
     state = make_ledger(LONG)
-    assert ledger_server.deliver_alerts(SLUG, state) == []
+    assert api_service.deliver_alerts(SLUG, state) == []
     assert capsys.readouterr().err == f"alert delivery for {SLUG}: no redis\n"
 
 
 def test_the_server_reply_delivers_new_alerts(inbox):
     make_ledger()
-    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = f"/api/{SLUG}?view=agent"
     handler.send = lambda code, body, ctype: None
     taken = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
@@ -375,8 +375,8 @@ def test_versioned_write_delivers_alert_once(inbox):
         "ops": [op],
         "guards": {"phases": resources.resource_revision(state, "phases")},
     }
-    mutations.apply(ledger_server.api_services(), SLUG, "", payload)
-    mutations.apply(ledger_server.api_services(), SLUG, "", payload)
+    mutations.apply(api_service.services(), SLUG, "", payload)
+    mutations.apply(api_service.services(), SLUG, "", payload)
     items = inbox.inbox("master") + inbox.inbox(seat_address(SLUG, MASTER)) + inbox.inbox("operator")
     assert len(items) == 1
     assert "phase id p1 is already taken" in items[0].text
@@ -392,7 +392,7 @@ def test_refusal_reaches_writer_seat_or_agent(inbox, seat):
         [{"op": "phase_append", "id": "refusal", "by": writer, "phases": [{"phase": "p1", "title": "Taken"}]}]
     )
     assert rejected == ["refusal"]
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     address = seat or writer
     assert len(inbox.inbox(address)) == 1
     assert inbox.inbox("operator") == []
@@ -409,7 +409,7 @@ def test_missing_or_finished_writer_falls_back_to_master(inbox, finished):
     state, _ = sync(
         [{"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}]
     )
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     assert len(inbox.inbox(seat_address(SLUG, MASTER))) == 1
     assert inbox.inbox("writer") == []
     assert inbox.inbox("operator") == []
@@ -455,7 +455,7 @@ def test_server_sweep_expires_refusals_without_a_new_write(monkeypatch):
     make_ledger()
     state = refuse_a_plan()
     monkeypatch.setattr(core, "now_ms", lambda: state["alerts"][0]["at"] + 3600000)
-    ledger_server.expire_alerts()
+    api_service.expire_alerts()
     state = ledger_server.repository.get_document(SLUG)
     assert state["alerts"][0]["state"] == "done"
     assert state["alerts"][0]["outcome"] == "No repeat refusal for one hour."
@@ -556,7 +556,7 @@ def test_server_sweep_tolerates_an_older_ledger_without_alerts(monkeypatch):
     state = make_ledger()
     state.pop("alerts")
     monkeypatch.setattr(ledger_server.repository, "read", lambda slug, *keys: state)
-    ledger_server.expire_alerts()
+    api_service.expire_alerts()
     assert "alerts" not in state
 
 
@@ -629,9 +629,7 @@ def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monke
     op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
     if refused:
         op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
-    reply = mutations.apply(
-        ledger_server.api_services(), SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}}
-    )
+    reply = mutations.apply(api_service.services(), SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}})
     assert reply["rejected"] == (["one"] if refused else [])
     assert len(resolved) <= (4 if refused else 2), resolved
 
@@ -760,7 +758,7 @@ def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox, monkeypatch):
 
     monkeypatch.setattr(ledger_blockers, "autonomy", lambda slug: "full" if slug == SLUG else "")
     make_ledger()
-    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = f"/api/{SLUG}?view=agent"
     handler.send = lambda code, body, ctype: None
     handler.reply_state(SLUG, ops=[raise_promotion("r1")])
@@ -796,7 +794,7 @@ def test_alert_delivery_reads_the_step_from_the_ledger_state(inbox, monkeypatch)
     monkeypatch.setattr(ledger_alerts, "deliver", deliver)
     blocker = {"attempts": [{}, {}], "critic": None, "escalation": None}
     state = {"_meta": {"rev": 5}, "alerts": [alert], "tasks": [{"id": "t1", "blocker": blocker}]}
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     assert rendered[0].endswith(f"launch the blind critic: agentihooks swarm {SLUG} resolve critic tasks/t1.")
 
 
@@ -823,7 +821,7 @@ def test_stale_and_claimed_alerts_do_not_need_an_inbox(monkeypatch, capsys):
             {"id": "claimed", "rev": 2, "state": "claimed", "target": "master"},
         ],
     }
-    assert ledger_server.deliver_alerts(SLUG, state) == []
+    assert api_service.deliver_alerts(SLUG, state) == []
     assert capsys.readouterr().err == ""
 
 

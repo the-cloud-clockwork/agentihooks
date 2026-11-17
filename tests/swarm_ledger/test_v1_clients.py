@@ -13,21 +13,22 @@ from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger as ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
 from scripts.swarm_ledger.api import client as api_client  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front
 from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
-from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
+from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger
 
 
 @pytest.fixture
 def routes(live, monkeypatch):  # noqa: F811
     seen = []
     for method in ("do_GET", "do_POST", "do_PUT"):
-        original = getattr(server.Handler, method)
+        original = getattr(Front, method)
 
         def record(self, original=original, method=method):
             seen.append((method.removeprefix("do_"), self.path.split("?", 1)[0]))
             return original(self)
 
-        monkeypatch.setattr(server.Handler, method, record)
+        monkeypatch.setattr(Front, method, record)
     return seen
 
 
