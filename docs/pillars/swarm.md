@@ -708,7 +708,16 @@ agentihooks swarm <id> set masters=2
 agentihooks swarm <id> master up --new
 # Or retire the front door and start a fresh one on master@<id>
 agentihooks swarm <id> master up --replace
+# Or replace it in the forced launch mode no quota floor refuses
+agentihooks swarm <id> master up --forced
 ```
+
+`master up --forced` and the night watch front door respawn launch the front door master in the forced mode. The
+tick master launch skips the session slot wait and asks placement with the forced task. Hive master selection then
+closes no Claude account at a quota floor, and herdr spawn never refuses the master as all full. The claude ai launch
+takes the token fallback on any login refusal, so a login held or at the master floor still starts a master, shown as
+`route=token-fallback`. Under forced, the token fallback takes the probed account with the most room even when every
+account is under its floor. The claude ai login reserve itself stays.
 
 ### Master pool
 

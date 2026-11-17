@@ -749,16 +749,18 @@ def test_a_forced_master_replaces_the_live_front_door_and_launches_forced(up, mo
     answers(monkeypatch)
     assert run("sw", "master", "up", "--forced") == 0
     launched = printed(capsys)
-    assert rt.killed == [live.name]
+    assert (rt.killed, launched["choice"]) == ([live.name], "forced")
     assert [(name, task.get("forced")) for name, task in rt.masters] == [(launched["master"], True)]
 
 
 @pytest.mark.feature("forced-master-start")
-@pytest.mark.parametrize("flag", ["--replace", "--new"])
-def test_a_replacing_or_new_master_launches_unforced(up, monkeypatch, flag):
-    _, _, rt = up
-    answers(monkeypatch)
-    assert run("sw", "master", "up", flag) == 0
+@pytest.mark.parametrize(("flags", "replies"), [(["--replace"], ()), (["--new"], ()), ([], ("1", "y"))])
+def test_a_replacing_new_or_offered_master_launches_unforced(up, monkeypatch, capsys, flags, replies):
+    store, _, rt = up
+    gone_master(store, conversation="")
+    answers(monkeypatch, *replies)
+    assert run("sw", "master", "up", *flags) == 0
+    assert printed(capsys)["choice"] == "new"
     assert ["forced" in task for _, task in rt.masters] == [False]
 
 

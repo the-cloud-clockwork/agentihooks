@@ -1885,7 +1885,7 @@ def test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home(
 def test_a_forced_master_token_launch_selects_under_every_floor(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer as router
@@ -1894,18 +1894,22 @@ def test_a_forced_master_token_launch_selects_under_every_floor(
     monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(account_sessions, "sessions_by_account", dict)
-    chosen: list[str] = []
+    refusal = router.RoutingError("no Claude account has a free session under its quota band")
+    decision = router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "x"), None, "forced master")
+    picked: list[tuple[router.RoutingError, tuple[str, ...]]] = []
 
-    def selector(source: str) -> Callable[..., router.RouteDecision]:
-        def select(environ: Mapping[str, str], **options: object) -> router.RouteDecision:
-            chosen.append(source)
-            return router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "x"), None, source)
+    def refuse(environ: Mapping[str, str], **options: object) -> router.RouteDecision:
+        raise refusal
 
-        return select
+    def forced(environ: Mapping[str, str], refused: router.RoutingError, exclude: tuple[str, ...]) -> object:
+        picked.append((refused, exclude))
+        return decision
 
-    monkeypatch.setattr(router, "select_master_credential", selector("master"))
-    monkeypatch.setattr(router, "select_forced_master_credential", selector("forced"))
+    monkeypatch.setattr(router, "select_master_credential", refuse)
+    monkeypatch.setattr(router, "forced_credential", forced)
     monkeypatch.setattr(account_slots, "execute", lambda *args, **kwargs: None)
     login.launch_token("/opt/claude", [], _environ(rendered), "", forced=True)
-    login.launch_token("/opt/claude", [], _environ(rendered), "")
-    assert chosen == ["forced", "master"]
+    assert picked == [(refusal, (router.API_ACCOUNT,))]
+    with pytest.raises(router.RoutingError) as raised:
+        login.launch_token("/opt/claude", [], _environ(rendered), "")
+    assert (raised.value, len(picked)) == (refusal, 1)

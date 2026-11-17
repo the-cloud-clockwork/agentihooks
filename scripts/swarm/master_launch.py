@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,7 @@ from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
 LAST, NEW, REPLACE = "last", "new", "replace"
+FORCED = "forced"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
 QUESTION = (
     "  1) bring back the last master with its own conversation\n"
@@ -185,7 +187,7 @@ def _filled(task, config):
     return task
 
 
-def _new(store, slug, runtime, at):
+def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> Launched:
     config = store.ensure_code(slug)
     name = store.next_name(slug, MASTER, at)
     record = AgentRecord(name, MASTER, MASTER, started_at=at, state="starting", seat=seat_address(slug, MASTER))
@@ -201,7 +203,7 @@ def _new(store, slug, runtime, at):
         capacity.feed_spent(runtime, store, at)
         if reader := getattr(runtime, "quota_capacity", None):
             reader(config, store.agents(slug), at / 1000)
-        placed = runtime.spawn(config, MASTER, name, task)
+        placed = runtime.spawn(config, MASTER, name, {**task, "forced": True} if forced else task)
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
@@ -221,7 +223,7 @@ def _new(store, slug, runtime, at):
         store.redis.delete(store.key(slug, "master-start"))
         store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
-    return Launched(name, record.pane_id, record.seat, NEW)
+    return Launched(name, record.pane_id, record.seat, FORCED if forced else NEW)
 
 
 def _front_doors(store, slug, live):
@@ -257,7 +259,15 @@ def _beside(store, slug, runtime, at, live):
     return Launched(record.name, record.pane_id, record.seat, NEW)
 
 
-def _fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool = False) -> Launched:
+def _fresh(
+    store: RedisStore,
+    slug: str,
+    runtime: Any,
+    at: int,
+    live: set[str],
+    replace_live: bool = False,
+    forced: bool = False,
+) -> Launched:
     from scripts.swarm import tick_master
 
     tick_master.finish_dead_starting(store, slug, runtime, at)
@@ -269,14 +279,23 @@ def _fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], 
             raise SwarmError(STARTING.format(name=leads[0].name, state=leads[0].state, count=count))
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front)
-    return _new(store, slug, runtime, at)
+    return _new(store, slug, runtime, at, forced)
 
 
-def up(store, slug, runtime, at, choice, ask, say):
+def up(
+    store: RedisStore,
+    slug: str,
+    runtime: Any,
+    at: int,
+    choice: str,
+    ask: Callable[[str], str],
+    say: Callable[[str], None],
+) -> Launched:
     """Launch the chosen master; ask last or new when no choice is given. Refuses beside a live master only when
     every counted master seat is held: a new master takes a free counted seat beside a live front door, and a
-    replacing one retires the front door first."""
-    replace_live = choice == REPLACE
+    replacing one retires the front door first. A forced one replaces and launches where no quota floor refuses it."""
+    replace_live = choice in (REPLACE, FORCED)
+    forced = choice == FORCED
     choice = NEW if replace_live else choice
     live = runtime.live_names()
     previous = _previous(store, slug)
@@ -286,7 +305,7 @@ def up(store, slug, runtime, at, choice, ask, say):
         say(QUESTION)
         choice = _choose(ask)
     if choice == NEW:
-        return _fresh(store, slug, runtime, at, live, replace_live)
+        return _fresh(store, slug, runtime, at, live, replace_live, forced)
     front = _front_doors(store, slug, live)
     why = _why(previous, store.config(slug), live) or (front and f"the front door master {front[0].name} is live")
     if not why:

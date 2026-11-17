@@ -773,14 +773,25 @@ def trust_launch_folder(environ: Mapping[str, str], target: Path) -> None:
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str, forced: bool = False) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
-    from scripts.claude_quota_balancer import API_ACCOUNT, RoutingError, launch_environment, select_master_credential
+    from scripts.claude_quota_balancer import (
+        API_ACCOUNT,
+        RoutingError,
+        forced_credential,
+        launch_environment,
+        select_master_credential,
+    )
     from scripts.hive.account_slots import Unavailable, execute
     from scripts.install import _claude_command, _write_route_report
 
     with _token_lock(environ):
-        decision = select_master_credential(
-            environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
-        )
+        try:
+            decision = select_master_credential(
+                environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
+            )
+        except RoutingError as exc:
+            if not forced:
+                raise
+            decision = forced_credential(environ, exc, (API_ACCOUNT,))
         target = token_home(environ)
         trust_launch_folder(environ, target)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}

@@ -877,9 +877,15 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
         )
 
 
-def select_forced_master_credential(environ: Mapping[str, str], **options: Any) -> RouteDecision:
-    """A forced master start takes the master credential."""
-    return select_master_credential(environ, **options)
+def forced_credential(environ: Mapping[str, str], refused: RoutingError, exclude: Iterable[str]) -> RouteDecision:
+    """The account with the most room among the probes a master selection ``refused``, even under every quota floor,
+    for a forced master start; ``refused`` again when every probed account is excluded."""
+    excluded = set(exclude)
+    found = [result for result in refused.results if result.account not in excluded]
+    if not found:
+        raise refused
+    best = rank_results(found)[0]
+    return RouteDecision(credential_for_slug(discover_credentials(environ), best.account), best, "forced master")
 
 
 def select_launch_credential(

@@ -805,7 +805,8 @@ class HerdrRuntime:
             agent, reason = self.choose(want, environ)
         else:
             agent, reason = self._fallback_choice(saved, profile, quota_transfer, environ, requested, avoid)
-        if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
+        full = reason == agent_choice.ALL_FULL and not task.get("forced")
+        if full and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
         if planned and planned != avoid and not (requested or saved or want):
@@ -887,6 +888,7 @@ class HerdrRuntime:
                     *argv,
                     "--",
                     *route,
+                    *([front_door_route.FORCED] if forced and task.get("forced") else []),
                     *remote_control.arguments(rc),
                     *_model_args(
                         agent,

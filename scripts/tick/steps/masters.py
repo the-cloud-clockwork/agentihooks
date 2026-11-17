@@ -222,7 +222,7 @@ def _night_watch(slug: Any, store: Any, ledger: Any, runtime: Any, doc: Any, now
         if tick.master_start.read(store, slug).get("alerted"):
             store.redis.delete(store.key(slug, "master-start"))
         with tick.PLACING:
-            return tick._master(slug, store.config(slug), store, runtime, now_ms)
+            return tick._master(slug, store.config(slug), store, runtime, now_ms, forced=True)
 
     return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
 
@@ -367,9 +367,9 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, force
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
-    if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {}):
+    if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {"forced": True} if forced else {}):
         return [refused]
-    if refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER):
+    if not forced and (refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER)):
         store.redis.hset(tick.MASTER_WAITING, slug, now_ms)
         return [refused]
 
@@ -398,7 +398,7 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, force
         tick.master_start.begin(store, slug, record.name, task, now_ms)
         tick.affinity.handed_off(store, slug)
         launched.update(task)  # pyright: ignore[reportUnknownMemberType]
-        return task  # pyright: ignore[reportUnknownVariableType]
+        return {**task, "forced": True} if forced else task  # pyright: ignore[reportUnknownVariableType]
 
     try:
         record, placed = tick.seat_spawn.place(slug, config, store, runtime, tick.MASTER, now_ms, prepare)
