@@ -3,10 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A uv tool install of agentihooks without the nats extra builds a tool venv with no nats-py. On 17 November
-      agentihooks init rebuilt the workstation tool venv as an editable install with no extras, and with the NATS bus
-      on every hive and init-agent launch died on ModuleNotFoundError no module named nats before claude ran, for over
-      three hours. Install the spec with the extra, ".[nats]" or "agentihooks[nats]".
+      A uv tool install of agentihooks without the nats extra builds a tool venv with no nats-py, so with
+      AGENTIHOOKS_BUS=nats opening the bus fails on ModuleNotFoundError no module named nats. Install the spec with the
+      extra, ".[nats]" or "agentihooks[nats]".
     patterns:
       - pattern: '[$UV, "tool", "install", ...]'
       - pattern-not: '[$UV, "tool", "install", ..., "=~/\[(nats|all)\]$/", ...]'

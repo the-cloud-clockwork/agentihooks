@@ -62,7 +62,7 @@ def test_a_uv_tool_upgrade_installs_the_package_with_the_nats_extra() -> None:
 def test_the_nats_extra_the_tool_installs_carries_the_nats_client() -> None:
     project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())["project"]
 
-    assert [spec for spec in project["optional-dependencies"]["nats"] if spec.startswith("nats-py")]
+    assert "nats-py>=2.9" in project["optional-dependencies"]["nats"]
 
 
 def test_pipx_install_is_detected_by_prefix(wheel_install, monkeypatch, tmp_path):

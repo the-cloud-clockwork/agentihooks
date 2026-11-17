@@ -3844,10 +3844,6 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
     print("Restart Claude Code for the changes to take effect.")
 
 
-# ---------------------------------------------------------------------------
-# CLI tool install (uv tool install --editable .)
-# ---------------------------------------------------------------------------
-
 _CLI_NAME = "agentihooks"
 
 
