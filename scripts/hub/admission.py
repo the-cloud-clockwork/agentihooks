@@ -350,15 +350,16 @@ class Admission:
 
     def _seeds(self, slug: str, task: dict[str, Any], doc: dict[str, Any], name: str) -> dict[str, str]:
         """The files the hive writes into the task's work folder before the launch: steering from the task and the
-        latest task copy synced by the hive that last launched the task, else by the hive of its previous agent, so a
-        predecessor retired before this admission still hands over its lines."""
+        latest task copy synced by the hive that last launched the task, else the one synced by the hive of its
+        previous agent, so a predecessor retired before this admission still hands over its lines."""
         from scripts.swarm_ledger import ledger_workspace
 
         earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
         previous = max(earlier, key=lambda agent: agent.started_at, default=None)
         redis = cast(Any, self.store).redis
-        hive = redis.get(self.store.key(slug, WORK_FOLDER, task["id"])) or (previous.hive if previous else "")
-        held = redis.get(ledger_workspace.task_files_key(hive, slug, task["id"])) if hive else None
+        hives = (redis.get(self.store.key(slug, WORK_FOLDER, task["id"])), previous.hive if previous else "")
+        copies = (redis.get(ledger_workspace.task_files_key(hive, slug, task["id"])) for hive in hives)
+        held = next(filter(None, copies), None)
         synced: dict[str, str] = json.loads(held) if held else {}
         return {**synced, "steering.md": ledger_workspace.steering(task, doc)}
 
@@ -443,8 +444,6 @@ class Admission:
         decision the hive placed, and records that hive as the holder of the task's work folder for the next agent's
         seeds; the hub launch check admission started stays as it is, so a late report never restarts a judged check.
         False when the hive holds no admission for the offer or another agent now occupies the admitted seat."""
-        from scripts.swarm_ledger import ledger_workspace
-
         held = self.store.redis.get(self._key(slug, request))
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
@@ -458,7 +457,7 @@ class Admission:
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
             return False
         folder = self.store.key(slug, WORK_FOLDER, request["task"])
-        cast(Any, self.store).redis.set(folder, request["hive"], ex=ledger_workspace.FILES_SECONDS)
+        cast(Any, self.store).redis.set(folder, request["hive"])
         cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         return True
 

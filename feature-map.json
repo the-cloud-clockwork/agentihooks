@@ -208,6 +208,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-sync-across-hives",
       "behaviour": "A task's progress and proof lines follow it to a successor on any hive: each hive syncs the work folder of every worker execution it runs, the ones the hub admitted with no host target included, and keeps one copy per task under its own key for the files TTL after it stops hosting the task; the hub records the hive of each launched execution and seeds a successor from that hive's task copy, else from the hive of the task's previous agent, so after a hive roll and the predecessor's retirement the successor's folder on another hive holds every line.",
       "seam": "Consumer.sync_workspaces, ledger_workspace.sync and task_files_key, Admission.launched and Admission._seeds",
+      "semgrep_rule": "feature-work-folder-follows-the-task",
       "tests": [
         "tests/hive/test_prompt_transport.py::test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it",
         "tests/hive/test_prompt_transport.py::test_a_task_copy_outlives_the_hive_hosting_it",
@@ -215,6 +216,7 @@
         "tests/hub/test_admission.py::test_a_launched_report_records_the_hive_holding_the_task_work_folder",
         "tests/hub/test_admission.py::test_the_seeds_follow_the_hive_that_last_launched_the_task_after_its_agent_retired",
         "tests/hub/test_admission.py::test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive",
+        "tests/hub/test_admission.py::test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy",
         "tests/hub/test_admission.py::test_a_successor_on_another_hive_after_a_roll_receives_every_line"
       ]
     },

@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import plan_read, ports
 
@@ -11,8 +11,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from redis import Redis
-
-    from scripts.swarm.store import AgentRecord
 
 PART_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,127}")
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
@@ -183,7 +181,7 @@ def sync(redis: "Redis", hive: str, hosted: list[tuple[str, str]], ttl: int) -> 
     redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
 
 
-def latest(agents: "Iterable[AgentRecord]") -> "dict[str, AgentRecord]":
+def latest(agents: "Iterable[Any]") -> "dict[str, Any]":
     """Each task's live execution, else the one that started last."""
     ordered = sorted(agents, key=lambda agent: (agent.state not in ENDED, agent.started_at))
     return {agent.task: agent for agent in ordered}

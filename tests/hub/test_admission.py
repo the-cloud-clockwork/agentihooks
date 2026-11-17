@@ -1694,8 +1694,6 @@ def test_the_seeds_follow_the_most_recently_started_earlier_agent(rig: SimpleNam
 
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_launched_report_records_the_hive_holding_the_task_work_folder(rig: SimpleNamespace) -> None:
-    from scripts.swarm_ledger import ledger_workspace
-
     key = rig.store.key(SLUG, "work-folder", "t1")
     rig.admitter.admit(SLUG, ask())
     assert rig.store.redis.get(key) is None
@@ -1703,7 +1701,7 @@ def test_a_launched_report_records_the_hive_holding_the_task_work_folder(rig: Si
     assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
 
     assert rig.store.redis.get(key) == "hive-a"
-    assert 0 < rig.store.redis.ttl(key) <= ledger_workspace.FILES_SECONDS
+    assert rig.store.redis.ttl(key) == -1
 
 
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
@@ -1735,6 +1733,24 @@ def test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive(r
     admitted = rig.admitter.admit(SLUG, ask())
 
     assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-b\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+
+    named = rig.store.next_name(SLUG, "eng", 1)
+    earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", started_at=1, hive="hive-c")
+    rig.store.start_execution(SLUG, earlier, "")
+    rig.store.redis.set(task_copy("hive-c"), json.dumps({"progress.md": "- step on hive-c\n"}))
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-c\n"
 
 
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
