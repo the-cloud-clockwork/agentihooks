@@ -87,7 +87,7 @@ def _start_systemd(python: str) -> str:
     return "" if proc.returncode == 0 else (proc.stderr or proc.stdout).strip()
 
 
-def _start_pidfile(python: str) -> str:
+def _start_pidfile(python: str) -> subprocess.Popen[bytes]:
     _logfile().parent.mkdir(parents=True, exist_ok=True)
     with open(_logfile(), "ab") as log:
         proc = subprocess.Popen(  # noqa: S603
@@ -100,14 +100,15 @@ def _start_pidfile(python: str) -> str:
             start_new_session=True,
         )
     _pidfile().write_text(str(proc.pid))
-    return ""
+    return proc
 
 
 def start(python: str = sys.executable) -> int:
     if mcp_daemon.port_open(HOST, port()):
         print(f"serena router already running at {base_url()}")
         return 0
-    error = _start_systemd(python) if mcp_daemon._systemctl_usable() else _start_pidfile(python)
+    router = None if mcp_daemon._systemctl_usable() else _start_pidfile(python)
+    error = _start_systemd(python) if router is None else ""
     if error:
         print(f"serena router failed to start: {error}", file=sys.stderr)
         return 1
@@ -116,6 +117,12 @@ def start(python: str = sys.executable) -> int:
         if mcp_daemon.port_open(HOST, port()):
             print(f"serena router running at {base_url()}")
             return 0
+        if router is not None and router.poll() is not None:
+            print(
+                f"serena router exited {router.returncode} before opening {base_url()}; see {_logfile()}",
+                file=sys.stderr,
+            )
+            return 1
         time.sleep(1)
     print(f"serena router did not open {base_url()} within {START_WAIT_SECONDS}s; see {_logfile()}", file=sys.stderr)
     return 1
