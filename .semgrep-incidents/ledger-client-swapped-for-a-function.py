@@ -6,8 +6,11 @@ from tests.swarm.client_class import client_class
 
 
 class Ledger:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
     def say(self, slug: str, text: str) -> None:
-        pass
+        self.lines.append(text)
 
 
 def refuse() -> Ledger:
