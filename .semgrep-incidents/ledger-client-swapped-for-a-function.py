@@ -75,6 +75,17 @@ def test_closure_function_swap(monkeypatch: pytest.MonkeyPatch) -> None:
     swap()
 
 
+class ClassBodySwap:
+    def client() -> Ledger:
+        return Ledger()
+
+    # ruleid: ledger-client-swapped-for-a-function
+    setattr(ledger_client, "LedgerClient", client)
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+
 def test_mock_patch_swap() -> None:
     # ruleid: ledger-client-swapped-for-a-function
     with patch("scripts.swarm.ledger_client.LedgerClient", lambda: Ledger()):
