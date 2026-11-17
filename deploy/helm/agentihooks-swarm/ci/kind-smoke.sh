@@ -537,10 +537,10 @@ while kill -0 "$lease_wait" 2>/dev/null; do
   if [[ -n $restarts && $restarts != 0 ]]; then
     printf 'the controller restarted %s times while the proof waited for its lease\n' "$restarts" >&2
     kill "$lease_wait"
-    exit 1
+    break
   fi
   sleep 0.5
-done
+done &
 wait "$lease_wait"
 
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"

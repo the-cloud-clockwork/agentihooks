@@ -1,4 +1,5 @@
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -189,26 +190,32 @@ def test_one_exec_waits_for_the_lease_and_its_renewal() -> None:
     assert "current = lease.current(connect(), slug)\n        except Exception:\n            current = None" in watch
 
 
-def _lease_watch(tmp_path: Path, kubectl: str, lease: str) -> subprocess.CompletedProcess[str]:
-    """Runs the kind proof's controller restart watch against a fake kubectl running ``kubectl``, with the
-    background command ``lease`` standing in for the lease exec."""
+def _lease_watch(tmp_path: Path, kubectl: str, lease: str) -> tuple[int, str, float]:
+    """Runs the kind proof's controller restart watch against a fake kubectl whose body is ``kubectl``, with the
+    background command ``lease`` standing in for the lease exec; returns the shell's exit status, its error output
+    and the seconds until it returned."""
     watch = SCRIPT[_at("lease_wait=$!\n") : _at('wait "$lease_wait"\n') + len('wait "$lease_wait"\n')]
     fake = tmp_path / "kubectl"
     fake.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{tmp_path}/calls"\n{kubectl}\n')
     fake.chmod(0o755)
-    return subprocess.run(
-        ["bash", "-c", f"set -euo pipefail\ncontroller=(-l controller)\n{lease} &\n{watch}"],
-        env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
+    errors = tmp_path / "errors"
+    started = time.monotonic()
+    with errors.open("w") as sink:
+        status = subprocess.run(
+            ["bash", "-c", f"set -euo pipefail\ncontroller=(-l controller)\n{lease} &\n{watch}"],
+            env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+            stdout=subprocess.DEVNULL,
+            stderr=sink,
+            timeout=20,
+        ).returncode
+    return status, errors.read_text(), time.monotonic() - started
 
 
 def test_the_first_controller_restart_ends_the_lease_wait_at_once(tmp_path: Path) -> None:
-    done = _lease_watch(tmp_path, "echo 1", "sleep 60")
-    assert done.returncode == 1
-    assert "the controller restarted 1 times while the proof waited for its lease" in done.stderr
+    status, errors, seconds = _lease_watch(tmp_path, "echo 1", "sleep 60")
+    assert status == 143
+    assert seconds < 10
+    assert "the controller restarted 1 times while the proof waited for its lease" in errors
     assert (tmp_path / "calls").read_text() == (
         "get pods -l controller --field-selector=status.phase=Running "
         "-o jsonpath={.items[0].status.containerStatuses[0].restartCount}\n"
@@ -217,9 +224,16 @@ def test_the_first_controller_restart_ends_the_lease_wait_at_once(tmp_path: Path
 
 @pytest.mark.parametrize("kubectl", ["echo 0", "exit 1"])
 def test_the_lease_wait_keeps_its_own_verdict_until_the_controller_restarts(tmp_path: Path, kubectl: str) -> None:
-    done = _lease_watch(tmp_path, kubectl, "bash -c 'sleep 0.3; exit 3'")
-    assert done.returncode == 3
-    assert "restarted" not in done.stderr
+    status, errors, _ = _lease_watch(tmp_path, kubectl, "bash -c 'sleep 0.3; exit 3'")
+    assert status == 3
+    assert "restarted" not in errors
+
+
+def test_the_proof_moves_on_when_the_lease_exec_ends_without_waiting_for_a_restart_read(tmp_path: Path) -> None:
+    status, errors, seconds = _lease_watch(tmp_path, "sleep 10; echo 0", "sleep 0.2")
+    assert status == 0
+    assert seconds < 5
+    assert "restarted" not in errors
 
 
 def test_every_controller_probe_still_runs_and_fails_the_proof() -> None:
