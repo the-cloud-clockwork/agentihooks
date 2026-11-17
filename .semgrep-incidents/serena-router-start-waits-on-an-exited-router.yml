@@ -1,0 +1,27 @@
+rules:
+  - id: serena-router-start-waits-on-an-exited-router
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The Serena router start waits on the router port without checking whether the router process it started has
+      exited. A hive pod with no serena binary starts a router that dies at once, so the start polled a port that
+      never opens for its full ninety seconds; hive run waits on it before its first heartbeat, and the worker hive
+      pod proof saw no live hive. End the wait when the started router process exits and report the router down
+      with its exit status.
+    paths:
+      include:
+        - /scripts/serena_router_daemon.py
+        - serena-router-start-waits-on-an-exited-router.py
+    patterns:
+      - pattern: |
+          while $COND:
+              ...
+              if mcp_daemon.port_open(...):
+                  ...
+              ...
+      - pattern-not: |
+          while $COND:
+              ...
+              if <... $ROUTER.poll() ...>:
+                  ...
+              ...
