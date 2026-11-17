@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +10,7 @@ from tests.helpers import service_path
 
 pytestmark = pytest.mark.unit
 INTERPRETER = [sys.executable, "-P", "-m", "scripts.install"]
+LINKED = len(INTERPRETER) + 2
 
 
 def git(repo, *args):
@@ -190,7 +190,7 @@ def test_install_honors_updated_sources_on_a_persistent_hive(tmp_path, monkeypat
     run = subprocess.run
 
     def execute(argv, **kwargs):
-        if argv[0] == "agentihooks":
+        if "link-profile" in argv:
             commands.append(argv)
             return subprocess.CompletedProcess(argv, 0)
         return run(argv, **kwargs)
@@ -198,7 +198,7 @@ def test_install_honors_updated_sources_on_a_persistent_hive(tmp_path, monkeypat
     monkeypatch.setattr(linked_profiles.subprocess, "run", execute)
     env = {"HIVE_REPO_ROOT": str(tmp_path / "hive"), "HIVE_LINKED_PROFILES": json.dumps([spec])}
     linked_profiles.install(env)
-    previous = commands[-1][3]
+    previous = commands[-1][LINKED]
     if change == "ref":
         git(repo, "switch", "-c", "other")
         spec["ref"] = "other"
@@ -212,8 +212,8 @@ def test_install_honors_updated_sources_on_a_persistent_hive(tmp_path, monkeypat
     git(repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "change")
     env["HIVE_LINKED_PROFILES"] = json.dumps([spec])
     linked_profiles.install(env)
-    assert (Path(commands[-1][3]) / "profile.yml").read_text() == "name: changed\n"
-    assert (commands[-1][3] == previous) is (change == "advance")
+    assert (Path(commands[-1][LINKED]) / "profile.yml").read_text() == "name: changed\n"
+    assert (commands[-1][LINKED] == previous) is (change == "advance")
 
 
 def test_install_accepts_uppercase_profile_names_and_propagates_registration_failure(tmp_path, monkeypatch):
@@ -222,10 +222,10 @@ def test_install_accepts_uppercase_profile_names_and_propagates_registration_fai
     _, repo = source(tmp_path)
     tools = tmp_path / "bin"
     tools.mkdir()
-    cli = tools / "agentihooks"
+    cli = tools / "python"
     cli.write_text("#!/usr/bin/env bash\nexit 9\n")
     cli.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+    monkeypatch.setattr(linked_profiles.sys, "executable", str(cli))
     spec = {"name": "Recall-1.v2", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
     with pytest.raises(subprocess.CalledProcessError) as refused:
         linked_profiles.install({"HIVE_REPO_ROOT": str(tmp_path), "HIVE_LINKED_PROFILES": json.dumps([spec])})
@@ -251,7 +251,7 @@ def test_install_refuses_a_diverged_checkout_instead_of_registering_stale_profil
     run = subprocess.run
 
     def execute(argv, **kwargs):
-        if argv[0] == "agentihooks":
+        if "link-profile" in argv:
             commands.append(argv)
             return subprocess.CompletedProcess(argv, 0)
         return run(argv, **kwargs)
@@ -259,7 +259,7 @@ def test_install_refuses_a_diverged_checkout_instead_of_registering_stale_profil
     monkeypatch.setattr(linked_profiles.subprocess, "run", execute)
     env = {"HIVE_REPO_ROOT": str(tmp_path / "hive"), "HIVE_LINKED_PROFILES": json.dumps([spec])}
     linked_profiles.install(env)
-    checkout = Path(commands[-1][3]).parents[1]
+    checkout = Path(commands[-1][LINKED]).parents[1]
     for target in (repo, checkout):
         git(
             target,

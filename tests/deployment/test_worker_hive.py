@@ -42,6 +42,8 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
+        '  [[ -f "$AGENTIHOOKS_HOME/state-at-init.json" || ! -f "$AGENTIHOOKS_HOME/state.json" ]] || '
+        'cp "$AGENTIHOOKS_HOME/state.json" "$AGENTIHOOKS_HOME/state-at-init.json"\n'
         '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$*" != "init --bundle "* ]] || git -C "$3" rev-parse HEAD > "$AGENTIHOOKS_HOME/bundle-head-at-init"\n'
@@ -511,8 +513,9 @@ def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeyp
     assert result.returncode == 0, result.stderr
     cloned = next((worker / "repos/.linked-profiles/memory").glob("*/profiles/memory"))
     assert (cloned / "profile.yml").read_text() == "name: memory\n"
-    registration = f"link-profile link {cloned} --name memory --no-append --no-init"
-    assert commands.splitlines().index(registration) < commands.splitlines().index("init")
+    registered = json.loads((home / "state-at-init.json").read_text())["linked_profiles"]
+    assert [(entry["name"], Path(entry["path"]).resolve()) for entry in registered] == [("memory", cloned.resolve())]
+    assert "init" in commands.splitlines()
     assert "HIVE_LINKED_PROFILES=" in (home / "hive-container.env").read_text()
 
 
