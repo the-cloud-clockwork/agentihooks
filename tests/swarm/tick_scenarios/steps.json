@@ -24,6 +24,9 @@
   "step starvation": [
    "running"
   ],
+  "tick master": [
+   "running"
+  ],
   "workflow runner": [
    "running"
   ]
@@ -112,7 +115,6 @@
   "status publish",
   "stopped branch",
   "strays",
-  "tick master",
   "tick view",
   "time left",
   "track outages",

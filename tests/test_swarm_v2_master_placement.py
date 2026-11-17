@@ -53,7 +53,7 @@ def test_configured_master_seat_runs_as_a_native_master_pod(world, seat):
     runtime = controller.FencedRuntime(store, SLUG, service.controller.held, inner, "distributed")
     try:
         if seat == "master":
-            launched = master_launch.up(store, SLUG, runtime, 100, "new", None, None)
+            launched = master_launch.up(store, SLUG, runtime, 100, "new", lambda question: "", lambda line: None)
             assert launched.seat == f"master@{SLUG}"
         else:
             lead = store.next_name(SLUG, "master")

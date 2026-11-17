@@ -22,6 +22,24 @@ Operator constraints this record follows (swarm culture, 19 and 29 October):
 The 29 October inventory the plan names was never written down; the master confirmed it was kept only in a session.
 The inventory below was mapped from `dev` at `65249ec02` by reading the code named in each table.
 
+## Landed so far
+
+A first ledger API service, `scripts/swarm_ledger/api_service.py` (`python -m scripts.swarm_ledger.api_service
+--serve`, port 8766), runs as its own process and deployment and takes every write the page sends: `do_POST`,
+`do_PUT`, `do_PATCH` and its own `POST /healthz` probe. The public host routes a request to it by method (POST,
+PUT, PATCH, DELETE); `GET` stays with the ledger server. It migrates the shared schema at start and runs the write
+side upkeep this record lists under the ledger server today: bin purge, binning closed ledgers without a swarm,
+alert expiry, the inbox relay replay and the outbox relay to the bus.
+
+This is not yet the four way split below: one process holds both the API's guarded data application and the app
+server's rule chain, derivations and side effects, instead of two services with the chain pulled out of the write
+transaction first (step 1 and step 2 in [Order, strangler steps and rollback](#order-strangler-steps-and-rollback)).
+Every swarm, agent and service client reaches it the same way, in process through
+`scripts.tick.adapters.database_ledger`, never over HTTP; only the page's own writes travel as HTTP, routed to this
+service. The ledger server (`ledger_server.py`) keeps every read: the page, `GET /api/v1`, the event stream, and
+`ledger_server.api_services()`, whose write hooks all refuse. `PostgresLedgerRepository.connect()` no longer
+creates the schema; only this service's `migrate()` does, at start.
+
 ## Target in one picture
 
 ```
@@ -75,8 +93,8 @@ The inventory below was mapped from `dev` at `65249ec02` by reading the code nam
 - `GET ledgers/{slug}/events` as server-sent events for the page, built from outbox events on the bus. The
   in-process `events.hub.Hub` moves here unchanged; replicas share nothing, so the client reconnects with
   `Last-Event-ID` and a cursor from another replica answers `410 cursor_expired`, as it does today across restarts.
-- Swarm controls: `swarm/controls`, `swarm/actions`, `lifecycle/actions`, `controller-lease`, proof ledgers, routing
-  settings, hives, monitor.
+- Swarm controls: `swarm/controls`, `swarm/actions`, `lifecycle/actions`, proof ledgers, routing settings, hives,
+  monitor.
 - Consumes outbox events for every side effect (task da3), idempotent by event id. The API relays the outbox table to
   the bus, as `outbox_host.running` does today; the app server subscribes on the bus and never reads the table.
 
@@ -116,7 +134,7 @@ Today every route below is served by one process, `ledger_server.Handler`, on po
 | `GET ledgers/{slug}/events` (SSE) | `routes.events` → `events.stream.serve` | Stream | App server |
 | `GET swarm`, `swarm/*`, `swarm/models`, `swarm/context/*`, `tasks/{id}/workspace`, legacy `GET /api/swarm/<slug>` | `resources.swarm_read`, `context_view.expand`, `workspace_tails` | Read, Redis | App server |
 | `PUT swarm/controls`, `POST swarm/actions`, legacy `PUT /api/swarm/<slug>` | `put_swarm`, `admin.control` | Swarm command | App server |
-| `POST lifecycle/actions`, `GET`/`POST controller-lease` | `admin.lifecycle`, `controller_lease` | Command, lease | App server |
+| `POST lifecycle/actions` | `admin.lifecycle` | Command | App server |
 | `GET`/`PATCH routing/settings`, `GET`/`PATCH hives/*`, `GET monitor` | `routing.settings`, `hives.route`, `monitor.route` | Read and write, Redis | App server |
 | `POST proof-ledgers/*` | `proofs.route` | Command | App server |
 | `GET`/`POST migrations/{slug}` | `storage_migration.hosted.route` | Import and capture | API, operator principal only |
@@ -190,7 +208,7 @@ the ledger request metrics.
 
 | Step | Phase | Change | Switch | Rollback |
 |---|---|---|---|---|
-| 1 | One API owns the database (da2) | Split `repository.mutation.apply` into data application (API) and the rule chain with derivations (ledger server). Stand up the API deployment. The ledger server reaches storage through an HTTP repository that implements `LedgerRepository` against the API, with revision guards on every write | Ledger server repository backend: direct or API | Set the backend to direct and scale the API to zero. Both paths write the same Postgres, so no data moves |
+| 1 | One API owns the database (da2) | Landed in a different shape: the API deployment stood up (`api_service.py`) owns every write, in and out of the request thread, but still runs the full rule chain and derivations itself rather than leaving them in the ledger server; splitting `repository.mutation.apply` into data application and a separately owned rule chain stays open | Ledger server write routes: refused always (`do_POST`/`do_PUT`/`do_PATCH` removed); the public host routes writes to the API deployment | Point the public host's write routes back at a ledger server carrying the old write handlers; both paths write the same Postgres, so no data moves |
 | 2 | One API owns the database (da3) | Relay, alerts, masters channel and doctor stop run from outbox events, consumed by the hub, idempotent by event id | One setting per side effect: in request or outbox | Set it back to in request. Inbox ids are stable, so an effect that ran on both paths during the switch lands once |
 | 3 | App server is the control plane (dp1) | The hub becomes the app server: it takes the rule chain and the operations, controls and swarm read routes. The ledger server forwards those routes to it | Ledger server forwards writes: off or on | Turn forwarding off; the ledger server still holds the chain until step 7 |
 | 4 | App server is the control plane | The tick moves from the controller deployment and the workstation scheduler into the app server | Controller tick: on or off; app server tick: on or off, never both (the tick lease already enforces one holder) | Turn the controller tick back on; the lease hands over within one lease period |

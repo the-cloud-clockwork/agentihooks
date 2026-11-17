@@ -149,7 +149,7 @@ def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: d
     if lives < claim_cap.CAP or mode == "off":
         return ""
     last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    failure = claim_cap.launch_failure(lives, store.launches(slug), task["id"])
+    failure = claim_cap.launch_failure(lives, store.launches(slug, task["id"]), task["id"])
     reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
     _ports().log(slug, [gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason)])

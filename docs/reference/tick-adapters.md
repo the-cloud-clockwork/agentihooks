@@ -19,7 +19,7 @@ Tick step modules never import the adapted implementations. A unit test in CI wa
 
 | Port | Adapter | Delegates to | Operations (read / write) |
 |---|---|---|---|
-| `Ledger` | `ledger.ClientLedger`, built with `ledger.resource_client` | `scripts.swarm_ledger.api.client.ResourceClient` on the ledger server's export and mutate routes | `export` / `mutate` |
+| `Ledger` | `ledger.ClientLedger`, built with `ledger.resource_client` | `scripts.swarm_ledger.api.client.ResourceClient` running the ledger API's export and mutate routes in process over the shared database | `export` / `mutate` |
 | `Coordination` | `coordination.StoreCoordination` | `scripts.swarm.store.RedisStore`, `scripts.swarm.lease` and `scripts.routing.reservation.LaunchSlots` | `read`, `capacity` / `lease`, `lock`, `configure`, `mark` |
 | `SourceControl` | `github.GitHubSourceControl` | `scripts.swarm.github_reads.rest` (`gh api`) and `git ls-remote` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities`, `issue_state`, `rate_limit`, `issues_enabled`, `latest_runs`, `merged_at`, `open_changes`, `workflow_runs`, `download`, `graph` / `enqueue`, `merge`, `comment`, `close_issue`, `cancel_run` |
 | `Inbox` | `inbox.StoreInbox` | `scripts.inbox.store.InboxStore` | `read` / `send`, `close` |
@@ -221,18 +221,18 @@ runtime: 4 methods, 4 checks
 
 ## Ledger adapter
 
-`ClientLedger(slug, clients)` reads and writes one ledger, named by `slug`, through the ledger server's resource API.
+`ClientLedger(slug, clients)` reads and writes one ledger, named by `slug`, by running the ledger API's resource
+routes in process over the shared ledger database.
 `clients` is a callable that takes the seconds left on the deadline and returns a
-`scripts.swarm_ledger.api.client.ResourceClient`. `resource_client(slug, service=False)` builds the production
-callable from the same base address and credentials the swarm's `LedgerClient` uses; `service=True` asks for the
-service credentials.
+`scripts.swarm_ledger.api.client.ResourceClient`. `resource_client(slug)` builds the production callable from the
+same base the swarm's `LedgerClient` uses; it carries no credential, since the call never leaves the process.
 
 ```python
 from scripts.tick.adapters.ledger import ClientLedger, resource_client
 from scripts.tick.deadline import Deadline
 
 slug = "rig-grade-swarm"
-port = ClientLedger(slug, resource_client(slug, service=True))
+port = ClientLedger(slug, resource_client(slug))
 state = port.export(deadline=Deadline.after(10.0))
 comment = {
     "op": "add",
@@ -246,15 +246,15 @@ reply = port.mutate([comment], deadline=Deadline.after(10.0))
 
 | Operation | Client call | Returns |
 |---|---|---|
-| `export()` | `ResourceClient.export(slug)`, `POST /api/v1/ledgers/<slug>/export` | The ledger export as a dictionary |
-| `mutate(operations)` | `ResourceClient.mutate(slug, stamped)`, `POST /api/v1/ledgers/<slug>/operations` after a revision read of each target | The server's answer as a dictionary |
+| `export()` | `ResourceClient.export(slug)`, the `export` route of `/api/v1/ledgers/<slug>` | The ledger export as a dictionary |
+| `mutate(operations)` | `ResourceClient.mutate(slug, stamped)`, the `operations` route of `/api/v1/ledgers/<slug>` after a revision read of each target | The route's answer as a dictionary |
 
-- Each call refuses an expired deadline before it builds a client, so no request is sent.
-- The client is built per call with a request timeout of the smaller of the ledger request timeout
+- Each call refuses an expired deadline before it builds a client, so no call is made.
+- The client is built per call with a timeout of the smaller of the ledger request timeout
   (`REQUEST_TIMEOUT` in `scripts.swarm_ledger.ledger`, 10 seconds) and the seconds left on the deadline.
-- That timeout bounds each HTTP request, not the call. `export` can fall back to a second, full read, and `mutate`
-  reads the revision of each target and retries a conflicting write with a backoff, so one call can outlast its
-  deadline.
+- That timeout bounds each call into the ledger API route code, not the whole operation. `export` can fall back to
+  a second, full read, and `mutate` reads the revision of each target and retries a conflicting write with a
+  backoff, so one call can outlast its deadline.
 - `mutate` stamps every operation with `controller_epoch` from `scripts.swarm.lease.epoch_for(slug)` and leaves the
   caller's list unchanged. With no epoch the operations go out as given. The epoch is resolved in this order:
 
@@ -488,7 +488,7 @@ Every builder except `stack.origin_source_control` uses the current folder as `r
 | Run wait | `download` on a run or job endpoint under the caller's reader; `rate_limit` when GitHub answers with a rate limit, to time the backoff | 20 s each | `Unreachable("gh api <endpoint>: <stderr>")`, or `RateLimited` with the hold time on a rate limit |
 | Pull request check views (`ledger_events.view` and the batched checks reader) | `graph` under the readers `swarm.checks.fresh` and `swarm.checks` | 20 s | `None` or an empty answer; a rate limit starts the run wait backoff |
 | `swarm merge queue` and `swarm merge priority` | `graph` for the pull request state and the `enqueuePullRequest`, `dequeuePullRequest` or `mergePullRequest` mutation, `download` for REST reads | 20 s each | `SwarmError` carrying GitHub's message |
-| Panic cancel in the tick | `change` on each `--fix` pull request for its `head_branch`, then per fleet repository `latest_runs` and `cancel_run` on every run in `queued`, `in_progress`, `waiting`, `pending` or `requested` that is neither a `merge_group` run nor on a fix branch | 60 s each | The pass reports `panic cancel failed: <error>` and retries a minute later |
+| Panic cancel in the tick | `change` on each `--fix` pull request for its `head_branch`, then per fleet repository `latest_runs` and `cancel_run` on every run in `queued`, `in_progress`, `waiting`, `pending` or `requested` that is neither a `merge_group` run, on a fix branch, nor a `workflow_run` run whose `display_title` names, after its last ` for `, a fix branch of its own repository, as the Gate Required status run name does | 60 s each | The pass reports `panic cancel failed: <error>` and retries a minute later |
 
 `swarm merge queue` lands a pull request with `enqueuePullRequest` whenever the repository has a merge queue on dev,
 and squashes it with `mergePullRequest` only when GraphQL reports none; the port's own `merge` is not used there.
@@ -551,6 +551,18 @@ Files that still build `gh` commands are listed twice and must match: in the rul
 mapped to the task that removes its whole hash reads or unpaged key scans. A unit test in
 `tests/test_ci_semgrep.py` requires every entry to be one `.py` path with no wildcard, and names files that have left
 the list, such as `scripts/swarm/stack.py`, so they cannot return.
+
+The same step also counts the exceptions written inside each rule. Per rule
+id it counts the `pattern-not`, `pattern-not-inside` and `pattern-not-regex` entries at any depth and the
+`paths.exclude` entries of every rule file in each `.semgrep*` folder, fixtures named `*.test.yml` or `*.test.yaml`
+aside, at the merge base of the head and the base and at the head. It prints
+`Own rule exceptions: <head counts> ...; the merge base holds <base counts>` and fails with
+`<rule id> pattern-not entries grew from <base> to <head>` or `<rule id> path excludes grew from <base> to <head>`
+for each count of a rule the merge base holds that rose. The rule counts use the merge base, so a branch is never red
+for an exception `dev` removed after it branched. A rule id the merge base lacks starts its own counts, so a renamed
+rule starts over, and a head with no rule fails with
+`No own Semgrep rule under a .semgrep folder; the check graded nothing`. `.semgrepignore` entries and inline `nosemgrep`
+comments are outside the count.
 
 The list holds two files: `scripts/tick/adapters/github.py`, the adapter, and `scripts/swarm/github_reads.py`, the
 audited runner the adapter calls, which builds each `gh` command with the adapter's `command`. Every swarm caller has
@@ -1162,7 +1174,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools
 
 tools = Tools(
-    ledger=ClientLedger("rig-grade-swarm", resource_client("rig-grade-swarm", service=True)),
+    ledger=ClientLedger("rig-grade-swarm", resource_client("rig-grade-swarm")),
     coordination=StoreCoordination(swarm_connect(), "rig-grade-swarm", hive_id()),
     source_control=source_control,
     runtime=runtime,

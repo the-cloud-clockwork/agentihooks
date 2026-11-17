@@ -51,6 +51,13 @@ def ask(**fields):
     return {"hive": "hive-a", "task": "t1", "lane": "eng", "generation": 0, **fields}
 
 
+def task_copy(hive: str) -> str:
+    """The key under its own prefix where a hive keeps its copy of task t1's work folder."""
+    from scripts.swarm_ledger import ledger_workspace
+
+    return f"{ledger_workspace.files_key(hive)}:{SLUG}:t1"
+
+
 @pytest.mark.feature("swarm-claim-lives")
 @pytest.mark.parametrize("lives", [3, 4])
 def test_events_admission_blocks_spent_claim_lives_before_creating_an_execution(rig, lives, capsys):
@@ -440,17 +447,16 @@ def test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was(rig: SimpleNam
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
-def test_a_late_events_admission_hands_its_transfer_back(rig: SimpleNamespace) -> None:
+def test_a_late_events_admission_keeps_its_transfer_with_the_admitted_successor(rig: SimpleNamespace) -> None:
     from scripts.handoff import transfers
 
     transfer = left_transfer(rig)
     rig.admitter.clock = late_clock(5)
 
-    with pytest.raises(admission.LateAdmission):
-        rig.admitter.admit(SLUG, ask())
+    name = rig.admitter.admit(SLUG, ask())["name"]
 
-    assert transfers.get(rig.store, SLUG, transfer["id"])["successor"] == ""
-    assert rig.store.claimant(SLUG, "t1") is None
+    assert transfers.get(rig.store, SLUG, transfer["id"])["successor"] == name
+    assert rig.store.claimant(SLUG, "t1") == name
 
 
 @pytest.mark.feature("hub-admission-claim-continuity")
@@ -622,27 +628,222 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
     assert rig.admitter.reopen(SLUG, ask()) is False
 
 
-@pytest.mark.feature("events-failed-launch-releases-admission")
-def test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     rig.admitter.clock = late_clock(0)
 
-    with pytest.raises(admission.LateAdmission, match="t1"):
-        rig.admitter.admit(SLUG, ask())
+    admitted = rig.admitter.admit(SLUG, ask())
 
-    assert rig.store.claimant(SLUG, "t1") is None
-    assert rig.store.agents(SLUG) == []
-    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
-    assert rig.store.redis.get(rig.admitter._key(SLUG, ask())) is None
+    assert f"late: finished after {admission.ANSWER_MS} ms" in capsys.readouterr().err
+
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [admitted["name"]]
+    row = rig.rows["t1"]
+    assert (row["state"], row["claimed_by"], row["claim_generation"]) == ("claimed", admitted["name"], 1)
+    assert rig.admitter.admit(SLUG, ask()) == admitted
+    assert len(rig.ledger.writes) == 1
 
 
-@pytest.mark.feature("events-failed-launch-releases-admission")
-def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live_claimant(
+    rig: SimpleNamespace,
+) -> None:
+    now = [7_000]
+    rig.admitter.clock = lambda: now[0]
+    write = rig.ledger.update_task
+
+    def slow(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        now[0] += 8_000
+        written: dict[str, Any] = write(*args, **kwargs)
+        return written
+
+    rig.ledger.update_task = slow
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["name"] in rig.store.listed(SLUG)
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert rig.rows["t1"]["claimed_by"] == admitted["name"]
+
+
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admission_finished_just_inside_the_hive_wait_is_kept(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     rig.admitter.clock = late_clock(-1)
 
     name = rig.admitter.admit(SLUG, ask())["name"]
 
     assert rig.store.claimant(SLUG, "t1") == name
     assert rig.rows["t1"]["state"] == "claimed"
+    assert "late:" not in capsys.readouterr().err
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_another_hive_gets_none(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import admission as hive_admission
+
+    monkeypatch.setattr(admission, "TURN_TRIES", 1)
+    monkeypatch.setattr(admission, "TURN_WAIT_S", 0)
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    write = rig.admitter._mark
+    asked: list[dict[str, Any] | None] = []
+
+    def slow(*args: Any) -> dict[str, Any] | None:
+        asked.extend([other.admit(SLUG, ask()), other.admit(SLUG, ask(hive="hive-b"))])
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", slow)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert asked == [{"held": hive_admission.ADMITTING}, None]
+    assert other.admit(SLUG, ask()) == admitted
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [admitted["name"]]
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_whose_own_ask_was_kept_before_its_turn_answers_that_admission(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    placement = other._unplaceable
+    kept: list[dict[str, Any] | None] = []
+
+    def admitting(row: dict[str, Any], hive: str) -> str:
+        kept.append(rig.admitter.admit(SLUG, ask()))
+        unplaceable: str = placement(row, hive)
+        return unplaceable
+
+    monkeypatch.setattr(other, "_unplaceable", admitting)
+
+    again = other.admit(SLUG, ask())
+
+    assert again is not None
+    assert again == kept[0]
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [again["name"]]
+    assert len(rig.ledger.writes) == 1
+    assert other.admit(SLUG, ask(hive="hive-b")) is None
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_it_leaves_the_turn(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    turn, offer = admission.turn_key("hive-a"), rig.admitter._key(SLUG, ask())
+    write = rig.admitter._mark
+    holders: list[str] = []
+
+    def marking(*args: Any) -> dict[str, Any] | None:
+        holders.append(rig.store.redis.get(turn))
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", marking)
+    admitted = rig.admitter.admit(SLUG, ask())
+    kept = rig.store.redis.get(offer)
+    rig.store.redis.delete(offer)
+    rig.store.redis.set(turn, holders[0])
+
+    def leave(seconds: float) -> None:
+        rig.store.redis.set(offer, kept)
+        rig.store.redis.delete(turn)
+
+    monkeypatch.setattr(admission, "time", SimpleNamespace(sleep=leave))
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+
+    assert other.admit(SLUG, ask()) == admitted
+    assert other.admit(SLUG, ask(hive="hive-b")) is None
+    assert rig.store.redis.get(turn) is None
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    kept: list[dict[str, Any] | None] = []
+
+    def snapshot(slug: str) -> Any:
+        kept.append(rig.admitter.admit(SLUG, ask()))
+        return rig.admitter.source.snapshot(slug)
+
+    monkeypatch.setattr(other, "source", SimpleNamespace(snapshot=snapshot))
+
+    again = other.admit(SLUG, ask())
+
+    assert again is not None
+    assert again == kept[0]
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from unittest.mock import Mock
+
+    from scripts import serena_router_daemon
+    from scripts.events.config import QueuePolicy
+    from scripts.hive import lanes
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    bus: Any = open_bus(BusConfig())
+    slots.serve(bus, admitter=rig.admitter)
+    request = type(bus).request
+    asks: list[str] = []
+
+    def late_first(self: Any, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        answer: bytes = request(self, subject, data, timeout_ms)
+        asks.append(json.loads(data)["op"])
+        if asks == ["admit"]:
+            raise TimeoutError(f"no responders for {subject!r}")
+        return answer
+
+    monkeypatch.setattr(type(bus), "request", late_first)
+    rig.admitter.clock = late_clock(0)
+    runtime = Mock()
+    placed = SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500)
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    tasks = lanes.LaneTasks(bus, "hive-a", rig.store.config)
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(config, bus, runtime, tasks, lambda: reading, view=Mock(return_value=None))
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    offered: list[str] = []
+
+    def unsettled(event: Any) -> bool:
+        offered.append(event.key)
+        return False
+
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        assert spoke.poll() == "asked"
+        name = rig.store.claimant(SLUG, "t1")
+        queue.withdraw(unsettled)
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
+        queue.withdraw(unsettled)
+        assert spoke.poll() == "started"
+    finally:
+        bus.close()
+
+    assert offered == ["t1"]
+    assert "late: finished after" in capsys.readouterr().err
+    [launched] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert launched.name == name
+    assert rig.store.claimant(SLUG, "t1") == name
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claim_generation"]) == ("claimed", 1)
+    assert asks == ["admit", "admit", "launched"]
 
 
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
@@ -686,12 +887,31 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
 ) -> None:
     rig.admitter.clock = late_clock(5)
 
-    with pytest.raises(admission.LateAdmission):
-        rig.admitter.admit(SLUG, ask())
+    rig.admitter.admit(SLUG, ask())
 
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms release={admission.ANSWER_MS + 5} held=0 stopped=0 "
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release={admission.ANSWER_MS + 5} held=0 stopped=0 "
+        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
+    ]
+
+
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_queue(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.events.bus import SERVE_WAITED_MS
+
+    rig.admitter.clock = lambda: 7_000
+    waited = SERVE_WAITED_MS.set(admission.ANSWER_MS)
+    try:
+        rig.admitter.admit(SLUG, ask())
+    finally:
+        SERVE_WAITED_MS.reset(waited)
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS} ms, "
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=0 held=0 stopped=0 "
         f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
     ]
 
@@ -719,9 +939,9 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     original_turn = rig.admitter._turn
 
     @contextmanager
-    def turn(hive: str) -> Iterator[str]:
+    def turn(hive: str, offer: str) -> Iterator[str]:
         now[0] += 800
-        with original_turn(hive) as busy:
+        with original_turn(hive, offer) as busy:
             yield busy
 
     monkeypatch.setattr(rig.admitter, "_outdated", bump(100, rig.admitter._outdated))
@@ -738,12 +958,11 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     monkeypatch.setattr(rig.store, "start_execution", bump(1200, rig.store.start_execution))
     monkeypatch.setattr(rig.ledger, "update_task", bump(1300, rig.ledger.update_task))
 
-    with pytest.raises(admission.LateAdmission):
-        rig.admitter.admit(SLUG, ask())
+    rig.admitter.admit(SLUG, ask())
 
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 9100 ms, "
-        f"the hive stopped waiting at {admission.ANSWER_MS} ms release=100 held=200 stopped=300 snapshot=400 "
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=100 held=200 stopped=300 snapshot=400 "
         f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 ledger=1300"
     ]
 
@@ -1326,13 +1545,12 @@ def test_an_admitted_task_carries_its_territory_overlaps_and_its_group(rig: Simp
 def test_the_seeds_carry_the_folder_the_previous_agents_hive_synced(rig: SimpleNamespace) -> None:
     from scripts.hive import orders
     from scripts.swarm.store import AgentRecord
-    from scripts.swarm_ledger import ledger_workspace
 
     named = rig.store.next_name(SLUG, "eng", 1)
     earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", state="starting", started_at=1, hive="hive-b")
     rig.store.start_execution(SLUG, earlier, "")
-    synced = {SLUG: {"t1": {"progress.md": "- earlier step\n", "steering.md": "stale"}}}
-    rig.store.redis.set(ledger_workspace.files_key("hive-b"), json.dumps(synced))
+    synced = {"progress.md": "- earlier step\n", "steering.md": "stale"}
+    rig.store.redis.set(task_copy("hive-b"), json.dumps(synced))
 
     admitted = rig.admitter.admit(SLUG, ask())
 
@@ -1391,6 +1609,49 @@ def test_a_cleared_protected_branch_continues_from_the_earlier_life_instead(
     assert admitted["task"]["reclaim"]["continue_from"] == "origin/eng-sw-0000"
 
 
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_the_branch_heads_query_asks_only_for_earlier_lives_that_launched(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig.store.update(SLUG, repo_origin="github.com/acme/app")
+    for name, state, pane, ended in (
+        ("eng@sw-0001", "finished", "w1:p1", 1),
+        ("eng@sw-0002", "starting", "", 2),
+        ("eng@sw-0003", "starting", "", 3),
+    ):
+        life = {"task": "t1", "lane": "eng", "name": name, "state": state, "pane_id": pane, "ended_at": ended}
+        rig.store.redis.rpush(rig.store.key(SLUG, "history"), json.dumps(life))
+    asked = _github_heads(monkeypatch, {"b0": {"target": {"oid": "abc123"}}})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert asked == [{"owner": "acme", "name": "app", "b0": "refs/heads/eng-sw-0001"}]
+    assert admitted["task"]["reclaim"]["continue_from"] == "origin/eng-sw-0001"
+
+
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hub import branch_heads
+
+    first = rig.admitter.admit(SLUG, ask())
+    [agent] = rig.store.agents(SLUG)
+    rig.admitter.free(SLUG, agent)
+
+    def unread(config: SwarmConfig) -> None:
+        raise AssertionError("a life no hive started pushed no branch")
+
+    monkeypatch.setattr(branch_heads, "reclaimer", unread)
+
+    admitted = rig.admitter.admit(SLUG, ask(generation=2))
+
+    [life] = [json.loads(raw) for raw in rig.store.redis.lrange(rig.store.key(SLUG, "history"), 0, -1)]
+    assert (life["name"], life["state"], life["pane_id"]) == (first["name"], "starting", "")
+    assert "reclaim" not in admitted["task"]
+    assert rig.store.reclaims(SLUG) == {}
+
+
 @pytest.mark.feature("hub-admission-claim-context")
 @pytest.mark.parametrize("handed_off", [False, True])
 def test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_continued(
@@ -1420,18 +1681,123 @@ def test_a_branch_another_pull_request_in_the_stored_origin_holds_is_never_conti
 def test_the_seeds_follow_the_most_recently_started_earlier_agent(rig: SimpleNamespace) -> None:
     from scripts.hive import orders
     from scripts.swarm.store import AgentRecord
-    from scripts.swarm_ledger import ledger_workspace
 
     for started, hive in ((1, "hive-c"), (5, "hive-b")):
         named = rig.store.next_name(SLUG, "eng", started)
         record = AgentRecord(named, "eng", "t1", seat=f"eng-{started + 7}@sw", started_at=started, hive=hive)
         rig.store.start_execution(SLUG, record, "")
-        copy = {SLUG: {"t1": {"progress.md": f"- step on {hive}\n"}}}
-        rig.store.redis.set(ledger_workspace.files_key(hive), json.dumps(copy))
+        copy = {"progress.md": f"- step on {hive}\n"}
+        rig.store.redis.set(task_copy(hive), json.dumps(copy))
 
     admitted = rig.admitter.admit(SLUG, ask())
 
     assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-b\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_a_launched_report_records_the_hive_holding_the_task_work_folder(rig: SimpleNamespace) -> None:
+    key = rig.store.key(SLUG, "work-folder", "t1")
+    rig.admitter.admit(SLUG, ask())
+    assert rig.store.redis.get(key) is None
+
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+
+    assert rig.store.redis.get(key) == "hive-a"
+    assert rig.store.redis.ttl(key) == -1
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_seeds_follow_the_hive_that_last_launched_the_task_after_its_agent_retired(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+
+    copy = {"progress.md": "- step on hive-b\n", "proof.md": "- proof on hive-b\n"}
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+    rig.store.redis.set(task_copy("hive-b"), json.dumps(copy))
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS] == {**copy, "steering.md": "# t1: title t1\n"}
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive(rig: SimpleNamespace) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+
+    named = rig.store.next_name(SLUG, "eng", 1)
+    earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", started_at=1, hive="hive-c")
+    rig.store.start_execution(SLUG, earlier, "")
+    for hive in ("hive-b", "hive-c"):
+        copy = {"progress.md": f"- step on {hive}\n"}
+        rig.store.redis.set(task_copy(hive), json.dumps(copy))
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-b\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import orders
+    from scripts.swarm.store import AgentRecord
+
+    named = rig.store.next_name(SLUG, "eng", 1)
+    earlier = AgentRecord(named, "eng", "t1", seat="eng-9@sw", started_at=1, hive="hive-c")
+    rig.store.start_execution(SLUG, earlier, "")
+    rig.store.redis.set(task_copy("hive-c"), json.dumps({"progress.md": "- step on hive-c\n"}))
+    rig.store.redis.set(rig.store.key(SLUG, "work-folder", "t1"), "hive-b")
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"][orders.SEEDS]["progress.md"] == "- step on hive-c\n"
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_a_successor_on_another_hive_after_a_roll_receives_every_line(rig: SimpleNamespace, tmp_path: Any) -> None:
+    from dataclasses import replace
+    from pathlib import Path
+    from unittest.mock import Mock, patch
+
+    from scripts.hive import lanes, orders
+
+    homes = {hive: tmp_path / hive for hive in ("hive-a", "hive-b")}
+    for home in homes.values():
+        home.mkdir()
+
+    def on(hive: str) -> Any:
+        return patch.object(Path, "home", return_value=homes[hive])
+
+    def beat() -> None:
+        orders.Consumer(rig.store.redis, "hive-a", Mock()).sync_workspaces(45)
+
+    first = rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.launched(SLUG, ask(launch=LAUNCH)) is True
+    with on("hive-a"):
+        folder = Path(lanes.placed(SLUG, first["task"])["workspace"])
+        (folder / "progress.md").write_text("- step one\n", encoding="utf-8")
+        (folder / "proof.md").write_text("- proof one\n", encoding="utf-8")
+        beat()
+        with (folder / "progress.md").open("a", encoding="utf-8") as fh:
+            fh.write("- step written just before the roll\n")
+        agent = rig.store.execution_registry.get(SLUG, first["task"]["execution_id"])
+        rig.store.execution_registry.update(SLUG, replace(agent, state="finished"))
+        beat()
+        expected = {name: (folder / name).read_text(encoding="utf-8") for name in ("progress.md", "proof.md")}
+    rig.store.release(SLUG, "t1", first["name"])
+    rig.store.drop_agent(SLUG, first["name"])
+    with on("hive-a"):
+        beat()
+    rig.rows["t1"].update(state="open", claimed_by="")
+
+    second = rig.admitter.admit(SLUG, ask(hive="hive-b", generation=1))
+
+    with on("hive-b"):
+        moved = Path(lanes.placed(SLUG, second["task"])["workspace"])
+        assert {name: (moved / name).read_text(encoding="utf-8") for name in expected} == expected
+        assert (moved / "steering.md").read_text(encoding="utf-8") == "# t1: title t1\n"
 
 
 @pytest.mark.feature("hub-admission-claim-context")

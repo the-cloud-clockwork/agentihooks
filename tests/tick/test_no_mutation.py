@@ -144,7 +144,7 @@ def test_without_a_held_view_current_is_the_pass_view_and_a_write_is_harmless() 
 def test_a_ledger_client_write_marks_the_held_view_stale(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import ledger_client
 
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: {}))
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: {}))
     stale = view.Held(view.LedgerView(1, {}), lambda: view.LedgerView(2, {}))
     view.HELD.set(stale)
     ledger_client.LedgerClient().state("sw")

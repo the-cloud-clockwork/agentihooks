@@ -21,14 +21,14 @@ def test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read(
     started, reads = [], []
     monkeypatch.setattr(client, "state", lambda slug: reads.append(slug) or {})
 
-    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
-        started.append((slug, service, list(reads)))
+    def start(slug: str, timeout: float | None = None) -> None:
+        started.append((slug, list(reads)))
         raise RuntimeError("view read")
 
     monkeypatch.setattr(view, "start", start)
     with pytest.raises(RuntimeError, match="^view read$"):
         cli.run_tick(store, "sw", client, rt, FakeHerdr({}))
-    assert started == [("sw", True, [])]
+    assert started == [("sw", [])]
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
 
@@ -100,14 +100,14 @@ def test_a_stopped_pass_reads_its_ledger_through_the_view(env: tuple, monkeypatc
     ledger.service = True
     monkeypatch.setattr(ledger, "state", lambda slug: whole.append(slug) or doc, raising=False)
 
-    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
-        started.append((slug, service))
+    def start(slug: str, timeout: float | None = None) -> None:
+        started.append(slug)
         view.REFRESH.set((slug, lambda: view.LedgerView(1, doc)))
 
     monkeypatch.setattr(view, "reads", lambda client: client is ledger)
     monkeypatch.setattr(view, "start", start)
     store.update("sw", state="stopped")
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert started == [("sw", True)]
+    assert started == ["sw"]
     assert whole == []
     assert view.REFRESH.get() is None

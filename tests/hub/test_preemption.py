@@ -177,3 +177,18 @@ def test_the_memory_bus_without_a_store_runs_nothing(monkeypatch):
     reactor = preemption.Preemption(clock=lambda: 1_000)
     reactor.poll()
     assert reactor._source is None
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_a_handed_ledger_copy_preempts_with_the_store_the_pass_connects(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import readiness
+
+    shared = readiness.Source(rig.store, rig.reactor._ledger)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setattr(preemption, "connect", lambda: rig.store)
+    rig.reactor = preemption.Preemption(clock=lambda: rig.now.ms, source=shared)
+    poll_at(rig, 1_000, 1_000 + preemption.INTERVAL_MS)
+    assert len(asks(rig.store, "e2")) == 1
+    assert rig.reactor._source is shared

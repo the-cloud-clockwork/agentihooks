@@ -14,6 +14,7 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger import api_service  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "close-2026-01-01"
@@ -174,7 +175,7 @@ class Home(unittest.TestCase):
         self.assertIn('<span class="state s-stopped" role="cell">stopped</span>', rows[OPEN_SLUG])
 
     def test_the_page_close_runs_the_same_close_command_as_the_cli(self):
-        self.assertEqual(server.control_argv({"action": "close"}), ["close"])
+        self.assertEqual(api_service.control_argv({"action": "close"}), ["close"])
 
 
 if __name__ == "__main__":

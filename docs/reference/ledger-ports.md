@@ -24,7 +24,7 @@ outside the adapters that imports one of those packages.
 |---|---|---|
 | Ports | `scripts.swarm_ledger.ports` | The `Swarm`, `Hive` and `Hooks` protocols, the `BOUND` table, `bind()` and the accessors `swarm()`, `hive()` and `hooks()` |
 | Adapters | `scripts.swarm_ledger.adapters.swarm`, `.hive`, `.hooks` | One class per port; each property imports the real module when it is read and returns it |
-| Other adapters | `scripts.swarm_ledger.adapters.hive_ledger`, `.safety_nudge` | Re-export the hive ledger gateway and `report` from `scripts.swarm.hive_ledger`, and record a joining master in the safety nudge registry; the ledger CLI imports these two directly |
+| Other adapters | `scripts.swarm_ledger.adapters.safety_nudge` | Record a joining master in the safety nudge registry; the ledger CLI imports it directly |
 | Composition root | `scripts.swarm_ledger.composition` | `adapters()` builds one adapter per port; `wire()` binds them |
 | Import check | `tests/swarm_ledger/test_ledger_boundary.py` | Fails CI when a ledger module outside `adapters` imports the swarm, hive or hooks packages |
 | Port tests | `tests/swarm_ledger/test_ledger_ports.py` | Prove each adapter satisfies its protocol and that ledger code calls whatever is bound |
@@ -37,7 +37,7 @@ keeps the call shape it used before: `ports.swarm().store.connect(environ)` in p
 
 | Port | Members | Adapter delegates to |
 |---|---|---|
-| `Swarm` | `naming`, `store`, `commands`, `lifecycle`, `freeze`, `effort_range`, `claim_hold`, `idle`, `lease`, `model_catalog`, `default_models`, `quota_refresh`, `operator_mail`, `overlays`, `verdicts`, `phase_state`, `affinity`, `templates`, `stack_env`, `stack_init`, `front_door`, `ledger_writer`, `master_fence`, `masters`, `architecture`, `operator_auth`, `task_specs`, `authority`, `ledger_cutover` | Modules under `scripts.swarm` and `scripts.swarm_v2` |
+| `Swarm` | `naming`, `store`, `commands`, `lifecycle`, `freeze`, `effort_range`, `claim_hold`, `idle`, `lease`, `model_catalog`, `default_models`, `quota_refresh`, `operator_mail`, `overlays`, `verdicts`, `phase_state`, `affinity`, `templates`, `stack_env`, `stack_init`, `front_door`, `ledger_writer`, `master_fence`, `masters`, `architecture`, `operator_auth`, `task_specs`, `authority` | Modules under `scripts.swarm` and `scripts.swarm_v2` |
 | `Hive` | `auth`, `registry`, `launch`, `reports`, `headroom`, `herdr_stats` | `scripts.hive.<member>` |
 | `Hooks` | `account_sessions`, `config`, `conditions`, `filters`, `operator_words`, `classifier`, `profile_chain`, and the method `redis()` | `hooks.context`, `hooks.config`, `hooks.filters.check`, `hooks.classifier` with its `code_rules` and `runner`, and `hooks._redis.get_redis()` |
 
@@ -45,8 +45,7 @@ The swarm adapter also hands out `context_view`, which the brain context route r
 list it, so a fake swarm bound in a test needs it only when the test reaches that route.
 
 Adapter properties import on read, so importing the ledger package loads none of the swarm, hive or hooks modules
-until a ledger call needs one. The one exception is `adapters.hive_ledger`, which the ledger CLI module imports at
-module level and which loads `scripts.swarm.hive_ledger` with it.
+until a ledger call needs one.
 
 ## Binding
 

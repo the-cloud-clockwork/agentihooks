@@ -351,7 +351,7 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
         assert first.take("one", "claude") == "a"
         assert second.take("two", "claude") is None
         posing = account_slots.Remote(account_slots.asker(members[1], "rig", "m1", 500), "m1")
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m1'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.rig.m1' timed out after 500 ms$"):
             posing.release("one", "claude", "a")
         refusal = "slot request names hive 'm2' but the sending credential is bound to hive 'm1'"
         with pytest.raises(account_slots.Unavailable, match=f"^{refusal}$"):

@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_upload:0cc581bf780497d3cbcd303daf71f8508ec670820d15149cb7c9c6bb5f6428c3": {
+    "reader": "standards-reader",
+    "reason": "upload stores Content-Length in an email Message whose get ignores name case; CONTENT-LENGTH and Content-Length read the same value."
+  }
+}

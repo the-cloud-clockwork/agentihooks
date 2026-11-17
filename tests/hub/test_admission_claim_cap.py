@@ -6,7 +6,8 @@ from typing import Any
 import pytest
 
 from scripts.gates.claims import refusal
-from scripts.hub import claims
+from scripts.hub import admission, claims
+from scripts.swarm import readiness
 from scripts.swarm.store import AgentRecord
 from tests.helpers import store_seed
 from tests.hub.test_admission import SLUG, ask
@@ -159,3 +160,44 @@ def test_the_refusal_dates_only_failures_within_the_counted_claims(
     )
     assert rig.rows["t1"]["state"] == "blocked"
     assert all(row in store.launches(SLUG) for row in original)
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_the_claim_cap_reads_only_the_launch_rows_of_its_task(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    lives(rig, 3)
+    asked: list[str | None] = []
+    read = rig.store.launches
+
+    def launches(slug: str, task: str | None = None) -> list[dict[str, Any]]:
+        asked.append(task)
+        return read(slug, task)
+
+    monkeypatch.setattr(rig.store, "launches", launches)
+    assert rig.admitter.admit(SLUG, ask()) is None
+    assert asked == ["t1"]
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it(rig: Any) -> None:
+    lives(rig, 3)
+    rig.ledger.metadata = lambda slug: {"_meta": {"rev": 1}}
+    rig.ledger.state = lambda slug: {**rig.found, "tasks": [dict(row) for row in rig.rows.values()]}
+    shared = readiness.Source(rig.store, rig.ledger)
+    admitter = admission.Admission(rig.store, rig.ledger, shared, clock=lambda: 7_000)
+    assert admitter.admit(SLUG, ask()) is None
+    assert rig.rows["t1"]["state"] == "blocked"
+    assert [row["state"] for row in shared.state(SLUG)["tasks"]] == ["open", "open"]
+
+
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap(rig: Any) -> None:
+    for generation in (0, 2, 4):
+        rig.admitter.admit(SLUG, ask(generation=generation))
+        [agent] = rig.store.agents(SLUG)
+        rig.admitter.free(SLUG, agent)
+    freed = rig.store.redis.llen(rig.store.key(SLUG, "history"))
+    admitted = rig.admitter.admit(SLUG, ask(generation=6))
+    claims.Claims(rig.store).handle(started(admitted))
+    assert (freed, rig.store.claims(SLUG, "t1")) == (3, 1)
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("claimed", admitted["name"])
+    assert gate_rows() == []

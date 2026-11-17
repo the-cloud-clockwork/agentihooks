@@ -59,7 +59,7 @@ Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 `hub-<name>`. Singleton reactors hold a lease in `hub-leases`, so with two replicas only one replica runs each of
 them. Every reactor takes up to 50 deliveries of an event, waiting 1, 5, 15, 60 and then 300 seconds between attempts.
 
-With a remote ledger, `agentihooks hub run` first issues the replica its own service credential, `hub-<hostname>.<token>`, and exports it as `AGENTIHOOKS_CONTROLLER_CREDENTIAL`. The readiness, admission, lifecycle and inbox wake reactors make their ledger service writes with it. The ledger accepts it while the digest key `agentihooks-hive:controller:hub-<hostname>` lives. The key expires after five minutes, and a renewal thread renews it every hundred seconds, so a replaced pod's credential lapses on its own. Issuing it never retires the controller's credential or the other replica's. The hub's Redis user needs GET and SET on `~agentihooks-hive:controller:*` beside `~agentihooks-hive:controller`, and every ledger server's Redis user needs GET on it.
+With a remote ledger, `agentihooks hub run` first issues the replica its own service credential, `hub-<hostname>.<token>`, and exports it as `AGENTIHOOKS_CONTROLLER_CREDENTIAL`. The readiness, admission, lifecycle and inbox wake reactors run their ledger writes in process over the shared database, carrying no credential for that call; this credential is what the ledger's own authority check (`dispatch`, `ledger_authority.controller`) accepts for any call these reactors still make as real HTTP, such as a proof ledger's own routes. The ledger accepts it while the digest key `agentihooks-hive:controller:hub-<hostname>` lives. The key expires after five minutes, and a renewal thread renews it every hundred seconds, so a replaced pod's credential lapses on its own. Issuing it never retires the controller's credential or the other replica's. The hub's Redis user needs GET and SET on `~agentihooks-hive:controller:*` beside `~agentihooks-hive:controller`, and every ledger server's Redis user needs GET on it.
 
 | Reactor | Reacts to | Does |
 |---|---|---|
@@ -68,7 +68,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
 | `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
 | `claim-lives` | `swarm.*.execution.started` | Counts each successful spoke launch once toward the task's three started lives cap. |
-| `lifecycle` | `swarm.*.execution.exited` | Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. |
+| `lifecycle` | `swarm.*.execution.exited` | Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. An exit a hive reports after an execution stop carries reason `stopped` and the stop's `stop_reason`, such as `ended` for an agent whose work ended (see [Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended)). |
 | `reconciler` | A five minute poll; it also subscribes to `swarm.*.reconcile.requested`, which nothing publishes yet | Rebuilds missing starts and ends executions that are gone. |
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the legacy tick does. |
@@ -83,6 +83,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `AGENTIHOOKS_BUS_URL` | The NATS URL; default `nats://127.0.0.1:4222`. |
 | `AGENTIHOOKS_BUS_CREDENTIALS` | A NATS credentials file, or `openbao:<path>`, which reads that record's `credentials` field. |
 | `AGENTIHOOKS_BUS_BIND` | `1` binds to streams and buckets the hub created, without creating any itself. |
+| `AGENTIHOOKS_BUS_REPLICAS` | Replica count of every stream and bucket a provisioning bus creates; default `1`. At start it raises each stream holding fewer replicas in place and keeps a higher count. Set it to the server count of a NATS cluster; a single server refuses more than one. |
 
 A hive gets these settings from its invite. The hub operator runs `agentihooks hive invite <label> --bus-url <url>`.
 On the hive, `agentihooks hive join <invite>` writes `AGENTIHOOKS_BUS=nats` and the URL into `hive.env`. When the
@@ -153,40 +154,21 @@ as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values
 
 ### Move the swarm to the hosted ledger
 
-Run these from the workstation that holds the swarm's controller lease, in a plain terminal: activation refuses a
-session whose environment names both a swarm and an agent.
+Every ledger client, workstation or hive, reads and writes a swarm's ledger by running the ledger API route code in
+process against the one shared repository its address names: Postgres when `AGENTIHOOKS_SWARM_DATABASE_URL` is set,
+else the SQLite folder under `LEDGER_DIR`. A browser's reads and the live event stream still go to the ledger
+server over HTTP, and a browser's writes go to the ledger API service ([The hub and the
+bus](#the-hub-and-the-bus); [Shared ledger database sessions](shared-ledger-database.md)); every other reader and
+writer, including a worker Pod's, already shares the one database once that setting is the same everywhere.
 
-```bash
-agentihooks swarm my-swarm set api-url-pending=https://swarm.example.internal
-agentihooks swarm my-swarm ledger-ready        # JSON; "ready": true once every successor is staged
-agentihooks swarm my-swarm pause
-agentihooks swarm my-swarm set api-url=https://swarm.example.internal
-```
-
-- `api-url-pending` stages the destination and records when it was staged. The active ledger address stays as it
-  was, so the swarm keeps writing its current ledger.
-- Each live agent verifies its staged credential against the hosted metadata API and writes a readiness receipt.
-  `ledger-ready` prints the readiness record built from those receipts: `ready`, `missing` (live agents without a
-  current receipt for the staged address), `missing_masters` (configured master seats with no live master),
-  `pending_url`, `active_url` and `staged_at`.
-- `set api-url` to the staged address activates it. The controller lease first moves to the hosted ledger; then one
-  local Redis transaction clears the workstation's controller ownership, writes `api_url`, clears the staged address
-  and drops the readiness receipts. When the transaction is refused with `the ledger activation changed before
-  commit`, the moved lease is released again. From then on every swarm command, tick and wait for this swarm routes
-  to the hosted ledger. Other swarms on the workstation stay local.
-
-Activation refuses, and changes nothing, with:
-
-| Refusal | Cause |
-|---|---|
-| `the ledger endpoint must be activated separately` | `api-url` was set together with another setting. |
-| `the ledger destination must be staged and ready` | The address differs from `api-url-pending`, or nothing is staged. |
-| `ledger activation requires controller authority` | The command ran inside a swarm agent session. |
-| `the ledger successors are not ready` | `ledger-ready` would still report `"ready": false`. |
-| `the swarm must be paused before ledger activation` | The swarm is running or stopping. |
-| `the swarm tick is still running` | A tick pass holds the tick lock; retry after it ends. |
-| `the source controller ownership changed` | Another hive took the controller lease. |
-| `the ledger activation cohort changed` or `the ledger activation changed before commit` | Agents, executions, seats or the lease changed during activation; run it again. |
+Moving a swarm onto a distributed controller is therefore only a Redis and database change, with no staged
+activation step: point the chart's controller at the same `AGENTIHOOKS_SWARM_REDIS_URL` (or
+`AGENTIHOOKS_HIVE_REDIS_URL`) and the same `AGENTIHOOKS_SWARM_DATABASE_URL` the workstation uses, and let it take
+the swarm's controller lease the way any hive takes over a swarm it does not already hold (fencing; see
+[Fencing](../pillars/hives.md#fencing)). There is no `api-url-pending` setting, no `ledger-ready` command and no
+activation refusal to work through; `agentihooks swarm <id> set api-url=...` is gone, since `api_url` is written
+only by the controller itself, naming its own worker-registration address ([Configure the
+controller](#configure-the-controller)).
 
 ### Retire the workstation tick
 
@@ -256,97 +238,13 @@ controller:
 
 ### Which ledger address a tick uses
 
-A swarm's stored `api_url` names a ledger destination only for a process in local client mode. Every other process
-ignores it and reaches the ledger through its own `SWARM_URL` or `LEDGER_URL`.
-
-| Process | Client mode | Ledger address for the swarm's commands, ticks and waits |
-|---|---|---|
-| Workstation CLI, host tick and wait timer | `local` | The swarm's `api_url` when set and reachable, else the default ledger base: the hosted ledger when configured, else the workstation ledger server |
-| Controller pod | `distributed` or `compose` | Its own `SWARM_URL`, else `LEDGER_URL`; the stored `api_url` is ignored |
-| Worker and hive pods | Any mode other than `local` | Their own `SWARM_URL`, else `LEDGER_URL` |
-
-The rule matters because a controller with `controller.workers.apiUrl` set writes that control API address into the
-served swarm's `api_url` on every pass. The address points at the controller itself, never at a hosted ledger.
-
-A `run_tick` routed to a stored `api_url`, or for a swarm with a staged `api-url-pending`, runs its pass only when it
-carries tick authority: the `X-Ledger-Tick` token that `agentihooks swarm tick`, the scheduled host tick, signs with
-the hosted ledger's server secret. A command tick (`swarm start`, `pause`, `stop`, `reopen`, `restore`) carries none.
-Without it the tick returns `the host tick will apply the settings` and spawns, reaps and writes nothing. Kubernetes
-runs no host tick, so a controller that reached this branch would never apply a setting.
-
-```bash
-# in the controller pod: the chart sets the mode and the ledger link the tick uses
-kubectl -n agentihooks-swarm exec deploy/agentihooks-swarm-controller -- printenv AGENTIHOOKS_DEPLOYMENT LEDGER_URL
-# distributed
-# http://agentihooks-swarm-ledger:8765
-```
-
-From [#4793](https://github.com/the-cloud-clockwork/agentihooks/pull/4793) until
-[#4943](https://github.com/the-cloud-clockwork/agentihooks/pull/4943) the routing read `api_url` in every mode. The
-controller then took its own control API address for a hosted destination, every in-cluster pass logged only `the
-host tick will apply the settings`, and the helm kind smoke timed out at its host pressure step. Red: dev push
-[run 39326662179](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39326662179). Green: the helm kind
-smoke dispatched on the fix branch, [run 39331201531](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39331201531),
-where the controller recorded the host pressure off reason 1.7 seconds after the simulated pressure, and the
-`helm-kind / kind` job of dev push [run 39337452296](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337452296)
-at the merge commit; that run is red from its `swarm-image / smoke` job and the required gate above it. The regression test
-`test_a_controller_deployment_ticks_its_swarm_on_its_own_ledger_link` runs a scheduled tick in `distributed` and
-`compose` mode with `api_url` set and asserts that the tick reaches `LEDGER_URL` and ignores the stored address.
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| The controller log repeats `the host tick will apply the settings` and agents never change | The controller runs code from before #4943, or `AGENTIHOOKS_DEPLOYMENT=local` is set in the controller pod | Deploy a release that contains #4943; keep the chart's `deployment` value, which the pod carries as `AGENTIHOOKS_DEPLOYMENT`, at a non-local mode |
-| A workstation tick prints `the host tick will apply the settings` | A command tick for a swarm with a hosted `api_url` or a staged `api-url-pending` has no tick authority | Let the scheduled host tick apply it on its next minute |
-| A controller tick writes to the wrong ledger | `SWARM_URL` or `LEDGER_URL` in the controller pod names another ledger | Set the pod's ledger address; changing `api_url` has no effect on the controller |
-
-#### A workstation uses only a stored address it can reach
-
-A controller writes its in-cluster control API address, such as
-`http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780`, into its swarm's `api_url`, and a scratch proof
-swarm keeps that address while it stops. Before
-[pull request 8658](https://github.com/the-cloud-clockwork/agentihooks/pull/8658) the workstation tick took that
-address for the swarm and sent the ledger credential there. `ledger_link.guard` refused, because a credential off
-loopback travels only over https, and the pass failed with
-`a ledger credential off loopback travels only over https, not to http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780`.
-On 29 October the journal held 22 such failures in three hours.
-
-`ledger_route.configured` now passes the stored `api_url` through `ledger_link.reachable` in local client mode, and
-the tick, swarm commands and a pinned agent's ledger commands (`ledger_route.session`) all route through it:
-
-| Stored `api_url` | Inside a cluster (`KUBERNETES_SERVICE_HOST` set) | On a workstation |
-|---|---|---|
-| A host ending in `.svc` or `.svc.cluster.local`, any scheme | Used when https | Dropped |
-| `https://` on any other host | Used | Used |
-| `http://` on a host that resolves only to loopback, such as `127.0.0.1` or `localhost` | Used | Used |
-| `http://` on any other host | Dropped | Dropped |
-
-A dropped address routes the swarm to the default ledger base: `AGENTIHOOKS_HOSTED_LEDGER_URL` when the process holds a
-ledger credential and the address answers (see [Hosted ledger first](#hosted-ledger-first)), else the workstation
-ledger server. The stored value stays in the swarm config; only the route ignores it.
-
-Read the stored address, the route the tick takes for it, and the ledger page a pinned command uses, from the
-repository root with the workspace Python:
-
-```bash
-~/dev/tcc-ecosystem/.venv/bin/python -c 'from scripts.swarm import store; from scripts.swarm_ledger import ledger_route
-s = store.connect(); print(repr(s.config("my-swarm").api_url), repr(ledger_route.configured(s, "my-swarm")))'
-# 'http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780' ''
-AGENTIHOOKS_SWARM=my-swarm agentihooks ledger --slug my-swarm url
-```
-
-An empty second value means the route dropped the stored address. The `url` line then names the hosted ledger or the
-workstation ledger server, never a `.svc` host.
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Tick passes fail with `a ledger credential off loopback travels only over https, not to http://...svc:8780` | The workstation runs a release before #8658 | Install a release that contains #8658; the next tick routes the swarm to the default ledger base |
-| The same refusal names a host that is not a cluster service | Another ledger process in remote mode has `SWARM_URL` or `LEDGER_URL` set to a plain http address off loopback | Serve that ledger with `LEDGER_TLS_CERT` and `LEDGER_TLS_KEY` and address it as https |
-| A swarm whose `api_url` names a plain http ledger on another machine writes to the workstation ledger | That address is dropped as unreachable without cleartext | Serve the remote ledger over https and set `api-url` to its https address |
-
-Tests in `tests/swarm/test_scoped_ledger_routing.py` cover each table row, a tick of a swarm holding the in-cluster
-address, and a pinned ledger command for one. Red: Proofs run
-[40832818662](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40832818662). Green: Proofs run
-[40834075702](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40834075702).
+A tick never resolves or routes to a ledger address: `run_tick` and every other swarm command run the ledger API
+route code in process against the shared repository, judged as the swarm's own service (`database_ledger.acting`).
+There is nothing left for `api_url` to route for the tick; the setting only carries the controller's own
+worker-registration address, written by the controller itself on every pass and read back by
+[Configure the controller](#configure-the-controller) and [Which work runs
+where](#which-work-runs-where). A command tick outside local client mode still stops at the gate in [Ticks started
+by swarm commands](#ticks-started-by-swarm-commands) before it reaches any ledger call.
 
 ### Which work runs where
 
@@ -444,26 +342,30 @@ kubectl -n agentihooks-swarm-workers get pods -l swarm.agentihooks.io/controller
 
 ## Client mode resolution
 
-Every ledger client, whether the `agentihooks ledger` CLI, the swarm tick, the session hook or a worker on a hive,
-asks `ledger_link.remote` whether it is a remote client. A remote client sends every read and write to the hub
-ledger over HTTP and never reads the local page credential. A local client talks to the ledger server on
-`LEDGER_HOST:LEDGER_PORT` with the page credential stored beside that ledger.
+The `agentihooks ledger` CLI, the swarm tick, the session hook and a worker on a hive read and write a ledger by
+running the ledger API route code in process against the shared repository ([Shared ledger database
+sessions](shared-ledger-database.md)): Postgres when `AGENTIHOOKS_SWARM_DATABASE_URL` is set, else the SQLite
+folder under `LEDGER_DIR`. `ledger_link.remote` still decides whether a process is a remote client, but that now
+governs only the parts of a session's work that still travel as HTTP: the live event stream
+(`agentihooks ledger watch`, and the page's own stream) and a `/healthz` probe. A remote client sends those to
+`SWARM_URL` or `LEDGER_URL` with a derived or issued agent token; a local client sends them to the ledger server on
+`LEDGER_HOST:LEDGER_PORT` with the page credential stored beside that ledger. In process, no credential header is
+checked: a call is judged by the pinned agent name or by `database_ledger.acting`, never by `remote`.
 
 The first rule that matches decides:
 
 | Order | Environment | Client |
 |---|---|---|
-| 1 | A ledger route is active for this ledger: a ledger cutover, or an `agentihooks ledger` command run by an agent of that swarm with no `SWARM_URL`, routed to the swarm's stored API address | Remote, to the routed address |
-| 2 | `AGENTIHOOKS_HOSTED_LEDGER_URL` set, the session holds `AGENTIHOOKS_LEDGER_AGENT_TOKEN` or `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL`, and the address answers `/healthz` | Remote, to the hosted address, in every mode |
-| 3 | `SWARM_URL` set, and `AGENTIHOOKS_SWARM` is unset or names this ledger | Remote, in every mode, `local` included |
-| 4 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` set | Remote |
-| 5 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` unset | Local |
-| 6 | `AGENTIHOOKS_DEPLOYMENT=local` | Local; `LEDGER_URL` is ignored |
-| 7 | `AGENTIHOOKS_DEPLOYMENT` set to any other value | Remote |
+| 1 | `AGENTIHOOKS_HOSTED_LEDGER_URL` set, the session holds `AGENTIHOOKS_LEDGER_AGENT_TOKEN` or `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL`, and the address answers `/healthz` | Remote, to the hosted address, in every mode |
+| 2 | `SWARM_URL` set, and `AGENTIHOOKS_SWARM` is unset or names this ledger | Remote, in every mode, `local` included |
+| 3 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` set | Remote |
+| 4 | `AGENTIHOOKS_DEPLOYMENT` unset and `LEDGER_URL` unset | Local |
+| 5 | `AGENTIHOOKS_DEPLOYMENT=local` | Local; `LEDGER_URL` is ignored |
+| 6 | `AGENTIHOOKS_DEPLOYMENT` set to any other value | Remote |
 
 A hub address with no mode is remote because it is the safe default: a worker handed the hub's `LEDGER_URL` and
 nothing else must not fall back to a local client that reads a local ledger credential. Local mode needs either no
-hub address at all or an explicit `AGENTIHOOKS_DEPLOYMENT=local`, and rule 2 still sends a session with a hosted
+hub address at all or an explicit `AGENTIHOOKS_DEPLOYMENT=local`, and rule 1 still sends a session with a hosted
 credential to an answering hosted ledger in local mode.
 
 A remote client sends to `SWARM_URL`, else `LEDGER_URL`, with any trailing slash removed.
@@ -548,8 +450,10 @@ A remote client picks the first credential that applies and never reads the ledg
    `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without it, the token derived from `SWARM_SECRET`; without that, a token
    fetched from the hub with the hive credential `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL`.
 
-Service writes, which a local client signs with the page credential, are refused on a remote client unless one of
-the first two credentials applies. Server side checks of these credentials are in
+This selection no longer gates an ordinary ledger read or write: those run in process against the shared database
+with no credential header checked, judged only by the pinned agent name or `database_ledger.acting`. It still
+picks the headers for the live event stream (`agentihooks ledger watch`) and for routes that keep their own
+credential check in process, such as a proof ledger's controls. Server side checks of these credentials are in
 [Hosted ledger auth](hosted-ledger-auth.md#clients).
 
 ### Configuration
@@ -606,12 +510,12 @@ makes it remote whichever ledger `AGENTIHOOKS_SWARM` names.
 | Local | The local ledger folder | The local artifact folder |
 | Remote | The hosted ledger API, one collection read each for `tasks`, `phases` and `artifacts` | `GET <ledger address>/artifacts/<slug>/<file id>` on the hosted ledger server |
 
-The ledger address is the one a remote client sends to: an active ledger route, an answering
-`AGENTIHOOKS_HOSTED_LEDGER_URL`, else `SWARM_URL`, else `LEDGER_URL`. The collection reads carry the credentials in
-[Credentials a remote client sends](#credentials-a-remote-client-sends); the artifact request carries only the
-access headers from `SWARM_ACCESS_CLIENT_ID` and `SWARM_ACCESS_CLIENT_SECRET` (else the `CF_ACCESS_` pair). An agent
-on a remote hive therefore reads its plan lines with no ledger folder and no artifact folder on that machine. A
-local client reads as before.
+The ledger address is the one a remote client sends to: an answering `AGENTIHOOKS_HOSTED_LEDGER_URL`, else
+`SWARM_URL`, else `LEDGER_URL`. The three collection reads run the ledger API route code in process against the
+shared database, so no credential travels for them; only the artifact request is a real network call, and it
+carries no ledger credential, only the access headers from `SWARM_ACCESS_CLIENT_ID` and
+`SWARM_ACCESS_CLIENT_SECRET` (else the `CF_ACCESS_` pair). An agent on a remote hive therefore reads its plan lines
+with no ledger folder and no artifact folder on that machine. A local client reads as before.
 
 On a worker hive whose environment carries the hub address, inside a swarm task session:
 
@@ -628,23 +532,23 @@ description, in both modes.
 
 | Output | Cause |
 |---|---|
-| `no ledger <slug>` | The hosted ledger answered 404 for one of the three collections: it holds no ledger by that name |
-| `no stored artifact <file id>` | The hosted ledger holds the ledger but answered 404 for the plan file |
-| `unauthenticated: the ledger server refused the credential` | A collection read was answered 403 with the server's credential refusal |
-| An HTTP error traceback with its status | The hosted ledger refused with any other status, such as 503 once the read retries are spent; the error is not rewritten |
+| `no ledger <slug>` | One of the three collection reads found no ledger by that name |
+| `no stored artifact <file id>` | The ledger holds the ledger but the artifact GET answered 404 for the plan file |
+| An HTTP error traceback with its status | The artifact GET refused with any other status, such as 503 once the read retries are spent; the error is not rewritten |
 
 `tests/swarm_ledger/test_plan_read.py` covers the remote read in compose mode with no local ledger folder: the
-three collection reads, the artifact request with its address and timeout, both 404 errors and a passed on 503. The credential refusal
-comes from the shared remote read retry, outside these tests.
+three collection reads, the artifact request with its address and timeout, and both 404 errors.
 
 ### Troubleshooting
+
+The credential messages below surface only for the live event stream (`agentihooks ledger watch`, and the page's
+own stream); an ordinary ledger read or write runs in process and never raises them.
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `a remote ledger client needs SWARM_URL, the address of the hosted ledger server` | A mode other than `local` with neither `SWARM_URL` nor `LEDGER_URL` set | Set the hub address, or set `AGENTIHOOKS_DEPLOYMENT=local` for a workstation ledger |
 | `a remote ledger client needs a pinned agent identity; the operator credential stays on its host` | A hub address reached a shell with no swarm or no agent name, so the client is remote and will not use the page token | Run as a swarm agent, or set `AGENTIHOOKS_DEPLOYMENT=local` on a workstation that owns the ledger |
 | `a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential ...` | A pinned agent with no agent token, no `SWARM_SECRET` and no hive credential | Launch the agent through the swarm, which exports its token, or run `agentihooks hive add` on the UI hive to deliver the worker's credential |
-| `a remote ledger client cannot make service writes; the operator credential stays on its host` | A service write from a remote client outside the tick and without a controller credential | Run it on the hub host, or through the tick |
 | `forbidden` (403) on every hub ledger write after `hub: service credential renewal failed` | The renewal thread could not renew `agentihooks-hive:controller:hub-<hostname>` and the key expired | Fix the logged Redis error; the next renewal writes the key again |
 | `agentihooks hub run` exits at startup with a Redis `NoPermissionError` (no permissions to access a key) | The hub's Redis user cannot set `agentihooks-hive:controller:*` | Grant GET and SET on it to the hub's Redis user |
 | A workstation stops starting its local ledger server after `LEDGER_URL` was added to its env | Rule 3: a hub address with no mode is remote | Set `AGENTIHOOKS_DEPLOYMENT=local`, or remove `LEDGER_URL` |

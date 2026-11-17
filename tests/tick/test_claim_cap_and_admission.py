@@ -42,7 +42,7 @@ def test_claim_cap_returns_blank_when_the_guarded_update_leaves_the_task_not_blo
         claims=lambda slug, task_id: place.claim_cap.CAP,
         config=lambda slug: SimpleNamespace(gates={}),
         handoff_envelope=lambda slug, task_id: {"reason": "quota"},
-        launches=lambda slug: [],
+        launches=lambda slug, task=None: [],
     )
     ledger = SimpleNamespace(update_task=lambda slug, task_id, patch, if_state: {"state": "claimed"})
     rows: dict[str, Any] = {"t1": {"id": "t1", "state": "open"}}

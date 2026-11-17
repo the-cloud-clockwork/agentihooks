@@ -1,0 +1,19 @@
+rules:
+  - id: nats-serve-awaits-handler
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A NATS request callback awaits its handler, and nats-py runs the callbacks of one subscription one after another,
+      so one slow request holds every later request on that subject; hive slot heartbeats timed out on the hub behind
+      slow lane admissions this way. Start the handler without awaiting it, so the callback returns at once.
+    paths:
+      include:
+        - /scripts/events/nats.py
+        - nats-serve-awaits-handler.py
+    patterns:
+      - pattern-inside: |
+          async def $CALLBACK(...):
+              ...
+          ...
+          <... $CLIENT.subscribe(..., cb=$CALLBACK, ...) ...>
+      - pattern: await $LOOP.run_in_executor(...)

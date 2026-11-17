@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x\u01c1Writes\u01c1post_artifact:c4ed1476b8a35064eb177e47b93eb04dda01e7167edadbf7c2d7a2de9caee632": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns request unchanged at run time; the dict guard above it is unchanged."
+  }
+}

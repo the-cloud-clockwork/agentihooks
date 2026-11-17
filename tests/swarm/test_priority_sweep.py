@@ -483,7 +483,10 @@ def test_run_tick_runs_the_priority_pass(env, monkeypatch):
     from tests.swarm.test_tick import FakeRuntime
 
     store, ledger = env
+    from tests.conftest import patch_swarm_store_connect
+
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
+    patch_swarm_store_connect(monkeypatch, store)
     monkeypatch.setattr(swarm_cli, "LedgerClient", FileLedger)
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", FakeRuntime)
     monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)

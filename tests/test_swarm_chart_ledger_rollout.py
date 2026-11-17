@@ -28,7 +28,7 @@ def test_the_ledger_answers_every_extra_host_the_values_list():
 
 def test_the_ledger_probes_hit_the_port_directly_instead_of_forking_a_python_client():
     helpers = (CHART / "templates" / "_helpers.tpl").read_text()
-    healthz = helpers.split('{{- define "swarm.healthz" -}}', 1)[1].split("{{- end -}}", 1)[0]
+    healthz = helpers.split('{{- define "swarm.healthzFor" -}}', 1)[1].split("{{- end -}}", 1)[0]
 
     assert "exec" not in healthz
     assert "httpGet" in healthz and "path: /healthz" in healthz and "port: http" in healthz
@@ -37,7 +37,7 @@ def test_the_ledger_probes_hit_the_port_directly_instead_of_forking_a_python_cli
 def test_the_ledger_probe_sends_a_host_header_the_server_allows():
     server = (ROOT / "scripts" / "swarm_ledger" / "ledger_link.py").read_text()
     helpers = (CHART / "templates" / "_helpers.tpl").read_text()
-    healthz = helpers.split('{{- define "swarm.healthz" -}}', 1)[1].split("{{- end -}}", 1)[0]
+    healthz = helpers.split('{{- define "swarm.healthzFor" -}}', 1)[1].split("{{- end -}}", 1)[0]
 
     assert '"127.0.0.1"' in server.split("LOOPBACK = ", 1)[1].split("\n", 1)[0]
     assert "httpHeaders" in healthz

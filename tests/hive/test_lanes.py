@@ -97,6 +97,35 @@ def test_an_offer_the_hub_holds_at_max_agents_raises_held_and_spawns_nothing(hub
     configs.assert_not_called()
 
 
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing() -> None:
+    from scripts.hive import admission
+
+    bus = open_bus(BusConfig(scoped=True))
+    configs = Mock()
+    try:
+        with pytest.raises(admission.Unanswered, match="^no responders for 'slots.rig.hive-a'$"):
+            lanes.LaneTasks(bus, "hive-a", configs).request(offer())
+    finally:
+        bus.close()
+    configs.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_held_answer_naming_the_hives_own_admission_in_progress_raises_unanswered(hub: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    hub.hub.admitted = {"held": admission.ADMITTING}
+    configs = Mock()
+
+    with pytest.raises(admission.Unanswered) as raised:
+        lanes.LaneTasks(hub.bus, "hive-a", configs).request(offer())
+
+    assert str(raised.value) == admission.ADMITTING
+    assert not isinstance(raised.value, admission.Held)
+    configs.assert_not_called()
+
+
 def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(lane="plan"))
     assert hub.hub.seen == [
@@ -259,6 +288,64 @@ def test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_
     [request] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert request.task["workspace"] == str(folder)
     assert written == seeds
+
+
+@pytest.mark.feature("hive-spoke-launch-waits-for-serena-router")
+def test_a_lane_spoke_launches_no_agent_while_the_serena_router_does_not_come_up(
+    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import serena_router_daemon
+
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: False)
+    hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
+    runtime = Mock()
+
+    assert lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, "hive-a", ("eng",), 0, {}) == ["retry"]
+
+    runtime.spawn.assert_not_called()
+    assert [ask for ask, _, _ in hub.hub.seen] == ["admit", "reopen"]
+    claim = hub.bus.for_swarm("rig").state("spoke-work").get(spoke.claim_key(offer()))
+    assert json.loads(claim.value) == {"state": "ready"}
+    assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: spawn unavailable: serena)" in (
+        capsys.readouterr().err
+    )
+
+
+@pytest.mark.feature("hive-spoke-launch-waits-for-serena-router")
+def test_a_lane_spoke_ensures_the_serena_router_before_it_spawns_the_admitted_agent(
+    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import serena_router_daemon
+
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    calls: list[str] = []
+    placed = SimpleNamespace(
+        pane_id="pane-1",
+        harness="claude",
+        account="slot-a",
+        profile="engineer",
+        model="opus",
+        effort="high",
+        launched_at=0,
+    )
+
+    def ensure() -> bool:
+        calls.append("router")
+        return True
+
+    def spawn(request: object) -> Outcome:
+        calls.append("spawn")
+        return Outcome("spawn", Status.OK, "local", placed)
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", ensure)
+    runtime = Mock()
+    runtime.spawn.side_effect = spawn
+    hub.bus.queue("swarm.rig.ready.eng", QueuePolicy()).offer(offer())
+
+    assert lanes.run_once(configs({"rig": "events"}), hub.bus, runtime, "hive-a", ("eng",), 0, {}) == ["started"]
+
+    assert calls == ["router", "spawn"]
 
 
 def test_an_admitted_task_with_no_work_folder_is_spawned_unchanged(hub):
@@ -493,3 +580,25 @@ def test_hive_run_loads_the_operator_env_then_starts_the_lane_spokes_before_the_
 
     assert cli._daemon("run") == 0
     assert order == [("env",), ("lanes", True), ("telemetry",)]
+
+
+@pytest.mark.feature("hive-service-start-ensures-serena-router")
+def test_hive_run_ensures_the_serena_router_before_the_lane_spokes_and_starts_even_when_it_is_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import serena_router_daemon
+    from scripts.hive import cli, daemon
+
+    order: list[tuple[str, ...]] = []
+
+    def ensure() -> bool:
+        order.append(("router",))
+        return False
+
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: order.append(("env",)))
+    monkeypatch.setattr(serena_router_daemon, "ensure", ensure)
+    monkeypatch.setattr(lanes, "serve", lambda environ: order.append(("lanes",)))
+    monkeypatch.setattr(daemon, "run", lambda connect: order.append(("telemetry",)))
+
+    assert cli._daemon("run") == 0
+    assert order == [("env",), ("router",), ("lanes",), ("telemetry",)]

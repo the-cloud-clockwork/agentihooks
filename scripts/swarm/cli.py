@@ -113,6 +113,7 @@ from scripts.swarm import (
     master_launch,
     master_move,
     master_queue,
+    master_refusals,
     merge_queue,
     naming,
     outage,
@@ -241,9 +242,8 @@ SCALING_KEYS = {
     "swap-floor": "swap_floor_mb",
 }
 LAB_URL = "lab-url"
-ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url", LAB_URL: "lab_url"}
+ADDRESS_KEYS = {LAB_URL: "lab_url"}
 TOP_LEVEL = ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch", "spoke")
-NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 NO_LAB_ADDRESS = "lab-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 HIVE_PLACEMENT = "hive-placement"
@@ -272,7 +272,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
-WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"judged"}), "wrapper view": frozenset({"agents"})}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
@@ -362,7 +362,7 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     beating.callback(ledger_client.OFFLINE.set, False)
     beating.callback(ledger_client.SLOW.set, False)
     try:
-        ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
+        ledger_view.start(slug, ledger_client.SNAPSHOT_TIMEOUT_S)
     except ledger_link.Cleartext as exc:
         print(f"ledger {slug} view not held: {exc}", file=sys.stderr)
     except OSError as exc:
@@ -376,7 +376,7 @@ def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> 
     stores no view fresh enough to run from, else hold the stored view."""
     if ledger_view.timed_out(exc) and not ledger_view.fresh(slug):
         try:
-            ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
+            ledger_view.start(slug, ledger_client.EXPORT_TIMEOUT_S)
             return
         except OSError as again:
             if isinstance(again, urllib.error.HTTPError) and again.code < 500:
@@ -501,11 +501,13 @@ class _Wrapper:
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
         needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
-        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say, asked
+        first so a step needing a step that raised falls whatever else shuts it."""
+        ticked = self.ticks.shut(step)
         open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
         stopped = not open_past_stop and "stop" in self.box
         ended = self.ended is not None and step.group not in ENDS_AFTER
-        return stopped or ended or self.ticks.shut(step)
+        return ticked or stopped or ended
 
     def actions(self, records: Iterable[Any]) -> list[str]:
         """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
@@ -539,7 +541,8 @@ class _Wrapper:
         return True
 
     def _read(self) -> bool:
-        """End the pass when the ledger is binned or gone, else read its pass state and clear the halt marks."""
+        """End the pass when the ledger is binned or gone, else read its pass state, record its open fixer branches for
+        the panic sweep and clear the halt marks."""
         store, slug, ledger = self.store, self.slug, self.ledger
         if timing.call(ledger.binned, slug):
             self.ended = _bin_stop(store, slug, ledger, self.state["runtime"])
@@ -552,6 +555,7 @@ class _Wrapper:
                 [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
             )
             return False
+        panic.keep_fixers(store, slug, self.box["doc"]["tasks"])
         store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
         return True
 
@@ -562,10 +566,10 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan, raise what the intent check held and keep its view and checked actions when it stored
-        them; an intent check that overran its budget stored nothing and leaves the pass going."""
+        """End the tick's scan and keep the intent check's view and checked actions when it stored them; an intent
+        check that raised or overran its budget stored neither and leaves the pass going, and only the pass end raises
+        what it held."""
         self.ticks.close()
-        host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
             self.box["view"] = host_steps.pass_view(self.slug, view)
@@ -635,7 +639,7 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
         return next((record for record in swarm.agents(slug) if record.name == name), None)
 
     return Tools(
-        ledger=ClientLedger(slug, resource_client(slug, service=True)) if ledger is None else PassLedger(slug, ledger),
+        ledger=ClientLedger(slug, resource_client(slug)) if ledger is None else PassLedger(slug, ledger),
         coordination=StoreCoordination(store, slug, owner),
         source_control=GitHubSourceControl("", Path.cwd(), "dev"),
         runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime, fencing=_fencing(store, slug)),
@@ -663,7 +667,7 @@ def _end_hold(store: RedisStore, slug: str, token: str, keeping: Token[Any], rev
 @timing.instrument_tick
 @scope.one_pass()
 @outage.guard_tick
-@ledger_route.service
+@ledger_route.tick
 def run_tick(
     store: RedisStore,
     slug: str,
@@ -790,10 +794,9 @@ def _reconcile_services():
 def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     from scripts.swarm_ledger import authority_context
 
-    with ledger_route.scoped(slug, ledger_route.configured(store, slug)):
-        if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
-            return []
-        return _end_waits(store, slug, ledger)
+    if ledger_link.remote(slug=slug) and not authority_context.tick_headers(slug):
+        return []
+    return _end_waits(store, slug, ledger)
 
 
 def _end_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
@@ -1318,7 +1321,7 @@ def scaling_value(key, value):
         raise SwarmError(f"{key} takes a number, {what}") from None
 
 
-def api_address(value: str, refusal: str = NO_API_ADDRESS) -> str:
+def api_address(value: str, refusal: str) -> str:
     try:
         parts = urlsplit(value)
         host = parts.hostname
@@ -1344,7 +1347,7 @@ def config_value(key, value):
         return int(value)
     if key == LAB_URL:
         return api_address(value, NO_LAB_ADDRESS)
-    return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
+    return scaling_value(key, value)
 
 
 def _engine_origin(config, changes):
@@ -1400,8 +1403,6 @@ def _manual_count_step(counts):
 
 
 def cmd_set(store, args):
-    from scripts.swarm import ledger_cutover
-
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
     changes.update(_manual_count_step(counts))
@@ -1443,12 +1444,12 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, codex-inbox-transport=legacy|app_server "
                 f"or {', '.join(LANE_KEYS)}=<value>, engine=events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
-    config = ledger_cutover.settings(store, args.slug, {**changes, **_pinned(changes)})
+    config = store.update(args.slug, **{**changes, **_pinned(changes)})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
@@ -1564,12 +1565,6 @@ def _remote_control_text(agents):
     return "".join(f"{line}\n" for a in agents if (line := remote_control.line(a.__dict__)))
 
 
-def cmd_ledger_ready(store: RedisStore, args: argparse.Namespace) -> None:
-    from scripts.swarm import ledger_cutover
-
-    print(json.dumps(ledger_cutover.readiness(store, args.slug)))
-
-
 def probe_command(store, args):
     from scripts.swarm import probe
 
@@ -1627,6 +1622,7 @@ def cmd_status(store: Any, args: Any) -> None:
     from scripts.hive import admission, placement_waits
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
+    held += master_refusals.status_lines(store, args.slug, now_ms())
     held += hive_admission(store, config.slug)["lines"]
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
@@ -1853,11 +1849,15 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
-    """The panic button: on stops agent starts and cancels CI runs but the fixes, off clears it once stable."""
+    """The panic button: on, pressed by the master or the operator, stops agent starts and cancels CI runs but the
+    checked fixes and the fixer branches every swarm recorded, off clears it once stable."""
     now = now_ms()
     if args.action == "on":
+        _master_or_operator(store, args, "only the master or the operator presses panic on")
+        for fix in args.fix:
+            panic.check_fix(fix)
         found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs(found.fixes, panic.REPOS, panic.port)
+        cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":
@@ -1976,15 +1976,9 @@ def cmd_resolve(store, args):
     resolve.run(store, args, _me(store, args).name, LedgerClient())
 
 
-def cmd_review(store, args):
+def cmd_review(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
-    row = LedgerClient().task(args.slug, agent.task) or {}
-    pulls = row.get("split_pulls") or []
-    print(
-        json.dumps(
-            review_rounds.start(args.slug, agent.task, pr_url=row.get("pr_url"), first_pr=pulls[0] if pulls else "")
-        )
-    )
+    print(json.dumps(review_rounds.start(args.slug, agent.task, LedgerClient(), agent.name)))
 
 
 def _git(run, *args):
@@ -2760,6 +2754,7 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
+    pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
@@ -2770,7 +2765,6 @@ def build_parser() -> argparse.ArgumentParser:
     report = sub.add_parser("tick-report")
     report.add_argument("--passes", type=tick_report.pass_count, default=100)
     report.set_defaults(handler=tick_report.command)
-    sub.add_parser("ledger-ready")
     for verb in ("freeze", "focus", "unfreeze"):
         frozen = sub.add_parser(verb)
         frozen.add_argument("target")
@@ -2963,18 +2957,16 @@ def dispatch(argv):
         if "slug" in args:
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
-        route_slug = getattr(args, "slug", "")
-        with ledger_route.command(store, route_slug, who):
-            before = (
-                control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
-            )
-            if action in clearance.COMMANDS:
-                run_control(store, args, who, handler)
-            else:
-                handler(store, args)
-            if action in control_notifications.CONTROLS:
-                control_notifications.notify(store, args, LedgerClient(), before, action)
+        before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
+        if action in clearance.COMMANDS:
+            run_control(store, args, who, handler)
+        else:
+            handler(store, args)
+        panic.settle()
+        if action in control_notifications.CONTROLS:
+            control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:
+        panic.settle()
         if handler is cmd_status and outage.show(args.slug, args.json):
             return 0
         return failed(args, who, exc)

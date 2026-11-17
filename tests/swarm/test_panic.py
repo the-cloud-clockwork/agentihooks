@@ -1,9 +1,13 @@
 import json
 import subprocess
+import threading
+from collections.abc import Iterator
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from hooks.context import blocker_window, master_coding
 from hooks.observability import otel
@@ -14,7 +18,7 @@ from scripts.swarm.tick_watch import STALE_TICK, _alert
 from scripts.tick.adapters.fakes import Call, FakeSourceControl
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports.source_control import RepositoryRun
+from scripts.tick.ports.source_control import ChangeRef, ChangeState, RepositoryRun
 
 pytestmark = pytest.mark.unit
 
@@ -23,6 +27,8 @@ SID = "master-session"
 HOUR = panic.HOUR_MS
 WINDOW = panic.WINDOW_MS
 FIX = "https://github.com/the-cloud-clockwork/agentihooks/pull/1"
+BRANCH_FIX = "https://github.com/the-cloud-clockwork/agentihooks/tree/fix-branch"
+HELD_S = 5.0
 
 
 @pytest.fixture
@@ -41,6 +47,12 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float, dict[str,
     calls: list[tuple[str, float, dict[str, str]]] = []
     monkeypatch.setattr(otel, "add_counter", lambda name, value, attrs: calls.append((name, value, attrs)))
     return calls
+
+
+@pytest.fixture(autouse=True)
+def no_sweep_left() -> Iterator[None]:
+    yield
+    _sweep_ended()
 
 
 class Runs:
@@ -76,7 +88,8 @@ def _branches(monkeypatch: pytest.MonkeyPatch, branches: dict[str, str]) -> list
     def change(url: str, refused: str) -> ChangeState:
         assert refused == f"cannot read pull request {url}"
         asked.append(url)
-        return ChangeState(ChangeRef("o/r", 1), "open", "a" * 40, "dev", False, url, branches[url])
+        owner, name = url.removeprefix("https://github.com/").split("/")[:2]
+        return ChangeState(ChangeRef(f"{owner}/{name}", 1), "open", "a" * 40, "dev", False, url, branches[url])
 
     monkeypatch.setattr(stack, "change", change)
     return asked
@@ -96,6 +109,34 @@ def _passes(store: RedisStore, ok: int, bad: int, at: int) -> None:
         panic.count_pass(store, True, at)
     for _ in range(bad):
         panic.count_pass(store, False, at)
+
+
+def _sweep_ended() -> None:
+    assert panic.SWEEP.acquire(timeout=HELD_S)
+    panic.SWEEP.release()
+
+
+def _tick(store: RedisStore, ok: bool, now_ms: int, ports: panic.Ports) -> list[str]:
+    reported: list[str] = []
+    actions = panic.tick_pass(store, ok, now_ms, reported.append, ports)
+    _sweep_ended()
+    return [*actions, *reported]
+
+
+class Held(FakeSourceControl):
+    def __init__(self, repository: str, gate: threading.Event, listed: list[str]) -> None:
+        super().__init__()
+        self.repository, self.gate, self.listed = repository, gate, listed
+
+    def latest_runs(self, *, deadline: Deadline) -> tuple[RepositoryRun, ...]:
+        self.listed.append(self.repository)
+        if self.repository == panic.REPOS[0]:
+            self.gate.wait(HELD_S)
+        return (_row(1, "busy"),)
+
+
+def _held(gate: threading.Event, listed: list[str]) -> panic.Ports:
+    return lambda repository: Held(repository, gate, listed)
 
 
 def test_an_error_lands_on_the_otel_counter_by_swarm_and_category(store, counted):
@@ -177,7 +218,7 @@ def test_a_tick_pass_records_whether_any_step_failed(store, counted, monkeypatch
     monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
     seen: list[tuple[bool, int]] = []
-    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append((ok, now)) or ["x"])
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now, report: seen.append((ok, now)) or ["x"])
     from scripts.swarm import timing
 
     with spawn_stall.watch(store, SLUG, None, lambda: 7_000, None):
@@ -333,7 +374,8 @@ def test_release_refuses_below_the_level(store, counted):
 
 
 def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    fix = "https://github.com/o/a/pull/1"
+    asked = _branches(monkeypatch, {fix: "fix-branch"})
     runs = Runs(
         {
             "o/a": [
@@ -343,21 +385,27 @@ def test_cancel_runs_spares_the_merge_queue_the_fix_and_finished_runs(monkeypatc
                 _row(4, "done", status="completed"),
                 _row(5, "waiting", status="queued"),
             ],
-            "o/b": [_row(6, "other", status="pending")],
+            "o/b": [_row(6, "other", status="pending"), _row(7, "fix-branch")],
         },
     )
-    cancelled = panic.cancel_runs([FIX], ["o/a", "o/b"], runs)
-    assert cancelled == ["o/a run 1 on feature", "o/a run 5 on waiting", "o/b run 6 on other"]
+    cancelled = panic.cancel_runs([fix], ["o/a", "o/b"], runs)
+    assert cancelled == [
+        "o/a run 1 on feature",
+        "o/a run 5 on waiting",
+        "o/b run 6 on other",
+        "o/b run 7 on fix-branch",
+    ]
     assert [(repository, call.operation, call.args) for repository, call in runs.calls()] == [
         ("o/a", "latest_runs", ()),
         ("o/a", "cancel_run", (1,)),
         ("o/a", "cancel_run", (5,)),
         ("o/b", "latest_runs", ()),
         ("o/b", "cancel_run", (6,)),
+        ("o/b", "cancel_run", (7,)),
     ]
     assert all(panic.TOOL_SECONDS - 5 < call.deadline.remaining <= panic.TOOL_SECONDS for _, call in runs.calls())
     assert panic.TOOL_SECONDS == 60.0
-    assert asked == [FIX]
+    assert asked == [fix]
 
 
 def test_every_active_status_is_cancelled():
@@ -418,6 +466,89 @@ def test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit(monkeypatch: py
     monkeypatch.setattr(stack, "change", change)
     runs = Runs({"o/a": [RepositoryRun(1, "dev", "push", "in_progress", head_sha=commit)]})
     assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 1 on dev"]
+
+
+def _fix_reads(monkeypatch: pytest.MonkeyPatch, merged: set[str], commit: str) -> list[str]:
+    """Answer every fix pull request read with a state merged at ``commit`` for the urls in ``merged``, open for the
+    rest, and return the urls in the order they were read."""
+    from scripts.swarm import stack
+
+    reads: list[str] = []
+
+    def change(url: str, refused: str) -> ChangeState:
+        reads.append(url)
+        return _fix(url, url in merged, commit)
+
+    monkeypatch.setattr(stack, "change", change)
+    return reads
+
+
+def _fix(url: str, merged: bool, commit: str) -> ChangeState:
+    """Return the state of fix pull request ``url`` of o/a, merged at ``commit`` when ``merged``, else open."""
+    number = int(url.rsplit("/", 1)[1])
+    state = "closed" if merged else "open"
+    return ChangeState(
+        ChangeRef("o/a", number), state, "a" * 40, "dev", merged, url, f"fix-{number}", merge_commit=commit
+    )
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merged, opened, commit = FIX, f"{FIX}0", "m" * 40
+    reads = _fix_reads(monkeypatch, {merged}, commit)
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
+    rows = [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]
+    runs = Runs({repo: rows for repo in panic.REPOS})
+    panic.engage(store, "pressed", False, [merged, opened], 0)
+    sweeps = [_tick(store, True, at, runs) for at in (1_000, 1_000 + panic.CANCEL_EVERY_MS)]
+    assert reads == [merged, opened, opened]
+    assert sweeps == [[f"panic cancelled {repo} run 2 on feature" for repo in panic.REPOS]] * 2
+    assert panic.fix_state(store, merged) == _fix(merged, True, commit)
+    assert reads == [merged, opened, opened]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_cancel_runs_without_a_store_reads_every_fix_every_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
+    for _ in range(2):
+        panic.cancel_runs([FIX], ["o/a"], Runs({}))
+    assert reads == [FIX, FIX]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_a_merged_fix_is_read_again_after_panic_releases(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
+    panic.engage(store, "pressed", False, [FIX], 0)
+    for at in (1_000, 2_000):
+        _tick(store, True, at, Runs({}))
+    assert reads == [FIX]
+    assert panic.release(store, 2_000)
+    panic.engage(store, "pressed", False, [FIX], 3_000)
+    _tick(store, True, 3_000, Runs({}))
+    assert reads == [FIX, FIX]
+
+
+@pytest.mark.parametrize("drift", ["state", "reference"])
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_a_kept_fix_row_of_another_shape_is_read_again(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    commit = "m" * 40
+    reads = _fix_reads(monkeypatch, {FIX}, commit)
+    stale = asdict(_fix(FIX, True, commit))
+    if drift == "state":
+        del stale["body"]
+    else:
+        stale["reference"]["owner"] = "o"
+    store.redis.hset(f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}", FIX, json.dumps(stale))
+    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    assert reads == [FIX]
 
 
 @pytest.mark.feature("panic-merged-fix-integration-head")
@@ -518,6 +649,72 @@ def test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged(monk
     ]
 
 
+def _github_runs(monkeypatch: pytest.MonkeyPatch, rows: dict[str, list[dict[str, object]]]) -> None:
+    from scripts.tick.adapters import github
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        repository, found, _ = args[1].removeprefix("repos/").partition("/actions/runs?")
+        body = json.dumps({"workflow_runs": rows[repository]}) if found else ""
+        return subprocess.CompletedProcess(args, 0, body, "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+
+
+def _api_run(run_id: int, title: str, event: str = "workflow_run") -> dict[str, object]:
+    return {"id": run_id, "head_branch": "main", "event": event, "status": "queued", "display_title": title}
+
+
+@pytest.mark.feature("panic-fix-triggered-workflow-run")
+def test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    here, there = "the-cloud-clockwork/agentihooks", "the-cloud-clockwork/antoncore"
+    _github_runs(
+        monkeypatch,
+        {
+            here: [
+                _api_run(1, "Gate Required status for fix-branch"),
+                _api_run(2, "Gate Required status for hotfix"),
+                _api_run(3, "Gate Required status for feature"),
+                _api_run(4, "Gate Required status"),
+                _api_run(5, "Gate Required status for fix-branch-2"),
+                _api_run(6, "Cancel the push run for fix-branch", event="push"),
+            ],
+            there: [
+                _api_run(7, "Gate Required status for hotfix"),
+                _api_run(8, "Gate Required status for fix-branch"),
+            ],
+        },
+    )
+    fixes = [FIX, f"https://github.com/{here}/tree/hotfix"]
+    assert panic.cancel_runs(fixes, [here, there], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
+        f"{here} run 3 on main",
+        f"{here} run 4 on main",
+        f"{here} run 5 on main",
+        f"{here} run 6 on main",
+        f"{there} run 7 on main",
+        f"{there} run 8 on main",
+    ]
+
+
+@pytest.mark.feature("panic-fix-triggered-workflow-run")
+def test_the_gate_required_run_name_names_the_branch_the_sweep_keeps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/gate-required.yml").read_text())
+    branch = "${{ github.event.workflow_run.head_branch }}"
+    name = workflow.get("run-name")
+    assert name == f"Gate Required status for {branch}"
+    titles = [name.replace(branch, fix) for fix in ("fix-branch", "feature")]
+    here = "the-cloud-clockwork/agentihooks"
+    _github_runs(monkeypatch, {here: [_api_run(number, title) for number, title in enumerate(titles, 1)]})
+    assert panic.cancel_runs([FIX], [here], lambda repo: GitHubSourceControl(repo, tmp_path, "dev")) == [
+        f"{here} run 2 on main"
+    ]
+
+
 def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
     assert panic.REPOS == (
         "the-cloud-clockwork/agentihooks",
@@ -536,15 +733,15 @@ def test_port_answers_the_repository_through_the_source_control_adapter(
 def test_tick_pass_cancels_once_a_minute_while_panic_holds(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
     panic.engage(store, "pressed", False, [], 0)
-    first = panic.tick_pass(store, True, 1_000, runs)
+    first = _tick(store, True, 1_000, runs)
     assert first == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
-    assert panic.tick_pass(store, True, 1_000 + panic.CANCEL_EVERY_MS - 1, runs) == []
+    assert _tick(store, True, 1_000 + panic.CANCEL_EVERY_MS - 1, runs) == []
     assert len(runs.cancelled()) == len(panic.REPOS)
 
 
 def test_tick_pass_without_panic_cancels_nothing(store, counted):
     runs = Runs({repo: [_row(1, "busy")] for repo in panic.REPOS})
-    assert panic.tick_pass(store, True, 1_000, runs) == []
+    assert _tick(store, True, 1_000, runs) == []
     assert runs.calls() == []
     assert panic.level(store, 1_000) == 1.0
 
@@ -552,14 +749,14 @@ def test_tick_pass_without_panic_cancels_nothing(store, counted):
 def test_tick_pass_engages_and_cancels_in_one_pass(store, counted):
     _errors(store, panic.THRESHOLD, 1_000)
     runs = Runs({})
-    assert panic.tick_pass(store, False, 1_000, runs) == [f"panic engaged: {panic.THRESHOLD} errors in the last hour"]
+    assert _tick(store, False, 1_000, runs) == [f"panic engaged: {panic.THRESHOLD} errors in the last hour"]
     assert panic.level(store, 1_000) == 0.0
 
 
 def test_tick_pass_reports_a_failed_cancel(store, counted):
     panic.engage(store, "pressed", False, [], 0)
 
-    found = panic.tick_pass(store, True, 1_000, lambda repository: Broken())
+    found = _tick(store, True, 1_000, lambda repository: Broken())
     assert len(found) == 1
     assert found[0].startswith("panic cancel failed: ")
 
@@ -574,12 +771,324 @@ def test_tick_pass_reports_an_unreadable_fix_branch(store, counted, monkeypatch:
         raise SwarmError(f"{refused}: boom")
 
     monkeypatch.setattr(stack, "change", unreadable)
-    assert panic.tick_pass(store, True, 1_000, Runs({})) == [
-        f"panic cancel failed: cannot read pull request {FIX}: boom"
+    assert _tick(store, True, 1_000, Runs({})) == [f"panic cancel failed: cannot read pull request {FIX}: boom"]
+
+
+@pytest.mark.parametrize(
+    ("fix", "named"),
+    [
+        (BRANCH_FIX, ("github.com/the-cloud-clockwork/agentihooks", "fix-branch")),
+        (
+            "https://github.com/The-Cloud-Clockwork/agentihooks/tree/Fix",
+            ("github.com/the-cloud-clockwork/agentihooks", "Fix"),
+        ),
+        ("https://github.com/o/r/tree/fix/nested", ("github.com/o/r", "fix/nested")),
+        ("https://github.com/o/tree/tree/b", ("github.com/o/tree", "b")),
+        (FIX, ("", "")),
+        ("o/r/tree/b", ("", "")),
+        ("https://github.com/o/r/tree", ("", "")),
+        ("https://github.com/o/r/tree/", ("", "")),
+        ("https://github.com//r/tree/b", ("", "")),
+    ],
+)
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_a_branch_link_names_its_repository_and_branch(fix: str, named: tuple[str, str]) -> None:
+    assert panic.branch_fix(fix) == named
+
+
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = _branches(monkeypatch, {FIX: "pr-branch"})
+    runs = Runs({repo: [_row(1, "busy"), _row(2, "fix-branch"), _row(3, "pr-branch")] for repo in panic.REPOS})
+    panic.engage(store, "pressed", False, [FIX, BRANCH_FIX], 0)
+    assert _tick(store, True, 1_000, runs) == [
+        "panic cancelled the-cloud-clockwork/agentihooks run 1 on busy",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 1 on busy",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 2 on fix-branch",
+        "panic cancelled the-cloud-clockwork/agentihooks-bundle run 3 on pr-branch",
+        "panic cancelled the-cloud-clockwork/antoncore run 1 on busy",
+        "panic cancelled the-cloud-clockwork/antoncore run 2 on fix-branch",
+        "panic cancelled the-cloud-clockwork/antoncore run 3 on pr-branch",
+    ]
+    assert asked == [FIX]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_the_pass_ends_before_the_panic_cancel_sweep_it_starts(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.tick.adapters import github
+
+    gate, reported = threading.Event(), threading.Event()
+    held: list[bool] = []
+    actions: list[str] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        repository, listing, _ = args[1].removeprefix("repos/").partition("/actions/runs?")
+        if listing and repository == panic.REPOS[0]:
+            held.append(gate.wait(HELD_S))
+        body = json.dumps({"workflow_runs": [_api_run(1, "busy")]}) if listing else ""
+        return subprocess.CompletedProcess(args, 0, body, "")
+
+    def emit(stream: object, line: str) -> None:
+        if '"event": "swarm_panic",' in line:
+            actions.append(json.loads(line)["action"])
+            if len(actions) == len(panic.REPOS):
+                reported.set()
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    monkeypatch.setattr(timing, "emit", emit)
+    monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
+    panic.engage(store, "pressed", False, [], 0)
+    try:
+        with spawn_stall.watch(store, SLUG, None, lambda: 1_000, None):
+            pass
+        early = list(actions)
+    finally:
+        gate.set()
+    assert early == []
+    assert reported.wait(HELD_S)
+    assert held == [True]
+    assert actions == [f"panic cancelled {repo} run 1 on main" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_a_due_pass_starts_no_sweep_while_an_earlier_one_runs(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = set(threading.enumerate())
+    gate = threading.Event()
+    listed: list[str] = []
+    reported: list[str] = []
+    monkeypatch.setattr(panic, "due_cancel", lambda *_: True)
+    panic.engage(store, "pressed", False, [], 0)
+    try:
+        assert panic.tick_pass(store, True, 1_000, reported.append, _held(gate, listed)) == []
+        assert panic.tick_pass(store, True, 2_000, reported.append, _held(gate, listed)) == []
+        sweeps = [thread for thread in threading.enumerate() if thread.name == "panic-sweep" and thread not in before]
+    finally:
+        gate.set()
+    _sweep_ended()
+    assert [thread.daemon for thread in sweeps] == [True]
+    assert listed == list(panic.REPOS)
+    assert reported == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_a_sweep_thread_that_cannot_start_frees_the_sweep(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Unstartable(threading.Thread):
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    reported: list[str] = []
+    monkeypatch.setattr(panic, "Thread", Unstartable)
+    panic.engage(store, "pressed", False, [], 0)
+    assert panic.tick_pass(store, True, 1_000, reported.append, Runs({})) == [
+        "panic cancel failed: can't start new thread"
+    ]
+    assert panic.SWEEP.acquire(blocking=False)
+    panic.SWEEP.release()
+    assert reported == []
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+def test_settle_returns_once_the_running_sweep_reported(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    gate, settled = threading.Event(), threading.Event()
+    listed: list[str] = []
+    reported: list[str] = []
+
+    def settle() -> None:
+        panic.settle()
+        settled.set()
+
+    panic.engage(store, "pressed", False, [], 0)
+    assert panic.tick_pass(store, True, 1_000, reported.append, _held(gate, listed)) == []
+    waiter = threading.Thread(target=settle)
+    waiter.start()
+    try:
+        assert not settled.wait(0.2)
+    finally:
+        gate.set()
+    assert settled.wait(HELD_S)
+    waiter.join(HELD_S)
+    assert reported == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-sweep-off-pass-thread")
+@pytest.mark.parametrize(("argv", "code"), [(["panic"], 0), (["panic", "off"], 1)])
+def test_a_swarm_command_waits_for_the_running_panic_sweep_before_it_returns(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], argv: list[str], code: int
+) -> None:
+    gate = threading.Event()
+    listed: list[str] = []
+    reported: list[str] = []
+    _passes(store, 0, 1, cli.now_ms())
+    panic.engage(store, "pressed", False, [], 0)
+    assert panic.tick_pass(store, True, 1_000, reported.append, _held(gate, listed)) == []
+    opener = threading.Timer(0.2, gate.set)
+    opener.start()
+    try:
+        assert cli.main([SLUG, *argv]) == code
+        returned = list(reported)
+    finally:
+        gate.set()
+        opener.cancel()
+    assert returned == [f"panic cancelled {repo} run 1 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-fix-pull-request-head-in-its-repository")
+def test_cancel_runs_spares_a_fix_pull_request_head_only_in_its_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    runs = Runs({repo: [_row(1, "fix-branch")] for repo in panic.REPOS})
+    assert panic.cancel_runs([FIX], panic.REPOS, runs) == [
+        "the-cloud-clockwork/agentihooks-bundle run 1 on fix-branch",
+        "the-cloud-clockwork/antoncore run 1 on fix-branch",
+    ]
+    assert runs.cancelled() == ["the-cloud-clockwork/agentihooks-bundle:1", "the-cloud-clockwork/antoncore:1"]
+    assert asked == [FIX]
+
+
+def _fixer_rows() -> list[dict[str, Any]]:
+    return [
+        {"id": "promo-43992907244-1", "state": "claimed", "claimed_by": "ci@323133-5149", "branch": "ci-323133-5149"},
+        {
+            "id": "promo-43992907244-0",
+            "state": "pr",
+            "claimed_by": "ci@323133-5153",
+            "branch": "ci-323133-5150",
+            "repository_branches": {"/home/hive/dev/antoncore": "ci-323133-5150-2"},
+        },
+        {"id": "crew-1116073743-fix-1", "state": "claimed", "claimed_by": "engineer@323133-10087"},
+        {"id": "crew-1116073743-scout-1", "state": "claimed", "claimed_by": "ci@323133-5140", "branch": "ci-1"},
+        {"id": "promo-43913675090-0", "state": "done", "claimed_by": "ci@323133-5084", "branch": "ci-323133-5084"},
+        {"id": "t-panic-spares-fix-prs", "state": "claimed", "claimed_by": "ci@323133-5155", "branch": "ci-2"},
+        {"id": "promo-1-0", "state": "open", "branch": "dev", "repository_branches": {"/home/hive/dev/x": "main"}},
     ]
 
 
-def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys):
+def _fixer_links(*branches: str) -> list[str]:
+    return sorted(f"https://github.com/{repo}/tree/{branch}" for repo in panic.REPOS for branch in branches)
+
+
+def _record(store: RedisStore, slug: str, *branches: str) -> None:
+    store.redis.set(store.key(slug, "panic-fixers"), json.dumps(_fixer_links(*branches)))
+
+
+def _read_pass(store: RedisStore, monkeypatch: pytest.MonkeyPatch, document: dict[str, Any]) -> dict[str, Any]:
+    class Ledger:
+        def binned(self, slug: str) -> bool:
+            return False
+
+    monkeypatch.setattr(cli.ledger_client, "pass_state", lambda ledger, slug: document)
+    wrapper: Any = object.__new__(cli._Wrapper)
+    wrapper.state = {"store": store, "slug": SLUG, "ledger": Ledger()}
+    wrapper.box = {}
+    assert cli._Wrapper._read(wrapper) is True
+    return wrapper.box
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_tick_pass_spares_every_swarms_recorded_fixer_branches_without_a_registration(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    for slug in ("other", "third"):
+        store.create(SwarmConfig(slug, "/repo", max_eng=1, max_ci=1))
+    _record(store, SLUG, "ci-323133-5149", "ci-323133-5150")
+    _record(store, "other", "engineer-323133-10087")
+    panic.engage(store, "pressed", False, [], 0)
+    branches = ("busy", "ci-323133-5149", "ci-323133-5150", "engineer-323133-10087", "ci-2")
+    runs = Runs({repo: [_row(n, branch) for n, branch in enumerate(branches)] for repo in panic.REPOS})
+    assert _tick(store, True, 1_000, runs) == [
+        f"panic cancelled {repo} run {n} on {branches[n]}" for repo in panic.REPOS for n in (0, 4)
+    ]
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_panic_button_spares_the_recorded_fixer_branches(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    _record(store, SLUG, "ci-323133-5149")
+    runs = Runs({repo: [_row(7, "busy"), _row(8, "ci-323133-5149")] for repo in panic.REPOS})
+    monkeypatch.setattr(panic, "port", runs)
+    args = cli.build_parser().parse_args([SLUG, "panic", "on", "--fix", FIX])
+    args.handler(store, args)
+    out = json.loads(capsys.readouterr().out)
+    assert out["fixes"] == [FIX]
+    assert out["cancelled"] == [f"{repo} run 7 on busy" for repo in panic.REPOS]
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_pass_read_records_the_open_fixer_branches_of_its_document(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = {"tasks": _fixer_rows()}
+    assert _read_pass(store, monkeypatch, document)["doc"] is document
+    assert json.loads(store.redis.get(store.key(SLUG, "panic-fixers")) or "[]") == _fixer_links(
+        "ci-323133-5149", "ci-323133-5150", "ci-323133-5150-2", "ci-323133-5153", "engineer-323133-10087"
+    )
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_pass_read_drops_the_record_once_no_fixer_is_open(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _record(store, SLUG, "ci-323133-5149")
+    _read_pass(store, monkeypatch, {"tasks": _fixer_rows()[3:]})
+    assert store.redis.exists(store.key(SLUG, "panic-fixers")) == 0
+
+
+def test_fixer_links_keeps_the_fixers_listed_after_a_skipped_task() -> None:
+    rows = [*_fixer_rows()[3:], *_fixer_rows()[:1]]
+    assert panic.fixer_links(rows) == _fixer_links("ci-323133-5149")
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file() -> None:
+    from scripts.swarm import promotion_watch, troubleshooting_crew
+
+    crew = troubleshooting_crew.crew_id(1_794_870_000.0)
+    fixers = [f"{promotion_watch.TASK_PREFIX}43992907244-1", *troubleshooting_crew.numbered(crew, "fix", 2)]
+    others = [*troubleshooting_crew.numbered(crew, "scout", 1), f"{crew}-harden", "t-panic-spares-fix-prs"]
+    malformed = ["doc-promo-1-0", "promo--0", "promo-1-", "promo-x-0", "crew-fix-1", "crew-1-fix-"]
+    assert [panic.FIXER_TASK.fullmatch(task) is not None for task in fixers] == [True, True, True]
+    assert [panic.FIXER_TASK.fullmatch(task) is not None for task in [*others, *malformed]] == [False] * 9
+
+
+@pytest.mark.feature("panic-spares-fixer-branches")
+def test_the_pass_read_writes_the_fixer_record_to_expire_after_fixers_ms(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[dict[str, Any]] = []
+    original = store.redis.set
+
+    def recording(name: str, value: str, **options: Any) -> Any:
+        sent.append(options)
+        return original(name, value, **options)
+
+    monkeypatch.setattr(store.redis, "set", recording)
+    _read_pass(store, monkeypatch, {"tasks": _fixer_rows()[:1]})
+    assert sent == [{"px": panic.FIXERS_MS}]
+
+
+def test_the_panic_button_cancels_and_prints(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     _branches(monkeypatch, {FIX: "fix-branch"})
     runs = Runs({repo: [_row(7, "busy"), _row(8, "fix-branch")] for repo in panic.REPOS})
     monkeypatch.setattr(panic, "port", runs)
@@ -591,7 +1100,13 @@ def test_the_panic_button_cancels_and_prints(store, counted, monkeypatch, capsys
     assert out == {
         "panic": "on",
         "fixes": [FIX],
-        "cancelled": [f"{repo} run 7 on busy" for repo in panic.REPOS],
+        "cancelled": [
+            "the-cloud-clockwork/agentihooks run 7 on busy",
+            "the-cloud-clockwork/agentihooks-bundle run 7 on busy",
+            "the-cloud-clockwork/agentihooks-bundle run 8 on fix-branch",
+            "the-cloud-clockwork/antoncore run 7 on busy",
+            "the-cloud-clockwork/antoncore run 8 on fix-branch",
+        ],
     }
     current = panic.state(store)
     assert current is not None
@@ -666,6 +1181,172 @@ def test_the_panic_button_without_a_fix_spares_only_the_merge_queue(store, count
     assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [], "cancelled": []}
 
 
+def _press(store: RedisStore, monkeypatch: pytest.MonkeyPatch, runs: Runs, *argv: str) -> None:
+    monkeypatch.setattr(panic, "port", runs)
+    args = cli.build_parser().parse_args([SLUG, *argv])
+    args.handler(store, args)
+
+
+def _busy() -> Runs:
+    return Runs({repo: [_row(7, "busy")] for repo in panic.REPOS})
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    asked = _branches(monkeypatch, {})
+    runs = _busy()
+    store.put_agent(SLUG, AgentRecord("engineer@a1b2c3-0001", "eng", "t1"))
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "--as", "engineer@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX)
+    assert str(caught.value) == "only the master or the operator presses panic on"
+    assert panic.state(store) is None
+    assert runs.calls() == []
+    assert asked == []
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_a_seat_cannot_press_panic_on_as_the_master(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    assert cli.main([SLUG, "--as", "master@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX]) == 1
+    assert "cannot act as master@a1b2c3-0001" in capsys.readouterr().err
+    assert panic.state(store) is None
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_the_swarm_master_presses_panic_on_with_a_checked_fix(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    asked = _branches(monkeypatch, {})
+    store.put_agent(SLUG, AgentRecord("master@a1b2c3-0001", "master", "master"))
+    _press(store, monkeypatch, _busy(), "--as", "master@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX)
+    cancelled = [f"{repo} run 7 on busy" for repo in panic.REPOS]
+    assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [BRANCH_FIX], "cancelled": cancelled}
+    assert asked == []
+
+
+SHAPE = (
+    "{fix} is not a fix link: name a pull request https://github.com/OWNER/NAME/pull/NUMBER or a branch "
+    "https://github.com/OWNER/NAME/tree/BRANCH"
+)
+OUTSIDE = (
+    "{fix} is outside the panic repositories the-cloud-clockwork/agentihooks, "
+    "the-cloud-clockwork/agentihooks-bundle, the-cloud-clockwork/antoncore"
+)
+
+
+@pytest.mark.parametrize(
+    ("fix", "refusal"),
+    [
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/dev", "{fix} names dev, which panic never spares"),
+        ("https://github.com/the-cloud-clockwork/antoncore/tree/main", "{fix} names main, which panic never spares"),
+        ("https://github.com/someone/else/tree/fix-branch", OUTSIDE),
+        ("https://github.com/someone/else/pull/1", OUTSIDE),
+        ("https://github.com/The-Cloud-Clockwork/agentihooks/pull/1", OUTSIDE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/pull/one", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/pull/1/files", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/issues/1", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/", SHAPE),
+        ("https://github.com/the-cloud-clockwork/tree/fix-branch", SHAPE),
+        ("http://github.com/the-cloud-clockwork/agentihooks/pull/1", SHAPE),
+        ("the-cloud-clockwork/agentihooks/pull/1", SHAPE),
+        (f"{FIX}\n", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/dev?x=1", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/dev/", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/refs/heads/dev", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/a..b", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/fix branch", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree/.hidden", SHAPE),
+        ("https://github.com/the-cloud-clockwork/agentihooks/tree//dev", SHAPE),
+    ],
+)
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything(
+    store: RedisStore,
+    counted: list[tuple[str, float, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    fix: str,
+    refusal: str,
+) -> None:
+    asked = _branches(monkeypatch, {})
+    panic.engage(store, "pressed", False, [BRANCH_FIX], 0)
+    runs = _busy()
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "panic", "on", "--fix", BRANCH_FIX, "--fix", fix)
+    assert str(caught.value) == refusal.format(fix=fix)
+    assert panic.state(store) == panic.Panic(0, "pressed", False, (BRANCH_FIX,))
+    assert runs.calls() == []
+    assert asked == []
+
+
+@pytest.mark.parametrize("head", ["dev", "main"])
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch, head: str
+) -> None:
+    asked = _branches(monkeypatch, {FIX: head})
+    runs = _busy()
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "panic", "on", "--fix", FIX)
+    assert str(caught.value) == f"{FIX} names {head}, which panic never spares"
+    assert panic.state(store) is None
+    assert runs.calls() == []
+    assert asked == [FIX]
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_panic_on_refuses_a_fix_pull_request_it_cannot_read(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import stack
+    from scripts.swarm.store import SwarmError
+
+    def unreadable(url: str, refused: str) -> None:
+        raise SwarmError(f"{refused}: boom")
+
+    monkeypatch.setattr(stack, "change", unreadable)
+    runs = _busy()
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, runs, "panic", "on", "--fix", FIX)
+    assert str(caught.value) == f"cannot read pull request {FIX}: boom"
+    assert panic.state(store) is None
+    assert runs.calls() == []
+
+
+@pytest.mark.parametrize(
+    "fix",
+    [
+        BRANCH_FIX,
+        "https://github.com/the-cloud-clockwork/agentihooks-bundle/tree/devops",
+        "https://github.com/the-cloud-clockwork/antoncore/tree/fix/main",
+        "https://github.com/the-cloud-clockwork/agentihooks/tree/diffcheck/ci-1_2.v3",
+    ],
+)
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_a_branch_link_of_a_panic_repository_passes_the_check_unread(monkeypatch: pytest.MonkeyPatch, fix: str) -> None:
+    asked = _branches(monkeypatch, {})
+    assert panic.check_fix(fix) is None
+    assert asked == []
+
+
+@pytest.mark.feature("panic-fix-registration-checked")
+def test_a_fix_pull_request_passes_the_check_after_one_read_of_its_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    assert panic.check_fix(FIX) is None
+    assert asked == [FIX]
+
+
 def test_panic_found_names_the_panic_since_its_start(store):
     from scripts.swarm.blockers import Blocker
 
@@ -731,7 +1412,9 @@ def _checkout(root: Path, branch: str, origin: str = "git@github.com:The-Cloud-C
     return str(root)
 
 
-@pytest.mark.parametrize("command", ["git push origin fix-branch", "gh run rerun 5", "gh workflow run t.yml"])
+@pytest.mark.parametrize(
+    "command", ["git push origin fix-branch", "gh run rerun 5", "gh workflow run t.yml --ref fix-branch"]
+)
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
@@ -795,6 +1478,56 @@ def test_a_push_without_a_session_directory_stays_frozen(
     assert blocker_window._directory("", [str(fix)]) == ""
 
 
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_passes_any_branch_without_panic(store: RedisStore, tmp_path: Path) -> None:
+    cwd = _checkout(tmp_path / "other", "other-branch")
+    assert blocker_window.held_push(cwd, "other-branch") is None
+
+
+@pytest.mark.parametrize("fix", [FIX, BRANCH_FIX])
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fix: str
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [fix], 0)
+    cwd = _checkout(tmp_path / "work", "engineer-branch")
+    assert blocker_window.held_push(cwd, "fix-branch") is None
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_refuses_a_branch_no_fix_names(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX, BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.held_push(cwd, "other-branch") == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_refuses_a_fix_whose_config_routes_the_push(store: RedisStore, tmp_path: Path) -> None:
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    subprocess.run(["git", "-C", cwd, "config", "remote.origin.pushurl", "git@github.com:else/where.git"], check=True)
+    assert blocker_window.held_push(cwd, "fix-branch") == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_the_push_check_passes_when_the_store_cannot_be_reached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import store
+    from scripts.swarm.store import Unreachable
+
+    def connect() -> RedisStore:
+        raise Unreachable("Redis is unreachable")
+
+    monkeypatch.setattr(store, "connect", connect)
+    cwd = _checkout(tmp_path / "other", "other-branch")
+    assert blocker_window.held_push(cwd, "other-branch") is None
+
+
 @pytest.mark.parametrize("command", ["kubectl apply -f a.yaml", "git push && helm upgrade x y"])
 def test_a_fix_branch_session_still_waits_to_deploy(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
@@ -839,6 +1572,326 @@ def test_panic_refuses_a_push_outside_a_git_checkout(
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "reason", False, [FIX], 0)
     assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", str(tmp_path))[1] is not None
+
+
+@pytest.mark.parametrize(
+    "command", ["git push -u origin HEAD", "gh run rerun 5", "gh workflow run t.yml --ref fix-branch"]
+)
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_panic_spares_the_first_push_of_a_registered_fix_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    asked = _branches(monkeypatch, {})
+    panic.engage(store, "60 errors in the last hour", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+    assert asked == []
+
+
+@pytest.mark.parametrize(
+    ("branch", "origin"),
+    [
+        ("other-branch", "git@github.com:The-Cloud-Clockwork/agentihooks.git"),
+        ("fix-branch", "https://github.com/the-cloud-clockwork/antoncore.git"),
+    ],
+)
+@pytest.mark.feature("panic-fix-branch-first-push")
+def test_panic_refuses_a_push_from_a_branch_no_fix_registers(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, branch: str, origin: str
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "60 errors in the last hour", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "work", branch, origin)
+    block = blocker_window.pretool("Bash", {"command": "git push -u origin HEAD"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin fix-branch:dev",
+        "git push origin HEAD:main",
+        "git push origin HEAD:refs/heads/dev",
+        "git push origin dev",
+        "git push origin fix-branch dev",
+        "git push origin :",
+        "git push origin dev:HEAD",
+        "git push upstream fix-branch",
+        "git push origin HEAD:dev>/dev/null",
+        "git push 2> err.txt origin HEAD:dev",
+        "git push --all origin",
+        "git push --branches origin",
+        "git push --mirror origin",
+        "git push origin --tags",
+        "git push --follow-tags origin fix-branch",
+        "git push --prune origin fix-branch",
+        "git push --repo=elsewhere",
+        "git push --repo elsewhere fix-branch",
+        "gh workflow run t.yml",
+        "gh workflow run t.yml --ref",
+        "gh workflow run t.yml --ref dev",
+        "gh workflow run t.yml --ref=main",
+        "gh workflow run t.yml -r dev",
+        "gh workflow run t.yml -rmain",
+        "gh workflow run t.yml --ref fix-branch -r dev",
+        "gh workflow run t.yml --ref fix-branch -R the-cloud-clockwork/antoncore",
+        "gh workflow run t.yml --ref fix-branch --repo=the-cloud-clockwork/antoncore",
+        "gh run rerun 5 -R the-cloud-clockwork/antoncore",
+        "gh run rerun 5 --repo the-cloud-clockwork/antoncore",
+        "gh -R the-cloud-clockwork/antoncore workflow run t.yml --ref fix-branch",
+        "gh --repo=the-cloud-clockwork/antoncore run rerun 5",
+        "GIT_DIR=/elsewhere/.git git push",
+        "GIT_WORK_TREE=/elsewhere git push origin fix-branch",
+        "export GIT_DIR=/elsewhere/.git; git push origin HEAD",
+        "env GIT_COMMON_DIR=/elsewhere git push origin fix-branch",
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.default GIT_CONFIG_VALUE_0=upstream git push",
+        "git -c push.default=upstream push",
+        "git --git-dir=.git push origin fix-branch",
+        "git --no-pager -C . push origin dev",
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_fix_branch_session_stays_frozen_for_a_command_that_writes_another_ref(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push",
+        "git push origin",
+        "git push -u origin HEAD 2>&1 | tail -3",
+        "git push origin fix-branch",
+        "git push origin +fix-branch",
+        "git push --force-with-lease origin HEAD:fix-branch",
+        "git push origin fix-branch:refs/heads/fix-branch >/dev/null 2>&1",
+        "git push origin fix-branch < /dev/null",
+        "git -C . push origin fix-branch",
+        "gh workflow run t.yml --ref fix-branch",
+        "gh workflow run t.yml --ref=refs/heads/fix-branch",
+        "gh workflow run t.yml -r fix-branch",
+        "gh workflow run t.yml -r=fix-branch",
+        "gh workflow run t.yml -rfix-branch",
+        "gh workflow run t.yml -r dev --ref fix-branch",
+        "gh run rerun 5 --failed",
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+
+
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_git_c_decides_the_checkout_a_push_is_spared_in(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    fix = _checkout(tmp_path / "fix", "fix-branch")
+    other = _checkout(tmp_path / "other", "other-branch")
+    frozen = blocker_window.FROZEN.format(reason="reason")
+    assert blocker_window.pretool("Bash", {"command": f"git -C {other} push"}, "s", fix)[1] == frozen
+    assert blocker_window.pretool("Bash", {"command": f"git -C {other} push origin fix-branch"}, "s", fix)[1] == frozen
+    assert blocker_window.pretool("Bash", {"command": f"git -C {fix} push origin fix-branch"}, "s", other) == (
+        None,
+        None,
+    )
+    assert blocker_window.pretool("Bash", {"command": "git -C ../fix push"}, "s", other) == (None, None)
+    assert blocker_window.pretool("Bash", {"command": f"git -C {fix} push"}, "s", "")[1] == frozen
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "command", "frozen"),
+    [
+        ("push.default", "upstream", "git push", True),
+        ("push.default", "matching", "git push origin", True),
+        ("remote.origin.push", "+refs/heads/*:refs/heads/*", "git push origin fix-branch", True),
+        ("remote.origin.pushurl", "https://github.com/someone/else.git", "git push origin fix-branch", True),
+        ("remote.origin.mirror", "true", "git push origin fix-branch", True),
+        (
+            "url.git@github.com:someone/.pushInsteadOf",
+            "git@github.com:The-Cloud-Clockwork/",
+            "git push origin fix-branch",
+            True,
+        ),
+        ("branch.fix-branch.remote", "upstream", "git push", True),
+        ("branch.fix-branch.pushRemote", "elsewhere", "git push", True),
+        ("remote.pushDefault", "elsewhere", "git push", True),
+        ("push.default", "current", "git push", False),
+        ("push.default", "simple", "git push", False),
+        ("branch.fix-branch.remote", "origin", "git push", False),
+        ("remote.pushDefault", "origin", "git push origin HEAD", False),
+        ("push.followTags", "true", "git push origin fix-branch", True),
+        ("push.followTags", "false", "git push origin fix-branch", False),
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_push_git_config_may_route_elsewhere_stays_frozen(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    key: str,
+    value: str,
+    command: str,
+    frozen: bool,
+) -> None:
+    _branches(monkeypatch, {})
+    panic.engage(store, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    subprocess.run(["git", "-C", cwd, "config", key, value], check=True)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == (blocker_window.FROZEN.format(reason="reason") if frozen else None)
+
+
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_git_config_that_cannot_be_read_counts_as_routed(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[tuple[str, tuple[str, ...]]] = []
+
+    def git(cwd: str, *args: str) -> str:
+        asked.append((cwd, args))
+        return ""
+
+    monkeypatch.setattr(blocker_window, "_git", git)
+    assert blocker_window._routed("/work") is True
+    assert asked == [("/work", ("config", "--list"))]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /work push",
+        "/usr/bin/git -C /work push origin x",
+        "git --no-pager push origin x",
+        "git -c a=b push",
+        "git >/dev/null push origin x",
+        ">/dev/null git push origin x",
+        "gh -R o/r workflow run ci.yml --ref dev",
+        "gh --repo o/r run rerun 5",
+        "gh --repo=o/r workflow run ci.yml",
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_panic_freezes_a_push_behind_git_global_options_or_a_redirection(store: RedisStore, command: str) -> None:
+    panic.engage(store, "reason", True, [], 0)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")[1]
+    assert block == blocker_window.FROZEN.format(reason="reason")
+
+
+@pytest.mark.parametrize(
+    ("tokens", "command"),
+    [
+        ([], ([], [])),
+        (["git"], (["git"], [])),
+        (["git", "-C"], (["git"], [("-C", "")])),
+        (
+            ["/usr/bin/git", "--no-pager", "-C", "x", "-c", "a=b", "push", "-u"],
+            (["git", "push", "-u"], [("--no-pager", ""), ("-C", "x"), ("-c", "a=b")]),
+        ),
+        (
+            ["git", "--git-dir=d", "--work-tree", "w", "push"],
+            (["git", "push"], [("--git-dir=d", ""), ("--work-tree", "w")]),
+        ),
+        (
+            [
+                "git",
+                "--git-dir",
+                "g",
+                "--namespace",
+                "n",
+                "--super-prefix",
+                "s",
+                "--config-env",
+                "e",
+                "--attr-source",
+                "a",
+                "push",
+            ],
+            (
+                ["git", "push"],
+                [
+                    ("--git-dir", "g"),
+                    ("--namespace", "n"),
+                    ("--super-prefix", "s"),
+                    ("--config-env", "e"),
+                    ("--attr-source", "a"),
+                ],
+            ),
+        ),
+        (["gh", "-R", "o/r", "run", "rerun"], (["gh", "run", "rerun"], [("-R", "o/r")])),
+        (["gh", "--repo=o/r", "-R"], (["gh"], [("--repo=o/r", ""), ("-R", "")])),
+        (["kubectl", "-n", "x", "apply"], (["kubectl", "-n", "x", "apply"], [])),
+        (
+            [">/dev/null", "git", "push", "2>", "&", "1", "origin", "&", ">", "out", "dev>x", "3<", "in", "x"],
+            (["git", "push", "origin", "dev", "x"], []),
+        ),
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_command_reads_without_its_redirections_and_git_global_options(
+    tokens: list[str], command: tuple[list[str], list[tuple[str, str]]]
+) -> None:
+    assert blocker_window._command(tokens) == command
+
+
+@pytest.mark.parametrize(
+    ("words", "targets"),
+    [
+        ([], None),
+        (["kubectl", "apply"], None),
+        (["gh", "run", "rerun", "5"], ()),
+        (["gh", "workflow", "run", "t.yml"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a"], ("a",)),
+        (["gh", "workflow", "run", "t.yml", "--ref=b"], ("b",)),
+        (["gh", "workflow", "run", "t.yml", "-r", "c"], ("c",)),
+        (["gh", "workflow", "run", "t.yml", "-r=d"], ("d",)),
+        (["gh", "workflow", "run", "t.yml", "-re"], ("e",)),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "-r", "c"], ("c",)),
+        (["gh", "workflow", "run", "-r", "x", "t.yml"], ("x",)),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "-R", "o/r"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "-Ro/r"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "--repo", "o/r"], None),
+        (["gh", "workflow", "run", "t.yml", "--ref", "a", "--repo=o/r"], None),
+        (["gh", "run", "rerun", "5", "-R", "o/r"], None),
+        (["gh", "run", "rerun", "5", "--repository"], ()),
+        (["git", "push"], ()),
+        (["git", "push", "-u", "origin", "HEAD"], ()),
+        (
+            ["git", "push", "origin", "+HEAD:refs/heads/f", "f", ":", "d:HEAD", "+g"],
+            ("refs/heads/f", "f", "", "HEAD", "g"),
+        ),
+        (["git", "push", "upstream"], None),
+        (["git", "push", "--all"], None),
+        (["git", "push", "--branches"], None),
+        (["git", "push", "--mirror"], None),
+        (["git", "push", "--tags"], None),
+        (["git", "push", "--follow-tags"], None),
+        (["git", "push", "--prune"], None),
+        (["git", "push", "--repo"], None),
+        (["git", "push", "--repo=x"], None),
+    ],
+)
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_spared_command_names_the_refs_it_writes(words: list[str], targets: tuple[str, ...] | None) -> None:
+    assert blocker_window._targets(words) == targets
+
+
+@pytest.mark.feature("panic-fix-spare-reads-target")
+def test_a_dispatch_without_a_ref_names_an_empty_ref() -> None:
+    assert blocker_window._ref(["t.yml"]) == ""
+    assert blocker_window._ref(["t.yml", "--ref"]) == ""
+    assert blocker_window._ref(["t.yml", "-r", "fix", "-f", "a=b"]) == "fix"
 
 
 def _git_runs(monkeypatch: pytest.MonkeyPatch, outcome: Any) -> list[tuple[list[str], dict[str, Any]]]:
@@ -917,21 +1970,21 @@ def _reads(monkeypatch: pytest.MonkeyPatch, answers: dict[tuple[str, ...], str])
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_no_directory_or_no_fix_reads_no_git(monkeypatch: pytest.MonkeyPatch, cwd: str, fixes: tuple[str, ...]) -> None:
     asked = _reads(monkeypatch, {})
-    assert blocker_window._on_fix_branch(cwd, fixes) is False
+    assert blocker_window._on_fix_branch(cwd, fixes, ()) is False
     assert asked == []
 
 
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_a_detached_checkout_reads_no_origin_and_stays_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = _reads(monkeypatch, {("branch", "--show-current"): ""})
-    assert blocker_window._on_fix_branch("/work", (FIX,)) is False
+    assert blocker_window._on_fix_branch("/work", (FIX,), ()) is False
     assert asked == [("branch", "--show-current")]
 
 
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_a_checkout_without_an_origin_stays_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = _reads(monkeypatch, {("branch", "--show-current"): "fix-branch", ("remote", "get-url", "origin"): ""})
-    assert blocker_window._on_fix_branch("/work", (FIX,)) is False
+    assert blocker_window._on_fix_branch("/work", (FIX,), ()) is False
     assert asked == [("branch", "--show-current"), ("remote", "get-url", "origin")]
 
 
@@ -939,16 +1992,17 @@ def test_a_checkout_without_an_origin_stays_frozen(monkeypatch: pytest.MonkeyPat
 def test_the_frozen_check_reads_the_branch_in_the_given_directory(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seen: list[tuple[str, tuple[str, ...]]] = []
+    seen: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
 
-    def on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
-        seen.append((cwd, fixes))
+    def on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -> bool:
+        seen.append((cwd, fixes, targets))
         return True
 
     monkeypatch.setattr(blocker_window, "_on_fix_branch", on_fix_branch)
+    monkeypatch.setattr(blocker_window, "_routed", lambda cwd: False)
     panic.engage(store, "reason", False, [FIX], 0)
     assert blocker_window._frozen("Bash", {"command": "git push"}, "/work") is None
-    assert seen == [("/work", (FIX,))]
+    assert seen == [("/work", (FIX,), ())]
 
 
 @pytest.mark.parametrize("command", ["git status", "gh run list", "kubectl get pods", "echo push", ""])
@@ -992,7 +2046,7 @@ def _quiet_watch(monkeypatch: pytest.MonkeyPatch, seen: list[bool]) -> None:
     monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
     monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
-    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append(ok) or [])
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now, report: seen.append(ok) or [])
 
 
 def test_a_pending_hive_launch_and_a_full_reservation_fail_no_step(

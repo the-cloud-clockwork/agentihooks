@@ -554,7 +554,7 @@ class TestTimeLeftOp:
         ledger_time_left.apply(doc(task("a", "open", "S")), op, ctx)
         assert ctx.meta["time_left"]["inputs"] == {"slots": 1, "ci_minutes": 5, "lab": lab}
         assert ctx.meta["time_left"]["calculation"]["lab"]["classes"] == [
-            {"class": "queue", "pending": 1, "predicted_wait_s": 30.0}
+            {"class": "queue", "pending": 1, "predicted_wait_s": 30.0, "verdict_cache_hit_ratio": None}
         ]
 
     def test_the_op_refuses_a_lab_reading_that_is_not_an_object(self) -> None:

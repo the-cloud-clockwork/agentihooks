@@ -37,7 +37,7 @@ def test_shard_grader_never_restores_an_environment_written_by_head_tests():
     assert not any(step.get("name") == "Use the test environment" for step in steps)
 
 
-def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data():
+def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data() -> None:
     jobs = _jobs()
     split = jobs["split"]["steps"]
     collect = next(step for step in split if step.get("name") == "Adopt latest dev durations")
@@ -56,18 +56,8 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     steps = jobs["shard-check"]["steps"]
     download = next(step for step in steps if step.get("name") == "Download collected tests")
     check = next(step for step in steps if _as_python(step.get("run", "")).startswith("python -m tests.shard_check"))
-    if "name" in download["with"]:
-        assert download["with"]["name"] == upload["with"]["name"]
-        assert f"--collected {download['with']['path']}/collected.json" in check["run"]
-    else:
-        assert "--collected collected-data/collected.json" in check["run"]
-        assert download["with"] == {
-            "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
-            "path": "shard-data",
-        }
-        layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-        assert 'mv "shard-data/collected-$PYTHON_VERSION" collected-data' in layout["run"]
-        assert steps.index(download) < steps.index(layout) < steps.index(check)
+    assert download["with"]["name"] == upload["with"]["name"]
+    assert f"--collected {download['with']['path']}/collected.json" in check["run"]
     assert steps.index(download) < steps.index(check)
 
 
@@ -151,37 +141,36 @@ def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path, interpr
     assert "Ran 12 tests" in summary
 
 
-@pytest.mark.parametrize("case", ["complete", "missing", "duplicate", "reused", "missing_collection", "missing_plan"])
-def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path, case):
+@pytest.mark.parametrize("case", ["complete", "missing", "duplicate", "reused"])
+def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path: Path, case: str) -> None:
     steps = _jobs()["shard-check"]["steps"]
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
     assert [download["with"] for download in downloads] == [
-        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
-        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
         {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
         {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
     ]
-    branch, branch_retry = downloads[4], downloads[5]
+    branch, branch_retry = downloads[2], downloads[3]
     assert branch["if"] == "needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'"
     assert branch["continue-on-error"] is True
     assert branch_retry["if"] == steps[steps.index(branch_retry) - 1]["if"] == "steps.branch-plan.outcome == 'failure'"
-    for first, retry in ((downloads[0], downloads[1]), (downloads[2], downloads[3])):
-        assert first["continue-on-error"] is True
-        assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"
-        assert "continue-on-error" not in retry
-        assert "if" not in first
-        wait = steps[steps.index(retry) - 1]
-        assert wait["if"] == retry["if"]
-        assert wait["run"].splitlines()[-1] == "sleep 30"
+    first, retry = downloads[0], downloads[1]
+    assert first["continue-on-error"] is True
+    assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"
+    assert "continue-on-error" not in retry
+    assert "if" not in first
+    wait = steps[steps.index(retry) - 1]
+    assert wait["if"] == retry["if"]
+    assert wait["run"].splitlines()[-1] == "sleep 30"
     require = next(step for step in steps if step.get("name") == "Require every planned shard report")
-    assert steps.index(downloads[2]) < steps.index(downloads[3]) < steps.index(require)
+    assert steps.index(first) < steps.index(retry) < steps.index(require)
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
-    layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[2])
-    root = tmp_path / "shard-data"
+    collected = next(step for step in steps if step.get("name") == "Download collected tests")
+    reused = next(step for step in steps if step.get("name") == "Download the tests this run reuses")
+    assert reused["if"] == "needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'"
+    assert steps.index(collected) < steps.index(reused) < steps.index(prefetch) < steps.index(first)
     reports = tmp_path / "shard-reports"
     for index, nodeids in enumerate(
         (["suite::a"], ["suite::a", "suite::b"] if case == "duplicate" else ["suite::b"]), 1
@@ -192,27 +181,14 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         directory.mkdir(parents=True)
         (directory / "durations.json").write_text(json.dumps(dict.fromkeys(nodeids, 0.1)))
         (directory / "durations.sha256").write_text("a" * 64)
-    root.mkdir()
-    if case != "missing_collection":
-        directory = root / "collected-3.12"
-        directory.mkdir()
-        collected = ["suite::a", "suite::b", *(["suite::reused"] if case == "reused" else [])]
-        (directory / "collected.json").write_text(json.dumps(collected))
+    collection = tmp_path / collected["with"]["path"]
+    collection.mkdir()
+    collected_ids = ["suite::a", "suite::b", *(["suite::reused"] if case == "reused" else [])]
+    (collection / "collected.json").write_text(json.dumps(collected_ids))
     if case == "reused":
-        directory = root / "reused-tests-3.12"
-        directory.mkdir()
-        (directory / "reused-tests.json").write_text(json.dumps({"tests": ["suite::reused"]}))
-    arranged = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", layout["run"]],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHON_VERSION": "3.12", "REUSED": "1" if case in {"reused", "missing_plan"} else "0"},
-        capture_output=True,
-        text=True,
-    )
-    if case in {"missing_collection", "missing_plan"}:
-        assert arranged.returncode != 0
-        return
-    assert arranged.returncode == 0, arranged.stdout + arranged.stderr
+        plan = tmp_path / reused["with"]["path"]
+        plan.mkdir()
+        (plan / "reused-tests.json").write_text(json.dumps({"tests": ["suite::reused"]}))
     command = [
         sys.executable,
         "-S",

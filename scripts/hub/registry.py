@@ -1,11 +1,15 @@
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus
 from scripts.events.config import QueuePolicy
 from scripts.events.envelope import Envelope, _count
 from scripts.hub import lease
+
+if TYPE_CHECKING:
+    from scripts.swarm import readiness
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
@@ -57,7 +61,7 @@ def durable(reactor: Reactor) -> str:
 REACTORS = Registry()
 
 
-def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
+def configured(bus: Bus, clock: lease.Clock = lease.wall_ms, source: "readiness.Source | None" = None) -> Registry:
     from scripts.hub.claims import Claims
     from scripts.hub.hive_loss import HiveLoss
     from scripts.hub.inbox_wake import InboxWake
@@ -80,8 +84,8 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms) -> Registry:
             HiveLoss(bus, clock).reactor(),
             Lifecycle(bus).reactor(),
             Reconciler(bus, clock=clock).reactor(),
-            Readiness(bus, clock=clock).reactor(),
-            Preemption(clock=clock).reactor(),
+            Readiness(bus, source=source, clock=clock).reactor(),
+            Preemption(clock=clock, source=source).reactor(),
             Pulls(bus, clock=clock).reactor(),
             LaunchChecks(bus, clock=clock).reactor(),
         ]

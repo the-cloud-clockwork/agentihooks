@@ -1,0 +1,16 @@
+rules:
+  - id: replica-standby-sleeps-past-lock-lapse
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A standby controller replica sleeps one whole poll between takes of the replica lock without reading how long
+      the held lock has left. A leader killed while Redis was down leaves its lock to lapse, and the standby behind
+      it keeps standing by up to one poll past the lapse while the liveness probe already counts the lapsed lock as
+      no leader and kills the standby. Wait no longer than the held lock has left to live.
+    paths:
+      include:
+        - /scripts/swarm/replica.py
+        - replica-standby-sleeps-past-lock-lapse.py
+    pattern: |
+      while not $LOCK.take():
+          $WAIT($POLL)

@@ -42,6 +42,43 @@ def test_build_and_parse_round_trip():
     assert naming.lane_of("operator") == ""
 
 
+@pytest.mark.feature("agent-number-past-four-digits")
+def test_an_agent_number_past_four_digits_builds_and_parses() -> None:
+    name = naming.build("engineer", "323133", 10_000)
+    assert name == "engineer@323133-10000"
+    parsed = naming.parse(name)
+    assert parsed is not None
+    assert (parsed.kind, parsed.code, parsed.number, parsed.lane) == ("engineer", "323133", 10_000, "eng")
+    assert naming.PATTERNS["pane"].fullmatch(naming.plain(name))
+    million = naming.build("engineer", "323133", 1_000_000)
+    assert million == "engineer@323133-1000000"
+    parsed_million = naming.parse(million)
+    assert parsed_million is not None
+    assert parsed_million.number == 1_000_000
+    assert naming.PATTERNS["pane"].fullmatch(naming.plain(million))
+
+
+@pytest.mark.feature("agent-number-past-four-digits")
+def test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped(store: RedisStore) -> None:
+    code = store.config("sw").code
+    store.names.names_state.amend("seq", code, lambda seq: {**(seq or {}), "engineer": 9999}, lambda _: None)
+    name = store.next_name("sw", "eng")
+    assert name == f"engineer@{code}-10000"
+    assert name in [row["name"] for row in store.names.names("sw")]
+
+
+def test_build_refuses_an_invalid_code_at_any_number() -> None:
+    with pytest.raises(naming.NamingError):
+        naming.build("engineer", "nothex", 5)
+    with pytest.raises(naming.NamingError):
+        naming.build("engineer", "nothex", 10_000)
+
+
+def test_build_refuses_an_unknown_kind_with_a_valid_code_and_number() -> None:
+    with pytest.raises(naming.NamingError):
+        naming.build("nope", "a1b2c3", 5)
+
+
 def test_creating_a_swarm_mints_one_code_kept_on_its_record_and_in_the_registry(store):
     code = store.config("sw").code
     assert re.fullmatch(r"[0-9a-f]{6}", code)

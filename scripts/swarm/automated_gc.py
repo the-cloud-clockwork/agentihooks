@@ -1,7 +1,12 @@
 import json
+from typing import TYPE_CHECKING, Any
 
 from scripts.inbox import store as inbox_store
 from scripts.swarm import idle, outage
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.tick.steps.claims import Runtime
 
 LIMIT_MS = 30 * 60 * 1000
 IDLE_ANSWER = "nothing to do"
@@ -37,12 +42,14 @@ def _held(inbox, item_id):
     return inbox, inbox.find(item_id, "automated-gc")
 
 
-def _answer(inbox, agent, record, now_ms):
+def _answer(inbox: inbox_store.InboxStore, agent: "AgentRecord", record: dict[str, Any], now_ms: int) -> bool:
     _, request = _held(inbox, record["request"])
     if request is None:
         record["request"] = ""
         return False
     if not request.reason.startswith(REPLY_PREFIX):
+        if request.state in inbox_store.CLOSED:
+            record["request"] = ""
         return False
     world, answer = _held(inbox, request.reason.removeprefix(REPLY_PREFIX))
     if answer is None:
@@ -91,13 +98,21 @@ def _deliver(inbox, runtime, agent, record):
     )
 
 
-def _probe(inbox, store, slug, runtime, agent, record, now_ms):
+def _probe(
+    inbox: inbox_store.InboxStore,
+    store: "RedisStore",
+    slug: str,
+    runtime: "Runtime",
+    agent: "AgentRecord",
+    record: dict[str, Any],
+    now_ms: int,
+) -> list[str]:
     if not record["request"]:
         beat = idle.heartbeat(store.redis, slug, agent.name) or {}
         active = max(agent.started_at, beat.get("at", 0), idle.last_prompt(store.redis, slug, agent.name) or 0)
         if now_ms - max(active, record["last_probe"]) < LIMIT_MS:
             return []
-        item = inbox.send("swarm", agent.name, TEXT, ref="automated-activity", task=agent.task)
+        item = inbox.send("swarm", agent.name, TEXT, ref=f"automated-activity:{now_ms}", task=agent.task)
         record.update(request=item.id, last_probe=now_ms, delivered=False)
         _save(store, slug, agent, record)
     if record.get("delivered"):

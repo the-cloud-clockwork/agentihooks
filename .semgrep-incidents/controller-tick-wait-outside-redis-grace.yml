@@ -1,0 +1,18 @@
+rules:
+  - id: controller-tick-wait-outside-redis-grace
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The controller waits on the Redis backed scheduler timer directly. During a Redis outage the timer raises
+      outside the pass loop's Redis grace window. In the kind proof's Redis readiness outage this ended the controller
+      0.2 seconds in and left its replica lock behind. Wait through _tick_wait, which finishes the wait on the local
+      clock when Redis refuses the timer.
+    paths:
+      include:
+        - /scripts/swarm/controller.py
+        - controller-tick-wait-outside-redis-grace.py
+    patterns:
+      - pattern: scheduled_wait(...)
+      - pattern-not-inside: |
+          def _tick_wait(...):
+              ...

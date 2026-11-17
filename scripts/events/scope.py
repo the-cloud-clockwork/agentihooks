@@ -66,6 +66,9 @@ class ScopedQueue:
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
         return self._queue.withdraw(stale)
 
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        self._queue.release(delivery, delay_ms)
+
 
 class MergedConsumer:
     def __init__(self, logs: Callable[[], list[EventLog]], durable: str, logical: str, policy: QueuePolicy | None):

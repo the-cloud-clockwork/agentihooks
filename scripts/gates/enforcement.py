@@ -20,7 +20,7 @@ class Enforcement:
 
 
 STALL_WATCH = Enforcement("stall")
-NIGHT_WATCH = Enforcement("nightwatch")
+NIGHT_WATCH = Enforcement("nightwatch", "enforce")
 MASTER_RESET = Enforcement("reset")
 FEATURE = Enforcement("feature")
 ENFORCEMENTS = {
