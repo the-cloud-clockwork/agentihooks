@@ -9,6 +9,7 @@ import sys
 import threading
 from collections.abc import Callable
 from contextlib import nullcontext
+from email.message import Message
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock
@@ -403,6 +404,7 @@ def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard:
     from scripts.swarm_ledger.repository import legacy
 
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", set(server.ALLOWED_HOSTS))
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
@@ -631,6 +633,31 @@ def test_the_api_service_binds_its_own_address_and_names_it_in_the_start_line(
         f"ledger API service on {scheme}://{api_service.HOST}:{api_service.PORT} answering "
         f"GET, POST, PUT, PATCH, OPTIONS, dir {nested}\n"
     )
+
+
+@pytest.mark.feature("compose-api-health-and-front-proxy")
+def test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port(
+    serving: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import api_service
+
+    sent: list[tuple[int, str, str]] = []
+
+    def send(code: int, body: str, ctype: str) -> None:
+        sent.append((code, body, ctype))
+
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {"api:8766"})
+    monkeypatch.setattr(api_service, "HOST", "0.0.0.0")
+    monkeypatch.setattr(api_service, "PORT", 8766)
+    api_service.serve()
+    headers = Message()
+    headers["Host"] = "127.0.0.1:8766"
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
+    handler.headers, handler.path = headers, "/healthz"
+    monkeypatch.setattr(handler, "send", send)
+    handler.do_GET()
+    assert sent == [(200, json.dumps({"dir": str(serving)}), "application/json")]
+    assert server.ALLOWED_HOSTS == {"api:8766", "127.0.0.1:8766", "localhost:8766"}
 
 
 class Piped(io.StringIO):

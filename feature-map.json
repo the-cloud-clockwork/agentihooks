@@ -18,6 +18,20 @@
       ]
     },
     {
+      "id": "serena-router-start-stops-waiting-on-an-exited-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-hive-proof-no-live-hive",
+      "behaviour": "Starting the Serena router without a systemd user session stops waiting the moment the router process it started exits before opening its port, and reports the router down with its exit status, while a router that still runs is waited on until its port opens. A hive pod with no serena binary therefore leaves the router start within seconds instead of ninety, writes its first heartbeat and registers as a live hive inside the worker hive pod proof's sixty second window.",
+      "seam": "serena_router_daemon.start on the pidfile path, which hive run reaches through serena_router_daemon.ensure",
+      "rules": [
+        "serena-router-start-waits-on-an-exited-router"
+      ],
+      "tests": [
+        "tests/test_serena_router_daemon.py::test_start_reports_the_router_down_as_soon_as_its_process_exits_before_opening_its_port",
+        "tests/test_serena_router_daemon.py::test_start_keeps_waiting_for_a_running_router_until_its_port_opens"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
@@ -64,6 +78,18 @@
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_adoption_sends_start_and_stop_to_the_bundle_swarm_service",
         "tests/swarm_ledger/test_server_compose.py::test_a_failed_pull_still_starts_the_service_on_its_local_image"
+      ]
+    },
+    {
+      "id": "compose-api-health-and-front-proxy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
+      "behaviour": "The ledger API service admits the Host its own health check sends, its loopback names on its own port, so the Compose API service turns healthy and the front starts. The Compose front resolves the swarm and api names through the Compose DNS at request time, so it reaches them and finds a recreated container. Every front config forwards each request with the Host the client sent, port included, so a client on the public URL's host and port passes the ledger server and API host checks.",
+      "seam": "scripts.swarm_ledger.api_service.serve, and the front nginx configs of the Compose stack, the swarm init stack and the local ledger Compose file",
+      "tests": [
+        "tests/test_swarm_v2_ledger_writer.py::test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port",
+        "tests/test_compose_stack.py::test_the_front_forwards_the_host_the_client_sent_with_its_port",
+        "tests/test_compose_stack.py::test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time"
       ]
     },
     {
