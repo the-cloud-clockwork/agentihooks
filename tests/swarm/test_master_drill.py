@@ -31,24 +31,25 @@ NOW = 1_800_000_000_000
 MINUTE = 60_000
 START = NOW - 30 * MINUTE
 OLD = "master@abc123-0001"
-NO_SLOT = "no session slot for the master, waiting"
+NO_SLOT = "no hive for master advertises a claude slot"
 QUIET = {"repo": "o/r", "queue": 0, "merged": 0, "failed": "none observed", "streak": 0, "head": 0}
 
 
 class LoginRuntime(FakeRuntime):
     """The tick tests' fake runtime, launching each master on the route the test names after refusing the first
-    ``refused`` session slots it is asked for."""
+    ``refused`` placements it is asked for, the refusal a forced master start still meets."""
 
     def __init__(self, route: str, refused: int = 0) -> None:
-        """Launch on ``route``, refuse the first ``refused`` slot checks and report every launch."""
+        """Launch on ``route``, refuse the first ``refused`` placements and report every launch."""
         super().__init__()
         self.route, self.refused, self.reports, self.placement = route, refused, True, ""
         self.events: list[dict[str, Any]] = []
+        self.placements: list[dict[str, Any]] = []
 
-    def has_capacity(self, config: SwarmConfig) -> bool:
-        """Record the check and refuse it while refused checks remain."""
-        self.capacity_for.append(config.slug)
-        return len(self.capacity_for) > self.refused
+    def placement_refusal(self, lane: str, task: dict[str, Any]) -> str:
+        """Record the placement asked for and refuse it while refused placements remain."""
+        self.placements.append(task)
+        return NO_SLOT if len(self.placements) <= self.refused else ""
 
     def reported(self, agent: AgentRecord) -> bool:
         """Whether a live launched agent reported, while the test lets launches report."""
