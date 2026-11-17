@@ -242,8 +242,8 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$RUNNER_TEMP/install-smoke-venv/bin/agentihooks" --help > /dev/null
 
   ledger-load:
-    needs: [reuse, admission]
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
+    needs: [reuse, admission, select]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' && needs.select.outputs.ledger == 'run') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
     uses: ./.github/workflows/ledger-load.yml
     with:
       base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
@@ -433,6 +433,7 @@ jobs:
       legs: ${{ steps.select.outputs.legs }}
       count: ${{ steps.select.outputs.count }}
       sonar: ${{ steps.select.outputs.sonar }}
+      ledger: ${{ steps.select.outputs.ledger }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
@@ -879,6 +880,11 @@ jobs:
             done < "$RUNNER_TEMP/changed-paths"
           fi
           echo "sonar=$sonar" >> "$GITHUB_OUTPUT"
+          ledger=skip
+          while IFS= read -r -d '' path; do
+            case "$path" in scripts/swarm_ledger/* | tests/ledger_load/* | .github/workflows/ledger-load.yml) ledger=run ;; esac
+          done < "$RUNNER_TEMP/changed-paths"
+          echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
           durations=("$RUNNER_TEMP/grader/.test_durations")
           for file in ~/dev-durations/.test_durations ~/dev-durations/.test_durations-3.12; do
             [[ -f "$file" ]] && durations+=("$file")
@@ -3786,6 +3792,7 @@ jobs:
                 ["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]
                 - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
+                + (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
               end) as $required
               | . as $jobs

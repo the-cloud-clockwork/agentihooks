@@ -16,10 +16,11 @@ The gate is `tests.ledger_load.gate`. The `Ledger server load` workflow runs it.
 |---|---|---|
 | Push to `dev` | yes, as the `ledger-load` job of the Tests workflow | [promotion](delivery-tiers.md) |
 | `workflow_dispatch` of Tests that passes admission | yes | promotion |
-| Pull request and merge group | no | none |
+| Pull request into `dev` that changes `scripts/swarm_ledger/`, `tests/ledger_load/` or `.github/workflows/ledger-load.yml` | yes, as the `ledger-load` job of the Tests workflow | [pull request](delivery-tiers.md) |
+| Any other pull request, and the merge group | no | none |
 | `workflow_dispatch` of `Ledger server load` | yes, under its own name in a [hosted lane](../ci-timing.md) | none |
 
-`ledger-load` is a need of `Gate — Required`, so a red run holds promotion of that `dev` head to `main`; it never holds the merge queue. Per [delivery tiers](delivery-tiers.md), a red run gets a fixer task, never a rerun until it passes. The job has a fifteen minute timeout and a green run takes about two minutes and fifteen seconds, ninety seconds of which are the workload.
+`ledger-load` is a need of `Gate — Required`, so a red run holds promotion of that `dev` head to `main`; it never holds the merge queue. On a pull request the `select` job marks `ledger` as `run` when the pull request changes one of those paths, and `Gate — Required` then requires `ledger-load` to pass before the pull request can enter the queue; otherwise the job is skipped and must stay skipped. Per [delivery tiers](delivery-tiers.md), a red run gets a fixer task, never a rerun until it passes. The job has a fifteen minute timeout and a green run takes about two minutes and fifteen seconds, ninety seconds of which are the workload.
 
 The job keys its declared inputs with the [CI result cache](ci-result-cache.md). When the key hits, the gate step is skipped and the earlier green result stands. Only a passing push or dispatch saves the key.
 
