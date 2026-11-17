@@ -2,6 +2,8 @@ import argparse
 import json
 import re
 
+FORCED = "--agentihooks-forced"
+
 
 def check(profile: str, name: str, args: list[str], harness: str = "claude") -> list[str]:
     if harness != "claude" or profile != "master" or re.fullmatch(r"master 1 · \S+", name) is None:

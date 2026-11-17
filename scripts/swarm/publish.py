@@ -410,8 +410,8 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
-def grade_and_push(root: Path, primary: Path, fields: dict[str, str], head: str) -> None:
-    held = blocker_window.held_push(str(root), fields["branch"])
+def grade_and_push(slug: str, root: Path, primary: Path, fields: dict[str, str], head: str) -> None:
+    held = blocker_window.held_push(str(root), fields["branch"], slug)
     if held:
         raise SwarmError(held)
     python = gate_python(primary)
@@ -451,7 +451,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         if changed or remote_head(root, fields["branch"]) != head:
-            grade_and_push(root, primary, fields, head)
+            grade_and_push(slug, root, primary, fields, head)
         else:
             fields["unchanged"] = (
                 "no changes in the listed files and the remote branch already points at this head; nothing pushed"

@@ -1164,7 +1164,18 @@ def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refu
 def panic_on(rig: SimpleNamespace) -> None:
     from scripts.swarm import panic
 
-    panic.engage(rig.store, "test", False, (), NOW)
+    panic.engage(rig.store, SLUG, "test", False, (), NOW)
+
+
+@pytest.mark.feature("panic-holds-only-its-swarm")
+def test_another_swarms_panic_leaves_the_stop_hook_pushing(rig: SimpleNamespace) -> None:
+    from scripts.swarm import panic
+
+    panic.engage(rig.store, f"{SLUG}-other", "test", False, (), NOW)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
 
 
 def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig: SimpleNamespace) -> None:
@@ -1210,7 +1221,7 @@ def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
 
     from scripts.swarm import panic
 
-    def broken(store: object) -> NoReturn:
+    def broken(store: object, slug: str) -> NoReturn:
         raise RedisError("down")
 
     monkeypatch.setattr(panic, "state", broken)
