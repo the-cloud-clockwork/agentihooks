@@ -1,4 +1,4 @@
-import importlib
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -11,11 +11,18 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _load(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, ROOT / "tests/ci_charts" / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _graders(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, ModuleType]:
-    monkeypatch.syspath_prepend(str(ROOT / "tests/ci_charts"))
-    for name in ("chart_timers", "chart_pod_templates"):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    return importlib.import_module("chart_timers"), importlib.import_module("chart_pod_templates")
+    timers = _load("chart_timers")
+    monkeypatch.setitem(sys.modules, "chart_timers", timers)
+    return timers, _load("chart_pod_templates")
 
 
 def _chart(root: Path, required: bool) -> Path:
