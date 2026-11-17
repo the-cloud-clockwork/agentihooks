@@ -85,7 +85,7 @@ def _pane(tmp_path: Path, argv: list[str], **_: Any) -> SimpleNamespace:
     words = shlex.split(line)
     claude_args = words[words.index("--") + 1 :]
     install.cmd_claude(claude_args)
-    route, _ = init_agent._take_route_report(Path(claude_args[claude_args.index("--agentihooks-report") + 1]))
+    route = init_agent._take_route_report(Path(claude_args[claude_args.index("--agentihooks-report") + 1]))[0]
     lines = [
         "status=started",
         f"route_status={route['status']}",
