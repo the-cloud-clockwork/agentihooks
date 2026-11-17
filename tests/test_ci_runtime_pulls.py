@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -494,6 +495,59 @@ fi
         for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine")
         if image != failure
     }
+
+
+def test_the_ready_list_reuses_every_runtime_image_the_parallel_smokes_pull(tmp_path: Path) -> None:
+    """Every image a parallel smoke always pulls is pre pulled by the build step and reused with no pull or tag."""
+    steps = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    parallel = next(
+        step for step in steps if step.get("run", "").startswith("bash scripts/packaging/swarm-smoke-parallel.sh ")
+    )
+    assert parallel["env"]["SWARM_SMOKE_RUNTIME_IMAGES_READY"] == "true"
+    build = next(step["run"] for step in steps if step.get("name") == "Build the swarm image")
+    pulled: set[str] = set()
+    for script in parallel["run"].split()[2:]:
+        text = (ROOT / script).read_text()
+        names = dict(re.findall(r"^(\w+)=(\S+)$", text, re.M))
+        pulled |= {
+            names.get(image.strip('"$'), image)
+            for image in re.findall(
+                r"^(?:bash scripts/packaging/pull-runtime-image\.sh|require_image) (\S+)$", text, re.M
+            )
+        }
+    assert pulled
+    assert pulled <= set(re.findall(r"docker tag \S+ (mirror\.gcr\.io/library/\S+)", build)), pulled
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == image && "$2" == inspect ]]; then
+  echo amd64
+  exit 0
+fi
+exit 17
+""",
+    )
+    for image in sorted(pulled):
+        log = tmp_path / f"{image.rsplit('/', 1)[1]}.log"
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+            env={
+                **os.environ,
+                "PATH": f"{tools}:{os.environ['PATH']}",
+                "PULL_LOG": str(log),
+                "SWARM_SMOKE_RUNTIME_IMAGES_READY": "true",
+            },
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, (image, result.stderr)
+        calls = log.read_text().splitlines()
+        assert len(calls) == 1, (image, calls)
+        assert " image inspect " in f" {calls[0]} " and calls[0].endswith(image)
 
 
 def dockerfile_bases():
