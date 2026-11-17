@@ -4163,6 +4163,21 @@
       ]
     },
     {
+      "id": "ledger-bin-tidy-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2592",
+      "behaviour": "A bin tidy pass with nothing to bin or purge takes no exclusive writer lock, so it never stalls ledger writers; a pass with work still bins or purges under the writer lock.",
+      "seam": "The ledger bin tidy and its writer lock",
+      "tests": [
+        "tests/swarm_ledger/test_bin_storage.py::test_an_idle_tidy_pass_takes_no_exclusive_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_at_exactly_the_kept_days_is_kept_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_an_expired_bin_entry_is_purged_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_ledger_due_for_the_bin_is_binned_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_recent_restore_keeps_an_old_ledger_out_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_without_a_time_is_never_purged"
+      ]
+    },
+    {
       "id": "ledger-column-resize",
       "origin": "inventory",
       "behaviour": "Every column on the ledger page and HOME resizes by its header grip, and widths are saved beside panel sizes and clear with Reset layout.",

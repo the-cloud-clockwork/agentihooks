@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -105,3 +106,95 @@ def test_auto_bin_treats_a_never_touched_ledger_as_idle_from_time_zero(monkeypat
         ),
     )
     assert bin_storage.auto_bin(now=604800001) == ["y"]
+
+
+def _locks_taken(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    taken: list[str] = []
+    begin = bin_storage.request_metrics.begin
+
+    def recorded(connection: Any, statement: str) -> None:
+        taken.append(statement)
+        begin(connection, statement)
+
+    monkeypatch.setattr(bin_storage.request_metrics, "begin", recorded)
+    return taken
+
+
+def _small(slug: str, updated_at: int) -> dict:
+    return {
+        "slug": slug,
+        "size": "small",
+        "finished": False,
+        "updated_at": updated_at,
+        "created_at": updated_at,
+        "closed_at": None,
+    }
+
+
+@pytest.mark.feature("ledger-bin-tidy-lock")
+def test_an_idle_tidy_pass_takes_no_exclusive_writer_lock(monkeypatch):
+    now = 10 * bin_storage.domain.DAY_MS
+    bin_storage.delete("recent", now=now - bin_storage.domain.DAY_MS)
+    monkeypatch.setattr(repository, "summaries", lambda connection: [_small("active", now)])
+    taken = _locks_taken(monkeypatch)
+    assert bin_storage.domain.tidy(now) == ([], [])
+    assert taken == []
+    assert bin_storage.entries() == {"recent": now - bin_storage.domain.DAY_MS}
+
+
+@pytest.mark.feature("ledger-bin-tidy-lock")
+def test_a_bin_entry_at_exactly_the_kept_days_is_kept_without_the_writer_lock(monkeypatch):
+    kept = bin_storage.domain.KEEP_DAYS * bin_storage.domain.DAY_MS
+    bin_storage.delete("edge", now=5)
+    taken = _locks_taken(monkeypatch)
+    assert bin_storage.purge_expired(now=5 + kept) == []
+    assert taken == []
+    assert bin_storage.entries() == {"edge": 5}
+
+
+@pytest.mark.feature("ledger-bin-tidy-lock")
+def test_an_expired_bin_entry_is_purged_under_the_writer_lock(monkeypatch):
+    kept = bin_storage.domain.KEEP_DAYS * bin_storage.domain.DAY_MS
+    bin_storage.delete("gone", now=5)
+    bin_storage.delete("young", now=5 + kept)
+    taken = _locks_taken(monkeypatch)
+    assert bin_storage.purge_expired(now=6 + kept) == ["gone"]
+    assert taken == [bin_storage.BEGIN_IMMEDIATE]
+    assert bin_storage.entries() == {"young": 5 + kept}
+
+
+@pytest.mark.feature("ledger-bin-tidy-lock")
+def test_a_ledger_due_for_the_bin_is_binned_under_the_writer_lock(monkeypatch):
+    now = 100 * bin_storage.domain.DAY_MS
+    bin_storage.delete("parked", now=now)
+    monkeypatch.setattr(
+        repository, "summaries", lambda connection: [_small("stale", 0), _small("parked", 0), _small("fresh", now)]
+    )
+    taken = _locks_taken(monkeypatch)
+    assert bin_storage.auto_bin(now=now) == ["stale"]
+    assert taken == [bin_storage.BEGIN_IMMEDIATE]
+    assert bin_storage.entries() == {"parked": now, "stale": now}
+
+
+@pytest.mark.feature("ledger-bin-tidy-lock")
+def test_a_recent_restore_keeps_an_old_ledger_out_without_the_writer_lock(monkeypatch):
+    now = 100 * bin_storage.domain.DAY_MS
+    bin_storage.delete("back", now=1)
+    bin_storage.restore("back", now=now - bin_storage.domain.DAY_MS)
+    monkeypatch.setattr(repository, "summaries", lambda connection: [_small("back", 0)])
+    taken = _locks_taken(monkeypatch)
+    assert bin_storage.auto_bin(now=now) == []
+    assert taken == []
+    assert bin_storage.entries() == {}
+
+
+@pytest.mark.feature("ledger-bin-tidy-lock")
+def test_a_bin_entry_without_a_time_is_never_purged(monkeypatch):
+    store: Any = repository
+    with store.connect() as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        store.save_registry(connection, "bin", {"odd": "later"})
+    taken = _locks_taken(monkeypatch)
+    assert bin_storage.purge_expired(now=100 * bin_storage.domain.DAY_MS) == []
+    assert taken == []
+    assert bin_storage.registries()["bin"] == {"odd": "later"}
