@@ -4550,6 +4550,23 @@
       ]
     },
     {
+      "id": "panic-publish-holds",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-honours-panic",
+      "behaviour": "While fleet panic is on, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
+      "seam": "swarm publish before it grades and pushes, and the panic guard's push check it asks",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing",
+        "tests/swarm/test_publish.py::test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_any_branch_without_panic",
+        "tests/swarm/test_panic.py::test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",
@@ -6566,6 +6583,21 @@
       ]
     },
     {
+      "id": "controller-gh-token-in-process",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gh-token-in-process",
+      "behaviour": "A process that holds the GitHub App key in App mode, as the swarm controller does, runs every gh call of github_reads.rest on the real gh client with the installation token its own process minted and cached, keeping the read reserve check in process, so no Python token wrapper starts and no token is minted per call; a token it cannot mint or a read below the reserve is left to the gh wrapper unchanged, and a process without the key runs gh exactly as before.",
+      "seam": "scripts.swarm.github_reads.rest through scripts.swarm.github_reads._signed and scripts.github_app_cli.signed",
+      "tests": [
+        "tests/swarm/test_github_reads.py::test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token",
+        "tests/swarm/test_github_reads.py::test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper",
+        "tests/swarm/test_github_reads.py::test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged",
+        "tests/test_github_app_cli.py::test_signed_runs_the_wrapped_client_on_the_process_token_over_the_caller_environment",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_read_below_the_reserve_to_the_wrapper",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_token_the_process_cannot_mint_to_the_wrapper"
+      ]
+    },
+    {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
@@ -8021,6 +8053,16 @@
         "tests/swarm/test_master_lock.py::test_the_tick_master_step_and_master_up_release_the_lock_after_their_launch",
         "tests/swarm/test_master_replace.py::test_master_up_replace_retires_a_starting_front_door_master_before_it_starts_one",
         "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant"
+      ]
+    },
+    {
+      "id": "semgrep-rule-exceptions-shrink",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-exceptions-shrink",
+      "behaviour": "The Semgrep scan step Rule exceptions only shrink counts, per rule id, the pattern-not, pattern-not-inside and pattern-not-regex entries at any depth and the paths.exclude entries of every rule file in each .semgrep folder at the merge base and on the head, fails naming each count of a rule the merge base holds that grew, lets a rule id the merge base lacks start its counts, skips fixtures and is red when the head holds no rule, so an exception added inside an existing rule turns the step red.",
+      "seam": "The Semgrep scan step Rule exceptions only shrink run text, executed over a planted repository whose head changes one rule's exceptions",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
       ]
     }
   ],
