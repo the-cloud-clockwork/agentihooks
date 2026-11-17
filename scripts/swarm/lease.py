@@ -98,20 +98,6 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
     return document.write(store, slug, take)
 
 
-def transfer(store: RedisStore, slug: str, owner: str, source_epoch: int, expected_epoch: int) -> Lease:
-    def move(doc: dict[str, Any]) -> Any:
-        at = now_ms(store)
-        if doc["legacy_owner"]:
-            raise SwarmError("the controller lease belongs to an incompatible owner")
-        live = _live(doc, at)
-        if (live.epoch if live else 0) != expected_epoch or (live and live.owner != owner):
-            raise SwarmError(STALE)
-        epoch = max(doc["epoch"], source_epoch, live.epoch if live else 0) + 1
-        return _hold(doc, Lease(owner, epoch, at + ttl_ms()))
-
-    return document.write(store, slug, move)
-
-
 def _check(doc: dict, at: int, held: Lease | int) -> None:
     live = _live(doc, at)
     if isinstance(held, Lease):
