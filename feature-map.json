@@ -4777,6 +4777,32 @@
       ]
     },
     {
+      "id": "panic-holds-only-its-swarm",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-swarm-scoped",
+      "behaviour": "Panic belongs to the swarm that pressed it: its push, rerun, dispatch and deploy freeze holds only sessions bound to that swarm, sessions bound to another swarm and unbound sessions keep every command, the sweep cancels only runs on worktree branches of that swarm's agents and the runs those branches triggered, and a legacy fleet panic holds only the swarm its reason names.",
+      "seam": "the blocker window PreToolUse hook, swarm panic on and the tick pass panic sweep",
+      "tests": [
+        "tests/swarm/test_panic_scope.py::test_panic_on_one_swarm_leaves_other_swarms_and_unbound_sessions_free",
+        "tests/swarm/test_panic_scope.py::test_the_panic_button_cancels_only_the_runs_of_its_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_panic_holds_only_the_swarm_its_reason_names",
+        "tests/swarm/test_panic_scope.py::test_the_tick_sweep_cancels_only_the_runs_of_the_held_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_the_owner_names_only_branches_of_the_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_swarm_without_a_code_owns_no_branch",
+        "tests/swarm/test_panic_scope.py::test_one_swarms_errors_and_failed_passes_reach_only_its_own_panic",
+        "tests/swarm/test_panic_scope.py::test_each_swarm_keeps_its_own_cancel_minute",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_the_legacy_fleet_record_only_for_the_swarm_it_names",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_only_its_own_swarms_kept_fixes",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_record_naming_no_swarm_holds_none",
+        "tests/swarm/test_panic_scope.py::test_an_unbound_session_never_reads_panic",
+        "tests/swarm/test_panic_scope.py::test_swarm_publish_holds_only_the_panicking_swarms_push",
+        "tests/swarm/test_panic_scope.py::test_another_swarms_panic_opens_no_window_for_this_master",
+        "tests/swarm/test_panic_scope.py::test_the_panic_messages_name_the_held_swarm",
+        "tests/gates/test_push_stop.py::test_another_swarms_panic_leaves_the_stop_hook_pushing"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",

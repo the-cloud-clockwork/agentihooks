@@ -1856,20 +1856,21 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
             panic.check_fix(fix)
-        found = panic.engage(store, f"pressed on swarm {args.slug}", False, args.fix, now)
-        cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port)
+        found = panic.engage(store, args.slug, f"pressed on swarm {args.slug}", False, args.fix, now)
+        owns = panic.owner(store, args.slug)
+        cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port, owns)
         print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
         return
     if args.action == "off":
-        if not panic.release(store, now):
+        if not panic.release(store, args.slug, now):
             raise SwarmError(
-                f"panic holds: business as usual is at {panic.level(store, now):.2f} with "
-                f"{panic.errors_since(store, now - panic.WINDOW_MS)} errors in the last 15 minutes; it clears at "
-                f"{panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
+                f"panic holds: business as usual is at {panic.level(store, args.slug, now):.2f} with "
+                f"{panic.errors_since(store, args.slug, now - panic.WINDOW_MS)} errors in the last 15 minutes; it "
+                f"clears at {panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
             )
         print(json.dumps({"panic": "off"}))
         return
-    current = panic.state(store)
+    current = panic.state(store, args.slug)
     print(
         json.dumps(
             {
@@ -1877,9 +1878,9 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
                 "since": current.since if current else None,
                 "reason": current.reason if current else "",
                 "fixes": list(current.fixes) if current else [],
-                "errors_last_hour": panic.errors_by_category(store, now - panic.HOUR_MS),
+                "errors_last_hour": panic.errors_by_category(store, args.slug, now - panic.HOUR_MS),
                 "threshold": panic.THRESHOLD,
-                "level": round(panic.level(store, now), 3),
+                "level": round(panic.level(store, args.slug, now), 3),
             }
         )
     )
