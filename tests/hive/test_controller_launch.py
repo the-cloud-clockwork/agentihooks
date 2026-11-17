@@ -2198,13 +2198,27 @@ def test_swarm_health_reports_missing_hive_and_removes_completed_waits(setup, mo
     assert placement_waits.read(setup.store, setup.config.slug) == {}
 
 
+def test_swarm_health_keeps_a_master_wait_the_tick_still_sees_and_removes_a_stale_one(setup, monkeypatch):
+    from scripts.hive import placement, placement_waits
+    from scripts.swarm import status
+
+    placement_waits.observe(setup.store, setup.config.slug, placement.MASTER, placement.MASTER, "refused", 1000)
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    monkeypatch.setattr(status, "now_ms", lambda: 1000 + placement_waits.FRESH_MS - 1)
+    status.findings(setup.store, setup.config.slug, setup.config, [], [])
+    assert list(placement_waits.read(setup.store, setup.config.slug)) == [placement.MASTER]
+    monkeypatch.setattr(status, "now_ms", lambda: 1000 + placement_waits.FRESH_MS)
+    status.findings(setup.store, setup.config.slug, setup.config, [], [])
+    assert placement_waits.read(setup.store, setup.config.slug) == {}
+
+
 @pytest.mark.parametrize("state", ["done", "cancelled"])
 def test_wait_pruning_keeps_active_tasks_and_drops_removed_tasks(setup, state):
     from scripts.hive import placement, placement_waits
 
     for task in ("active", "settled", "removed"):
         placement_waits.observe(setup.store, setup.config.slug, "eng", task, placement.NO_UI_HIVE, 1000)
-    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}])
+    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}], 1000)
     assert list(placement_waits.read(setup.store, setup.config.slug)) == ["active"]
 
 

@@ -108,7 +108,7 @@ def findings(
         passing = checks.cached_green(store.redis, store.key(slug, "checks"))
     else:
         pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
-    placement_waits.prune(store, slug, tasks)
+    placement_waits.prune(store, slug, tasks, now_ms())
     events = [
         *events,
         *(

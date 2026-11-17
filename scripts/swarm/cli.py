@@ -113,6 +113,7 @@ from scripts.swarm import (
     master_launch,
     master_move,
     master_queue,
+    master_refusals,
     merge_queue,
     naming,
     outage,
@@ -1621,6 +1622,7 @@ def cmd_status(store: Any, args: Any) -> None:
     from scripts.hive import admission, placement_waits
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
+    held += master_refusals.status_lines(store, args.slug, now_ms())
     held += hive_admission(store, config.slug)["lines"]
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
