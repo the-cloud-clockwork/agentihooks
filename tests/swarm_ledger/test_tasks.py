@@ -329,11 +329,11 @@ class OwnershipOperationContract(unittest.TestCase):
             (1, ["open"], {"claimed_by": "engineer-1", "claim_generation": 0}),
             (1, None, unclaimed),
             (1, ["open", "claimed"], unclaimed),
+            (1, ["open"], None),
         ):
             guard = {} if state is None else {"if_state": state}
-            change = op(
-                "task_update", 1, item="tasks/t1", fields={"claim_generation": value}, if_match=expected, **guard
-            )
+            matched = {} if expected is None else {"if_match": expected}
+            change = op("task_update", 1, item="tasks/t1", fields={"claim_generation": value}, **guard, **matched)
             with self.assertRaises(ValueError) as raised:
                 ledger_tasks.check(change)
             self.assertEqual(
