@@ -272,7 +272,7 @@ def results() -> Iterator[tuple[str, list[tuple[str, str, dict[str, object]]]]]:
                     ]
                 }
             elif body["name"] == "coverage-3.12-1":
-                answer = {"signed_url": f"http://127.0.0.1:{self.server.server_port}/blob"}
+                answer = {"signed_url": f"http://{self.headers['Host']}/blob"}
             else:
                 self.send_response(404)
                 self.end_headers()
