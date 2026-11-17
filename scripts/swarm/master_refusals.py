@@ -40,8 +40,9 @@ def read(store: Any, slug: str, seat: str) -> list[dict[str, Any]]:
 
 
 def seats(store: Any, slug: str) -> dict[str, list[dict[str, Any]]]:
-    """Every seat's kept refusal rows, by seat."""
-    return {seat: json.loads(raw) for seat, raw in store.redis.hgetall(store.key(slug, KEY)).items()}
+    """Every seat's kept refusal rows, by seat, read as one page of at most ROWS seats."""
+    _, fields = store.redis.hscan(store.key(slug, KEY), 0, count=ROWS)
+    return {seat: json.loads(raw) for seat, raw in fields.items()}
 
 
 def latest(store: Any, slug: str, seat: str) -> dict[str, Any]:
@@ -51,14 +52,14 @@ def latest(store: Any, slug: str, seat: str) -> dict[str, Any]:
 
 
 def named(store: Any, slug: str, now_ms: int) -> str:
-    """The front door seat's newest refusal reason with its age and time, empty while none is kept."""
-    row = latest(store, slug, MASTER)
+    """The front door seat's newest refusal reason within the day with its age and time, empty while none is kept."""
+    row = _current(store, slug, now_ms)
     return NAMED.format(ago=_ago(row, now_ms), at=_clock(row["at"]), reason=row["reason"]) if row else ""
 
 
 def notice(store: Any, slug: str, text: str, now_ms: int) -> str:
-    """The master down notice text naming the front door seat's newest refusal reason with its age and time."""
-    row = latest(store, slug, MASTER)
+    """The master down notice text naming the front door seat's newest refusal within the day with its age and time."""
+    row = _current(store, slug, now_ms)
     return NOTICE.format(text=text, ago=_ago(row, now_ms), at=_clock(row["at"]), reason=row["reason"]) if row else text
 
 
@@ -74,8 +75,14 @@ def status_lines(store: Any, slug: str, now_ms: int) -> list[str]:
             reason=rows[-1]["reason"],
         )
         for seat, rows in sorted(seats(store, slug).items())
-        if rows
+        if rows and now_ms - rows[-1]["at"] < KEEP_MS
     ]
+
+
+def _current(store: Any, slug: str, now_ms: int) -> dict[str, Any]:
+    """The front door seat's newest refusal row while it is within the day, else empty."""
+    row = latest(store, slug, MASTER)
+    return row if row and now_ms - row["at"] < KEEP_MS else {}
 
 
 def _ago(row: dict[str, Any], now_ms: int) -> int:

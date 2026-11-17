@@ -152,16 +152,25 @@ def test_the_master_down_notice_without_a_kept_refusal_is_unchanged(store: Redis
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
 def test_swarm_status_names_each_seat_latest_refusal_with_its_time(store: RedisStore) -> None:  # noqa: F811
+    master_refusals.record(store, "sw", SEAT_TWO, "a seat two refusal", 2 * MINUTE)
     master_refusals.record(store, "sw", MASTER, "an older refusal", MINUTE)
     for at in (2 * MINUTE, 3 * MINUTE):
         master_refusals.record(store, "sw", MASTER, REFUSED, at)
-    master_refusals.record(store, "sw", SEAT_TWO, "a seat two refusal", 2 * MINUTE)
 
     assert master_refusals.status_lines(store, "sw", 10 * MINUTE - 1) == [
         f"master placement refused  master@sw  00:03 UTC  6 minutes ago  2 passes since 00:02 UTC  {REFUSED}",
         "master placement refused  master-2@sw  00:02 UTC  7 minutes ago  1 passes since 00:02 UTC  a seat two refusal",
     ]
     assert master_refusals.status_lines(store, "other", MINUTE) == []
+
+
+def test_swarm_status_reads_every_seat_of_a_large_master_count(store: RedisStore) -> None:  # noqa: F811
+    for index in range(2, 14):
+        master_refusals.record(store, "sw", f"master-{index}", "refused", MINUTE)
+
+    lines = master_refusals.status_lines(store, "sw", MINUTE)
+
+    assert sorted(line.split("  ")[1] for line in lines) == sorted(f"master-{index}@sw" for index in range(2, 14))
 
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
@@ -199,6 +208,21 @@ def test_a_seat_keeps_its_newest_hundred_rows(store: RedisStore) -> None:  # noq
 
     kept = [kept["reason"] for kept in master_refusals.read(store, "sw", MASTER)]
     assert kept == [f"reason {index}" for index in range(1, 101)]
+
+
+def test_a_seat_refused_a_day_ago_is_no_longer_named_while_another_seat_keeps_the_record(store: RedisStore) -> None:  # noqa: F811
+    master_refusals.record(store, "sw", MASTER, "a day old refusal", MINUTE)
+    master_refusals.record(store, "sw", SEAT_TWO, "a seat two refusal", MINUTE + DAY - 1)
+    day_old = "master placement last refused 1439 minutes ago, at 00:01 UTC: a day old refusal"
+
+    assert master_refusals.named(store, "sw", MINUTE + DAY - 1) == day_old
+    assert len(master_refusals.status_lines(store, "sw", MINUTE + DAY - 1)) == 2
+
+    assert master_refusals.named(store, "sw", MINUTE + DAY) == ""
+    assert master_refusals.notice(store, "sw", MASTER_DOWN, MINUTE + DAY) == MASTER_DOWN
+    assert master_refusals.status_lines(store, "sw", MINUTE + DAY) == [
+        "master placement refused  master-2@sw  00:00 UTC  0 minutes ago  1 passes since 00:00 UTC  a seat two refusal"
+    ]
 
 
 def test_a_repeated_reason_extends_the_latest_row_only(store: RedisStore) -> None:  # noqa: F811
