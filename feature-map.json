@@ -6347,6 +6347,16 @@
       ]
     },
     {
+      "id": "front-door-master-refill-deployed-shape",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after the front door master hands its seat off for a recycle, the tick master step places its successor through the pod controller's fenced runtime, the hive launch selection and a launch order the root hive consumes, on root's master claude ai login slot, with no placement refusal and before the forcing window ends.",
+      "seam": "scripts.tick.steps.masters._tick_master through scripts.swarm.controller.FencedRuntime, scripts.hive.launch.HiveLaunch and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_the_forcing_window"
+      ]
+    },
+    {
       "id": "remote-control-token-fallback-reason",
       "origin": "inventory",
       "behaviour": "When a front door master asks for its native claude.ai login but the login chain lands on the subscription token fallback, its recorded Remote Control decision downgrades to off with reason subscription token fallback instead of staying on, both for a fresh launch and a resume, and a hive worker's acknowledgement carries the landed remote_control decision back to the controller's execution record.",
