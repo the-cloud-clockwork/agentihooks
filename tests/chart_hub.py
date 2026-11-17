@@ -133,6 +133,9 @@ def problems(chart: str) -> list[str]:
     unaddressed = render(chart, "--set", "hub.enabled=true", "--set", "nats.enabled=false")
     if unaddressed.returncode == 0 or "hub.bus.url" not in unaddressed.stderr:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
+    unmarked = render(chart, *ENABLED, "--set", "hub.servingFile=")
+    if unmarked.returncode == 0 or "hub.servingFile" not in unmarked.stderr:
+        found.append("a hub without hub.servingFile renders a readiness probe that never passes")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
     return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
