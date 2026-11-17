@@ -386,10 +386,11 @@ def test_the_shell_guard_refuses_another_sessions_push_during_panic(unseated, mo
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: redis)
-    panic.engage(RedisStore(redis), "60 errors in the last hour", True, [], 0)
+    panic.engage(RedisStore(redis), "sw", "60 errors in the last hour", True, [], 0)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
     monkeypatch.setattr("hooks.context.local_test_guard.check_local_tests", Mock())
     monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", Mock())
     payload = {"tool_name": "Bash", "tool_input": {"command": "git push origin x"}, "session_id": "engineer-session"}
     with pytest.raises(hook_manager.BlockAction) as refused:
         hook_manager._check_shell_guards(payload)
-    assert str(refused.value) == blocker_window.FROZEN.format(reason="60 errors in the last hour")
+    assert str(refused.value) == blocker_window.FROZEN.format(slug="sw", reason="60 errors in the last hour")

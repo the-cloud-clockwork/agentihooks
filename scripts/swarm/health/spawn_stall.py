@@ -196,7 +196,7 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         yield
     finally:
         timing.ON_FAILURE.reset(token)
-        for line in panic.tick_pass(store, previous is None, clock()):
+        for line in panic.tick_pass(store, slug, previous is None, clock()):
             timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())

@@ -1,5 +1,7 @@
-"""Fleet panic mode: a fleet error counter over the last hour, the alarm that engages panic at THRESHOLD errors, the
-CI cancellation that frees runners for the named fix, and the business-as-usual level that releases it.
+"""Swarm panic mode: each swarm's error counter over the last hour, the alarm that engages that swarm's panic at
+THRESHOLD errors, the CI cancellation that frees runners from the swarm's own runs for the named fix, and the
+business-as-usual level that releases it. A panic holds only its swarm; the legacy fleet record reads as panic for the
+swarm its reason names.
 
 THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet.
 
@@ -52,6 +54,7 @@ FIX_LINK = re.compile(
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
 MERGED_FIXES = "merged-fixes"
+LEGACY_REASON = re.compile(r"pressed on swarm (\S+)")
 Ports = Callable[[str], SourceControl]
 
 
@@ -67,6 +70,10 @@ def _key(part: str) -> str:
     return f"{PREFIX}:{FLEET}:{part}"
 
 
+def _swarm_key(slug: str, part: str) -> str:
+    return f"{PREFIX}:{slug}:panic:{part}"
+
+
 def _client(store: RedisStore) -> Any:
     return getattr(store, "redis")
 
@@ -78,55 +85,66 @@ def _emit(slug: str, category: str) -> None:
 
 
 def count_error(store: RedisStore, slug: str, category: str, now_ms: int) -> None:
-    """Counts one error in the fleet window and on the OpenTelemetry counter."""
-    key = _key("errors")
+    """Counts one error in the swarm's window and on the OpenTelemetry counter."""
+    key = _swarm_key(slug, "errors")
     _client(store).zadd(key, {f"{category}|{now_ms}|{uuid.uuid4().hex}": now_ms})
     _client(store).zremrangebyscore(key, 0, now_ms - HOUR_MS - 1)
     _emit(slug, category)
 
 
-def errors_since(store: RedisStore, since_ms: int) -> int:
-    return int(_client(store).zcount(_key("errors"), since_ms, math.inf))
+def errors_since(store: RedisStore, slug: str, since_ms: int) -> int:
+    return int(_client(store).zcount(_swarm_key(slug, "errors"), since_ms, math.inf))
 
 
-def errors_by_category(store: RedisStore, since_ms: int) -> dict[str, int]:
+def errors_by_category(store: RedisStore, slug: str, since_ms: int) -> dict[str, int]:
     found: dict[str, int] = {}
-    for member in _client(store).zrangebyscore(_key("errors"), since_ms, math.inf):
+    for member in _client(store).zrangebyscore(_swarm_key(slug, "errors"), since_ms, math.inf):
         category = str(member).split("|")[0]
         found[category] = found.get(category, 0) + 1
     return found
 
 
-def count_pass(store: RedisStore, ok: bool, now_ms: int) -> None:
-    """Records one tick pass and whether every step in it finished without a failure."""
-    key = _key("passes-ok" if ok else "passes-failed")
+def count_pass(store: RedisStore, slug: str, ok: bool, now_ms: int) -> None:
+    """Records one of the swarm's tick passes and whether every step in it finished without a failure."""
+    key = _swarm_key(slug, "passes-ok" if ok else "passes-failed")
     _client(store).zadd(key, {f"{now_ms}|{uuid.uuid4().hex}": now_ms})
     _client(store).zremrangebyscore(key, 0, now_ms - WINDOW_MS - 1)
 
 
-def level(store: RedisStore, now_ms: int) -> float:
-    """Business-as-usual level: the share of tick passes in the last WINDOW_MS with no failed step."""
+def level(store: RedisStore, slug: str, now_ms: int) -> float:
+    """Business-as-usual level: the share of the swarm's tick passes in the last WINDOW_MS with no failed step."""
     since = now_ms - WINDOW_MS
-    ok = int(_client(store).zcount(_key("passes-ok"), since, math.inf))
-    failed = int(_client(store).zcount(_key("passes-failed"), since, math.inf))
+    ok = int(_client(store).zcount(_swarm_key(slug, "passes-ok"), since, math.inf))
+    failed = int(_client(store).zcount(_swarm_key(slug, "passes-failed"), since, math.inf))
     return ok / (ok + failed) if ok + failed else 1.0
 
 
-def stable(store: RedisStore, now_ms: int) -> bool:
-    return level(store, now_ms) >= RELEASE_LEVEL and errors_since(store, now_ms - WINDOW_MS) < RELEASE_ERRORS
+def stable(store: RedisStore, slug: str, now_ms: int) -> bool:
+    return (
+        level(store, slug, now_ms) >= RELEASE_LEVEL and errors_since(store, slug, now_ms - WINDOW_MS) < RELEASE_ERRORS
+    )
 
 
-def state(store: RedisStore) -> Panic | None:
-    raw = _client(store).get(_key("panic"))
+def _legacy(raw: str | None, slug: str) -> str | None:
+    """Return the legacy fleet panic record when its reason names swarm ``slug``, else None."""
+    found = None if raw is None else LEGACY_REASON.fullmatch(json.loads(raw)["reason"])
+    return raw if found is not None and found[1] == slug else None
+
+
+def state(store: RedisStore, slug: str) -> Panic | None:
+    """Return the panic holding swarm ``slug``: its own record, else the legacy fleet record whose reason names it."""
+    client = _client(store)
+    raw = client.get(_swarm_key(slug, "state")) or _legacy(client.get(_key("panic")), slug)
     if raw is None:
         return None
     row = json.loads(raw)
     return Panic(row["since"], row["reason"], row["auto"], tuple(row["fixes"]))
 
 
-def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now_ms: int) -> Panic:
-    """Turns panic on, or adds fixes to the panic already on; a person pressing on with no fix makes it manual."""
-    current = state(store)
+def engage(store: RedisStore, slug: str, reason: str, auto: bool, fixes: Iterable[str], now_ms: int) -> Panic:
+    """Turns the swarm's panic on, or adds fixes to the panic already on; a person pressing on with no fix makes it
+    manual."""
+    current = state(store, slug)
     added = tuple(fixes)
     found = Panic(
         current.since if current else now_ms,
@@ -134,30 +152,45 @@ def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now
         (current.auto and (auto or bool(added))) if current else auto,
         tuple(sorted({*(current.fixes if current else ()), *added})),
     )
-    _client(store).set(_key("panic"), json.dumps(found.__dict__))
+    _client(store).set(_swarm_key(slug, "state"), json.dumps(found.__dict__))
     return found
 
 
-def release(store: RedisStore, now_ms: int) -> bool:
-    """Turns panic off only when the fleet is stable and back at RELEASE_LEVEL of business as usual."""
-    if not stable(store, now_ms):
+def release(store: RedisStore, slug: str, now_ms: int) -> bool:
+    """Turns the swarm's panic off, with the legacy fleet record that names it, only when the swarm is stable and back
+    at RELEASE_LEVEL of business as usual."""
+    if not stable(store, slug, now_ms):
         return False
-    _client(store).delete(_key("panic"), _key(MERGED_FIXES))
+    client = _client(store)
+    legacy = [_key("panic")] if _legacy(client.get(_key("panic")), slug) else []
+    client.delete(_swarm_key(slug, "state"), _key(MERGED_FIXES), *legacy)
     return True
 
 
-def alarm(store: RedisStore, now_ms: int) -> str:
-    """Engages panic at THRESHOLD errors in the last hour; releases an automatic panic once stable."""
-    current = state(store)
+def alarm(store: RedisStore, slug: str, now_ms: int) -> str:
+    """Engages the swarm's panic at THRESHOLD of its errors in the last hour; releases an automatic panic once
+    stable."""
+    current = state(store, slug)
     if current is None:
-        count = errors_since(store, now_ms - HOUR_MS)
+        count = errors_since(store, slug, now_ms - HOUR_MS)
         if count < THRESHOLD:
             return ""
-        engage(store, f"{count} errors in the last hour", True, (), now_ms)
+        engage(store, slug, f"{count} errors in the last hour", True, (), now_ms)
         return f"panic engaged: {count} errors in the last hour"
-    if current.auto and release(store, now_ms):
+    if current.auto and release(store, slug, now_ms):
         return "panic released: the fleet is back at business as usual"
     return ""
+
+
+def owner(store: RedisStore, slug: str) -> Callable[[str], bool]:
+    """Return the check whether a branch belongs to swarm ``slug``: a branch one of its agents cut, the plain agent name
+    on the swarm's code, after any folder such as diffcheck/ and before any suffix such as a worktree number; a swarm
+    without a code owns no branch."""
+    from scripts.swarm.naming import TYPES
+
+    code = store.config(slug).code
+    branches = re.compile(rf"(?:.+/)?(?:{'|'.join(TYPES.values())})-{re.escape(code)}-\d{{4,}}(?:[-/].*)?")
+    return lambda branch: bool(code) and branches.fullmatch(branch) is not None
 
 
 def port(repository: str) -> SourceControl:
@@ -264,8 +297,22 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
     return (queued | set(heads.values())) - {""}
 
 
-def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports, store: RedisStore | None = None) -> list[str]:
-    """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes, the
+def _owned(row: RepositoryRun, owns: Callable[[str], bool]) -> bool:
+    """Return whether a run belongs to the panicking swarm: its branch is one of the swarm's, or it is a workflow run
+    event run whose run-name names one of the swarm's branches after its last " for "."""
+    found = TRIGGER_TITLE.fullmatch(row.title)
+    return owns(str(row.branch)) or (row.event == WORKFLOW_RUN and found is not None and owns(found[1]))
+
+
+def cancel_runs(
+    fixes: Iterable[str],
+    repos: Iterable[str],
+    ports: Ports,
+    owns: Callable[[str], bool],
+    store: RedisStore | None = None,
+) -> list[str]:
+    """Cancels every queued or running Actions run of the panicking swarm, the runs on branches ``owns`` accepts and
+    the workflow run event runs they triggered, except the merge queue, release tags, the named fixes, the
     workflow run event runs a fix's run triggered and the runs on a fix's merge queue commit, merge commit or merged
     integration branch head; a fix pull request spares its head branch and a fix branch link its branch only in its
     own repository, and a branch link is never read as a pull request. With ``store`` a merged fix pull request is
@@ -284,26 +331,27 @@ def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports, store:
         kept = {change.head_branch for change in changes if change.reference.repository == repo}
         kept |= {branch for _, key, branch in named if key == here}
         for row in rows:
-            if _spared(row, kept, spared):
+            if not _owned(row, owns) or _spared(row, kept, spared):
                 continue
             provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
             cancelled.append(f"{repo} run {row.id} on {row.branch}")
     return cancelled
 
 
-def due_cancel(store: RedisStore, now_ms: int) -> bool:
-    return bool(_client(store).set(_key("cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
+def due_cancel(store: RedisStore, slug: str, now_ms: int) -> bool:
+    return bool(_client(store).set(_swarm_key(slug, "cancel"), now_ms, nx=True, px=CANCEL_EVERY_MS))
 
 
-def tick_pass(store: RedisStore, ok: bool, now_ms: int, ports: Ports = port) -> list[str]:
-    """Counts the pass, runs the alarm and, while panic holds, cancels the fleet's other CI runs once a minute."""
-    count_pass(store, ok, now_ms)
-    actions = [changed] if (changed := alarm(store, now_ms)) else []
-    current = state(store)
-    if current is None or not due_cancel(store, now_ms):
+def tick_pass(store: RedisStore, slug: str, ok: bool, now_ms: int, ports: Ports = port) -> list[str]:
+    """Counts the swarm's pass, runs its alarm and, while its panic holds, cancels its agents' other CI runs once a
+    minute."""
+    count_pass(store, slug, ok, now_ms)
+    actions = [changed] if (changed := alarm(store, slug, now_ms)) else []
+    current = state(store, slug)
+    if current is None or not due_cancel(store, slug, now_ms):
         return actions
     try:
-        cancelled = cancel_runs(current.fixes, REPOS, ports, store)
+        cancelled = cancel_runs(current.fixes, REPOS, ports, owner(store, slug), store)
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]
