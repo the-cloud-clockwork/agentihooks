@@ -154,7 +154,7 @@ def test_the_replica_count_defaults_to_one_and_comes_from_the_environment() -> N
 
 @pytest.mark.parametrize("count", [0, -3, True, 2.0, "3"])
 def test_a_replica_count_that_is_not_a_positive_whole_number_is_refused(count: object) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^bus replicas must be a positive integer$"):
         BusConfig(replicas=count)  # pyright: ignore[reportArgumentType]
 
 
@@ -225,10 +225,8 @@ def test_raise_all_raises_each_stream_below_the_count_across_every_page() -> Non
     assert (update.kwargs["config"].name, update.kwargs["config"].num_replicas) == ("LOW", COUNT)
 
 
-@pytest.mark.parametrize(("count", "listings"), [(1, 0), (2, 1)])
-def test_a_provisioning_bus_lists_the_account_only_above_one_replica(
-    monkeypatch: pytest.MonkeyPatch, count: int, listings: int
-) -> None:
+def _faked_bus(monkeypatch: pytest.MonkeyPatch, config: BusConfig) -> tuple[nats.NatsBus, Any]:
+    """Return a bus opened on a faked server holding no stream, with that server's JetStream."""
     js: Any = SimpleNamespace(
         stream_info=AsyncMock(side_effect=nats.NotFoundError()),
         streams_info=AsyncMock(return_value=[]),
@@ -238,8 +236,48 @@ def test_a_provisioning_bus_lists_the_account_only_above_one_replica(
     )
     client = SimpleNamespace(jetstream=Mock(return_value=js), close=AsyncMock(), options={})
     monkeypatch.setattr(nats.nats_client, "connect", AsyncMock(return_value=client))
-    bus = nats.NatsBus(BusConfig(replicas=count), "nats://localhost:4222")
+    return nats.NatsBus(config, "nats://localhost:4222"), js
+
+
+@pytest.mark.parametrize(("count", "listings"), [(1, 0), (2, 1)])
+def test_a_provisioning_bus_lists_the_account_only_above_one_replica(
+    monkeypatch: pytest.MonkeyPatch, count: int, listings: int
+) -> None:
+    bus, js = _faked_bus(monkeypatch, BusConfig(replicas=count))
     try:
         assert js.streams_info.await_count == listings
     finally:
         bus.close()
+
+
+def test_a_provisioning_bus_creates_its_streams_and_buckets_at_its_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    bus, js = _faked_bus(monkeypatch, BusConfig(replicas=COUNT))
+    try:
+        bus.state("hub-github")
+        created = [(made.kwargs["name"], made.kwargs["num_replicas"]) for made in js.add_stream.await_args_list]
+        assert created == [(nats.EVENT_STREAM, COUNT), (nats.DEAD_STREAM, COUNT), (nats.LAB_STREAM, COUNT)]
+        js.create_key_value.assert_awaited_once_with(bucket="hub-github", replicas=COUNT, history=nats.KV_HISTORY)
+    finally:
+        bus.close()
+
+
+def test_a_state_store_provisions_its_bucket_at_one_replica_unless_given_a_count() -> None:
+    js: Any = SimpleNamespace(create_key_value=AsyncMock())
+    loop: Any = SimpleNamespace(run=asyncio.run)
+    nats.NatsStateStore(loop, js, "hub-github", True)
+    nats.NatsStateStore(loop, js, "hub-github", True, COUNT)
+    assert [made.kwargs["replicas"] for made in js.create_key_value.await_args_list] == [1, COUNT]
+
+
+def test_provisioning_raises_a_bucket_outside_the_state_limits_that_holds_fewer_replicas() -> None:
+    js: Any = SimpleNamespace(
+        create_key_value=AsyncMock(side_effect=[APIError(err_code=nats_replicas.NAME_IN_USE), "raised"]),
+        stream_info=AsyncMock(return_value=_info("KV_hub-github", 1)),
+        update_stream=AsyncMock(side_effect=lambda config: SimpleNamespace(config=config)),
+    )
+    assert asyncio.run(nats.provision_state(js, "hub-github", COUNT)) == "raised"
+    js.stream_info.assert_awaited_once_with("KV_hub-github")
+    [update] = js.update_stream.await_args_list
+    assert (update.kwargs["config"].name, update.kwargs["config"].num_replicas) == ("KV_hub-github", COUNT)
+    wanted = call(bucket="hub-github", replicas=COUNT, history=nats.KV_HISTORY)
+    assert js.create_key_value.await_args_list == [wanted, wanted]
