@@ -1,14 +1,18 @@
+import contextlib
 import inspect
 import io
 import os
 import subprocess
 import time
 import urllib.error
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from scripts.swarm_ledger import ledger_link
+from scripts.swarm_ledger.api.client import Transport
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from tests.ledger_load import gate as ledger_load
 
@@ -561,7 +565,9 @@ def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
 
 def preflight_client(sent: list, refusal=None) -> type:
     class Api:
-        def __init__(self, base, credentials, timeout):
+        def __init__(
+            self, base: str, credentials: dict[str, str], timeout: float, transport: Transport | None = None
+        ) -> None:
             pass
 
         def mutate(self, slug, operations):
@@ -602,3 +608,23 @@ def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
     assert len(results["writes"]) == 2
     assert results["errors"] == []
+
+
+def test_a_load_writer_reads_its_guard_revisions_from_the_ledger_server_and_posts_to_the_api_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[tuple[str, str]] = []
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> contextlib.nullcontext[io.BytesIO]:
+        sent.append((request.get_method(), request.full_url))
+        return contextlib.nullcontext(io.BytesIO(b'{"revision": "r1", "data": {}}'))
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    writer, reader = ledger_load.front("http://api", "http://ledger", {"X-Ledger-Agent": "ci@ab0000-0000"})
+    writer.mutate(ledger_load.SLUG, [{"op": "join", "id": "j", "by": "ci@ab0000-0000", "role": "member"}])
+    reader.request(ledger_load.SLUG, "tasks/t0")
+    assert sent == [
+        ("GET", "http://ledger/api/v1/ledgers/load-gate/members"),
+        ("POST", "http://api/api/v1/ledgers/load-gate/operations"),
+        ("GET", "http://ledger/api/v1/ledgers/load-gate/tasks/t0"),
+    ]
