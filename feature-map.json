@@ -4098,6 +4098,21 @@
       ]
     },
     {
+      "id": "uv-tool-install-nats-extra",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tool-install-nats-extra",
+      "behaviour": "Every uv tool install of the agentihooks CLI carries the nats extra, so a reinstall of the global tool venv keeps nats-py and launches with the NATS bus on still import the bus client: agentihooks init in a source checkout installs the editable tree as .[nats], the updater upgrades a uv tool install as agentihooks[nats], the nats extra in pyproject carries nats-py, and a uv tool install command list without the extra is a Semgrep incident.",
+      "seam": "install._install_cli_tool in a source checkout and updater.upgrade_command for a uv tool install, each read as the uv command it runs",
+      "rules": [
+        "uv-tool-install-without-nats-extra"
+      ],
+      "tests": [
+        "tests/test_cli_link.py::test_a_source_checkout_installs_the_editable_tree_with_the_nats_extra",
+        "tests/test_updater.py::test_a_uv_tool_upgrade_installs_the_package_with_the_nats_extra",
+        "tests/test_updater.py::test_the_nats_extra_the_tool_installs_carries_the_nats_client"
+      ]
+    },
+    {
       "id": "pypi-retry-attempt-timeout",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-index-retry-attempt-timeout",
