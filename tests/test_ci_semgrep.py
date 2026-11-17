@@ -177,6 +177,8 @@ def test_ledger_write_rules_carry_no_exceptions() -> None:
     assert fixture.count("# ok: ledger-server-reads-only") == 3
     assert fixture.count("# ruleid: ledger-client-in-process") == 6
     assert fixture.count("# ok: ledger-client-in-process") == 3
+    incidents = yaml.safe_load((_ROOT / ".semgrep-incidents/ledger-server-write.yml").read_text())
+    assert [rule["id"] for rule in incidents["rules"]] == ["ledger-write-switch"]
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():

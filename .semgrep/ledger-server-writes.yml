@@ -3,9 +3,10 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      The ledger server only reads: it serves the ledger page and its reads. Every ledger write is a route of the
-      ledger API service, which writes the shared database, so the ledger server defines no POST, PUT, PATCH or
-      DELETE handler.
+      Incident 16 November: every swarm write went over HTTP to the ledger server, so a slow ledger server made hub
+      claims late and a stale page process could take writes. The ledger server only reads: it serves the ledger page
+      and its reads. Every ledger write is a route of the ledger API service, which writes the shared database, so
+      the ledger server defines no POST, PUT, PATCH or DELETE handler.
     paths:
       include:
         - /scripts/swarm_ledger/ledger_server.py
@@ -26,8 +27,10 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A ResourceClient without a transport sends its operations over HTTP to the ledger server, the old write path.
-      Give it the in process transport, which runs the ledger API route code over the shared database.
+      Incident 16 November: swarm clients wrote the ledger over HTTP through the ledger server. A ResourceClient
+      without a transport sends its operations over HTTP to the ledger server, the old write path. Build it with
+      scripts.tick.adapters.database_ledger.client or scripts.swarm_ledger.ledger.client, or give it the in process
+      transport, which runs the ledger API route code over the shared database.
     pattern-either:
       - patterns:
           - pattern-either:
