@@ -196,12 +196,6 @@ def reorder(
 
 def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], lift: bool) -> dict:
     journal = queue_record.Journal(url)
-    held = None if lift else blocking(url, journal)
-    if held is not None:
-        record = {**held, "sender": sender, "order": store.redis.incr(store.key(slug, ORDER))}
-        store.redis.hset(store.key(slug, PENDING), url, json.dumps(record))
-        journal.write("priority-deferred", url, "", None, None, **record)
-        return {"url": url, "deferred": True, "displaced": [], "errors": [], **held}
     if lift:
         journal.write("priority-lift", url, "", None, None)
     return apply(store, slug, url, sender, tasks, journal)
