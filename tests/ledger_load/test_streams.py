@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -43,3 +46,60 @@ def test_stream_load_refuses_to_run_on_the_shared_machine(monkeypatch, tmp_path)
         streams.main(["--base", "base", "--head", "head", "--folder", str(tmp_path)])
     assert error.value.code == 2
     assert not (tmp_path / "streams.json").exists()
+
+
+def listener(variable: str) -> str:
+    """A server script that accepts connections on the port named by the environment variable."""
+    return (
+        "import os, socket\n"
+        "listener = socket.socket()\n"
+        f"listener.bind(('127.0.0.1', int(os.environ[{variable!r}])))\n"
+        "listener.listen()\n"
+        "while True:\n"
+        "    connection, _ = listener.accept()\n"
+        "    connection.close()\n"
+    )
+
+
+def test_the_stream_write_server_trusts_its_checkout_writer_but_refuses_an_unrelated_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stranger = tmp_path / "stranger"
+    stranger.mkdir()
+    subprocess.run(["git", "init", "-q", str(stranger)], check=True)
+    subprocess.run(
+        ["git", "-C", str(stranger), "remote", "add", "origin", "https://github.com/stranger/project.git"],
+        check=True,
+    )
+    (stranger / ".agentihooks" / "conditions").mkdir(parents=True)
+    checkout = Path(streams.__file__).resolve().parents[2]
+    writer = tmp_path / "writer.py"
+    writer.write_text(
+        "from hooks import config\n"
+        "from hooks.context import profile_chain\n"
+        "from hooks.filters.check import trusted_folder\n"
+        "profile_chain.read_state = lambda: {}\n"
+        "assert config.CONDITIONS_ENABLED\n"
+        f"trusted_folder({str(checkout)!r})\n"
+        "try:\n"
+        f"    trusted_folder({str(stranger)!r})\n"
+        "except ValueError as exc:\n"
+        "    assert 'outside the operator' in str(exc)\n"
+        "else:\n"
+        "    raise AssertionError('unrelated writer was trusted')\n" + listener("LEDGER_API_PORT")
+    )
+    reader = tmp_path / "reader.py"
+    reader.write_text(listener("LEDGER_PORT"))
+    launch = subprocess.Popen
+
+    def popen(argv: list[str], **options: Any) -> subprocess.Popen:
+        return launch([sys.executable, str(writer if "-m" in argv else reader)], **options)
+
+    monkeypatch.setattr(streams.subprocess, "Popen", popen)
+    monkeypatch.setenv("PYTHONPATH", str(checkout))
+    monkeypatch.setenv("CONDITIONS_ENABLED", "true")
+    monkeypatch.setenv("CONDITIONS_TRUSTED_OWNERS", "")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    with streams.serving(checkout, logs, streams.gate.free_port(), streams.gate.free_port()) as servers:
+        assert [server.poll() for server in servers] == [None, None]
