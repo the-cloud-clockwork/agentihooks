@@ -8,6 +8,7 @@ import sys
 import threading
 import traceback
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
@@ -34,6 +35,7 @@ FETCH_TIMEOUT_MS = 500
 LEASE_TTL_MS = 15_000
 LEASE_RENEW_S = LEASE_TTL_MS / 1000 / 3
 CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
+SERVING_ENV = "AGENTIHOOKS_HUB_SERVING_FILE"
 KEEP_S = auth.SERVICE_TTL_S / 3
 
 
@@ -236,6 +238,9 @@ def main(argv: list[str]) -> int:
     source = None if config.backend == "memory" else readiness.Source()
     slots.serve(bus, admitter=Admission(source=source))
     exits.serve(bus)
+    serving = os.environ.get(SERVING_ENV)
+    if serving:
+        Path(serving).touch()
     hub = HubRunner(bus, registry.configured(bus, source=source), holder)
     keeper = None if args.once else Interval(functools.partial(_renew_leases, hub), every=LEASE_RENEW_S)
     if keeper is not None:
