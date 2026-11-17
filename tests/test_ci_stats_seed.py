@@ -332,9 +332,13 @@ def test_harvest_fails_naming_the_artifact_once_every_download_failed(
     ("failing", "failure"),
     [
         ("actions/artifacts/5/zip", subprocess.TimeoutExpired(["gh", "api"], 0)),
-        (
-            "actions/runs/1/artifacts?per_page=100",
-            subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Bad Gateway (HTTP 502)\n"),
+        *(
+            (path, subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Bad Gateway (HTTP 502)\n"))
+            for path in (
+                "pulls/7",
+                f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10",
+                "actions/runs/1/artifacts?per_page=100",
+            )
         ),
     ],
 )
