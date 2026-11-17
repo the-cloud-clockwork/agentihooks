@@ -140,6 +140,16 @@
       ]
     },
     {
+      "id": "hub-serving-readiness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2540",
+      "behaviour": "A hub process given AGENTIHOOKS_HUB_SERVING_FILE creates that file only after its slots and exits responders have subscribed on the bus, so a readiness probe that reads the file passes only once the hub answers slots requests. A hub without the setting writes no file.",
+      "seam": "runner.main, after slots.serve and exits.serve",
+      "tests": [
+        "tests/hub/test_runner.py::test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe"
+      ]
+    },
+    {
       "id": "controller-waits-ride-out-redis-outage",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-controller-redis-grace",
