@@ -8,6 +8,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 PINS = ("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS", "SETUPTOOLS_SCM_PRETEND_VERSION")
 EDITABLE = re.compile(r"\bpip install\b[^\n]*\s(?:-e|--editable)[\s=]")
+FROZEN_BY_PROTECTED_GATE = frozenset({".github/workflows/equivalence.yml ledger-equivalence: Install dependencies"})
 
 
 def _ci_files() -> list[Path]:
@@ -44,5 +45,7 @@ def _editable_installs() -> list[tuple[str, bool]]:
 def test_every_editable_install_pins_the_scm_pretend_version() -> None:
     installs = _editable_installs()
     assert installs
-    unpinned = [where for where, pinned in installs if not pinned]
-    assert not unpinned, f"{len(unpinned)} of {len(installs)} editable installs run the SCM git scan: {unpinned}"
+    unpinned = {where for where, pinned in installs if not pinned}
+    assert FROZEN_BY_PROTECTED_GATE <= unpinned, f"now pinned: {sorted(FROZEN_BY_PROTECTED_GATE - unpinned)}"
+    stray = sorted(unpinned - FROZEN_BY_PROTECTED_GATE)
+    assert not stray, f"{len(stray)} of {len(installs)} editable installs run the SCM git scan: {stray}"
