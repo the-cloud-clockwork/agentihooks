@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import nats as nats_py
 import pytest
@@ -223,3 +223,23 @@ def test_raise_all_raises_each_stream_below_the_count_across_every_page() -> Non
     assert js.streams_info.await_args_list == [call(offset=0), call(offset=1), call(offset=2)]
     [update] = js.update_stream.await_args_list
     assert (update.kwargs["config"].name, update.kwargs["config"].num_replicas) == ("LOW", COUNT)
+
+
+@pytest.mark.parametrize(("count", "listings"), [(1, 0), (2, 1)])
+def test_a_provisioning_bus_lists_the_account_only_above_one_replica(
+    monkeypatch: pytest.MonkeyPatch, count: int, listings: int
+) -> None:
+    js: Any = SimpleNamespace(
+        stream_info=AsyncMock(side_effect=nats.NotFoundError()),
+        streams_info=AsyncMock(return_value=[]),
+        add_stream=AsyncMock(),
+        create_key_value=AsyncMock(),
+        key_value=AsyncMock(),
+    )
+    client = SimpleNamespace(jetstream=Mock(return_value=js), close=AsyncMock(), options={})
+    monkeypatch.setattr(nats.nats_client, "connect", AsyncMock(return_value=client))
+    bus = nats.NatsBus(BusConfig(replicas=count), "nats://localhost:4222")
+    try:
+        assert js.streams_info.await_count == listings
+    finally:
+        bus.close()

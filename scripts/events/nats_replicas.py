@@ -40,10 +40,13 @@ async def create(js: JetStreamContext, replicas: int, name: str, config: StreamC
 
 
 async def raise_all(js: JetStreamContext, replicas: int) -> None:
-    """Raise every stream of the account holding fewer replicas than the count, in place.
+    """Raise every stream of the account holding fewer replicas than the count, in place; at one replica no stream
+    holds fewer, so the account is not listed.
 
     A stream electing its leader is missing from a listing, so it waits for the next provisioning bus to start.
     """
+    if replicas <= 1:
+        return
     offset = 0
     while page := await js.streams_info(offset=offset):
         for info in page:
