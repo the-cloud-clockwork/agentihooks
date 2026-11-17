@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.967 · 2026-11-17
+
+### 2026-11-17 · 83fab3803c73 · #11704 · @agenticore-app
+
+**Panic sweep spares every open promotion and crew fixer branch without a master call**
+
+During a panic hold, the CI cancel sweep was killing branches for open promotion and crew fixer tasks whenever the swarm had no master registered, even though those runs were legitimate fixes in progress. This change has each tick pass record every open fixer's branch (claim, repo branch, and worktree branch) to Redis with a fifteen-minute expiry, and feeds those links into cancel_runs so the sweep spares them alongside registered fixes. It closes a real incident where fixer PRs lost their runs mid-fix while waiting unanswered on an empty master seat.
+
 ## v2.17.965 · 2026-11-17
 
 ### 2026-11-17 · bedb09d6bbc1 · #11678 · @nestorcolt
