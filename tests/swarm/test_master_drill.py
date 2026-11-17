@@ -59,7 +59,7 @@ class LoginRuntime(FakeRuntime):
         placement."""
         placed: Placed = super().spawn(config, lane, name, task)
         self.events.append({"by": name, "at": NOW})
-        return replace(placed, route_kind=self.route, placement=self.placement)
+        return replace(placed, route_kind=self.route, placement=self.placement, harness=self.harness)
 
 
 def seat_master(
@@ -175,6 +175,19 @@ def test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery(rig: S
     record = master_drill.run(drill(rig))
     assert (record["seated_minute"], record["successor"]) == (10, successor(rig).name)
     assert (record["route"], record["recovered"]) == ("token fallback", False)
+
+
+@pytest.mark.feature("master-drill")
+def test_a_working_codex_successor_on_the_login_route_kind_is_recorded_without_a_recovery(rig: SimpleNamespace) -> None:
+    rig.runtime.harness = "codex"
+    record = master_drill.run(drill(rig))
+    assert (record["seated_minute"], record["successor"]) == (10, successor(rig).name)
+    assert (successor(rig).state, successor(rig).harness, successor(rig).route_kind) == (
+        "working",
+        "codex",
+        "master-login",
+    )
+    assert (record["route"], record["recovered"]) == ("", False)
 
 
 @pytest.mark.feature("master-drill")

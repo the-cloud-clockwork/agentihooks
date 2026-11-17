@@ -24,6 +24,7 @@
       "tests": [
         "tests/swarm/test_master_drill.py::test_the_drill_retires_the_front_door_master_and_records_a_login_successor_forced_up_at_ten_minutes",
         "tests/swarm/test_master_drill.py::test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_working_codex_successor_on_the_login_route_kind_is_recorded_without_a_recovery",
         "tests/swarm/test_master_drill.py::test_a_successor_forced_up_at_the_thirtieth_minute_still_recovers",
         "tests/swarm/test_master_drill.py::test_a_seat_left_empty_for_thirty_minutes_records_no_successor",
         "tests/swarm/test_master_drill.py::test_the_drill_starts_the_night_watch_seat_episode_over",

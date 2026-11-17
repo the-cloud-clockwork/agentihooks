@@ -66,16 +66,17 @@ def successor(drill: Drill) -> AgentRecord | None:
     return next(holders, None)
 
 
-def watch(drill: Drill, store: Any, start: int, asleep: bool) -> tuple[list[str], int | None]:
+def watch(drill: Drill, store: Any, start: int, asleep: bool) -> tuple[list[str], int | None, AgentRecord | None]:
     """Pass the tick's night watch once a minute on the drill clock from ``start`` until a successor holds the front
-    door seat, at most thirty minutes on: the actions it took and the minute the seat was held, or no minute."""
+    door seat, at most thirty minutes on: the actions it took, the minute the seat was held and the successor holding
+    it, or neither."""
     actions: list[str] = []
     for minute in range(MINUTES + 1):
         at = start + minute * MINUTE_MS
         actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
-        if successor(drill) is not None:
-            return actions, minute
-    return actions, None
+        if (found := successor(drill)) is not None:
+            return actions, minute, found
+    return actions, None, None
 
 
 def run(drill: Drill) -> dict[str, Any]:
@@ -94,8 +95,7 @@ def run(drill: Drill) -> dict[str, Any]:
     start = drill.now_ms - MINUTES * MINUTE_MS
     rows = {task["id"]: task for task in drill.doc["tasks"]}
     asleep = lifetime.sleeping(drill.slug, drill.store, rows)
-    actions, minute = watch(drill, running(drill.store, drill.slug), start, asleep)
-    found = successor(drill)
+    actions, minute, found = watch(drill, running(drill.store, drill.slug), start, asleep)
     route = front_door.landed(found) if found and found.state == "working" and found.harness == "claude" else ""
     record: dict[str, Any] = {
         "swarm": drill.slug,
