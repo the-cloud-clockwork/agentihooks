@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import shlex
 import shutil
@@ -40,6 +41,103 @@ def test_sonar_sets_up_before_merging_coverage():
     for setup in ("actions/checkout@v4", "actions/setup-python@v5", "Install coverage"):
         assert names.index(setup) < merge
     assert merge < names.index("Wait for the coverage merge") < names.index("SonarQube Scan")
+
+
+def _sonar_steps() -> tuple[list[dict], list[str | None]]:
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
+    return steps, [step.get("name") for step in steps]
+
+
+def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lands() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert not {"unit", "unit-selected"} & set(jobs["sonar"]["needs"])
+    steps, names = _sonar_steps()
+    arrivals = steps[names.index("Take each shard's coverage as it lands")]
+    assert arrivals["uses"] == "actions/github-script@v7"
+    assert arrivals["with"]["github-token"] == "none"
+    assert "process.env.ARRIVALS" in arrivals["with"]["script"]
+    assert arrivals["continue-on-error"] is True
+    assert arrivals["if"] == "needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'"
+    merge = steps[names.index("Merge shard coverage")]
+    assert arrivals["env"] == {
+        "SHARDS": merge["env"]["SHARDS"],
+        "SCOPE": merge["env"]["SCOPE"],
+        "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py",
+    }
+    order = [
+        "Install coverage",
+        "Carry the pull request runs' coverage of the reused tests",
+        "Take each shard's coverage as it lands",
+        "Take each selected leg's latest branch coverage",
+        "Merge shard coverage",
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    patterns = [str((step.get("with") or {}).get("pattern", "")) for step in steps]
+    assert not [pattern for pattern in patterns if "coverage-3.12" in pattern]
+
+
+def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -> None:
+    spec = importlib.util.spec_from_file_location("sonar_arrivals", ROOT / ".github/coverage/arrivals.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    steps, names = _sonar_steps()
+    minutes = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
+    assert module.WAIT < minutes * 60
+    pull, push = minutes + 15, minutes + 30
+    assert jobs["sonar"]["timeout-minutes"] == (
+        f"${{{{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && {push} || {pull} }}}}"
+    )
+
+
+def test_sonar_waits_for_the_shards_on_a_light_runner() -> None:
+    classes = json.loads((ROOT / ".github/runner-classes.json").read_text())
+    assert classes["test.yml/sonar"] == "light"
+
+
+def test_a_shard_uploads_its_flake_report_after_its_coverage() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    unit = [step.get("name") for step in jobs["unit"]["steps"]]
+    assert unit.index("Upload coverage") < unit.index("Record flaky tests") < unit.index("Upload the flake report")
+    selected = [step.get("name") for step in jobs["unit-selected"]["steps"]]
+    assert (
+        selected.index("Upload this leg's branch coverage")
+        < selected.index("Upload coverage")
+        < selected.index("Upload selected test flakes")
+    )
+
+
+def test_combine_takes_each_report_flattened_as_it_landed(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    for folder in ("coverage-3.12-1", "coverage-3.12-2", "branch-5/1-2"):
+        (shards / folder).mkdir(parents=True)
+        (shards / folder / ".coverage").write_text("x")
+    (shards / "coverage-3.12-1/flat-.coverage").write_text("flat one")
+    (shards / "coverage-3.12-2/flat-.coverage").write_text("")
+    (shards / "branch-5/1-2/flat-.coverage").write_text("flat carried")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls.txt"
+    (bin_dir / "python").write_text(
+        f'#!/usr/bin/env bash\necho "$*" >> {calls}\n'
+        'if [[ "$3" == combine ]]; then for data in "${@:5}"; do cat "$data"; echo; done >> ' + f"{calls}; fi\n"
+    )
+    (bin_dir / "python").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/coverage/combine.sh"), "--downloaded", "2"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = calls.read_text().splitlines()
+    flattened = [line.split()[1] for line in lines if "flatten.py" in line]
+    assert flattened == [".coverage-shards/coverage-3.12-2/.coverage"]
+    assert "flat one" in lines and "flat carried" in lines
+    assert sorted(shards.rglob("flat-*")) == [shards / "coverage-3.12-2/flat-.coverage"]
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
