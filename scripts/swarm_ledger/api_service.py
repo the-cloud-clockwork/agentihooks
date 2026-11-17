@@ -946,7 +946,7 @@ def serve() -> None:
     cast(Any, legacy).adopt(stored)
     adopt_unrelayed()
     threading.Thread(target=adopt_disk_files, daemon=True).start()
-    server.ALLOWED_HOSTS.update(f"{name}:{PORT}" for name in (HOST, *server.ledger_link.LOOPBACK))
+    server.ALLOWED_HOSTS.update(f"{name}:{PORT}" for name in server.ledger_link.LOOPBACK)
     httpd: Any = server.listening(handler=WriteHandler, address=(HOST, PORT))
     stopping = threading.Event()
     threading.Thread(target=server.retrying(upkeep), args=(stopping,), daemon=True).start()

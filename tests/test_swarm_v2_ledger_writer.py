@@ -404,6 +404,7 @@ def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard:
     from scripts.swarm_ledger.repository import legacy
 
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", set(server.ALLOWED_HOSTS))
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
@@ -656,7 +657,7 @@ def test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port(
     monkeypatch.setattr(handler, "send", send)
     handler.do_GET()
     assert sent == [(200, json.dumps({"dir": str(serving)}), "application/json")]
-    assert server.ALLOWED_HOSTS == {"api:8766", "0.0.0.0:8766", "127.0.0.1:8766", "localhost:8766"}
+    assert server.ALLOWED_HOSTS == {"api:8766", "127.0.0.1:8766", "localhost:8766"}
 
 
 class Piped(io.StringIO):
