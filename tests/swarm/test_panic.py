@@ -15,7 +15,7 @@ from scripts.swarm.tick_watch import STALE_TICK, _alert
 from scripts.tick.adapters.fakes import Call, FakeSourceControl
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports.source_control import RepositoryRun
+from scripts.tick.ports.source_control import ChangeRef, ChangeState, RepositoryRun
 
 pytestmark = pytest.mark.unit
 
@@ -428,6 +428,67 @@ def test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit(monkeypatch: py
     monkeypatch.setattr(stack, "change", change)
     runs = Runs({"o/a": [RepositoryRun(1, "dev", "push", "in_progress", head_sha=commit)]})
     assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 1 on dev"]
+
+
+def _fix_reads(monkeypatch: pytest.MonkeyPatch, merged: set[str], commit: str) -> list[str]:
+    """Answer every fix pull request read with a state merged at ``commit`` for the urls in ``merged``, open for the
+    rest, and return the urls in the order they were read."""
+    from scripts.swarm import stack
+
+    reads: list[str] = []
+
+    def change(url: str, refused: str) -> ChangeState:
+        reads.append(url)
+        return _fix(url, url in merged, commit)
+
+    monkeypatch.setattr(stack, "change", change)
+    return reads
+
+
+def _fix(url: str, merged: bool, commit: str) -> ChangeState:
+    """Return the state of fix pull request ``url`` of o/a, merged at ``commit`` when ``merged``, else open."""
+    number = int(url.rsplit("/", 1)[1])
+    state = "closed" if merged else "open"
+    return ChangeState(
+        ChangeRef("o/a", number), state, "a" * 40, "dev", merged, url, f"fix-{number}", merge_commit=commit
+    )
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_cancel_runs_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merged, opened, commit = FIX, f"{FIX}0", "m" * 40
+    reads = _fix_reads(monkeypatch, {merged}, commit)
+    runs = Runs({"o/a": [RepositoryRun(1, "main", "push", "in_progress", head_sha=commit), _row(2, "feature")]})
+    sweeps = [panic.cancel_runs([merged, opened], ["o/a"], runs, store) for _ in range(2)]
+    assert sweeps == [["o/a run 2 on feature"], ["o/a run 2 on feature"]]
+    assert reads == [merged, opened, opened]
+    assert panic.fix_state(store, merged) == _fix(merged, True, commit)
+    assert reads == [merged, opened, opened]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_cancel_runs_without_a_store_reads_every_fix_every_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
+    for _ in range(2):
+        panic.cancel_runs([FIX], ["o/a"], Runs({}))
+    assert reads == [FIX, FIX]
+
+
+@pytest.mark.feature("panic-sweep-keeps-merged-fixes")
+def test_tick_pass_keeps_a_merged_fix_until_panic_releases(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = _fix_reads(monkeypatch, {FIX}, "m" * 40)
+    kept = f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}"
+    panic.engage(store, "pressed", False, [FIX], 0)
+    assert panic.tick_pass(store, True, 1_000, Runs({})) == []
+    assert reads == [FIX]
+    assert list(store.redis.hgetall(kept)) == [FIX]
+    assert panic.release(store, 1_000)
+    assert store.redis.hgetall(kept) == {}
+    assert panic.state(store) is None
 
 
 @pytest.mark.feature("panic-merged-fix-integration-head")

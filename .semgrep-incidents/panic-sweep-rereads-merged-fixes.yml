@@ -1,0 +1,20 @@
+rules:
+  - id: panic-sweep-rereads-merged-fixes
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The panic cancel sweep runs in every tick pass. Reading each fix pull request through fix_change on every
+      sweep re-read sixty fixes, fifty three of them merged, one gh call at a time on the pass thread, and held each
+      controller pass about ninety seconds after its graph (issue 11670). Read fix pull requests in cancel_runs
+      through fix_state with the swarm store, which keeps a merged one once read.
+    paths:
+      include:
+        - /scripts/swarm/panic.py
+        - panic-sweep-rereads-merged-fixes.py
+    patterns:
+      - pattern-inside: |
+          def cancel_runs(...):
+            ...
+      - pattern-either:
+          - pattern: fix_change(...)
+          - pattern: stack.change(...)
