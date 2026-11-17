@@ -127,14 +127,17 @@ test('never reports a passing snapshot grade for a failed original grade', async
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
-test('fails at once naming a side job already red in its own graded run', async () => {
-  const f = fixture();
-  f.jobs.push({ id: 73, run_id: 42, name: 'mutation-stats-seed', status: 'completed', conclusion: 'failure' });
-  await assert.rejects(promote(f), /Promotion grade run 42 has red jobs: mutation-stats-seed failure/);
-  assert.equal(f.now(), 0);
-  assert.ok(f.grades.every(grade => grade.state !== 'success'));
-  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
-});
+for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'stale']) {
+  test(`fails at once when a job of its own graded run ended ${conclusion}`, async () => {
+    const f = fixture();
+    f.jobs.push({ id: 75, run_id: 42, name: 'mutation-stats-seed', status: 'completed', conclusion });
+    await assert.rejects(promote(f), new RegExp(`Graded run jobs did not pass: mutation-stats-seed ${conclusion}$`));
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, undefined);
+    assert.ok(f.grades.every(grade => grade.state !== 'success'));
+    assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  });
+}
 
 test('waits for the reported snapshot grade to appear before merging', async () => {
   const f = fixture();
@@ -450,10 +453,10 @@ test('fails at once naming a side job already red in the picked newer grade', as
     return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
       [...result, { name: 'test-summary', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
   };
-  await assert.rejects(promote(f), /Promotion grade run 43 has red jobs: test-summary cancelled/);
+  await assert.rejects(promote(f), /Graded run jobs did not pass: test-summary cancelled$/);
   assert.equal(f.now(), 0);
-  assert.ok(f.grades.every(grade => grade.state !== 'success'));
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  assert.equal(f.outputs.main, undefined);
 });
 
 test('closes its snapshot when a newer grade becomes ready before merge', async () => {
@@ -797,7 +800,8 @@ test('promotes a launch hotfix past an unrelated red promotion check', async () 
 test('never promotes a red grade outside the launch hotfix route', async () => {
   const f = fixture();
   hotfixRun(f, 'success', 'skipped');
-  await assert.rejects(promote(f), /Promotion grade run 42 has red jobs: Gate — Required failure, coverage-baseline failure/);
+  await assert.rejects(promote(f), /Graded run jobs did not pass: Gate — Required failure, coverage-baseline failure$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.ok(f.grades.every(grade => grade.state !== 'success'));
 });
@@ -806,7 +810,8 @@ test('never promotes a launch hotfix whose own grade failed', async () => {
   const f = fixture();
   hotfixRun(f, 'failure');
   await assert.rejects(promote(f),
-    /Promotion grade run 42 has red jobs: Gate — Required failure, Launch hotfix grade failure, coverage-baseline failure/);
+    /Graded run jobs did not pass: Gate — Required failure, Launch hotfix grade failure, coverage-baseline failure$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 

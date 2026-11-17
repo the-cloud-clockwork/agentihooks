@@ -34,9 +34,7 @@ async function snapshotGradeComplete(github, context, api, triggering = context,
   const current = jobs.filter(job => job.run_id === context.runId && job.name === 'promote / promote' &&
     (selected || job.status === 'in_progress'));
   const red = jobs.filter(job => !current.includes(job) && job.status === 'completed' && !settled(job, hotfix));
-  if (red.length) {
-    throw new Error(`Promotion grade run ${context.runId} has red jobs: ${red.map(job => `${job.name} ${job.conclusion}`).join(', ')}`);
-  }
+  if (red.length) throw new Error(`Graded run jobs did not pass: ${red.map(job => `${job.name} ${job.conclusion}`).join(', ')}`);
   return current.length === 1 && jobs.some(job => job.name === (hotfix ? HOTFIX_GRADE : GRADE) && job.status === 'completed' && job.conclusion === 'success') &&
     jobs.every(job => job === current[0] || settled(job, hotfix));
 }
