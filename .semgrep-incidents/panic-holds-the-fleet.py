@@ -10,9 +10,9 @@ def dispatch_seat(tick: Any, get: Get) -> Any:
     return tick.skip_refused(get("slug"))
 
 
-def watch(store: RedisStore, ok: bool, now: int) -> list[str]:
+def watch(store: RedisStore, ok: bool, now: int, report: Report) -> list[str]:
     # ruleid: panic-holds-the-fleet
-    return panic.tick_pass(store, ok, now)
+    return panic.tick_pass(store, ok, now, report)
 
 
 def press(fixes: list[str]) -> list[str]:
@@ -37,9 +37,9 @@ def dispatch_seat_for(tick: Any, get: Get) -> Any:
     return tick.skip_refused(get("slug"))
 
 
-def watch_for(store: RedisStore, slug: str, ok: bool, now: int) -> list[str]:
+def watch_for(store: RedisStore, slug: str, ok: bool, now: int, report: Report) -> list[str]:
     # ok: panic-holds-the-fleet
-    return panic.tick_pass(store, slug, ok, now)
+    return panic.tick_pass(store, slug, ok, now, report)
 
 
 def press_for(store: RedisStore, slug: str, fixes: list[str]) -> list[str]:
