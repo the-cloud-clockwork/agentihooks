@@ -21,7 +21,7 @@ from scripts.hub import branch_heads, lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import AgentRecord, RedisStore, connect
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -396,13 +396,40 @@ class Admission:
         self.store.drop_agent(slug, name)
 
     def reopen(self, slug: str, request: dict) -> bool:
+        """Reopens the task the asking hive's admission claimed and forgets that admission, answering True only then;
+        with no admission held, a dead lettered offer advances its task's claim generation instead."""
         key = self._key(slug, request)
         held = self.store.redis.get(key)
-        if not held or json.loads(held)["hive"] != request["hive"]:
+        if not held:
+            if request.get("dead"):
+                self._advance(slug, request)
+            return False
+        if json.loads(held)["hive"] != request["hive"]:
             return False
         self._release(slug, request["task"], json.loads(held)["name"])
         self.store.redis.delete(key)
         return True
+
+    def _advance(self, slug: str, request: dict[str, Any]) -> None:
+        """Raises the claim generation of an open, unclaimed task whose offer dead lettered with no admission held, so
+        its next offer carries a fresh claim key; a task claimed or already past that generation is left as it is,
+        and a ledger that refuses or cannot take the advance is logged, since the spoke asks again when a later
+        delivery meets the dead claim."""
+        generation: int = request["generation"]
+        try:
+            self.ledger.update_task(
+                slug,
+                request["task"],
+                {"claim_generation": generation + 1},
+                if_state=("open",),
+                if_match={"claimed_by": "", "claim_generation": generation},
+            )
+        except SwarmError as exc:
+            print(
+                f"hub: events reopen swarm={slug} task={request['task']} generation={generation}: "
+                f"claim generation not advanced, {exc}",
+                file=sys.stderr,
+            )
 
     def _release(self, slug: str, task_id: str, name: str) -> None:
         """Returns a claimed task to open: its pending life, its transfer, its claim and agent, then its ledger row."""

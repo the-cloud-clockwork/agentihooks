@@ -776,13 +776,15 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     rig.bus.dead.publish = publish
     rig.queue.take = take
     rig.tasks.reopen.side_effect = lambda event: observed.append("reopen")
+    rig.tasks.dead_lettered.side_effect = lambda event: observed.append("dead_lettered")
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 10
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
-    assert observed == ["reopen", "reopen", "dead", "reopen", "term"]
-    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
+    assert observed == ["reopen", "reopen", "dead", "dead_lettered", "term"]
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 2
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)]
     letters = rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0)
     assert len(letters) == 1
     letter = letters[0].event
@@ -793,11 +795,52 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     assert letter.data["source"] == "swarm.rig.ready.eng"
     letters[0].ack()
     assert real_take(0) is None
-    rig.queue.offer(replace(rig.event, id="duplicate-after-dead"))
+    duplicate = replace(rig.event, id="duplicate-after-dead")
+    rig.queue.offer(duplicate)
     assert rig.spoke.poll() == "dead"
     assert rig.runtime.spawn.call_count == 3
-    assert rig.tasks.reopen.call_count == 3
+    assert rig.tasks.reopen.call_count == 2
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),), ((duplicate,),)]
     assert rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0) == []
+
+
+@pytest.mark.feature("dead-offer-generation")
+def test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term(
+    rig: SimpleNamespace,
+) -> None:
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps({"state": "dead"}).encode())
+    rig.tasks.dead_lettered.side_effect = RuntimeError("hub unavailable")
+
+    assert rig.spoke.poll() == "retry"
+    rig.tasks.dead_lettered.side_effect = None
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "dead"
+
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)] * 2
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.request.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+    assert rig.queue.take(0) is None
+    assert claim(rig) == {"state": "dead"}
+
+
+def test_an_offer_meeting_a_withdrawn_claim_is_terminated_without_asking_the_hub(rig: SimpleNamespace) -> None:
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps({"state": "withdrawn"}).encode())
+
+    assert rig.spoke.poll() == "withdrawn"
+
+    rig.tasks.dead_lettered.assert_not_called()
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.request.assert_not_called()
+    assert rig.queue.take(0) is None
 
 
 def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
@@ -860,7 +903,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             bus.close()
 
 
-@pytest.mark.parametrize("boundary", ["started", "dead", "reopen"])
+@pytest.mark.parametrize("boundary", ["started", "dead", "dead_lettered"])
 def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, boundary):
     from scripts.hive.spoke import Spoke
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -869,8 +912,8 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
         rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
     target = rig.bus.events if boundary == "started" else rig.bus.dead
     real_publish = target.publish
-    if boundary == "reopen":
-        rig.tasks.reopen.side_effect = RuntimeError("ledger unavailable")
+    if boundary == "dead_lettered":
+        rig.tasks.dead_lettered.side_effect = RuntimeError("ledger unavailable")
     else:
         target.publish = Mock(side_effect=RuntimeError("bus unavailable"))
     for now in (0, 10, 30):
@@ -883,7 +926,7 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
         if delivery is not None:
             delivery.nak(0)
     assert rig.queue.take(0) is None
-    rig.tasks.reopen.side_effect = None
+    rig.tasks.dead_lettered.side_effect = None
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
     assert restarted.poll() == ("started" if boundary == "started" else "dead")
     if boundary == "started":
@@ -891,9 +934,10 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
             replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
         )
         rig.tasks.reopen.assert_not_called()
+        rig.tasks.dead_lettered.assert_not_called()
     else:
         assert rig.runtime.spawn.call_count == 3
-        assert rig.tasks.reopen.call_args.args == (rig.event,)
+        assert rig.tasks.dead_lettered.call_args.args == (rig.event,)
 
 
 def test_a_restarted_spoke_relaunches_its_own_ambiguous_spawn_under_a_new_claim_fence(rig):
@@ -1142,7 +1186,8 @@ def test_ready_recovery_retries_below_the_cap_and_reopens_at_the_cap(rig, attemp
     else:
         assert rig.spoke.poll() == "dead"
         rig.runtime.spawn.assert_not_called()
-        rig.tasks.reopen.assert_called_once_with(rig.event)
+        rig.tasks.reopen.assert_not_called()
+        rig.tasks.dead_lettered.assert_called_once_with(rig.event)
         letter = rig.bus.dead.consumer("audit", "dead.>").fetch(1, 0)[0].event
         assert letter.data["attempts"] == 3
     assert pending.get(rig.spoke._pending_key).value == b"{}"
@@ -1160,7 +1205,8 @@ def test_own_launching_recovery_releases_the_claim_and_takes_new_work(rig, attem
     else:
         assert rig.spoke.poll() == "dead"
         assert claim(rig) == {"state": "dead"}
-        rig.tasks.reopen.assert_called_once_with(rig.event)
+        rig.tasks.reopen.assert_not_called()
+        rig.tasks.dead_lettered.assert_called_once_with(rig.event)
     assert pending.get(rig.spoke._pending_key).value == b"{}"
     rig.runtime.spawn.assert_not_called()
 
@@ -1236,7 +1282,8 @@ def test_another_spoke_finishes_a_pending_dead_letter_without_a_local_pending_re
         claim_key(rig.event), json.dumps({"state": "dead_pending", "event": letter.to_dict()}).encode()
     )
     assert rig.spoke.poll() == "dead"
-    rig.tasks.reopen.assert_called_once_with(rig.event)
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.dead_lettered.assert_called_once_with(rig.event)
     rig.runtime.spawn.assert_not_called()
     assert rig.queue.take(0) is None
 
@@ -1252,10 +1299,12 @@ def test_completed_dead_work_does_not_repeat_recovery_on_a_held_spoke(rig):
     assert rig.spoke.poll() == "empty"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
-    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 2
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)]
     rig.spoke.measure = lambda: None
     assert rig.spoke.poll() == "held"
-    assert rig.tasks.reopen.call_count == 3
+    assert rig.tasks.reopen.call_count == 2
+    assert rig.tasks.dead_lettered.call_count == 1
 
 
 def test_ambiguous_launch_intent_keeps_owner_and_name_after_the_exception(rig):

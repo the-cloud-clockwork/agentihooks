@@ -353,3 +353,50 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
     assert request.task["id"] == "desk"
     assert rig.store.claimant(SLUG, "desk") == request.name
     scoped.close()
+
+
+@pytest.mark.feature("dead-offer-generation")
+def test_a_task_whose_offer_dead_lettered_at_its_current_generation_is_placed_on_a_later_pass(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import serena_router_daemon
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    scoped = open_bus(BusConfig(scoped=True))
+    slots.serve(cast(Bus, scoped), admitter=rig.admitter)
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    configs = SimpleNamespace(
+        slugs=lambda: [SLUG],
+        config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine="events"),
+        redis=rig.redis,
+    )
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(
+            pane_id="pane-1",
+            harness="claude",
+            account="slot-a",
+            profile="engineer",
+            model="opus",
+            effort="high",
+            launched_at=0,
+        ),
+    )
+    [offered] = [event for event in readiness.offers(rig.admitter.source.snapshot(SLUG), NOW) if event.key == "plain"]
+    scoped.for_swarm(SLUG).state("spoke-work").create(spoke.claim_key(offered), b'{"state": "dead"}')
+    assert f"ready:{SLUG}:plain:0" in readiness.publish(scoped.for_swarm(SLUG), rig.admitter.source.snapshot(SLUG), NOW)
+
+    assert lanes.run_once(configs, scoped, runtime, "hive-a", ("eng",), 0, {}) == ["dead"]
+    assert readiness.publish(scoped.for_swarm(SLUG), rig.admitter.source.snapshot(SLUG), NOW) == [
+        f"ready:{SLUG}:plain:1"
+    ]
+    assert lanes.run_once(configs, scoped, runtime, "hive-a", ("eng",), 0, {}) == ["started"]
+
+    [request] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert request.task["id"] == "plain"
+    assert rig.store.claimant(SLUG, "plain") == request.name
+    scoped.close()
