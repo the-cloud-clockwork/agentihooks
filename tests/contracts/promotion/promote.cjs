@@ -127,6 +127,18 @@ test('never reports a passing snapshot grade for a failed original grade', async
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
+for (const conclusion of ['failure', 'cancelled', 'timed_out']) {
+  test(`fails at once when a job of its own graded run ended ${conclusion}`, async () => {
+    const f = fixture();
+    f.jobs.push({ id: 75, run_id: 42, name: 'mutation-stats-seed', status: 'completed', conclusion });
+    await assert.rejects(promote(f), new RegExp(`Graded run jobs did not pass: mutation-stats-seed ${conclusion}$`));
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, undefined);
+    assert.ok(f.grades.every(grade => grade.state !== 'success'));
+    assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  });
+}
+
 test('waits for the reported snapshot grade to appear before merging', async () => {
   const f = fixture();
   const paginate = f.github.paginate;
@@ -429,6 +441,20 @@ test('never releases a selected grade whose readiness is revoked before merge', 
     return result;
   };
   await assert.rejects(promote(f), /no longer ready/);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('keeps waiting on a selected newer grade whose run has a red job', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
+      [...result, { name: 'test-summary', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
+  };
+  await assert.rejects(promote(f), /thirty minutes/);
+  assert.equal(f.now(), 1800000);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.equal(f.outputs.main, undefined);
 });
@@ -774,7 +800,8 @@ test('promotes a launch hotfix past an unrelated red promotion check', async () 
 test('never promotes a red grade outside the launch hotfix route', async () => {
   const f = fixture();
   hotfixRun(f, 'success', 'skipped');
-  await assert.rejects(promote(f), /thirty minutes/);
+  await assert.rejects(promote(f), /Graded run jobs did not pass: Gate — Required failure, coverage-baseline failure$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.ok(f.grades.every(grade => grade.state !== 'success'));
 });
@@ -782,7 +809,9 @@ test('never promotes a red grade outside the launch hotfix route', async () => {
 test('never promotes a launch hotfix whose own grade failed', async () => {
   const f = fixture();
   hotfixRun(f, 'failure');
-  await assert.rejects(promote(f), /thirty minutes/);
+  await assert.rejects(promote(f),
+    /Graded run jobs did not pass: Gate — Required failure, Launch hotfix grade failure, coverage-baseline failure$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
