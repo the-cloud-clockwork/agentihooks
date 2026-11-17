@@ -4021,6 +4021,16 @@
       ]
     },
     {
+      "id": "gate-protected-finds-the-tests-run-through-check-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-find-run-by-checks",
+      "behaviour": "Gate Protected finds a pull request head's Tests run through the head commit's check runs while the GitHub run listing still omits that run, reading each other workflow run those check runs name once, so a clean head whose Tests run already runs with jobs passes the gate instead of failing with the Tests run missing.",
+      "seam": "ci_tests_start.verify and the check runs lookup it falls back to",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits_it"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
