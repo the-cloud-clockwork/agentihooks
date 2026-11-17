@@ -1,5 +1,5 @@
-"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless its swarm's panic holds
-or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
+"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless its swarm's panic
+holds or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
 refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
 ledger line since the push, unless any declared wait during that panic, a checked wait on another task not yet done,
 or one on the merge of a pull request still open, holds it."""
@@ -304,8 +304,8 @@ class PushStop:
 
     def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool) -> bool:
         """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
-        the swarm's panic holds, one on another unfinished task, or one on the merge of a pull request still open, which a
-        push would drop from the queue, while every change is committed."""
+        the swarm's panic holds, one on another unfinished task, or one on the merge of a pull request still open,
+        which a push would drop from the queue, while every change is committed."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)
