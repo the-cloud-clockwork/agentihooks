@@ -14,6 +14,7 @@ from scripts.swarm import (
     capacity,
     effort_range,
     launch_check,
+    master_lock,
     master_start,
     model_pick,
     seat_spawn,
@@ -28,6 +29,7 @@ from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
 LAST, NEW, REPLACE = "last", "new", "replace"
+STARTER = "master up"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
 QUESTION = (
     "  1) bring back the last master with its own conversation\n"
@@ -258,6 +260,14 @@ def _beside(store, slug, runtime, at, live):
 
 
 def _fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool = False) -> Launched:
+    """Start a new master under the swarm's master launch lock, refusing while another starter holds it."""
+    with master_lock.held(store, slug, STARTER) as refused:
+        if refused:
+            raise SwarmError(refused)
+        return _start_fresh(store, slug, runtime, at, live, replace_live)
+
+
+def _start_fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool) -> Launched:
     from scripts.swarm import tick_master
 
     tick_master.finish_dead_starting(store, slug, runtime, at)
