@@ -78,9 +78,8 @@ def test_the_master_row_shows_its_route_on_its_own_line_at_1920(account: str, li
 
 @pytest.mark.feature("balance-master-route")
 def test_the_master_name_cell_names_its_account_and_route() -> None:
-    source = page_source()
-    assert "(nameCell(a)), a.lane," in source
     assert (
-        'const subs = [a.account && h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account }), '
-        'a.route && h("span", { class: "sw-sub", text: a.route })].filter(Boolean);' in source
+        'a.account || a.route ? h("span", {}, idCell(a.name), ...[a.account && h("span", { class: "sw-sub", '
+        'title: `account ${a.account}`, text: a.account }), a.route && h("span", { class: "sw-sub", text: a.route })]'
+        ".filter(Boolean)) : idCell(a.name)" in page_source()
     )

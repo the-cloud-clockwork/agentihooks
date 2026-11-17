@@ -156,13 +156,8 @@ function agentRows(sw, now) {
   });
 }
 
-function nameCell(a) {
-  const subs = [a.account && h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account }), a.route && h("span", { class: "sw-sub", text: a.route })].filter(Boolean);
-  return subs.length ? h("span", {}, idCell(a.name), ...subs) : idCell(a.name);
-}
-
 function agentRow(a, remote) {
-  return agentCellTips(withId(cells(((id) => a.hive ? h("span", {}, id, h("span", { class: "sw-sub", title: `hive ${a.hive}`, text: a.hive })) : id)(nameCell(a)), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? ((on) => h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail}), phone access ${on ? "available" : "unavailable"}` }, label(`phone access ${on ? "available" : "unavailable"}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])))(a.remoteControl.state === "on") : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+  return agentCellTips(withId(cells(((id) => a.hive ? h("span", {}, id, h("span", { class: "sw-sub", title: `hive ${a.hive}`, text: a.hive })) : id)(a.account || a.route ? h("span", {}, idCell(a.name), ...[a.account && h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account }), a.route && h("span", { class: "sw-sub", text: a.route })].filter(Boolean)) : idCell(a.name)), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? ((on) => h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail}), phone access ${on ? "available" : "unavailable"}` }, label(`phone access ${on ? "available" : "unavailable"}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])))(a.remoteControl.state === "on") : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     h("span", {}, a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state), joinCell(a.hiveJoin)),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`));
 }

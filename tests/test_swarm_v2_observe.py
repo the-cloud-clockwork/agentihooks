@@ -391,6 +391,7 @@ def test_status_report_rows_keep_their_fields_and_add_the_observation(monkeypatc
         "inbox",
         "observation",
         "capabilities",
+        "route",
         "hive_join",
     }
     assert row["hive_join"] == {}
