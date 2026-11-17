@@ -119,10 +119,10 @@ scan database for that build would lose those associations.
 ### Taking coverage as shards land
 
 The `sonar` job needs only `select`, `reuse`, `admission` and `lab-verdict`, so it
-starts beside the unit shards on a runner of class `light`. Its runner wait,
-checkout and carried coverage finish while the shards run. A light runner
-requests a quarter CPU, so the waiting job keeps no standard runner from the
-shards. `Take each shard's coverage as it lands` runs
+starts beside the unit shards on a standard runner. Its runner wait, checkout
+and carried coverage finish while the shards run. The job holds that runner
+while it waits, because a light runner requests a quarter CPU and ran the scan
+three to four times slower. `Take each shard's coverage as it lands` runs
 `.github/coverage/arrivals.py` from `actions/github-script` with
 `github-token: none`. Every 3 seconds it lists the run's artifacts through the
 results service, the same service `download-artifact` uses for the current run,
@@ -135,9 +135,12 @@ A shard ends when its coverage is taken, or when its flake report is listed with
 no coverage of it beside. `unit` and `unit-selected` upload the flake report after
 their coverage, so a listed flake report means no more coverage is coming. A
 rerun attempt counts only a flake report whose artifact changed since the
-wait's first listing. Coverage that an earlier attempt left counts at once. The
-wait gives up after 44 minutes. It never fails the job itself, so a shard
-still missing reaches `combine.sh`, which names it.
+wait's first listing. Coverage that an earlier attempt left counts at once. A
+shard that leaves neither coverage nor a flake report, such as one that lost
+its runner or ran past its job timeout, holds the wait to its deadline, and so
+does listed coverage that never downloads. The wait gives up after 44 minutes.
+It never fails the job itself, so a shard still missing reaches `combine.sh`,
+which names it.
 
 `combine.sh` moves each `flat-<report>` it finds into its combine input and
 flattens only the reports that have no flat copy. After the last shard lands,
@@ -225,7 +228,7 @@ gh run download "$RUN_ID" \
 | Failure or symptom | Inspection |
 |---|---|
 | `Missing coverage for shard N` | Read `Take each shard's coverage as it lands` for the artifacts it logged as landed, and compare the expected count with them; an optional reused report does not replace the required primary database. |
-| `Shards N had not ended after 44 minutes` | The coverage wait gave up on shards that never uploaded coverage or a flake report, such as a shard that lost its runner or still waited for one. Read those shard jobs; a rerun of `sonar` alone takes coverage they left at once. |
+| `Shards N had not ended after 44 minutes` | The coverage wait gave up on shards that never uploaded coverage or a flake report, such as a shard that lost its runner or still waited for one. Read those shard jobs. A rerun of `sonar` alone takes any coverage they left at once and waits to the deadline again for a shard that left none. |
 | Coverage merge fails or ends without a status | Read the log printed by the merge wait for flattening, combine, XML or LCOV errors. Keep the wait and all coverage inputs. |
 | Merge wait times out | Inspect the merge process and runner resource timings; the short background launch step does not measure merge completion. |
 | No browser or node coverage | Inspect the shard capture artifacts and the LCOV diagnostic; retain both input types required for that scope. |

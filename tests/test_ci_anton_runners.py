@@ -106,7 +106,7 @@ MOVED = {
     ("test.yml", "select"): LIGHT,
     ("test.yml", "lab-verdict"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
-    ("test.yml", "sonar"): LIGHT,
+    ("test.yml", "sonar"): QUEUED,
     ("test.yml", "dep-manifest"): QUEUED,
     ("test.yml", "split"): QUEUED,
     ("test.yml", "launch-hotfix"): LIGHT,

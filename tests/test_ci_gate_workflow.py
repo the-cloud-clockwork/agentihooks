@@ -274,7 +274,7 @@ def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_
     assert all("2>&1 < /dev/null &" in line for line in background)
 
 
-def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
+def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each() -> None:
     jobs = _workflow()["jobs"]
     graders = {"shard-check", "coverage-ratchet", "sonar"}
     for name in graders:

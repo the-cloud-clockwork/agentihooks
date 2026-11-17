@@ -91,9 +91,9 @@ def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -
     )
 
 
-def test_sonar_waits_for_the_shards_on_a_light_runner() -> None:
+def test_sonar_waits_for_the_shards_on_a_standard_runner_so_its_scan_keeps_its_cpu() -> None:
     classes = json.loads((ROOT / ".github/runner-classes.json").read_text())
-    assert classes["test.yml/sonar"] == "light"
+    assert classes["test.yml/sonar"] == "standard"
 
 
 def test_a_shard_uploads_its_flake_report_after_its_coverage() -> None:

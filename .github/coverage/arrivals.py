@@ -88,12 +88,6 @@ def backend_ids(token: str) -> dict[str, str]:
     return {"workflow_run_backend_id": run, "workflow_job_run_backend_id": job}
 
 
-def field(entry: dict[str, Any], name: str) -> Any:
-    """Return a field under its proto name or its JSON camel case name, either of which the service may send."""
-    camel = re.sub(r"_([a-z])", lambda found: found[1].upper(), name)
-    return entry[name] if name in entry else entry.get(camel)
-
-
 class Results:
     """The results service, reached with the job's runtime token."""
 
@@ -125,17 +119,17 @@ class Results:
             return None
         newest: dict[str, str] = {}
         for artifact in answer.get("artifacts") or []:
-            name, ident = artifact["name"], str(field(artifact, "database_id"))
+            name, ident = artifact["name"], str(artifact["database_id"])
             if int(ident) >= int(newest.get(name, "0")):
                 newest[name] = ident
-                self.owners[name] = {key: str(field(artifact, key)) for key in OWNER}
+                self.owners[name] = {key: str(artifact[key]) for key in OWNER}
         return newest
 
     def fetch(self, name: str, folder: Path) -> bool:
         """Download one listed artifact, signed for the job that uploaded it, into the folder; False leaves no folder."""
         if name not in self.owners:
             return False
-        url = field(self.call("GetSignedArtifactURL", {**self.owners[name], "name": name}) or {}, "signed_url")
+        url = (self.call("GetSignedArtifactURL", {**self.owners[name], "name": name}) or {}).get("signed_url")
         if not isinstance(url, str) or not url:
             return False
         staged = folder.with_name(folder.name + PART)

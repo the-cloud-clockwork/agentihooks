@@ -28,7 +28,7 @@ BUDGETS = {
     "test-count": 120,
     "lint": 240,
     "docs": 120,
-    "sonar": 420,
+    "sonar": 570,
     "dep-manifest": 120,
     "coverage-ratchet": 90,
     "queue-fail-fast": 60,
