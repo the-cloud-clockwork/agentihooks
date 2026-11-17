@@ -11,8 +11,9 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS"
 VALUE = "0.dev${{ github.run_number }}"
-INSTALLER = re.compile(r"\bpip3?\s+install\b|\buv\s+sync\b")
+INSTALLER = re.compile(r"\bpip3?\s+install\b|\buv\s+(?:sync|run)\b")
 SEPARATORS = {"&&", "||", ";", "|", "&"}
+NO_PROJECT_INSTALL = {"--no-install-project", "--no-project", "--no-sync"}
 
 
 def _is_editable_install(run: str) -> bool:
@@ -30,7 +31,9 @@ def _is_editable_install(run: str) -> bool:
             if token in ("pip", "pip3") and tokens[index + 1] == "install":
                 if any(option == "--editable" or option.startswith(("-e", "--editable=")) for option in options):
                     return True
-            if token == "uv" and tokens[index + 1] == "sync" and "--no-install-project" not in options:
+            if token == "uv" and tokens[index + 1] in ("sync", "run") and not NO_PROJECT_INSTALL & set(options):
+                return True
+            if token in ("bash", "sh") and tokens[index + 1] == "-c" and options and _is_editable_install(options[0]):
                 return True
     return False
 
@@ -88,6 +91,9 @@ def _frozen_by_protected_gate() -> set[str]:
         ("uv pip install --system \\\n  -e '.[dev,all]'", True),
         ("uv sync --frozen", True),
         ("uv sync --no-install-project", False),
+        ("uv run pytest tests", True),
+        ("uv run --no-project ruff check .", False),
+        ("bash -c \"uv pip install -e '.[all]'\"", True),
         ("uv pip install semgrep==1.177.0", False),
         ('[[ -e "$PLAYWRIGHT_BROWSERS_PATH" ]] && pip install ruff', False),
         ("uv build --wheel", False),
