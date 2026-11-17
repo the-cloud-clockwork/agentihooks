@@ -24,11 +24,6 @@ LONE_FOLDER = {MUTATION, REPLAY}
 ROOT_READ = {
     ("workflows/test.yml", "test-summary", "durations-3.*"),
     ("workflows/test.yml", "test-summary", "flakes-3.*"),
-    (
-        "workflows/test.yml",
-        "sonar",
-        "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}",
-    ),
 }
 UNAFFECTED = {
     ("workflows/hierarchy-cpu.yml", "grade", "load-pair-*"),
