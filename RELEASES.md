@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.980 · 2026-11-17
+
+### 2026-11-17 · a452ffe5b0bb · #11800 · @agenticore-app
+
+**Install the events smoke dependencies offline from the runner wheelhouse**
+
+The events launch smoke job now installs its dependencies offline from the runner wheelhouse first, matching how the unit test shards already work, instead of always hitting the package index. Previously, on wheelhouse-backed runners the index install could stall downloading large wheels and get cancelled at the ten-minute job limit; offline installs instead finish in seconds. Runners without a wheelhouse, such as those for forks or untrusted pull requests, still fall back to the retried index install, so correctness is preserved while typical runs become dramatically faster and more reliable.
+
 ## v2.17.978 · 2026-11-17
 
 ### 2026-11-17 · a2cc75fc5a60 · #11794 · @nestorcolt
