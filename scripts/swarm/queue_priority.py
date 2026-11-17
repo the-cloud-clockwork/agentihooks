@@ -147,14 +147,10 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
     return actions
 
 
-def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -> dict | None:
+def blocking(url: str, journal: queue_record.Journal, head: str) -> dict | None:
     groups = journal.groups()
     if groups is None:
         raise SwarmError("queue priority waits until the head group can be read")
-    if head is None:
-        if not groups or not groups[0]["head"]:
-            return None
-        head = groups[0]["head"]
     repo = "/".join(url.split("/")[3:5])
     runs = merge_queue.rest(
         f"repos/{repo}/actions/workflows/test.yml/runs?event=merge_group&head_sha={head}&per_page=100",
