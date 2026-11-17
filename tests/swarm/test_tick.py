@@ -1016,8 +1016,8 @@ def test_an_operator_line_with_no_live_master_posts_the_down_notice_and_reaches_
     assert ledger.notes.count(MASTER_DOWN) == 1
     later = inbox.send("operator", "master@sw", "still nobody?")
     tick("sw", store, ledger, runtime, down + 2)
-    slot_wait = master_refusals.notice(store, "sw", MASTER_DOWN)
-    assert slot_wait.startswith(f"{MASTER_DOWN} The latest master placement refusal, at ")
+    slot_wait = master_refusals.notice(store, "sw", MASTER_DOWN, down + 2)
+    assert slot_wait.startswith(f"{MASTER_DOWN} The master placement was last refused 0 minutes ago, at ")
     assert slot_wait.endswith(": no session slot for the master, waiting.")
     assert ledger.notes.count(MASTER_DOWN) == 1 and ledger.notes.count(slot_wait) == 1
     runtime.full = False

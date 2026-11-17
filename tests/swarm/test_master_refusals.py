@@ -1,4 +1,5 @@
-"""The tick keeps each master placement refusal with its reason and time, past its pass and past the outage hand back."""
+"""The tick keeps each master placement refusal per seat with its reason and time, past its pass and past the outage
+hand back."""
 
 from typing import Any
 
@@ -9,14 +10,19 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, master_refusals, tick_master
 from scripts.swarm.store import MASTER, RedisStore
 from scripts.swarm.tick import MASTER_DOWN, SpawnError, tick
+from scripts.swarm_v2 import master_fill
+from scripts.swarm_v2.masters import MasterSeats
 from scripts.tick.steps import masters as master_steps
+from tests.hive.test_controller_launch import setup  # noqa: F401
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
 MINUTE = 60_000
-HOUR = 3_600_000
+DAY = 24 * 60 * MINUTE
+SEAT_TWO = "master-2"
 REFUSED = "the master lane runs on the workstation: no live hive takes master"
 ROOM = "no hive for master has room: every hive is full"
+SLOT = "no session slot for the master, waiting"
 
 
 class RefusingRuntime(FakeRuntime):
@@ -35,14 +41,20 @@ class FullRuntime(FakeRuntime):
         return super().spawn(config, lane, name, task)
 
 
+def row(reason: str, since: int, at: int, passes: int = 1) -> dict[str, Any]:
+    return {"reason": reason, "since": since, "at": at, "passes": passes}
+
+
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
 def test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_back(store: RedisStore) -> None:  # noqa: F811
     runtime, ledger = RefusingRuntime(), tasks()
     for at in (MINUTE, 2 * MINUTE, 3 * MINUTE):
         assert REFUSED in tick("sw", store, ledger, runtime, at)
-    kept = {"reason": REFUSED, "since": MINUTE, "at": 3 * MINUTE, "passes": 3}
-    assert master_refusals.latest(store, "sw") == kept
-    assert tick_master._launch_refusal(store, "sw") == f"master placement refused at 00:03 UTC: {REFUSED}"
+    kept = row(REFUSED, MINUTE, 3 * MINUTE, 3)
+    assert master_refusals.latest(store, "sw", MASTER) == kept
+    assert tick_master._launch_refusal(store, "sw", 5 * MINUTE) == (
+        f"master placement last refused 2 minutes ago, at 00:03 UTC: {REFUSED}"
+    )
     assert tick_master.read(store, "sw") == {"since": MINUTE}
 
     runtime.refused = ""
@@ -51,8 +63,33 @@ def test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_b
     assert f"spawned master {runtime.masters[0][0]}" in actions
     assert [m.state for m in masters(store)] == ["working"]
     assert tick_master.read(store, "sw") == {}
-    assert master_refusals.latest(store, "sw") == kept
-    assert HOUR - MINUTE < store.redis.pttl(store.key("sw", master_refusals.KEY)) <= HOUR
+    assert master_refusals.latest(store, "sw", MASTER) == kept
+    assert DAY - MINUTE < store.redis.pttl(store.key("sw", master_refusals.KEY)) <= DAY
+
+
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_a_fenced_master_refusal_is_kept_through_the_master_step_status_findings_and_prune(
+    setup: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import controller, lease, status
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    slug, at = setup.config.slug, lease.now_ms(setup.store)
+
+    [refused] = master_steps._master(slug, setup.config, setup.store, fenced, at)
+
+    wait = placement_waits.read(setup.store, slug)[MASTER]
+    assert refused == f"{controller.WORKSTATION.format(lane=MASTER)}: {wait['reason']}"
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    status.findings(setup.store, slug, setup.config, [], [])
+    assert placement_waits.read(setup.store, slug)[MASTER] == wait
+    assert master_refusals.latest(setup.store, slug, MASTER) == row(refused, at, at)
 
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
@@ -60,9 +97,7 @@ def test_a_master_refused_room_on_every_hive_is_kept_with_its_reason(store: Redi
     actions = master_steps._master("sw", store.config("sw"), store, FullRuntime(), 5 * MINUTE)
 
     assert actions == [f"the master waits: {ROOM}"]
-    assert master_refusals.read(store, "sw") == [
-        {"reason": f"the master waits: {ROOM}", "since": 5 * MINUTE, "at": 5 * MINUTE, "passes": 1}
-    ]
+    assert master_refusals.read(store, "sw", MASTER) == [row(f"the master waits: {ROOM}", 5 * MINUTE, 5 * MINUTE)]
     assert masters(store) == []
 
 
@@ -72,21 +107,35 @@ def test_a_master_with_no_session_slot_is_kept_with_its_reason_and_its_wait_time
 
     actions = master_steps._master("sw", store.config("sw"), store, FakeRuntime(full=True), 5 * MINUTE)
 
-    reason = "no session slot for the master, waiting"
-    assert actions == [reason]
-    assert master_refusals.read(store, "sw") == [{"reason": reason, "since": 5 * MINUTE, "at": 5 * MINUTE, "passes": 1}]
+    assert actions == [SLOT]
+    assert master_refusals.read(store, "sw", MASTER) == [row(SLOT, 5 * MINUTE, 5 * MINUTE)]
     assert store.redis.hget(MASTER_WAITING, "sw") == str(5 * MINUTE)
 
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
-def test_the_master_down_notice_names_the_latest_refusal(store: RedisStore) -> None:  # noqa: F811
+def test_every_master_seat_keeps_its_own_refusals(store: RedisStore) -> None:  # noqa: F811
+    MasterSeats(store.redis).set_count("sw", 2)
+
+    assert master_fill.run("sw", store.config("sw"), store, RefusingRuntime(), {}, MINUTE) == [REFUSED]
+    assert master_fill.run("sw", store.config("sw"), store, FakeRuntime(full=True), {}, 2 * MINUTE) == [SLOT]
+
+    assert master_refusals.read(store, "sw", SEAT_TWO) == [
+        row(REFUSED, MINUTE, MINUTE),
+        row(SLOT, 2 * MINUTE, 2 * MINUTE),
+    ]
+    assert master_refusals.read(store, "sw", MASTER) == []
+
+
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_the_master_down_notice_names_the_latest_refusal_with_its_age(store: RedisStore) -> None:  # noqa: F811
     inbox, ledger = InboxStore(store.redis), tasks()
-    master_refusals.record(store, "sw", REFUSED, 3 * MINUTE)
+    master_refusals.record(store, "sw", MASTER, REFUSED, 3 * MINUTE)
+    master_refusals.record(store, "sw", SEAT_TWO, "a seat two refusal", 4 * MINUTE)
     item = inbox.send("operator", "master@sw", "anyone there")
 
-    actions = master_steps._master_down("sw", store.config("sw"), store, ledger, FakeRuntime(), 4 * MINUTE)
+    actions = master_steps._master_down("sw", store.config("sw"), store, ledger, FakeRuntime(), 5 * MINUTE)
 
-    text = f"{MASTER_DOWN} The latest master placement refusal, at 00:03 UTC: {REFUSED}."
+    text = f"{MASTER_DOWN} The master placement was last refused 2 minutes ago, at 00:03 UTC: {REFUSED}."
     assert actions == ["master down, told the operator about 1 waiting lines"]
     assert ledger.notes == [text]
     assert inbox.history(item.id)[-1]["reason"] == text
@@ -102,13 +151,15 @@ def test_the_master_down_notice_without_a_kept_refusal_is_unchanged(store: Redis
 
 
 @pytest.mark.feature("swarm-master-placement-refusals-kept")
-def test_swarm_status_names_the_latest_refusal_with_its_time(store: RedisStore) -> None:  # noqa: F811
-    master_refusals.record(store, "sw", "an older refusal", MINUTE)
+def test_swarm_status_names_each_seat_latest_refusal_with_its_time(store: RedisStore) -> None:  # noqa: F811
+    master_refusals.record(store, "sw", MASTER, "an older refusal", MINUTE)
     for at in (2 * MINUTE, 3 * MINUTE):
-        master_refusals.record(store, "sw", REFUSED, at)
+        master_refusals.record(store, "sw", MASTER, REFUSED, at)
+    master_refusals.record(store, "sw", SEAT_TWO, "a seat two refusal", 2 * MINUTE)
 
-    assert master_refusals.status_lines(store, "sw", 3 * MINUTE + 7 * MINUTE - 1) == [
-        f"master placement refused  00:03 UTC  6 minutes ago  2 passes since 00:02 UTC  {REFUSED}"
+    assert master_refusals.status_lines(store, "sw", 10 * MINUTE - 1) == [
+        f"master placement refused  master@sw  00:03 UTC  6 minutes ago  2 passes since 00:02 UTC  {REFUSED}",
+        "master placement refused  master-2@sw  00:02 UTC  7 minutes ago  1 passes since 00:02 UTC  a seat two refusal",
     ]
     assert master_refusals.status_lines(store, "other", MINUTE) == []
 
@@ -121,51 +172,61 @@ def test_status_text_names_the_latest_master_placement_refusal(  # noqa: F811
 ) -> None:
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    master_refusals.record(swarm, "sw", "no live hive takes master", 3 * MINUTE)
+    master_refusals.record(swarm, "sw", MASTER, "no live hive takes master", 3 * MINUTE)
     monkeypatch.setattr(cli, "now_ms", lambda: 10 * MINUTE)
 
     run("sw", "status")
 
-    line = "master placement refused  00:03 UTC  7 minutes ago  1 passes since 00:03 UTC  no live hive takes master"
+    line = "master placement refused  master@sw  00:03 UTC  7 minutes ago  1 passes since 00:03 UTC  no live hive takes master"
     assert line in capsys.readouterr().out.splitlines()
 
 
-def test_a_refusal_row_is_kept_for_the_whole_finding_window(store: RedisStore) -> None:  # noqa: F811
-    master_refusals.record(store, "sw", "first", MINUTE)
-    master_refusals.record(store, "sw", "second", MINUTE + HOUR - 1)
+def test_a_refusal_row_is_kept_for_a_whole_day(store: RedisStore) -> None:  # noqa: F811
+    master_refusals.record(store, "sw", MASTER, "first", MINUTE)
+    master_refusals.record(store, "sw", MASTER, "second", MINUTE + DAY - 1)
 
-    assert [row["reason"] for row in master_refusals.read(store, "sw")] == ["first", "second"]
-    assert HOUR - MINUTE < store.redis.pttl(store.key("sw", master_refusals.KEY)) <= HOUR
+    assert [kept["reason"] for kept in master_refusals.read(store, "sw", MASTER)] == ["first", "second"]
+    assert DAY - MINUTE < store.redis.pttl(store.key("sw", master_refusals.KEY)) <= DAY
 
-    master_refusals.record(store, "sw", "third", MINUTE + HOUR)
+    master_refusals.record(store, "sw", MASTER, "third", MINUTE + DAY)
 
-    assert [row["reason"] for row in master_refusals.read(store, "sw")] == ["second", "third"]
+    assert [kept["reason"] for kept in master_refusals.read(store, "sw", MASTER)] == ["second", "third"]
+
+
+def test_a_seat_keeps_its_newest_hundred_rows(store: RedisStore) -> None:  # noqa: F811
+    for index in range(101):
+        master_refusals.record(store, "sw", MASTER, f"reason {index}", MINUTE + index)
+
+    kept = [kept["reason"] for kept in master_refusals.read(store, "sw", MASTER)]
+    assert kept == [f"reason {index}" for index in range(1, 101)]
 
 
 def test_a_repeated_reason_extends_the_latest_row_only(store: RedisStore) -> None:  # noqa: F811
     for at, reason in ((MINUTE, "a"), (2 * MINUTE, "b"), (3 * MINUTE, "b")):
-        assert master_refusals.record(store, "sw", reason, at) == [reason]
+        assert master_refusals.record(store, "sw", MASTER, reason, at) == [reason]
 
-    assert master_refusals.read(store, "sw") == [
-        {"reason": "a", "since": MINUTE, "at": MINUTE, "passes": 1},
-        {"reason": "b", "since": 2 * MINUTE, "at": 3 * MINUTE, "passes": 2},
-    ]
-    assert master_refusals.named(store, "sw") == "master placement refused at 00:03 UTC: b"
-    assert master_refusals.named(store, "other") == ""
-    assert master_refusals.latest(store, "other") == {}
+    assert master_refusals.read(store, "sw", MASTER) == [row("a", MINUTE, MINUTE), row("b", 2 * MINUTE, 3 * MINUTE, 2)]
+    assert (
+        master_refusals.named(store, "sw", 4 * MINUTE) == "master placement last refused 1 minutes ago, at 00:03 UTC: b"
+    )
+    assert master_refusals.named(store, "other", 4 * MINUTE) == ""
+    assert master_refusals.latest(store, "other", MASTER) == {}
 
 
 def test_the_launch_refusal_without_a_kept_refusal_says_no_master_launched(store: RedisStore) -> None:  # noqa: F811
-    assert tick_master._launch_refusal(store, "sw") == tick_master.NO_LAUNCH
+    master_refusals.record(store, "sw", SEAT_TWO, "a seat two refusal", MINUTE)
+
+    assert tick_master._launch_refusal(store, "sw", 2 * MINUTE) == tick_master.NO_LAUNCH
 
 
-def test_the_status_prune_keeps_the_master_wait_while_the_tick_still_sees_it_refused(store: RedisStore) -> None:  # noqa: F811
+def test_the_status_prune_keeps_every_master_seat_wait_while_the_tick_still_sees_it(store: RedisStore) -> None:  # noqa: F811
     placement_waits.observe(store, "sw", MASTER, MASTER, REFUSED, MINUTE)
+    placement_waits.observe(store, "sw", MASTER, SEAT_TWO, REFUSED, MINUTE)
     placement_waits.observe(store, "sw", "eng", "gone", REFUSED, MINUTE)
 
     placement_waits.prune(store, "sw", [], MINUTE + placement_waits.FRESH_MS - 1)
 
-    assert set(placement_waits.read(store, "sw")) == {MASTER}
+    assert set(placement_waits.read(store, "sw")) == {MASTER, SEAT_TWO}
 
     placement_waits.prune(store, "sw", [], MINUTE + placement_waits.FRESH_MS)
 

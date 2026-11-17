@@ -1,68 +1,86 @@
-"""Each master placement refusal the tick master step meets, kept in swarm Redis with its reason and time for the
-sixty minute finding window, so an empty front door master seat stays explained after the pass, after the outage hand
-back and after the controller log rotates."""
+"""Each placement refusal a master seat meets, kept in swarm Redis per seat with its reason and time for a day, so an
+empty master seat stays explained after the pass, after the outage hand back and after the controller log rotates."""
 
 import json
 import time
 from typing import Any
 
+from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
+from scripts.swarm.store import MASTER
+
 KEY = "master-refusals"
-KEEP_MS = 60 * 60_000
+KEEP_MS = 24 * 60 * 60_000
+ROWS = 100
 MINUTE_MS = 60_000
 CLOCK = "%H:%M"
-NAMED = "master placement refused at {at} UTC: {reason}"
-NOTICE = "{text} The latest master placement refusal, at {at} UTC: {reason}."
-LINE = "master placement refused  {at} UTC  {ago} minutes ago  {passes} passes since {since} UTC  {reason}"
+NAMED = "master placement last refused {ago} minutes ago, at {at} UTC: {reason}"
+NOTICE = "{text} The master placement was last refused {ago} minutes ago, at {at} UTC: {reason}."
+LINE = "master placement refused  {seat}  {at} UTC  {ago} minutes ago  {passes} passes since {since} UTC  {reason}"
 
 
-def record(store: Any, slug: str, reason: str, now_ms: int) -> list[str]:
-    """Keep the refusal and return it as the master step's action: a repeat of the latest reason extends its row, a
-    new reason opens one, and a row last seen a whole window ago is dropped."""
-    rows = read(store, slug)
+def record(store: Any, slug: str, seat: str, reason: str, now_ms: int) -> list[str]:
+    """Keep the seat's refusal and return it as the step's action: a repeat of the seat's latest reason extends its
+    row, a new reason opens one, and the seat keeps its newest rows seen within the day."""
+    rows = read(store, slug, seat)
     if rows and rows[-1]["reason"] == reason:
         rows[-1] = {**rows[-1], "at": now_ms, "passes": rows[-1]["passes"] + 1}
     else:
         rows.append({"reason": reason, "since": now_ms, "at": now_ms, "passes": 1})
-    kept = [row for row in rows if now_ms - row["at"] < KEEP_MS]
-    store.redis.set(store.key(slug, KEY), json.dumps(kept), px=KEEP_MS)
+    kept = [row for row in rows if now_ms - row["at"] < KEEP_MS][-ROWS:]
+    key = store.key(slug, KEY)
+    store.redis.hset(key, seat, json.dumps(kept))
+    store.redis.pexpire(key, KEEP_MS)
     return [reason]
 
 
-def read(store: Any, slug: str) -> list[dict[str, Any]]:
-    """Every kept refusal row, oldest first."""
-    raw = store.redis.get(store.key(slug, KEY))
+def read(store: Any, slug: str, seat: str) -> list[dict[str, Any]]:
+    """Every kept refusal row of the seat, oldest first."""
+    raw = store.redis.hget(store.key(slug, KEY), seat)
     return json.loads(raw) if raw else []
 
 
-def latest(store: Any, slug: str) -> dict[str, Any]:
-    """The newest kept refusal row, empty while none is kept."""
-    rows = read(store, slug)
+def seats(store: Any, slug: str) -> dict[str, list[dict[str, Any]]]:
+    """Every seat's kept refusal rows, by seat."""
+    return {seat: json.loads(raw) for seat, raw in store.redis.hgetall(store.key(slug, KEY)).items()}
+
+
+def latest(store: Any, slug: str, seat: str) -> dict[str, Any]:
+    """The seat's newest kept refusal row, empty while none is kept."""
+    rows = read(store, slug, seat)
     return rows[-1] if rows else {}
 
 
-def named(store: Any, slug: str) -> str:
-    """The newest refusal reason with its time, empty while none is kept."""
-    row = latest(store, slug)
-    return NAMED.format(at=_clock(row["at"]), reason=row["reason"]) if row else ""
+def named(store: Any, slug: str, now_ms: int) -> str:
+    """The front door seat's newest refusal reason with its age and time, empty while none is kept."""
+    row = latest(store, slug, MASTER)
+    return NAMED.format(ago=_ago(row, now_ms), at=_clock(row["at"]), reason=row["reason"]) if row else ""
 
 
-def notice(store: Any, slug: str, text: str) -> str:
-    """The master down notice text naming the newest refusal reason and its time."""
-    row = latest(store, slug)
-    return NOTICE.format(text=text, at=_clock(row["at"]), reason=row["reason"]) if row else text
+def notice(store: Any, slug: str, text: str, now_ms: int) -> str:
+    """The master down notice text naming the front door seat's newest refusal reason with its age and time."""
+    row = latest(store, slug, MASTER)
+    return NOTICE.format(text=text, ago=_ago(row, now_ms), at=_clock(row["at"]), reason=row["reason"]) if row else text
 
 
 def status_lines(store: Any, slug: str, now_ms: int) -> list[str]:
-    """The swarm status line for the newest refusal, none while none is kept."""
-    row = latest(store, slug)
-    if not row:
-        return []
-    ago = (now_ms - row["at"]) // MINUTE_MS
+    """One swarm status line per master seat naming its newest kept refusal."""
     return [
         LINE.format(
-            at=_clock(row["at"]), ago=ago, passes=row["passes"], since=_clock(row["since"]), reason=row["reason"]
+            seat=seat_address(slug, seat),
+            at=_clock(rows[-1]["at"]),
+            ago=_ago(rows[-1], now_ms),
+            passes=rows[-1]["passes"],
+            since=_clock(rows[-1]["since"]),
+            reason=rows[-1]["reason"],
         )
+        for seat, rows in sorted(seats(store, slug).items())
+        if rows
     ]
+
+
+def _ago(row: dict[str, Any], now_ms: int) -> int:
+    """Whole minutes since the row's latest refusal."""
+    return (now_ms - row["at"]) // MINUTE_MS
 
 
 def _clock(at_ms: int) -> str:

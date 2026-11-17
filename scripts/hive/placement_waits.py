@@ -63,10 +63,10 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
 
 
 def prune(store: RedisStore, slug: str, tasks: list[dict[str, Any]], now: int) -> None:
-    """Drop the waits of tasks no longer active; the master's wait stays while the tick still sees it refused."""
+    """Drop the waits of tasks no longer active; a master seat's wait stays while the tick still sees it refused."""
     active = {task["id"] for task in tasks if task.get("state") not in ("done", "cancelled")}
     for task, row in read(store, slug).items():
-        if task not in active and not (task == MASTER and now - row["seen_at"] < FRESH_MS):
+        if task not in active and not (row["lane"] == MASTER and now - row["seen_at"] < FRESH_MS):
             store.redis.hdel(store.key(slug, WAITS), task)
 
 

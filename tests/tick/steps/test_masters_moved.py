@@ -122,7 +122,7 @@ def inbox(monkeypatch: pytest.MonkeyPatch) -> type[_Inbox]:
 
 def _store(agents: list[AgentRecord] | None = None) -> SimpleNamespace:
     return SimpleNamespace(
-        redis=SimpleNamespace(get=lambda key: None),
+        redis=SimpleNamespace(hget=lambda key, field: None),
         key=lambda slug, kind: f"{slug}/{kind}",
         agents=lambda slug: list(agents or []) if slug == "sw" else [],
     )

@@ -94,7 +94,7 @@ def run(
         master_start.clear_unalerted(store, slug)
     launched = launch()
     if forcing and not launched:
-        launched = [_launch_refusal(store, slug)]
+        launched = [_launch_refusal(store, slug, now_ms)]
     actions = [FORCED.format(minutes=_shown(minutes)), *finished, *launched] if forcing else launched
     if config.state == "stopping":
         master_alarm.drop(store, slug)
@@ -172,7 +172,7 @@ def _finish(store: RedisStore, slug: str, runtime: Any, now_ms: int, states: tup
     return actions
 
 
-def _launch_refusal(store: RedisStore, slug: str) -> str:
+def _launch_refusal(store: RedisStore, slug: str, now_ms: int) -> str:
     if leads := _masters(store, slug):
         names = ", ".join(f"{a.name} ({a.state})" for a in leads)
         return f"master launch refused: unfinished lead {names}"
@@ -181,7 +181,7 @@ def _launch_refusal(store: RedisStore, slug: str) -> str:
         return f"master launch refused: startup pending for {name}"
     if pending.get("alerted"):
         return "master launch refused: startup retry backoff pending"
-    return master_refusals.named(store, slug) or NO_LAUNCH
+    return master_refusals.named(store, slug, now_ms) or NO_LAUNCH
 
 
 def _bound(store: RedisStore, slug: str, runtime: Any, doc: dict) -> AgentRecord | None:
