@@ -1,4 +1,6 @@
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,7 @@ from scripts.swarm_ledger.repository import bin_storage
 from scripts.swarm_ledger.storage import default as default_repository
 
 repository = default_repository()
+IN_PROCESS = "in process bin lock"
 
 
 @pytest.fixture(autouse=True)
@@ -110,12 +113,20 @@ def test_auto_bin_treats_a_never_touched_ledger_as_idle_from_time_zero(monkeypat
 
 def _locks_taken(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     taken: list[str] = []
+    locked = bin_storage.request_metrics.locked
 
     def recorded(statement: str) -> None:
         if statement == bin_storage.BEGIN_IMMEDIATE:
             taken.append(statement)
 
+    @contextmanager
+    def held(lock: Any) -> Iterator[None]:
+        taken.append(IN_PROCESS)
+        with locked(lock):
+            yield
+
     monkeypatch.setattr(repository, "trace", recorded)
+    monkeypatch.setattr(bin_storage.request_metrics, "locked", held)
     return taken
 
 
@@ -158,7 +169,7 @@ def test_an_expired_bin_entry_is_purged_under_the_writer_lock(monkeypatch: pytes
     bin_storage.delete("young", now=5 + kept)
     taken = _locks_taken(monkeypatch)
     assert bin_storage.purge_expired(now=6 + kept) == ["gone"]
-    assert taken == [bin_storage.BEGIN_IMMEDIATE]
+    assert taken == [IN_PROCESS, bin_storage.BEGIN_IMMEDIATE]
     assert bin_storage.entries() == {"young": 5 + kept}
 
 
@@ -171,7 +182,7 @@ def test_a_ledger_due_for_the_bin_is_binned_under_the_writer_lock(monkeypatch: p
     )
     taken = _locks_taken(monkeypatch)
     assert bin_storage.auto_bin(now=now) == ["stale"]
-    assert taken == [bin_storage.BEGIN_IMMEDIATE]
+    assert taken == [IN_PROCESS, bin_storage.BEGIN_IMMEDIATE]
     assert bin_storage.entries() == {"parked": now, "stale": now}
 
 
