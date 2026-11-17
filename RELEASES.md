@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.963 · 2026-11-17
+
+### 2026-11-17 · 95405e26e12c · #11708 · @agenticore-app
+
+**Chart graders render a chart's required values under every render**
+
+This change teaches the chart test graders (chart_timers.py and chart_pod_templates.py) to treat a chart's ci/required-values.yaml as a base layer: if present, it's merged into every render—including the bare-defaults render—instead of being tested alone as a standalone values file. Charts lacking that file render exactly as before. This matters because it prepares for the swarm chart's upcoming controller guard, which will require the shared ledger database values to render at all; the graders now learn to always supply required values before that guard lands, avoiding false failures.
+
 ## v2.17.962 · 2026-11-17
 
 ### 2026-11-17 · d588a83a764d · #11699 · @nestorcolt
