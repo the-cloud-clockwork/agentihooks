@@ -350,12 +350,13 @@ def _root_bus(args: argparse.Namespace) -> str:
 def _refresh_root_bus() -> None:
     from dotenv import dotenv_values
 
+    from scripts.events import nkey
     from scripts.hive import root_bus
     from scripts.swarm.probe import ROOT
 
     try:
         path = root_bus.refresh(registry.home(), _signer, ROOT)
-    except auth.HiveError as exc:
+    except (auth.HiveError, nkey.NkeyError, KeyError, OSError) as exc:
         print(f"hive kept the stored root bus credential ({exc})", file=sys.stderr)
         return
     if path is not None:

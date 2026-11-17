@@ -42,11 +42,16 @@ def write(home: Path, signer: nats_grant.Signer, member_id: str) -> Path:
 def refresh(home: Path, signer: Callable[[], nats_grant.Signer | None], member_id: str) -> Path | None:
     """Re-mint the stored credential of member_id through write when a fresh mint grants other subjects.
 
-    Return the env path when it re-minted; without a stored credential or a signer nothing changes.
+    Return the env path when it re-minted and None when the stored grant matches or no credential is stored, without
+    reading the signer then; raise HiveError when a stored credential has no signer to compare it with.
     """
     creds = Path(home) / FOLDER / CREDS_FILE
-    if not creds.is_file() or (found := signer()) is None:
+    if not creds.is_file():
         return None
+    if (found := signer()) is None:
+        raise auth.HiveError(
+            f"{nats_grant.SIGNER_ENV} is unset, so the stored credential is not compared with a fresh mint"
+        )
     stored: dict[str, object] = nkey.claims(nkey.parse_creds(creds.read_text())[0])["nats"]
     user = nats_grant.member_user(found, member_id).public
     fresh: dict[str, object] = nats_grant.member_claims(user, nats_grant.require_listed(found, member_id), member_id)

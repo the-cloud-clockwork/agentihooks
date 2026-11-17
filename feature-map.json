@@ -656,7 +656,7 @@
       "id": "hive-root-bus-re-mint",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2531",
-      "behaviour": "hive run, after the operator env fills and before the lane spokes start, compares the publish and subscribe grant of the stored root hive bus credential with what nats_grant.member_claims mints now for the swarms the hub signer lists for root; when they differ, such as a credential minted before the per member stop consumer grants, it re-mints through root_bus.write and loads the rewritten bus env into the service; a matching credential is kept unchanged, no signer is read without a stored credential, and a signer that cannot mint keeps the stored credential and logs why.",
+      "behaviour": "hive run, after the operator env fills and before the lane spokes start, compares the publish and subscribe grant of the stored root hive bus credential with what nats_grant.member_claims mints now for the swarms the hub signer lists for root; when they differ, such as a credential minted before the per member stop consumer grants, it re-mints through root_bus.write and loads the rewritten bus env into the service; a matching credential is kept unchanged and no signer is read without a stored credential; a missing signer, a signer that cannot mint or a stored credential it cannot read keeps the stored credential and logs why to the hive journal.",
       "seam": "root_bus.refresh and hive run",
       "tests": [
         "tests/hive/test_root_bus.py::test_refresh_re_mints_a_root_credential_minted_without_the_stop_consumer_grants",
@@ -664,9 +664,10 @@
         "tests/hive/test_root_bus.py::test_refresh_keeps_a_root_credential_that_matches_a_fresh_mint",
         "tests/hive/test_root_bus.py::test_refresh_re_mints_for_the_swarms_the_signer_lists_now",
         "tests/hive/test_root_bus.py::test_refresh_reads_no_signer_without_a_stored_root_credential",
-        "tests/hive/test_root_bus.py::test_refresh_keeps_the_stored_root_credential_without_a_signer",
+        "tests/hive/test_root_bus.py::test_refresh_refuses_to_compare_a_stored_root_credential_without_a_signer",
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env",
-        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint"
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_a_stored_root_credential_it_cannot_read"
       ]
     },
     {

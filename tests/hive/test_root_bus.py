@@ -653,14 +653,18 @@ def test_refresh_reads_no_signer_without_a_stored_root_credential(tmp_path: Path
 
 
 @pytest.mark.feature("hive-root-bus-re-mint")
-def test_refresh_keeps_the_stored_root_credential_without_a_signer(tmp_path: Path) -> None:
+def test_refresh_refuses_to_compare_a_stored_root_credential_without_a_signer(tmp_path: Path) -> None:
     signer = _signer(ROOT)
     root_bus.write(tmp_path, signer, "root")
     creds = _stored(tmp_path, signer, _without_stop_grants(signer))
     stored = creds.read_text()
 
-    assert root_bus.refresh(tmp_path, lambda: None, "root") is None
+    with pytest.raises(auth.HiveError) as refused:
+        root_bus.refresh(tmp_path, lambda: None, "root")
 
+    assert str(refused.value) == (
+        "AGENTIHOOKS_NATS_SIGNER is unset, so the stored credential is not compared with a fresh mint"
+    )
     assert creds.read_text() == stored
 
 
@@ -708,4 +712,27 @@ def test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint(
     assert capsys.readouterr().err == (
         "hive kept the stored root bus credential (the hub record lists no member swarms for hive member root; "
         "it mints no unscoped bus credential)\n"
+    )
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_keeps_a_stored_root_credential_it_cannot_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    root_bus.write(home, signer, "root")
+    creds = home / "root-bus" / "bus.creds"
+    creds.write_text("not a creds file\n")
+    monkeypatch.delenv("AGENTIHOOKS_BUS_SWARMS", raising=False)
+    monkeypatch.setattr(cli, "_signer", lambda: signer)
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", None, "telemetry"]
+    assert creds.read_text() == "not a creds file\n"
+    assert capsys.readouterr().err == (
+        "hive kept the stored root bus credential (a NATS creds file holds one user JWT and one seed)\n"
     )
