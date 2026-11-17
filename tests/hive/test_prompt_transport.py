@@ -531,6 +531,29 @@ def test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it(
 
 
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_a_hive_syncs_the_work_folder_of_a_session_it_started_that_names_only_its_process(
+    setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    process = {"pid": 4242, "pid_start": 9001}
+    agents = [
+        replace(setup.agent, task="started", runtime_target=process),
+        replace(setup.agent, task="started-elsewhere", hive="other", runtime_target=process),
+    ]
+    monkeypatch.setattr(setup.consumer.store, "agents", lambda slug: agents)
+    monkeypatch.setattr(setup.consumer.store, "slugs", lambda: ["fixture"])
+    with at(homes.hive):
+        for task in ("started", "started-elsewhere"):
+            ledger_workspace.materialize("fixture", task, {"progress.md": f"{task} step\n"})
+        setup.consumer.sync_workspaces(45)
+    synced = json.loads(setup.redis.get(ledger_workspace.files_key("host")))
+    assert synced == {"fixture": {"started": {"progress.md": "started step\n"}}}
+    held = setup.redis.get(f"{ledger_workspace.files_key('host')}:fixture:started")
+    assert json.loads(held) == {"progress.md": "started step\n"}
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes: SimpleNamespace) -> None:
     lines = {"progress.md": "hive step\n", "proof.md": "hive proof\n"}
     with at(homes.hive):

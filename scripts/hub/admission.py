@@ -357,8 +357,8 @@ class Admission:
         earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
         previous = max(earlier, key=lambda agent: agent.started_at, default=None)
         redis = cast(Any, self.store).redis
-        hives = (redis.get(self.store.key(slug, WORK_FOLDER, task["id"])), previous.hive if previous else "")
-        copies = (redis.get(ledger_workspace.task_files_key(hive, slug, task["id"])) for hive in hives)
+        hives = (redis.get(self.store.key(slug, WORK_FOLDER, task["id"])), previous and previous.hive)
+        copies = (redis.get(ledger_workspace.task_files_key(hive, slug, task["id"])) for hive in hives if hive)
         held = next(filter(None, copies), None)
         synced: dict[str, str] = json.loads(held) if held else {}
         return {**synced, "steering.md": ledger_workspace.steering(task, doc)}

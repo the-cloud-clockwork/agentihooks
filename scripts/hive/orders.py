@@ -280,15 +280,15 @@ class Consumer:
         self.offbeat(order)
 
     def sync_workspaces(self, ttl: int) -> None:
-        """Publishes the work folder of each worker task whose latest execution runs here: on its host target, else on
-        the hive its hub admission named."""
+        """Publishes the work folder of each worker task whose latest execution runs here: the hive its host target
+        names, else the hive on its record, which a hub admission and a session the hive started itself both carry."""
         hosted = [
             (slug, task)
             for slug in self.store.slugs()
             for task, agent in ledger_workspace.latest(self.store.agents(slug)).items()
             if agent.execution_id
             and agent.lane != MASTER
-            and (agent.runtime_target.get("host_id") if agent.runtime_target else agent.hive) == self.hive
+            and (agent.runtime_target.get("host_id") or agent.hive) == self.hive
         ]
         ledger_workspace.sync(self.store.redis, self.hive, hosted, ttl)
 
