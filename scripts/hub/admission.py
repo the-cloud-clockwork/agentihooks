@@ -20,8 +20,8 @@ from scripts.hive import admission as hive_admission
 from scripts.hub import branch_heads, lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
-from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
-from scripts.swarm.store import AgentRecord, RedisStore, connect
+from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -414,7 +414,8 @@ class Admission:
     def _advance(self, slug: str, request: dict[str, Any]) -> None:
         """Raises the claim generation of an open, unclaimed task whose offer dead lettered with no admission held, so
         its next offer carries a fresh claim key; a task claimed or already past that generation is left as it is,
-        and a ledger refusing the advance is logged."""
+        and a ledger that refuses or cannot take the advance is logged, since the spoke asks again when a later
+        delivery meets the dead claim."""
         generation: int = request["generation"]
         try:
             self.ledger.update_task(
@@ -424,7 +425,7 @@ class Admission:
                 if_state=("open",),
                 if_match={"claimed_by": "", "claim_generation": generation},
             )
-        except LedgerRefused as exc:
+        except SwarmError as exc:
             print(
                 f"hub: events reopen swarm={slug} task={request['task']} generation={generation}: "
                 f"claim generation not advanced, {exc}",

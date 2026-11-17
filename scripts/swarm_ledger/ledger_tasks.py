@@ -108,7 +108,10 @@ RANK_AUTHORS = ("operator", SWARM, "dispatcher")
 RANK_LANES = ("master", "dispatch")
 QUOTED = "task_update takes quote, the operator's words, only with a rank"
 GENERATION = "claim_generation"
-ADVANCED = "claim_generation may be set only to one above the claim_generation if_match names"
+ADVANCED = (
+    "claim_generation may be set only on a task if_state names open and if_match names unclaimed, "
+    "to one above the claim_generation if_match names"
+)
 UNRELAYED_TASK = "a rank relay refused: the task does not exist"
 UNRELAYED_ROLE = (
     "a rank relay refused: {by} is not the ledger's orchestrator; only the master relays the operator's rank, "
@@ -216,12 +219,15 @@ def check_guards(op: dict) -> None:
 
 
 def check_generation(op: dict[str, Any]) -> None:
-    """A task update sets the claim generation only one above the claim generation its if_match names, so an offer
-    that dead lettered unclaimed retires its claim key without a change of claimant."""
+    """A task update sets the claim generation only on an open task its guard names unclaimed, and only one above
+    the claim generation its if_match names, so an offer that dead lettered unclaimed retires its claim key without a
+    change of claimant and never strands a holder's claim."""
     if GENERATION not in op["fields"]:
         return
-    value, guard = op["fields"][GENERATION], op.get("if_match", {}).get(GENERATION)
-    if type(value) is not int or type(guard) is not int or value != guard + 1:
+    expected = op.get("if_match", {})
+    value, guard = op["fields"][GENERATION], expected.get(GENERATION)
+    unclaimed = op.get("if_state") == ["open"] and expected.get("claimed_by") == ""
+    if not unclaimed or type(value) is not int or type(guard) is not int or value != guard + 1:
         raise ValueError(ADVANCED)
 
 

@@ -317,19 +317,30 @@ class OwnershipOperationContract(unittest.TestCase):
     def test_the_operation_validator_refuses_a_claim_generation_not_one_above_its_guard(self) -> None:
         from scripts.swarm_ledger import ledger_tasks
 
-        for value, expected in (
-            (2, {"claim_generation": 0}),
-            (0, {"claim_generation": 0}),
-            (1, {"claimed_by": ""}),
-            (True, {"claim_generation": 0}),
-            (1.0, {"claim_generation": 0}),
-            ("1", {"claim_generation": 0}),
+        unclaimed = {"claimed_by": "", "claim_generation": 0}
+        for value, state, expected in (
+            (2, ["open"], unclaimed),
+            (0, ["open"], unclaimed),
+            (True, ["open"], unclaimed),
+            (1.0, ["open"], unclaimed),
+            ("1", ["open"], unclaimed),
+            (1, ["open"], {"claimed_by": ""}),
+            (1, ["open"], {"claim_generation": 0}),
+            (1, ["open"], {"claimed_by": "engineer-1", "claim_generation": 0}),
+            (1, None, unclaimed),
+            (1, ["open", "claimed"], unclaimed),
         ):
-            change = op("task_update", 1, item="tasks/t1", fields={"claim_generation": value}, if_match=expected)
-            with self.assertRaisesRegex(
-                ValueError, "^claim_generation may be set only to one above the claim_generation if_match names$"
-            ):
+            guard = {} if state is None else {"if_state": state}
+            change = op(
+                "task_update", 1, item="tasks/t1", fields={"claim_generation": value}, if_match=expected, **guard
+            )
+            with self.assertRaises(ValueError) as raised:
                 ledger_tasks.check(change)
+            self.assertEqual(
+                str(raised.exception),
+                "claim_generation may be set only on a task if_state names open and if_match names unclaimed, "
+                "to one above the claim_generation if_match names",
+            )
 
     def test_the_operation_guard_matches_size_and_group_members_with_legacy_defaults(self) -> None:
         from scripts.swarm_ledger import ledger_tasks

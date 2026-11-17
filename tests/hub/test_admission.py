@@ -688,13 +688,17 @@ def test_a_dead_lettered_reopen_of_its_own_admission_releases_it(rig: SimpleName
     )
 
 
-def test_a_refused_generation_advance_is_logged_and_answered_false(
-    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    "failure",
+    ["LedgerRefused", "LedgerUnreachable"],
+)
+def test_a_failed_generation_advance_is_logged_and_answered_false(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str], failure: str
 ) -> None:
-    from scripts.swarm.ledger_client import LedgerRefused
+    from scripts.swarm import ledger_client
 
     def refuse(*args: Any, **kwargs: Any) -> dict:
-        raise LedgerRefused("ledger sw refused: task_update may set only")
+        raise getattr(ledger_client, failure)("ledger sw refused: task_update may set only")
 
     rig.ledger.update_task = refuse
 
