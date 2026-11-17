@@ -171,7 +171,10 @@ def test_the_front_proxies_reads_with_the_scheme_the_swarm_serves() -> None:
     override = yaml.safe_load(smoke.split("<<'YAML'\n", 1)[1].split("\nYAML\n", 1)[0])["services"]
     assert override["swarm"]["environment"]["LEDGER_TLS_CERT"] == "/tls/cert.pem"
     assert override["front"]["environment"] == {"SWARM_LEDGER_SCHEME": "https"}
-    assert "127.0.0.1:{os.environ['SWARM_PORT']}" in smoke
+    read = smoke.split("if ! python3 - \"$slug\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    assert "http://127.0.0.1:{os.environ['SWARM_PORT']}" in read
+    assert 'for route in ("/healthz", "/api/v1/ledgers", f"/{slug}"):' in read
+    assert smoke.index(read) < smoke.index('docker run -d --name "$run-member"')
 
 
 @pytest.mark.feature("compose-api-health-and-front-proxy")
