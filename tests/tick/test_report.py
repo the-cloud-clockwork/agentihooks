@@ -267,7 +267,9 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
 
 def _closing_store(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
     redis = SimpleNamespace(
-        set=lambda key, value: calls.append(("set", key, value)), delete=lambda key: calls.append(("delete", key))
+        set=lambda key, value: calls.append(("set", key, value)),
+        delete=lambda key: calls.append(("delete", key)),
+        get=lambda key: None,
     )
     return SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
 
