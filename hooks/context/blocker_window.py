@@ -3,6 +3,7 @@ window automatically and injects a once-a-minute notice naming each sustained ca
 troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
 session's pushes, reruns, dispatches and deploys; a session on a registered fix branch, or on the head branch of a
 registered fix pull request, keeps reruns in its repository and the pushes and dispatches that write only that branch.
+Swarm publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
 Fails open on a store error."""
 
 import re
