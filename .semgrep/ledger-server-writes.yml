@@ -6,23 +6,27 @@ rules:
       Incident 16 November: every swarm write went over HTTP to the ledger server, so a slow ledger server made hub
       claims late and a stale page process could take writes. The ledger server only reads: it serves the ledger page
       and its reads. Every ledger write is a route of the ledger API service, which writes the shared database, so
-      the ledger server defines no POST, PUT, PATCH or DELETE handler.
+      the ledger server defines no POST, PUT, PATCH or DELETE handler and sets no attribute under a computed name.
     paths:
       include:
         - /scripts/swarm_ledger/ledger_server.py
         - "*.test.py"
-    patterns:
-      - pattern-either:
-          - pattern: |
-              def $METHOD(...):
-                  ...
-          - pattern: $METHOD = $VALUE
-          - pattern: "$METHOD: $TYPE = $VALUE"
-          - pattern: $OWNER.$METHOD = $VALUE
-          - pattern: setattr($OWNER, "$METHOD", $VALUE)
-      - metavariable-regex:
-          metavariable: $METHOD
-          regex: ^do_(POST|PUT|PATCH|DELETE)$
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  def $METHOD(...):
+                      ...
+              - pattern: $METHOD = $VALUE
+              - pattern: "$METHOD: $TYPE = $VALUE"
+              - pattern: $OWNER.$METHOD = $VALUE
+              - pattern: setattr($OWNER, "$METHOD", $VALUE)
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: ^do_(POST|PUT|PATCH|DELETE)$
+      - patterns:
+          - pattern: setattr($OWNER, $NAME, $VALUE)
+          - pattern-not: setattr($OWNER, "...", $VALUE)
   - id: ledger-client-in-process
     languages: [python]
     severity: ERROR
@@ -31,13 +35,15 @@ rules:
       without a transport sends its operations over HTTP to the ledger server, the old write path. Build it with
       scripts.tick.adapters.database_ledger.client or scripts.swarm_ledger.ledger.client, or give it the in process
       transport, which runs the ledger API route code over the shared database.
+    options:
+      symbolic_propagation: true
     pattern-either:
       - patterns:
           - pattern-either:
               - pattern: ResourceClient(...)
               - pattern: $MODULE.ResourceClient(...)
-          - pattern-not: $CLIENT(..., transport=$TRANSPORT, ...)
-          - pattern-not: $CLIENT($BASE, $CREDENTIALS, $TIMEOUT, $TRANSPORT, ...)
+          - pattern-not: $CALLEE(..., transport=$TRANSPORT, ...)
+          - pattern-not: $CALLEE($BASE, $CREDENTIALS, $TIMEOUT, $TRANSPORT, ...)
       - pattern: ResourceClient(..., transport=None, ...)
       - pattern: $MODULE.ResourceClient(..., transport=None, ...)
       - pattern: ResourceClient($BASE, $CREDENTIALS, $TIMEOUT, None, ...)

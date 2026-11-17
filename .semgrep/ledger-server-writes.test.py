@@ -51,6 +51,13 @@ setattr(Handler, "do_DELETE", Handler.do_GET)
 setattr(Handler, "do_HEAD", Handler.do_GET)
 
 
+def mount(verb: str) -> None:
+    # ruleid: ledger-server-reads-only
+    setattr(Handler, verb, Handler.do_GET)
+    # ruleid: ledger-server-reads-only
+    setattr(Handler, f"do_{verb}", Handler.do_GET)
+
+
 def over_http(base: str, headers: dict[str, str]) -> ResourceClient:
     # ruleid: ledger-client-in-process
     return ResourceClient(base, headers, 10)
@@ -81,6 +88,18 @@ def explicit_http_positional(base: str) -> ResourceClient:
     return api_client.ResourceClient(base, {}, 10, None)
 
 
+def over_http_variable(base: str) -> ResourceClient:
+    made = ResourceClient
+    # ruleid: ledger-client-in-process
+    return made(base, {}, 10)
+
+
+def over_http_module_variable(base: str) -> ResourceClient:
+    made = api_client.ResourceClient
+    # ruleid: ledger-client-in-process
+    return made(base, {}, 10)
+
+
 def in_process(base: str) -> ResourceClient:
     # ok: ledger-client-in-process
     return ResourceClient(base, {}, 10, transport=database_ledger.request)
@@ -94,3 +113,9 @@ def in_process_module(base: str) -> ResourceClient:
 def in_process_positional(base: str) -> ResourceClient:
     # ok: ledger-client-in-process
     return Client(base, {}, 10, database_ledger.request)
+
+
+def in_process_variable(base: str) -> ResourceClient:
+    made = ResourceClient
+    # ok: ledger-client-in-process
+    return made(base, {}, 10, transport=database_ledger.request)
