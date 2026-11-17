@@ -294,4 +294,4 @@ def test_a_claude_check_without_a_service_path_runs_on_the_user_folders_alone(
         return subprocess.CompletedProcess(args, 0, '{"type":"result","result":"OK"}', "")
 
     assert provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path, run).ok is True
-    assert paths == [user_folders("")]
+    assert paths == [os.pathsep.join([str(Path.home() / ".local" / "bin"), str(Path(sys.executable).parent)])]

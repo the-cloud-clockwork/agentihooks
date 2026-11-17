@@ -194,10 +194,9 @@ def _codex_launch(target: Target, args: list[str], env: dict[str, str]) -> tuple
 
 def _service_path(environ: dict[str, str]) -> str:
     """The user bin folder and this interpreter's folder ahead of the service PATH, so the claude command that
-    agentihooks claude starts resolves under systemd."""
-    return os.pathsep.join(
-        (str(Path.home() / ".local" / "bin"), str(Path(sys.executable).parent), environ.get("PATH", ""))
-    )
+    agentihooks claude starts resolves under systemd; an unset service PATH adds no empty entry."""
+    folders = (str(Path.home() / ".local" / "bin"), str(Path(sys.executable).parent), environ.get("PATH", ""))
+    return os.pathsep.join(folder for folder in folders if folder)
 
 
 def check(target: Target, directory: Path, run: Callable = _run) -> Result:
