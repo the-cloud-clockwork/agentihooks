@@ -5384,6 +5384,25 @@
       ]
     },
     {
+      "id": "hive-front-door-master-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",
+      "behaviour": "The controller's master selection refuses a Claude login only at the master floor, its week at or under the primary login reserve or its five hour window at or under the hard five hour handoff, or for a closure the worker drain floor does not explain; a login the fleet capacity rows close at the worker drain floor alone still takes the front door master on its hive master login, a missing claude slot wait names each hosting hive master login at the master floor in whole percent, a master seat two and up is checked against its own seat, and a front door master is warned to hand off only at its master floor.",
+      "seam": "HiveLaunch master selection closed set over the fleet AccountRoute capacity rows",
+      "rules": ["master-closed-at-worker-drain-floor"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor_does_not_explain",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_reads_the_worker_drain_rule_of_the_row_harness",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_wait_other_than_a_missing_claude_slot_names_no_master_floor",
+        "tests/hive/test_master_fallback_launch.py::test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door",
+        "tests/hive/test_master_fallback_launch.py::test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain",
+        "tests/swarm/test_quota_handoff.py::test_a_front_door_master_is_warned_only_at_its_master_floor"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
