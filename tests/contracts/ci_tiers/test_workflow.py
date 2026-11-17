@@ -111,7 +111,9 @@ def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace]
     )
 
 
-def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritative: str = "") -> set[str]:
+def jobs_for(
+    event: str, base_ref: str = "dev", scope: str = "full", authoritative: str = "", ledger: str = "skip"
+) -> set[str]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     completed = {}
     pending = dict(jobs)
@@ -140,6 +142,7 @@ def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritati
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
                     sonar="run",
+                    ledger=ledger if runs else "",
                     probe="true",
                     probe_shards="[0, 1]",
                     authoritative=authoritative if runs else "",
@@ -168,6 +171,22 @@ def test_each_event_runs_only_its_tier_jobs(event: str, expected: set[str]) -> N
         assert jobs_for(event) in (expected, expected | {"install-smoke"})
     else:
         assert jobs_for(event) == expected
+
+
+@pytest.mark.parametrize(
+    "event,ledger,runs",
+    [
+        ("pull_request", "run", True),
+        ("pull_request", "skip", False),
+        ("pull_request", "", False),
+        ("merge_group", "run", False),
+        ("push", "skip", True),
+    ],
+)
+def test_ledger_load_runs_on_pull_requests_whose_selection_marks_a_ledger_server_change(
+    event: str, ledger: str, runs: bool
+) -> None:
+    assert ("ledger-load" in jobs_for(event, ledger=ledger)) == runs
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])

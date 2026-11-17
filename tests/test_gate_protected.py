@@ -1305,11 +1305,13 @@ def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_tes
 def test_the_tests_gate_may_require_ledger_load_when_selection_marks_a_ledger_server_change(weakened: bool) -> None:
     from scripts import ci_reuse
 
-    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
-    head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["select"]["outputs"]["ledger"] = "${{ steps.select.outputs.ledger }}"
+    head = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    base = copy.deepcopy(head)
+    del base["test.yml"]["jobs"]["select"]["outputs"]["ledger"]
+    step = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = step["run"].replace(ci_reuse.LEDGER_REQUIRED[1], ci_reuse.LEDGER_REQUIRED[0])
     gate = head["test.yml"]["jobs"]["gate-required"]
-    gate["steps"] = ci_reuse.ledger_required(gate["steps"])
+    assert ci_reuse.ledger_required(base["test.yml"]["jobs"]["gate-required"]["steps"]) == gate["steps"]
     assert '+ (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)' in gate["steps"][0]["run"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('["ledger-load"] else []', "[] else []")
