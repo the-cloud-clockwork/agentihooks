@@ -7591,6 +7591,18 @@
       ]
     },
     {
+      "id": "test-summary-downloads-every-report-in-one-step",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
+      "behaviour": "The protected grader admits a test summary job that fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
+      "seam": "scripts.gate_protected.grade over the test-summary job, through scripts.gate_protected._one_download",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_separate_summary_accepts_one_download_of_every_report",
+        "tests/test_gate_protected.py::test_the_separate_summary_refuses_one_download_of_other_reports",
+        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was"
+      ]
+    },
+    {
       "id": "lab-full-pool-wait",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-full-pool-wait",
