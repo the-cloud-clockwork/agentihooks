@@ -31,7 +31,7 @@ def test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_l
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     script = json.dumps(str(ROOT / ".github/scripts/promote.cjs"))
     listed = subprocess.run(
-        ["node", "-p", f"JSON.stringify(require({script}).EXEMPT ?? [])"], capture_output=True, text=True, check=True
+        ["node", "-p", f"JSON.stringify(require({script}).EXEMPT)"], capture_output=True, text=True, check=True
     )
     exempt = set(json.loads(listed.stdout))
     gating = _needed(jobs, "promotion-ready")

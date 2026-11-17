@@ -459,6 +459,20 @@ test('fails at once naming a job already red in the picked newer grade', async (
   assert.equal(f.outputs.main, undefined);
 });
 
+test('releases the picked newer grade past an exempt side job it holds red', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
+      [...result, { name: 'test-summary', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
+  };
+  await promote(f);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.graded, newer);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
 test('closes its snapshot when a newer grade becomes ready before merge', async () => {
   const f = batchFixture({ late: true });
   await promote(f);
@@ -603,10 +617,10 @@ for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled', 'timed_o
 }
 
 for (const name of ['mutation-stats-seed', 'test-summary']) {
-  for (const outcome of ['in_progress', 'failure', 'cancelled']) {
+  for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled']) {
     test(`an exempt side job never holds the release: ${name} ${outcome}`, async () => {
       const f = selfWaitFixture();
-      const pending = outcome === 'in_progress';
+      const pending = outcome === 'queued' || outcome === 'in_progress';
       const job = { name, status: pending ? outcome : 'completed', conclusion: pending ? null : outcome };
       f.jobs.push({ id: 75, run_id: 42, ...job });
       f.checks.push(job);
@@ -842,5 +856,14 @@ test('waits for every launch hotfix run job to finish before promoting', async (
   };
   await promote(f);
   assert.equal(f.now(), 15000);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('promotes a launch hotfix while an exempt side job still runs', async () => {
+  const f = fixture();
+  hotfixRun(f);
+  f.jobs.push({ id: 75, run_id: 42, name: 'test-summary', status: 'in_progress', conclusion: null });
+  await promote(f);
+  assert.equal(f.now(), 0);
   assert.equal(f.outputs.main, 'rebased');
 });

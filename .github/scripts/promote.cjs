@@ -3,7 +3,7 @@ const HOTFIX_GRADE = 'Launch hotfix grade';
 const HOTFIX_STEP = 'Confirm the launch hotfix route';
 const EXEMPT = ['mutation-stats-seed', 'test-summary'];
 const settled = (job, hotfix) => EXEMPT.includes(job.name) ||
-  job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion));
+  (job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion)));
 
 async function gradeIsComplete(github, context, api, hotfix = false) {
   const [jobs, checks, statuses] = await Promise.all([
