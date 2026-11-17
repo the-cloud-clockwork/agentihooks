@@ -224,6 +224,10 @@ class LedgerClient:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
 
+    def alerts(self, slug: str) -> list[dict[str, Any]]:
+        """The ledger's alerts, read without the rest of the ledger."""
+        return self._resource(slug, "alerts", collection=True)
+
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
         return self.item(slug, f"tasks/{task_id}")
