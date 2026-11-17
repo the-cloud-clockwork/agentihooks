@@ -740,6 +740,44 @@ def test_a_replacing_master_retires_the_live_front_door_first(up, monkeypatch, c
     assert [(a.name, a.seat) for a in held] == [(launched["master"], "master@sw")]
 
 
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_replaces_the_live_front_door_and_launches_forced(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, _, rt = up
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    rt.live.add(live.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--forced") == 0
+    launched = printed(capsys)
+    assert (rt.killed, launched["choice"]) == ([live.name], "forced")
+    assert [(name, task.get("forced")) for name, task in rt.masters] == [(launched["master"], True)]
+
+
+@pytest.mark.feature("forced-master-start")
+@pytest.mark.parametrize(("flags", "replies"), [(["--replace"], ()), (["--new"], ()), ([], ("1", "y"))])
+def test_a_replacing_new_or_offered_master_launches_unforced(
+    up: tuple[RedisStore, object, ResumingRuntime],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    flags: list[str],
+    replies: tuple[str, ...],
+) -> None:
+    store, _, rt = up
+    gone_master(store, conversation="")
+    answers(monkeypatch, *replies)
+    assert run("sw", "master", "up", *flags) == 0
+    assert printed(capsys)["choice"] == "new"
+    assert ["forced" in task for _, task in rt.masters] == [False]
+
+
+@pytest.mark.feature("forced-master-start")
+def test_forced_and_last_flags_exclude_each_other(up: tuple[RedisStore, object, ResumingRuntime]) -> None:
+    with pytest.raises(SystemExit):
+        run("sw", "master", "up", "--last", "--forced")
+
+
 def test_a_front_door_that_will_not_retire_starts_no_replacement(up, monkeypatch, capsys):
     store, _, rt = up
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
