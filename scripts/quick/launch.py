@@ -100,9 +100,7 @@ def _recorded(folder: Path, before: registry.Seat) -> bool:
     return seat is not None and seat.session_id not in ("", before.session_id)
 
 
-def bound(
-    folder: Path, before: registry.Seat, *, wait_s: float = BIND_S, sleep: Callable[[float], None] = time.sleep
-) -> bool:
+def bound(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None], wait_s: float = BIND_S) -> bool:
     """Whether the seat's new agent recorded a session other than its predecessor's within ``wait_s``."""
     for _ in range(round(wait_s / POLL_S)):
         if _recorded(folder, before):
@@ -137,18 +135,18 @@ def relaunch(
             registry.set_state(folder, seat_name, registry.PENDING)
             return "pane-busy"
         sleep(POLL_S)
-    ready = False
+    pending = True
     try:
         code = start_seat(folder, swarm, taken, base, start)
         gone = code != 0 or bool(exited([taken], bare, sleep=sleep))
-        ready = not gone and bound(folder, taken, sleep=sleep)
+        pending = gone or not bound(folder, taken, sleep=sleep)
     finally:
-        registry.set_state(folder, seat_name, registry.READY if ready else registry.PENDING)
+        registry.set_state(folder, seat_name, registry.PENDING if pending else registry.READY)
     if code != 0:
         return f"failed-{code}"
     if gone:
         return "exited"
-    return "started" if ready else "unbound"
+    return "unbound" if pending else "started"
 
 
 def end_agent(name: str) -> None:

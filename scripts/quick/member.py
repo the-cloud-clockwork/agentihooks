@@ -45,7 +45,7 @@ def find(environ: Mapping[str, str]) -> Member | None:
 def bind(environ: Mapping[str, str], session_id: str) -> Member | None:
     """Record this session and its herdr pane in the launching seat its seat variables name; None when none was bound."""
     found = _by_variables(environ)
-    pane = environ.get("HERDR_PANE_ID", "")
-    if found is None or not (pane and session_id):
+    pane = environ.get("HERDR_PANE_ID")
+    if found is None or not pane or not session_id:
         return None
     return _by_variables(environ) if registry.bind(found.folder, found.seat.seat, pane, session_id) else None

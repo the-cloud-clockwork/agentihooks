@@ -207,12 +207,18 @@ def test_adopt_seats_a_live_session_started_outside_the_swarm(
 ) -> None:
     folder = _swarm(tmp_path)
     unbound = _unbound(tmp_path)
+    seen: list[dict[str, str]] = []
+
+    def live(environ: dict[str, str]) -> Herdr:
+        seen.append(environ)
+        return Herdr({"w1:p8": None})
+
     monkeypatch.setattr(cli.guard, "require", lambda environ: environ["HERDR_PANE_ID"])
-    monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: Herdr({"w1:p8": None}))
+    monkeypatch.setattr(cli.tick, "LiveHerdr", live)
     assert cli.main(["status"], unbound) == 2
     capsys.readouterr()
     assert cli.main(["relaunch", "master", "--folder", str(folder), "--adopt"], unbound) == 0
-    assert capsys.readouterr().out == "adopted\n"
+    assert capsys.readouterr().out == "adopted\n" and seen == [unbound]
     seat = _master(folder)
     assert (seat.pane_id, seat.session_id, seat.state) == ("w1:pA", NEW, registry.READY)
     assert cli.main(["status"], unbound) == 0
@@ -225,7 +231,7 @@ def test_adopt_seats_a_live_session_started_outside_the_swarm(
 def test_a_live_session_in_the_seats_own_pane_adopts_it_to_record_its_session(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    folder = _swarm(tmp_path)
+    folder = _swarm(tmp_path, master_state=registry.PENDING)
     monkeypatch.setattr(cli.guard, "require", lambda environ: "w1:p8")
     monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: Herdr({"w1:p8": False}))
     here = {**_home(tmp_path), "HERDR_PANE_ID": "w1:p8", "CLAUDE_CODE_SESSION_ID": NEW}
