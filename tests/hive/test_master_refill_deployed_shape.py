@@ -47,7 +47,7 @@ def _root_hive(setup: SimpleNamespace, login_week_left: float) -> None:
             now // 1000 + 48 * 3600,
         )
         setup.store.redis.hset(quota.latest_key("claude"), account, quota.encode(observation))
-    observations = quota.QuotaObservations(setup.store, setup.config.slug, lambda token: None)
+    observations = quota.QuotaObservations(setup.store, setup.config.slug, Mock(side_effect=AssertionError))
     route = approved.AccountRoute(lambda: frozenset({"account", "login"}), observations, dict, "claude")
     setup.herdr._quota_accounts = None
     setup.herdr.quota_accounts = approved.FleetAccounts(route, 6)
