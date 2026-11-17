@@ -40,7 +40,7 @@ spec:
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
       terminationGracePeriodSeconds: {{ $hub.terminationGracePeriodSeconds }}
-      {{- $spread := true }}
+      {{- $spread := and (gt (int $hub.replicas) 1) (not (hasKey (default (dict) $hub.affinity) "podAntiAffinity")) }}
       {{- if or $hub.affinity $spread }}
       affinity:
         {{- with $hub.affinity }}
