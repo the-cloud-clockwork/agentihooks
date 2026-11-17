@@ -173,6 +173,24 @@ def test_the_master_routes_skip_a_front_door_master_the_live_rule_drops() -> Non
     assert routes == {}
 
 
+@pytest.mark.feature("master-route-acting-front-door")
+def test_the_master_routes_name_the_lead_seat_when_no_master_seat_is_held() -> None:
+    import fakeredis
+
+    from scripts.inbox.seats import SeatRegistry
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    gone = replace(DOOR, name="master@a1b2c3-0009", state="finished")
+    SeatRegistry(redis).occupy("master@sw", gone.name, 1)
+    agents = [gone, DOOR]
+    store = cast(front_door.Swarms, SimpleNamespace(redis=redis, slugs=lambda: ["sw"], agents=lambda slug: agents))
+
+    assert (front_door.held_seats(store, "sw"), front_door.master_routes(store, lambda found: found)) == (
+        [],
+        {"home": "claude ai login"},
+    )
+
+
 def test_the_refusal_names_the_inbox_route_to_the_front_door():
     assert front_door.refusal("sw", "master-2@sw") == (
         "page chat belongs to the front door master master@sw, so master-2@sw cannot write it; send it to the front "
