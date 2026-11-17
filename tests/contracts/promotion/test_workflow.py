@@ -38,6 +38,7 @@ def test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_l
     assert sorted(set(jobs) - gating - exempt - {"promotion-ready", "promote"}) == []
     assert sorted((exempt - set(jobs)) | (exempt & gating)) == []
     assert sorted(name for name in exempt if {"name", "strategy", "uses"} & set(jobs[name])) == []
+    assert sorted(job for job, spec in jobs.items() if job not in exempt and spec.get("name") in exempt) == []
 
 
 def _needed(jobs: dict[str, Any], name: str) -> set[str]:
