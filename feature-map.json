@@ -952,6 +952,7 @@
         "tests/test_master_claude_login.py::test_a_forced_token_launch_asks_the_forced_credential_after_a_refusal",
         "tests/swarm/test_front_door_login_route.py::test_a_forced_front_door_spawn_hands_the_claude_ai_route_the_forced_flag",
         "tests/swarm/test_front_door_login_route.py::test_a_forced_master_off_the_interactive_route_is_never_refused_all_full",
+        "tests/swarm/test_front_door_login_route.py::test_an_interactive_route_spawn_is_never_refused_all_full",
         "tests/swarm/test_master_launch.py::test_a_forced_master_replaces_the_live_front_door_and_launches_forced",
         "tests/swarm/test_master_launch.py::test_a_replacing_new_or_offered_master_launches_unforced",
         "tests/tick/steps/test_master_placement_ops.py::test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced",
