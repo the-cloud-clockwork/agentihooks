@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "hive-service-start-ensures-serena-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
+      "behaviour": "The hive service starts or waits for the Serena router once, after it loads the operator env and before it starts the lane spokes and the beat loop that takes launch and resume orders, and it still starts when the router does not come up. An agent the hive resumes right after a pod start therefore finds the router serving when its session connects to Serena at startup.",
+      "seam": "hive run in the hive service, through serena_router_daemon.ensure",
+      "rules": [
+        "hive-service-start-before-serena-router"
+      ],
+      "tests": [
+        "tests/hive/test_lanes.py::test_hive_run_ensures_the_serena_router_before_the_lane_spokes_and_starts_even_when_it_is_down"
+      ]
+    },
+    {
       "id": "hive-spoke-launch-waits-for-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",

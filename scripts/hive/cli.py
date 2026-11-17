@@ -569,10 +569,12 @@ def _registry(args: argparse.Namespace) -> None:
 
 
 def _daemon(command: str) -> int:
+    from scripts import serena_router_daemon
     from scripts.hive import daemon, lanes
 
     def run() -> object:
         daemon.fill_operator_env()
+        serena_router_daemon.ensure()
         lanes.serve(os.environ)
         return daemon.run(lambda: daemon.clients(redis_client()))
 

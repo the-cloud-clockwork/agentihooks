@@ -1,0 +1,18 @@
+rules:
+  - id: hive-service-start-before-serena-router
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive service starts its lane spokes without first ensuring the Serena router. After a hive pod start the
+      router stays down until a launch path starts it, and a resume order starts the resumed session with no router
+      check, so that agent never connects to Serena and cannot edit Python for the rest of its run. Call
+      serena_router_daemon.ensure() in hive run after the operator env loads and before lanes.serve starts the spokes.
+    paths:
+      include:
+        - /scripts/hive/cli.py
+        - hive-service-start-before-serena-router.py
+    patterns:
+      - pattern: lanes.serve(...)
+      - pattern-not-inside: |
+          serena_router_daemon.ensure()
+          ...
