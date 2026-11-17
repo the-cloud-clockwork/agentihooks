@@ -180,11 +180,12 @@ helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
 planted="$(helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
   --set 'secretEnv[0].name=AGENTIHOOKS_SWARM_DATABASE_URL' --set 'secretEnv[0].secretName=swarm-ledger-database' \
   --set 'secretEnv[0].key=url' | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" "$ledger_values" 2>&1 >/dev/null || true)"
-if [[ $planted != *"container controller references the ledger only Secret swarm-ledger-database"* ]]; then
+if [[ $planted != *"container wait references the ledger only Secret swarm-ledger-database"* \
+  || $planted != *"container controller references the ledger only Secret swarm-ledger-database"* ]]; then
   printf 'the chart check did not flag a planted shared reference to the ledger only Secret: %s\n' "$planted" >&2
   exit 1
 fi
-printf 'only the ledger container reads the ledger secret env\n'
+printf 'only the ledger container and the database readers read the ledger secret env\n'
 printf 'the TLS ledger rolls when its TLS secret renews and a plain ledger watches no secret\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
@@ -385,6 +386,46 @@ if [[ $refusal != *"controller.api.proof needs controller.workers.apiUrl"* ]]; t
 fi
 printf 'the chart renders the proof setting only when set and refuses an incomplete proof\n'
 wait "$cluster_setup"
+kubectl apply -f - <<'POSTGRES'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swarm-ledger-postgres
+spec:
+  selector:
+    matchLabels:
+      app: swarm-ledger-postgres
+  template:
+    metadata:
+      labels:
+        app: swarm-ledger-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: mirror.gcr.io/library/postgres:16
+          env:
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: trust
+            - name: POSTGRES_DB
+              value: ledger
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, ledger]
+            periodSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swarm-ledger-postgres
+spec:
+  selector:
+    app: swarm-ledger-postgres
+  ports:
+    - port: 5432
+POSTGRES
+database=(--set "ledger.env.AGENTIHOOKS_SWARM_DATABASE_URL=postgresql://postgres@swarm-ledger-postgres.default.svc.cluster.local:5432/ledger")
 kubectl create namespace swarm-pod-proof
 kubectl create serviceaccount swarm-worker --namespace swarm-pod-proof
 printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: kata-fc\nhandler: kata-fc\n' | kubectl create -f -
@@ -417,7 +458,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$ledger_host" \
 kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt" --from-file="$ledger_tls/tls.key" \
   --from-file=ca.crt="$ledger_tls/tls.crt"
 rm -rf "$ledger_tls"
-helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
+helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${database[@]}" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 bash "$chart/ci/redis-readiness-proof.sh" "$release"
 
@@ -441,7 +482,8 @@ ca_dir="$(mktemp -d)"
 ) &
 prep=$!
 
-kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
+kubectl rollout status deployment swarm-ledger-postgres --timeout 2m
+kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "import os; from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; from scripts.swarm_ledger.repository import postgres; postgres.PostgresLedgerRepository(postgres.url(os.environ)).migrate(); create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
 bash "$chart/ci/hive-drain-proof.sh" "$image" "$release" &
 drain_proof=$!
 kubectl rollout restart deployment "$release-controller"
@@ -587,7 +629,7 @@ if ! wait "$drain_proof"; then
   printf 'a rolled hive did not wait for its agent to hand off under the roll lease\n' >&2
   exit 1
 fi
-helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
+helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${database[@]}" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
 built=""

@@ -196,11 +196,13 @@ def test_the_pass_view_reads_the_ledger_with_the_tick_scope(tmp_path: Path, monk
         return {"generation": 3, "data": {"tasks": []}}
 
     stand_in = SimpleNamespace(
-        base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4
+        base=lambda slug: "http://ledger",
+        client=lambda slug, timeout: api.ResourceClient("http://ledger", {}, timeout),
+        REQUEST_TIMEOUT=4,
     )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: stand_in)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
     with view.holding():
-        assert view.start("sw", False) is not None
+        assert view.start("sw") is not None
     assert asked == [view.TICK_SCOPE]

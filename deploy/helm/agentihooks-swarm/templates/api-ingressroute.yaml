@@ -1,0 +1,32 @@
+{{- if and .Values.api.enabled .Values.api.publicRoute.host (not .Values.hiveOnly) }}
+{{- $fullname := include "swarm.fullname" . }}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  {{- with .Values.api.publicRoute.entryPoints }}
+  entryPoints:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  routes:
+    - kind: Rule
+      match: Host(`{{ .Values.api.publicRoute.host }}`) && (Method(`POST`) || Method(`PUT`) || Method(`PATCH`) || Method(`DELETE`) || Method(`OPTIONS`))
+      priority: {{ int .Values.api.publicRoute.priority }}
+      services:
+        - name: {{ $fullname }}-api
+          port: http
+          {{- if .Values.ledger.tls.secretName }}
+          scheme: https
+          {{- end }}
+          {{- with .Values.api.publicRoute.serversTransportName }}
+          serversTransport: {{ . }}
+          {{- end }}
+  {{- with .Values.api.publicRoute.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

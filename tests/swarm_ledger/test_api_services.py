@@ -206,46 +206,48 @@ def test_the_services_bundle_carries_interfaces_and_no_modules():
 
 
 @pytest.mark.parametrize(
-    ("service", "field", "source"),
+    ("service", "field", "module", "source"),
     [
-        ("ledger", "core", "core"),
-        ("ledger", "authority", "authority"),
-        ("ledger", "hub", "HUB"),
-        ("ledger", "layout_rows", "ledger_layout.ROWS"),
-        ("ledger", "layout_lists", "ledger_layout.LISTS"),
-        ("ledger", "home_summaries", "home_summaries"),
-        ("ledger", "bin_summaries", "bin_summaries"),
-        ("ledger", "bin_entries", "ledger_bin.entries"),
-        ("ledger", "bin_ledger", "ledger_bin.delete"),
-        ("ledger", "workspace_tails", "workspace_tails"),
-        ("ledger", "stream_resources", "stream_resources"),
-        ("ledger", "layout", "ledger_layout.read"),
-        ("ledger", "write_layout", "ledger_layout.write"),
-        ("ledger", "write_gate", "write_gate"),
-        ("ledger", "relay_to_inbox", "relay_to_inbox"),
-        ("ledger", "deliver_alerts", "deliver_alerts"),
-        ("swarm", "doctor", "DOCTOR"),
-        ("swarm", "store", "swarm_store"),
-        ("swarm", "status", "swarm_status"),
-        ("swarm", "models", "swarm_models"),
-        ("swarm", "control", "swarm_control"),
-        ("swarm", "lifecycle", "lifecycle_control"),
-        ("swarm", "refresh_quota", "refresh_quota"),
-        ("swarm", "control_argv", "control_argv"),
-        ("swarm", "doctor_phrase", "doctor_phrase"),
-        ("media", "media_store", "ledger_media"),
-        ("media", "artifact_store", "ledger_artifacts"),
-        ("media", "resolve_media", "ledger_media.resolve"),
-        ("media", "resolve_artifacts", "ledger_artifacts.resolve"),
+        ("ledger", "core", "server", "core"),
+        ("ledger", "authority", "server", "authority"),
+        ("ledger", "hub", "server", "HUB"),
+        ("ledger", "layout_rows", "server", "ledger_layout.ROWS"),
+        ("ledger", "layout_lists", "server", "ledger_layout.LISTS"),
+        ("ledger", "home_summaries", "server", "home_summaries"),
+        ("ledger", "bin_summaries", "server", "bin_summaries"),
+        ("ledger", "bin_entries", "server", "ledger_bin.entries"),
+        ("ledger", "bin_ledger", "server", "ledger_bin.delete"),
+        ("ledger", "workspace_tails", "server", "workspace_tails"),
+        ("ledger", "stream_resources", "server", "stream_resources"),
+        ("ledger", "layout", "server", "ledger_layout.read"),
+        ("ledger", "write_layout", "server", "ledger_layout.write"),
+        ("ledger", "write_gate", "api_service", "write_gate"),
+        ("ledger", "relay_to_inbox", "api_service", "relay_to_inbox"),
+        ("ledger", "deliver_alerts", "api_service", "deliver_alerts"),
+        ("swarm", "doctor", "api_service", "DOCTOR"),
+        ("swarm", "store", "server", "swarm_store"),
+        ("swarm", "status", "server", "swarm_status"),
+        ("swarm", "models", "server", "swarm_models"),
+        ("swarm", "control", "api_service", "swarm_control"),
+        ("swarm", "lifecycle", "api_service", "lifecycle_control"),
+        ("swarm", "refresh_quota", "api_service", "refresh_quota"),
+        ("swarm", "control_argv", "api_service", "control_argv"),
+        ("swarm", "doctor_phrase", "api_service", "doctor_phrase"),
+        ("media", "media_store", "server", "ledger_media"),
+        ("media", "artifact_store", "server", "ledger_artifacts"),
+        ("media", "resolve_media", "server", "ledger_media.resolve"),
+        ("media", "resolve_artifacts", "server", "ledger_artifacts.resolve"),
     ],
 )
-def test_the_composition_root_wires_each_service_to_its_server_source(service, field, source):
-    from scripts.swarm_ledger import ledger_server
+def test_the_composition_root_wires_each_service_to_its_server_source(
+    service: str, field: str, module: str, source: str
+) -> None:
+    from scripts.swarm_ledger import api_service, ledger_server
 
-    expected = ledger_server
+    expected = api_service if module == "api_service" else ledger_server
     for part in source.split("."):
         expected = getattr(expected, part)
-    assert getattr(getattr(ledger_server.api_services(), service), field) is expected
+    assert getattr(getattr(api_service.services(), service), field) is expected
 
 
 def test_the_composition_root_injects_the_repository_and_the_http_policy():

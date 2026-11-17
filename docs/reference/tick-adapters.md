@@ -19,7 +19,7 @@ Tick step modules never import the adapted implementations. A unit test in CI wa
 
 | Port | Adapter | Delegates to | Operations (read / write) |
 |---|---|---|---|
-| `Ledger` | `ledger.ClientLedger`, built with `ledger.resource_client` | `scripts.swarm_ledger.api.client.ResourceClient` on the ledger server's export and mutate routes | `export` / `mutate` |
+| `Ledger` | `ledger.ClientLedger`, built with `ledger.resource_client` | `scripts.swarm_ledger.api.client.ResourceClient` running the ledger API's export and mutate routes in process over the shared database | `export` / `mutate` |
 | `Coordination` | `coordination.StoreCoordination` | `scripts.swarm.store.RedisStore`, `scripts.swarm.lease` and `scripts.routing.reservation.LaunchSlots` | `read`, `capacity` / `lease`, `lock`, `configure`, `mark` |
 | `SourceControl` | `github.GitHubSourceControl` | `scripts.swarm.github_reads.rest` (`gh api`) and `git ls-remote` | `change`, `checks`, `runs`, `queue_health`, `tags`, `capabilities`, `issue_state`, `rate_limit`, `issues_enabled`, `latest_runs`, `merged_at`, `open_changes`, `workflow_runs`, `download`, `graph` / `enqueue`, `merge`, `comment`, `close_issue`, `cancel_run` |
 | `Inbox` | `inbox.StoreInbox` | `scripts.inbox.store.InboxStore` | `read` / `send`, `close` |
@@ -221,18 +221,18 @@ runtime: 4 methods, 4 checks
 
 ## Ledger adapter
 
-`ClientLedger(slug, clients)` reads and writes one ledger, named by `slug`, through the ledger server's resource API.
+`ClientLedger(slug, clients)` reads and writes one ledger, named by `slug`, by running the ledger API's resource
+routes in process over the shared ledger database.
 `clients` is a callable that takes the seconds left on the deadline and returns a
-`scripts.swarm_ledger.api.client.ResourceClient`. `resource_client(slug, service=False)` builds the production
-callable from the same base address and credentials the swarm's `LedgerClient` uses; `service=True` asks for the
-service credentials.
+`scripts.swarm_ledger.api.client.ResourceClient`. `resource_client(slug)` builds the production callable from the
+same base the swarm's `LedgerClient` uses; it carries no credential, since the call never leaves the process.
 
 ```python
 from scripts.tick.adapters.ledger import ClientLedger, resource_client
 from scripts.tick.deadline import Deadline
 
 slug = "rig-grade-swarm"
-port = ClientLedger(slug, resource_client(slug, service=True))
+port = ClientLedger(slug, resource_client(slug))
 state = port.export(deadline=Deadline.after(10.0))
 comment = {
     "op": "add",
@@ -246,15 +246,15 @@ reply = port.mutate([comment], deadline=Deadline.after(10.0))
 
 | Operation | Client call | Returns |
 |---|---|---|
-| `export()` | `ResourceClient.export(slug)`, `POST /api/v1/ledgers/<slug>/export` | The ledger export as a dictionary |
-| `mutate(operations)` | `ResourceClient.mutate(slug, stamped)`, `POST /api/v1/ledgers/<slug>/operations` after a revision read of each target | The server's answer as a dictionary |
+| `export()` | `ResourceClient.export(slug)`, the `export` route of `/api/v1/ledgers/<slug>` | The ledger export as a dictionary |
+| `mutate(operations)` | `ResourceClient.mutate(slug, stamped)`, the `operations` route of `/api/v1/ledgers/<slug>` after a revision read of each target | The route's answer as a dictionary |
 
-- Each call refuses an expired deadline before it builds a client, so no request is sent.
-- The client is built per call with a request timeout of the smaller of the ledger request timeout
+- Each call refuses an expired deadline before it builds a client, so no call is made.
+- The client is built per call with a timeout of the smaller of the ledger request timeout
   (`REQUEST_TIMEOUT` in `scripts.swarm_ledger.ledger`, 10 seconds) and the seconds left on the deadline.
-- That timeout bounds each HTTP request, not the call. `export` can fall back to a second, full read, and `mutate`
-  reads the revision of each target and retries a conflicting write with a backoff, so one call can outlast its
-  deadline.
+- That timeout bounds each call into the ledger API route code, not the whole operation. `export` can fall back to
+  a second, full read, and `mutate` reads the revision of each target and retries a conflicting write with a
+  backoff, so one call can outlast its deadline.
 - `mutate` stamps every operation with `controller_epoch` from `scripts.swarm.lease.epoch_for(slug)` and leaves the
   caller's list unchanged. With no epoch the operations go out as given. The epoch is resolved in this order:
 
@@ -1162,7 +1162,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools
 
 tools = Tools(
-    ledger=ClientLedger("rig-grade-swarm", resource_client("rig-grade-swarm", service=True)),
+    ledger=ClientLedger("rig-grade-swarm", resource_client("rig-grade-swarm")),
     coordination=StoreCoordination(swarm_connect(), "rig-grade-swarm", hive_id()),
     source_control=source_control,
     runtime=runtime,

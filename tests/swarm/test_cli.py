@@ -3,6 +3,7 @@ import json
 import multiprocessing
 import subprocess
 import sys
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -778,6 +779,11 @@ def test_a_tick_whose_ledger_health_probe_fails_releases_its_lock(env, monkeypat
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: False)
+
+    def unreachable(slug: str, timeout: float | None = None) -> None:
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(cli.ledger_view, "start", unreachable)
     unprobed = cli.ledger_client.LedgerClient()
     assert cli.run_tick(store, "sw", unprobed, rt, FakeHerdr({})) == ["Ledger health probe failed"]
     assert store.redis.get(store.key("sw", "tick-lock")) is None
@@ -2966,13 +2972,13 @@ def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
         "https://[::1",
     ],
 )
-def test_set_refuses_an_api_address_that_is_not_a_plain_web_address(env, capsys, value):
+def test_set_refuses_a_lab_address_that_is_not_a_plain_web_address(env, capsys, value):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     before = store.config("sw")
-    assert run("sw", "set", f"api-url={value}") == 1
+    assert run("sw", "set", f"lab-url={value}") == 1
     assert capsys.readouterr().err.strip() == (
-        "swarm: api-url takes an http or https address with a host and no credentials"
+        "swarm: lab-url takes an http or https address with a host and no credentials"
     )
     assert store.config("sw") == before
 

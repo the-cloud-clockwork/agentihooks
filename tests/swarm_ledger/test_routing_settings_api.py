@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.routing.settings import FileSettings
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 from scripts.swarm_ledger.api import resources, routes, routing
 from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.api_fakes import as_services
@@ -169,7 +169,7 @@ def test_other_methods_on_the_settings_resource_are_not_allowed(store):
 
 @pytest.fixture
 def http_server():
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), ledger_server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), api_service.WriteHandler)
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     yield httpd.server_address[1]
     httpd.shutdown()

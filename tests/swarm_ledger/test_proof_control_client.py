@@ -1,5 +1,3 @@
-import urllib.request
-
 import pytest
 
 from scripts.swarm_ledger import ledger, proof_ledger
@@ -14,6 +12,8 @@ credential, hive, live, owned = _credential, _hive, _live, _owned
 
 @pytest.mark.parametrize("provided", [True, False])
 def test_remote_creator_uses_its_own_parent_identity_and_bounded_transport(owned, monkeypatch, provided):
+    from scripts.tick.adapters import database_ledger
+
     environ = {
         "AGENTIHOOKS_DEPLOYMENT": "compose",
         "LEDGER_URL": f"http://{owned.live['host']}",
@@ -29,22 +29,20 @@ def test_remote_creator_uses_its_own_parent_identity_and_bounded_transport(owned
         return owned.parent["X-Ledger-Token"]
 
     monkeypatch.setattr(ledger, "launch_token", launch_token)
-    original = urllib.request.urlopen
+    original = database_ledger.exchanged
     sent = []
 
-    def open_request(request, **options):
-        assert options == {"timeout": 10}
-        sent.append(request.full_url)
-        return original(request, **options)
+    def exchanged(command, path, payload, headers):
+        sent.append(path)
+        return original(command, path, payload, headers)
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
-    monkeypatch.setattr(proof_ledger.ledger_link, "transport", lambda environ=None: {})
+    monkeypatch.setattr(database_ledger, "exchanged", exchanged)
     result = proof_ledger.control(owned.slug, {"control": "pause"}, environ)
     assert result["state"] == "pending" and result["argv"] == ["pause"]
     assert minted == ([] if provided else [(SLUG, owned.owner)])
     assert sent == [
-        f"http://{owned.live['host']}/api/v1/proof-ledgers/{owned.slug}/credential",
-        f"http://{owned.live['host']}/api/v1/proof-ledgers/{owned.slug}/controls",
+        f"/api/v1/proof-ledgers/{owned.slug}/credential",
+        f"/api/v1/proof-ledgers/{owned.slug}/controls",
     ]
     assert "credential" not in result
 
@@ -76,6 +74,8 @@ def test_remote_client_reports_the_refusal_without_exposing_credentials(owned):
 
 
 def test_controller_client_adopts_external_owner_and_uses_scoped_controls(owned, monkeypatch):
+    from scripts.tick.adapters import database_ledger
+
     owner = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
     environ = {
         "AGENTIHOOKS_DEPLOYMENT": "compose",
@@ -83,21 +83,19 @@ def test_controller_client_adopts_external_owner_and_uses_scoped_controls(owned,
         "AGENTIHOOKS_CONTROLLER_CREDENTIAL": owned.controller["X-Controller-Credential"],
     }
     owned.store.redis.delete(owned.store.key(owned.slug, "proof-creator"))
-    original = urllib.request.urlopen
+    original = database_ledger.exchanged
     sent = []
 
-    def open_request(request, **options):
-        assert options == {"timeout": 10}
-        sent.append(request.full_url)
-        return original(request, **options)
+    def exchanged(command, path, payload, headers):
+        sent.append(path)
+        return original(command, path, payload, headers)
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
-    monkeypatch.setattr(proof_ledger.ledger_link, "transport", lambda environ=None: {})
+    monkeypatch.setattr(database_ledger, "exchanged", exchanged)
     assert proof_ledger.migrate(owned.slug, owner, environ) == {"parent": "external-parent", "owner": owned.owner}
     result = proof_ledger.controller_control(owned.slug, owner, {"control": "pause"}, environ)
     assert result["state"] == "pending" and result["argv"] == ["pause"]
     assert "credential" not in result
     assert sent == [
-        f"http://{owned.live['host']}/api/v1/proof-ledgers/{owned.slug}/migrate",
-        f"http://{owned.live['host']}/api/v1/proof-ledgers/{owned.slug}/controller-controls",
+        f"/api/v1/proof-ledgers/{owned.slug}/migrate",
+        f"/api/v1/proof-ledgers/{owned.slug}/controller-controls",
     ]

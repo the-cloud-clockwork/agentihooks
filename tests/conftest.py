@@ -57,6 +57,14 @@ def _store_client(environ: MutableMapping[str, str] | None = None) -> Any:
     return store.redis_client(environ)
 
 
+def patch_swarm_store_connect(monkeypatch: pytest.MonkeyPatch, store: Any) -> None:
+    """Point scripts.swarm.store.connect at the given fake store, the port ledger_authority.fence reads through
+    ports.swarm().store.connect regardless of any swarm_cli.connect patch, which only rebinds that one name."""
+    from scripts.swarm import store as swarm_store
+
+    monkeypatch.setattr(swarm_store, "connect", lambda environ=None: store)
+
+
 def _refuse_redis_connect(sock, address):
     if _is_redis(address):
         raise ConnectionRefusedError(errno.ECONNREFUSED, f"the test suite refuses Redis at {address[0]}:{REDIS_PORT}")

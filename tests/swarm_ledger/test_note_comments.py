@@ -6,7 +6,10 @@ import ledger_server
 import new_ledger
 import pytest
 
+from scripts.swarm_ledger import api_service  # noqa: E402
+from scripts.swarm_ledger import ledger_server as packaged_ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 
 SLUG = "note-comments-2026-01-01"
 
@@ -61,7 +64,7 @@ def test_operator_note_comment_reaches_master_with_original_note(inbox):
     make_note()
     state, rejected = core.sync(SLUG, ops=[note_comment()])
     assert rejected == []
-    ledger_server.relay_to_inbox(SLUG, state)
+    api_service.relay_to_inbox(SLUG, state)
     [message] = inbox.pending_items(f"master@{SLUG}")
     assert "Can you answer here?" in message.text
     assert "Keep replies under this note." in message.text
@@ -74,7 +77,7 @@ def test_addressed_note_comment_reaches_addressee(inbox):
     store.put_agent(SLUG, AgentRecord("engineer", "eng", "t1", seat=f"eng-1@{SLUG}"))
     make_note("@engineer Please answer under this note.")
     state, _ = core.sync(SLUG, ops=[note_comment()])
-    ledger_server.relay_to_inbox(SLUG, state)
+    api_service.relay_to_inbox(SLUG, state)
     [message] = inbox.pending_items(f"eng-1@{SLUG}")
     assert "Please answer under this note." in message.text
     assert inbox.pending_items(f"master@{SLUG}") == []
@@ -108,9 +111,10 @@ def test_server_accepts_note_comment_and_agent_command_reply(inbox, monkeypatch,
     import ledger
 
     make_note()
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), ledger_server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     base = f"http://127.0.0.1:{httpd.server_port}"
     monkeypatch.setattr(ledger_server, "ALLOWED_HOSTS", {f"127.0.0.1:{httpd.server_port}"})
+    monkeypatch.setattr(packaged_ledger_server, "ALLOWED_HOSTS", {f"127.0.0.1:{httpd.server_port}"})
     monkeypatch.setattr(ledger, "BASE", base)
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     try:

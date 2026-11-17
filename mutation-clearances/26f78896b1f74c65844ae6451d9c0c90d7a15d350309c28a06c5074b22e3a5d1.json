@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x_call:22b89ea21340f55fd7d56465e4f0238dd85efef185fd8ec3ea1aa88f538f5beb": {
+    "reader": "standards-reader",
+    "reason": "exchanged stores the X-Controller-Credential key in an email Message; routes.dispatch and require_controller read it with headers.get, which ignores name case."
+  }
+}

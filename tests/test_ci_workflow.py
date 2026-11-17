@@ -384,7 +384,10 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
-    assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
+    assert install["env"] == {
+        "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS": "0.dev${{ github.run_number }}",
+        "PYTHON_PATH": "${{ steps.python.outputs.python-path }}",
+    }
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
         'uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',

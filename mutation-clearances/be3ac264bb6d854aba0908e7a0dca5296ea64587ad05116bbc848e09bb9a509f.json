@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_bin_request:e3e3bfd9b14f2d916b6ea0410c37c65bc88f555df0b3134f1d4c6df000e997b2": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns body unchanged at run time; the dict guard already held."
+  }
+}

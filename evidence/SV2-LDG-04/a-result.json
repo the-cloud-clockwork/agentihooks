@@ -3,7 +3,7 @@
   "independent_runs": 2,
   "observed": {
     "case": "T-SV2-LDG-04-A",
-    "evidence_class": "two real ledger server processes sharing one SQLite ledger folder; no Redis fixture",
+    "evidence_class": "two real ledger API service processes sharing one SQLite ledger folder; no Redis fixture",
     "observed": {
       "chat": [
         "Written by the one active writer"

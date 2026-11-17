@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_relay_to_inbox:40792da7bb08d23417965fcaab868f1f9d3e3afcbe487625ccb360df56aae150": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns chat_receipts unchanged at run time; the post call is identical."
+  }
+}

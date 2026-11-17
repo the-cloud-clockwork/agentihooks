@@ -8,6 +8,7 @@ import pytest
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_server as server
+from scripts.tick.adapters import database_ledger
 from tests.swarm_ledger.test_media import Endpoint, core, media, png
 
 MARKDOWN = b"# Handoff template\n\n| Field | Use |\n| --- | --- |\n| Done | what landed |\n\n```\nagentihooks swarm done\n```\n\n- Keep it short\n"
@@ -414,19 +415,15 @@ def test_artifact_command_uploads_the_file_and_records_it_on_the_task(tmp_path, 
 def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     doc = tmp_path / "proposal.md"
     doc.write_bytes(MARKDOWN)
-    with (
-        patch.object(ledger.repository, "token", return_value="test-token"),
-        patch.object(ledger.urllib.request, "urlopen") as opened,
-    ):
-        opened.return_value.__enter__.return_value.read.return_value = b'{"id": "x"}'
+    with patch.object(database_ledger, "upload", return_value={"id": "x"}) as uploaded:
         assert ledger.upload_artifact(
             "shots", "art-engineer", str(doc), {"task": "av1", "title": "Proposal", "request": "wanted"}
         ) == {"id": "x"}
-    req = opened.call_args.args[0]
-    assert req.full_url.endswith("/api/v1/ledgers/shots/uploads/artifacts")
-    assert req.data == MARKDOWN
-    assert req.get_header("X-artifact-name") == "proposal.md"
-    assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "title": "Proposal", "request": "wanted"}
+    slug, route, data, headers = uploaded.call_args.args
+    assert (slug, route) == ("shots", "artifacts")
+    assert data == MARKDOWN
+    assert headers["X-Artifact-Name"] == "proposal.md"
+    assert json.loads(headers["X-Artifact-Request"]) == {"task": "av1", "title": "Proposal", "request": "wanted"}
 
 
 class TestOperatorHostPlanUpload(Endpoint):

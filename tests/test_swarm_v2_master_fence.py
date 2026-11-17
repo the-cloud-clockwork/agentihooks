@@ -410,9 +410,9 @@ def test_refusals_are_counted_per_swarm(world):
 
 def test_the_server_fences_master_writes_inside_the_talk_budget():
     from scripts.gates import talk
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service
 
-    gate = ledger_server.write_gate(SLUG)
+    gate = api_service.write_gate(SLUG)
 
     protocol, budget = gate.inner.inner, gate.inner.inner.inner
     assert (type(gate), gate.slug, type(budget), budget.slug) == (master_fence.Fence, SLUG, talk.Budget, SLUG)
@@ -420,7 +420,7 @@ def test_the_server_fences_master_writes_inside_the_talk_budget():
 
 
 def test_the_api_publishes_decisions_after_the_write(monkeypatch):
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service, ledger_server
     from scripts.swarm_ledger.api import mutations
 
     published, gates = [], []
@@ -436,15 +436,15 @@ def test_the_api_publishes_decisions_after_the_write(monkeypatch):
         gates.append(gate.inner.budget)
         return {"_meta": {"rev": 2, "warnings": []}, "tasks": []}, ["b"]
 
-    monkeypatch.setattr(ledger_server, "write_gate", lambda slug: Gate())
+    monkeypatch.setattr(api_service, "write_gate", lambda slug: Gate())
     monkeypatch.setattr(
         ledger_server.repository, "current", lambda slug: SimpleNamespace(state={"tasks": [], "_meta": {}})
     )
     monkeypatch.setattr(ledger_server.repository, "apply_ops", apply_ops)
     for name in ("relay_to_inbox", "doctor_phrase", "deliver_alerts"):
-        monkeypatch.setattr(ledger_server, name, lambda slug, state: None)
+        monkeypatch.setattr(api_service, name, lambda slug, state: None)
     ops = [{"op": "ack", "id": n, "by": LEAD_NAME, "rev": 1} for n in ("a", "b")]
-    reply = mutations.apply(ledger_server.api_services(), SLUG, "", {"operation_id": "o1", "ops": ops, "guards": {}})
+    reply = mutations.apply(api_service.services(), SLUG, "", {"operation_id": "o1", "ops": ops, "guards": {}})
 
     assert [type(g).__name__ for g in gates] == ["Gate"]
     assert published == [["b"]]
@@ -453,7 +453,7 @@ def test_the_api_publishes_decisions_after_the_write(monkeypatch):
 
 @pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack", "id": "ack-1"}], True), (None, False)])
 def test_the_page_write_publishes_decisions_after_the_write(monkeypatch, ops, gated):
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service, ledger_server
 
     published, seen = [], []
 
@@ -465,14 +465,16 @@ def test_the_page_write_publishes_decisions_after_the_write(monkeypatch, ops, ga
         seen.append(type(gate).__name__)
         return {"_meta": {"members": {}, "rev": 1}, "tasks": []}, ["ack-1"]
 
-    monkeypatch.setattr(ledger_server, "write_gate", lambda slug: Gate())
+    monkeypatch.setattr(api_service, "write_gate", lambda slug: Gate())
     monkeypatch.setattr(ledger_server.repository, "apply_ops", apply_ops)
-    monkeypatch.setattr(ledger_server, "relay_to_inbox", lambda slug, state: [])
-    monkeypatch.setattr(ledger_server, "doctor_phrase", lambda slug, state: None)
-    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    monkeypatch.setattr(api_service, "relay_to_inbox", lambda slug, state: [])
+    monkeypatch.setattr(api_service, "doctor_phrase", lambda slug, state: None)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = f"/api/{SLUG}?view=agent"
-    handler.send = lambda code, body, ctype: code
-    assert handler.reply_state(SLUG, ops=ops) == 200
+    replies = []
+    handler.send = lambda code, body, ctype: replies.append((code, body, ctype))
+    handler.reply_state(SLUG, ops=ops)
+    assert replies[0][0] == 200
     assert (seen, published) == ((["Gate"], [["ack-1"]]) if gated else (["NoneType"], []))
 
 

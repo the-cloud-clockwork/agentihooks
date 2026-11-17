@@ -145,7 +145,7 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     sent = []
     ledger = SimpleNamespace(
         base=lambda slug: f"http://ledger/{slug}",
-        credentials=lambda slug, service: {"X-Ledger-Token": f"{slug} {service}"},
+        client=lambda slug, timeout: api.ResourceClient(f"http://ledger/{slug}", {}, timeout),
         REQUEST_TIMEOUT=4,
     )
 
@@ -163,9 +163,9 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
-    held = view.start("sw", service=True)
+    held = view.start("sw")
     assert held is not None
-    assert sent == [("http://ledger/sw", {"X-Ledger-Token": "sw True"}, 4, "sw", 0, view.PARTS)]
+    assert sent == [("http://ledger/sw", {}, 4, "sw", 0, view.PARTS)]
     assert view.CURRENT.get() is held
     kept = view.HELD.get()
     assert kept is not None and kept.view is held and not kept.stale
@@ -197,7 +197,11 @@ def refusing(code: int) -> Callable[..., dict]:
 
 
 def ledger_module() -> SimpleNamespace:
-    return SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+    return SimpleNamespace(
+        base=lambda slug: "http://ledger",
+        client=lambda slug, timeout: api.ResourceClient("http://ledger", {}, timeout),
+        REQUEST_TIMEOUT=4,
+    )
 
 
 def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
@@ -210,7 +214,7 @@ def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", refusing(400))
     view.CURRENT.set(view.LedgerView(1, STATE))
-    assert view.start("sw", False) is None
+    assert view.start("sw") is None
     assert view.CURRENT.get() is None
     assert view.HELD.get() is None
     assert not view.view_file("http://ledger", "sw", tmp_path).exists()
@@ -225,7 +229,7 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", refusing(503))
     with pytest.raises(urllib.error.HTTPError) as raised:
-        view.start("sw", False)
+        view.start("sw")
     assert raised.value.code == 503
 
 

@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.swarm_ledger import api_service, request_body
 from scripts.swarm_ledger import ledger_server as server
-from scripts.swarm_ledger import request_body
 from scripts.swarm_ledger import request_metrics as metrics
 from scripts.swarm_ledger.repository import postgres
 
@@ -174,7 +174,7 @@ def test_a_client_slow_to_send_its_request_line_shows_as_client_wait(monkeypatch
         return timing(**fields)
 
     monkeypatch.setattr(metrics, "Timing", started)
-    with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
+    with ThreadingHTTPServer(("127.0.0.1", ledger_port), api_service.WriteHandler) as http:
         thread = threading.Thread(target=http.serve_forever)
         thread.start()
         try:

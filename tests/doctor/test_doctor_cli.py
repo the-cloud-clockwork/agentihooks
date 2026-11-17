@@ -67,7 +67,10 @@ def env(monkeypatch, memory_path):
     assert new_ledger.create(WATCHED, content)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     rt = FakeRuntime()
+    from tests.conftest import patch_swarm_store_connect
+
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
+    patch_swarm_store_connect(monkeypatch, store)
     monkeypatch.setattr(swarm_cli, "LedgerClient", FileLedger)
     monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", FileLedger)
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", lambda: rt)

@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_sv2_ldg01_remote_worker.py::test_local_resource_and_export_reads_run_once": {
+    "reader": "standards-reader",
+    "reason": "The HTTP ledger client transport is deleted: uploads, proof ledger calls, proof controls, launch tokens, replays and the controller and chat clients run the ledger API route code in process, so no credential, access header, plain http refusal, HTTP timeout or stall retry of these calls remains, and ledger.resource and ledger.export always retry, so the run once read is gone."
+  }
+}

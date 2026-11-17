@@ -7,7 +7,7 @@ import pytest
 
 from scripts.swarm import command_runner, commands, lifecycle
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 
 
 def queue_class():
@@ -377,23 +377,23 @@ def test_the_ledger_server_queues_through_lifecycle_and_returns_fresh_status(sto
     monkeypatch.setattr(ledger_server.repository, "read", lambda slug, *keys: {(SLUG, STAMPS): stamps}[(slug, keys)])
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
     monkeypatch.setattr(ledger_server, "swarm_status", lambda slug: {"swarm": slug})
-    assert ledger_server.lifecycle_control(SLUG, body(agent, "drain", revisions={"t1": 5}), True) == (
+    assert api_service.lifecycle_control(SLUG, body(agent, "drain", revisions={"t1": 5}), True) == (
         {"swarm": SLUG},
         "",
     )
     assert len(queued(store)) == 1
     with pytest.raises(lifecycle.Refused):
-        ledger_server.lifecycle_control(SLUG, body(agent, "drain", "op-other-1", revisions={"t1": 4}), True)
+        api_service.lifecycle_control(SLUG, body(agent, "drain", "op-other-1", revisions={"t1": 4}), True)
     with pytest.raises(lifecycle.Refused) as caught:
-        ledger_server.lifecycle_control(SLUG, body(agent, "cancel", "op-other-2", revisions={"t1": 5}), False)
+        api_service.lifecycle_control(SLUG, body(agent, "cancel", "op-other-2", revisions={"t1": 5}), False)
     assert caught.value.status == 403
-    assert ledger_server.lifecycle_control("nowhere", body(agent, "drain"), True)[0] is None
+    assert api_service.lifecycle_control("nowhere", body(agent, "drain"), True)[0] is None
 
     def missing(slug, *keys):
         raise KeyError(slug)
 
     monkeypatch.setattr(ledger_server.repository, "read", missing)
-    assert ledger_server.lifecycle_control(SLUG, body(agent, "drain"), True) == (None, "no such ledger")
+    assert api_service.lifecycle_control(SLUG, body(agent, "drain"), True) == (None, "no such ledger")
 
 
 def test_submit_still_queues_one_pending_row(store):
@@ -679,13 +679,13 @@ def test_the_ledger_server_reads_the_stamps_of_its_own_ledger(store, monkeypatch
             ledger_server.repository, "read", lambda slug, *keys, stored=stored: {(SLUG, STAMPS): stored}[(slug, keys)]
         )
         sent = body(agent, "drain", op=f"op-drain-{agent.task}")
-        assert ledger_server.lifecycle_control(SLUG, sent, True) == ({"swarm": SLUG}, "")
+        assert api_service.lifecycle_control(SLUG, sent, True) == ({"swarm": SLUG}, "")
 
     def gone(*args, **kwargs):
         raise SwarmError("the swarm is gone")
 
     monkeypatch.setattr(lifecycle, "request", gone)
-    assert ledger_server.lifecycle_control(SLUG, body(first, "drain"), True) == (None, "the swarm is gone")
+    assert api_service.lifecycle_control(SLUG, body(first, "drain"), True) == (None, "the swarm is gone")
 
 
 def put_swarm(monkeypatch, sent, outcome):
@@ -695,7 +695,7 @@ def put_swarm(monkeypatch, sent, outcome):
         calls.append((slug, given, operator))
         return outcome()
 
-    monkeypatch.setattr(ledger_server, "lifecycle_control", control)
+    monkeypatch.setattr(api_service, "lifecycle_control", control)
     handler = SimpleNamespace(
         exists=lambda slug: True,
         refused=lambda slug: False,
@@ -704,7 +704,7 @@ def put_swarm(monkeypatch, sent, outcome):
         rfile=io.BytesIO(raw),
         send=lambda *args: replies.append(args),
     )
-    ledger_server.Handler.put_swarm(handler, SLUG)
+    api_service.WriteHandler.put_swarm(handler, SLUG)
     return calls, replies
 
 
@@ -722,11 +722,9 @@ def test_the_swarm_route_hands_a_lifecycle_body_to_its_control(monkeypatch):
 
 def test_the_swarm_route_stops_at_a_refused_request(monkeypatch):
     replies = []
-    monkeypatch.setattr(
-        ledger_server, "lifecycle_control", lambda *args: pytest.fail("refused request reached control")
-    )
+    monkeypatch.setattr(api_service, "lifecycle_control", lambda *args: pytest.fail("refused request reached control"))
     handler = SimpleNamespace(
         exists=lambda slug: True, refused=lambda slug: True, send=lambda *args: replies.append(args)
     )
-    assert ledger_server.Handler.put_swarm(handler, SLUG) is None
+    assert api_service.WriteHandler.put_swarm(handler, SLUG) is None
     assert replies == []

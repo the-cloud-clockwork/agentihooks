@@ -106,3 +106,14 @@ def test_a_leave_from_outside_the_crew_names_its_reason():
     assert ledger_agent_ops.apply({}, {"op": "leave", "by": "eng"}, ctx) is True
     assert ctx.refused == []
     assert "eng" not in state["members"]
+
+
+def test_adding_an_item_whose_id_exists_changes_nothing_and_reports_success() -> None:
+    state = meta()
+    doc: dict[str, object] = {}
+    first = {"op": "add_item", "list": "followups", "id": "f1", "text": "First text", "by": "eng"}
+    assert ledger_agent_ops.apply(doc, first, ledger_core.Context(state, 10)) is True
+    again = ledger_core.Context(state, 20)
+    assert ledger_agent_ops.apply(doc, {**first, "text": "Second text"}, again) is True
+    assert doc["followups"] == [{"id": "f1", "text": "First text", "comments": [], "done": False}]
+    assert again.events == []

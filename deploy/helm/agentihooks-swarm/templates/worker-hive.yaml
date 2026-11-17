@@ -142,6 +142,7 @@ spec:
                 command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d >>/proc/1/fd/1 2>&1" $drain | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
+            {{- include "swarm.databaseEnv" (dict "root" $root "env" (dict) "secretEnv" (list) "skip" (gt (len ($workers.envFromSecrets | default list)) 0)) | nindent 12 }}
             {{- if $brain.secretName }}
             - name: HIVE_BRAIN_BINDING_FILE
               value: /run/swarm-brain/binding.json

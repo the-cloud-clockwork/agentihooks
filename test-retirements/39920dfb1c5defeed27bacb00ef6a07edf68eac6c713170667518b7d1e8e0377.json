@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_folder_store.py::test_the_ledger_server_takes_the_folder_writer_lease_with_an_api_address_set": {
+    "reader": "standards-reader",
+    "reason": "The cutover switch is deleted: no api-url setting, ledger-ready key, scoped or configured ledger route, hosted lease route or serving switch remains; the lab-url refusal keeps the same five addresses and the API service lease keeps its own tests."
+  }
+}

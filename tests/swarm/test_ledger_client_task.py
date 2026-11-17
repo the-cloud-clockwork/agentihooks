@@ -11,8 +11,8 @@ from scripts.swarm import ledger_client
 def served(monkeypatch, answer):
     reads = []
 
-    def resource(slug, path, service, collection):
-        reads.append((slug, path, service, collection))
+    def resource(slug, path, collection=False):
+        reads.append((slug, path, collection))
         if isinstance(answer, Exception):
             raise answer
         return answer
@@ -29,13 +29,13 @@ def refused(code, error="resource_missing"):
 def test_a_task_read_names_one_task_and_returns_its_row(monkeypatch):
     reads = served(monkeypatch, {"id": "t2", "state": "open"})
     assert ledger_client.LedgerClient(service=True).task("demo", "t2") == {"id": "t2", "state": "open"}
-    assert reads == [("demo", "tasks/t2", True, False)]
+    assert reads == [("demo", "tasks/t2", False)]
 
 
 def test_a_task_id_cannot_name_a_thread_or_another_resource(monkeypatch):
     reads = served(monkeypatch, refused(404))
     assert ledger_client.LedgerClient().task("demo", "t1/comments") is None
-    assert reads == [("demo", "tasks/t1%2Fcomments", False, False)]
+    assert reads == [("demo", "tasks/t1%2Fcomments", False)]
 
 
 def test_a_task_the_ledger_does_not_hold_reads_as_none(monkeypatch):
@@ -56,7 +56,7 @@ def test_a_targeting_read_asks_the_ledger_for_the_tasks_naming_one_pull(monkeypa
     own, other = {"id": "t2", "pr_url": "https://github.com/o/r/pull/7"}, {"id": "t3"}
     reads = served(monkeypatch, [own, other])
     assert ledger_client.LedgerClient().tasks_targeting("demo", "https://github.com/o/r/pull/7") == [own]
-    assert reads == [("demo", "tasks?targets=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F7", False, False)]
+    assert reads == [("demo", "tasks?targets=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F7", False)]
 
 
 @pytest.mark.feature("master-freeze-queue")
@@ -64,7 +64,7 @@ def test_a_freeze_read_asks_the_ledger_for_its_whole_freeze_collection(monkeypat
     rows = [{"verb": "freeze", "target": "tasks/t2", "by": "master@a1b2c3-0001"}]
     reads = served(monkeypatch, rows)
     assert ledger_client.LedgerClient().freezes("demo") == rows
-    assert reads == [("demo", "freezes", False, True)]
+    assert reads == [("demo", "freezes", True)]
 
 
 def test_a_ledger_without_targeting_falls_back_to_filtering_its_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,7 +72,7 @@ def test_a_ledger_without_targeting_falls_back_to_filtering_its_tasks(monkeypatc
     rows = [{"id": "t1", "pr_url": url}, {"id": "t2", "pr_url": url + "0"}, {"id": "t3", "split_pulls": [url]}]
     reads = []
 
-    def resource(slug: str, path: str, service: bool, collection: bool) -> list[dict]:
+    def resource(slug: str, path: str, collection: bool = False) -> list[dict]:
         reads.append((slug, path, collection))
         if not collection:
             raise refused(400, "schema_invalid")
@@ -90,7 +90,7 @@ def test_any_other_refusal_of_a_targeting_read_is_raised(
 ) -> None:
     url = "https://github.com/o/r/pull/7"
 
-    def resource(slug: str, path: str, service: bool, collection: bool) -> list[dict]:
+    def resource(slug: str, path: str, collection: bool = False) -> list[dict]:
         if not collection:
             raise refused(code, error)
         return [{"id": "t1", "pr_url": url}]
@@ -104,4 +104,4 @@ def test_any_other_refusal_of_a_targeting_read_is_raised(
 def test_a_watchdog_copy_read_names_the_watchdog_resource(monkeypatch):
     reads = served(monkeypatch, {"text": "copy", "digest": "d"})
     assert ledger_client.LedgerClient(service=True).watchdog_copy("demo") == {"text": "copy", "digest": "d"}
-    assert reads == [("demo", "watchdog", True, False)]
+    assert reads == [("demo", "watchdog", False)]
