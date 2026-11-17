@@ -52,6 +52,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
@@ -66,6 +67,7 @@ from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 TASKS = ("t1", "t2", "t3", "t4", "t5", "t6")
 HIVE = "recovery-hive"
 LAUNCHES = "/data/recovery-launches.jsonl"
+REPORTS = "/data/recovery-reports.jsonl"
 FETCH_MS = 100
 store, slug, ledger = connect(), os.environ["SLUG"], LedgerClient(service=True)
 
@@ -119,6 +121,10 @@ class Tasks:
     def reopen(self, event):
         return None
 
+    def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
+        with open(REPORTS, "a") as reports:
+            reports.write(json.dumps([event.key, placed.harness]) + "\n")
+
 
 class StandIn:
     def spawn(self, request):
@@ -130,6 +136,16 @@ def launched():
         return []
     with open(LAUNCHES) as launches:
         return [json.loads(line) for line in launches if line.strip()]
+
+
+def unreported() -> list[str]:
+    """The drill's tasks with fewer claude launch reports from the spoke than launches."""
+    reports = []
+    if os.path.exists(REPORTS):
+        with open(REPORTS) as found:
+            reports = [json.loads(line) for line in found if line.strip()]
+    launches = [launch["task"] for launch in launched()]
+    return [task for task in TASKS if reports.count([task, "claude"]) < launches.count(task)]
 
 
 def take(count):
@@ -218,7 +234,7 @@ def beat():
 
 step, args = sys.argv[1], sys.argv[2:]
 result = {"seed": lambda: seed(args), "take": lambda: take(int(args[0])), "done": lambda: done(args),
-          "die": lambda: die(args), "beat": beat, "state": state, "pass": hub}[step]()
+          "die": lambda: die(args), "beat": beat, "state": state, "pass": hub, "unreported": unreported}[step]()
 print(json.dumps(result))
 PY
 )"
@@ -286,6 +302,12 @@ settle \
   "$(task t6 1 '"exited"')" \
   '"agents": []'
 printf 'ledger against the recorded state after reconcile: %s\n' "$found"
+unreported="$(drill unreported)"
+if [[ $unreported != '[]' ]]; then
+  printf 'the spoke never reported every launch of %s to the stand in task client\n' "$unreported" >&2
+  exit 1
+fi
+printf 'every launch reported to the stand in task client\n'
 lap 'final reconcile'
 
 cleanup

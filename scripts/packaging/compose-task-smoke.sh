@@ -37,6 +37,7 @@ import time
 from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events
 from scripts.hive.spoke import Spoke, SpokeConfig
@@ -70,6 +71,7 @@ offered = readiness.publish(bus, view, int(time.time() * 1000))
 assert offered == [f"ready:{slug}:t1:0"], offered
 print(f"offered on NATS: {offered}", flush=True, file=sys.stderr)
 admitted = {}
+reported = []
 
 
 class Tasks:
@@ -87,6 +89,9 @@ class Tasks:
 
     def reopen(self, event):
         return None
+
+    def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
+        reported.append([event.key, placed.harness])
 
 
 class StandIn:
@@ -109,6 +114,8 @@ for _ in range(30):
     time.sleep(1)
 assert outcomes[-1] == "started", f"the spoke never started the task: {outcomes}"
 print(f"spoke took the offer from NATS: {outcomes}", file=sys.stderr)
+assert reported == [["t1", "claude"]], f"the spoke reported {reported} for its one launch"
+print(f"spoke reported its launch: {reported}", file=sys.stderr)
 report = {
     "observed_at": int(time.time() * 1000),
     "executions": {admitted["execution"]: {"slug": slug, "name": admitted["name"],
