@@ -822,12 +822,14 @@ jobs:
           QUIET: ${{ vars.AGENTIHOOKS_CI_QUIET_SECONDS }}
           PULL: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          UPDATED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           whole='^(0|[1-9][0-9]?)$'
           if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 60 ]]; then
             echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 60, not $QUIET"
             exit 1
           fi
+          echo "Pull request $PULL last changed at $UPDATED_AT; the hold starts at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           deadline=$((SECONDS + QUIET))
           while [[ "$SECONDS" -lt "$deadline" ]]; do
             pause=$((deadline - SECONDS))
