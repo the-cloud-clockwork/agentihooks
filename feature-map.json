@@ -1,6 +1,21 @@
 {
   "features": [
     {
+      "id": "balance-master-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",
+      "behaviour": "The balance row for the account a live front door master runs on names its route after the master mark, the claude ai login or the token fallback, read from the master execution record whatever the account spelling, and shows no route while the swarm Redis is unreachable; the swarm status payload carries the same route on the front door master only, and the swarm panel master row shows it beside its account.",
+      "seam": "agents_quota.balance_table, the swarm status report agent entries and the swarm panel agentRows and agentRow master name cell",
+      "tests": [
+        "tests/test_agents_quota.py::test_balance_names_the_route_the_live_front_door_master_runs_on",
+        "tests/test_agents_quota.py::test_balance_names_a_token_fallback_on_another_account_in_either_spelling",
+        "tests/test_agents_quota.py::test_balance_shows_no_route_while_the_swarm_redis_is_unreachable",
+        "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_only_on_the_front_door_master",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_carries_the_route_its_status_names",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_name_cell_names_its_account_and_route"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
