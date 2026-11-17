@@ -1,6 +1,7 @@
 """A quick seat stays bound to its live session: a relaunched agent records its pane and session in the seat, a
 launch whose agent never records itself leaves the seat pending, and quick relaunch --adopt seats a live session."""
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -260,6 +261,6 @@ def test_adopt_with_no_session_id_seats_the_pane_alone(
         cli.main(["relaunch", "master", "--folder", str(folder), "--adopt", "--force"], _home(tmp_path))
     again = cli.parser().parse_args(["relaunch", "master", "--folder", str(folder)])
     assert (again.adopt, again.force) == (False, False)
-    relaunch = next(a for a in cli.parser()._actions if a.dest == "command").choices["relaunch"]
-    option = relaunch._option_string_actions["--adopt"]
+    sub = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction))
+    option = sub.choices["relaunch"]._option_string_actions["--adopt"]
     assert option.help == "Record this live session and its herdr pane as the seat's occupant"
