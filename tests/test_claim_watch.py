@@ -1,15 +1,19 @@
 import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
 from hooks.context import claim_watch
 from scripts.swarm import ledger_client, store
 from scripts.swarm_ledger import ledger_workspace
+from tests.helpers import service_path
 
 pytestmark = pytest.mark.unit
 
 NAME = "engineer@a1b2c3-0004"
+EXIT = [sys.executable, "-P", "-m", "scripts.install", "swarm", "sw", "--as", NAME, "exit"]
 ENV = {
     "AGENTIHOOKS_SWARM": "sw",
     "AGENTIHOOKS_AGENT_NAME": NAME,
@@ -109,7 +113,7 @@ def test_a_new_claimant_stops_the_old_one_at_its_next_tool_call() -> None:
     assert redis.reads == [KEY]
     assert spawn.calls == [
         (
-            ["agentihooks", "swarm", "sw", "--as", NAME, "exit"],
+            EXIT,
             {
                 "start_new_session": True,
                 "stdin": subprocess.DEVNULL,
@@ -121,6 +125,16 @@ def test_a_new_claimant_stops_the_old_one_at_its_next_tool_call() -> None:
     assert (folder / "progress.md").read_text() == "earlier step\n" + claim_watch.NOTE.format(
         at="1970-01-01T00:16:40Z", name=NAME, owner=OTHER
     )
+
+
+@pytest.mark.feature("service-commands-run-through-interpreter")
+def test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path(tmp_path: Path) -> None:
+    _, _, spawn = _check(OTHER)
+
+    [(argv, _)] = spawn.calls
+    done = service_path.help_run(argv, tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert "exit" in done.stdout
 
 
 def test_the_claimant_itself_keeps_working() -> None:
@@ -305,7 +319,7 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
             {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/"}
         )
     assert redis.reads == [KEY]
-    assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
+    assert [argv for argv, _ in spawn.calls] == [EXIT]
 
 
 @pytest.mark.wall_clock
@@ -343,7 +357,7 @@ def test_a_lost_pushed_claim_still_exits_through_the_swarm_gates(monkeypatch: py
     assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") == claim_watch.STOP.format(
         task="t1", slug="sw", owner=OTHER
     )
-    assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
+    assert [argv for argv, _ in spawn.calls] == [EXIT]
 
 
 @pytest.mark.parametrize("session", [{}, {"session_id": "s1"}])

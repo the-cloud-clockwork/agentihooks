@@ -1,11 +1,16 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from tests.helpers import service_path
+
 pytestmark = pytest.mark.unit
+INTERPRETER = [sys.executable, "-P", "-m", "scripts.install"]
 
 
 def git(repo, *args):
@@ -56,7 +61,7 @@ def test_profile_install_clones_and_registers_the_alias_before_init(tmp_path, mo
 
     def execute(argv, **kwargs):
         commands.append(argv)
-        if argv[0] == "agentihooks":
+        if "link-profile" in argv:
             return subprocess.CompletedProcess(argv, 0)
         return run(argv, **kwargs)
 
@@ -65,7 +70,7 @@ def test_profile_install_clones_and_registers_the_alias_before_init(tmp_path, mo
     profile = next((root / ".linked-profiles" / "recall").glob("*/profiles/memory"))
     assert (profile / "profile.yml").read_text() == "name: memory\n"
     assert commands[-1] == [
-        "agentihooks",
+        *INTERPRETER,
         "link-profile",
         "link",
         str(profile),
@@ -79,6 +84,34 @@ def test_profile_install_clones_and_registers_the_alias_before_init(tmp_path, mo
     linked_profiles.install({"HIVE_REPO_ROOT": str(root), "HIVE_LINKED_PROFILES": json.dumps([spec])})
     assert commands[0] == ["git", "-C", str(profile.parents[1]), "pull", "--ff-only", "--", str(repo), "dev"]
     assert len(commands) == 2
+
+
+@pytest.mark.feature("service-commands-run-through-interpreter")
+def test_the_profile_link_command_resolves_under_the_systemd_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import linked_profiles
+
+    _, repo = source(tmp_path)
+    root = tmp_path / "hive"
+    root.mkdir()
+    spec = {"name": "recall", "url": str(repo), "ref": "dev", "path": "profiles/memory"}
+    links: list[list[str]] = []
+    run = subprocess.run
+
+    def execute(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if "link-profile" in argv:
+            links.append(argv)
+            return subprocess.CompletedProcess(argv, 0)
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(linked_profiles.subprocess, "run", execute)
+    linked_profiles.install({"HIVE_REPO_ROOT": str(root), "HIVE_LINKED_PROFILES": json.dumps([spec])})
+
+    [argv] = links
+    done = service_path.help_run(argv, tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert "link-profile" in done.stdout
 
 
 def test_no_linked_profiles_publish_an_empty_list_and_need_no_repository_root(tmp_path):
