@@ -263,7 +263,7 @@ def test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recove
 
 @pytest.mark.feature("master-drill")
 def test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_retire(rig: SimpleNamespace) -> None:
-    hived = "master@abc123-0003"
+    hived = rig.store.next_name(SCRATCH, MASTER, NOW - 60 * MINUTE)
     placed = AgentRecord(
         hived, MASTER, MASTER, seat=front_door.seat(SCRATCH), started_at=NOW - 60 * MINUTE, hive="hive-a"
     )
