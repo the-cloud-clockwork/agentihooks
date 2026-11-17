@@ -1,0 +1,20 @@
+x-swarm-env: &swarm-env
+  # ruleid: compose-stack-agent-bus
+  AGENTIHOOKS_BUS: ${AGENTIHOOKS_BUS:-nats}
+  # ruleid: compose-stack-agent-bus
+  AGENTIHOOKS_BUS_URL: ${AGENTIHOOKS_BUS_URL:-nats://nats:4222}
+  # ruleid: compose-stack-agent-bus
+  AGENTIHOOKS_BUS_CREDENTIALS: ${AGENTIHOOKS_BUS_CREDENTIALS}
+
+services:
+  controller:
+    environment:
+      <<: *swarm-env
+      # ok: compose-stack-agent-bus
+      AGENTIHOOKS_BUS: ${SWARM_BUS:-nats}
+      # ok: compose-stack-agent-bus
+      AGENTIHOOKS_BUS_URL: ${SWARM_BUS_URL:-nats://nats:4222}
+  swarm:
+    environment:
+      # ok: compose-stack-agent-bus
+      AGENTIHOOKS_BUS: memory
