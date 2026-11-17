@@ -2010,12 +2010,12 @@ def test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing(p
 
     fake = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(store, "redis_client", lambda environ=None: fake)
-    panic.engage(RedisStore(fake), "60 errors in the last hour", False, [], 0)
+    panic.engage(RedisStore(fake), "swarm", "60 errors in the last hour", False, [], 0)
     with pytest.raises(SwarmError) as refused:
         publish.publish(
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
-    frozen = blocker_window.FROZEN.format(reason="60 errors in the last hour")
+    frozen = blocker_window.FROZEN.format(slug="swarm", reason="60 errors in the last hour")
     assert (
         str(refused.value) == f"{frozen}; Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
     )
@@ -2031,12 +2031,12 @@ def test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch(pu
 
     asked = []
 
-    def held_push(cwd, branch):
-        asked.append((cwd, branch))
+    def held_push(cwd, branch, slug):
+        asked.append((cwd, branch, slug))
 
     monkeypatch.setattr(blocker_window, "held_push", held_push)
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
-    assert asked == [(str(publication.root), "engineer-test")]
+    assert asked == [(str(publication.root), "engineer-test", "swarm")]
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
