@@ -13,6 +13,7 @@ from typing import Any, cast
 from packaging.version import InvalidVersion, Version
 
 from scripts import updater
+from scripts.events.bus import SERVE_WAITED_MS
 from scripts.handoff import transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
@@ -20,7 +21,7 @@ from scripts.hub import branch_heads, lease
 from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import AgentRecord, RedisStore, connect
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -28,6 +29,7 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
+WORK_FOLDER = "work-folder"
 
 
 def release_key(text: str) -> Version | None:
@@ -36,10 +38,6 @@ def release_key(text: str) -> Version | None:
         return Version(text)
     except InvalidVersion:
         return None
-
-
-class LateAdmission(RuntimeError):
-    """An admission finished after the asking hive stopped waiting for its answer."""
 
 
 class _StepTimer:
@@ -67,6 +65,13 @@ def refused(slug: str, request: dict[str, Any], reason: str) -> None:
     )
 
 
+def turn_key(hive: str) -> str:
+    """The Redis key every hub pod holds while it admits a launch for the hive."""
+    from scripts.hive import registry
+
+    return f"{registry.key(hive)}:admitting"
+
+
 class Admission:
     def __init__(
         self,
@@ -87,15 +92,17 @@ class Admission:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
-        started = self.clock()
-        timer = _StepTimer(self.clock, started)
+        begun = self.clock()
+        queued_ms = SERVE_WAITED_MS.get()
+        started = begun - queued_ms
+        timer = _StepTimer(self.clock, begun)
         if older := self._outdated(request["hive"]):
             refused(slug, request, older)
             return None
         timer.mark("release")
-        held = self.store.redis.get(self._key(slug, request))
-        if held:
-            admitted = json.loads(held)
+        offer = self._key(slug, request)
+        admitted = self._held(offer)
+        if admitted:
             live = admitted["name"] in self.store.listed(slug)
             if live and admitted["hive"] == request["hive"]:
                 return admitted
@@ -113,8 +120,7 @@ class Admission:
         if withdrawn := readiness.withdrawal(
             SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
         ):
-            refused(slug, request, f"the offer is withdrawn, {withdrawn}")
-            return None
+            return self._withdrawn(slug, request, offer, withdrawn)
         timer.mark("withdrawal")
         if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]):
             print(
@@ -131,8 +137,10 @@ class Admission:
             )
             return None
         timer.mark("cap")
-        with self._turn(request["hive"]) as busy:
+        with self._turn(request["hive"], offer) as busy:
             timer.mark("turn")
+            if not busy and (kept := self._kept(slug, request, offer)):
+                return kept
             if full := busy or self._full(request["hive"]):
                 refused(slug, request, full)
                 held: dict[str, str] = {hive_admission.HELD: full}
@@ -144,20 +152,44 @@ class Admission:
             return None
         return self._answered(slug, request, started, admitted, timer)
 
+    def _held(self, offer: str) -> dict[str, Any] | None:
+        """The admission kept for the offer, whichever hive asked for it; None when none is kept."""
+        held: str | None = self.store.redis.get(offer)  # pyright: ignore[reportUnknownMemberType]
+        return json.loads(held) if held else None
+
+    def _kept(self, slug: str, request: dict[str, Any], offer: str) -> dict[str, Any] | None:
+        """The admission the asking hive's own ask of the offer kept while its agent is still listed; None otherwise."""
+        admitted = self._held(offer)
+        if admitted and admitted["hive"] == request["hive"] and admitted["name"] in self.store.listed(slug):
+            return admitted
+        return None
+
+    def _withdrawn(self, slug: str, request: dict[str, Any], offer: str, withdrawn: str) -> dict[str, Any] | None:
+        """A repeat ask from the hive whose own admission claimed the offer: answered with that admission once it
+        leaves the hive's turn and held while it outlasts the turn wait; any other ask is refused for the withdrawal."""
+        if self._admitting(request["hive"], offer):
+            with self._turn(request["hive"], offer) as busy:
+                if busy == hive_admission.ADMITTING:
+                    held: dict[str, str] = {hive_admission.HELD: busy}
+                    return held
+        if kept := self._kept(slug, request, offer):
+            return kept
+        refused(slug, request, f"the offer is withdrawn, {withdrawn}")
+        return None
+
     def _answered(
         self, slug: str, request: dict[str, Any], started: int, admitted: dict[str, Any], timer: _StepTimer
     ) -> dict[str, Any]:
-        """The admission the asking hive is still waiting for; one finished past its wait is released and refused."""
+        """The admission for the asking hive; one finished past the answer budget keeps its claim, so a hive still
+        waiting gets it and a hive that stopped waiting gets the same admission when it asks again for the offer."""
         elapsed = self.clock() - started
-        if elapsed < ANSWER_MS:
-            return admitted
-        self.reopen(slug, request)
-        print(
-            f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} late: "
-            f"finished after {elapsed} ms, the hive stopped waiting at {ANSWER_MS} ms {timer.line()}",
-            file=sys.stderr,
-        )
-        raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
+        if elapsed >= ANSWER_MS:
+            print(
+                f"hub: events admission swarm={slug} task={request['task']} hive={request['hive']} late: "
+                f"finished after {elapsed} ms, past the {ANSWER_MS} ms answer budget, claim kept {timer.line()}",
+                file=sys.stderr,
+            )
+        return admitted
 
     def _outdated(self, hive: str) -> str:
         """The member release below the hub release it is refused for; empty when either release is unreported."""
@@ -181,24 +213,28 @@ class Admission:
         return ""
 
     @contextmanager
-    def _turn(self, hive: str) -> Iterator[str]:
+    def _turn(self, hive: str, offer: str) -> Iterator[str]:
         """Holds the hive's admission key in Redis, shared by every hub pod, while its cap is counted and the task
-        claimed; yields BUSY when another admission for the hive keeps it past the wait."""
-        from scripts.hive import registry
-
-        key, token = f"{registry.key(hive)}:admitting", uuid.uuid4().hex
+        claimed, naming the offer it admits; yields ADMITTING when the hive's own admission of the same offer keeps it
+        past the wait and BUSY when another admission for the hive does."""
+        key, token = turn_key(hive), f"{offer} {uuid.uuid4().hex}"
         for _ in range(TURN_TRIES):
             if self.store.redis.set(key, token, nx=True, px=TURN_MS):
                 break
             time.sleep(TURN_WAIT_S)
         else:
-            yield BUSY
+            yield hive_admission.ADMITTING if self._admitting(hive, offer) else BUSY
             return
         try:
             yield ""
         finally:
             if self.store.redis.get(key) == token:
                 self.store.redis.delete(key)
+
+    def _admitting(self, hive: str, offer: str) -> bool:
+        """True while the hive's admission key is held by an admission of this same offer."""
+        holder: object = self.store.redis.get(turn_key(hive))  # pyright: ignore[reportUnknownMemberType]
+        return str(holder).startswith(f"{offer} ")
 
     def _full(self, hive: str) -> str:
         """The hive's live worker executions across every swarm against its registry max agents; empty below the cap
@@ -314,14 +350,18 @@ class Admission:
 
     def _seeds(self, slug: str, task: dict[str, Any], doc: dict[str, Any], name: str) -> dict[str, str]:
         """The files the hive writes into the task's work folder before the launch: steering from the task and the
-        latest copy that the hive of the task's previous agent synced."""
+        latest task copy synced by the hive that last launched the task, else the one synced by the hive of its
+        previous agent, so a predecessor retired before this admission still hands over its lines."""
         from scripts.swarm_ledger import ledger_workspace
 
         earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
         previous = max(earlier, key=lambda agent: agent.started_at, default=None)
-        held = self.store.redis.get(ledger_workspace.files_key(previous.hive)) if previous and previous.hive else None
-        synced: dict[str, dict[str, dict[str, str]]] = json.loads(held) if held else {}
-        return {**synced.get(slug, {}).get(task["id"], {}), "steering.md": ledger_workspace.steering(task, doc)}
+        redis = cast(Any, self.store).redis
+        hives = (redis.get(self.store.key(slug, WORK_FOLDER, task["id"])), previous and previous.hive)
+        copies = (redis.get(ledger_workspace.task_files_key(hive, slug, task["id"])) for hive in hives if hive)
+        held = next(filter(None, copies), None)
+        synced: dict[str, str] = json.loads(held) if held else {}
+        return {**synced, "steering.md": ledger_workspace.steering(task, doc)}
 
     def _mark(self, slug: str, request: dict[str, Any], row: dict[str, Any], name: str) -> dict[str, Any] | None:
         """The ledger row once claimed by name with its portable work folder, a protected branch cleared and the lane
@@ -356,13 +396,40 @@ class Admission:
         self.store.drop_agent(slug, name)
 
     def reopen(self, slug: str, request: dict) -> bool:
+        """Reopens the task the asking hive's admission claimed and forgets that admission, answering True only then;
+        with no admission held, a dead lettered offer advances its task's claim generation instead."""
         key = self._key(slug, request)
         held = self.store.redis.get(key)
-        if not held or json.loads(held)["hive"] != request["hive"]:
+        if not held:
+            if request.get("dead"):
+                self._advance(slug, request)
+            return False
+        if json.loads(held)["hive"] != request["hive"]:
             return False
         self._release(slug, request["task"], json.loads(held)["name"])
         self.store.redis.delete(key)
         return True
+
+    def _advance(self, slug: str, request: dict[str, Any]) -> None:
+        """Raises the claim generation of an open, unclaimed task whose offer dead lettered with no admission held, so
+        its next offer carries a fresh claim key; a task claimed or already past that generation is left as it is,
+        and a ledger that refuses or cannot take the advance is logged, since the spoke asks again when a later
+        delivery meets the dead claim."""
+        generation: int = request["generation"]
+        try:
+            self.ledger.update_task(
+                slug,
+                request["task"],
+                {"claim_generation": generation + 1},
+                if_state=("open",),
+                if_match={"claimed_by": "", "claim_generation": generation},
+            )
+        except SwarmError as exc:
+            print(
+                f"hub: events reopen swarm={slug} task={request['task']} generation={generation}: "
+                f"claim generation not advanced, {exc}",
+                file=sys.stderr,
+            )
 
     def _release(self, slug: str, task_id: str, name: str) -> None:
         """Returns a claimed task to open: its pending life, its transfer, its claim and agent, then its ledger row."""
@@ -401,9 +468,9 @@ class Admission:
 
     def launched(self, slug: str, request: dict[str, Any]) -> bool:
         """Writes the launch decision the admitted hive reports onto its agent's record, with the overlays and profile
-        decision the hive placed; the hub launch check admission started stays as it is, so a late report never
-        restarts a judged check. False when the hive holds no admission for the offer or another agent now occupies
-        the admitted seat."""
+        decision the hive placed, and records that hive as the holder of the task's work folder for the next agent's
+        seeds; the hub launch check admission started stays as it is, so a late report never restarts a judged check.
+        False when the hive holds no admission for the offer or another agent now occupies the admitted seat."""
         held = self.store.redis.get(self._key(slug, request))
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
@@ -416,6 +483,8 @@ class Admission:
         placed = {field: launch[field] for field in account_slots.LAUNCH_PLACEMENT if field in launch}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
             return False
+        folder = self.store.key(slug, WORK_FOLDER, request["task"])
+        cast(Any, self.store).redis.set(folder, request["hive"])
         cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         return True
 

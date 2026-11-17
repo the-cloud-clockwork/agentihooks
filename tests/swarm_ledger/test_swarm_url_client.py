@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_hook, ledger_link
+from scripts.swarm_ledger import ledger, ledger_link
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api.client import ResourceClient
 
@@ -114,73 +114,9 @@ def test_a_pinned_agent_derives_its_token_from_the_server_secret(monkeypatch):
         assert ledger.credentials(SLUG) == {"X-Ledger-Token": "given", "X-Ledger-Agent": WORKER}
 
 
-def test_swarm_url_never_starts_a_local_server(monkeypatch):
-    monkeypatch.setenv("SWARM_URL", "http://127.0.0.1:9")
-    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "given")
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", WORKER)
-    monkeypatch.delenv("LEDGER_AUTOSTART", raising=False)
-    monkeypatch.setattr(ledger, "BASE", "")
-    monkeypatch.setattr(ledger, "REMOTE_READ_PAUSE", 0)
-
-    def started(*args, **kwargs):
-        raise AssertionError(f"a local ledger server was started: {args}")
-
-    monkeypatch.setattr(ledger.subprocess, "run", started)
-    monkeypatch.setattr(ledger_hook.subprocess, "Popen", started)
-    with pytest.raises(SystemExit) as exc:
-        ledger.call(SLUG)
-    assert str(exc.value) == (
-        "ledger server not answering on http://127.0.0.1:9: <urlopen error [Errno 111] Connection refused>"
-    )
-    assert ledger_hook.serve_ledgers() is None
-
-
 def test_every_ledger_transport_request_carries_the_access_headers(heard):
     url, seen = heard
     request = urllib.request.Request(f"{url}/healthz", headers={"Accept": "text/event-stream"})
     with ledger_link.urlopen(request, 1, ACCESS):
         pass
     assert {key: seen[0].get(key) for key in (*SENT, "Accept")} == {**SENT, "Accept": "text/event-stream"}
-
-
-def test_a_proof_ledger_call_carries_the_access_headers(heard):
-    from scripts.swarm_ledger import proof_ledger
-
-    url, seen = heard
-    environ = {"SWARM_URL": url, "AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller", **ACCESS}
-    assert proof_ledger.call(f"ledgers/{SLUG}/metadata", None, environ) == {}
-    assert {key: seen[0].get(key) for key in (*SENT, "X-Controller-Credential", "Content-Type")} == {
-        **SENT,
-        "X-Controller-Credential": "controller",
-        "Content-Type": "application/json",
-    }
-
-
-def test_a_proof_control_call_carries_the_access_headers(heard):
-    from scripts.swarm_ledger import proof_ledger
-
-    url, seen = heard
-    environ = {"SWARM_URL": url, **ACCESS}
-    assert proof_ledger._control_call(SLUG, "controls", {}, {"X-Proof-Credential": "proof"}, environ) == {}
-    assert {key: seen[0].get(key) for key in (*SENT, "X-Proof-Credential", "Content-Type")} == {
-        **SENT,
-        "X-Proof-Credential": "proof",
-        "Content-Type": "application/json",
-    }
-
-
-def test_an_upload_carries_the_access_headers(heard, monkeypatch, tmp_path):
-    url, seen = heard
-    monkeypatch.setenv("SWARM_URL", url)
-    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "given")
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", WORKER)
-    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_CREDENTIAL", raising=False)
-    for key, value in ACCESS.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setattr(ledger, "BASE", "")
-    sent = tmp_path / "plan.md"
-    sent.write_text("plan")
-    assert ledger.upload(SLUG, WORKER, str(sent), "artifacts", {}) == {"dir": "/srv/ledgers", "data": {}}
-    assert {key: seen[0].get(key) for key in (*SENT, "X-Ledger-Token")} == {**SENT, "X-Ledger-Token": "given"}

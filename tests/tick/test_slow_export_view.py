@@ -64,7 +64,7 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     ledger = SimpleNamespace(
         base=lambda slug: base if slug == "sw" else "http://127.0.0.1:9",
-        credentials=lambda slug, service: {},
+        client=lambda slug, timeout: api.ResourceClient(base if slug == "sw" else "http://127.0.0.1:9", {}, timeout),
         REQUEST_TIMEOUT=SHORT_S,
     )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
@@ -155,11 +155,11 @@ def _refused(code: int) -> urllib.error.HTTPError:
 def test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass(
     code: int, offline: bool | None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    calls: list[tuple[str, bool, float | None]] = []
+    calls: list[tuple[str, float | None]] = []
     replies: list[OSError] = [TimeoutError("timed out"), _refused(code)]
 
-    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
-        calls.append((slug, service, timeout))
+    def start(slug: str, timeout: float | None = None) -> None:
+        calls.append((slug, timeout))
         raise replies.pop(0)
 
     monkeypatch.setattr(cli.ledger_view, "start", start)
@@ -174,6 +174,6 @@ def test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass(
             assert OFFLINE.get() is offline
             assert f"ledger sw not answering (HTTP Error {code}: refused)" in capsys.readouterr().err
     assert calls == [
-        ("sw", True, ledger_client.SNAPSHOT_TIMEOUT_S),
-        ("sw", True, ledger_client.EXPORT_TIMEOUT_S),
+        ("sw", ledger_client.SNAPSHOT_TIMEOUT_S),
+        ("sw", ledger_client.EXPORT_TIMEOUT_S),
     ]

@@ -44,7 +44,9 @@ def stored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Queued:
 
     ledger = SimpleNamespace(
         base=lambda slug: "http://ledger" if slug == "sw" else "http://elsewhere",
-        credentials=lambda slug, service: {},
+        client=lambda slug, timeout: api.ResourceClient(
+            "http://ledger" if slug == "sw" else "http://elsewhere", {}, timeout
+        ),
         REQUEST_TIMEOUT=4,
         queue=queue,
         call=call,
@@ -128,7 +130,7 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
     timeouts: list[float | None] = []
     stored = view.LedgerView(7, STATE)
 
-    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
+    def start(slug: str, timeout: float | None = None) -> None:
         timeouts.append(timeout)
         raise failure
 
@@ -313,7 +315,7 @@ def test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept(
     _offline_claim("e1")
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
     with view.holding():
-        held = view.start("sw", False)
+        held = view.start("sw")
         assert held is not None and held.read("tasks", "t1") == {"id": "t1", "state": "open"}
     reloaded = view.stored("sw")
     assert reloaded is not None and reloaded.read("tasks", "t1") == {"id": "t1", "state": "open"}
@@ -335,7 +337,7 @@ def test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept(
 
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
     with view.holding():
-        view.start("sw", False)
+        view.start("sw")
         view.queued([{"op": "task_update", "item": "tasks/t1", "fields": {"claimed_by": "e1"}}])
         kept = view.stored("sw")
         assert kept is not None and kept.read("tasks", "t1") == {"id": "t1", "state": "open", "claimed_by": "e1"}
@@ -379,13 +381,17 @@ def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
             raise reply
         return reply
 
-    ledger = SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+    ledger = SimpleNamespace(
+        base=lambda slug: "http://ledger",
+        client=lambda slug, timeout: api.ResourceClient("http://ledger", {}, timeout),
+        REQUEST_TIMEOUT=4,
+    )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
     with view.holding(), ExitStack() as reset:
         reset.callback(OFFLINE.set, False)
-        held = view.start("sw", False)
+        held = view.start("sw")
         assert OFFLINE.get() is False
         view.wrote()
         assert contextvars.copy_context().run(view.current) is held
@@ -494,7 +500,7 @@ def test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once(
 
     ledger = SimpleNamespace(
         base=lambda slug: "http://ledger",
-        credentials=lambda slug, service: {},
+        client=lambda slug, timeout: api.ResourceClient("http://ledger", {}, timeout),
         REQUEST_TIMEOUT=4,
         call=counted("call", _not_answering(error)),
         resource=counted("resource", _unreached(error)),
@@ -505,7 +511,7 @@ def test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once(
     monkeypatch.setattr(api.ResourceClient, "changes", lambda *_args, **_kwargs: {"generation": 3, "data": STATE})
     client = LedgerClient()
     with view.holding():
-        view.start("sw", False)
+        view.start("sw")
         assert ledger_client.offline() is False
         with pytest.raises(raised):
             getattr(client, first)("sw")
@@ -526,12 +532,16 @@ def test_a_refusal_or_other_failure_leaves_the_held_view_online(
 ) -> None:
     from scripts.scheduler import service
 
-    ledger = SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+    ledger = SimpleNamespace(
+        base=lambda slug: "http://ledger",
+        client=lambda slug, timeout: api.ResourceClient("http://ledger", {}, timeout),
+        REQUEST_TIMEOUT=4,
+    )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", lambda *_args, **_kwargs: {"generation": 3, "data": STATE})
     with view.holding():
-        view.start("sw", False)
+        view.start("sw")
         view.stopped(failure)
         assert (view.offline(), view.slow()) == (False, False)
 

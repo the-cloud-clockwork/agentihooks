@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -79,8 +80,10 @@ fi
         assert "runtime images ready for startup" in result.stdout, result.stderr
         assert len(starts) == 1
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == (2 if script == "hive-launch-smoke" else 3)
+        assert len(pulls) == {"compose-hive-smoke": 4, "swarm-smoke": 4, "hive-launch-smoke": 2}[script]
         assert all("@sha256:runtime" in call for call in pulls)
+        if script != "hive-launch-smoke":
+            assert any("nginx:1.27-alpine@sha256:runtime" in call for call in pulls)
         assert any("redis:7@sha256:runtime" in call for call in pulls)
         if script != "hive-launch-smoke":
             assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
@@ -429,8 +432,10 @@ def test_swarm_smoke_loads_saved_runtime_images_before_any_pull_reuses_them() ->
     assert save["with"]["key"] == steps[names.index("Restore the runtime images saved on dev")]["with"]["key"]
 
 
-@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "build"])
-def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
+@pytest.mark.parametrize(
+    "failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "nginx:1.27-alpine", "build"]
+)
+def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path: Path, failure: str) -> None:
     log = tmp_path / "docker.log"
     tools = tools_with(
         tmp_path,
@@ -487,11 +492,69 @@ fi
     assert (sync / "redis:7").exists()
     assert (sync / "redis:7-alpine").exists()
     assert (sync / "nats:2.15.1-alpine").exists()
+    assert (sync / "nginx:1.27-alpine").exists()
     assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
         f"public.ecr.aws/docker/library/{image}"
-        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine")
+        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "nginx:1.27-alpine")
         if image != failure
     }
+
+
+def test_the_ready_list_reuses_every_runtime_image_the_parallel_smokes_pull(tmp_path: Path) -> None:
+    """Every image a parallel smoke always pulls is pre pulled by the build step and reused with no pull or tag."""
+    steps = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    parallel = next(
+        step for step in steps if step.get("run", "").startswith("bash scripts/packaging/swarm-smoke-parallel.sh ")
+    )
+    assert parallel["env"]["SWARM_SMOKE_RUNTIME_IMAGES_READY"] == "true"
+    build = next(step["run"] for step in steps if step.get("name") == "Build the swarm image")
+    pulled: set[str] = set()
+    for script in parallel["run"].split()[2:]:
+        text = (ROOT / script).read_text()
+        names = dict(re.findall(r"^(\w+)=(\S+)$", text, re.M))
+        block = ""
+        for line in text.splitlines():
+            if line in ('if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then', "require_image() {"):
+                block = line
+            elif block and line in ("else", "fi", "}"):
+                block = "else" if line == "else" else ""
+            elif found := re.fullmatch(r"(?:bash scripts/packaging/pull-runtime-image\.sh|require_image) (\S+)", line):
+                pulled.add(names.get(found[1].strip('"$'), found[1]))
+            elif re.search(r"pull-runtime-image\.sh|require_image", line):
+                assert block in ("else", "require_image() {"), (script, line)
+    assert pulled
+    assert pulled <= set(re.findall(r"docker tag \S+ (mirror\.gcr\.io/library/\S+)", build)), pulled
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == image && "$2" == inspect ]]; then
+  echo amd64
+  exit 0
+fi
+exit 17
+""",
+    )
+    for image in sorted(pulled):
+        log = tmp_path / f"{image.rsplit('/', 1)[1]}.log"
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+            env={
+                **os.environ,
+                "PATH": f"{tools}:{os.environ['PATH']}",
+                "PULL_LOG": str(log),
+                "SWARM_SMOKE_RUNTIME_IMAGES_READY": "true",
+            },
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, (image, result.stderr)
+        calls = log.read_text().splitlines()
+        assert len(calls) == 1, (image, calls)
+        assert " image inspect " in f" {calls[0]} " and calls[0].endswith(image)
 
 
 def dockerfile_bases():

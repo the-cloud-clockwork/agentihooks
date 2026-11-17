@@ -30,6 +30,8 @@ spec:
             {{- toYaml .Values.worker.command | nindent 12 }}
           env:
             {{- include "swarm.env" (dict "root" . "role" "worker") | nindent 12 }}
+            {{- include "swarm.databaseEnv" (dict "root" . "env" .Values.worker.env "secretEnv" .Values.worker.secretEnv) | nindent 12 }}
+            {{- include "swarm.secretKeyEnv" .Values.worker.secretEnv | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.worker.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:

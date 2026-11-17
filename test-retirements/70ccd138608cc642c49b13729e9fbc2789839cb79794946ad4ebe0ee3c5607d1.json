@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_hosted_ledger_first.py::test_a_routed_swarm_address_still_wins_over_the_hosted_ledger": {
+    "reader": "standards-reader",
+    "reason": "The cutover switch is deleted: no api-url setting, ledger-ready key, scoped or configured ledger route, hosted lease route or serving switch remains; the lab-url refusal keeps the same five addresses and the API service lease keeps its own tests."
+  }
+}

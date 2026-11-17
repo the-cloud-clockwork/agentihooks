@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload:28cf8dc8b5e3afb9bc97cba981949b508c5edea13eb5c3d054a67bcd836a6511": {
+    "reader": "standards-reader",
+    "reason": "upload copies the dict into an email Message with sent[name]=value; get ignores name case and no other key collides with Content-Type."
+  }
+}

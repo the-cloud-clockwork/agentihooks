@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_ledger_outbox.py::test_ledger_replay_sends_the_recorded_credential_with_the_write_timeout": {
+    "reader": "standards-reader",
+    "reason": "The HTTP ledger client transport is deleted: uploads, proof ledger calls, proof controls, launch tokens, replays and the controller and chat clients run the ledger API route code in process, so no credential, access header, plain http refusal, HTTP timeout or stall retry of these calls remains, and ledger.resource and ledger.export always retry, so the run once read is gone."
+  }
+}

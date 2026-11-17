@@ -492,3 +492,20 @@ def test_a_redis_failure_holds_what_the_store_last_held(monkeypatch):
     assert acc.managed_held() == {("f000000000000001", "alpha")}
     monkeypatch.setattr("hooks._redis.get_redis", lambda: Broken())
     assert acc.managed_held() == {("f000000000000001", "alpha")}
+
+
+@pytest.mark.feature("master-route-writers-keep-the-route")
+@pytest.mark.parametrize(
+    ("env", "route"),
+    [
+        ({"AH_ROUTE_API": "1", "AH_ROUTE_INTERACTIVE_home": "1"}, "api"),
+        ({"AH_ROUTE_INTERACTIVE_home": "1", "AH_CC_TOKEN_alpha": "secret-a"}, "interactive"),
+        ({"AH_CC_TOKEN_alpha": "secret-a"}, "subscription"),
+        ({"PATH": "/bin"}, "subscription"),
+    ],
+)
+def test_the_process_route_comes_from_its_variable_names(tmp_path: Path, env: dict[str, str], route: str) -> None:
+    root = tmp_path / "proc"
+    _proc(root, 100, "claude", 1, ["claude"], env)
+
+    assert (acc.pid_route(100, root), acc.pid_route(101, root)) == (route, "subscription")

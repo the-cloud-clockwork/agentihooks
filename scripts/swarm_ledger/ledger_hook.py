@@ -14,6 +14,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -252,12 +253,18 @@ def stop_reasons(session, state):
     return reasons, len(owed), pol
 
 
-def post_bypass(session, unhandled):
+def post_bypass(session: dict[str, Any], unhandled: int) -> None:
     try:
         import ledger
 
+        from scripts.swarm_ledger.authority_context import REMOTE_SERVICE, service_refused
+        from scripts.tick.adapters import database_ledger
+
+        if service_refused(session["slug"]):
+            raise PermissionError(REMOTE_SERVICE)
         op = {"op": "gate_bypass", "id": f"gb-{uuid.uuid4().hex[:8]}", "by": session["name"], "unhandled": unhandled}
-        ledger.request(session["slug"], [op], service=True, timeout=2)
+        with database_ledger.acting(""):
+            ledger.request(session["slug"], [op], timeout=2)
     except Exception as exc:  # the stop must go through whatever the server does
         log(f"bypass not recorded: {exc}")
 

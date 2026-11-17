@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlsplit
 from scripts.swarm import command_runner, commands, lifecycle
 from scripts.swarm import context_view as cv
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 from scripts.swarm_v2.herdr import visibility
 from scripts.swarm_v2.herdr.visibility import View
 from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
@@ -70,7 +70,7 @@ class Swarm:
             patch.object(ledger_server.repository, "read", return_value=self.stamps()),
         ):
             try:
-                ledger_server.lifecycle_control(self.slug, body, operator)
+                api_service.lifecycle_control(self.slug, body, operator)
             except lifecycle.Refused as refused:
                 return refused.status, str(refused)
         return 200, ""

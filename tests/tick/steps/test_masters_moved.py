@@ -121,7 +121,11 @@ def inbox(monkeypatch: pytest.MonkeyPatch) -> type[_Inbox]:
 
 
 def _store(agents: list[AgentRecord] | None = None) -> SimpleNamespace:
-    return SimpleNamespace(redis="redis", agents=lambda slug: list(agents or []) if slug == "sw" else [])
+    return SimpleNamespace(
+        redis=SimpleNamespace(hget=lambda key, field: None),
+        key=lambda slug, kind: f"{slug}/{kind}",
+        agents=lambda slug: list(agents or []) if slug == "sw" else [],
+    )
 
 
 @pytest.mark.feature("swarm-tick-masters-moved")
@@ -254,7 +258,7 @@ def test_night_watch_runs_the_watch_with_a_respawn_that_places_the_master_past_t
     assert fields == [store, "sw", "ledger", "runtime", "doc", 7, True]
     assert respawn() == ["spawned"]
     assert store.redis.deleted == deleted
-    assert started == [("sw", "config of sw", store, "runtime", 7, {})]
+    assert started == [("sw", "config of sw", store, "runtime", 7, {"forced": True})]
 
 
 @pytest.mark.feature("swarm-tick-masters-moved")

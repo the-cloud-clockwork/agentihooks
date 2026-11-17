@@ -4,9 +4,11 @@ import datetime
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable, Coroutine, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 import nats as nats_client
 from nats.aio.client import Client
@@ -24,8 +26,8 @@ from nats.js.errors import (
 )
 from nats.js.kv import KeyValue
 
-from . import nats_batch, nats_payload, nkey
-from .bus import Bus, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
+from . import nats_batch, nats_payload, nats_replicas, nkey
+from .bus import SERVE_WAITED_MS, Bus, Delivery, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -54,6 +56,7 @@ _log = logging.getLogger(__name__)
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 FIRST_CONNECT_RETRIES = 5
 RECONNECT_WAIT_S = 2
+SERVE_WORKERS = 8
 
 
 def queue_stream(name: str) -> str:
@@ -110,6 +113,11 @@ def connect_options(config: BusConfig) -> dict[str, Any]:
     }
 
 
+def _logged(future: Future[Any]) -> None:
+    if not future.cancelled() and (error := future.exception()) is not None:
+        _log.error("bus call failed: %s", error)
+
+
 class _Loop:
     def __init__(self):
         self.closed = False
@@ -127,6 +135,13 @@ class _Loop:
             coro.close()
             raise RuntimeError("bus is closed")
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    def submit(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Runs ``coro`` on the bus loop without waiting for it, logging the error it ends with."""
+        if self.closed:
+            coro.close()
+            raise RuntimeError("bus is closed")
+        asyncio.run_coroutine_threadsafe(coro, self._loop).add_done_callback(_logged)
 
     def close(self) -> None:
         if self.closed:
@@ -179,6 +194,15 @@ def _attempt(message: Msg) -> int:
     return message.metadata.num_delivered + int((message.headers or {}).get(ATTEMPT_BASE, "0"))
 
 
+async def _release(js: JetStreamContext, msg: Msg, subject: str, stream: str, attempt: int, delay_ms: int) -> None:
+    """Holds ``msg`` in flight for ``delay_ms``, then queues a copy whose first delivery counts as ``attempt`` and acks
+    the original; the copy's id names the original's sequence, so a second hand back of it stays one copy."""
+    await asyncio.sleep(_seconds(delay_ms))
+    headers = {MSG_ID: f"release:{msg.metadata.sequence.stream}", ATTEMPT_BASE: str(attempt - 1)}
+    await nats_payload.publish(js, subject, msg.data, stream=stream, headers=headers)
+    await msg.ack()
+
+
 class NatsDelivery:
     def __init__(self, loop: _Loop, msg: Msg):
         self._loop = loop
@@ -194,6 +218,9 @@ class NatsDelivery:
 
     def term(self) -> None:
         self._loop.run(self._msg.term())
+
+    def release(self, js: JetStreamContext, subject: str, stream: str, delay_ms: int) -> None:
+        self._loop.submit(_release(js, self._msg, subject, stream, self.attempt, delay_ms))
 
 
 class NatsConsumer:
@@ -346,23 +373,32 @@ async def provision_queue(js: JetStreamContext, names: QueueNames, config: BusCo
             pass
         else:
             return
-    await js.add_stream(
-        name=names.stream,
-        subjects=[names.filter],
-        retention=api.RetentionPolicy.WORK_QUEUE,
-        duplicate_window=_seconds(config.dedupe_window_ms),
+    await nats_replicas.create(
+        js,
+        config.replicas,
+        names.stream,
+        api.StreamConfig(
+            subjects=[names.filter],
+            retention=api.RetentionPolicy.WORK_QUEUE,
+            duplicate_window=_seconds(config.dedupe_window_ms),
+        ),
     )
 
 
-async def provision_state(js: JetStreamContext, bucket: str) -> KeyValue:
+async def provision_state(js: JetStreamContext, bucket: str, replicas: int = 1) -> KeyValue:
     limits = STATE_LIMITS.get(bucket, {"history": KV_HISTORY})
-    try:
-        return await js.create_key_value(bucket=bucket, **limits)
-    except APIError as exc:
-        if exc.err_code != 10058 or bucket not in STATE_LIMITS:
-            raise
     stream = f"KV_{bucket}"
-    info = await js.stream_info(stream)
+    try:
+        return await js.create_key_value(bucket=bucket, replicas=replicas, **limits)
+    except APIError as exc:
+        if exc.err_code != nats_replicas.NAME_IN_USE:
+            raise
+        info = await js.stream_info(stream)
+        if bucket not in STATE_LIMITS and nats_replicas.held(info) == replicas:
+            raise
+    info = await nats_replicas.raised(js, info, replicas)
+    if bucket not in STATE_LIMITS:
+        return await js.create_key_value(bucket=bucket, replicas=nats_replicas.held(info), **limits)  # pyright: ignore[reportUnknownMemberType]
     await js.update_stream(config=replace(info.config, max_msgs_per_subject=limits["history"]))
     await nats_payload.reclaim_all(js, stream, f"$KV.{bucket}.")
     bounded = replace(info.config, max_msgs_per_subject=limits["history"], max_bytes=limits["max_bytes"])
@@ -442,14 +478,19 @@ class NatsWorkQueue:
         except NotFoundError:
             return None
 
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        """Hands the delivery back on the bus loop, so the caller takes its next offer at once; a delay past the ack
+        wait lets the server redeliver the original, counted, before its copy is queued."""
+        cast(NatsDelivery, delivery).release(self._js, self._subject, self._stream, delay_ms)
+
 
 class NatsStateStore:
-    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
+    def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool, replicas: int = 1) -> None:
         self._loop = loop
         self._js = js
         self._bucket = bucket
         self._swept = None
-        self._kv = loop.run(provision_state(js, bucket) if provision else js.key_value(bucket))
+        self._kv = loop.run(provision_state(js, bucket, replicas) if provision else js.key_value(bucket))
 
     async def _create_chunk(self, key: str, value: bytes) -> None:
         try:
@@ -547,19 +588,24 @@ async def _first_connect(url: str, config: BusConfig) -> Client:
         raise ConnectionError(
             f"nats: no server at {url} answered the first connect within {FIRST_CONNECT_RETRIES} retries"
         ) from error
+    except TimeoutError as error:
+        raise TimeoutError(
+            f"nats: the server at {url} did not finish the connect handshake within {FIRST_CONNECT_S} s"
+        ) from error
     lifecycle.client = client
     client.options.update(allow_reconnect=True, max_reconnect_attempts=-1, reconnect_time_wait=RECONNECT_WAIT_S)
     return client
 
 
 class NatsBus:
-    def __init__(self, config: BusConfig, url: str):
+    def __init__(self, config: BusConfig, url: str) -> None:
         self._config = config
         self._loop = _Loop()
         self._lock = threading.Lock()
         self._queues: dict[str, NatsWorkQueue] = {}
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
+        self._serving = ThreadPoolExecutor(SERVE_WORKERS)
         try:
             self._nc = self._loop.run(_first_connect(url, config))
             self._js = self._nc.jetstream()
@@ -570,17 +616,18 @@ class NatsBus:
                 )
                 dead_stream = self._loop.run(root_stream(self._js, DEAD_STREAM, "AGENTIHOOKS_DEAD", config.credentials))
             if config.provision:
-                self._loop.run(provision_events(self._js, event_stream, _seconds(config.dedupe_window_ms)))
-                self._loop.run(
-                    self._js.add_stream(
-                        name=dead_stream, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
+                window = _seconds(config.dedupe_window_ms)
+                self._loop.run(nats_replicas.raise_all(self._js, config.replicas))
+                self._loop.run(provision_events(self._js, event_stream, window, config.replicas))
+                for name, subject in ((dead_stream, DEAD_SUBJECT), (LAB_STREAM, LAB_SUBJECT)):
+                    self._loop.run(
+                        nats_replicas.create(
+                            self._js,
+                            config.replicas,
+                            name,
+                            api.StreamConfig(subjects=[subject], duplicate_window=window),
+                        )
                     )
-                )
-                self._loop.run(
-                    self._js.add_stream(
-                        name=LAB_STREAM, subjects=[LAB_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
-                    )
-                )
         except BaseException:
             self._loop.close()
             raise
@@ -658,14 +705,40 @@ class NatsBus:
         with self._lock:
             store = self._buckets.get(bucket)
             if store is None:
-                store = self._buckets[bucket] = NatsStateStore(self._loop, self._js, bucket, self._config.provision)
+                store = self._buckets[bucket] = NatsStateStore(
+                    self._loop, self._js, bucket, self._config.provision, self._config.replicas
+                )
             return store
 
-    def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
+    def serve(
+        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+    ) -> None:
+        """Answer each request on one of the bus's SERVE_WORKERS serve threads, because nats-py awaits the callbacks of
+        one subscription one at a time and an awaited handler would hold every later request on the subject behind a
+        slow one; with wait_ms, a request that waited that long since it arrived is dropped unanswered, because its
+        requester stopped waiting and its handler would claim for nobody."""
+
+        def answer(msg: Msg, received_ns: int) -> None:
+            waited = (time.monotonic_ns() - received_ns) // 1_000_000
+            if wait_ms is not None and waited >= wait_ms:
+                print(
+                    f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "
+                    f"past its requester's {wait_ms} ms wait",
+                    file=sys.stderr,
+                )
+                return
+            token = SERVE_WAITED_MS.set(waited)
+            try:
+                reply = handler(msg.subject, msg.data)
+                nats_payload.validate(self._nc, msg.reply, reply)
+                self._loop.run(msg.respond(reply))
+            except Exception as error:
+                self._loop.run(_unreported(error))
+            finally:
+                SERVE_WAITED_MS.reset(token)
+
         async def respond(msg: Msg) -> None:
-            answer = await asyncio.get_running_loop().run_in_executor(None, handler, msg.subject, msg.data)
-            nats_payload.validate(self._nc, msg.reply, answer)
-            await msg.respond(answer)
+            self._serving.submit(answer, msg, time.monotonic_ns())
 
         self._loop.run(self._nc.subscribe(subject, queue=queue, cb=respond))
         self._loop.run(self._nc.flush())
@@ -674,8 +747,10 @@ class NatsBus:
         nats_payload.validate(self._nc, subject, data)
         try:
             return self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
-        except (FetchTimeout, NoRespondersError):
+        except NoRespondersError:
             raise TimeoutError(f"no responders for {subject!r}") from None
+        except FetchTimeout:
+            raise TimeoutError(f"request to {subject!r} timed out after {timeout_ms} ms") from None
 
     def migrate_state(self, swarm: str, bucket: str, keys: list[str]) -> None:
         from .nats_migration import migrate_state
@@ -698,6 +773,7 @@ class NatsBus:
                 if not self._loop.closed:
                     self._loop.run(self._nc.close())
             finally:
+                self._serving.shutdown(wait=False, cancel_futures=True)
                 self._loop.close()
 
 

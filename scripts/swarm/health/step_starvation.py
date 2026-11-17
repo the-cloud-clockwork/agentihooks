@@ -161,7 +161,9 @@ def alarm(store: Any, slug: str, state: Mapping[str, Any], at: int) -> list[str]
         text = f"URGENT: {summary} on swarm {slug}. Evidence: {'; '.join(_evidence(entry, window))}."
         item_id = hashlib.sha256(f"{KEY}:{slug}:{name}:{entry['missed']}".encode()).hexdigest()[:12]
         try:
-            InboxStore(store.redis).send(SENDER, master, text, ref=f"{KEY}:{slug}:{name}", item_id=item_id)
+            InboxStore(store.redis).send(
+                SENDER, master, text, ref=f"{KEY}:{slug}:{name}:{entry['missed']}", item_id=item_id
+            )
         except DuplicateItem:
             continue
         lines.append(f"step starvation: alarmed {master}: {summary}")

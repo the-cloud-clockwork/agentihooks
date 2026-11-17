@@ -1,15 +1,17 @@
+import contextlib
 import inspect
 import io
 import os
 import subprocess
 import time
 import urllib.error
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from tests.ledger_load import gate as ledger_load
 
@@ -61,8 +63,10 @@ def test_alerts_past_their_quiet_hour_left_open_after_the_load_are_named(tmp_pat
 
 
 def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
-    interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
-    period = ledger_server.BIN_SWEEP_EVERY * interval
+    from scripts.swarm_ledger import api_service
+
+    interval = inspect.signature(api_service.upkeep).parameters["interval"].default
+    period = api_service.BIN_SWEEP_EVERY * interval
     assert ledger_load.duration() >= ledger_load.SWEEPS * period + period / 2
 
 
@@ -276,11 +280,89 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
     monkeypatch.setattr(ledger_load, "free_port", lambda: 0)
     monkeypatch.setattr(ledger_load, "duration", lambda: 10.0)
-    monkeypatch.setattr(ledger_load, "start_server", lambda folder, port, log: SimpleNamespace(pid=1))
+    monkeypatch.setattr(ledger_load, "start_server", lambda folder, port, log, *args, **kwargs: SimpleNamespace(pid=1))
     monkeypatch.setattr(ledger_load, "stop_server", lambda server: None)
-    monkeypatch.setattr(ledger_load, "load", lambda port, token, pid, seconds: results)
+    monkeypatch.setattr(ledger_load, "load", lambda write_port, read_port, token, pid, seconds: results)
     monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
     assert ledger_load.run(tmp_path) == ([], 0.7)
+
+
+def test_the_harness_loads_on_a_base_revision_that_has_no_api_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+    import sys
+
+    import scripts.swarm_ledger
+
+    monkeypatch.delattr(scripts.swarm_ledger, "api_service", raising=False)
+    monkeypatch.setitem(sys.modules, "scripts.swarm_ledger.api_service", None)
+    spec = importlib.util.spec_from_file_location("base_load_gate", ledger_load.__file__)
+    assert spec is not None and spec.loader is not None
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+    assert harness.api_service is None
+
+
+@pytest.mark.parametrize("has_api_service", [True, False])
+def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledger_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_api_service: bool
+) -> None:
+    started: list[tuple[int, list[str] | None]] = []
+    stopped: list[SimpleNamespace] = []
+    loaded: list[tuple[int, int, int]] = []
+    ports = iter([8101, 8102])
+    results = {
+        "writes": [0.1] * 9 + [0.7],
+        "reads": [0.05] * 10,
+        "item_reads": [0.01] * 100,
+        "errors": [],
+        "cpu": [(0.0, 0.0), (float(ledger_load.CPU_WINDOW_S), 1.0)],
+        "resources": resource_samples(),
+    }
+
+    def start(folder: Path, port: int, log: object, argv: list[str] | None = None, **kwargs: object) -> SimpleNamespace:
+        started.append((port, argv))
+        return SimpleNamespace(pid=len(started))
+
+    def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
+        loaded.append((write_port, read_port, pid))
+        return results
+
+    if not has_api_service:
+        monkeypatch.setattr(ledger_load, "api_service", None)
+    monkeypatch.setattr(ledger_load, "full_size", lambda at: {"tasks": []})
+    monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
+    monkeypatch.setattr(ledger_load, "free_port", lambda: next(ports))
+    monkeypatch.setattr(ledger_load, "duration", lambda: 10.0)
+    monkeypatch.setattr(ledger_load, "start_server", start)
+    monkeypatch.setattr(ledger_load, "stop_server", stopped.append)
+    monkeypatch.setattr(ledger_load, "load", load)
+    monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
+    assert ledger_load.run(tmp_path) == ([], 0.7)
+    if has_api_service:
+        writes = started[0][1]
+        assert writes is not None and writes[-2:] == ["scripts.swarm_ledger.api_service", "--serve"]
+        assert started[1] == (8102, None)
+        assert loaded == [(8101, 8102, 1)]
+    else:
+        assert started == [(8101, None)]
+        assert loaded == [(8101, 8101, 1)]
+    assert [server.pid for server in stopped] == list(range(len(started), 0, -1))
+
+
+def test_a_base_without_the_api_service_times_its_sweeps_and_expiry_by_the_ledger_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ledger_load, "TASKS", 20)
+    monkeypatch.setattr(ledger_load, "LEDGER_BYTES", 0)
+    ledger_load.store(tmp_path, ledger_load.full_size(0))
+    alerts = SimpleNamespace(expired=lambda alert, at: alert["id"].endswith("1"))
+    base_server = SimpleNamespace(watch_ledgers=lambda interval=3.0: None, BIN_SWEEP_EVERY=4, ledger_alerts=alerts)
+    monkeypatch.setattr(ledger_load, "api_service", None)
+    monkeypatch.setattr(ledger_load, "ledger_server", base_server)
+    assert ledger_load.duration() == (ledger_load.SWEEPS + 1) * 4 * 3.0
+    stored = SQLiteLedgerRepository(tmp_path / DATABASE).export_document(ledger_load.SLUG)["alerts"]
+    expired = [alert["id"] for alert in stored if alert["id"].endswith("1")]
+    assert expired and ledger_load.unexpired(tmp_path, 0) == expired
 
 
 def test_the_load_server_trusts_its_writer_but_refuses_an_unrelated_project(monkeypatch, tmp_path):
@@ -420,10 +502,12 @@ def test_a_partially_missing_resource_budget_is_red():
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
+    from scripts.swarm_ledger import api_service
+
     at = 10 * ledger_load.ALERT_QUIET_MS
     alerts = [ledger_load.alert(n, at) for n in range(ledger_load.ALERTS)]
-    assert any(ledger_server.ledger_alerts.expired(alert, at) for alert in alerts)
-    assert not all(ledger_server.ledger_alerts.expired(alert, at) for alert in alerts if alert["state"] == "open")
+    assert any(api_service.ledger_alerts.expired(alert, at) for alert in alerts)
+    assert not all(api_service.ledger_alerts.expired(alert, at) for alert in alerts if alert["state"] == "open")
 
 
 def test_the_generated_ledger_reaches_the_target_size(monkeypatch):
@@ -493,7 +577,7 @@ def test_a_client_stops_at_the_deadline_without_sleeping_toward_a_write_it_will_
     monkeypatch.setattr(ledger_load, "time", clock)
     results = {"writes": [], "reads": [], "errors": []}
     deadline = 2.5 * ledger_load.write_every()
-    ledger_load.client(Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)
+    ledger_load.client(Api(), Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)  # pyright: ignore[reportArgumentType]
     assert (len(results["writes"]), len(results["reads"]), results["errors"]) == (3, 3, [])
     assert clock.now <= deadline
 
@@ -558,8 +642,8 @@ def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
 
 def preflight_client(sent: list, refusal=None) -> type:
     class Api:
-        def __init__(self, base, credentials, timeout):
-            pass
+        def __init__(self, write_base: str, read_base: str, credentials: dict[str, str]) -> None:
+            self.read = self
 
         def mutate(self, slug, operations):
             sent.append(operations[0]["op"])
@@ -579,23 +663,43 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
     sent = []
     monkeypatch.setattr(
         ledger_load,
-        "ResourceClient",
+        "Front",
         preflight_client(sent, lambda: urllib.error.HTTPError("http://x", 400, "Bad Request", {}, io.BytesIO(body))),
     )
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     began = time.monotonic()
     with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
-        ledger_load.load(0, "token", os.getpid(), 15.0)
+        ledger_load.load(0, 0, "token", os.getpid(), 15.0)
     assert time.monotonic() - began < 5
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
 
 
 def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     sent = []
-    monkeypatch.setattr(ledger_load, "ResourceClient", preflight_client(sent))
+    monkeypatch.setattr(ledger_load, "Front", preflight_client(sent))
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
-    results = ledger_load.load(0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    results = ledger_load.load(0, 0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
     assert len(results["writes"]) == 2
     assert results["errors"] == []
+
+
+def test_a_load_writer_reads_its_guard_revisions_from_the_ledger_server_and_posts_to_the_api_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[tuple[str, str]] = []
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> contextlib.nullcontext[io.BytesIO]:
+        sent.append((request.get_method(), request.full_url))
+        return contextlib.nullcontext(io.BytesIO(b'{"revision": "r1", "data": {}}'))
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    writer = ledger_load.Front("http://api", "http://ledger", {"X-Ledger-Agent": "ci@ab0000-0000"})
+    writer.mutate(ledger_load.SLUG, [{"op": "join", "id": "j", "by": "ci@ab0000-0000", "role": "member"}])
+    writer.read.request(ledger_load.SLUG, "tasks/t0")
+    assert sent == [
+        ("GET", "http://ledger/api/v1/ledgers/load-gate/members"),
+        ("POST", "http://api/api/v1/ledgers/load-gate/operations"),
+        ("GET", "http://ledger/api/v1/ledgers/load-gate/tasks/t0"),
+    ]

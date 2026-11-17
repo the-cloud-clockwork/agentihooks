@@ -10,7 +10,7 @@ delay="${PULL_RETRY_SECONDS:-10}"
 if [[ ${PULL_REUSE_LOCAL:-} == true ||
       ( ${SWARM_SMOKE_RUNTIME_IMAGES_READY:-} == true &&
         ( "$image" == mirror.gcr.io/library/redis:7 || "$image" == mirror.gcr.io/library/redis:7-alpine ||
-          "$image" == mirror.gcr.io/library/nats:2.15.1-alpine ) ) ]] &&
+          "$image" == mirror.gcr.io/library/nats:2.15.1-alpine || "$image" == mirror.gcr.io/library/nginx:1.27-alpine ) ) ]] &&
    [[ "$(timeout "$limit" docker --host "$docker_host" image inspect --format '{{.Architecture}}' "$image" 2>/dev/null)" == amd64 ]]; then
   exit 0
 fi

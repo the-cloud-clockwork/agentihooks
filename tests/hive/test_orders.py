@@ -832,6 +832,37 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
     }
 
 
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "lane_model", "field"),
+    [
+        ("codex", "opus", "codex_model"),
+        ("codex", "claude-opus-5-5", "codex_model"),
+        ("claude", "gpt-6.1-sol", "claude_model"),
+    ],
+)
+def test_a_hive_order_never_launches_the_other_harness_lane_model(
+    setup: SimpleNamespace, harness: str, lane_model: str, field: str
+) -> None:
+    agent = replace(setup.agent, harness=harness, model="", effort="")
+    setup.store.execution_registry.update("fixture", agent)
+    config = setup.store.config("fixture")
+    setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": lane_model}})
+    setup.consumer.apply(replace(setup.order, harness=harness))
+    assignment = setup.runtime.spawn.call_args.args[0].task["launch_assignment"]
+    assert (assignment["harness"], assignment["model"]) == (harness, getattr(config, field))
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+def test_a_hive_order_keeps_a_lane_model_its_harness_runs(setup: SimpleNamespace) -> None:
+    agent = replace(setup.agent, harness="claude", model="", effort="")
+    setup.store.execution_registry.update("fixture", agent)
+    config = setup.store.config("fixture")
+    setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": "fable"}})
+    setup.consumer.apply(replace(setup.order, harness="claude"))
+    assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["model"] == "fable"
+
+
 @pytest.mark.feature("hosted-overlay-on-hive")
 def test_the_member_resolves_the_overlays_on_its_own_bundle_into_the_launch_assignment(
     setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

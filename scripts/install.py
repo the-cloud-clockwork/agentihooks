@@ -3844,15 +3844,11 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
     print("Restart Claude Code for the changes to take effect.")
 
 
-# ---------------------------------------------------------------------------
-# CLI tool install (uv tool install --editable .)
-# ---------------------------------------------------------------------------
-
 _CLI_NAME = "agentihooks"
 
 
 def _install_cli_tool() -> None:
-    """Install the agentihooks CLI globally via ``uv tool install --editable .``."""
+    """Install the agentihooks CLI globally via ``uv tool install --editable .[nats]``."""
     import subprocess
 
     if not _is_source_checkout():
@@ -3865,8 +3861,8 @@ def _install_cli_tool() -> None:
         print("       Then re-run: uv run agentihooks init")
         return
 
-    cmd = [uv, "tool", "install", "--editable", "--force", "."]
-    label = "uv tool install --editable ."
+    cmd = [uv, "tool", "install", "--editable", "--force", ".[nats]"]
+    label = "uv tool install --editable .[nats]"
     result = subprocess.run(cmd, cwd=str(AGENTIHOOKS_ROOT), capture_output=True, text=True)
     if result.returncode == 0:
         _cprint(f"  [OK] CLI installed via: {label}")
@@ -5259,7 +5255,7 @@ def _load_claude_runtime_env(*, shell_wins: bool = False) -> None:
     if env_file.is_file():
         from dotenv import dotenv_values
 
-        shell = set(os.environ) if shell_wins else set()
+        shell = set(os.environ) if shell_wins else runtime_env.shell_kept(os.environ)
         companions = [f for f in sorted(env_file.parent.glob("*.env")) if f != env_file]
         for f in [env_file, *companions]:
             for k, v in dotenv_values(f).items():

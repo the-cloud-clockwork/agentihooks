@@ -6,6 +6,7 @@ import uuid
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -14,9 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 
 import ledger_core as core  # noqa: E402
 
+from scripts.swarm_ledger import api_service  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger.repository.sqlite import DATABASE  # noqa: E402
 from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 from tests.swarm_ledger.test_sqlite import CONTENT, store  # noqa: E402
 
 repository = default_repository()
@@ -31,14 +34,14 @@ def live():
     slug = f"contract-{uuid.uuid4().hex[:8]}"
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     assert repository.create(slug, {"title": "Contract", "phases": [{"title": "One", "description": "d"}]})
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     host = f"127.0.0.1:{httpd.server_address[1]}"
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
         patch("hooks._redis.get_redis", return_value=None),
         patch("scripts.gates.talk.Budget._marks", return_value=None),
-        patch.object(server, "relay_to_inbox", return_value=None),
-        patch.object(server, "doctor_phrase", return_value=None),
+        patch.object(api_service, "relay_to_inbox", return_value=None),
+        patch.object(api_service, "doctor_phrase", return_value=None),
         patch.object(server, "ALLOWED_HOSTS", {host}),
     ):
         thread.start()
@@ -107,16 +110,16 @@ def test_serving_the_page_shell_writes_nothing_and_keeps_the_revision(live):
 
 
 def reply_of(state, rejected=(), ops=None, refusals=None):
-    handler = object.__new__(server.Handler)
+    handler: Any = object.__new__(api_service.WriteHandler)
     sent = {}
     handler.send = lambda status, body, kind: sent.update(status=status, body=json.loads(body), kind=kind)
     fake = SimpleNamespace(apply_ops=lambda *args, **kwargs: (state, list(rejected)))
     relayed = []
     with (
         patch.object(server, "repository", fake),
-        patch.object(server, "relay_to_inbox", lambda slug, state: relayed.append(slug)),
-        patch.object(server, "doctor_phrase", lambda *args: None),
-        patch.object(server, "deliver_alerts", lambda *args: None),
+        patch.object(api_service, "relay_to_inbox", lambda slug, state: relayed.append(slug)),
+        patch.object(api_service, "doctor_phrase", lambda *args: None),
+        patch.object(api_service, "deliver_alerts", lambda *args: None),
         patch("scripts.gates.talk.Budget", lambda slug: None),
     ):
         handler.reply_state("ledger", None, ops, refusals)

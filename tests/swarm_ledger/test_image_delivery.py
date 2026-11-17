@@ -6,10 +6,10 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 
+import api_service
 import ledger_core as core
 import ledger_hook
 import ledger_media as media
-import ledger_server
 import new_ledger
 import watch_ledger
 
@@ -48,7 +48,7 @@ def test_each_delivery_surface_names_every_image_and_harness_tool(delivery, thre
     assert rejected == []
     [event] = [e for e in state["_meta"]["events"] if e.get("id") == "picture"]
     if surface == "inbox":
-        [item] = ledger_server.relay_to_inbox(SLUG, state)
+        [item] = api_service.relay_to_inbox(SLUG, state)
         text = item.text
     elif surface == "watch":
         text = watch_ledger.line(event)

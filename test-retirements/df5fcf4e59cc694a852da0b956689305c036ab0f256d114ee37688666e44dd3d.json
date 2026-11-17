@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_ledger_tls.py::test_proof_controls_refuse_their_credentials_over_plain_http_off_loopback": {
+    "reader": "standards-reader",
+    "reason": "The HTTP ledger client transport is deleted: uploads, proof ledger calls, proof controls, launch tokens, replays and the controller and chat clients run the ledger API route code in process, so no credential, access header, plain http refusal, HTTP timeout or stall retry of these calls remains, and ledger.resource and ledger.export always retry, so the run once read is gone."
+  }
+}

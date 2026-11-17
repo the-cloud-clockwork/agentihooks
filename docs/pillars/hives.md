@@ -633,7 +633,7 @@ granting each key Redis refused until all five passed gave the list.
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
 `lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `execution-publishing`, the
 Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`,
-`stage-covers`, the task gate lifts `gate-lifts:tasks:*`, `gate-lift-drops` and `ledger-ready`.
+`stage-covers`, and the task gate lifts `gate-lifts:tasks:*` and `gate-lift-drops`.
 
 The list also keeps `swarm:*:identity-conflicts`, the key the identity conflict counter used before it moved into
 `swarm:state:counters:*`. Code only reads it, as a fallback when the counters record holds no entry.
@@ -1893,7 +1893,7 @@ whose work ended.
 |---|---|---|
 | Finished agents keep their seats and fill a hive's max agents | The controller log for `hub execution stop for <agent>` | No line while finished hub admitted agents are seated: the controller predates pull request #11464; roll it onto a release that carries it. |
 | The controller logs `sent` for the agent after each dedupe window, and the agent stays seated | The hive's log for `hive execution stop` | No line at all: the hive is not reading its stops, because its service predates the stop reader or is not running; restart it as in [Upgrade](#upgrade). The hive logs nothing for a stop it honors, so a quiet log alone proves nothing. `could not reap it; retrying`: the hive's runtime cannot find or reap the session; check herdr on that hive. |
-| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, run `agentihooks hive root-bus` again, because the credential it wrote earlier does not gain grants added after; on a member hive, run `agentihooks hive refresh`. |
+| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
 ### Running a spoke
@@ -2525,6 +2525,14 @@ which expires after 45 seconds, so a hive that stopped beating has no report. Th
 | `names` | The agent names the hive's herdr lists. |
 | `process_namespace` | The hive's process namespace. Written only while the hive runs at least one execution. |
 | `pane_ids` | Every pane id herdr lists. Written only while the hive runs at least one execution; `null` when herdr refuses the pane listing or its answer cannot be read. |
+| `admitted` | One entry per execution the hub admitted to this hive that no host target names yet, keyed by execution id: its `generation` and the `pane` this hive's herdr reads for it. |
+
+A worker the hub admitted carries no host target, so the controller has no herdr that can read its pane. The tick
+reads that worker's pane from the `admitted` entry of the hive that admitted it, and counts it idle or working from
+that pane like any local worker; an entry for another generation, or none, reads `unknown`. A worker admitted to the
+hive the tick runs on is read from that hive's own herdr. Both the controller and the hive must run a release that
+carries this report field; until then the worker reads `unknown`, which counts as working and never reaches the idle
+retire.
 
 A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
 and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these

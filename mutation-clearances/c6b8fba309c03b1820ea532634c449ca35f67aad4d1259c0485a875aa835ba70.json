@@ -1,0 +1,6 @@
+{
+  "scripts/hub/runner.py:scripts.hub.runner.x_main:bb50715dcf0e053623e66a84c00c180a531116aa31b69ec33ea4f4195b6bfe1b": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns ledger_link unchanged at run time; remote() is called on the same object."
+  }
+}

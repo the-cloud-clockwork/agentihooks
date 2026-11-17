@@ -25,7 +25,7 @@ Run a whole swarm on one machine: Redis, a NATS server with JetStream, the ledge
 Install AgentiHooks and its native hooks:
 
 ```bash
-uv tool install agentihooks
+uv tool install "agentihooks[nats]"
 agentihooks init
 ```
 

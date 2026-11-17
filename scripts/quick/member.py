@@ -40,3 +40,12 @@ def _by_pane(environ: Mapping[str, str]) -> Member | None:
 def find(environ: Mapping[str, str]) -> Member | None:
     """This session's quick seat: by its launch variables, else by its herdr pane in a registered quick swarm."""
     return _by_variables(environ) or _by_pane(environ)
+
+
+def bind(environ: Mapping[str, str], session_id: str) -> Member | None:
+    """Record this session and its herdr pane in the launching seat its seat variables name; None when none was bound."""
+    found = _by_variables(environ)
+    pane = environ.get("HERDR_PANE_ID")
+    if found is None or not pane or not session_id:
+        return None
+    return _by_variables(environ) if registry.bind(found.folder, found.seat.seat, pane, session_id) else None

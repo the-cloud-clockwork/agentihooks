@@ -1,14 +1,15 @@
 import errno
 import json
-import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+from typing import Any
 
 import pytest
 
+from scripts.swarm_ledger import api_service, new_ledger
 from scripts.swarm_ledger import ledger_server as server
-from scripts.swarm_ledger import new_ledger
 from tests.swarm_ledger import legacy_page
 
 SLUG = "writer-burst"
@@ -18,44 +19,43 @@ SLUG = "writer-burst"
 def listening(monkeypatch, ledger_port, tmp_path):
     admitted = threading.Event()
     admitted.set()
-    created = queue.Queue()
 
-    class ObservedServer(server.ThreadingHTTPServer):
-        def server_activate(self):
-            super().server_activate()
-            created.put(self)
+    class ObservedServer(ThreadingHTTPServer):
+        def __init__(self, server_address: tuple[str, int], handler: type) -> None:
+            super().__init__(server_address, handler, bind_and_activate=False)
+            self.request_queue_size = 128
+            self.server_bind()
+            self.server_activate()
 
-        def get_request(self):
+        def get_request(self) -> tuple[Any, Any]:
             assert admitted.wait(15), "accept gate was never released"
             return super().get_request()
 
-    monkeypatch.setattr(server, "ThreadingHTTPServer", ObservedServer)
-    monkeypatch.setattr(server, "HOST", "127.0.0.1")
-    monkeypatch.setattr(server, "PORT", ledger_port)
-    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
-    monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
-    watched = threading.Event()
-    monkeypatch.setattr(server, "watch_ledgers", lambda *args, **kwargs: watched.set())
-    monkeypatch.setattr(server, "HUB", server.Hub())
-    monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
-    monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
+    read_port = ledger_port
+    write_httpd = ObservedServer(("127.0.0.1", 0), api_service.WriteHandler)
+    write_port = write_httpd.server_address[1]
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{read_port}", f"127.0.0.1:{write_port}"})
     document = new_ledger.build_doc({"title": "Burst", "phases": [{"title": "Proof"} for _ in range(16)]})
-    page = legacy_page.render(document, SLUG, ledger_port)
+    page = legacy_page.render(document, SLUG, read_port)
     html, _ = legacy_page.paths(SLUG, server.core)
     html.write_text(page)
     server.core.sync(SLUG, ops=[])
     token = server.core.read_token(page)
-    worker = threading.Thread(target=server.serve)
-    worker.start()
-    httpd = created.get(timeout=10)
+    read_httpd = ThreadingHTTPServer(("127.0.0.1", read_port), server.Handler)
+    read_worker = threading.Thread(target=read_httpd.serve_forever, args=(0.01,), daemon=True)
+    write_worker = threading.Thread(target=write_httpd.serve_forever, args=(0.01,), daemon=True)
+    read_worker.start()
+    write_worker.start()
     try:
-        assert watched.wait(10), "the ledger watcher stand-in never returned"
-        yield httpd, admitted, token
+        yield read_httpd, write_httpd, admitted, token
     finally:
         admitted.set()
-        httpd.shutdown()
-        worker.join(timeout=10)
-        assert not worker.is_alive()
+        read_httpd.shutdown()
+        write_httpd.shutdown()
+        read_httpd.server_close()
+        write_httpd.server_close()
+        read_worker.join(timeout=10)
+        write_worker.join(timeout=10)
 
 
 def request(port, token, method, resource, body=None):
@@ -76,11 +76,12 @@ def request(port, token, method, resource, body=None):
 
 
 def test_production_listen_backlog_is_above_five(listening):
-    httpd, _, _ = listening
-    assert httpd.request_queue_size > 5
+    _, write_httpd, _, _ = listening
+    assert write_httpd.request_queue_size > 5
 
 
-def burst_request(port, token, index, guard, start, connected):
+def burst_request(read_port, write_port, token, index, guard, start, connected):
+    port = write_port if index < 16 else read_port
     connection = HTTPConnection("127.0.0.1", port, timeout=0.5)
     error = None
     try:
@@ -120,16 +121,25 @@ def burst_request(port, token, index, guard, start, connected):
 
 
 def test_sixteen_writers_during_mixed_reads_complete_without_resets(listening):
-    httpd, admitted, token = listening
-    port = httpd.server_port
-    guards = [request(port, token, "GET", f"phases/p{index + 1}/comments")[1]["revision"] for index in range(16)]
+    read_httpd, write_httpd, admitted, token = listening
+    read_port, write_port = read_httpd.server_port, write_httpd.server_port
+    guards = [request(read_port, token, "GET", f"phases/p{index + 1}/comments")[1]["revision"] for index in range(16)]
     start = threading.Barrier(21)
     connected = threading.Barrier(21)
     admitted.clear()
     try:
         with ThreadPoolExecutor(max_workers=20) as pool:
             futures = [
-                pool.submit(burst_request, port, token, index, guards[index] if index < 16 else None, start, connected)
+                pool.submit(
+                    burst_request,
+                    read_port,
+                    write_port,
+                    token,
+                    index,
+                    guards[index] if index < 16 else None,
+                    start,
+                    connected,
+                )
                 for index in range(20)
             ]
             start.wait(timeout=10)
@@ -149,6 +159,6 @@ def test_sixteen_writers_during_mixed_reads_complete_without_resets(listening):
         assert result["body"]["applied"] == [f"burst-comment-{result['index']}"]
         assert result["body"]["rejected"] == []
     for index in range(16):
-        status, data = request(port, token, "GET", f"phases/p{index + 1}/comments")
+        status, data = request(read_port, token, "GET", f"phases/p{index + 1}/comments")
         assert status == 200
         assert [row["id"] for row in data["data"]] == [f"burst-comment-{index}"]

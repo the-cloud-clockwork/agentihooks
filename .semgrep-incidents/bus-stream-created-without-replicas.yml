@@ -1,0 +1,20 @@
+rules:
+  - id: bus-stream-created-without-replicas
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Every swarm JetStream stream and key value bucket held one replica on a three server cluster because no create
+      passed a replica count, so a node stall took the streams of its server offline and moving a server's volume
+      would have lost them. Create streams through nats_replicas.create, or pass num_replicas to add_stream and
+      replicas to create_key_value from the bus configuration.
+    paths:
+      include:
+        - /scripts/
+        - bus-stream-created-without-replicas.py
+    pattern-either:
+      - patterns:
+          - pattern: $JS.add_stream(...)
+          - pattern-not: $JS.add_stream(..., num_replicas=$COUNT, ...)
+      - patterns:
+          - pattern: $JS.create_key_value(...)
+          - pattern-not: $JS.create_key_value(..., replicas=$COUNT, ...)

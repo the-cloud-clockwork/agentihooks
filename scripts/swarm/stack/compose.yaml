@@ -11,8 +11,6 @@ services:
   swarm:
     image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     build: .
-    ports:
-      - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
     environment:
       <<: *swarm-env
       AGENTIHOOKS_DEPLOYMENT: local
@@ -31,6 +29,48 @@ services:
       nats:
         condition: service_healthy
     restart: unless-stopped
+  api:
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
+    build: .
+    command: [python, -m, scripts.swarm_ledger.api_service, --serve]
+    environment:
+      <<: *swarm-env
+      AGENTIHOOKS_DEPLOYMENT: local
+      LEDGER_API_HOST: 0.0.0.0
+      LEDGER_API_PORT: "8766"
+      LEDGER_DIR: /data
+      SWARM_ALLOWED_HOSTS: api:8766,${SWARM_ALLOWED_HOSTS:-}
+      SWARM_PUBLIC_URL: ${SWARM_PUBLIC_URL:-http://127.0.0.1:${SWARM_PORT:-8765}}
+    volumes:
+      - swarm-data:/data
+      - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+    healthcheck:
+      test: [CMD, python, -c, "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['LEDGER_API_PORT'] + '/healthz', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+      start_interval: 1s
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+  front:
+    image: mirror.gcr.io/library/nginx:1.27-alpine
+    ports:
+      - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
+    environment:
+      SWARM_LEDGER_SCHEME: ${SWARM_LEDGER_SCHEME:-http}
+    volumes:
+      - ./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      swarm:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
   controller:
     image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     command:
@@ -46,8 +86,10 @@ services:
       AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0
       LEDGER_URL: http://swarm:8765
       SWARM_HIVE_ID: ${SWARM_HIVE_ID:-compose-controller}
+      LEDGER_DIR: /data
     volumes:
       - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+      - swarm-data:/data
     healthcheck:
       test:
         - CMD

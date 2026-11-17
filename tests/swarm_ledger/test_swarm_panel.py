@@ -19,8 +19,10 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger import api_service  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 
 SLUG = "swarm-panel-2026-01-01"
 STATUS = {
@@ -60,7 +62,7 @@ class SwarmPanel(unittest.TestCase):
         json_path.unlink(missing_ok=True)
         core.sync(SLUG)
         cls.token = legacy_page.stored_token(html_path)
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 
@@ -376,7 +378,7 @@ class SwarmPanel(unittest.TestCase):
             patch.object(server, "swarm_store", return_value=self.live_store()),
             patch.object(server, "swarm_status", return_value=STATUS) as status,
         ):
-            self.assertEqual(server.refresh_quota(SLUG), (STATUS, ""))
+            self.assertEqual(api_service.refresh_quota(SLUG), (STATUS, ""))
         status.assert_called_once_with(SLUG)
 
     def test_doctor_controls_run_the_doctor_command(self):

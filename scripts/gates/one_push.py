@@ -15,6 +15,7 @@ from scripts.gates.subagents import READERS, SubagentBudget
 from scripts.swarm.naming import lane_of
 
 if TYPE_CHECKING:
+    from scripts.gates.verdicts import Verdicts
     from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
@@ -168,13 +169,28 @@ class OnePush:
                 return Decision.deny(reason)
         return Decision()
 
-    def opening(self, who, state, where):
-        budget = Budget(state.slug, SubagentBudget.name, state.home)
-        missing = [name for name in READERS if not budget.spent(who.task, name)] if self.target() == "claude" else []
+    def opening(self, who: Who, state: "Verdicts", where: Path) -> str:
+        missing = self.unread(who, state) if self.target() == "claude" else []
         held = unsaved(where)
         return (
             f"{open_refusal(who.swarm, missing, held)}. Checked worktree: {where.resolve()}" if missing or held else ""
         )
+
+    def unread(self, who: Who, state: "Verdicts") -> list[str]:
+        """The readers neither this machine's launch counters nor the task's review readers on the ledger hold; the
+        ledger is read only when a counter here is missing, and an unreadable ledger leaves those readers missing."""
+        from scripts.swarm import review_rounds
+        from scripts.swarm.store import SwarmError
+
+        budget = Budget(state.slug, SubagentBudget.name, state.home)
+        missing = [name for name in READERS if not budget.spent(who.task, name)]
+        if not missing:
+            return missing
+        try:
+            ran = review_rounds.readers(self.ledger().task(who.swarm, who.task) or {})
+        except (SwarmError, OSError):
+            return missing
+        return [name for name in missing if name not in ran]
 
     def pushing(self, who: Who, where: Path, args: list[str]) -> str:
         task = self.ledger().task(who.swarm, who.task) or {}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x\u01c1Writes\u01c1post_artifact:a49710054da5a9b74d05dbd049e3ec8a49775094dbfd18115cba071508635d89": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns request unchanged at run time; the isinstance guard short-circuits before it."
+  }
+}

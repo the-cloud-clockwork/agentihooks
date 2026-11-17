@@ -14,7 +14,7 @@ Start the packaged swarm service bundle for **Claude Code and Codex**. It provid
 Install Python 3.12 or later, Docker with a running daemon, and the Docker Compose plugin. Install AgentiHooks:
 
 ```bash
-uv tool install agentihooks
+uv tool install "agentihooks[nats]"
 ```
 
 Agent hosts separately need Claude Code or Codex, authenticated accounts or API credentials, and their configuration bundle. The service containers do not inherit a host's CLI login.
@@ -192,7 +192,7 @@ Swarm stack not ready: redis is created.
 
 ## Share one database across hosts
 
-Set `AGENTIHOOKS_SWARM_DATABASE_URL` to the shared Postgres connection URL and `AGENTIHOOKS_SWARM_REDIS_URL` to the shared Redis connection URL before initialization. Both URLs are retained in the private stack settings and generated client settings. Every ledger server and swarm engine must use the same database and Redis. Without the database setting, the ledger uses SQLite in `LEDGER_DIR`.
+Set `AGENTIHOOKS_SWARM_DATABASE_URL` to the shared Postgres connection URL and `AGENTIHOOKS_SWARM_REDIS_URL` to the shared Redis connection URL before initialization. Both URLs are retained in the private stack settings and generated client settings. Every ledger server, ledger API service and swarm engine must use the same database and Redis. Without the database setting, the ledger uses SQLite in `LEDGER_DIR`.
 
 Supply credentials through environment settings or your secret manager. Hosted Kubernetes services use ExternalSecret references. Do not print connection URLs or paste generated client settings into chat. Keep TLS certificate verification enabled for remote connections.
 
