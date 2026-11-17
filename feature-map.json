@@ -7255,7 +7255,8 @@
       "seam": "scripts.install._load_claude_runtime_env as scripts.install.cmd_claude runs it before routing the session",
       "tests": [
         "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_proof_master_on_the_scratch_redis",
-        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_live_swarm_session_on_the_env_file_redis"
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_live_swarm_session_on_the_env_file_redis",
+        "tests/test_proof_master_redis.py::test_only_a_proof_swarm_that_exported_its_redis_keeps_it_over_the_env_files"
       ]
     },
     {

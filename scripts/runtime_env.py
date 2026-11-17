@@ -36,4 +36,4 @@ def shell_kept(environ: Mapping[str, str]) -> set[str]:
     from scripts.swarm.naming import PROOF_RE
 
     swarm = environ.get("AGENTIHOOKS_SWARM")
-    return {"AGENTIHOOKS_SWARM_REDIS_URL"} & set(environ) if swarm and PROOF_RE.fullmatch(swarm) else set()
+    return ({"AGENTIHOOKS_SWARM_REDIS_URL"} & set(environ)) if swarm and PROOF_RE.fullmatch(swarm) else set()

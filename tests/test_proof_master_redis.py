@@ -71,14 +71,12 @@ def _claude_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swarm: str) 
 def test_agentihooks_claude_starts_a_proof_master_on_the_scratch_redis(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts import runtime_env
     from scripts.swarm import store
 
     started = _claude_launch(tmp_path, monkeypatch, PROOF)
     assert started["AGENTIHOOKS_SWARM_REDIS_URL"] == SCRATCH
     assert store.redis_url(started) == SCRATCH
     assert started[THRESHOLD] == "99"
-    assert runtime_env.shell_kept(started) == {"AGENTIHOOKS_SWARM_REDIS_URL"}
 
 
 @pytest.mark.feature("proof-master-claude-launch-scratch-redis")
@@ -88,3 +86,14 @@ def test_agentihooks_claude_starts_a_live_swarm_session_on_the_env_file_redis(
     started = _claude_launch(tmp_path, monkeypatch, "rig-grade-swarm")
     assert started["AGENTIHOOKS_SWARM_REDIS_URL"] == SHARED
     assert started[THRESHOLD] == "99"
+
+
+@pytest.mark.feature("proof-master-claude-launch-scratch-redis")
+def test_only_a_proof_swarm_that_exported_its_redis_keeps_it_over_the_env_files() -> None:
+    from scripts import runtime_env
+
+    exported = {"AGENTIHOOKS_SWARM": PROOF, "AGENTIHOOKS_SWARM_REDIS_URL": SCRATCH, THRESHOLD: "5"}
+    assert runtime_env.shell_kept(exported) == {"AGENTIHOOKS_SWARM_REDIS_URL"}
+    assert runtime_env.shell_kept({"AGENTIHOOKS_SWARM": PROOF, THRESHOLD: "5"}) == set()
+    assert runtime_env.shell_kept({"AGENTIHOOKS_SWARM_REDIS_URL": SCRATCH, THRESHOLD: "5"}) == set()
+    assert runtime_env.shell_kept({**exported, "AGENTIHOOKS_SWARM": "rig-grade-swarm"}) == set()
