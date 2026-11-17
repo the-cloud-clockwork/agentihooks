@@ -3,7 +3,8 @@ THRESHOLD errors, the CI cancellation that frees runners from the swarm's own ru
 business-as-usual level that releases it. A panic holds only its swarm; the legacy fleet record reads as panic for the
 swarm its reason names.
 
-THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet.
+THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet, measured
+when one swarm ran; each swarm's own count is held to it.
 
 A step or a pass that merely runs long, up to the golden pass duration (`scripts.tick.engine.GOLDEN_PASS_S`),
 never reaches either counter here: `count_error` only takes a category a caller chose to report, and the one
@@ -163,7 +164,7 @@ def release(store: RedisStore, slug: str, now_ms: int) -> bool:
         return False
     client = _client(store)
     legacy = [_key("panic")] if _legacy(client.get(_key("panic")), slug) else []
-    client.delete(_swarm_key(slug, "state"), _key(MERGED_FIXES), *legacy)
+    client.delete(_swarm_key(slug, "state"), _swarm_key(slug, MERGED_FIXES), *legacy)
     return True
 
 
@@ -190,7 +191,11 @@ def owner(store: RedisStore, slug: str) -> Callable[[str], bool]:
 
     code = store.config(slug).code
     branches = re.compile(rf"(?:.+/)?(?:{'|'.join(TYPES.values())})-{re.escape(code)}-\d{{4,}}(?:[-/].*)?")
-    return lambda branch: bool(code) and branches.fullmatch(branch) is not None
+
+    def owns(branch: str) -> bool:
+        return bool(code) and branches.fullmatch(branch) is not None
+
+    return owns
 
 
 def port(repository: str) -> SourceControl:
@@ -207,21 +212,23 @@ def fix_change(url: str) -> ChangeState:
     return stack.change(url, f"cannot read pull request {url}")
 
 
-def fix_state(store: RedisStore | None, url: str) -> ChangeState:
-    """Return the state of fix pull request ``url``, kept under the fleet panic keys from the read that finds it
-    merged until panic releases, since a merged pull request never changes; an open one, a kept row whose fields no
-    longer match ChangeState, or any read without a store, is read through the port."""
-    if store is None:
+def fix_state(kept: tuple[RedisStore, str] | None, url: str) -> ChangeState:
+    """Return the state of fix pull request ``url``, kept under the panic keys of the swarm ``kept`` names with its
+    store from the read that finds it merged until that panic releases, since a merged pull request never changes; an
+    open one, a kept row whose fields no longer match ChangeState, or any read with nothing kept, is read through the
+    port."""
+    if kept is None:
         return fix_change(url)
+    store, slug = kept
     client = _client(store)
-    raw = client.hget(_key(MERGED_FIXES), url)
+    raw = client.hget(_swarm_key(slug, MERGED_FIXES), url)
     row: dict[str, Any] = {} if raw is None else json.loads(raw)
     shaped = set(row) == {field.name for field in fields(ChangeState)}
     if shaped and set(row["reference"]) == {field.name for field in fields(ChangeRef)}:
         return ChangeState(ChangeRef(**row.pop("reference")), **row)
     found = fix_change(url)
     if found.merged:
-        client.hset(_key(MERGED_FIXES), url, json.dumps(asdict(found)))
+        client.hset(_swarm_key(slug, MERGED_FIXES), url, json.dumps(asdict(found)))
     return found
 
 
@@ -309,18 +316,18 @@ def cancel_runs(
     repos: Iterable[str],
     ports: Ports,
     owns: Callable[[str], bool],
-    store: RedisStore | None = None,
+    cache: tuple[RedisStore, str] | None = None,
 ) -> list[str]:
     """Cancels every queued or running Actions run of the panicking swarm, the runs on branches ``owns`` accepts and
     the workflow run event runs they triggered, except the merge queue, release tags, the named fixes, the
     workflow run event runs a fix's run triggered and the runs on a fix's merge queue commit, merge commit or merged
     integration branch head; a fix pull request spares its head branch and a fix branch link its branch only in its
-    own repository, and a branch link is never read as a pull request. With ``store`` a merged fix pull request is
-    read once and kept, so each sweep reads only the open ones."""
+    own repository, and a branch link is never read as a pull request. With ``cache``, the store and the swarm's
+    slug, a merged fix pull request is read once and kept, so each sweep reads only the open ones."""
     from scripts.swarm.stack import GITHUB, repo_key
 
     named = [(fix, *branch_fix(fix)) for fix in fixes]
-    changes = [fix_state(store, fix) for fix, _, branch in named if not branch]
+    changes = [fix_state(cache, fix) for fix, _, branch in named if not branch]
     commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
@@ -351,7 +358,7 @@ def tick_pass(store: RedisStore, slug: str, ok: bool, now_ms: int, ports: Ports 
     if current is None or not due_cancel(store, slug, now_ms):
         return actions
     try:
-        cancelled = cancel_runs(current.fixes, REPOS, ports, owner(store, slug), store)
+        cancelled = cancel_runs(current.fixes, REPOS, ports, owner(store, slug), (store, slug))
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
         return [*actions, f"panic cancel failed: {error}"]
     return [*actions, *(f"panic cancelled {line}" for line in cancelled)]

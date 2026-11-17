@@ -49,4 +49,4 @@ def press_for(store: RedisStore, slug: str, fixes: list[str]) -> list[str]:
 
 def sweep_for(store: RedisStore, slug: str, fixes: list[str]) -> list[str]:
     # ok: panic-holds-the-fleet
-    return panic.cancel_runs(fixes, panic.REPOS, panic.port, panic.owner(store, slug), store)
+    return panic.cancel_runs(fixes, panic.REPOS, panic.port, panic.owner(store, slug), (store, slug))

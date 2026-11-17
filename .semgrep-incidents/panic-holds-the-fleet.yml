@@ -4,8 +4,8 @@ rules:
     severity: ERROR
     message: >-
       Panic belongs to the swarm that pressed it. A panic read without the swarm slug, or a sweep without the
-      swarm's branch owner check, made one swarm's panic freeze every agentihooks session and cancel every fleet
-      run on 17 November. Read panic.state(store, slug), sweep with panic.tick_pass(store, slug, ok, now) and give
+      swarm's branch owner check, lets one swarm's panic freeze every agentihooks session and cancel every fleet
+      run. Read panic.state(store, slug), sweep with panic.tick_pass(store, slug, ok, now) and give
       panic.cancel_runs the swarm's panic.owner(store, slug).
     paths:
       include:

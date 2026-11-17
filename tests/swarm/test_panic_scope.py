@@ -192,6 +192,15 @@ def test_panic_off_clears_the_legacy_fleet_record_only_for_the_swarm_it_names(st
     assert panic.state(store, HELD) is None
 
 
+@pytest.mark.feature("panic-holds-only-its-swarm")
+def test_panic_off_clears_only_its_own_swarms_kept_fixes(store: RedisStore) -> None:
+    kept = {slug: f"{PREFIX}:{slug}:panic:{panic.MERGED_FIXES}" for slug in CODES}
+    for key in kept.values():
+        store.redis.hset(key, "fix", "{}")
+    assert panic.release(store, OTHER, 1_000)
+    assert (store.redis.exists(kept[HELD]), store.redis.exists(kept[OTHER])) == (1, 0)
+
+
 @pytest.mark.parametrize(
     "reason", ["60 errors in the last hour", f"pressed on swarm {HELD} again", "pressed on swarm "]
 )
@@ -232,3 +241,22 @@ def test_another_swarms_panic_opens_no_window_for_this_master(
     assert not master_coding.is_open("other-master")
     assert blocker_window._panic_found(store, OTHER, 5) == {}
     assert blocker_window._panic_found(store, HELD, 5) == {"panic": Blocker("panic", 3, 5, 0, "pressed")}
+
+
+@pytest.mark.feature("panic-holds-only-its-swarm")
+def test_the_panic_messages_name_the_held_swarm() -> None:
+    from scripts.gates.push_stop import PANIC_HELD
+
+    assert blocker_window.FROZEN.format(slug=HELD, reason="pressed") == (
+        "BLOCKED: panic mode holds swarm held (pressed). Its sessions' pushes, reruns, dispatches and deploys wait "
+        "until the master's fix brings it back to business as usual; agentihooks swarm held panic status shows the "
+        "level."
+    )
+    assert blocker_window.NOTICE.format(slug=HELD, categories="panic for 0 minutes") == (
+        "BLOCKER QUEUE on swarm held: panic for 0 minutes sustained for an hour or more. Fix this now: the master "
+        "coding window is open; troubleshoot and fix before any other work, and clear each category with "
+        "agentihooks swarm held blockers clear <category>. Stop everything unnecessary for the fix: agentihooks "
+        "swarm held panic on --fix <pr url> pauses the swarm's agent starts and cancels every CI run of its agents "
+        "but the fix and the merge queue, printing what it cancelled."
+    )
+    assert PANIC_HELD.format(path="/w") == "Swarm panic holds, so the stop hook pushes nothing and did not push /w."

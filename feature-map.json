@@ -4583,10 +4583,12 @@
         "tests/swarm/test_panic_scope.py::test_one_swarms_errors_and_failed_passes_reach_only_its_own_panic",
         "tests/swarm/test_panic_scope.py::test_each_swarm_keeps_its_own_cancel_minute",
         "tests/swarm/test_panic_scope.py::test_panic_off_clears_the_legacy_fleet_record_only_for_the_swarm_it_names",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_only_its_own_swarms_kept_fixes",
         "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_record_naming_no_swarm_holds_none",
         "tests/swarm/test_panic_scope.py::test_an_unbound_session_never_reads_panic",
         "tests/swarm/test_panic_scope.py::test_swarm_publish_holds_only_the_panicking_swarms_push",
         "tests/swarm/test_panic_scope.py::test_another_swarms_panic_opens_no_window_for_this_master",
+        "tests/swarm/test_panic_scope.py::test_the_panic_messages_name_the_held_swarm",
         "tests/gates/test_push_stop.py::test_another_swarms_panic_leaves_the_stop_hook_pushing"
       ]
     },

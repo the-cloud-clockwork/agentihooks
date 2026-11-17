@@ -482,7 +482,7 @@ def test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep(
     sweeps = [panic.tick_pass(store, SLUG, True, at, runs) for at in (1_000, 1_000 + panic.CANCEL_EVERY_MS)]
     assert reads == [merged, opened, opened]
     assert sweeps == [[f"panic cancelled {repo} run 2 on {MINE}-2" for repo in panic.REPOS]] * 2
-    assert panic.fix_state(store, merged) == _fix(merged, True, commit)
+    assert panic.fix_state((store, SLUG), merged) == _fix(merged, True, commit)
     assert reads == [merged, opened, opened]
 
 
@@ -522,9 +522,9 @@ def test_a_kept_fix_row_of_another_shape_is_read_again(
         del stale["body"]
     else:
         stale["reference"]["owner"] = "o"
-    store.redis.hset(f"{PREFIX}:{panic.FLEET}:{panic.MERGED_FIXES}", FIX, json.dumps(stale))
-    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
-    assert panic.fix_state(store, FIX) == _fix(FIX, True, commit)
+    store.redis.hset(f"{PREFIX}:{SLUG}:panic:{panic.MERGED_FIXES}", FIX, json.dumps(stale))
+    assert panic.fix_state((store, SLUG), FIX) == _fix(FIX, True, commit)
+    assert panic.fix_state((store, SLUG), FIX) == _fix(FIX, True, commit)
     assert reads == [FIX]
 
 
