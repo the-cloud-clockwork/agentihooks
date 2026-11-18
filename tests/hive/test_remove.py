@@ -590,6 +590,7 @@ def test_remove_of_a_machine_hive_stops_and_disables_its_services_over_its_ssh_r
     assert (stopping, machine.SSH_TIMEOUT_S) in run.calls
     commands = [argv for argv, _ in run.calls]
     assert commands.index(stopping) < commands.index(["herdr", "machine", "remove", "p7"])
+    assert run.inputs[commands.index(stopping)] is None
     assert not auth.member(store.redis, member)
 
 
@@ -622,7 +623,7 @@ def test_an_unreachable_host_is_named_and_every_other_step_still_runs(
 
     assert done[1] == (
         f"host: could not stop the services on {TARGET} ({error}); "
-        "stop and disable agentihooks-hive.service there by hand"
+        "stop and disable agentihooks-hive.service and agentihooks-scheduler.service there by hand"
     )
     assert [line.split(":")[0] for line in done] == [*STEP_TITLES, "manifests", "openbao"]
     assert not auth.member(store.redis, member)

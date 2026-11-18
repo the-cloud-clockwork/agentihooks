@@ -5,9 +5,7 @@ rules:
     message: >-
       A hive remove step list forgets the herdr machine without first stopping the hive services on its host. The
       herdr step deletes the only SSH route to the machine, and revoking the member leaves its hive user service
-      running: on 18 November a retired automation VM kept agentihooks-hive.service up for days and retried swarm
-      Redis logins about 264 thousand times until a master stopped it by hand. Run the host step, stop_services,
-      before the herdr step.
+      running and retrying swarm Redis logins. Run the host step, stop_services, before the herdr step.
     patterns:
       - pattern: |
           STEPS = (..., ("herdr", $FORGET), ...)

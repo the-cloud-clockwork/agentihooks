@@ -370,7 +370,9 @@ def stop_services(store: "RedisStore | None", bao: openbao_kv.OpenBao | None, pl
     try:
         stopped = machine.run_checked(host.run, argv, None, machine.SSH_TIMEOUT_S).splitlines()
     except auth.HiveError as error:
-        return [f"could not stop the services on {target} ({error}); stop and disable {UNIT} there by hand"]
+        return [
+            f"could not stop the services on {target} ({error}); stop and disable {UNIT} and {SCHEDULER} there by hand"
+        ]
     if not stopped:
         return [f"{target} has no agentihooks user service to stop"]
     return [f"stopped and disabled {', '.join(stopped)} on {target}"]
