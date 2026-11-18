@@ -112,8 +112,10 @@ def test_a_reread_during_a_rate_limit_backoff_makes_no_request(port: Any, monkey
 def test_each_pass_reads_fresh_past_the_shared_snapshot(
     port: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
+    import fakeredis
+
     monkeypatch.setattr(github_reads, "home", lambda: tmp_path / "reads")
-    cache = SimpleNamespace()
+    cache = fakeredis.FakeRedis(decode_responses=True)
     for _ in range(2):
         assert head(ledger_events.fresh_reader(held(*URLS), cache)(URLS[0])) == "fresh0"
     assert len(port.calls) == 2

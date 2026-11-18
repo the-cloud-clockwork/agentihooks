@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
@@ -33,6 +33,7 @@ from scripts.tick.ports.contracts import SourceControl
 
 MINUTE_MS = 60_000
 TICK_VIEW_TTL_S = 180
+MERGED_VIEW_TTL_S = 2 * 24 * 3600
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
 HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -460,6 +461,35 @@ def _paged(commit: str | None, field: str, page: Any, source: SourceControl, num
     return None if info.get("hasNextPage") else nodes
 
 
+def _merged_key(url: str) -> str:
+    """Return the shared cache key that keeps the merged view of pull request ``url``."""
+    return f"{PREFIX}:merged-pull-view:{url}"
+
+
+def _kept_merged(cache: Any, urls: list[str]) -> dict[str, PullRequest]:
+    """Return the merged view the shared cache keeps for each pull request in ``urls``, leaving out an entry another
+    release wrote with other fields."""
+    if cache is None or not urls:
+        return {}
+    kept: dict[str, PullRequest] = {}
+    for url, text in zip(urls, cache.mget([_merged_key(url) for url in urls])):
+        saved: dict[str, Any] = json.loads(text) if text else {}
+        if set(saved) == set(PullRequest.__dataclass_fields__):
+            saved["failed"] = tuple(saved["failed"])
+            kept[url] = PullRequest(**saved)
+    return kept
+
+
+def _keep_merged(cache: Any, found: dict[str, PullRequest | None]) -> None:
+    """Keep each view in ``found`` that GitHub answered merged in the shared cache for two days, since a merged view
+    never changes, so a new process serves it instead of reading it again."""
+    if cache is None:
+        return
+    for url, pull in found.items():
+        if pull is not None and pull.state == "MERGED":
+            cache.set(_merged_key(url), json.dumps(asdict(pull)), ex=MERGED_VIEW_TTL_S)
+
+
 def views(
     urls: list[str],
     source: SourceControl | None = None,
@@ -468,13 +498,15 @@ def views(
 ) -> dict[str, PullRequest | None]:
     port = source or stack.login_source_control()
     urls = list(dict.fromkeys(urls))
-    found = dict.fromkeys(urls)
+    kept = _kept_merged(cache, urls)
+    found: dict[str, PullRequest | None] = {url: kept.get(url) for url in urls}
+    pending = [url for url in urls if url not in kept]
     selection = PULL_QUERY.partition("{")[2][:-1].replace(
         'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}}',
         'file(path:".github/workflows"){object{id}}',
     )
-    for start in range(0, len(urls), 20):
-        batch = urls[start : start + 20]
+    for start in range(0, len(pending), 20):
+        batch = pending[start : start + 20]
         fields = [
             f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
             for i, url in enumerate(batch)
@@ -494,6 +526,7 @@ def views(
                 if declaration is not None
                 else None
             )
+    _keep_merged(cache, {url: found[url] for url in pending})
     return found
 
 

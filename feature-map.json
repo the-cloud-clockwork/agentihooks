@@ -7780,6 +7780,18 @@
       ]
     },
     {
+      "id": "lab-scheduler-evidence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-record-grades",
+      "behaviour": "When the CI lab scheduler closes a grade because every unit is final, it records the grade through the evidence printer: the grade document under its run and an empty marker under its head, carrying the grade inputs and one unit per unit of the grade with the grade run that used its verdict, so the evidence printer shows the grade by run and the head index lists it; a grade still waiting on a unit records nothing.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, read back through scripts.ci_lab.evidence.show and scripts.ci_lab.evidence.head_prefix",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_is_recorded_only_when_its_last_unit_is_final",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
@@ -8695,6 +8707,18 @@
       "tests": [
         "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
         "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
+      ]
+    },
+    {
+      "id": "tick-view-merged-pull-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slow-github-reads",
+      "behaviour": "The batched pull request read serves every pull request the swarm Redis keeps as merged and reads only the rest from GitHub, then keeps each view GitHub answered merged in full for two days, because a merged view never changes. A new controller process after a roll therefore reads only the open pull requests of its tick view instead of every merged pull request of the last day, so its first tick view build fits the pass view wait and the merge pass runs. Open and closed pull requests, and an entry another release wrote with other fields, are read again.",
+      "seam": "views in scripts.swarm.ledger_events, called by tick_view and fresh_reader with the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_new_process_reads_only_the_pull_requests_not_kept_merged",
+        "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
+        "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
       ]
     }
   ],
