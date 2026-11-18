@@ -15,7 +15,7 @@ argument-hint: "<plan-file> --repo DIR [--template NAME]"
 
 The plan is accepted before this skill runs. This session names the swarm,
 creates it with its ledger and starts it, then hands the operator to the swarm's **master**: the
-agent the swarm keeps online to answer the operator, keep the ledger current
+agent the swarm keeps online to answer the operator, keep progress current through `agentihooks api`
 and steer the swarm. This session never claims a task and does not join the
 ledger as orchestrator; the master does.
 
