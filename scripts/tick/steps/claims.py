@@ -182,7 +182,7 @@ def claim_view(
         lambda task_id: task_id in awaiting or task_id in claimed,  # pyright: ignore[reportUnknownLambdaType]
         lambda task: released(task) and applied(task) and unshared(task) and not lab(task),  # pyright: ignore[reportUnknownLambdaType]
     )
-    return tick.Claims(view, held, sorted(rows.values(), key=dispatched or tick.claim_order.key(rows)))
+    return tick.Claims(view, held, sorted(rows.values(), key=dispatched or tick.claim_order.key(rows, fix)))
 
 
 def _launch_order(slug: Any, store: Any, tasks: Any, dispatched: Any = None) -> Any:

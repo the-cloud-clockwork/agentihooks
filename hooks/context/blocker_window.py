@@ -24,8 +24,9 @@ NOTICE = (
     "BLOCKER QUEUE on swarm {slug}: {categories} sustained for an hour or more. Fix this now: the master coding "
     "window is open; troubleshoot and fix before any other work, and clear each category with "
     "agentihooks swarm {slug} blockers clear <category>. Stop everything unnecessary for the fix: "
-    "agentihooks swarm {slug} panic on --fix <pr url> pauses the swarm's agent starts and cancels every CI run of its "
-    "agents but the fix and the merge queue, printing what it cancelled."
+    "agentihooks swarm {slug} panic on --fix <pr url> pauses the swarm's agent starts, cancels every CI run of its "
+    "agents but the fix and the merge queue, and pauses the lab's pull request grading but the fix, printing what it "
+    "cancelled and paused."
 )
 FROZEN = (
     "BLOCKED: panic mode holds swarm {slug} ({reason}). Its sessions' pushes, reruns, dispatches and deploys wait "

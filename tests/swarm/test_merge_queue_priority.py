@@ -139,7 +139,106 @@ def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
     result = merge_queue.prioritize(URL, run=queue.run)
     assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 9, 2, 3, 4, 5, 6]
     assert queue.mutations == [("dequeue", n) for n in (6, 5, 4, 3, 2)] + [("queue", n) for n in (2, 3, 4, 5, 6)]
-    assert result == {"url": URL, "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)], "errors": []}
+    assert result == {
+        "url": URL,
+        "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)],
+        "errors": [],
+        "lab": None,
+    }
+
+
+class Journal:
+    def __init__(self) -> None:
+        self.records: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def groups(self) -> list[dict[str, Any]]:
+        return []
+
+    def write(self, *args: Any, **kwargs: Any) -> None:
+        self.records.append((args, kwargs))
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_the_priority_journal_records_the_queue_move_and_the_lab_acknowledgement() -> None:
+    queue = FakeQueue()
+    ack = {"priority": ["head9"], "class": "hotfix", "expires_ms": 7}
+    told: list[tuple[str, list[Any]]] = []
+
+    def lab(head: str) -> dict[str, Any]:
+        told.append((head, list(queue.mutations)))
+        return ack
+
+    journal = Journal()
+    result = merge_queue.prioritize(URL, run=queue.run, journal=journal, lab=lab)
+    assert result["lab"] == ack
+    assert told == [("head9", queue.mutations)]
+    ((args, kwargs),) = journal.records
+    assert args[:3] == ("priority", URL, "head9")
+    assert ["queue", URL] in kwargs["steps"]
+    assert kwargs["lab"] == ack
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_a_lab_that_cannot_be_told_leaves_the_queue_move_standing() -> None:
+    queue = FakeQueue()
+    journal = Journal()
+    refused = {"error": "the swarm has no lab url"}
+    result = merge_queue.prioritize(URL, run=queue.run, journal=journal, lab=lambda head: refused)
+    assert (result["errors"], result["lab"]) == ([], refused)
+    assert journal.records[0][1]["lab"] == refused
+    assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 9, 2, 3]
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_a_failed_queue_move_still_tells_the_lab() -> None:
+    queue = FakeQueue()
+
+    def run(command: list[str], **kwargs: Any) -> Any:
+        if "enqueuePullRequest" in " ".join(command) and "id=P9" in command:
+            return subprocess.CompletedProcess(command, 1, "", "insertion refused")
+        return queue.run(command, **kwargs)
+
+    ack = {"priority": ["head9"], "class": "hotfix", "expires_ms": 7}
+    told: list[str] = []
+
+    def lab(head: str) -> dict[str, Any]:
+        told.append(head)
+        return ack
+
+    journal = Journal()
+    result = merge_queue.prioritize(URL, run=run, journal=journal, lab=lab)
+    assert (told, result["errors"], result["lab"]) == (["head9"], ["insertion refused"], ack)
+    assert journal.records[0][1]["lab"] == ack
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fakeredis
+
+    from scripts.swarm import lab_control
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.names.mint = lambda: "a1b2c3"
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, lab_url="http://lab:8800"))
+    monkeypatch.setenv(lab_control.TOKEN, "tok")
+    asked: list[tuple[str, str, str]] = []
+
+    def acknowledge(url: str, head: str, environ: Any) -> dict[str, Any]:
+        asked.append((url, head, environ[lab_control.TOKEN]))
+        return {"ok": True}
+
+    def prioritize(
+        url: str, journal: queue_record.Journal, displaced: Any, lab: Callable[[str], dict[str, Any]]
+    ) -> dict[str, Any]:
+        assert (url, journal.url) == (URL, URL)
+        return {"url": url, "displaced": [], "errors": [], "lab": lab("head9")}
+
+    monkeypatch.setattr(lab_control, "acknowledge", acknowledge)
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    result = queue_priority.reorder(store, "sw", URL, "master", [], queue_record.Journal(URL))
+    assert result["lab"] == {"ok": True}
+    assert asked == [("http://lab:8800", "head9", "tok")]
 
 
 def test_priority_leaves_earlier_priority_targets_in_place_on_either_side():
@@ -156,7 +255,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     tasks = [
@@ -287,7 +386,12 @@ def test_priority_stops_restoring_at_the_first_refusal_so_the_rest_keep_their_or
         return queue.run(command, **kwargs)
 
     result = merge_queue.prioritize(URL, run=run)
-    assert result == {"url": URL, "displaced": [], "errors": [f"could not restore {URL[:-1]}2: restore refused"]}
+    assert result == {
+        "url": URL,
+        "displaced": [],
+        "errors": [f"could not restore {URL[:-1]}2: restore refused"],
+        "lab": None,
+    }
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9"]
 
 
@@ -304,7 +408,7 @@ def test_priority_requeues_a_queued_target_ejected_before_a_dequeue_fails():
         return done
 
     result = merge_queue.prioritize(URL, run=run)
-    assert result == {"url": URL, "displaced": [URL[:-1] + "4"], "errors": ["dequeue refused"]}
+    assert result == {"url": URL, "displaced": [URL[:-1] + "4"], "errors": ["dequeue refused"], "lab": None}
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P3", "P9", "P4"]
 
 
@@ -336,7 +440,12 @@ def test_priority_preserves_order_across_queue_pages(queued, split):
 
     result = merge_queue.prioritize(URL, run=run)
     assert len(pages) == 2
-    assert result == {"url": URL, "displaced": [URL[:-1] + n for n in ("2", "3", "4", "5")], "errors": []}
+    assert result == {
+        "url": URL,
+        "displaced": [URL[:-1] + n for n in ("2", "3", "4", "5")],
+        "errors": [],
+        "lab": None,
+    }
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P2", "P3", "P4", "P5"]
 
 
@@ -351,7 +460,7 @@ def test_priority_does_not_remove_an_entry_that_started_running():
 
     displaced = Displaced(queue)
     result = merge_queue.prioritize(URL, run=run, displaced=displaced)
-    assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": []}
+    assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": [], "lab": None}
     assert queue.mutations == [("dequeue", 3), ("queue", 9), ("queue", 3)]
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P9", "P3"]
     assert displaced.pulls == {}
@@ -373,7 +482,7 @@ def test_master_priority_moves_waiting_entries_without_cancelling_running_head(
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))
