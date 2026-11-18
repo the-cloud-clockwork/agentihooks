@@ -1125,7 +1125,7 @@ def test_a_recorded_method_unit_selects_its_test_by_the_file_before_the_first_se
 
 
 @pytest.mark.feature("selectors-read-outside-files")
-def test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file():
+def test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file() -> None:
     manifest = {
         "units": [],
         "tests": {
