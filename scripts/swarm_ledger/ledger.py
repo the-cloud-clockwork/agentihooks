@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""The swarm write API: join the crew, talk in chat, record progress, acknowledge operator events.
-
-Reachable as `agentihooks ledger --slug SLUG --as NAME <command>` or, preferred in every skill,
-rule and prompt, `agentihooks api --slug SLUG --as NAME <command>` — both names run this same
-module. The ledger web page is read only, a presentation layer for the operator; it never takes
-a write. Every write, from any agent, service or hive, runs this route code in process over the
-shared database, the one write path there is.
+"""Agent CLI for a ledger: join the crew, talk in chat, record progress, acknowledge operator events.
 
 Usage: ledger.py --slug SLUG --as NAME <command> [args]
 
