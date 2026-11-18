@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.992 · 2026-11-18
+
+### 2026-11-18 · 8a615d8d7897 · #11849 · @nestorcolt
+
+**Run the lab sandbox tests under real bubblewrap on pull requests that touch the sandbox**
+
+This adds a `lab-sandbox` job to the Writer lock workflow, running on `ubuntu-latest` with real bubblewrap, triggered when a pull request touches the sandbox, its two runners, their three test files, or the workflow itself. Previously these tests silently skipped on the Anton runner image because bubblewrap wasn't installed, so nothing in CI actually proved a lab unit gets refused a write into the grader or base tree. The new job installs bwrap if missing, probes namespace support, and fails on any skip or probe failure, closing that gap with verified red/green evidence including a required check on pull requests.
+
 ## v2.17.991 · 2026-11-18
 
 ### 2026-11-18 · 4641ca6fc351 · #11834 · @agenticore-app
