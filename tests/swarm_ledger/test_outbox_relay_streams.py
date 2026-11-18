@@ -34,8 +34,8 @@ class Unclaimed:
 @pytest.fixture
 def repo(tmp_path: Path) -> SQLiteLedgerRepository:
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repository.create("ledger", CONTENT)
-    repository.create("alpha", CONTENT)
+    repository.create("ledger", CONTENT, "swarm")
+    repository.create("alpha", CONTENT, "swarm")
     return repository
 
 
@@ -94,3 +94,20 @@ def test_each_ledger_takes_its_own_batch_of_rows(repo: SQLiteLedgerRepository, l
     alpha, ledger = rows(repo, "alpha"), rows(repo, "ledger")
     assert outbox.relay(repo, log, batch=1) == 2
     assert published(log) == [alpha[0], ledger[0]]
+
+
+@pytest.mark.feature("ledger-outbox-small-ledgers")
+def test_a_relay_beside_a_small_ledger_publishes_the_swarm_ledgers_rows_and_leaves_no_unsent_row(
+    tmp_path: Path, log: memory.MemoryEventLog
+) -> None:
+    repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repository.create("session", CONTENT)
+    repository.create("crew", CONTENT, "swarm")
+    with repository.transaction() as transaction:
+        transaction.purge("session")
+    taken = rows(repository, "crew")
+    assert rows(repository, "session") == []
+    assert outbox.relay(repository, Unclaimed(log, "session")) == len(taken) == 2
+    assert published(log) == taken
+    with repository.connect() as connection:
+        assert connection.execute(outbox.SLUGS).fetchall() == []

@@ -32,7 +32,7 @@ def event(kind, entity, data):
 
 def test_every_row_the_outbox_writers_write_matches_the_catalogue_and_every_catalogued_type_is_written(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repo.create("ledger", CONTENT)
+    repo.create("ledger", CONTENT, "swarm")
     writes = [{"ops": [ADD]}, {"ops": [CLAIM]}, {"ops": [APPEND]}, {"changes": [DONE]}]
     assert [repo.apply_ops("ledger", **write)[1] for write in writes] == [[], [], [], []]
     source = repo.get_document("ledger")
