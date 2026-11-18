@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1003 · 2026-11-18
+
+### 2026-11-18 · cd0e33779118 · #11440 · @agenticore-app
+
+**Pin the lab verdict job and gate job conditions in the protected grader**
+
+This change closes a real gap in the protected grader: it now pins the lab's `lab-verdict` job to exactly match the base's reviewed version, and enforces that any gate condition referencing that verdict (directly, via a computed key, or case-insensitively) either preserves its base clause untouched or matches it plus the required lab-gating suffix exactly. Previously the grader missed forged jobs and malformed conditions, letting a head swap in a fake verdict or weaken a gate's logic without detection. Nine confirmed-equivalent mutants were cleared after review; everything else, including the duration migration and case-insensitive job-id handling, continues to grade correctly.
+
 ## v2.17.1001 · 2026-11-18
 
 ### 2026-11-18 · bcd43660b476 · #11839 · @nestorcolt
