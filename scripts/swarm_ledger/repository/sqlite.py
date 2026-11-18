@@ -50,7 +50,7 @@ CHANGES_KEPT = 256
 VIEW_BUILD = threading.Lock()
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 WAL = "PRAGMA journal_mode=WAL"
-BUSY = "database is locked"
+LOCKED = "database is locked"
 BUSY_TIMEOUT_S = 30
 WAL_RETRY_S = 0.05
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
@@ -415,7 +415,7 @@ def wal(connection: sqlite3.Connection) -> None:
             connection.execute(WAL)
             return
         except sqlite3.OperationalError as error:
-            if BUSY not in str(error) or time.monotonic() >= deadline:
+            if LOCKED not in str(error) or time.monotonic() >= deadline:
                 raise
         time.sleep(WAL_RETRY_S)
 

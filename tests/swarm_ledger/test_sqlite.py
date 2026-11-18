@@ -485,16 +485,14 @@ def test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch(
     path = tmp_path / "ledgers.sqlite3"
     holder = sqlite3.connect(path, isolation_level=None)
     holder.execute("BEGIN IMMEDIATE")
-    clock = iter([0.0, 30.0])
-
-    def pause(seconds: float) -> None:
-        raise AssertionError(f"paused {seconds} s at the busy timeout")
-
-    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=pause))
+    clock = iter([0.0, 29.9, 30.0])
+    pauses: list[float] = []
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=pauses.append))
     with closing(sqlite3.connect(path)) as connection:
         with pytest.raises(sqlite3.OperationalError, match="database is locked"):
             sqlite.wal(connection)
     holder.close()
+    assert pauses == [0.05]
 
 
 @pytest.mark.feature("ledger-new-file-setup-waits-out-another-write-lock")
