@@ -8070,6 +8070,7 @@
         "tests/ci_lab/test_scheduler.py::test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function_in_a_checkout_it_removes",
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function",
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_deletes",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran",
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_that_changes_no_measured_python_expands_no_mutation_units"
       ]
     },

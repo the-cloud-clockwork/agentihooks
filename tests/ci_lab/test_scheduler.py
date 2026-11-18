@@ -1487,11 +1487,22 @@ def test_a_hotfix_pull_request_or_merge_group_head_expands_no_mutation_units(tmp
 @pytest.mark.usefixtures("staticless")
 @pytest.mark.parametrize("tier", [Priority.PROMOTION, Priority.BACKFILL])
 def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function_in_a_checkout_it_removes(
-    tmp_path: Path, tier: Priority
+    tmp_path: Path, tier: Priority, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
-    head = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4").replace("2", "3")})
+    source = ALPHA.replace("return 1", "return 4").replace("2", "3")
+    head = _commit(suite.repo, {"scripts/alpha.py": source})
+    checkouts: list[tuple[Path, str]] = []
+    build = expand_mutation.mutant_units
+
+    def spy(root: Path, changes: Any, covering: Any) -> tuple[Unit, ...]:
+        checkouts.append((root.parent, (root / "scripts/alpha.py").read_text()))
+        return build(root, changes, covering)
+
+    monkeypatch.setattr(expand_mutation, "mutant_units", spy)
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier, head))
+    monkeypatch.undo()
+    assert checkouts == [(tmp_path / "stores", source)]
     mutation = _mutation_gates(
         suite,
         head,
@@ -1538,6 +1549,22 @@ def test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_dele
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
     mutation = _mutation_gates(suite, head, {"scripts/alpha.py": [6]}, [], {SECOND: [SECOND_TEST]})
     assert list(mutation) == ["mutation"]
+    assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS), **mutation}
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("2", "3") + "\n\ndef third():\n    return 3\n"})
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
+    mutation = _mutation_gates(
+        suite, head, {"scripts/alpha.py": [6, 7, 8, 9, 10]}, ["tests/test_beta.py"], {SECOND: [SECOND_TEST]}
+    )
+    assert [executors.function_of(unit.members[0]) for unit in mutation["mutation"]] == [
+        SECOND,
+        "scripts.alpha.x_third",
+    ]
     assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS), **mutation}
 
 

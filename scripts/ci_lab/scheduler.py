@@ -19,9 +19,11 @@ import json
 import logging
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
@@ -34,7 +36,19 @@ import jsonschema
 import yaml
 
 from scripts import ci_select
-from scripts.ci_lab import budget, contract, control, evidence, expand_tests, interaction, lease_api, metrics, service
+from scripts.ci_lab import (
+    budget,
+    contract,
+    control,
+    evidence,
+    executors,
+    expand_mutation,
+    expand_tests,
+    interaction,
+    lease_api,
+    metrics,
+    service,
+)
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
@@ -50,6 +64,7 @@ from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
 from scripts.ci_lab.worktrees import Mirror
+from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
 from tests import dep_manifest
@@ -97,6 +112,8 @@ UNIT_ROWS = frozenset(
 FAIL_FAST = "queue-fail-fast"
 FAIL_FAST_RESULTS = frozenset({"success", "failure", "cancelled"})
 MUTATION_JOBS = frozenset({"mutation", "mutation-plan", "mutation-stats"})
+STATS_JOB = "mutation-stats"
+MUTANT_JOB = "mutation"
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
 PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
@@ -842,7 +859,8 @@ class StoredManifests:
 
 
 class MirrorExpander:
-    """Static gate units of a head read from a git mirror with ls-tree and show, never a checkout."""
+    """Units of a head read from a git mirror with ls-tree and show; only mutation units, whose builders read files,
+    use a temporary checkout."""
 
     def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
         self.node = node
@@ -899,7 +917,8 @@ class MirrorExpander:
 
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
-        and the unit job's test units of a merge group, promotion or backfill head, framed by the request's tier."""
+        the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
+        of a promotion or backfill head, framed by the request's tier."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -915,21 +934,19 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         if request.tier >= Priority.QUEUE:
-            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, head, toolchain))
+            manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
+            suite = expand_tests.units(manifest, contents, head, json.loads(contents.get(DURATIONS, b"{}")), toolchain)
+            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, manifest, suite))
+            if request.tier >= Priority.PROMOTION:
+                gates.update(self._mutation(mirror, request, manifest, contents))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
 
     def _tests(
-        self, mirror: Mirror, request: GradeRequest, grader: str, files: Mapping[str, str], toolchain: Toolchain
+        self, mirror: Mirror, request: GradeRequest, grader: str, manifest: dict[str, Any], suite: tuple[Unit, ...]
     ) -> tuple[Unit, ...]:
         """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
         invalidate, unless the interaction rule sends the group to the whole suite."""
-        ancestry = self._git(mirror, "rev-list", "--first-parent", request.base).split()
-        manifest = self.manifests(request.repo, ancestry)
-        if manifest is None:
-            raise ValueError(f"no dependency manifest at or before {request.base}")
-        tree = self._contents(mirror, files)
-        suite = expand_tests.units(manifest, tree, files, json.loads(tree.get(DURATIONS, b"{}")), toolchain)
         if request.tier != Priority.QUEUE:
             return suite
         cached = {test for unit in suite if self.verdicts(unit.kind, unit.key) is not None for test in unit.members}
@@ -938,6 +955,42 @@ class MirrorExpander:
         if chosen == interaction.FULL:
             return suite
         return tuple(unit for unit in suite if chosen.intersection(unit.members))
+
+    def _manifest(self, mirror: Mirror, request: GradeRequest) -> dict[str, Any]:
+        """Return the dependency manifest of the nearest commit on the base's first parent chain that has one stored."""
+        ancestry = self._git(mirror, "rev-list", "--first-parent", request.base).split()
+        manifest = self.manifests(request.repo, ancestry)
+        if manifest is None:
+            raise ValueError(f"no dependency manifest at or before {request.base}")
+        return manifest
+
+    def _mutation(
+        self, mirror: Mirror, request: GradeRequest, manifest: dict[str, Any], contents: Mapping[str, bytes]
+    ) -> dict[str, list[Unit]]:
+        """Return one mutant unit per function the head changes against its base and one stats unit per test file
+        present at the head that holds a test running such a function, built in a temporary checkout of the head;
+        none when the head changes no measured Python line."""
+        with self._checkout(mirror, request.head) as root:
+            changes = scope.changes_since(root, request.base, request.head)
+            if not changes:
+                return {}
+            covering = expand_mutation.covering(root, manifest, expand_tests.fingerprints(manifest, contents), changes)
+            mutants = expand_mutation.mutant_units(root, changes, covering)
+            owners = {executors.function_of(unit.members[0]) for unit in mutants}
+            tests = {test.partition("::")[0] for name in owners for test in covering.get(name, {})}
+            files = sorted(path for path in tests if (root / path).is_file())
+            stats = expand_mutation.stats_units(root, files, executors.OPTIONS)
+        return {job: list(units) for job, units in ((STATS_JOB, stats), (MUTANT_JOB, mutants)) if units}
+
+    @contextmanager
+    def _checkout(self, mirror: Mirror, sha: str) -> Generator[Path]:
+        """Yield a temporary worktree of a commit cut from the mirror's store under the mirror root, removed on exit."""
+        folder = Path(tempfile.mkdtemp(dir=self.root))
+        self._git(mirror, "worktree", "add", str(folder), sha)
+        try:
+            yield folder
+        finally:
+            self._git(mirror, "worktree", "remove", str(folder))
 
     def _group(self, mirror: Mirror, request: GradeRequest) -> interaction.Group:
         """Return a merge group head: its changes against the base and those of each entry, one first parent commit

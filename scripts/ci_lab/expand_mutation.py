@@ -147,9 +147,29 @@ def mutant_units(
     )
 
 
+def owner(path: str, unit: str, classes: frozenset[str]) -> str:
+    """Return the mutmut name of the top level function or method of path that holds a dependency manifest unit."""
+    first, _, rest = unit.partition(".")
+    if first in classes:
+        return get_mutant_name(Path(path), mangle_function_name(name=rest.partition(".")[0], class_name=first))
+    return get_mutant_name(Path(path), mangle_function_name(name=first, class_name=None))
+
+
 def covering(
     root: Path, manifest: Mapping[str, Any], keys: Mapping[str, str], changes: Iterable[str]
 ) -> dict[str, dict[str, str]]:
     """Map the mutmut name of each function of the changed files to the fingerprint of every dependency manifest test
     that ran it or a function nested in it."""
-    raise NotImplementedError
+    owners: dict[int, str] = {}
+    for path in changes:
+        tree = ast.parse((root / path).read_text())
+        classes = frozenset(node.name for node in tree.body if isinstance(node, ast.ClassDef))
+        for index, name in enumerate(manifest["units"]):
+            source, _, unit = name.partition("::")
+            if source == path:
+                owners[index] = owner(path, unit, classes)
+    found: dict[str, dict[str, str]] = {}
+    for test, record in manifest["tests"].items():
+        for index in owners.keys() & set(record["units"]):
+            found.setdefault(owners[index], {})[test] = keys[test]
+    return found
