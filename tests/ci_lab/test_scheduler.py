@@ -1,4 +1,5 @@
 import json
+import logging
 import subprocess
 import sys
 import threading
@@ -912,6 +913,7 @@ class Delivery:
     event: Envelope
     attempt: int = 1
     acked: bool = False
+    termed: bool = False
 
     def ack(self) -> None:
         self.acked = True
@@ -920,7 +922,7 @@ class Delivery:
         raise AssertionError(delay_ms)
 
     def term(self) -> None:
-        raise AssertionError(self.event.id)
+        self.termed = True
 
 
 @dataclass
@@ -944,6 +946,22 @@ def test_the_bus_inbox_reads_each_head_with_its_branch_as_lane_and_acknowledges_
     assert inbox.heads() == [scheduler.Head(branched, "dev"), scheduler.Head(bare, HEAD_B)]
     assert [delivery.acked for delivery in deliveries] == [True, True]
     assert consumer.asked == [(scheduler.BATCH, scheduler.FETCH_MS)]
+
+
+@pytest.mark.feature("lab-head-missing-field-terminate")
+def test_the_bus_inbox_terminates_a_head_missing_fields_with_a_logged_reason_and_reads_the_next_head(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    broken = envelope(HeadEvent("push", REPO, HEAD_A, BASE, ACTOR, "pushed"))
+    kept = {name: value for name, value in broken.data.items() if name not in {"actor", "action"}}
+    broken = replace(broken, data=kept)
+    bare = HeadEvent("pull_request", REPO, HEAD_B, BASE, ACTOR, "opened")
+    malformed, valid = Delivery(broken), Delivery(envelope(bare))
+    inbox = scheduler.BusInbox(Consumer([malformed, valid]))
+    with caplog.at_level(logging.WARNING, logger=scheduler.__name__):
+        assert inbox.heads() == [scheduler.Head(bare, HEAD_B)]
+    assert [(delivery.acked, delivery.termed) for delivery in (malformed, valid)] == [(False, True), (True, False)]
+    assert caplog.messages == [f"terminated lab head {broken.id} missing actor, action"]
 
 
 def _commit(repo: Path, files: dict[str, str]) -> str:

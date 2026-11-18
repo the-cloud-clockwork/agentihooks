@@ -7988,6 +7988,16 @@
       ]
     },
     {
+      "id": "lab-head-missing-field-terminate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-missing-field-terminate",
+      "behaviour": "The CI lab scheduler's bus inbox terminates a lab head envelope missing any head event field, logging the head's envelope id and the missing fields, and keeps reading the rest of the batch, so a malformed head is never left unacknowledged to be redelivered until the dead letter cap, whose publish the scheduler's bus grant refuses, which stopped the scheduler reading heads.",
+      "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a fake bus consumer and its deliveries",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_terminates_a_head_missing_fields_with_a_logged_reason_and_reads_the_next_head"
+      ]
+    },
+    {
       "id": "lab-scheduler-service",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-lab-scheduler-service",
