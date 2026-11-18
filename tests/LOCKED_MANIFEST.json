@@ -1044,7 +1044,7 @@
  "tests/test_credential_guard.py::test_kubectl_commands_that_name_no_secret_type_pass": {
   "assertions": 1,
   "calls": 1,
-  "cases": 6,
+  "cases": 17,
   "texts": [
    "0c85cd31a58dff89"
   ]
@@ -1052,9 +1052,9 @@
  "tests/test_credential_guard.py::test_kubectl_describe_of_a_secret_is_refused": {
   "assertions": 1,
   "calls": 2,
-  "cases": 13,
+  "cases": 23,
   "texts": [
-   "e81e63e006d08536"
+   "23abbafacff91842"
   ]
  },
  "tests/test_kubectl_mutation_guard.py::test_allowed_commands_are_not_blocked": {

@@ -480,25 +480,59 @@ def echo_secret_verdict(command):
     return None
 
 
-KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b.*?\bdescribe\b([^|<>]*)", re.S)
-DESCRIBE_WORD = re.compile(r"[\s'\"]+")
+KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b[^|]*?(?<!\S)describe(?!\S)([^|<>]*)")
+DESCRIBE_VALUE_FLAGS = {"-n", "--namespace", "-l", "--selector", "--context"}
+DESCRIBE_FILE_FLAG = re.compile(r"-[fk]|--filename|--kustomize")
+UNSHOWN_TYPE = re.compile(r"[$`{}*?\[]")
 SECRET_RESOURCES = {"secret", "secrets"}
 SECRET_KEY_LISTING = (
-    "\nkubectl get secret <name> -o go-template='{{range $k, $v := .data}}{{$k}}{{\"\\n\"}}{{end}}' "
+    "\nkubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}' "
     "lists the key names without the values."
 )
 
 
-def describes_secrets(low: str) -> bool:
-    """True when a kubectl describe in the lowercased segment names the Secret resource type."""
-    found = KUBECTL_DESCRIBE.search(low)
-    if found is None:
-        return False
-    return any(
-        part.split("/")[0].split(".")[0] in SECRET_RESOURCES
-        for word in DESCRIBE_WORD.split(found.group(1))
-        for part in word.split(",")
+def describe_words(rest: str) -> list[str]:
+    """Words of a kubectl describe argument list as the shell passes them, with quotes and escapes removed."""
+    return re.sub(r"[\"'\\]", "", rest).split()
+
+
+def describe_operands(words: list[str]) -> list[str]:
+    """Positional words of a kubectl describe, with the values of its value flags dropped."""
+    operands: list[str] = []
+    skip = False
+    for word in words:
+        if skip:
+            skip = False
+        elif word in DESCRIBE_VALUE_FLAGS:
+            skip = True
+        elif not word.startswith("-"):
+            operands.append(word)
+    return operands
+
+
+def hidden_type(operands: list[str]) -> bool:
+    """True when a describe names no resource type, or leaves one for the shell to expand."""
+    if not operands:
+        return True
+    typed = operands if any("/" in word for word in operands) else operands[:1]
+    return any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in typed)
+
+
+def names_secret(word: str) -> bool:
+    """True when a describe word names the Secret type: plain, plural, group qualified, in a list or as TYPE/NAME."""
+    return any(part.split("/")[0].split(".")[0] in SECRET_RESOURCES for part in word.split(","))
+
+
+def describe_may_show_secret(words: list[str]) -> bool:
+    """True when a describe names Secrets, reads its resources from a file, or leaves its type to the shell."""
+    return any(names_secret(word) or DESCRIBE_FILE_FLAG.match(word) is not None for word in words) or hidden_type(
+        describe_operands(words)
     )
+
+
+def describes_secrets(low: str) -> bool:
+    """True when any kubectl describe in the lowercased segment may print a Secret."""
+    return any(describe_may_show_secret(describe_words(found.group(1))) for found in KUBECTL_DESCRIBE.finditer(low))
 
 
 def renderer_verdict(command: str) -> str | None:
@@ -530,7 +564,8 @@ def renderer_verdict(command: str) -> str | None:
     if describes_secrets(low):
         return (
             block(
-                "describing a Secret (kubectl describe secret prints the token of a service account token Secret)",
+                "describing a Secret or a resource the command does not name "
+                "(kubectl describe prints the token of a service account token Secret)",
                 KIND_ENVIRONMENT,
             )
             + SECRET_KEY_LISTING

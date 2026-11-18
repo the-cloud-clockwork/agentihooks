@@ -2,7 +2,7 @@ KIND_ENVIRONMENT = "environment"
 # ruleid: credential-guard-offers-describe-secret
 DESCRIBE_ALTERNATIVE = "\nkubectl describe secret <name> shows the keys and byte sizes without the values."
 # ok: credential-guard-offers-describe-secret
-KEY_LISTING = "\nkubectl get secret <name> -o go-template='{{range $k, $v := .data}}{{$k}}{{\"\\n\"}}{{end}}'"
+KEY_LISTING = "\nkubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}'"
 
 
 def block(what: str, kind: str) -> str:
@@ -19,10 +19,7 @@ def get_secret_refusal() -> str:
 
 def describe_secret_refusal() -> str:
     # ok: credential-guard-offers-describe-secret
-    return (
-        block("describing a Secret (kubectl describe secret prints the token)", KIND_ENVIRONMENT)
-        + KEY_LISTING
-    )
+    return block("describing a Secret (kubectl describe secret prints the token)", KIND_ENVIRONMENT) + KEY_LISTING
 
 
 def key_listing_refusal() -> str:

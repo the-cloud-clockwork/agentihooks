@@ -399,7 +399,7 @@ def test_gh_commands_that_print_no_token_pass(command):
 
 
 SECRET_KEY_LISTING = (
-    "\nkubectl get secret <name> -o go-template='{{range $k, $v := .data}}{{$k}}{{\"\\n\"}}{{end}}' "
+    "\nkubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}' "
     "lists the key names without the values."
 )
 
@@ -410,13 +410,23 @@ DESCRIBE_SECRET_COMMANDS = [
     "kubectl -n prod describe secret db",
     "kubectl describe -n prod secret db",
     "kubectl describe --namespace=prod secrets db",
+    "kubectl describe --context prod secret db",
     "kubectl describe configmaps,secrets",
     "kubectl describe secrets.v1. db",
     "kubectl describe pod/web secret/db",
     "kubectl describe \\\n  secret db",
+    "kubectl \\\n  describe secret db",
+    'kubectl describe "sec"ret db',
     "kubectl describe secret db 2>&1",
     'ssh host "kubectl describe secret db"',
     "sudo kubectl describe secret db | head",
+    "kubectl describe pod web | kubectl describe secret db",
+    "kubectl get secrets -o name | xargs kubectl describe",
+    'for s in $(kubectl get secrets -o name); do kubectl describe "$s"; done',
+    "kubectl describe $RES db",
+    "kubectl describe pod/web $NAME",
+    "kubectl describe -f deploy.yaml",
+    "kubectl describe --filename=deploy.yaml",
 ]
 
 DESCRIBE_ALLOWED_COMMANDS = [
@@ -425,7 +435,18 @@ DESCRIBE_ALLOWED_COMMANDS = [
     "kubectl describe sa default",
     "kubectl describe pod web | grep -i secret",
     "kubectl describe pod web > secret",
-    "kubectl get secret db -o go-template='{{range $k, $v := .data}}{{$k}}{{\"\\n\"}}{{end}}'",
+    "kubectl -n secret describe pod web",
+    "kubectl describe pod $POD",
+    "kubectl describe pod/$NAME",
+    "kubectl describe -n $NS pod web",
+    "kubectl describe --namespace $NS pod web",
+    "kubectl describe -l $SEL pods",
+    "kubectl describe --selector $SEL pods",
+    "kubectl describe --selector=$SEL pods",
+    "kubectl describe --context $CTX pod web",
+    "kubectl get pods | grep describe",
+    "kubectl logs web-describe-0",
+    "kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'",
 ]
 
 
@@ -436,7 +457,8 @@ def test_kubectl_describe_of_a_secret_is_refused(command: str) -> None:
 
     assert reason == (
         block(
-            "describing a Secret (kubectl describe secret prints the token of a service account token Secret)",
+            "describing a Secret or a resource the command does not name "
+            "(kubectl describe prints the token of a service account token Secret)",
             KIND_ENVIRONMENT,
         )
         + SECRET_KEY_LISTING
