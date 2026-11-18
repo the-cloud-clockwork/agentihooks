@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import hmac
 import json
 import os
@@ -11,6 +10,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from scripts.ci_lab.head_notice import signature as signed
 from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake, envelope, head_events, notice_event
 from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
@@ -35,8 +35,7 @@ LOGGED_HEADER_CHARS = 64
 def verify(secret: bytes, body: bytes, signature: str | None) -> bool:
     if not secret or not signature:
         return False
-    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature.encode(), expected.encode())
+    return hmac.compare_digest(signature.encode(), signed(secret, body).encode())
 
 
 def observations(name: str | None, payload: dict) -> list[Observation]:

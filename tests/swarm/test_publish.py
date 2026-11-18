@@ -2344,17 +2344,31 @@ NOTICE_ACTOR = "agenticore-app[bot]"
 
 
 @pytest.fixture
-def lab_receiver(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
-    """Serve the real webhook receiver with lab intake on a local port and point the notice settings at it."""
+def lab_receiver(publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Serve the real webhook receiver with lab intake on a local port and point the notice settings at it.
+
+    The task worktree fetches from a GitHub origin url and pushes to its local remote, and tips keeps the remote task
+    branch as the receiver saw it at each notice it accepted."""
     from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
     from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake
     from scripts.events.config import BusConfig
+    from scripts.events.envelope import Envelope
     from scripts.events.memory import open_bus
     from scripts.hub import github_webhooks
 
+    remote = publication.repo.parent / "remote.git"
+    git(publication.root, "remote", "set-url", "origin", "git@github.com:Acme/Widgets.git")
+    git(publication.root, "config", "remote.origin.pushurl", str(remote))
     bus = open_bus(BusConfig())
     heads = bus.lab_heads.consumer("lab", "ci.lab.head.>")
-    intake = LabIntake(bus.lab_heads, NOTICE_SIGNER.encode())
+    tips: list[str] = []
+
+    class Witness:
+        def publish(self, subject: str, event: Envelope) -> bool:
+            tips.append(git(publication.root, "ls-remote", str(remote), "refs/heads/engineer-test"))
+            return bus.lab_heads.publish(subject, event)
+
+    intake = LabIntake(Witness(), NOTICE_SIGNER.encode())
     pulls = github_webhooks.LazyPulls(bus)  # pyright: ignore[reportArgumentType]
     ingress = github_webhooks.Ingress(pulls, b"webhook-signer", intake)
     server = ThreadingHTTPServer(("localhost", 0), github_webhooks.handler(ingress))
@@ -2363,7 +2377,7 @@ def lab_receiver(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     monkeypatch.setenv(URL_ENV, f"http://localhost:{server.server_address[1]}{github_webhooks.NOTICE_PATH}")
     monkeypatch.setenv(NOTICE_SECRET_ENV, NOTICE_SIGNER)
     monkeypatch.setenv(ACTOR_ENV, NOTICE_ACTOR)
-    yield SimpleNamespace(heads=heads)
+    yield SimpleNamespace(heads=heads, remote=remote, tips=tips)
     server.shutdown()
     server.server_close()
     serving.join()
@@ -2381,7 +2395,7 @@ def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
     head = git(publication.root, "rev-parse", "HEAD")
     notice = {
         "event": "notice",
-        "repo": publish.lab_repository(str(publication.repo.parent / "remote.git")),
+        "repo": "https://github.com/acme/widgets",
         "head": head,
         "base": git(publication.root, "merge-base", head, "origin/dev"),
         "actor": NOTICE_ACTOR,
@@ -2389,30 +2403,43 @@ def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
     }
     deliveries = lab_receiver.heads.fetch(100, 0)
     assert [(delivery.event.type, delivery.event.data) for delivery in deliveries] == [("ci.lab.head.notice", notice)]
+    assert lab_receiver.tips == [f"{head}\trefs/heads/engineer-test"]
     assert result["lab_notice"] == "200"
-    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
 @pytest.mark.feature("lab-head-notice-push")
-def test_a_notice_the_receiver_refuses_never_fails_the_push(
+@pytest.mark.parametrize("failure", ["refused", "unreachable"])
+def test_a_failed_notice_never_fails_the_push(
     publication: SimpleNamespace,
     lab_receiver: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    failure: str,
 ) -> None:
+    import socket
+
+    from scripts.ci_lab.head_notice import URL_ENV
     from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
     from scripts.swarm import publish
 
-    monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
+    if failure == "refused":
+        monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
+    else:
+        with socket.socket() as probe:
+            probe.bind(("localhost", 0))
+            port = probe.getsockname()[1]
+        monkeypatch.setenv(URL_ENV, f"http://localhost:{port}/lab/head")
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
     head = git(publication.root, "rev-parse", "HEAD")
-    refused = f"lab head notice for {head} was not accepted: <HTTPError 401: 'Unauthorized'>; the push stands"
-    assert refused in capsys.readouterr().err.splitlines()
+    prefix, suffix = f"lab head notice for {head} was not accepted: ", "; the push stands"
+    lines = capsys.readouterr().err.splitlines()
+    assert [line for line in lines if line.startswith(prefix) and line.endswith(suffix)] != []
     assert result["lab_notice"] == "0"
     assert lab_receiver.heads.fetch(100, 0) == []
-    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert lab_receiver.tips == []
+    assert git(publication.root, "ls-remote", str(lab_receiver.remote), "refs/heads/engineer-test").split()[0] == head
 
 
 @pytest.mark.feature("lab-head-notice-push")

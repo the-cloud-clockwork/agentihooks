@@ -9448,7 +9448,7 @@
       "seam": "scripts.swarm.publish grade_and_push after the origin push, through scripts.ci_lab.head_notice send, against scripts.hub.github_webhooks Ingress.notice",
       "tests": [
         "tests/swarm/test_publish.py::test_a_published_push_sends_one_signed_notice_the_receiver_accepts",
-        "tests/swarm/test_publish.py::test_a_notice_the_receiver_refuses_never_fails_the_push",
+        "tests/swarm/test_publish.py::test_a_failed_notice_never_fails_the_push",
         "tests/swarm/test_publish.py::test_a_publish_without_the_lab_notice_settings_sends_and_records_no_notice",
         "tests/swarm/test_publish.py::test_the_notice_names_the_repository_as_github_deliveries_do",
         "tests/ci_lab/test_head_notice.py::test_a_configured_send_posts_one_notice_signed_over_its_exact_body",

@@ -911,9 +911,9 @@ port 8790 from inside the cluster, where the receiver's network policy admits th
 
 `agentihooks swarm <slug> publish` sends one notice after each push to origin. Its body names the
 origin in the `https://github.com/<owner>/<repo>` form, the pushed head, the head's merge base with
-`origin/dev` and the actor below, signed as above. The publish result records the receiver's answer
-as `lab_notice`. Without all three settings nothing is sent and `lab_notice` is absent. A send the
-receiver refuses, or that cannot reach it, prints
+`origin/dev` and the actor below, signed as above. The publish result records the receiver's status
+as `lab_notice`, or `0` when the send failed. Without all three settings nothing is sent and
+`lab_notice` is absent. A send the receiver refuses, or that cannot reach it, prints
 `lab head notice for <head> was not accepted: <error>; the push stands` on standard error, records
 `lab_notice` `0` and leaves the push in place.
 
