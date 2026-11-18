@@ -1,4 +1,4 @@
-"""Every tests plugin a workflow loads with -p imports no hooks or scripts module when it loads.
+"""Every tests plugin pytest is told to load with -p imports no hooks or scripts module when it loads.
 
 pytest imports -p plugins before pytest-cov starts measuring in any process, so a graded module such a plugin imports
 runs its import time lines unmeasured and the coverage ratchet reads them as lines no test runs.
@@ -12,51 +12,48 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci_lab.expand_tests import PYTEST_INVOCATION
 from tests.coverage_grade import GRADED
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
-IMPORTED = """
+RECORD_IMPORTS = """
 import importlib
 import json
 import sys
 
-imported = {}
-for module in sys.argv[1:]:
-    loaded = set(sys.modules)
-    importlib.import_module(module)
-    imported[module] = sorted(set(sys.modules) - loaded)
-print(json.dumps(imported))
+loaded = set(sys.modules)
+importlib.import_module(sys.argv[1])
+print(json.dumps(sorted(set(sys.modules) - loaded)))
 """
 
 
-def _workflow_plugins() -> list[str]:
-    """Return every tests plugin the workflows load with -p, in the order they first name it."""
-    text = "\n".join(path.read_text() for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")))
-    return list(dict.fromkeys(re.findall(r"-p (tests\.\w+)", text)))
+def _preparse_plugins() -> list[str]:
+    """Return every tests plugin the workflows, actions, pytest config and CI lab pass with -p, first named first."""
+    configs = [*sorted((ROOT / ".github").rglob("*.y*ml")), ROOT / "pyproject.toml"]
+    named = re.findall(r"-p\s*[\"']?(tests\.\w+)", "\n".join(path.read_text() for path in configs))
+    lab = [plugin for flag, plugin in zip(PYTEST_INVOCATION, PYTEST_INVOCATION[1:]) if flag == "-p"]
+    return list(dict.fromkeys(plugin for plugin in [*named, *lab] if plugin.startswith("tests.")))
 
 
-def _graded_imports(modules: list[str]) -> dict[str, list[str]]:
-    """Import the modules in order in a fresh interpreter and return the hooks and scripts modules each one added."""
-    command = [sys.executable, "-c", IMPORTED, *modules]
+def _graded_imports(module: str) -> list[str]:
+    """Import the module in a fresh interpreter and return the hooks and scripts modules its import added."""
+    command = [sys.executable, "-c", RECORD_IMPORTS, module]
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     packages = {root.rstrip("/") for root in GRADED}
-    imported: dict[str, list[str]] = json.loads(result.stdout)
-    return {
-        module: [name for name in names if name.partition(".")[0] in packages] for module, names in imported.items()
-    }
+    added: list[str] = json.loads(result.stdout)
+    return [name for name in added if name.partition(".")[0] in packages]
 
 
-@pytest.mark.feature("workflow-plugins-import-no-graded-module")
-def test_no_workflow_plugin_imports_a_hooks_or_scripts_module_when_it_loads() -> None:
-    plugins = _workflow_plugins()
+@pytest.mark.feature("preparse-plugins-import-no-graded-module")
+def test_no_preparse_plugin_imports_a_hooks_or_scripts_module_when_it_loads() -> None:
+    plugins = _preparse_plugins()
     assert "tests.flake_ledger" in plugins
-    assert _graded_imports(plugins) == {plugin: [] for plugin in plugins}
+    assert {plugin: _graded_imports(plugin) for plugin in plugins} == {plugin: [] for plugin in plugins}
 
 
-@pytest.mark.feature("workflow-plugins-import-no-graded-module")
+@pytest.mark.feature("preparse-plugins-import-no-graded-module")
 def test_the_import_check_reports_each_graded_module_an_import_adds() -> None:
-    imported = _graded_imports(["json", "scripts.gh_config"])
-    assert imported["json"] == []
-    assert {"scripts", "scripts.gh_config"} <= set(imported["scripts.gh_config"])
+    assert _graded_imports("json") == []
+    assert {"scripts", "scripts.gh_config"} <= set(_graded_imports("scripts.gh_config"))

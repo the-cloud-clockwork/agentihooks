@@ -9400,13 +9400,13 @@
       ]
     },
     {
-      "id": "workflow-plugins-import-no-graded-module",
+      "id": "preparse-plugins-import-no-graded-module",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44318348402-0",
-      "behaviour": "Every tests plugin a workflow loads with -p imports no hooks or scripts module when it loads. pytest imports those plugins before pytest-cov starts measuring in the unit shard's controller, so the graded packages first import after measuring starts and the coverage ratchet sees the import time lines of scripts/__init__.py and scripts/gh_config.py on every head.",
-      "seam": "a fresh interpreter imports, in order, every tests plugin the workflows name after -p and lists the hooks and scripts modules each import added to sys.modules",
+      "behaviour": "Every tests plugin that the workflows, their actions, the pytest config or the CI lab pass to pytest with -p imports no hooks or scripts module when it loads. pytest imports those plugins before pytest-cov starts measuring in any process, so the graded packages first import after measuring starts in the controller and the coverage ratchet sees the import time lines of the scripts package and scripts.gh_config on every head.",
+      "seam": "a fresh interpreter per plugin imports each tests plugin named after -p and lists the hooks and scripts modules its import added to sys.modules",
       "tests": [
-        "tests/test_plugin_imports.py::test_no_workflow_plugin_imports_a_hooks_or_scripts_module_when_it_loads",
+        "tests/test_plugin_imports.py::test_no_preparse_plugin_imports_a_hooks_or_scripts_module_when_it_loads",
         "tests/test_plugin_imports.py::test_the_import_check_reports_each_graded_module_an_import_adds"
       ]
     },
