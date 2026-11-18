@@ -3,7 +3,6 @@ from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from redis.exceptions import NoPermissionError
 
 from scripts.hive import admission, auth
 from tests.swarm.test_cli import env as env
@@ -209,6 +208,8 @@ class _Granted:
         self.read = self.written + [pattern[3:] for pattern in patterns if pattern.startswith("%R~")]
 
     def _reach(self, key: str, patterns: list[str]) -> None:
+        from redis.exceptions import NoPermissionError
+
         if not any(fnmatchcase(key, pattern) for pattern in patterns):
             raise NoPermissionError("No permissions to access a key")
 
@@ -235,6 +236,15 @@ def test_a_hive_member_reads_every_hives_pending_admission_through_its_read_only
     member = cast("Redis", _Granted(redis, auth._acl_keys("hive-one")))
     assert admission.pending(member, "hive-two") == 1
     assert admission.pending(member, "hive-one") == 2
+
+
+def test_pending_counts_the_reservations_that_expire_after_the_server_clock_millisecond(
+    redis: "fakeredis.FakeRedis", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(redis, "time", lambda: (1_000, 900_400))
+    now = 1_000_900
+    redis.zadd(admission.key("anton"), {"s/gone": now - 1, "s/edge": now, "s/late": now + 0.25, "s/live": now + 1})
+    assert admission.pending(redis, "anton") == 2
 
 
 def test_a_reservation_key_lives_in_the_swarm_keyspace():

@@ -53,6 +53,7 @@ redis.call('PEXPIRE', KEYS[1], ARGV[2])
 _ADMITTED = """
 redis.call('HINCRBY', KEYS[2], 'admitted', 1)
 """
+_UNBOUNDED = "+inf"
 
 
 @dataclass(frozen=True)
@@ -225,7 +226,7 @@ def pending(redis: "Redis", machine: str) -> int:
     """Count the unexpired launch reservations on ``machine`` by the Redis server clock with read commands only. A
     hive member may only read other hives' admission keys, and Redis declares every key an EVAL names written."""
     seconds, micros = redis.time()  # pyright: ignore[reportUnknownMemberType]
-    return int(redis.zcount(key(machine), f"({seconds * 1000 + micros // 1000}", "+inf"))
+    return int(redis.zcount(key(machine), f"({seconds * 1000 + micros // 1000}", _UNBOUNDED))
 
 
 def release(redis: "Redis", machine: str, member: str) -> None:

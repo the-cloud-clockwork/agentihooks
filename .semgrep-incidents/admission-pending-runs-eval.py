@@ -1,3 +1,5 @@
+from typing import Protocol
+
 from redis import Redis
 
 _PENDING = "return redis.call('ZCOUNT', KEYS[1], ARGV[1], '+inf')"
@@ -12,20 +14,24 @@ def pending(redis: Redis, machine: str) -> int:
     return int(redis.eval(_PENDING, 1, key(machine)))
 
 
-class Cached:
+class Pending(Protocol):
+    def pending(self, redis: Redis, machine: str) -> int: ...
+
+
+class Cached(Pending):
     def pending(self, redis: Redis, machine: str) -> int:
         # ruleid: admission-pending-runs-eval
         return int(redis.evalsha("sha", 1, key(machine)))
 
 
-class Registered:
+class Registered(Pending):
     def pending(self, redis: Redis, machine: str) -> int:
         # ruleid: admission-pending-runs-eval
         script = redis.register_script(_PENDING)
         return int(script(keys=[key(machine)]))
 
 
-class Plain:
+class Plain(Pending):
     def pending(self, redis: Redis, machine: str) -> int:
         seconds, micros = redis.time()
         # ok: admission-pending-runs-eval
