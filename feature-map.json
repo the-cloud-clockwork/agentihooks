@@ -2579,11 +2579,13 @@
     {
       "id": "swarm-claim-order",
       "origin": "inventory",
-      "behaviour": "Claimable tasks are taken by rank, then resumed work, then the fast clear exception, then dependency depth, with ledger order breaking ties.",
-      "seam": "scripts.swarm.claim_order ordering key",
+      "behaviour": "Claimable tasks are taken with the tasks of the swarm's fix phase first, then by rank, then resumed work, then the fast clear exception, then dependency depth, with ledger order breaking ties.",
+      "seam": "scripts.swarm.claim_order ordering key and the tick claim view that sorts by it",
       "tests": [
         "tests/swarm/test_claim_order.py::test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth",
-        "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties"
+        "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties",
+        "tests/swarm/test_claim_order.py::test_a_task_of_the_fix_phase_claims_ahead_of_every_rank",
+        "tests/swarm/test_claim_view.py::test_the_claim_view_orders_the_tasks_of_the_swarm_fix_phase_first"
       ]
     },
     {
@@ -5119,6 +5121,48 @@
         "tests/swarm/test_panic.py::test_the_pass_read_drops_the_record_once_no_fixer_is_open",
         "tests/swarm/test_panic.py::test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file",
         "tests/swarm/test_panic.py::test_the_pass_read_writes_the_fixer_record_to_expire_after_fixers_ms"
+      ]
+    },
+    {
+      "id": "panic-reaches-lab",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
+      "behaviour": "Panic on marks the branches of the fixes and of every recorded fixer task hotfix in the swarm's CI lab and pauses its pull request grading except them, printing lab paused pull request grading except the heads and marking the swarm's panic as holding the lab; panic off, and the alarm's release of a panic that holds the lab, resume it and clear the mark, and neither touches a lab its panic never paused. A swarm without a lab url, a host without CI_LAB_CONTROL_TOKEN, a refused token, an unreachable lab or an unreadable fix prints lab not told with the reason, never raises, and leaves the panic as it was.",
+      "seam": "agentihooks swarm <slug> panic on and off, panic.alarm and scripts.swarm.lab_control against a fake lab urlopen",
+      "tests": [
+        "tests/swarm/test_panic_lab.py::test_panic_on_grades_the_fixes_first_and_pauses_the_rest_of_pull_request_grading",
+        "tests/swarm/test_panic_lab.py::test_panic_on_spares_the_recorded_fixer_branches_in_the_lab_too",
+        "tests/swarm/test_panic_lab.py::test_panic_on_without_a_fix_pauses_every_pull_request_grade",
+        "tests/swarm/test_panic_lab.py::test_panic_on_with_no_lab_url_is_an_action_line_that_reads_no_fix",
+        "tests/swarm/test_panic_lab.py::test_panic_on_with_no_token_is_an_action_line",
+        "tests/swarm/test_panic_lab.py::test_panic_on_holds_when_the_lab_cannot_be_told",
+        "tests/swarm/test_panic_lab.py::test_panic_on_names_a_stored_fix_it_cannot_read",
+        "tests/swarm/test_panic_lab.py::test_the_lab_reads_a_merged_fix_once",
+        "tests/swarm/test_panic_lab.py::test_panic_off_resumes_the_lab",
+        "tests/swarm/test_panic_lab.py::test_panic_off_keeps_the_lab_mark_when_the_lab_cannot_be_told",
+        "tests/swarm/test_panic_lab.py::test_panic_off_leaves_a_lab_its_panic_never_paused",
+        "tests/swarm/test_panic_lab.py::test_the_alarm_resumes_the_lab_its_released_panic_paused",
+        "tests/swarm/test_panic_lab.py::test_the_alarm_leaves_a_lab_its_panic_never_paused",
+        "tests/swarm/test_lab_control.py::test_lab_names_the_address_and_the_token_from_the_environment",
+        "tests/swarm/test_lab_control.py::test_lab_refuses_a_swarm_without_a_lab_or_a_host_without_a_token",
+        "tests/swarm/test_lab_control.py::test_each_order_posts_its_body_with_the_bearer_token",
+        "tests/swarm/test_lab_control.py::test_a_failed_order_names_why",
+        "tests/swarm/test_lab_control.py::test_a_reply_that_is_no_json_map_is_refused"
+      ]
+    },
+    {
+      "id": "merge-priority-reaches-lab",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
+      "behaviour": "A merge priority move marks the pull request head hotfix in the swarm's CI lab once its queue steps ran, even when one of them failed; the priority result and its queue journal record carry the queue steps and the lab's reply, or the reason it could not be told, under lab.",
+      "seam": "scripts.swarm.merge_queue.prioritize with a lab callable over the fake queue, and queue_priority.reorder binding it to the swarm's lab url",
+      "tests": [
+        "tests/swarm/test_merge_queue_priority.py::test_the_priority_journal_records_the_queue_move_and_the_lab_acknowledgement",
+        "tests/swarm/test_merge_queue_priority.py::test_a_lab_that_cannot_be_told_leaves_the_queue_move_standing",
+        "tests/swarm/test_merge_queue_priority.py::test_a_failed_queue_move_still_tells_the_lab",
+        "tests/swarm/test_merge_queue_priority.py::test_the_swarm_tells_its_own_lab_of_a_priority_move",
+        "tests/swarm/test_lab_control.py::test_acknowledge_returns_the_lab_reply_to_a_head_priority",
+        "tests/swarm/test_lab_control.py::test_acknowledge_returns_why_the_lab_was_not_told"
       ]
     },
     {
@@ -7866,6 +7910,26 @@
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
         "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
+      ]
+    },
+    {
+      "id": "lab-control-routes",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
+      "behaviour": "The CI lab scheduler port serves POST /priority, /pause and /resume only to a request carrying the bearer token in CI_LAB_CONTROL_TOKEN, refusing any other token and every request when the lab has none with 401 and no change; a priority marks heads hotfix for six hours so a head marked by its commit or its lane grades in the hotfix class; a pause holds every waiting head of its class but the excepted heads and lanes, leaving other classes alone, until resume lifts every pause.",
+      "seam": "scripts.ci_lab.lease_api.command and serve over fakeredis, scripts.ci_lab.control and Scheduler.tick with paused classes and priority marks",
+      "tests": [
+        "tests/ci_lab/test_lease_api.py::test_a_control_route_refuses_any_other_authorization",
+        "tests/ci_lab/test_lease_api.py::test_a_lab_without_a_control_token_refuses_every_control_request",
+        "tests/ci_lab/test_lease_api.py::test_priority_marks_the_heads_hotfix_until_they_expire",
+        "tests/ci_lab/test_lease_api.py::test_priority_refuses_anything_but_hotfix_heads",
+        "tests/ci_lab/test_lease_api.py::test_pause_holds_a_class_with_its_exceptions_until_resume",
+        "tests/ci_lab/test_lease_api.py::test_pause_refuses_an_unknown_class_or_exception_list",
+        "tests/ci_lab/test_lease_api.py::test_server_answers_a_control_route_only_with_the_bearer_token",
+        "tests/ci_lab/test_scheduler.py::test_a_head_marked_hotfix_by_its_commit_grades_in_the_hotfix_class",
+        "tests/ci_lab/test_scheduler.py::test_a_paused_class_holds_its_heads_but_the_excepted_ones_until_resume",
+        "tests/ci_lab/test_scheduler.py::test_a_pause_of_another_class_leaves_pull_request_grading_alone",
+        "tests/ci_lab/test_scheduler.py::test_the_hotfix_port_reads_the_heads_the_control_routes_marked"
       ]
     },
     {

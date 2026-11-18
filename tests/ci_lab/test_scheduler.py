@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import budget, delivery, evidence, queue, scheduler
+from scripts.ci_lab import budget, control, delivery, evidence, lease_api, queue, scheduler
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
@@ -489,6 +489,42 @@ def test_a_head_off_the_fix_branches_keeps_its_class(lab: Callable[..., Run]) ->
     assert run.grade(HEAD_A).tier == Priority.PULL_REQUEST
 
 
+@pytest.mark.feature("lab-control-routes")
+def test_a_head_marked_hotfix_by_its_commit_grades_in_the_hotfix_class(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})}, quiet_ms=60_000)
+    run.lab.fixes.add(HEAD_A)
+    run.push(HEAD_A, lane="feature", event="pull_request", action="synchronize")
+    run.tick(1000)
+    assert run.grade(HEAD_A).tier == Priority.HOTFIX
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_a_paused_class_holds_its_heads_but_the_excepted_ones_until_resume(lab: Callable[..., Run]) -> None:
+    held, by_lane, by_commit = HEAD_A, HEAD_B, "c" * 40
+    run = lab({head: pull_plan({"lint": (unit(1),)}) for head in (held, by_lane, by_commit)}, quiet_ms=0)
+    control.pause(run.lab.client, "pull_request", ["fix-branch", by_commit])
+    run.push(held, lane="feature", event="pull_request", action="synchronize")
+    run.push(by_lane, lane="fix-branch", event="pull_request", action="synchronize")
+    run.push(by_commit, lane="other", event="pull_request", action="synchronize")
+    run.tick(1000)
+    run.tick(2000)
+    assert sorted(grade.head for grade in run.grades()) == sorted([by_lane, by_commit])
+    assert run.lab.client.hlen(scheduler.WAITING) == 1
+    control.resume(run.lab.client)
+    run.tick(3000)
+    assert run.grade(held).tier == Priority.PULL_REQUEST
+    assert run.lab.client.hlen(scheduler.WAITING) == 0
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_a_pause_of_another_class_leaves_pull_request_grading_alone(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})}, quiet_ms=0)
+    control.pause(run.lab.client, "queue", [])
+    run.push(HEAD_A, lane="feature", event="pull_request", action="synchronize")
+    run.tick(1000)
+    assert run.grade(HEAD_A).tier == Priority.PULL_REQUEST
+
+
 def test_an_untrusted_head_is_never_held_or_graded(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_B: plan({"lint": (unit(1),)})}, quiet_ms=500)
     run.push(HEAD_A, actor="stranger")
@@ -790,7 +826,8 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
     run.tick(1000)
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
     spending.charge(1, 3600.0)
-    servers = scheduler.listen(run.engine, run.leases(), spending, lambda: 1000, (0, 0))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
@@ -804,6 +841,9 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
         leased = json.loads(_read(f"{api}/lease", body))["leases"]
         assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
+        resume = urllib.request.Request(f"{api}/resume", data=b"", headers={"Authorization": "Bearer tok"})
+        with urllib.request.urlopen(resume, timeout=5) as reply:
+            assert json.loads(reply.read()) == {"resumed": []}
         text = _read(f"{exposition}/metrics").decode()
         assert 'ci_lab_units_running{class="promotion"} 1.0' in text
         assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
@@ -1049,24 +1089,16 @@ def test_the_mirror_expander_fails_on_a_git_read_that_fails(tmp_path: Path, orig
         expander.trusted(f"file://{tmp_path / 'missing'}")
 
 
-def test_panic_fixes_name_the_fix_branches_while_panic_is_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.swarm import panic
-    from scripts.swarm.store import PREFIX, RedisStore, SwarmError
-
+@pytest.mark.feature("lab-control-routes")
+def test_the_hotfix_port_reads_the_heads_the_control_routes_marked() -> None:
     client = fake_redis()
-    client.sadd(f"{PREFIX}:index", "calm", "rig", "busy")
-    fixes = scheduler.PanicFixes(client)
-    assert fixes() == frozenset()
-    panic.engage(RedisStore(client), "rig", "outage", False, ["first", "second"], 1)
-    panic.engage(RedisStore(client), "busy", "outage", False, ["third"], 1)
-    monkeypatch.setattr(panic, "fix_branch", lambda url: f"fix-{url}")
-    assert fixes() == frozenset({"fix-first", "fix-second", "fix-third"})
-
-    def unreadable(url: str) -> str:
-        raise SwarmError(url)
-
-    monkeypatch.setattr(panic, "fix_branch", unreadable)
-    assert fixes() == frozenset()
+    now = [1000]
+    port = control.Priorities(client, lambda: now[0])
+    assert port() == frozenset()
+    control.prioritize(client, ["fix-branch", "c0ffee"], 1000)
+    assert port() == frozenset({"fix-branch", "c0ffee"})
+    now[0] = 1000 + control.PRIORITY_MS
+    assert port() == frozenset()
 
 
 @dataclass
@@ -1087,7 +1119,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     client = fake_redis()
     consumer = Consumer([])
     objects = LocalObjects(tmp_path / "objects")
-    built = scheduler.build(environ, client, objects, consumer, None)
+    built = scheduler.build(environ, client, objects, consumer)
     assert built.objects is objects
     assert built.settings.trusted == frozenset({"repository"})
     assert built.settings.retries == Policy(lost=len("repository"))
@@ -1098,14 +1130,14 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
     imageless = {name: value for name, value in environ.items() if name != scheduler.IMAGE}
-    bare = scheduler.build(imageless, client, objects, consumer, None).ports.expander
+    bare = scheduler.build(imageless, client, objects, consumer).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""
     first = built.ports.checks(SLUG)
     assert first == FakeChecks(SLUG) and built.ports.checks(SLUG) is first
     assert built.ports.checks("other/repo") == FakeChecks("other/repo")
-    swarm = object()
-    hotfixes = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), consumer, swarm).ports.hotfixes
-    assert isinstance(hotfixes, scheduler.PanicFixes) and hotfixes.redis is swarm
+    hotfixes = built.ports.hotfixes
+    assert isinstance(hotfixes, control.Priorities)
+    assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -1115,7 +1147,6 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
-    from hooks import _redis
     from scripts.events import config, factory
 
     calls: dict[str, Any] = {"served": 0}
@@ -1137,8 +1168,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     class Bus:
         lab_heads = Events()
 
-    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, swarm: Any) -> scheduler.Scheduler:
-        calls["build"] = (environ, redis_client, objects, consumer, swarm)
+    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
+        calls["build"] = (environ, redis_client, objects, consumer)
         ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str])
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 
@@ -1146,8 +1177,15 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         def serve_forever(self) -> None:
             calls["served"] += 1
 
-    def listen(found: Any, leases: Leases, spending: Any, clock: Any, ports: tuple[int, int]) -> list[Server]:
-        calls["listen"] = (found, leases, spending, clock, ports)
+    def listen(
+        found: Any,
+        leases: Leases,
+        routes: lease_api.ControlRoutes,
+        spending: Any,
+        clock: Any,
+        ports: tuple[int, int],
+    ) -> list[Server]:
+        calls["listen"] = (found, leases, routes, spending, clock, ports)
         return [Server(), Server()]
 
     class Thread:
@@ -1190,6 +1228,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
+        scheduler.contract.CONTROL_TOKEN: "tok",
     }
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
@@ -1197,7 +1236,6 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         config.BusConfig, "from_environ", classmethod(lambda cls, found: "config" if found is environ else None)
     )
     monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == "config" else None)
-    monkeypatch.setattr(_redis, "get_redis", lambda: "swarm")
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)
     monkeypatch.setattr(scheduler, "Thread", Thread)
@@ -1207,12 +1245,13 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
     options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
     assert calls["s3"] == ("s3", options)
-    built_from, redis_client, objects, consumer, swarm = calls["build"]
-    assert (built_from, redis_client, consumer, swarm) == (environ, client, "consumer", "swarm")
+    built_from, redis_client, objects, consumer = calls["build"]
+    assert (built_from, redis_client, consumer) == (environ, client, "consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
     assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
-    found, leases, spending, clock, ports = calls["listen"]
+    found, leases, routes, spending, clock, ports = calls["listen"]
     assert found.queue.client is client and leases.queue is found.queue
+    assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
     assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
     assert leases.clock() == 1_000_250 and clock() == 1_000_250
     leases.sleep(1500)
@@ -1225,6 +1264,9 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
     assert scheduler.main([], environ) == 7
     assert calls["serve"][1:3] == (scheduler.INTERVAL_S, 0)
+    del environ[scheduler.contract.CONTROL_TOKEN]
+    assert scheduler.main([], environ) == 7
+    assert calls["listen"][2].token == ""
     calls.clear()
     runtime.write_text(yaml.safe_dump({"classes": []}))
     with pytest.raises(delivery.DeliveryError):

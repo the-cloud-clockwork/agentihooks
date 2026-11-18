@@ -33,7 +33,7 @@ UNAFFECTED = {
     ("workflows/test.yml", "coverage-ratchet", "coverage-3.12-*"),
     ("workflows/test.yml", "refresh-durations", "durations-3.*"),
     ("workflows/test.yml", "flake-budget", "flakes-3.*"),
-    ("workflows/test.yml", "coverage-baseline", "coverage-3.12-*"),
+    ("workflows/test.yml", "coverage-baseline", "executed-lines-3.12-*"),
 }
 
 

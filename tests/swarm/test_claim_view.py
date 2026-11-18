@@ -3,9 +3,10 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import preempt, profile_first, seat_spawn, timing
+from scripts.swarm import freeze, preempt, profile_first, seat_spawn, timing
 from scripts.swarm import tick as tick_module
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, SwarmConfig
+from scripts.tick.steps import claims
 from tests.swarm import test_tick
 
 pytestmark = pytest.mark.unit
@@ -37,6 +38,23 @@ def test_ready_in_order_reads_the_same_tasks_from_a_prebuilt_claim_view(store):
     assert ids(tick_module.ready_in_order("sw", store, rows.rows, doc, "ci", claims=claims)) == ["t3", "t5"]
     assert ids(tick_module.ready_in_order("sw", store, rows.rows, doc, "eng")) == ["t1", "t4", "t2"]
     assert ids(tick_module.ready_in_order("sw", store, rows.rows, doc, "ci")) == ["t3", "t5"]
+
+
+@pytest.mark.feature("swarm-claim-order")
+def test_the_claim_view_orders_the_tasks_of_the_swarm_fix_phase_first(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+
+    def fix_phase(config: SwarmConfig) -> str:
+        asked.append(config.slug)
+        return "fix"
+
+    monkeypatch.setattr(freeze, "fix_phase", fix_phase)
+    rows = FakeLedger([{"id": "t1", "phase": "build"}, {"id": "t2", "phase": "fix"}, {"id": "t3", "phase": "build"}])
+    found = claims.claim_view("sw", store, rows.rows, rows.state("sw"))
+    assert ids(found.ordered) == ["t2", "t1", "t3"]
+    assert asked == ["sw"]
 
 
 def test_placement_times_each_task_decision_and_refusal(store, capsys):

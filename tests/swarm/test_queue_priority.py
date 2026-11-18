@@ -20,7 +20,7 @@ GRAPHQL = merge_queue.graphql
 def priority(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger_events, "view", READ_PULL)
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
@@ -97,6 +97,7 @@ def test_priority_moves_waiting_entries_at_once_while_the_head_group_tests(
         "url": URL,
         "displaced": [URL[:-1] + str(n) for n in (2, 3, 4)],
         "errors": [],
+        "lab": {"error": "the swarm has no lab url"},
     }
     assert p.queue.mutations == [("dequeue", n) for n in (4, 3, 2)] + [("queue", n) for n in (2, 3, 4)]
     assert [(entry["pullRequest"]["id"], entry["state"]) for entry in p.queue.entries] == [
