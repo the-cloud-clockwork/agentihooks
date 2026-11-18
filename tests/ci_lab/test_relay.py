@@ -5,6 +5,7 @@ import base64
 import json
 import subprocess
 from collections.abc import Mapping
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from typing import Any, cast
@@ -379,24 +380,43 @@ def test_a_tick_keeps_one_head_pushed_to_two_branches_apart_and_relays_both() ->
 
 
 class Failing(Calls):
-    """Fake relay ports whose push fails before GitHub answers."""
+    """Fake relay ports whose git calls for the first branch fail before GitHub answers."""
 
     def push(self, sha: str, branch: str) -> None:
-        """Fail the push."""
-        raise OSError("mirror fetch failed")
+        """Fail the first branch's push and keep the others."""
+        if branch == BRANCH:
+            raise subprocess.CalledProcessError(128, ["git", "fetch"])
+        super().push(sha, branch)
 
 
-def test_a_relay_that_raises_keeps_its_head_pending_for_the_next_tick() -> None:
-    client, calls = fake_redis(), Failing()
+@pytest.mark.parametrize("error", [OSError("connection reset"), requests.ConnectionError("connection reset")])
+def test_a_relay_whose_call_fails_stays_pending_and_the_next_head_still_relays(error: Exception) -> None:
+    class Down(Calls):
+        """Fake relay ports whose pull requests call fails before GitHub answers."""
+
+        def open(self, branch: str, title: str, body: str) -> str:
+            """Fail the call."""
+            raise error
+
+    client, calls = fake_redis(), Down()
     found = {HEAD: [grade("success")]}
     engine = relay.Relay(
         client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
     )
-    with pytest.raises(OSError, match="mirror fetch failed"):
-        engine.tick()
-    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == relay.Pending(
-        REPO, HEAD, REF, BRANCH
-    )
+    assert engine.tick()[-1] == f"retry {HEAD} for {BRANCH}: connection reset"
+    assert client.hget(relay.PENDING, f"{HEAD} {BRANCH}") is not None
+
+
+def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relays() -> None:
+    client, calls = fake_redis(), Failing()
+    first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), head=OTHER)]}
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
+    actions = engine.tick()
+    assert actions[2].startswith(f"retry {HEAD} for {BRANCH}: Command '['git', 'fetch']' returned non-zero")
+    assert actions[3] == f"pushed {OTHER} to engineer-2"
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
 
 
 def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:

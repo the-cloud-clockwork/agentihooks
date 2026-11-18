@@ -176,7 +176,7 @@ class Relay:
 
     def tick(self) -> list[str]:
         """Record the new notices' relays per head and branch, then relay each pending one a closed grade answers and
-        forget it once relayed; a relay that raises stays pending for the next tick."""
+        forget it once relayed; a relay whose git or HTTP call fails is named and stays pending for the next tick."""
         actions: list[str] = []
         for item in self.notices.pending():
             self.client.hset(PENDING, f"{item.head} {item.branch}", json.dumps(asdict(item)))
@@ -184,9 +184,14 @@ class Relay:
         for key, raw in sorted(self.client.hgetall(PENDING).items()):
             item = Pending(**json.loads(raw))
             states = self.grades(item.head)
-            if states:
+            if not states:
+                continue
+            try:
                 actions.extend(self._relay(item, states))
-                self.client.hdel(PENDING, key)
+            except (OSError, subprocess.SubprocessError) as error:
+                actions.append(f"retry {item.head} for {item.branch}: {error}")
+                continue
+            self.client.hdel(PENDING, key)
         return actions
 
     def _relay(self, item: Pending, states: list[State]) -> list[str]:
