@@ -1,13 +1,10 @@
 """Tests for scripts/install.py's main() dispatch of the ledger and api programs."""
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-import install  # noqa: E402
+from scripts import install
 
 
 @pytest.mark.parametrize("prog", ["ledger", "api"])
