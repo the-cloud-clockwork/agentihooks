@@ -9151,6 +9151,7 @@
         "tests/ci_lab/test_remote_checkout.py::test_carry_adds_the_lab_remote_and_a_token_helper_that_stores_no_token",
         "tests/ci_lab/test_remote_checkout.py::test_carry_points_an_existing_lab_remote_at_the_lab_url",
         "tests/ci_lab/test_remote_checkout.py::test_carry_leaves_a_repository_the_lab_does_not_serve_untouched",
+        "tests/ci_lab/test_remote_checkout.py::test_carry_without_a_lab_url_leaves_even_a_repository_named_like_a_placeholder_untouched",
         "tests/ci_lab/test_remote_checkout.py::test_at_runs_git_in_the_checkout_with_its_timeout",
         "tests/ci_lab/test_remote_checkout.py::test_relayed_reads_the_branch_push_options_of_a_lab_push",
         "tests/test_worktree_skill.py::TestLabRemote::test_new_and_tmp_give_the_repository_the_lab_remote_and_its_token_helper",

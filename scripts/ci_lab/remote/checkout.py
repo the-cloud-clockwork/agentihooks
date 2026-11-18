@@ -43,9 +43,9 @@ def carry(git: Git, environ: Mapping[str, str]) -> bool:
     """Give the repository git runs in the lab remote and its credential helper when the environment names a lab URL
     for the repository its origin names, pointing an existing lab remote at that URL; return whether it applies."""
     url = environ.get(URL_ENV, "")
-    if not serves(url, git("config", "--get", "remote.origin.url").stdout):
+    if not serves(url, git("config", "remote.origin.url").stdout):
         return False
-    verb = "set-url" if git("config", "--get", f"remote.{REMOTE}.url").returncode == 0 else "add"
+    verb = "set-url" if git("config", f"remote.{REMOTE}.url").returncode == 0 else "add"
     git("remote", verb, REMOTE, url)
     git("config", f"credential.{url}.helper", HELPER)
     return True

@@ -1472,6 +1472,7 @@ def test_panic_still_refuses_a_push_from_any_other_branch(
         ("other-branch", "git push lab HEAD:refs/grade/t1", False),
         ("other-branch", "git push -o branch=fix-branch origin HEAD:fix-branch", True),
         ("other-branch", "git push --push-option branch=x origin HEAD:fix-branch", True),
+        ("other-branch", "git push origin HEAD:fix-branch -o", True),
     ],
 )
 @pytest.mark.feature("lab-remote-in-workspaces")

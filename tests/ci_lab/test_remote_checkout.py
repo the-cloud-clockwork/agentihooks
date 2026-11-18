@@ -95,6 +95,13 @@ def test_carry_leaves_a_repository_the_lab_does_not_serve_untouched(tmp_path: Pa
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
+def test_carry_without_a_lab_url_leaves_even_a_repository_named_like_a_placeholder_untouched(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, "git@github.com:the-cloud-clockwork/XXXX.git")
+    assert checkout.carry(checkout.at(repo), {}) is False
+    assert _git(repo, "remote") == "origin"
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
 def test_at_runs_git_in_the_checkout_with_its_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     monkeypatch.setattr(checkout.subprocess, "run", lambda argv, **options: calls.append((argv, options)))
