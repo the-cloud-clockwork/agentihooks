@@ -5600,6 +5600,16 @@
       ]
     },
     {
+      "id": "hive-release-jobs-run-one-at-a-time",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
+      "behaviour": "The hive job of every release waits in one queued concurrency group, hive-worker-release with queue max and no cancelling, so two releases never check and move the hive worker release tag at the same time and an older release finishing last cannot move the tag back; a waiting hive job is never replaced, so every release still publishes its hive version image.",
+      "seam": "Swarm worker image hive job concurrency group",
+      "tests": [
+        "tests/deployment/test_worker_hive_image.py::test_every_release_hive_job_queues_behind_the_last_one_in_one_group"
+      ]
+    },
+    {
       "id": "hive-pods-not-rolled-by-release-image-digest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
@@ -5617,6 +5627,21 @@
       "seam": "hive-rollout.yaml hook Job container image and the chart release package appVersion",
       "tests": [
         "tests/test_swarm_chart_hive_rollout_release.py::test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps"
+      ]
+    },
+    {
+      "id": "hive-worker-release-tag-moves-on-every-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
+      "behaviour": "Each release's hive job moves the hive worker release tag onto its own image unless a newer release has already published its hive version image, so a newer release that is only tagged never holds the tag on an older release; a registry error on a newer release image fails the job before any tag moves, a prerelease never moves the tag, and the workflow passes no newest flag to the script.",
+      "seam": "release-hive.sh release tag move and the Swarm worker image hive job arguments",
+      "tests": [
+        "tests/deployment/test_worker_hive_image.py::test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image",
+        "tests/deployment/test_worker_hive_image.py::test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version",
+        "tests/deployment/test_worker_hive_image.py::test_a_release_stops_at_the_newest_published_release_past_newer_unpublished_ones",
+        "tests/deployment/test_worker_hive_image.py::test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag",
+        "tests/deployment/test_worker_hive_image.py::test_a_prerelease_leaves_the_release_tag_without_reading_tags_and_still_tags_its_version",
+        "tests/deployment/test_worker_hive_image.py::test_a_release_builds_the_hive_worker_on_its_released_worker_and_lets_the_script_decide_the_release_tag"
       ]
     },
     {
@@ -7993,6 +8018,29 @@
         "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
         "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
+      ]
+    },
+    {
+      "id": "lab-scheduler-service",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-lab-scheduler-service",
+      "behaviour": "The agentihooks ci-lab-scheduler command runs the CI lab scheduler service and keeps the offline self test behind --self-test; the service reads the runtime config at CI_LAB_RUNTIME_CONFIG before it connects, serves the lease API, GET /capacity and GET /grades/<sha> on the scheduler port and GET /metrics on the metrics port, both from one load built from the pending and leased queue jobs, the classes of the live grades holding them, the free slots workers offered on a lease poll within the ready window and the day's core budget; a grade lookup returns every open and closed grade of one full commit sha and refuses anything else; the swarm image carries the locked git package the mirror expander runs.",
+      "seam": "scripts.ci_lab.contract.scheduler, scripts.ci_lab.scheduler.main and listen, scripts.ci_lab.service.Routes, scripts.ci_lab.scheduler.Scheduler.load and grades_of over fakeredis and the local object store, scripts.ci_lab.leases.Leases.lease offers and the root Dockerfile shell packages",
+      "tests": [
+        "tests/ci_lab/test_contract.py::test_the_scheduler_command_runs_the_service_and_keeps_the_self_test",
+        "tests/ci_lab/test_scheduler.py::test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes",
+        "tests/ci_lab/test_scheduler.py::test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load",
+        "tests/ci_lab/test_scheduler.py::test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grades_holding_it",
+        "tests/ci_lab/test_scheduler.py::test_the_load_counts_leased_slots_and_the_free_slots_workers_offered_within_the_ready_window",
+        "tests/ci_lab/test_scheduler.py::test_the_grades_of_a_commit_are_its_live_grades_and_the_closed_ones_its_evidence_names",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_capacity_from_the_load_snapshot",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_every_grade_of_a_commit",
+        "tests/ci_lab/test_service.py::test_a_grade_lookup_refuses_anything_but_one_full_commit_sha",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_keeps_every_lease_route",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_serves_its_routes_over_http",
+        "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
+        "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
+        "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
       ]
     },
     {

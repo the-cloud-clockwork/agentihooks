@@ -234,3 +234,28 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:
     assert jobs.job("h1:test:none") is None
     assert jobs.token("h1:test:none") == ""
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots(jobs: queue.Queue) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.leased() == [] and jobs.offers(0) == {}
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900)
+    assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500)
+    assert jobs.claim(found(jobs, ids[1]), "w2", "t3", 700)
+    assert jobs.leased() == [ids[0], ids[1], ids[2]]
+    assert jobs.finish(found(jobs, ids[0]), "t2", "passed")
+    assert jobs.leased() == [ids[1], ids[2]]
+    jobs.offer("w1", 3, 1000)
+    jobs.offer("w2", 0, 1100)
+    jobs.offer("w1", 1, 1200)
+    assert jobs.offers(1100) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.offers(1101) == {"w1": (1, 1200)}
+    assert jobs.offers(0) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.prune(1100) == 0
+    assert jobs.prune(1101) == 1
+    assert jobs.offers(0) == {"w1": (1, 1200)}
+    jobs.offer("w3", 2, 900)
+    jobs.offer("w3", 5, 1300)
+    assert jobs.prune(1201) == 1
+    assert jobs.offers(0) == {"w3": (5, 1300)}
