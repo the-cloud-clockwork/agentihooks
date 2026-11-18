@@ -8,6 +8,7 @@ from typing import Any
 
 import jsonschema
 import pytest
+import yaml
 
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import queue, scheduler
@@ -338,6 +339,8 @@ def test_framed_grades_fold_green_unless_a_lab_gate_fails(lab: Callable[..., Run
     run.tick(1000)
     assert run.grade(HEAD_A).conclusion == "success"
     assert run.grade(HEAD_B).conclusion == "failure"
+    assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == run.grade(HEAD_A).run
+    assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{OTHER_TREE}") is None
 
 
 def test_a_head_waits_out_its_lanes_quiet_window_and_a_newer_head_restarts_it(lab: Callable[..., Run]) -> None:
@@ -554,12 +557,22 @@ def test_a_graded_job_stores_its_verdict_from_the_uploaded_report(lab: Callable[
     assert run.grade(HEAD_A).conclusion == "failure"
 
 
-def test_a_head_whose_expansion_fails_is_dropped_with_its_reason(lab: Callable[..., Run]) -> None:
+def test_a_head_whose_expansion_fails_is_dropped_with_its_reason(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run = lab({})
     run.push(HEAD_A)
     actions = run.tick(1000)
     assert actions[-1].startswith(f"cannot expand {HEAD_A}: ")
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+    def malformed(request: GradeRequest) -> scheduler.Plan:
+        raise yaml.YAMLError(f"malformed workflow at {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    run.push(HEAD_B)
+    assert run.tick(2000)[-1] == f"cannot expand {HEAD_B}: malformed workflow at {BASE}"
     assert run.grades() == []
 
 
