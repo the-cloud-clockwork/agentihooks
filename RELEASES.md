@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1004 · 2026-11-18
+
+### 2026-11-18 · 4ac2a06bfdb6 · #11894 · @nestorcolt
+
+**Drop the branch mutation preflight sentence from the swarm engineer skill**
+
+This change removes a leftover instruction in the swarm engineer role skill telling engineers to never wait for a "branch mutation preflight" before opening a draft pull request—a workflow that was already deleted in an earlier change (#11335). The stale reference was harmless but confusing documentation debt; removing it keeps the skill accurate and matches a companion update dropping the same obsolete language from the related manifesto and dev cycle docs. Tests were updated to confirm the word "preflight" no longer appears.
+
 ## v2.17.1003 · 2026-11-18
 
 ### 2026-11-18 · cd0e33779118 · #11440 · @agenticore-app
