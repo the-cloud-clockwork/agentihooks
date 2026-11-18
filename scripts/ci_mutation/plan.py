@@ -314,7 +314,8 @@ def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
-        if units.intersection(found["units"]) or paths.intersection(found.get("files", ()))
+        if units.intersection(found["units"])
+        or paths.intersection((*found.get("files", ()), *found.get("outside", ())))
     }
 
 
@@ -549,7 +550,7 @@ def line_covering_tests(
         for test, found in manifest["tests"].items()
         if test not in manifest["lines"]
         or fallback.intersection(found["units"])
-        or paths.intersection(found.get("files", ()))
+        or paths.intersection((*found.get("files", ()), *found.get("outside", ())))
         or any(changed.intersection(manifest["lines"][test].get(path, ())) for path, changed in lines.items())
         or any(
             path in manifest["lines"][test] and re.search(rf"\b{name}\b", file_text(root / test_file(test)))

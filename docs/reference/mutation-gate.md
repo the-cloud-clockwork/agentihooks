@@ -328,7 +328,7 @@ test merely to meet a time target.
 | Manifest has no commit, a shared test helper or conftest changed, dependency inputs or the unit test workflow changed, or a Python module outside the measured roots changed | Disable narrowing; retain candidate files |
 | Inserted or deleted source cannot map directly | Include tests reaching the affected recorded functions; added or removed modules use their recorded units |
 | Import-time source changes or replaced lines outside a function that change the module shape | Include tests reaching recorded units in that module. Edits that leave the shape unchanged keep line selection; see [Class body edits outside a function](#class-body-edits-outside-a-function) |
-| Changed data file was opened by a recorded test | Retain that test as a covering candidate |
+| Changed data file was opened by a recorded test, as one of its `files` or a file in its `outside` list | Retain that test as a covering candidate |
 | Narrowing would leave a source path with no tests | Keep its original candidate list |
 
 #### Class body edits outside a function
@@ -491,7 +491,7 @@ Required passes. Mutation planning reads that record through the
 | `version` | `2` |
 | `commit` | The dev commit the coverage was recorded on; drift checks compare the pull request against it |
 | `units` | Every recorded function, method or module unit, as `path::Qualified.name` or `path::<module>` |
-| `tests` | Per test: `units` (indexes into `units`), data `files` it opened, and `escapes` for escape-only child processes |
+| `tests` | Per test: `units` (indexes into `units`), data `files` it opened, `escapes` for escape-only child processes, and, once a lab verdict noted them, the `outside` files it opened outside its record |
 | `lines` | Per test: each measured source path and the sorted line numbers that test executed |
 
 Test ids come from the coverage context with its phase suffix after the last
