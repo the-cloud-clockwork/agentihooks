@@ -4880,7 +4880,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-18",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-env-guard-gap",
-      "behaviour": "The credential guard checks the script a shell runs with -c like a command of its own, whether the shell is the command itself or the command a kubectl, docker or ssh wrapper runs, so an environment dump, a credential file read or a recursive search of a tree that holds a credential file inside sh -c, bash -c, zsh -c or dash -c is refused the same way as at the top level, while a script that prints no value, a count, a shell running a script file and a -c flag of another tool pass.",
+      "behaviour": "The credential guard checks the script a shell runs with -c like a command of its own, whether the shell is the command itself or the command a kubectl, docker or ssh wrapper runs, so an environment dump, a credential file read or a recursive search of a tree that holds a credential file inside sh -c, bash -c, zsh -c or dash -c is refused the same way as at the top level, while a script that prints no value, a count, a shell running a script file with no c flag shaped argument and a -c flag of another tool pass; a c flag shaped word anywhere after the shell has its next word checked, which fails closed.",
       "seam": "hooks.context.credential_guard.shell_scripts, read by hooks.context.credential_guard.decide and hooks.context.credential_guard.evaluate",
       "tests": [
         "tests/test_credential_guard.py::test_an_environment_dump_inside_a_shell_script_is_refused",
