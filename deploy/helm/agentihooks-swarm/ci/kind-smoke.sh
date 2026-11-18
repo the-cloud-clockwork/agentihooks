@@ -105,6 +105,7 @@ keep_layers() {
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t swarm_layers < <(layers swarm)
   docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
   printf 'main fixture image built\n'
