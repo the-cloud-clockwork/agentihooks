@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
@@ -38,7 +38,7 @@ from scripts.ci_lab import budget, contract, control, evidence, expand_tests, in
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
-from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
+from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
@@ -103,6 +103,7 @@ HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
 STATIC = "static"
 WHOLE_TREE = "."
 DURATIONS = ".test_durations"
+NOTES = "outside/"
 DEV = "dev"
 DURABLE = "ci-lab-scheduler"
 SUBJECT = f"{HEAD_SUBJECT}.>"
@@ -693,7 +694,7 @@ class Scheduler:
             self.client.srem(LIVE, run)
             return [f"forgot {run}"]
         for slot in state.units.values():
-            self._collect(slot)
+            self._collect(slot, state.repo)
         actions = self._post(state)
         if all(slot.outcome for slot in state.units.values()):
             self.client.srem(LIVE, run)
@@ -705,7 +706,7 @@ class Scheduler:
         self._save(state)
         return actions
 
-    def _collect(self, slot: Slot) -> None:
+    def _collect(self, slot: Slot, repo: str) -> None:
         """Take a finished job's outcome into its slot, storing its verdict, unless the retry policy runs it again; a
         vanished job was dropped."""
         if slot.outcome or not slot.job:
@@ -715,7 +716,7 @@ class Scheduler:
             slot.outcome = DROPPED
         elif job.state in FINISHED and not self._rerun(job):
             slot.outcome = job.outcome
-            self._remember(job)
+            self._remember(job, repo)
         else:
             slot.started = slot.started or job.state == "leased"
 
@@ -725,8 +726,9 @@ class Scheduler:
         result = UnitResult(job.outcome, job.attempts)
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
-    def _remember(self, job: Job) -> None:
-        """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
+    def _remember(self, job: Job, repo: str) -> None:
+        """Store the verdict of a graded job from the report its worker uploaded, and note the files its batch opened
+        outside the repository's manifest; a lost or unrun job is no verdict."""
         report_path, log_path = upload_path(job.id, "report"), upload_path(job.id, "log")
         present = set(self.objects.keys(str(PurePosixPath(report_path).parent) + "/"))
         if job.outcome in UNGRADED or report_path not in present:
@@ -738,6 +740,8 @@ class Scheduler:
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
         )
         self.store.put(verdict, report, log)
+        if report.get("outside"):
+            StoredManifests(self.objects).note(repo, job.unit.members, report["outside"])
 
     def _post(self, state: State) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again."""
@@ -826,19 +830,40 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
 
 @dataclass(frozen=True)
 class StoredManifests:
-    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
+    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`, and
+    the notes of the files test batches opened outside them, under its `outside/` folder."""
 
     objects: Objects
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
-        """Return the manifest of the first commit that has one stored, None when none has."""
+        """Return the manifest of the first commit that has one stored, with every note of the repository merged into
+        its test records, None when none has."""
         folder = manifest_folder(_slug(repo))
         stored = frozenset(self.objects.keys(folder))
         for commit in commits:
             path = f"{folder}{commit}.json"
             if path in stored:
-                return UNPACK(json.loads(self.objects.read(path)))
+                notes = (name for name in stored if name.startswith(folder + NOTES))
+                return self._merged(UNPACK(json.loads(self.objects.read(path))), notes)
         return None
+
+    def note(self, repo: str, tests: Sequence[str], outside: Sequence[str]) -> None:
+        """Write a batch's tests and the files it opened outside the manifest as one note of the repository, named by
+        its content so the same batch and files write it once."""
+        record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
+        self.objects.write_once(
+            f"{manifest_folder(_slug(repo))}{NOTES}{digest(record)}.json", json.dumps(record).encode()
+        )
+
+    def _merged(self, manifest: dict[str, Any], notes: Iterable[str]) -> dict[str, Any]:
+        """Return the manifest with each note's files added to the outside list of every test record it names."""
+        records: dict[str, dict[str, Any]] = manifest["tests"]
+        for name in notes:
+            note = json.loads(self.objects.read(name))
+            for test in note["tests"]:
+                if test in records:
+                    records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
+        return manifest
 
 
 class MirrorExpander:
