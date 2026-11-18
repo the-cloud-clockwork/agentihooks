@@ -4,7 +4,7 @@ used and pod load readings carry a launched agent's own load from the next heart
 hive without a CPU used reading falls back to takes up to five minutes to show it."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm.keyspace import ROOT
 
@@ -42,12 +42,6 @@ if held >= tonumber(ARGV[2]) then return {0, held} end
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[3]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {1, held}
-"""
-
-_PENDING = """
-local now = redis.call('TIME')
-local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
 """
 
 _RECORD = """
@@ -228,7 +222,10 @@ def record(redis: "Redis", machine: str, member: str, totals: str = "") -> None:
 
 
 def pending(redis: "Redis", machine: str) -> int:
-    return int(redis.eval(_PENDING, 1, key(machine)))
+    """Count the unexpired launch reservations on ``machine`` by the Redis server clock with read commands only. A
+    hive member may only read other hives' admission keys, and Redis declares every key an EVAL names written."""
+    seconds, micros = cast("tuple[int, int]", redis.time())
+    return cast(int, redis.zcount(key(machine), f"({seconds * 1000 + micros // 1000}", "+inf"))
 
 
 def release(redis: "Redis", machine: str, member: str) -> None:
