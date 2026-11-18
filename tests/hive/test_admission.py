@@ -363,6 +363,20 @@ def test_view_lines_join_hive_lines_and_the_binding_line_and_stay_empty_without_
     assert admission.view_lines([], {"host room": 3}) == []
 
 
+@pytest.mark.feature("status-names-each-hive-admission-count-a-member-may-not-read")
+def test_view_lines_name_each_refused_count_and_bind_only_over_the_hives_read() -> None:
+    hives = [hive_row("vm", 0, "cpu: busy", "cpu: busy")]
+    refused = {"far": "No permissions to access a key"}
+    assert admission.view_lines(hives, {"host room": 3}, refused) == [
+        "hive vm  admission room 0  cpu: busy",
+        "hive far  admission count unreadable: No permissions to access a key",
+        "binding limit hive admission, room 0: hive vm cpu: busy",
+    ]
+    assert admission.view_lines([], {"host room": 3}, refused) == [
+        "hive far  admission count unreadable: No permissions to access a key"
+    ]
+
+
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
     from scripts.hive import placement_waits
     from scripts.swarm import cli, status
