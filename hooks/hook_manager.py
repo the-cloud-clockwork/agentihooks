@@ -1325,7 +1325,7 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
-def _check_shell_guards(payload: dict) -> None:
+def _check_shell_guards(payload: dict[str, Any]) -> None:
     from hooks.context.local_test_guard import check_local_tests
     from hooks.context.swarm_wait_nudge import check_github_watch
 
@@ -1350,6 +1350,15 @@ def _check_shell_guards(payload: dict) -> None:
     except Exception as e:
         log("branch_guard check failed", {"error": str(e)})
         print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+    try:
+        from hooks.context.venv_guard import check_venv_guard
+
+        check_venv_guard(payload)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("venv_guard check failed", {"error": str(e)})
+        print(f"WARNING: venv_guard check failed ({e}) — guard bypassed", file=sys.stderr)
 
 
 def _fit_pretool(blocks: list[tuple[str, str]]) -> str:

@@ -137,6 +137,20 @@ def test_editable_install_into_the_active_hooks_venv_from_a_worktree_is_refused(
 
 
 @pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+def test_the_refusal_names_the_hooks_venv_the_source_and_the_way_out(checkouts: dict[str, Path]) -> None:
+    venv, worktree = checkouts["venv"], checkouts["worktree"]
+    with pytest.raises(BlockAction) as refused:
+        check_venv_guard(_bash(f"uv pip install --python {venv}/bin/python -e .", worktree))
+    assert str(refused.value) == (
+        f"BLOCKED: this editable install points the venv the hooks run from ({venv}) at {worktree}, which is not "
+        "inside a primary checkout. Once that folder goes, as wt.sh done removes a worktree, every hook and gate "
+        "condition that imports from it fails open.\n"
+        f"Install from the primary checkout (uv pip install --python {venv}/bin/python -e <primary checkout>), or "
+        "install the worktree into its own venv."
+    )
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
 @pytest.mark.parametrize(
     ("command", "cwd"),
     [
@@ -147,6 +161,9 @@ def test_editable_install_into_the_active_hooks_venv_from_a_worktree_is_refused(
         ("uv pip install -e .", "worktree"),
         ("pip install -e .", "worktree"),
         ("uv pip install --python {venv}/bin/python requests", "worktree"),
+        ("uv pip install --python {venv}/bin/python -e", "worktree"),
+        ("{venv}/bin/pip download -e {worktree}", "primary"),
+        ("{venv}/bin/ruff check -e {worktree}", "primary"),
         ("git commit -m 'uv pip install --python {venv}/bin/python -e .'", "worktree"),
     ],
 )
@@ -172,6 +189,9 @@ def test_the_shell_guards_warn_when_the_venv_guard_crashes(
     def crash(payload: dict[str, object]) -> None:
         raise RuntimeError("boom")
 
+    logged: list[tuple[object, ...]] = []
     monkeypatch.setattr(venv_guard, "check_venv_guard", crash)
+    monkeypatch.setattr(hook_manager, "log", lambda *args: logged.append(args))
     hook_manager._check_shell_guards({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo hi"}})
-    assert "venv_guard check failed (boom)" in capsys.readouterr().err
+    assert ("venv_guard check failed", {"error": "boom"}) in logged
+    assert "WARNING: venv_guard check failed (boom) — guard bypassed\n" in capsys.readouterr().err
