@@ -406,6 +406,48 @@ ci-lab-worker 150
 | A running worker pod was evicted | A higher class that preempts took its node | `kubectl get events -n <namespace> --field-selector reason=Preempted` |
 | `cluster-rbac` sync fails after the value was edited | `value` is immutable | Re-rank by name as above |
 
+## Worker pod deletion cost
+
+A scale down of the worker Deployment removes the ReplicaSet's pods with the lowest
+`controller.kubernetes.io/pod-deletion-cost` first. The scheduler keeps that annotation in step
+with the leases, so idle workers go before busy ones:
+
+| Transition | Patch on the worker's pod |
+|---|---|
+| A lease poll grants the worker at least one job | annotation set to `1000` |
+| The completion or reap of the worker's last live lease | annotation removed |
+| The end of one lease while the worker holds another | none |
+| A grant that lands while the last lease's clear is in flight | annotation set to `1000` again |
+
+A worker names itself by its pod hostname, so the worker name on a lease is its pod name; a pod on
+the host network, or one whose name runs past 63 characters, has another hostname and its patch is
+refused. `scripts.ci_lab.pods.KubePods` sends one JSON merge patch on
+`/api/v1/namespaces/<namespace>/pods/<worker>`, with the namespace, token and CA of the scheduler's
+mounted service account. Outside a cluster (`KUBERNETES_SERVICE_HOST` unset) the scheduler patches
+nothing. A refused or unreachable API server never fails a grant, a completion or a pass, but each
+patch waits up to five seconds for it; the annotation then lags until the worker's next transition.
+
+The scheduler pod needs `patch` on `pods` in the lab namespace, a mounted service account token,
+and network egress to the API server.
+
+### Verify
+
+```bash
+kubectl get pods -n <namespace> -l app.kubernetes.io/component=worker \
+  -o custom-columns='NAME:.metadata.name,COST:.metadata.annotations.controller\.kubernetes\.io/pod-deletion-cost'
+```
+
+A worker running a unit shows `1000`; an idle one shows `<none>`.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| Every worker shows `<none>` while units run | The scheduler's patches are refused or never reach the API server | `kubectl auth can-i patch pods -n <namespace> --as system:serviceaccount:<namespace>:ci-lab-scheduler`, then the scheduler's network policy egress to the API server |
+| Grants and completions slow by about five seconds each | The API server does not answer the patches | The check above; the patch timeout bounds each patch at five seconds, and a completion that raced a grant sends two |
+| A busy worker shows `<none>` after a grant raced a clear | The busy patch of the re-check was refused or timed out | The `kubectl auth can-i` check above; the cost stays cleared until the raced lease ends, and the worker's next poll that grants sets it again |
+| An idle worker shows `1000` | A grant marked it busy again during a clear, and that lease ended before the re-check's patch landed | Its next lease poll that grants and the end of that lease reset it |
+
 ## Lab head intake
 
 The lab learns which heads to grade from `agentihooks github-webhook`, the GitHub webhook receiver

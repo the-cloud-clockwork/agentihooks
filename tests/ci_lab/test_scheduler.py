@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -132,6 +132,15 @@ class Poster:
         return [(post[2], post[3]) for post in self.posts if post[0] == head and post[1] == gate]
 
 
+class FakeKube:
+    def __init__(self) -> None:
+        self.patches: list[tuple[str, bool]] = []
+
+    def __call__(self, pod: str, busy: bool) -> bool:
+        self.patches.append((pod, busy))
+        return True
+
+
 @dataclass
 class Lab:
     client: Any
@@ -142,6 +151,7 @@ class Lab:
     fixes: set[str] = field(default_factory=set[str])
     asked: list[int] = field(default_factory=list[int])
     repos: list[str] = field(default_factory=list[str])
+    kube: FakeKube = field(default_factory=FakeKube)
     now: int = 0
 
     def checks(self, repo: str) -> Poster:
@@ -153,7 +163,7 @@ class Lab:
         return frozenset(self.fixes)
 
     def build(self, quiet_ms: int, retries: Policy) -> scheduler.Scheduler:
-        ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes)
+        ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes, self.kube)
         settings = scheduler.Settings(frozenset({ACTOR}), quiet_ms, retries)
         return scheduler.Scheduler(self.client, self.objects, ports, settings)
 
@@ -177,7 +187,7 @@ class Run:
         return self.engine.tick(at)
 
     def leases(self, ttl_ms: int = 1000) -> Leases:
-        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1)
+        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube)
 
     def lease(self, slots: int = 1, ttl_ms: int = 1000) -> list[Grant]:
         return self.leases(ttl_ms).lease("worker", slots, frozenset(), 0)
@@ -372,6 +382,22 @@ def test_the_lost_retries_come_from_the_settings(lab: Callable[..., Run]) -> Non
     grant = run.lease(ttl_ms=100)[0]
     assert f"reaped {grant.job} lost" in run.tick(1100)
     assert run.grade(HEAD_A).conclusion == "failure"
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_the_reap_pass_clears_the_pod_cost_of_a_worker_only_once_its_last_lease_expired(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    first, second = run.lease(slots=2, ttl_ms=100)
+    assert run.lab.kube.patches == [("worker", True)]
+    assert run.leases(ttl_ms=500).heartbeat(second.job, second.token) == 1500
+    assert f"reaped {first.job} pending" in run.tick(1100)
+    assert run.lab.kube.patches == [("worker", True)]
+    assert f"reaped {second.job} pending" in run.tick(1500)
+    assert run.lab.kube.patches == [("worker", True), ("worker", False)]
 
 
 @pytest.mark.feature("lab-scheduler-grade")
@@ -1481,10 +1507,19 @@ class FakeChecks:
     repo: str
 
 
+@pytest.mark.feature("lab-worker-deletion-cost")
 def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
+    kube = FakeKube()
+    pods_of: list[Mapping[str, str]] = []
+
+    def worker_pods(found: Mapping[str, str]) -> FakeKube:
+        pods_of.append(found)
+        return kube
+
+    monkeypatch.setattr(scheduler, "worker_pods", worker_pods)
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
         scheduler.MIRROR_STORE: str(tmp_path / "stores"),
@@ -1495,6 +1530,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     consumer = Consumer([])
     objects = LocalObjects(tmp_path / "objects")
     built = scheduler.build(environ, client, objects, consumer)
+    assert built.ports.pods is kube and pods_of == [environ]
     assert built.objects is objects
     assert built.settings.trusted == frozenset({"repository"})
     assert built.settings.retries == Policy(lost=len("repository"))
@@ -1549,7 +1585,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
         calls["build"] = (environ, redis_client, objects, consumer)
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str])
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], FakeKube())
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 
     class Server:
@@ -1632,6 +1668,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
     found, leases, routes, spending, clock, ports = calls["listen"]
     assert found.queue.client is client and leases.queue is found.queue
+    assert leases.pods is found.ports.pods
     assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
     assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
     assert leases.clock() == 1_000_250 and clock() == 1_000_250
