@@ -782,11 +782,13 @@ UNCLAIMED = {"state": "open", "claimed_by": ""}
 DEPENDENCY_PROBE = ["git", "ls-remote", "--heads", "origin", "eng-a"]
 
 
-def _origin_lacks_eng_a(shell: Shell, probe_code: int = 0) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
+def _origin_lacks_eng_a(
+    shell: Shell, probe_code: int = 0, listed: str = "\n"
+) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
     def answer(argv: list[str]) -> subprocess.CompletedProcess[str]:
         done = shell(argv)
         if argv == DEPENDENCY_PROBE:
-            return subprocess.CompletedProcess(argv, probe_code, stdout="\n", stderr=" boom\n" if probe_code else "")
+            return subprocess.CompletedProcess(argv, probe_code, stdout=listed, stderr=" boom\n" if probe_code else "")
         if argv == ["git", "fetch", "origin", "eng-a"]:
             return subprocess.CompletedProcess(argv, 128, stdout="", stderr=f"{MISSING_REF}\n")
         if argv == ["git", "merge-base", "HEAD", "origin/dev"]:
@@ -797,12 +799,13 @@ def _origin_lacks_eng_a(shell: Shell, probe_code: int = 0) -> Callable[[list[str
 
 
 @pytest.mark.feature("swarm-park-unpushed-dependency-on-dev")
+@pytest.mark.parametrize("listed", ["\n", f"{'c' * 40}\trefs/heads/diffcheck/eng-a\n"])
 def test_park_stacks_on_dev_when_an_unclaimed_dependency_records_a_branch_origin_lacks(
-    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], listed: str
 ) -> None:
     _, ledger, _, shell, doc = parked
     ledger.rows["a"].update(UNCLAIMED)
-    monkeypatch.setattr(stack, "shell", _origin_lacks_eng_a(shell))
+    monkeypatch.setattr(stack, "shell", _origin_lacks_eng_a(shell, listed=listed))
     assert park(doc) == 0
     assert ("t1", {"parked_on": ["a"], "stacked_base": DEV, "parked_repos": []}, AGENT) in ledger.updates
     assert ledger.rows["t1"]["parked_on"] == ["a"] and ledger.rows["t1"]["stacked_base"] == DEV
@@ -845,12 +848,12 @@ def test_park_keeps_the_dependency_base_when_origin_holds_an_unclaimed_dependenc
 
 @pytest.mark.feature("swarm-park-unpushed-dependency-on-dev")
 @pytest.mark.parametrize(
-    ("fields", "probe_code"),
+    ("fields", "probe_code", "probed"),
     [
-        ({"state": "pr"}, 0),
-        ({"state": "claimed", "claimed_by": "engineer@a1b2c3-0002"}, 0),
-        ({"state": "open", "claimed_by": "engineer@a1b2c3-0002"}, 0),
-        (UNCLAIMED, 128),
+        ({"state": "pr"}, 0, False),
+        ({"state": "claimed", "claimed_by": "engineer@a1b2c3-0002"}, 0, False),
+        ({"state": "open", "claimed_by": "engineer@a1b2c3-0002"}, 0, False),
+        (UNCLAIMED, 128, True),
     ],
 )
 def test_park_refuses_a_missing_dependency_branch_unless_origin_answers_for_an_unclaimed_dependency(
@@ -859,12 +862,13 @@ def test_park_refuses_a_missing_dependency_branch_unless_origin_answers_for_an_u
     capsys: pytest.CaptureFixture[str],
     fields: dict[str, str],
     probe_code: int,
+    probed: bool,
 ) -> None:
     _, ledger, _, shell, _ = parked
     ledger.rows["a"].update(fields)
     monkeypatch.setattr(stack, "shell", _origin_lacks_eng_a(shell, probe_code))
     _refused(parked, capsys, f"cannot fetch eng-a: {MISSING_REF}")
-    assert (DEPENDENCY_PROBE in shell.calls) is bool(probe_code)
+    assert (DEPENDENCY_PROBE in shell.calls) is probed
     assert ["git", "fetch", "origin", "dev"] not in shell.calls
 
 
