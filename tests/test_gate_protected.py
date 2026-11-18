@@ -2658,9 +2658,34 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
     rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
     expected = {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
-    assert set(registry) in (expected, expected | {"scripts/ci_reuse.py"})
+    assert set(registry) in (
+        expected,
+        expected | {"scripts/ci_reuse.py"},
+        expected | {"scripts/ci_reuse.py", ".github/workflows/writer-lock.yml"},
+    )
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
+
+
+@pytest.mark.feature("frozen-writer-lock-workflow")
+def test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job(repo: Path) -> None:
+    lock = ".github/workflows/writer-lock.yml"
+    text = (_ROOT / lock).read_text()
+    registry = (_ROOT / gate_protected.FROZEN).read_text()
+    base = _put(repo, {lock: text, gate_protected.FROZEN: registry}, "base")
+    clean = _put(repo, {"README.md": "clean\n"}, "clean")
+    assert gate_protected._frozen_problems(repo, base, base, clean) == []
+    refusal = (
+        f"The head changes the frozen gate file {lock} to content {gate_protected.FROZEN} on the base does not "
+        "accept; announce its blob there by its own pull request first."
+    )
+    workflow = yaml.safe_load(text)
+    assert workflow["jobs"]
+    for job in workflow["jobs"]:
+        _git(repo, "checkout", "-q", "--detach", base)
+        jobs = {name: body for name, body in workflow["jobs"].items() if name != job}
+        head = _put(repo, {lock: yaml.safe_dump({**workflow, "jobs": jobs})}, f"drop {job}")
+        assert gate_protected._frozen_problems(repo, base, base, head) == [refusal], job
 
 
 def test_the_repository_registry_leaves_the_delivery_config_unfrozen() -> None:

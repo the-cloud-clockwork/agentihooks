@@ -137,11 +137,12 @@ class Admission:
             )
             return None
         timer.mark("cap")
+        reserved = self._reserved(view, view.rows[task_id], request["hive"])
         with self._turn(request["hive"], offer) as busy:
             timer.mark("turn")
             if not busy and (kept := self._kept(slug, request, offer)):
                 return kept
-            if full := busy or self._full(request["hive"]):
+            if full := busy or self._full(request["hive"], reserved):
                 refused(slug, request, full)
                 held: dict[str, str] = {hive_admission.HELD: full}
                 return held
@@ -212,6 +213,13 @@ class Admission:
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
 
+    def _reserved(self, view: readiness.Snapshot, row: dict[str, Any], hive: str) -> int:
+        """The root slots kept for the asking swarm's waiting tasks only the root hive takes when this task could run
+        on any hive; none for another hive or a task only the root hive takes."""
+        if hive != readiness.ROOT or readiness.root_only(row):
+            return 0
+        return readiness.root_waiting(view, readiness.declared(self.store, hive))
+
     @contextmanager
     def _turn(self, hive: str, offer: str) -> Iterator[str]:
         """Holds the hive's admission key in Redis, shared by every hub pod, while its cap is counted and the task
@@ -236,9 +244,9 @@ class Admission:
         holder: object = self.store.redis.get(turn_key(hive))  # pyright: ignore[reportUnknownMemberType]
         return str(holder).startswith(f"{offer} ")
 
-    def _full(self, hive: str) -> str:
-        """The hive's live worker executions across every swarm against its registry max agents; empty below the cap
-        or when none is set."""
+    def _full(self, hive: str, reserved: int) -> str:
+        """The hive's live worker executions across every swarm, with the slots it keeps for waiting tasks only it
+        takes, against its registry max agents; empty below the cap or when none is set."""
         from scripts.hive import registry
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
@@ -253,7 +261,8 @@ class Admission:
             for agent in self.store.execution_registry.agents(slug)
             if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
         )
-        return f"{live} of {cap} agents on the hive" if live >= cap else ""
+        kept = f" with {reserved} kept for tasks only the root hive takes" if reserved else ""
+        return f"{live} of {cap} agents on the hive{kept}" if live + reserved >= cap else ""
 
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
