@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_line_map:c63263b63e6a681d3e9d047ff21cd6c4d8704f6dab94b954b5cb59a5bda88680": {
+    "reader": "standards-reader",
+    "reason": "difflib.SequenceMatcher tests autojunk only for truth (if self.autojunk and n >= 200), so autojunk=None and autojunk=False give identical matching blocks (confirmed on a 253-line input with a popular line)."
+  }
+}

@@ -30,6 +30,20 @@ outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints 
 scheduler and the worker without `--self-test` run their services (see [Scheduler loop](#scheduler-loop)
 and [Worker executors](#worker-executors)).
 
+Both services run from the installed wheel, which ships `hooks`, `scripts` and `profiles` and no
+`tests` package, so lab code imports only from those packages. The dependency manifest lives in
+`scripts.dep_manifest` and the shard sizing the lab shares with the test shards in
+`scripts.shard_sizing`. Three checks hold it:
+
+| Check | Where | Red when |
+|---|---|---|
+| `tests/ci_lab/test_wheel_imports.py` | Pull request tests | Any module of `scripts.ci_lab`, or `scripts.ci_test_plan`, imports the `tests` package |
+| `shipped-code-imports-tests` | Semgrep incident rules | New code under `scripts` or `hooks` imports the `tests` package |
+| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import the scheduler, interaction, test expansion or the CI test planner |
+
+`docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
+built CI lab image.
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
@@ -115,7 +129,7 @@ The scheduler sets every metric its queue, lease and worker state answers, on on
 
 | Metric | Set from |
 |---|---|
-| `ci_lab_slots_wanted` | `Load.slots_wanted`: the slots running and pending units take in every class not shed |
+| `ci_lab_slots_wanted` | `scripts.ci_lab.budget.slots_wanted`: the running slots of every class but backfill plus the pending slots of every class but backfill that is not shed, so backfill never raises it |
 | `ci_lab_workers_ready` | The workers that offered free slots on a lease poll within `READY_MS` |
 | `ci_lab_units_overdue` | Leased units whose lease started, as `Queue.claim` stores it, more than `UNIT_ESTIMATE_S` ago; a lease claimed before the start was stored is not counted |
 | `ci_lab_core_seconds_total` | Each finished attempt's slots times its report's `seconds`, counted once (`Queue.tally`) in the most urgent class of the live grades holding its job; an attempt whose worker uploaded no report adds nothing |
@@ -186,7 +200,7 @@ Until the lab records measured unit durations, every estimate is the fixed `UNIT
 | `shed` | `()` | Classes the budget sheds; `scripts.ci_lab.budget.observe` sets them |
 | `cache_hits`, `cache_misses` | `{}` | Verdict cache lookups, keyed by class |
 | `frees_in` | `()` | Seconds until each busy slot frees, one entry per busy slot; an entry at or below zero counts as a slot free now |
-| `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `slots_wanted` sums them over the classes not shed |
+| `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `scripts.ci_lab.budget.slots_wanted` reads them for `ci_lab_slots_wanted` |
 | `workers_ready` | `0` | Workers that offered slots within the ready window |
 | `overdue` | `0` | Leased units past their estimate |
 
@@ -460,7 +474,7 @@ them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. `scripts.ci_lab.budget.slots_wanted` computes the number; nothing publishes it |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
@@ -1088,7 +1102,7 @@ key; the builders are pure and read no file, clock or network.
 | `static` | `base` | Path to blob id of every base file the gate compares against |
 | `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
-| `test` | `tests` | Test id to its fingerprint from `tests/dep_manifest.py` |
+| `test` | `tests` | Test id to its fingerprint from `scripts/dep_manifest.py` |
 | `test` | `opened` | Path to blob id of each file a test opened outside the manifest |
 | `test` | `invocation` | The pytest argument list, plugins included, in order |
 | `test` | `toolchain` | The toolchain above |
@@ -1104,7 +1118,7 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `versions` | Distribution name to version |
 | `mutant` | `module` | Path of the module that holds the function |
 | `mutant` | `function` | Name of the changed function |
-| `mutant` | `definition` | Digest of the function's whole definition text, from `tests.dep_manifest.unit_hashes` |
+| `mutant` | `definition` | Digest of the function's whole definition text, from `scripts.dep_manifest.unit_hashes` |
 | `mutant` | `module_code` | Digest of the module level code, the `<module>` entry of `unit_hashes` |
 | `mutant` | `names` | The mutant names of the function |
 | `mutant` | `mutmut` | The pinned mutmut version |
@@ -1157,19 +1171,27 @@ key; the builders are pure and read no file, clock or network.
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
-   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is enqueued.
-5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
+   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is held for
+   the budget.
+5. Held units are enqueued as `scripts.ci_lab.budget.admits` lets them in, the most urgent grade first.
+   Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
+   until the budget resets the next UTC day, though its units already in the queue still run. Backfill
+   takes only the slots workers offered free on a lease poll within the ready window after the units
+   already waiting in the queue. A newer head of the lane drops the older head's held units.
+6. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
-6. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
+7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
    `lab.retry` goes back to pending with one more attempt, so a `crash` reruns once by default.
    Otherwise a graded outcome with an uploaded report becomes a verdict in the
    store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red. A lease
    completes only with an outcome `scripts/ci_lab/outcomes.py` lists in `COMPLETED`: `passed`,
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
-7. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
+8. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
-   check run never moves again.
+   check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
+   its poster with that id and the last status it posted before the next move, so a restarted
+   scheduler advances the same check run instead of opening a second one.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without

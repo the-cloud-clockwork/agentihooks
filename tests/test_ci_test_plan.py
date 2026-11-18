@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import ci_test_plan
-from tests import dep_manifest
+from scripts import ci_test_plan, dep_manifest
 
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 HEAD = "a" * 40

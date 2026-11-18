@@ -13,10 +13,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
+from scripts import dep_manifest
 from scripts.ci_lab.digests import TestInputs, Toolchain, test_key
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation import scope
-from tests import dep_manifest
 
 PYTEST_INVOCATION = (
     "pytest",

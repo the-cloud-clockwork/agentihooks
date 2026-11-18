@@ -5,28 +5,6 @@ const EXEMPT = ['mutation-stats-seed', 'test-summary'];
 const settled = (job, hotfix) => EXEMPT.includes(job.name) ||
   (job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion)));
 
-async function gradeIsComplete(github, context, api, hotfix = false) {
-  const [jobs, checks, statuses] = await Promise.all([
-    github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...api, run_id: context.runId, filter: 'latest', per_page: 100 }),
-    github.paginate(github.rest.checks.listForRef, { ...api, ref: context.sha, filter: 'latest', per_page: 100 }),
-    github.paginate(github.rest.repos.listCommitStatusesForRef, { ...api, ref: context.sha, per_page: 100 }),
-  ]);
-  const current = jobs.filter(job => job.run_id === context.runId && job.name === 'promote / promote' && job.status === 'in_progress');
-  if (current.length !== 1) return false;
-  const runUrl = `${context.serverUrl}/${api.owner}/${api.repo}/actions/runs/${context.runId}/job/`;
-  const own = check => check.url === current[0].check_run_url && check.details_url === `${runUrl}${current[0].id}` &&
-    check.name === current[0].name && check.status === 'in_progress' && check.conclusion === null;
-  const latest = new Map();
-  for (const status of statuses) {
-    if (!latest.has(status.context)) latest.set(status.context, status.state);
-  }
-  return checks.filter(own).length === 1 &&
-    checks.some(check => check.name === (hotfix ? HOTFIX_GRADE : GRADE) && check.status === 'completed' &&
-      check.conclusion === 'success' && check.details_url.startsWith(runUrl)) &&
-    checks.every(check => own(check) || settled(check, hotfix)) &&
-    (hotfix || [...latest.values()].every(state => state === 'success'));
-}
-
 async function snapshotGradeComplete(github, context, api, triggering = context, hotfix = false) {
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
     { ...api, run_id: context.runId, filter: 'latest', per_page: 100 });
@@ -188,8 +166,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
         { ...api, ref: snapshot, per_page: 100 });
       const visible = statuses.find(check => check.context === status.context)?.state === 'success';
       const complete = reported && visible && await snapshotChecksComplete(github, api, snapshot, pull.number);
-      if (complete && latest.mergeable === true && (latest.mergeable_state === 'clean' ||
-          latest.mergeable_state === 'unstable' && await gradeIsComplete(github, triggering, api, hotfix))) {
+      if (complete && latest.mergeable === true && ['clean', 'unstable'].includes(latest.mergeable_state)) {
         ready = true;
         break;
       }

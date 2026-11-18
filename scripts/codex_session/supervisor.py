@@ -58,6 +58,7 @@ TRANSPORT_EXITED = "codex transport exited"
 OPENING_ATTEMPTS = 2
 OPENING_WATCH_S = 30.0
 TURN_COMPLETED = "turn/completed"
+TURN_FAILED = "failed"
 USER_MESSAGE = "userMessage"
 INPUT_ITEMS = (USER_MESSAGE, "hookPrompt")
 CAPACITY = "Selected model is at capacity"
@@ -77,6 +78,7 @@ OTHER_ACCOUNT = "the server is not signed in with a {} account"
 NO_THREAD = "the server returned no thread id"
 SPAWN_FAILED = "app-server could not start: {}"
 OPENING_CAPACITY = "the opening Codex turn ended twice on a provider capacity error: {}"
+OPENING_FAILED = "the opening Codex turn failed on a provider error: {}"
 
 
 class LaunchFailure(RuntimeError):
@@ -311,6 +313,10 @@ def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, d
             if launch.environ.get(binding.REPORT):
                 binding.refuse(Path(launch.environ[binding.REPORT]), reason)
             raise LaunchFailure("account_refused", reason)
+        if reason := opening_failure(turn):
+            if launch.environ.get(binding.REPORT):
+                binding.refuse(Path(launch.environ[binding.REPORT]), reason)
+            raise LaunchFailure("opening_failed", reason)
         error = str((turn.get("error") or {}).get("message"))
         if CAPACITY not in error:
             return turn_id
@@ -318,6 +324,13 @@ def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, d
     if launch.environ.get(binding.REPORT):
         binding.refuse(Path(launch.environ[binding.REPORT]), reason)
     raise LaunchFailure("capacity", reason)
+
+
+def opening_failure(turn: dict[str, Any]) -> str:
+    """The refusal for an opening turn that failed with a provider error other than a capacity error, else empty."""
+    message = str((turn.get("error") or {}).get("message") or "")
+    terminal = turn.get("status") == TURN_FAILED and bool(message) and CAPACITY not in message
+    return OPENING_FAILED.format(message) if terminal else ""
 
 
 def stop(process: subprocess.Popen) -> None:

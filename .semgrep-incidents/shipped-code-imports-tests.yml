@@ -1,0 +1,23 @@
+rules:
+  - id: shipped-code-imports-tests
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler imported the dependency manifest from the tests package, and the wheel ships only hooks,
+      scripts and profiles, so the swarm image raised No module named tests and the scheduler never started. Code
+      under hooks or scripts imports only shipped packages: move what it needs into scripts and let tests import it
+      from there.
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - shipped-code-imports-tests.py
+    patterns:
+      - pattern-either:
+          - pattern: import $MODULE
+          - pattern: import $MODULE as $ALIAS
+          - pattern: from $MODULE import $NAME
+          - pattern: from $MODULE import $NAME as $ALIAS
+      - metavariable-regex:
+          metavariable: $MODULE
+          regex: ^tests(\.|$)

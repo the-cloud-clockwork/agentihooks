@@ -399,6 +399,13 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
 
 
+def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
+    step = next(
+        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+    )
+    assert "semgrep scan --error --strict --timeout 30 --metrics off" in step["run"]
+
+
 def test_scan_and_charts_run_on_the_select_runner_expression():
     jobs = _jobs()
     select = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["select"]

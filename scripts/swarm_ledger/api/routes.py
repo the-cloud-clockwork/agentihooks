@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from scripts.swarm_ledger import ledger_closed, ports, request_metrics
+from scripts.swarm_ledger import ledger_closed, models, ports, request_metrics
 
 from ..repository import live_rows
 from ..repository.fragments import Fragment, exported, members
@@ -92,8 +92,16 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
         return architecture.view(os.environ)
     if path == "tasks" and not query.keys() & {"state", "offset", "q"}:
         return task_list.read(services.repository, slug, query)
+    if record_path(path) and not query:
+        return resources.read(services.repository.read(slug, path), path)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
+
+
+def record_path(path: str) -> bool:
+    """Whether path names one record of a record collection, such as `tasks/t1`, which reads its own rows alone."""
+    parts = path.split("/")
+    return len(parts) == 2 and parts[0] in models.RECORD_COLLECTIONS and bool(parts[1])
 
 
 def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:
