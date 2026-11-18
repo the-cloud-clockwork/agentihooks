@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
+from functools import partial
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -100,7 +101,7 @@ def _environ() -> dict[str, str]:
     return {**environ, "GIT_TERMINAL_PROMPT": "0", **helper}
 
 
-def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess:
+def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess[str]:
     scope = ["--git-dir", str(repo)] if repo else []
     try:
         return subprocess.run(
@@ -203,7 +204,7 @@ def _mirror(execution: Execution, request: Request, project: str, reuse: bool) -
     else:
         _clone(request.origin, mirror, project)
     _fetch(mirror, project)
-    checkout.carry(checkout.at(mirror), os.environ)
+    checkout.carry(partial(_git, repo=mirror), os.environ)
     return mirror
 
 

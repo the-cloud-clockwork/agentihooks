@@ -761,7 +761,9 @@ def test_publication_reads_its_own_task_by_id_and_never_the_tasks_collection(pub
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
     monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
     monkeypatch.chdir(publication.repo)
-    args = SimpleNamespace(slug="swarm", command=command, message="Change chosen", files=["chosen.txt"])
+    args = SimpleNamespace(
+        slug="swarm", command=command, message="Change chosen", files=["chosen.txt"], via="", direct=False
+    )
     getattr(cli, f"cmd_{command}")(None, args)
     assert reads and set(reads) == {("swarm", "t1")}
 
@@ -1318,7 +1320,9 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
         monkeypatch.setattr(p.ledger, "task", refuse)
     elif recording != "missing":
         monkeypatch.setattr(publish, command, refuse)
-    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    args = SimpleNamespace(
+        slug="swarm", command=command, message="Continue", files=["chosen.txt"], via="", direct=False
+    )
     with pytest.raises(publish.SwarmError, match=reason):
         getattr(cli, f"cmd_{command}")(None, args)
     assert opened == ["agentihooks-swarm"]
@@ -2137,7 +2141,9 @@ def test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_
     assert (lab / "pushed").read_text() == "refs/grade/t1 branch=engineer-test\n"
     assert _origin(publication).split()[0] == head
     assert git(publication.root, "remote", "get-url", "lab") == str(lab)
-    assert capfd.readouterr().err.endswith(f"lab grade: {url}\n")
+    shown = capfd.readouterr().err
+    assert f"remote: lab grade: {url}" in shown
+    assert shown.endswith("\n")
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
