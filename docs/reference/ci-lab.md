@@ -30,6 +30,20 @@ outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints 
 scheduler and the worker without `--self-test` run their services (see [Scheduler loop](#scheduler-loop)
 and [Worker executors](#worker-executors)).
 
+Both services run from the installed wheel, which ships `hooks`, `scripts` and `profiles` and no
+`tests` package, so lab code imports only from those packages. The dependency manifest lives in
+`scripts.dep_manifest` and the shard sizing the lab shares with the test shards in
+`scripts.shard_sizing`. Three checks hold it:
+
+| Check | Where | Red when |
+|---|---|---|
+| `tests/ci_lab/test_wheel_imports.py` | Pull request tests | Any module of `scripts.ci_lab`, or `scripts.ci_test_plan`, imports the `tests` package |
+| `shipped-code-imports-tests` | Semgrep incident rules | New code under `scripts` or `hooks` imports the `tests` package |
+| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import the scheduler, interaction, test expansion or the CI test planner |
+
+`docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
+built CI lab image.
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
@@ -1088,7 +1102,7 @@ key; the builders are pure and read no file, clock or network.
 | `static` | `base` | Path to blob id of every base file the gate compares against |
 | `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
-| `test` | `tests` | Test id to its fingerprint from `tests/dep_manifest.py` |
+| `test` | `tests` | Test id to its fingerprint from `scripts/dep_manifest.py` |
 | `test` | `opened` | Path to blob id of each file a test opened outside the manifest |
 | `test` | `invocation` | The pytest argument list, plugins included, in order |
 | `test` | `toolchain` | The toolchain above |
@@ -1104,7 +1118,7 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `versions` | Distribution name to version |
 | `mutant` | `module` | Path of the module that holds the function |
 | `mutant` | `function` | Name of the changed function |
-| `mutant` | `definition` | Digest of the function's whole definition text, from `tests.dep_manifest.unit_hashes` |
+| `mutant` | `definition` | Digest of the function's whole definition text, from `scripts.dep_manifest.unit_hashes` |
 | `mutant` | `module_code` | Digest of the module level code, the `<module>` entry of `unit_hashes` |
 | `mutant` | `names` | The mutant names of the function |
 | `mutant` | `mutmut` | The pinned mutmut version |

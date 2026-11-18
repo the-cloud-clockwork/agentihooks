@@ -357,9 +357,9 @@ def test_the_deselect_and_its_upload_run_when_either_plan_reuses_a_test(reused, 
 def _deselect(tmp_path: Path, dev: bool) -> dict:
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner, workspace = tmp_path / "runner", tmp_path / "workspace"
-    (runner / "planner/tests").mkdir(parents=True)
-    (runner / "planner/tests/__init__.py").write_text("")
-    (runner / "planner/tests/dep_manifest.py").write_text((ROOT / "tests/dep_manifest.py").read_text())
+    (runner / "planner/scripts").mkdir(parents=True)
+    (runner / "planner/scripts/__init__.py").write_text("")
+    (runner / "planner/scripts/dep_manifest.py").write_text((ROOT / "scripts/dep_manifest.py").read_text())
     workspace.mkdir()
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": collected[:2]}))
     (runner / "reused-branch.json").write_text(json.dumps({"version": 1, "runs": [], "tests": collected[2:]}))

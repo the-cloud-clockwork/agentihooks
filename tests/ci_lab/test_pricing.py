@@ -6,7 +6,7 @@ import pytest
 
 from scripts.ci_lab import pricing, units
 from scripts.ci_mutation.plan import MUTANT_SECONDS
-from tests.queue_shards import SLOWDOWN
+from scripts.shard_sizing import SLOWDOWN
 
 
 class History:

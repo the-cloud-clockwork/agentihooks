@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x__executed:11018a93cc5ac2fb8474397a55b9df0647c170a5e84da4778dfc975a0952794f": {
+    "reader": "standards_reader",
+    "reason": "\"UTF-8\" and \"utf-8\" name the same codec, so read_text decodes identically."
+  }
+}

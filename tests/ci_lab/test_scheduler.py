@@ -15,7 +15,7 @@ import jsonschema
 import pytest
 import yaml
 
-from scripts import ci_wiring
+from scripts import ci_wiring, dep_manifest
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import (
     budget,
@@ -45,11 +45,10 @@ from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HeadEvent, envelope
+from scripts.dep_manifest import _git
 from scripts.events import bus
 from scripts.events.envelope import Envelope
-from tests import dep_manifest
 from tests.ci_lab.gate_required_cases import load, materialize
-from tests.dep_manifest import _git
 
 REPO = "/the-cloud-clockwork/agentihooks"
 SLUG = "the-cloud-clockwork/agentihooks"

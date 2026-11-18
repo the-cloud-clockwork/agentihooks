@@ -15,8 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.dep_manifest import node
 from tests import coverage_check
-from tests.dep_manifest import node
 
 
 def line_map(old: str, new: str) -> dict[int, int]:
