@@ -808,7 +808,7 @@ redis-cli -u "$CI_LAB_REDIS_URL" SMEMBERS agentihooks-ci:disabled
 |---|---|---|
 | `lab/<kind>/<digest>/report.json` | `Store.put` | `{"report": <report>, "verdict": <verdict>}` as JSON with sorted keys |
 | `lab/<kind>/<digest>/log.txt` | `Store.put` | The unit's log bytes as given |
-| `lab/grades/<run>/grade.json` | `evidence.record`, write once; no caller in this tree yet | One grade run's evidence: its inputs and the units it used |
+| `lab/grades/<run>/grade.json` | `evidence.record`, write once, called by the scheduler when it closes a grade | One grade run's evidence: its inputs and the units it used |
 | `lab/heads/<head>/<run>` | `evidence.record`, write once | An empty marker naming each grade run of a head commit |
 | `lab/uploads/<job>/report.json` and `log.txt` | A worker, through an [upload URL](#worker-uploads) | A leased job's report and log |
 

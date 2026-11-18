@@ -7754,6 +7754,18 @@
       ]
     },
     {
+      "id": "lab-scheduler-evidence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-record-grades",
+      "behaviour": "When the CI lab scheduler closes a grade because every unit is final, it records the grade through the evidence printer: the grade document under its run and an empty marker under its head, carrying the grade inputs and one unit per unit of the grade with the grade run that used its verdict, so the evidence printer shows the grade by run and the head index lists it; a grade still waiting on a unit records nothing.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, read back through scripts.ci_lab.evidence.show and scripts.ci_lab.evidence.head_prefix",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_is_recorded_only_when_its_last_unit_is_final",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
