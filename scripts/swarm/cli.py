@@ -110,6 +110,7 @@ from scripts.swarm import (
     idle,
     launch_check,
     ledger_events,
+    linked_issues,
     master_launch,
     master_move,
     master_queue,
@@ -2078,8 +2079,10 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     ledger = LedgerClient()
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
-    head, repo, number, sha = PullHead(*pull_branch(args.url))
+    head, repo, number, sha, body = PullHead(*pull_branch(args.url))
     pull_head.refuse_other_branch(row, args, PullHead(head, repo))
+    if not keeps_main:
+        _refuse_unnamed_issues(ledger, args, row, body)
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
     fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})
@@ -2093,6 +2096,11 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     if drop_lifts:
         lift.drop_task(args.slug, agent.task, store=store)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
+
+
+def _refuse_unnamed_issues(ledger: LedgerClient, args: argparse.Namespace, row: dict[str, Any], body: str) -> None:
+    members = [ledger.task(args.slug, member) or {} for member in row.get("group_members") or []]
+    linked_issues.refuse_unnamed(args.url, body, [row, *members])
 
 
 def _stamp_scope(ledger, slug, task_id):
