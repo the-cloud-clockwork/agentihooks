@@ -11,8 +11,9 @@ __all__ = ["Load", "document", "hit_ratio", "predicted_wait", "utilisation"]
 
 @dataclass(frozen=True)
 class Load:
-    """Queue and slot state at one instant: pending estimates, running counts and verdict cache use per class, and the
-    seconds until each running unit frees its slot."""
+    """Queue and slot state at one instant: pending estimates, running counts, verdict cache use and the slots running
+    and pending units take per class, the seconds until each running unit frees its slot, the workers that offered
+    slots within the ready window and the leased units past their estimate."""
 
     pending: Mapping[str, Sequence[float]]
     running: Mapping[str, int]
@@ -23,11 +24,21 @@ class Load:
     cache_hits: Mapping[str, int] = field(default_factory=dict[str, int])
     cache_misses: Mapping[str, int] = field(default_factory=dict[str, int])
     frees_in: Sequence[float] = ()
+    running_slots: Mapping[str, int] = field(default_factory=dict[str, int])
+    pending_slots: Mapping[str, int] = field(default_factory=dict[str, int])
+    workers_ready: int = 0
+    overdue: int = 0
 
     @property
     def slots_free(self) -> int:
         """Slots not running a unit, never below zero."""
         return max(self.slots_total - self.slots_busy, 0)
+
+    @property
+    def slots_wanted(self) -> int:
+        """Slots the running and pending units of every class not shed take."""
+        held = (*self.running_slots.items(), *self.pending_slots.items())
+        return sum(slots for name, slots in held if name not in self.shed)
 
 
 def predicted_wait(estimates: Sequence[float], free_slots: int, frees_in: Sequence[float] = ()) -> float | None:
