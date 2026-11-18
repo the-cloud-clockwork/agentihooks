@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-FEATURE = "lab-sandbox-bwrap-pull-request-tier"
 PREPARE = "Let bubblewrap create user and network namespaces"
 RUN = "Run the lab sandbox tests under real bubblewrap"
 SHELL = ["/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", "-c"]
@@ -29,7 +28,7 @@ def fake(folder: Path, name: str, body: str) -> None:
     script.chmod(0o755)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-sandbox-bwrap-pull-request-tier")
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
@@ -67,7 +66,7 @@ def test_lab_sandbox_selection(path: str, expected: str, tmp_path: Path) -> None
     assert output.read_text() == f"due={expected}\n"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-sandbox-bwrap-pull-request-tier")
 def test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests() -> None:
     tests = workflow("test")["jobs"]
     assert "writer-lock" in tests["gate-required"]["needs"]
@@ -85,7 +84,7 @@ def test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests()
     assert "lab-sandbox" not in jobs["scenario"]["needs"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-sandbox-bwrap-pull-request-tier")
 @pytest.mark.parametrize(("probe", "code"), [(0, 0), (1, 1)], ids=["isolates", "cannot-isolate"])
 def test_the_job_fails_unless_bubblewrap_isolates_after_the_userns_restriction_is_lifted(
     probe: int, code: int, tmp_path: Path
@@ -105,7 +104,7 @@ def test_the_job_fails_unless_bubblewrap_isolates_after_the_userns_restriction_i
     assert record.read_text().splitlines() == [SYSCTL, PROBE]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-sandbox-bwrap-pull-request-tier")
 def test_the_job_installs_bubblewrap_from_the_ubuntu_archive_when_the_runner_lacks_it(tmp_path: Path) -> None:
     record = tmp_path / "record"
     fake(tmp_path / "bin", "sudo", 'printf "%s\\n" "$*" >> "$RECORD"\n')
@@ -123,7 +122,7 @@ def test_the_job_installs_bubblewrap_from_the_ubuntu_archive_when_the_runner_lac
     assert result.returncode == 127
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-sandbox-bwrap-pull-request-tier")
 @pytest.mark.parametrize(
     ("output", "status", "code"),
     [
