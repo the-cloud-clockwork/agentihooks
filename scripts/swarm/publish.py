@@ -75,7 +75,7 @@ def lab_push(root: Path, task: str, branch: str) -> str:
     if not checkout.carry(checkout.at(root), os.environ):
         raise SwarmError(f"publish --via {LAB} needs {checkout.URL_ENV} naming the lab remote of this repository")
     done = git_https.run(["git", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"], cwd=root)
-    print(done.stderr, end="", file=sys.stderr)
+    sys.stderr.write(done.stderr)
     found = GRADE_URL.search(done.stderr)
     if done.returncode or not found:
         raise SwarmError(f"the lab push named no grade url; origin was not pushed: {done.stderr.strip()}")
