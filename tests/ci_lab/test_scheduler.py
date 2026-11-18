@@ -141,6 +141,9 @@ class Expander:
 class Poster:
     posts: list[Post] = field(default_factory=list[Post])
 
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        pass
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         self.posts.append((head, gate, status, conclusion, output, shadow))
         return len(self.posts)

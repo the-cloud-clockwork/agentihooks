@@ -1169,7 +1169,9 @@ key; the builders are pure and read no file, clock or network.
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
 7. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
-   check run never moves again.
+   check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
+   its poster with that id and the last status it posted before the next move, so a restarted
+   scheduler advances the same check run instead of opening a second one.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without

@@ -168,6 +168,7 @@ class Checks:
 
     def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
+        self.runs[(head, name(gate, shadow), run)] = (run_id, status)
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create the check run on its first transition, else advance it in place; return its id."""

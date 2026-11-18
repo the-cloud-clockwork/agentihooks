@@ -332,7 +332,11 @@ class Expander(Protocol):
 
 
 class Poster(Protocol):
-    """Where check runs go: `Checks.post`."""
+    """Where check runs go: `Checks.post`, seeded by `Checks.seed` with the check runs a grade already holds."""
+
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        """Remember a check run posted before this poster existed, so its next post advances it in place."""
+        ...
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create or advance one check run and return its id."""
@@ -375,7 +379,8 @@ class Slot:
 
 @dataclass
 class State:
-    """A grade's state: what it grades, its units by gate, whether a newer head superseded it and what it posted."""
+    """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted and the
+    id of each check run it posted."""
 
     run: str
     repo: str
@@ -808,7 +813,8 @@ class Scheduler:
         return json.loads(self.objects.read(report_path)), log
 
     def _post(self, state: State) -> list[str]:
-        """Post each check run whose target moved since its last post; a completed check run never moves again."""
+        """Post each check run whose target moved since its last post; a completed check run never moves again. A
+        check run the grade already holds seeds the poster first, so a restarted scheduler advances it in place."""
         moved = [
             (check, status, conclusion)
             for check, (status, conclusion) in _checks(state).items()
@@ -818,8 +824,12 @@ class Scheduler:
         if not moved:
             return []
         poster = self.ports.checks(_slug(state.repo))
+        shadow = self.settings.shadow
         for check, status, conclusion in moved:
-            poster.post(state.head, check, status, conclusion, self._output(state, check, status), self.settings.shadow)
+            if check in state.runs:
+                poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
+            output = self._output(state, check, status)
+            state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
             state.posted[check] = [status, conclusion]
         return [f"posted {check} {status} on {state.head}" for check, status, _ in moved]
 
