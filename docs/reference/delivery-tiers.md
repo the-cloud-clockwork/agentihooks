@@ -1207,7 +1207,7 @@ The grader code comes from the base branch checkout, so a change to `scripts.gat
 ### Delivery evidence
 
 - [Pull request 11446](https://github.com/the-cloud-clockwork/agentihooks/pull/11446) merged on 16 November 2026 and closed issue 11445.
-- `tests/test_ci_gate_queue.py::test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take` checks that the canonical head grades green against itself. It then adds `new-required-check` to `gate-required`'s `needs`, and expects an `inventory` problem with the expression names and a `pins it` problem with plain names. Its feature map entry is `protected-grader-pins-gate-names`, with seam `gate_protected.grade`.
+- `tests/test_ci_gate_queue.py::test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take` runs in two parametrized cases, expression names and plain names. Each case checks that the canonical head grades green against itself, then adds `new-required-check` to `gate-required`'s `needs`. It expects an `inventory` problem in the expression names case and a `pins it` problem in the plain names case. Its feature map entry is `protected-grader-pins-gate-names`, with seam `gate_protected.grade`.
 - On 18 November 2026, `gate_protected.grade` was run on the `dev` workflows at commit `fad7e9be3a` and produced the examples table. `python -m scripts.gate_protected --base origin/dev --head HEAD` on that checkout printed the zero problem line above and exited 0.
 
 ## Lost runner requeue
