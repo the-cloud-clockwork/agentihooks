@@ -46,7 +46,7 @@ Today's `dev` already runs its slow checks after the merge: the promotion tier g
 | Green merge group run, created to completed | p50 13 min, p90 21 min | C6 |
 | Cancelled merge group runs that hid a failed job | 15 of 36 sampled: 14 with a failed unit shard, 1 with a failed `select`; in the other 21 only the summary failed after an outside cancel | C7 |
 | Estimated queue rejects in the window | 4 + 265 × 15 / 36 ≈ **114**, or 12.1 per 100 merges | C2, C7 |
-| Rejected pull requests that changed before merging | 13 of 19 took a new commit after the red group; 6 merged with no new commit | C8 |
+| Rejects in C7 and C2 whose pull request changed before merging | 13 of 19 rejects (18 pull requests) were followed by a new commit; after 6 the pull request merged with no new commit | C8 |
 
 On a rejected merge group the queue verifier, named `Gate — Required` on `merge_group`, cancels its own run, so most rejects show as `cancelled` rather than `failure`.
 
@@ -78,7 +78,7 @@ The exponent 1.58 is the mean number of merges a graded `dev` push covers, becau
 | The 118 merges inside the 75 green to red ranges, each reverted onto `dev` as it stood at the red verdict | 11 conflict (9.3 %) | C10 |
 | Files behind the conflicts at 7 merges | the feature map (`feature-map.json`) 98 of 171, the type baseline (`tests/TYPE_BASELINE.json`) 18, the frozen gate registry (`tests/registry/FROZEN_GATES.json`) 7, then at most 5 each | C10 |
 | Red streaks that were a single grade followed by green | 39 of 76 (51 %) | C4 |
-| Rejected pull requests that merged later with no new commit | 6 of 19 (32 %) | C8 |
+| Rejects after which the pull request merged with no new commit | 6 of 19 (32 %) | C8 |
 
 At the p90 verdict time, 7 merges sit on a culprit, and nearly one revert in five then conflicts, mostly on the shared registries that almost every pull request appends to. The innocent revert risk is larger. Half of today's red streaks end on the next grade, and a third of queue rejects merged unchanged. An automatic revert on the first red grade would revert those pull requests even though the next grade passed.
 
@@ -267,14 +267,39 @@ python3 -c 'import collections,json; k=collections.Counter(); [k.update(["unit s
 1 other job failed: select
 ```
 
-C8, for the 15 failed C7 runs and the 4 `failure` runs, the pull request named in the queue branch `gh-readonly-queue/dev/pr-<n>-<sha>` and its commits after the red group:
+C8, for the 15 failed C7 runs and the 4 `failure` runs, the pull request named in the queue branch `gh-readonly-queue/dev/pr-<n>-<sha>`, its merge time and its commits after the red group:
 
 ```bash
-gh api "repos/the-cloud-clockwork/agentihooks/pulls/$n/commits?per_page=100" \
-  --jq "[.[] | .commit.committer.date] | map(select(. > \"$red_group_created_at\")) | length"
+python3 -c 'import json,re; c={str(r["id"]):r for r in map(json.loads, open("mg-cancelled.jsonl"))}; rows=[c[str(j["run"])] for j in map(json.loads, open("c7-jobs.jsonl")) if [n for n in j["failed"] if n!="Queue gate summary"]]+list(map(json.loads, open("mg-failure.jsonl"))); [print(r["id"], re.search(r"pr-(\d+)-", r["head_branch"]).group(1), r["created_at"]) for r in rows]' > c8-prs.txt
+while read -r run n at; do
+  echo "$run $n $(gh api "repos/the-cloud-clockwork/agentihooks/pulls/$n" --jq .merged_at)" \
+    "$(gh api "repos/the-cloud-clockwork/agentihooks/pulls/$n/commits?per_page=100" --jq "[.[] | .commit.committer.date] | map(select(. > \"$at\")) | length")"
+done < c8-prs.txt
 ```
 
-The 19 pull requests all merged: 13 with at least one later commit, 6 with none.
+```text
+41755270692 9594 2026-11-04T02:53:48Z 1
+41780593852 9630 2026-11-04T07:45:45Z 1
+41838029431 9658 2026-11-04T14:10:44Z 2
+42011238034 9794 2026-11-05T11:44:38Z 1
+42151787606 9806 2026-11-06T04:55:55Z 3
+42744830340 10399 2026-11-10T05:06:30Z 1
+43008726721 10677 2026-11-11T13:02:06Z 1
+43035202852 10671 2026-11-11T16:54:24Z 3
+43047043330 10578 2026-11-11T15:49:19Z 0
+43055746589 10671 2026-11-11T16:54:24Z 1
+43126831451 10794 2026-11-12T01:58:46Z 1
+43169558796 10845 2026-11-12T07:28:52Z 1
+43757112784 11363 2026-11-15T22:50:51Z 0
+43762102058 11355 2026-11-15T21:56:05Z 0
+43876684668 11554 2026-11-16T17:17:16Z 2
+42670371791 10318 2026-11-10T01:16:17Z 1
+42404741735 10041 2026-11-07T19:28:45Z 0
+42403236647 10035 2026-11-07T19:09:54Z 0
+42396908025 9984 2026-11-07T17:57:24Z 0
+```
+
+All 19 rejects, across 18 pull requests, merged later: 13 after at least one new commit, 6 with none.
 
 C9, the model, over the C4 data:
 
