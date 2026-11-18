@@ -1084,6 +1084,15 @@ def test_a_live_acknowledgement_releases_its_admission_reservation(setup: Simple
     assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
 
 
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_a_live_acknowledgement_records_the_hive_holding_the_task_work_folder(setup: SimpleNamespace) -> None:
+    _, order, ack = live_order(setup)
+    pointer = setup.store.key("fixture", "work-folder", order.task)
+    assert setup.store.redis.get(pointer) is None
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.get(pointer) == order.hive == "remote"
+
+
 @pytest.mark.parametrize(
     "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
 )
