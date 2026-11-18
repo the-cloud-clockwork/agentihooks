@@ -8,7 +8,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 from urllib.parse import quote_plus
 
 from scripts.swarm_v2.kubernetes.client import ACCOUNT, KubeHttp
@@ -21,7 +21,7 @@ __all__ = [
     "TIMEOUT_S",
     "KubePods",
     "Pods",
-    "Unmanaged",
+    "unmanaged",
     "worker_pods",
 ]
 
@@ -31,20 +31,12 @@ MERGE_PATCH = "application/merge-patch+json"
 SERVICE_HOST = "KUBERNETES_SERVICE_HOST"
 TIMEOUT_S = 5
 Opener = Callable[..., Any]
+Pods = Callable[[str, bool], bool]
 
 
-class Pods(Protocol):
-    def cost(self, pod: str, busy: bool) -> bool:
-        """Set the busy deletion cost on the pod, or clear it; whether the API server took the patch."""
-        ...
-
-
-class Unmanaged:
-    """The pods port outside a cluster, where no worker runs as a pod: it patches nothing."""
-
-    def cost(self, pod: str, busy: bool) -> bool:
-        """Patch nothing and answer False."""
-        return False
+def unmanaged(pod: str, busy: bool) -> bool:
+    """The pods port outside a cluster, where no worker runs as a pod: patch nothing and answer False."""
+    return False
 
 
 @dataclass(frozen=True)
@@ -57,7 +49,7 @@ class KubePods:
     context: ssl.SSLContext
     opener: Opener = urllib.request.urlopen
 
-    def cost(self, pod: str, busy: bool) -> bool:
+    def __call__(self, pod: str, busy: bool) -> bool:
         """Patch the pod's deletion cost annotation to the busy cost, or to null to clear it; False when the API
         server refused the patch or could not be reached."""
         body = {"metadata": {"annotations": {ANNOTATION: BUSY if busy else None}}}
@@ -73,9 +65,9 @@ class KubePods:
 
 
 def worker_pods(environ: Mapping[str, str], account: Path = ACCOUNT) -> Pods:
-    """Return the pods client of the service account's namespace inside a cluster, else Unmanaged."""
+    """Return the pods client of the service account's namespace inside a cluster, else unmanaged."""
     if SERVICE_HOST not in environ:
-        return Unmanaged()
+        return unmanaged
     api = KubeHttp.in_cluster(environ, account)
     namespace = (account / "namespace").read_text().strip()
     return KubePods(api.server, namespace, api.token_path, api.context)

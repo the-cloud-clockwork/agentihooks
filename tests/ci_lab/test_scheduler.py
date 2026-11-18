@@ -135,7 +135,7 @@ class FakeKube:
     def __init__(self) -> None:
         self.patches: list[tuple[str, bool]] = []
 
-    def cost(self, pod: str, busy: bool) -> bool:
+    def __call__(self, pod: str, busy: bool) -> bool:
         self.patches.append((pod, busy))
         return True
 
@@ -1552,7 +1552,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
         calls["build"] = (environ, redis_client, objects, consumer)
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str])
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], FakeKube())
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 
     class Server:

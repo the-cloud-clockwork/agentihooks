@@ -306,7 +306,7 @@ class FakeKube:
     def __init__(self) -> None:
         self.patches: list[tuple[str, bool]] = []
 
-    def cost(self, pod: str, busy: bool) -> bool:
+    def __call__(self, pod: str, busy: bool) -> bool:
         self.patches.append((pod, busy))
         return True
 
@@ -363,12 +363,12 @@ class RacedKube(FakeKube):
         super().__init__()
         self.jobs, self.job = jobs, job
 
-    def cost(self, pod: str, busy: bool) -> bool:
+    def __call__(self, pod: str, busy: bool) -> bool:
         if not busy and self.job:
             raced = found(self.jobs, self.job)
             assert self.jobs.claim(raced, pod, "raced", 9999)
             self.job = ""
-        return super().cost(pod, busy)
+        return super().__call__(pod, busy)
 
 
 @pytest.mark.feature("lab-worker-deletion-cost")

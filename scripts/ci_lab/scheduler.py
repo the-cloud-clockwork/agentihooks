@@ -43,7 +43,7 @@ from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
-from scripts.ci_lab.pods import Pods, Unmanaged, worker_pods
+from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
 from scripts.ci_lab.queue import Job, Queue
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
@@ -326,7 +326,7 @@ class Ports:
     expander: Expander
     checks: Callable[[str], Poster]
     hotfixes: Callable[[], frozenset[str]]
-    pods: Pods = field(default_factory=Unmanaged)
+    pods: Pods = unmanaged
 
 
 @dataclass(frozen=True)

@@ -48,7 +48,7 @@ def test_a_cost_is_one_merge_patch_on_the_pod_with_the_service_account_token(
     tmp_path: Path, busy: bool, cost: str | None
 ) -> None:
     opener = Opener()
-    assert kube(tmp_path, opener).cost("ci-lab-worker-7d9f-abc", busy) is True
+    assert kube(tmp_path, opener)("ci-lab-worker-7d9f-abc", busy) is True
     [(request, options)] = opener.calls
     assert request.get_method() == "PATCH"
     assert request.full_url == f"{SERVER}/api/v1/namespaces/ci-lab/pods/ci-lab-worker-7d9f-abc"
@@ -63,7 +63,7 @@ def test_a_cost_is_one_merge_patch_on_the_pod_with_the_service_account_token(
 @pytest.mark.feature("lab-worker-deletion-cost")
 def test_a_worker_name_stays_one_path_segment_of_the_pod_url(tmp_path: Path) -> None:
     opener = Opener()
-    kube(tmp_path, opener).cost("../secrets/x", True)
+    kube(tmp_path, opener)("../secrets/x", True)
     assert opener.calls[0][0].full_url == f"{SERVER}/api/v1/namespaces/ci-lab/pods/..%2Fsecrets%2Fx"
 
 
@@ -80,7 +80,7 @@ def test_a_worker_name_stays_one_path_segment_of_the_pod_url(tmp_path: Path) -> 
 )
 def test_a_refused_or_unreachable_api_server_answers_false(tmp_path: Path, error: Exception) -> None:
     opener = Opener(error)
-    assert kube(tmp_path, opener).cost("ci-lab-worker-1", True) is False
+    assert kube(tmp_path, opener)("ci-lab-worker-1", True) is False
     assert len(opener.calls) == 1
 
 
@@ -88,15 +88,15 @@ def test_a_refused_or_unreachable_api_server_answers_false(tmp_path: Path, error
 def test_an_unreadable_token_answers_false_and_sends_nothing(tmp_path: Path) -> None:
     opener = Opener()
     api = pods.KubePods(SERVER, "ci-lab", tmp_path / "missing", CONTEXT, opener)
-    assert api.cost("ci-lab-worker-1", True) is False
+    assert api("ci-lab-worker-1", True) is False
     assert opener.calls == []
 
 
 @pytest.mark.feature("lab-worker-deletion-cost")
 def test_outside_a_cluster_the_pods_port_patches_nothing() -> None:
-    assert isinstance(pods.worker_pods({"KUBERNETES_SERVICE_PORT": "443"}), pods.Unmanaged)
-    assert pods.Unmanaged().cost("ci-lab-worker-1", True) is False
-    assert pods.Unmanaged().cost("ci-lab-worker-1", False) is False
+    assert pods.worker_pods({"KUBERNETES_SERVICE_PORT": "443"}) is pods.unmanaged
+    assert pods.unmanaged("ci-lab-worker-1", True) is False
+    assert pods.unmanaged("ci-lab-worker-1", False) is False
 
 
 @pytest.mark.feature("lab-worker-deletion-cost")

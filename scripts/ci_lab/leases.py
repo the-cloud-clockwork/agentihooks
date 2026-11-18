@@ -3,10 +3,10 @@
 import hmac
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from scripts.ci_lab.outcomes import COMPLETED
-from scripts.ci_lab.pods import Pods, Unmanaged
+from scripts.ci_lab.pods import Pods, unmanaged
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
@@ -34,7 +34,7 @@ class Leases:
     clock: Callable[[], int]
     sleep: Callable[[int], None]
     poll_ms: int
-    pods: Pods = field(default_factory=Unmanaged)
+    pods: Pods = unmanaged
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free
@@ -43,7 +43,7 @@ class Leases:
         grants = self._poll(worker, free_slots, capabilities, wait_ms)
         self.queue.offer(worker, free_slots - sum(grant.slots for grant in grants), self.clock())
         if grants:
-            self.pods.cost(worker, True)
+            self.pods(worker, True)
         return grants
 
     def _poll(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
@@ -108,6 +108,6 @@ def release(queue: Queue, pods: Pods, worker: str) -> None:
     """Clear the deletion cost of the worker's pod once the worker holds no live lease, and mark it busy again when a
     grant landed while the clear was in flight."""
     if not queue.holds(worker):
-        pods.cost(worker, False)
+        pods(worker, False)
         if queue.holds(worker):
-            pods.cost(worker, True)
+            pods(worker, True)
