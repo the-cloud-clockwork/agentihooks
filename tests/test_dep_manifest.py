@@ -2,10 +2,13 @@ import ast
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import sysconfig
+from collections.abc import Iterator
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import pytest
@@ -430,8 +433,24 @@ def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suff
     assert dep_manifest.plan(manifest, [(".github/workflows/test.yml", None, None)], "41")["tests"] == []
 
 
+@pytest.fixture
+def bounded() -> Iterator[None]:
+    """Raise TimeoutError in a test still running after five seconds, with no timeout plugin loaded."""
+
+    def expire(signum: int, frame: FrameType | None) -> None:
+        raise TimeoutError("the test ran past its five second bound")
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, 5)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 @pytest.mark.parametrize("path", [".github/workflows/swarm-smoke.yml", ".github/workflows/test.yml"])
-@pytest.mark.timeout(5, method="signal")
+@pytest.mark.usefixtures("bounded")
 def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_its_tests(path):
     manifest = {
         "version": 2,
@@ -567,7 +586,7 @@ def test_files_a_module_reads_while_imported_during_collection_belong_only_to_it
         "jobs:\n  unit:\n    needs: select\n  split: {}\n  select:\n    steps: [{run: changed}]\n",
     ],
 )
-@pytest.mark.timeout(5, method="signal")
+@pytest.mark.usefixtures("bounded")
 def test_execution_input_plants_still_invalidate_every_test(tmp_path, new):
     manifest = _measure(tmp_path)
     old = "jobs:\n  unit:\n    needs: select\n  split: {}\n  select: {}\n"
@@ -964,7 +983,7 @@ def test_the_changes_never_read_a_changed_non_python_blob(tmp_path: Path) -> Non
     ]
 
 
-@pytest.mark.timeout(5, method="signal")
+@pytest.mark.usefixtures("bounded")
 def test_a_change_to_the_workflow_defaults_changes_how_tests_run() -> None:
     before = {"jobs": {"unit": {"steps": []}, "split": {"steps": []}}}
     after = {**before, "defaults": {"run": {"shell": "bash"}}}
@@ -1195,7 +1214,7 @@ def test_changes_list_both_sides_of_a_rename_and_fail_on_an_unknown_revision(tmp
         dep_manifest.changes(tmp_path, "missing", "HEAD")
 
 
-@pytest.mark.timeout(5, method="signal")
+@pytest.mark.usefixtures("bounded")
 def test_workflow_execution_reads_env_every_producer_and_a_malformed_split_as_changed() -> None:
     def changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
         return dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(after))
