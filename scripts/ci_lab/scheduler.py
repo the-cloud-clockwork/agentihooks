@@ -1220,8 +1220,6 @@ def serve(
             print(action, flush=True)
         for action in relaying.tick():
             print(action, flush=True)
-        for action in relaying.tick():
-            print(action, flush=True)
         done += 1
         sleep(interval_s)
     return 0
