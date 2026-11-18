@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.983 · 2026-11-18
+
+### 2026-11-17 · 5c6db6a990b0 · #11544 · @nestorcolt
+
+**Cap the packaged toolbelt rule at 2000 characters**
+
+This change shrinks the always-loaded `agentihooks-toolbelt.md` rule from 32,816 to 1,579 characters, cutting what every session pays upfront. The bulk of the content—the full trigger-to-command reference—moves verbatim into a new `agentihooks-toolbelt` skill that loads only on demand, while the rule keeps just the six pinned always-on directives and a pointer to the skill. A new test enforces a 2,000-character cap on the rule going forward, and existing tests were updated to read from the skill where relevant content moved, with their assertions unchanged. This reduces per-session overhead without losing any information.
+
 ## v2.17.982 · 2026-11-17
 
 ### 2026-11-17 · 90a4161d7d19 · #11811 · @nestorcolt
