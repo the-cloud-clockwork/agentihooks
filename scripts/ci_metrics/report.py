@@ -1,4 +1,4 @@
-"""Runner cost and lead time over one window, measured the way the 4 November CI at agent scale report measured them.
+"""Runner cost and lead time of agentihooks CI over one window.
 
 Runner minutes are the summed run time of every job that was not skipped. A workflow's runs whose jobs were not read
 are counted at the minutes per run of its read runs. A merged pull request's lead time runs from the first CI run on
@@ -169,7 +169,7 @@ def lead_times(pulls: Iterable[Mapping[str, Any]], runs: Iterable[Mapping[str, A
 
 
 def percentile(values: Sequence[float], share: float) -> float | None:
-    """Linear interpolation between the closest ranks, as the 4 November report computed it."""
+    """Linear interpolation between the closest ranks."""
     if not values:
         return None
     ordered = sorted(values)
@@ -289,8 +289,4 @@ def rows(
         *(cost_row(repo, start, (TIER, name), part, merged, 0.0) for name, part in sorted(tiers.items())),
         *(cost_row(repo, start, (POOL, pool), Tally(), merged, value) for pool, value in sorted(pending.items())),
     ]
-    found = {COST: cost, LEAD: [lead_row(repo, item) for item in leads]}
-    for table, table_rows in found.items():
-        for row in table_rows:
-            table.check(row)  # pyright: ignore[reportUnknownMemberType]
-    return found
+    return {COST: cost, LEAD: [lead_row(repo, item) for item in leads]}

@@ -70,7 +70,7 @@ def pull_request(merged_at: str = "2026-11-04T11:30:00Z") -> dict[str, Any]:
     return {"number": 7, "branch": "feature", "created_at": "2026-11-04T10:05:00Z", "merged_at": merged_at}
 
 
-def test_the_4_november_pull_reproduces_its_lead_time_and_heads_per_branch() -> None:
+def test_the_baseline_pull_reproduces_its_lead_time_and_heads_per_branch() -> None:
     body = pulled()
     leads = report.lead_times(body["merged"], body["runs"], report.at(body["since"]))
     found = report.summary({}, 0, leads, {})
@@ -78,7 +78,7 @@ def test_the_4_november_pull_reproduces_its_lead_time_and_heads_per_branch() -> 
     assert found["heads"] == {"p50": 3.0, "p90": 9.0, "max": 27.0}
 
 
-def test_the_4_november_pull_costs_about_717_runner_minutes_per_merged_pull_request() -> None:
+def test_the_baseline_pull_costs_about_717_runner_minutes_per_merged_pull_request() -> None:
     body = pulled()
     since, until = report.at(body["since"]), report.at(body["until"])
     merged = sum(since <= report.at(item["merged_at"]) <= until for item in body["merged"])
@@ -122,7 +122,8 @@ def test_unread_runs_count_at_the_minutes_per_run_of_their_workflows_read_runs()
 
 
 def test_a_workflow_with_no_read_run_estimates_nothing() -> None:
-    assert report.tally([run(1), run(2)], {}) == report.Tally(runs=2)
+    found = report.tally([run(1), run(2, conclusion="cancelled")], {})
+    assert found == report.Tally(runs=2, cancelled_runs=1)
 
 
 def test_workflow_tallies_sum_into_their_tier() -> None:
@@ -309,7 +310,12 @@ def test_the_tables_are_ci_cost_and_ci_lead_time_in_the_swarm_database() -> None
     assert report.LEAD.ddl().startswith(f"CREATE TABLE IF NOT EXISTS {metrics_outbox.DATABASE}.ci_lead_time (")
 
 
-def test_rows_refuse_a_value_their_table_does_not_accept() -> None:
-    bad = report.Lead(7, "feature", START, START, heads=1, runs=1)
-    with pytest.raises(ValueError, match="needs an event id, a ledger and a positive time"):
-        report.rows("", START, {}, 0, [bad], {})
+def test_every_row_carries_exactly_the_columns_of_its_table() -> None:
+    runs, jobs = window()
+    tiers = report.by_tier(report.tallies(runs, jobs))
+    leads = report.lead_times([pull_request()], runs[:3], OPENED)
+    found = report.rows(REPO, START, tiers, 2, leads, {"anton-oss": 1.5})
+    assert [len(table_rows) for table_rows in found.values()] == [4, 1]
+    for table, table_rows in found.items():
+        for row in table_rows:
+            table.check(row)

@@ -147,8 +147,11 @@ def test_the_end_of_the_window_is_the_given_time_or_the_lagged_hour() -> None:
     assert entry.end_of_window("2026-11-04T09:00:00Z", 2, now) == datetime(2026, 11, 4, 9, tzinfo=UTC)
 
 
-def test_lead_times_read_the_whole_branch_history() -> None:
-    assert entry.OPENED == datetime.min.replace(tzinfo=UTC)
+def test_lead_times_count_a_branch_whose_first_run_is_years_old() -> None:
+    pull = {"number": 7, "branch": "feature", "created_at": "2001-01-01T00:00:00Z", "merged_at": "2026-11-04T13:40:00Z"}
+    first = {**window().runs[0], "created_at": "2001-01-01T00:00:00Z"}
+    [found] = report.lead_times([pull], [first], entry.OPENED)
+    assert found.first_run == datetime(2001, 1, 1, tzinfo=UTC)
 
 
 @pytest.mark.parametrize("missing", ["--repo", "--prometheus"])

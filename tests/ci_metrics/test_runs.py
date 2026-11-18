@@ -86,12 +86,29 @@ def test_merged_pulls_stop_at_an_empty_page(monkeypatch: pytest.MonkeyPatch) -> 
     assert paths == [f"{PULLS}1"]
 
 
-def test_merged_pulls_read_at_most_ten_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_merged_pulls_refuse_when_ten_pages_do_not_reach_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
     paths: list[str] = []
     recent = [pull(1, "2026-11-04T15:00:00Z", None)]
     monkeypatch.setattr(runs, "api", lambda path: paths.append(path) or recent)
-    assert runs.merged_pulls(REPO, SINCE, UNTIL) == []
+    with pytest.raises(SystemExit) as refused:
+        runs.merged_pulls(REPO, SINCE, UNTIL)
+    assert refused.value.code == (
+        "ci metrics refused: 10 pages of closed pull requests did not reach 2026-11-04T13:00:00Z"
+    )
     assert paths == [f"{PULLS}{page}" for page in range(1, 11)]
+
+
+def test_merged_pulls_accept_a_window_the_tenth_page_reaches(monkeypatch: pytest.MonkeyPatch) -> None:
+    paths: list[str] = []
+
+    def fake(path: str) -> list[dict[str, Any]]:
+        paths.append(path)
+        updated = "2026-11-04T12:00:00Z" if path.endswith("page=10") else "2026-11-04T15:00:00Z"
+        return [pull(len(paths), updated, None)]
+
+    monkeypatch.setattr(runs, "api", fake)
+    assert runs.merged_pulls(REPO, SINCE, UNTIL) == []
+    assert len(paths) == 10
 
 
 def test_branch_runs_list_every_run_on_the_quoted_branch(monkeypatch: pytest.MonkeyPatch) -> None:

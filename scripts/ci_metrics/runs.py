@@ -61,7 +61,8 @@ def merged_pulls(repo: str, since: datetime, until: datetime) -> list[dict[str, 
     """Pull requests merged into dev in the window.
 
     Closed pull requests are listed newest update first, and a merge updates its pull request, so paging stops at the
-    first page that reaches an update older than the window.
+    first page that reaches an update older than the window. A run whose page cap ends before that refuses rather
+    than count fewer merges.
     """
     found: list[dict[str, Any]] = []
     oldest = since.strftime(ci_minutes.STAMP)
@@ -70,6 +71,8 @@ def merged_pulls(repo: str, since: datetime, until: datetime) -> list[dict[str, 
         found.extend(listed)
         if not listed or listed[-1]["updated_at"] < oldest:
             break
+    else:
+        raise SystemExit(f"ci metrics refused: {PULL_PAGES} pages of closed pull requests did not reach {oldest}")
     return [
         merged_pull(pull)
         for pull in found
