@@ -97,9 +97,13 @@ def test_swarm_pr_records_a_body_closing_issues_the_task_and_its_group_name(
 ) -> None:
     row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, "abc123", "Closes #5, closes #7, closes #9"))
     row.update(issue_url=f"{REPO}/issues/5", description="Also fixes #7", group_members=["t2"])
-    env[1].rows["t2"]["issue_url"] = f"{REPO}/issues/9"
+    rows = env[1].rows
+    rows["t2"]["issue_url"] = f"{REPO}/issues/9"
+    reads: list[tuple[str, str]] = []
+    monkeypatch.setattr(env[1], "task", lambda slug, task_id: reads.append((slug, task_id)) or rows.get(task_id))
     assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) == 0
     assert (row["pr_url"], row["state"]) == (URL, "pr")
+    assert ("sw", "t2") in reads and {slug for slug, _ in reads} == {"sw"}
 
 
 @pytest.mark.feature("swarm-pr-closes-only-named-issues")
