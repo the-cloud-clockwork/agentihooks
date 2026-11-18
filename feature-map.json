@@ -8319,6 +8319,19 @@
       ]
     },
     {
+      "id": "lab-mutant-unit-unlisted-tests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2658",
+      "behaviour": "Every CI lab mutant unit key also carries the hash of each test module of the head that holds no dependency manifest test, of each conftest pytest loads for such a module and of each test tree module either imports, because the mutation executor runs every test module of the head against the mutants while the stored manifest only names the tests of the base. A head that adds a test module changes the key of each of its mutant units, and an edit to that module changes it again, so no cached mutant verdict graded without the new tests is reused.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.expand_tests.unlisted_test_hashes over a tree and scripts.ci_lab.expand_mutation.mutant_units over a fixture repository",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_lacks",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_keys_every_test_module_the_mutant_runner_runs",
+        "tests/ci_lab/test_expand_mutation.py::test_an_unlisted_test_module_enters_the_key_of_every_function"
+      ]
+    },
+    {
       "id": "lab-reusable-workflow-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-reusable-workflows",

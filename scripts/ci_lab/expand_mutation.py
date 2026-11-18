@@ -109,7 +109,12 @@ def module_digest(source: str) -> str:
 
 
 def function_units(
-    root: Path, path: str, changed: set[int], runner: str, covering: Mapping[str, Mapping[str, str]]
+    root: Path,
+    path: str,
+    changed: set[int],
+    runner: str,
+    covering: Mapping[str, Mapping[str, str]],
+    unlisted: Mapping[str, str],
 ) -> list[Unit]:
     """Return one mutant unit for each function mutmut trampolines in path whose lines meet changed."""
     source = (root / path).read_text()
@@ -128,22 +133,28 @@ def function_units(
         class_name = owner.name.value if isinstance(owner, cst.ClassDef) else None
         name = get_mutant_name(Path(path), mangle_function_name(name=function.name.value, class_name=class_name))
         text = wrapper.module.code_for_node(function.with_changes(leading_lines=()))
-        key = digest([name, text, module, runner, dict(covering.get(name, {}))])
+        key = digest([name, text, module, runner, dict(covering.get(name, {})), dict(unlisted)])
         units.append(Unit("mutant", key, tuple(f"{name}__mutmut_{index}" for index in range(1, len(mutations) + 1))))
     return units
 
 
 def mutant_units(
-    root: Path, changes: Mapping[str, Iterable[int]], covering: Mapping[str, Mapping[str, str]]
+    root: Path,
+    changes: Mapping[str, Iterable[int]],
+    covering: Mapping[str, Mapping[str, str]],
+    unlisted: Mapping[str, str],
 ) -> tuple[Unit, ...]:
     """Name every mutant of each changed function and key it by the inputs that decide its verdicts.
 
     changes maps each mutated source file, a Python file present under root, to its changed lines; covering maps a
-    qualified mutmut function name to the fingerprints of the tests that cover it.
+    qualified mutmut function name to the fingerprints of the tests that cover it; unlisted maps each test module
+    under root that holds no manifest test to its hash, and enters every key, since the mutant runner runs it too.
     """
     runner = runner_digest(root)
     return tuple(
-        unit for path in sorted(changes) for unit in function_units(root, path, set(changes[path]), runner, covering)
+        unit
+        for path in sorted(changes)
+        for unit in function_units(root, path, set(changes[path]), runner, covering, unlisted)
     )
 
 

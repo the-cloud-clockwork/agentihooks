@@ -132,6 +132,19 @@ def fingerprints(
     return keys
 
 
+def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
+    """Return the sha256 of every test module of the tree that holds no manifest test, of each conftest pytest loads
+    for such a module and of each test tree module either imports."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    reached: set[str] = set()
+    for path in tree:
+        if _test_module(path) and path not in listed:
+            for parent in PurePosixPath(path).parents:
+                _reached(tree, (parent / "conftest.py").as_posix(), reached)
+            _reached(tree, path, reached)
+    return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
+
+
 def _parts(tests: list[str], seconds: Mapping[str, float], target: float) -> list[tuple[str, ...]]:
     """Return the fewest longest first balanced parts of one file's tests that each fit the target."""
     ordered = sorted(tests, key=lambda test: -seconds[test])
