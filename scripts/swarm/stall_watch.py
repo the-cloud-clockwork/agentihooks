@@ -310,7 +310,7 @@ def _alert(watch, mail, task, case, minutes, action, limit):
     text = ALERT.format(
         slug=watch.slug, title=task.get("title") or "no title", wait=wait, **{**row, "case": CASES[case]}
     )
-    sent = cast(Item, inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}"))
+    sent = cast(Item, inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}:{watch.now_ms}"))
     row["item"] = sent.id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
     for item in earlier:

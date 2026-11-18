@@ -131,7 +131,7 @@ def test_past_the_report_limit_the_master_hears_the_task_its_age_and_last_steps_
     assert "t1" in item.text and OWNER in item.text and " 90 minutes " in item.text
     assert "Last steps: pushed the red test; fixed the push guard; waiting on the queue. " in item.text
     assert item.text.startswith("Overrun on swarm sw: ") and " Only its context limit hands it off. " in item.text
-    assert (item.ref, item.task) == ("sw:overrun:t1", "t1")
+    assert (item.ref, item.task) == (f"sw:overrun:t1:{REPORT}", "t1")
     assert actions == [f"overrun: told master@sw that {OWNER} has run 90 minutes on task t1"]
     assert swarm.agent_inbox() == []
     assert swarm.tick(REPORT + 10 * MINUTE) == []

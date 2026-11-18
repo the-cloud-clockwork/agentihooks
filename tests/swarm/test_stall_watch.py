@@ -648,7 +648,7 @@ def test_a_reopen_writes_the_exact_ledger_update_comment_alert_and_seat_exit():
     assert swarm.ledger.comments == [("t1", comment, "swarm")]
     [item] = swarm.inbox()
     assert item.text == _alert(case="green", minutes=10, wait=20, title="Fix it")
-    assert (item.sender, item.ref) == ("swarm", "sw:stall:t1")
+    assert (item.sender, item.ref) == ("swarm", f"sw:stall:t1:{START + 10 * MINUTE}")
     exit_record = InboxStore(swarm.store.redis).seats.exit_of(OWNER)
     assert (exit_record["seat"], exit_record["reason"]) == ("eng-1@sw", "stopped")
 

@@ -228,7 +228,7 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
         'protocol step is to attempt 1 of 2: agentihooks swarm sw resolve attempt tasks/t1 --tried "<what you tried>" '
         '--command "<the command run>" --output "<its output>".'
     )
-    assert item.ref == "sw:priority:tasks/t1" and not item.fyi
+    assert item.ref == "sw:priority:tasks/t1:100000" and not item.fyi
     assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
     assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
     assert texts(store, ENG_SEAT) == []
@@ -260,7 +260,7 @@ def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_m
     run(store, doc)
     doc["_meta"]["events"] = [e for e in doc["_meta"]["events"] if e["target"] != "followups/f1"]
     run(store, doc)
-    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
+    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2:100000"]
 
 
 def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):
