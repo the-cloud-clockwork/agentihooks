@@ -89,15 +89,6 @@ def launched(self, slug, request):
     return True
 
 
-# ok: feature-work-folder-follows-the-task
-def launched(self, slug, request):
-    if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
-        return False
-    ledger_workspace.launched_on(self.store, slug, request["task"], request["hive"])
-    cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
-    return True
-
-
 # ruleid: feature-work-folder-follows-the-task
 def _seeds(self, slug, task, doc, name):
     earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
