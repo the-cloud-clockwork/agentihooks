@@ -109,5 +109,5 @@ def push_mark(payload: dict[str, Any], environ: Any = None, redis: Any = None, n
         redis = client(env)
     repo, branch = pr_wait.pushed_where(command, payload.get("cwd") or ".")
     at = int(time.time() * 1000) if now_ms is None else now_ms
-    pr_wait.mark(redis, slug, name, at, repo, branch)
+    pr_wait.mark(redis, slug, name, at, repo, branch, "")
     return True

@@ -7,9 +7,10 @@ on its merge while it sits in the merge queue, on its checks otherwise, so no ag
 
 import re
 from collections.abc import Callable
+from typing import Any
 
 from scripts.gates.progress import Progress
-from scripts.swarm import idle, merge_queue, waits
+from scripts.swarm import idle, lab_wait, merge_queue, waits
 from scripts.swarm.store import SwarmError
 
 TRIGGERS = re.compile(
@@ -35,7 +36,7 @@ def triggered(command: str | None) -> bool:
     return bool(TRIGGERS.search(command)) or any(kind == "push" for kind, _, _ in actions(command, None))
 
 
-def mark(redis, slug: str, agent: str, at: int, repo: str, branch: str) -> None:
+def mark(redis: Any, slug: str, agent: str, at: int, repo: str, branch: str, head: str) -> None:
     key = Progress(redis, slug).key(agent)
     redis.hdel(key, "looked")
     redis.hset(key, mapping={"pushed_at": at, "pushed_repo": repo, "pushed_branch": branch})
@@ -61,6 +62,22 @@ def pushed_where(command: str, cwd: str) -> tuple[str, str]:
     return "", ""
 
 
+def pushed_head(command: str, cwd: str) -> str:
+    """The commit a git push in the command sends to its one lab grade ref, '' for any other push."""
+    return ""
+
+
+def lab_grade(lab_url: str, head: str) -> str:
+    """The grade url of the head on the lab at lab_url while the lab holds a grade of it, '' otherwise."""
+    if not (lab_url and head):
+        return ""
+    url = f"{lab_url.rstrip('/')}/grades/{head}"
+    try:
+        return url if lab_wait.grades(url) else ""
+    except (OSError, ValueError):
+        return ""
+
+
 def forge_pull(repo: str, branch: str) -> str:
     """The open pull request whose head is the branch, '' when there is none or the forge cannot say."""
     found = GITHUB.search(repo)
@@ -82,7 +99,13 @@ def pull_of(redis, slug, agent, pushed, task, now_ms, forge):
 
 
 def enforce_pass(
-    store, slug: str, rows: dict, github: Callable, now_ms: int, forge: Callable[[str, str], str] = forge_pull
+    store: Any,
+    slug: str,
+    rows: dict[str, dict[str, Any]],
+    github: Callable[[str], Any],
+    now_ms: int,
+    forge: Callable[[str, str], str] = forge_pull,
+    grade: Callable[[str], str] | None = None,
 ) -> list[str]:
     actions = []
     for agent in store.agents(slug):

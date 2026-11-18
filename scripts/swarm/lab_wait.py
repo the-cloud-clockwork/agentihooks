@@ -1,12 +1,20 @@
 """Lab check waits: a wait on a check run, such as a lab or lab shadow gate's, ends when GitHub reports it completed."""
 
 import re
+from typing import Any
 
 from scripts.swarm import run_wait
 
 CHECK_URL = re.compile(
     r"https://github\.com/([\w.-]+/[\w.-]+)/(?:runs/([0-9]+)|pull/[0-9]+/checks\?check_run_id=([0-9]+))"
 )
+GRADE_URL = re.compile(r"https?://[^\s?#]+/grades/[0-9a-f]{40}(?:[0-9a-f]{24})?")
+TIMEOUT_S = 3
+
+
+def grades(url: str) -> list[dict[str, Any]]:
+    """Every grade the lab serves at a grade url, as its GET /grades/<sha> route answers."""
+    return []
 
 
 def resolution(target: str) -> str:
