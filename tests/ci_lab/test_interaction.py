@@ -9,9 +9,8 @@ import yaml
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from scripts import ci_select
+from scripts import ci_select, dep_manifest
 from scripts.ci_lab import delivery, interaction
-from tests import dep_manifest
 
 Change = tuple[str, str | None, str | None]
 

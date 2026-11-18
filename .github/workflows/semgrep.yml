@@ -58,7 +58,7 @@ jobs:
           cp -r "$RULES" "$copy/rules"
           : > "$copy/.semgrepignore"
           (cd "$copy" && semgrep --metrics off --test --config rules rules)
-          semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
+          semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
 
       - name: Outage rules for tests hold on every test file
         env:
@@ -278,10 +278,20 @@ jobs:
       - name: A chart version bump leaves every pod template unchanged
         run: |
           script=tests/ci_charts/chart_pod_templates.py
+          empty="$(mktemp -d -p "$RUNNER_TEMP")"
+          if [[ "$(python "$RUNNER_TEMP/grader/$script" --root "$empty" 2>&1)" != *"No chart found under deploy"* ]]; then
+            echo "::error::The protected grader's copy of $script does not grade the tree --root names, so nothing trusted can grade the head's charts."
+            exit 1
+          fi
           python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
 
       # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
       - name: Charts render no CronJob outside the scheduler
         run: |
           script=tests/ci_charts/chart_timers.py
+          empty="$(mktemp -d -p "$RUNNER_TEMP")"
+          if [[ "$(python "$RUNNER_TEMP/grader/$script" --root "$empty" 2>&1)" != *"No chart found under deploy"* ]]; then
+            echo "::error::The protected grader's copy of $script does not grade the tree --root names, so nothing trusted can grade the head's charts."
+            exit 1
+          fi
           python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"

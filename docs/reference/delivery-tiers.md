@@ -377,7 +377,7 @@ For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported b
 
 ## Lab merge group interaction rule
 
-For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `tests.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
+For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
 
 | Clause | `FULL` when | Read from |
 |---|---|---|
@@ -386,7 +386,7 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `overlap` | two entries change a common Python module; a shared file that is no module, such as `feature-map.json`, does not count | each entry's changes |
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
-When no clause holds, the result is the union of `tests.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
 
 ## Queue shard sizing
 
@@ -729,7 +729,7 @@ The planner has no setting of its own. Its inputs are:
 | Stored durations | `.test_durations` at the repository root, which each unit job rewrites from the latest dev durations of its Python version (`tests.dev_durations.adopt`: the shared file overlaid with `.test_durations-<version>`) when a dev durations cache exists |
 | Shard count | `--shard N/M`: 20 for the 3.12 unit job, or the queue plan's `total` on merge groups |
 | Workers | 4 in the planner call in `tests/conftest.py` and `WORKERS` in `tests/queue_shards.py` |
-| Source size cost | `SECONDS_PER_SOURCE_BYTE` in `tests/shards.py` |
+| Source size cost | `SECONDS_PER_SOURCE_BYTE` in `scripts/shard_sizing.py` |
 
 To keep a set of tests together, put them in one file with one group:
 
@@ -749,7 +749,8 @@ The planner is plain Python and runs without pytest. From a checkout, this print
 python - tests/test_remote_control_mutation_baseline.py <<'EOF'
 import json, sys
 from pathlib import Path
-from tests.shards import FIRST_SHARD_FILES, assign_nodes, discover_test_files, grouped_files, source_sizes
+from scripts.shard_sizing import FIRST_SHARD_FILES, source_sizes
+from tests.shards import assign_nodes, discover_test_files, grouped_files
 
 root, target, shards = Path("."), sys.argv[1], 20
 durations = {**json.loads((root / ".test_durations").read_text()), **json.loads((root / ".test_durations-3.12").read_text())}

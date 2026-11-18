@@ -61,6 +61,9 @@ exit "$status"
         " scripts/packaging/stability-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
+        "docker run --rm --network none --entrypoint python local/agentihooks-swarm:clients-check"
+        " -c 'import scripts.ci_lab.scheduler, scripts.ci_lab.interaction, scripts.ci_lab.expand_tests,"
+        " scripts.ci_test_plan'",
         'rm -rf "$RUNNER_TEMP/swarm-smoke-layers"\n'
         'mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"\n',
         'mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"\n'

@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:79b8a09f88909ed9938c38ac374bc690d24e188f2c7036d8a8766ca64271e908": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers, including the temp table name, resolve case insensitively, so the uppercased insert writes the same rows."
+  }
+}

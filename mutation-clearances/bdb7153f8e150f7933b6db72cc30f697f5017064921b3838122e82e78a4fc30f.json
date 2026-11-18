@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_invalidated:67c36f5383b803a0bedfccc0a15f66f45f277bf2aa96cd6a8a5be80d4d45b4be": {
+    "reader": "standards_reader",
+    "reason": "rsplit(\"/\")[-1] equals rsplit(\"/\", 1)[-1]; same reasoning as mutmut_57."
+  }
+}

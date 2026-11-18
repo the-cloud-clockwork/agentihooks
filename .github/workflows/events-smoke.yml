@@ -60,4 +60,4 @@ jobs:
         shell: bash
         run: |
           python -m pytest tests/events_smoke --confcutdir=tests/events_smoke -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/events-smoke.log"
-          grep -q ' 6 passed' "$RUNNER_TEMP/events-smoke.log" || { echo '::error::The six events launch seams did not all run.'; exit 1; }
+          grep -q ' 8 passed' "$RUNNER_TEMP/events-smoke.log" || { echo '::error::The eight events smoke seams did not all run.'; exit 1; }

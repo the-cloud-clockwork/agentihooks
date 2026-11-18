@@ -12,7 +12,7 @@ from scripts import ci_wiring
 from scripts.ci_lab import run_static, static_gates
 from scripts.ci_lab.sandbox import PortAllocator
 from scripts.ci_lab.static_gates import StaticGate
-from tests.dep_manifest import _git
+from scripts.dep_manifest import _git
 
 ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = "tests/SIZE_ALLOWLIST.json"

@@ -1026,7 +1026,6 @@
   "tests/coverage_history.py": 3,
   "tests/coverage_stability.py": 1,
   "tests/dep_child.py": 2,
-  "tests/dep_manifest.py": 1,
   "tests/deployment/test_worker_brain.py": 1,
   "tests/deployment/test_worker_hive.py": 1,
   "tests/doctor/test_ci_measure.py": 8,

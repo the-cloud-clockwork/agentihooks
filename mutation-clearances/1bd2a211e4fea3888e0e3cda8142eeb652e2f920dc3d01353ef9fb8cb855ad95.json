@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_line_units:9cdcc848c405d8fc6559efded79008d07964a27f0cb612918167930b70fa4478": {
+    "reader": "standards_reader",
+    "reason": "each def's line number is unique, so the default tuple sort orders spans exactly as key=span[0] does."
+  }
+}
