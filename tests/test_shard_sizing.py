@@ -15,6 +15,14 @@ def test_a_unit_joins_the_shard_that_already_collects_its_file() -> None:
     assert assign_work(seconds, serial, collection, 2, 1, None, files) == [["a", "c"], ["b"]]
 
 
+def test_a_unit_joins_the_shard_that_already_collects_its_file_when_the_costs_tie() -> None:
+    seconds = {"a": 0.0, "b": 0.0}
+    serial = {"a": 0.1, "b": 0.0}
+    collection = {"a": 0.1, "b": 0.2}
+    files = {"a": "g", "b": "g"}
+    assert assign_work(seconds, serial, collection, 2, 1, None, files) == [["a", "b"], []]
+
+
 def test_a_shard_that_collects_two_files_carries_both_collection_costs() -> None:
     seconds = {"a": 8.0, "b": 4.8, "c": 0.5, "d": 0.1}
     collection = {"a": 1.0, "b": 1.0, "c": 3.0, "d": 0.1}

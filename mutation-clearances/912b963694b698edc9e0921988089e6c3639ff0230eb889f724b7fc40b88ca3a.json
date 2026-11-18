@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x__spans:13164a91959ad8e30f4d5dcb63d6e4a59dd78f8a4b522f3728224e422588a0bb": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument at runtime; the change is type-only."
+  }
+}

@@ -431,6 +431,7 @@ def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suff
 
 
 @pytest.mark.parametrize("path", [".github/workflows/swarm-smoke.yml", ".github/workflows/test.yml"])
+@pytest.mark.timeout(5, method="signal")
 def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_its_tests(path):
     manifest = {
         "version": 2,
@@ -566,6 +567,7 @@ def test_files_a_module_reads_while_imported_during_collection_belong_only_to_it
         "jobs:\n  unit:\n    needs: select\n  split: {}\n  select:\n    steps: [{run: changed}]\n",
     ],
 )
+@pytest.mark.timeout(5, method="signal")
 def test_execution_input_plants_still_invalidate_every_test(tmp_path, new):
     manifest = _measure(tmp_path)
     old = "jobs:\n  unit:\n    needs: select\n  split: {}\n  select: {}\n"
@@ -783,6 +785,17 @@ def test_a_packed_manifest_without_lines_unpacks_without_lines():
     assert dep_manifest.unpack(dep_manifest.pack(manifest)) == manifest
 
 
+def test_a_packed_manifest_writes_its_own_fields_before_the_packed_tests_and_lines() -> None:
+    manifest = {
+        "lines": {"t": {"hooks/a.py": [1, 2]}},
+        "tests": {"t": {"units": [0], "files": ["x"], "escapes": False}},
+        "version": 2,
+        "commit": "c",
+        "units": ["hooks/a.py::f"],
+    }
+    assert list(dep_manifest.pack(manifest)) == ["version", "commit", "units", "tests", "lines", "files", "spans"]
+
+
 @pytest.mark.feature("packed-manifest-outside-files")
 def test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout() -> None:
     manifest = {
@@ -884,6 +897,74 @@ def test_a_test_that_runs_module_level_code_depends_on_the_module_unit(tmp_path:
     assert manifest["units"] == ["hooks/sample.py::<module>"]
 
 
+def test_a_non_ascii_function_keeps_its_unit_name_under_a_latin_1_locale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "sample.py").write_text("def café(value):\n    return value\n", encoding="utf-8")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_m.py::test_cafe|run")
+    data.add_arcs({str(package / "sample.py"): [(-1, 2), (2, -1)]})
+    data.write()
+    read = Path.read_text
+
+    def latin_1_locale(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        return read(path, encoding=encoding or "latin-1", errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", latin_1_locale)
+    manifest = dep_manifest.build(tmp_path / ".coverage", [], tmp_path, "abc", "env")
+    assert manifest["units"] == ["hooks/sample.py::<module>", "hooks/sample.py::café"]
+
+
+def _changed_repository(root: Path) -> None:
+    """Commit a base, then change a Python file, rename another unchanged and change a text file."""
+
+    def git(*args: str) -> str:
+        command = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", *args]
+        return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+
+    git("init", "-q", "-b", "main")
+    (root / "hooks").mkdir()
+    (root / "hooks" / "a.py").write_text("def a():\n    return 1\n")
+    (root / "hooks" / "moved.py").write_text("x = 1\n")
+    (root / "notes.md").write_text("a\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    (root / "hooks" / "a.py").write_text("def a():\n    return 2\n")
+    (root / "notes.md").write_text("b\n")
+    git("mv", "hooks/moved.py", "hooks/renamed.py")
+    git("commit", "-qam", "head")
+
+
+def _drop_blob(root: Path, path: str) -> None:
+    """Delete the loose object holding the head revision of path."""
+    blob = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", f"HEAD:{path}"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (root / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+
+@pytest.mark.parametrize("path", ["hooks/a.py", "hooks/renamed.py"])
+def test_the_changes_refuse_a_changed_python_file_whose_blob_is_missing(tmp_path: Path, path: str) -> None:
+    _changed_repository(tmp_path)
+    _drop_blob(tmp_path, path)
+    with pytest.raises(subprocess.CalledProcessError):
+        dep_manifest.changes(tmp_path, "HEAD~1", "HEAD")
+
+
+def test_the_changes_never_read_a_changed_non_python_blob(tmp_path: Path) -> None:
+    _changed_repository(tmp_path)
+    _drop_blob(tmp_path, "notes.md")
+    assert dep_manifest.changes(tmp_path, "HEAD~1", "HEAD") == [
+        ("hooks/a.py", "def a():\n    return 1\n", "def a():\n    return 2\n"),
+        ("hooks/moved.py", "x = 1\n", None),
+        ("hooks/renamed.py", None, "x = 1\n"),
+        ("notes.md", None, None),
+    ]
+
+
+@pytest.mark.timeout(5, method="signal")
 def test_a_change_to_the_workflow_defaults_changes_how_tests_run() -> None:
     before = {"jobs": {"unit": {"steps": []}, "split": {"steps": []}}}
     after = {**before, "defaults": {"run": {"shell": "bash"}}}
@@ -1114,6 +1195,7 @@ def test_changes_list_both_sides_of_a_rename_and_fail_on_an_unknown_revision(tmp
         dep_manifest.changes(tmp_path, "missing", "HEAD")
 
 
+@pytest.mark.timeout(5, method="signal")
 def test_workflow_execution_reads_env_every_producer_and_a_malformed_split_as_changed() -> None:
     def changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
         return dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(after))
