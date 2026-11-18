@@ -1,7 +1,7 @@
 import json
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -284,7 +284,17 @@ def restore(removed: list[dict], run, displaced, steps: list, errors: list) -> l
     return restored
 
 
-def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=None) -> dict:
+def prioritize(
+    url: str,
+    run: Callable[..., Any] = subprocess.run,
+    journal: Any = None,
+    ahead: Collection[str] = (),
+    displaced: Any = None,
+    lab: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Move the pull request to the front of the dev merge queue, restore every entry it displaced in order and mark
+    its head hotfix through ``lab``, whether or not a queue step failed; the journal's priority record carries the
+    queue steps and the lab's acknowledgement under ``lab``."""
     displaced = displaced or Untracked()
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
@@ -300,6 +310,7 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []
+    acknowledged = None
     try:
         removed = []
         try:
@@ -315,7 +326,12 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=N
                     graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
             except SwarmError as exc:
                 errors.append(str(exc))
-        return {"url": url, "displaced": restore(removed, run, displaced, steps, errors), "errors": errors}
+        restored = restore(removed, run, displaced, steps, errors)
+        if lab is not None:
+            acknowledged = lab(raw["headRefOid"])
+        return {"url": url, "displaced": restored, "errors": errors, "lab": acknowledged}
     finally:
         if journal is not None:
-            journal.write("priority", url, raw["headRefOid"], before, journal.groups(), errors, steps=steps)
+            journal.write(
+                "priority", url, raw["headRefOid"], before, journal.groups(), errors, steps=steps, lab=acknowledged
+            )
