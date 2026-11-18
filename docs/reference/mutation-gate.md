@@ -10,6 +10,8 @@ The Mutation workflow runs beside Tests for pull requests into dev. It discovers
 
 Open the draft pull request into `dev` at the first push; for a stacked branch, open it into its dependency branch. A branch push runs no mutation: the pull request Tests run grades mutation on the pull request head, and the Proofs workflow runs focused mutation proofs. Tests and mutation runs execute in CI only.
 
+When the base branch's `delivery.yaml` names `mutation` under `lab.authoritative`, the Tests `mutation` job is skipped on pull request runs and the `lab-verdict` job waits for the lab's mutation check run instead ([Lab authority and back pressure](delivery-tiers.md#lab-authority-and-back-pressure)).
+
 ## Required gate proof
 
 `mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`

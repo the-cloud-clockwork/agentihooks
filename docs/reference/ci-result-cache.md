@@ -10,6 +10,8 @@ One CI algorithm for every repo and workflow: a check whose real inputs did not 
 
 Status: slices 1 to 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered), [Slice 5 as delivered](#slice-5-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)), with full scope pull request reuse added to slice 5 (see [Full scope pull request reuse as delivered](#full-scope-pull-request-reuse-as-delivered)) and reuse of a pull request's own earlier runs added after it (see [Pull request branch reuse as delivered](#pull-request-branch-reuse-as-delivered)); slice 7 is design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
+For each pull request gate that the base branch's `delivery.yaml` names under `lab.authoritative`, the lab verdict cache supersedes slices 1 to 6: the Actions job of that gate is skipped and the lab's cached verdict grades it ([Lab authority and back pressure](delivery-tiers.md#lab-authority-and-back-pressure)). Gates the list does not name, and the queue and promotion tiers, still use the slices below.
+
 ## Before numbers
 
 Measured on the Tests workflow from 2026-10-04 to 2026-10-11 with the Actions API. Raw runs, job logs and the classification scripts sit in the task work folder; every count below is tied to run ids there.

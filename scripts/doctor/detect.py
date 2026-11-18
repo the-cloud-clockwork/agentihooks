@@ -5,10 +5,13 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from functools import cache
+from pathlib import Path
 from threading import Lock
+from typing import Any
 
 from hooks.context import context_recycle
 from scripts.doctor import (
@@ -20,6 +23,7 @@ from scripts.doctor import (
     health,
     hive_pools,
     inbox,
+    lab,
     master_launches,
     master_prompts,
     read,
@@ -35,6 +39,7 @@ from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
 from scripts.swarm import commands, idle, input_wait, status, timing
 from scripts.swarm.health import activity
+from scripts.swarm.health.findings import Finding
 from scripts.swarm.runtime import SWARM_HOME
 
 HOUR_MS = 3_600_000
@@ -137,7 +142,15 @@ def _ci(store, tasks, now_ms):
     return [f for record in records for f in ci.findings(record, now_ms)]
 
 
-def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
+def readers(
+    store: Any,
+    ledger: Any,
+    slug: str,
+    now_ms: int,
+    environ: Mapping[str, str] | None = None,
+    home: Path = SWARM_HOME,
+    telemetry: bool | Callable[..., Any] = True,
+) -> dict[str, Callable[[], list[Finding]]]:
     """`telemetry` is False to skip the trace reader, or the client factory it reads through instead of the default."""
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
@@ -160,6 +173,8 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "startup": lambda: _starts(store, slug, now_ms),
         "headroom": lambda: _headroom(store, now_ms),
         "hive pool": lambda: hive_pools.read(store, slug, now_ms),
+        "lab": lambda: lab.read(store, slug, now_ms, env),
+        "lab gate": lambda: lab.read_gates(store, slug, env),
         "context overrun": lambda: _overruns(store, slug),
         "master prompt": lambda: _master_prompts(store, slug, now_ms),
         "ci": lambda: _ci(store, tasks(), now_ms),
