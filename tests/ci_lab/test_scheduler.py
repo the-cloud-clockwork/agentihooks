@@ -2144,6 +2144,29 @@ def test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_la
     assert len({units[0].key for units in found}) == 3
 
 
+@pytest.mark.feature("lab-mutant-unit-unlisted-reads")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("fixture", ["tests/fixtures/gamma.json", "scripts/gamma.json"])
+def test_a_promotion_head_rekeys_a_mutant_unit_when_a_file_a_test_module_the_manifest_lacks_reads_changes(
+    tmp_path: Path, fixture: str
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    reads = (
+        "from pathlib import Path\n\n\n"
+        f"def test_third():\n    assert (Path(__file__).parents[1] / {fixture!r}).read_text()\n"
+    )
+    added = _commit(
+        suite.repo,
+        {"scripts/alpha.py": ALPHA.replace("return 1", "return 4"), GAMMA: reads, fixture: '{"value": 1}\n'},
+    )
+    edited = _commit(suite.repo, {fixture: '{"value": 2}\n'})
+    found = [expander.expand(suite.request(Priority.PROMOTION, head)).gates["mutation"] for head in (added, edited)]
+    assert [[executors.function_of(unit.members[0]) for unit in units] for units in found] == [[FIRST]] * 2
+    assert found[0][0].key != found[1][0].key
+
+
 @pytest.mark.feature("lab-scheduler-mutation-units")
 @pytest.mark.usefixtures("staticless")
 def test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_deletes(tmp_path: Path) -> None:
