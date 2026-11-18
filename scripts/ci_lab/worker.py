@@ -23,6 +23,7 @@ from urllib.parse import urlencode
 
 from scripts import ci_cpu_quota
 from scripts.ci_lab import contract
+from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.units import Unit
 from scripts.scheduler.process_interval import Interval
 
@@ -69,6 +70,11 @@ class Finished:
     outcome: str
     report: Path
     log: Path
+
+    def __post_init__(self) -> None:
+        """Refuse an outcome the leases refuse, so an executor answering one raises and its lease is reaped."""
+        if self.outcome not in COMPLETED:
+            raise ValueError(f"unknown lab unit outcome {self.outcome!r}")
 
 
 Executor = Callable[[Lease], Finished]
