@@ -419,3 +419,27 @@ def test_report_maps_overloaded_implementations_instead_of_stubs(tmp_path, monke
     rows = collect_results(Path("hooks/sample.py"))
     assert rows[0]["lines"] == [6]
     assert evaluate("hooks/sample.py", rows, {6}, {})["failures"] == rows
+
+
+def test_report_rebuilds_the_graded_module_when_a_test_overwrote_the_mutants_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (tmp_path / name).mkdir(parents=True)
+    (tmp_path / "hooks/sample.py").write_text("def value():\n    return 7\n")
+    (tmp_path / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    (tmp_path / "changed-lines.json").write_text(json.dumps({"hooks/sample.py": {"lines": [2], "tests": []}}))
+    (tmp_path / "mutants/hooks/sample.py").write_text("pass\n")
+    meta = {"exit_code_by_key": {"hooks.sample.x_value__mutmut_1": 0}, "durations_by_key": {}}
+    (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps({**meta, "estimated_durations_by_key": {}}))
+    monkeypatch.chdir(tmp_path)
+    [row] = collect_results(Path("hooks/sample.py"))
+    assert row["status"] == "survived"
+    assert row["lines"] == [2]
+    assert (
+        row["diff"] == "--- hooks/sample.py\n+++ mutant\n@@ -1,2 +1,2 @@\n def value():\n-    return 7\n+    return 8"
+    )

@@ -85,12 +85,25 @@ def undecorated(node: ast.stmt) -> str:
     return ast.dump(type(node)(**{**vars(node), "decorator_list": []}))
 
 
+def graded_module(path: Path) -> object:
+    """Rebuild the mutated module from the workspace source and the changed lines the grader mutated."""
+    import libcst as cst
+    from mutmut.__main__ import read_mutants_module
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    selection = Path("changed-lines.json")
+    if not selection.is_file():
+        return read_mutants_module(path)
+    lines = set(json.loads(selection.read_text())[path.as_posix()]["lines"])
+    return cst.parse_module(selected_mutants(path.as_posix(), path.read_text(), lines)[0])
+
+
 def collect_results(path: Path, shard: tuple[int, int] = (0, 1)) -> list[dict]:
     import libcst as cst
     from mutmut.__main__ import (
         orig_function_and_class_names_from_key,
         read_mutant_function,
-        read_mutants_module,
         read_original_function,
     )
     from mutmut.utils.format_utils import get_mutant_name
@@ -100,7 +113,7 @@ def collect_results(path: Path, shard: tuple[int, int] = (0, 1)) -> list[dict]:
     parsed = parse_results(text)
     owned = shard_names([key for key, _ in parsed], shard)
     results = [(key, status) for key, status in parsed if key in owned and key.rpartition(".")[0] + "." == prefix]
-    module = read_mutants_module(path)
+    module = graded_module(path)
     source = path.read_text()
     rows = []
     for key, status in results:

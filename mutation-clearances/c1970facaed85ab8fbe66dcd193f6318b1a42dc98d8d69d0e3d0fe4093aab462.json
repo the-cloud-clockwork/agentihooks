@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_graded_module:dd6bb0e9111efb62935163ecca3a345b39af9d39c31de2c1c7474957f668b295": {
+    "reader": "standards_reader",
+    "reason": "The filename argument reaches only the mutmut pragma visitor, where it appears inside pragma parse error message text. selected_mutants returns the same code and names for any filename, because the changed lines set is the only input that shapes the output. A pragma error raises the same exception type either way, and the grader selection step runs on the same source before the report step, so a pragma error aborts there first with the real filename."
+  }
+}
