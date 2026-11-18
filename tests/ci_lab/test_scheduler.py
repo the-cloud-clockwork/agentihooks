@@ -1542,7 +1542,7 @@ def test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds(
     objects = LocalObjects(tmp_path / "objects")
     objects.write_once(f"{manifest_folder(SLUG)}older.json", packed_file(SUITE_MANIFEST, "older"))
     stored = scheduler.StoredManifests(objects, Fetches({"newer": packed_file(SUITE_MANIFEST, "newer")}))
-    stored.note(REPO, (SECOND_TEST, "tests/test_gone.py::test_gone"), ["docs/p.md", "docs/a.md"])
+    scheduler.note_outside(objects, REPO, (SECOND_TEST, "tests/test_gone.py::test_gone"), ["docs/p.md", "docs/a.md"])
     records = SUITE_MANIFEST["tests"]
     second = {**records[SECOND_TEST], "outside": ["docs/a.md", "docs/c.md", "docs/p.md"]}
     for commit in ("newer", "older"):

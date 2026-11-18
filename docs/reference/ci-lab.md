@@ -1201,7 +1201,7 @@ never folds green on an empty unit job.
 
 A batch verdict lists the files the batch opened outside its tests' manifest records. When the
 scheduler stores the verdict of a graded job whose uploaded report carries a non empty `outside`
-list, whatever its graded outcome, `StoredManifests.note` writes it as a note of the repository at
+list, whatever its graded outcome, `note_outside` writes it as a note of the repository at
 `lab/manifests/<owner>--<name>/outside/<digest>.json`, holding the unit's tests and the sorted list,
 where `<digest>` is `digests.digest` of that note. The object store is write once, so the packed
 `<commit>.json` manifests are never rewritten, and the same tests and list write one note. A

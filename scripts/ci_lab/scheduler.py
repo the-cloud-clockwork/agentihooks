@@ -749,7 +749,7 @@ class Scheduler:
         )
         self.store.put(verdict, report, log)
         if report.get("outside"):
-            StoredManifests(self.objects).note(repo, job.unit.members, report["outside"])
+            note_outside(self.objects, repo, job.unit.members, report["outside"])
 
     def _post(self, state: State) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again."""
@@ -862,14 +862,6 @@ class StoredManifests:
                 return self._merged(UNPACK(json.loads(packed)), notes)
         return None
 
-    def note(self, repo: str, tests: Sequence[str], outside: Sequence[str]) -> None:
-        """Write a batch's tests and the files it opened outside the manifest as one note of the repository, named by
-        its content so the same batch and files write it once."""
-        record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
-        self.objects.write_once(
-            f"{manifest_folder(_slug(repo))}{NOTES}{digest(record)}.json", json.dumps(record).encode()
-        )
-
     def _merged(self, manifest: dict[str, Any], notes: Iterable[str]) -> dict[str, Any]:
         """Return the manifest with each note's files added to the outside list of every test record it names."""
         records: dict[str, dict[str, Any]] = manifest["tests"]
@@ -879,6 +871,13 @@ class StoredManifests:
                 if test in records:
                     records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
         return manifest
+
+
+def note_outside(objects: Objects, repo: str, tests: Sequence[str], outside: Sequence[str]) -> None:
+    """Write a batch's tests and the files it opened outside the manifest as one note of the repository, named by its
+    content so the same batch and files write it once."""
+    record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
+    objects.write_once(f"{manifest_folder(_slug(repo))}{NOTES}{digest(record)}.json", json.dumps(record).encode())
 
 
 class MirrorExpander:
