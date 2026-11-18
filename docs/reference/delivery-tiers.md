@@ -367,6 +367,19 @@ agentihooks swarm <slug> merge queue https://github.com/the-cloud-clockwork/agen
 
 For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported by GitHub Actions (`gh api repos/the-cloud-clockwork/agentibrain-kernel/rules/branches/dev` lists it with `integration_id` 15368), the command grades that check, not a Tests run, and enqueues into the kernel's `dev` merge queue. A repository with no merge queue on `dev`, such as antoncore, takes the squash merge described above. The checks wait accepts a pull request or an Actions run in another repository the same way: `agentihooks swarm <slug> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<id>` reads only that repository's run and, when it is red, its jobs.
 
+## Lab merge group interaction rule
+
+For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `tests.dep_manifest`, the test units with a cached verdict and the entry limit, and returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
+
+| Clause | `FULL` when | Read from |
+|---|---|---|
+| `harness` | the group diff touches a harness file, a `conftest.py` that is not nested below a tests subfolder, or a `pyproject.toml` table that reaches every test | `scripts.ci_select.needs_full_suite`, with the `pyproject.toml` flag from `scripts.ci_select.pyproject_reaches_tests` |
+| `entries` | the group holds more entries than the limit | `lab.queue.full_suite_entries` in `delivery.yaml`, default 5, the merge queue's largest group |
+| `overlap` | two entries change a common Python module; a shared file that is no module, such as `feature-map.json`, does not count | each entry's changes |
+| `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
+
+When no clause holds, the result is the union of `tests.dep_manifest.invalidated` over the entries. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+
 ## Queue shard sizing
 
 A merge group runs its unit suite as one wave of shards on the `anton-oss-queue` runner pool. The queue shard planner, `tests.queue_shards`, never plans more shards than that pool holds, so no shard waits for another shard's runner to free up.

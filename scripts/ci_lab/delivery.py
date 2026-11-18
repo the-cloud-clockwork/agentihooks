@@ -42,6 +42,11 @@ LAB_SCHEMA = {
             "additionalProperties": False,
             "properties": {"lost": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0}},
         },
+        "queue": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"full_suite_entries": {"type": "integer", "minimum": 1}},
+        },
     },
 }
 DELIVERY_SCHEMA = {"type": "object", "required": ["lab"], "properties": {"lab": LAB_SCHEMA}}
