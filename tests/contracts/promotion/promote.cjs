@@ -586,6 +586,23 @@ test('a repeated promotion does not open or merge another pull request', async (
   assert.equal(f.outputs.main, 'main');
 });
 
+for (const [name, alter] of [
+  ['a red check of a dispatched run', f => f.checks.push({ name: 'load', status: 'completed', conclusion: 'failure',
+    details_url: 'https://github.com/owner/repo/actions/runs/44/job/80' })],
+  ['a running check of another workflow', f => f.checks.push({ name: 'kind', status: 'in_progress', conclusion: null,
+    details_url: 'https://github.com/owner/repo/actions/runs/45/job/81' })],
+  ['a failed commit status', f => f.statuses.push({ context: 'policy', state: 'failure' })],
+]) {
+  test(`an unstable snapshot merges on its first poll despite ${name} on the triggering commit`, async () => {
+    const f = fixture({ existing: true, mergeState: 'unstable' });
+    alter(f);
+    await promote(f);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+  });
+}
+
 const selfWaitFixture = () => fixture({ existing: true, mergeState: 'unstable' });
 
 test('admits only its running check after the current run grade passed', async () => {
