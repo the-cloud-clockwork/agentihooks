@@ -1709,11 +1709,13 @@ executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
 | Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`), `UV_PROJECT_ENVIRONMENT=root/<digest>` and the sandbox's private folders |
 | Run folder | under `root/builds`, removed after a build that ends with code 0 |
 
-uv and every build hook it starts see no other worker variable. A build that ends with a
-nonzero code or its time limit raises `CannotRun` naming its kept log and writes no marker, so
-the next call builds again. A worker without `uv` on its `PATH` raises
+uv and every build hook it starts get no other worker variable in their environment. A build
+that runs past the unit time limit or ends with a
+nonzero code raises `CannotRun` naming its kept log and writes no marker, so the next call
+builds again. A worker without `uv` on its `PATH` raises
 `uv is not installed, so a venv cannot be built`. The build is isolated by environment only:
-it can still read and write the host filesystem.
+it runs as the worker's user with no PID namespace, so it can still read and write the host
+filesystem, `/proc` included.
 
 ### Use it
 

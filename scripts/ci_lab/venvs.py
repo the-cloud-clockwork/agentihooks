@@ -1,5 +1,5 @@
 """Venv selection for the lab worker: the baked image venv when its lockfile matches, else one venv per lockfile,
-built by uv sync inside the lab sandbox with only its whitelist."""
+built by uv sync inside the lab sandbox with only its whitelisted environment."""
 
 import fcntl
 import os
