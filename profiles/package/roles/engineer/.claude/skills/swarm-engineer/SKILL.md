@@ -56,8 +56,7 @@ tick-step skill first and follows it for the step's artefacts and checks.
    with `agentihooks swarm <slug> issue <url>`; otherwise the ledger task is the spec.
 2. Your own worktree off the base branch (the worktree skill). Commit the
    seam's failing test, push it and open a draft pull request into the base
-   branch at that first push, in every repo; never wait for the branch
-   mutation preflight before opening it. Read the test red in CI on the
+   branch at that first push, in every repo. Read the test red in CI on the
    pull request. Then commit the least code to green, push and read it green
    in CI; the pull request's own mutation checks gate the merge. Lint,
    format and size may run locally; tests and mutation never run on this
