@@ -830,6 +830,29 @@ def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(m
     assert any(line.startswith("Agent\tLane\tHarness\tProfile") for line in out)
 
 
+def test_status_binds_hive_admission_to_the_host_room_of_its_own_swarm(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from scripts.hive import launch
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    store.redis.set(
+        store.key("sw", "quota-capacity"),
+        '{"configured":{"eng":2,"ci":1,"plan":1},"effective":{"eng":2,"ci":1,"plan":1},'
+        '"reason":"accounts are open","accounts":[],"at":0,"host":{"room":4,"reason":"load fits"}}',
+    )
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [account(cap=6)])
+    hives = [{"id": "workstation", "room": 9, "limit": "max agents: 3 of 12", "refusal": ""}]
+    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
+    assert "hive workstation  admission room 9  max agents: 3 of 12" in out
+    assert "binding limit host room, room 4" in out
+
+
 def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypatch, tmp_path):
     from scripts.swarm import runtime as module
 
