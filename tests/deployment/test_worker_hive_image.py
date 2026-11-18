@@ -532,6 +532,7 @@ def release_hive(
     newest: str = "v2.1.7",
     newer: str = "not found",
     published: tuple[str, ...] = (),
+    release: str = "v2.1.7",
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -552,9 +553,11 @@ def release_hive(
         '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$GIT_LOG"\n'
         '[[ "$1 $2 $3 $4" == "ls-remote --tags --refs origin" ]] || exit 2\n'
         '[[ "$FAKE_NEWEST" == unreachable ]] && { echo "fatal: unable to access origin" >&2; exit 128; }\n'
-        'for tag in v2.1.6 v2.1.7 v2.1.7rc1 $FAKE_NEWEST v2.1.10-beta; do printf "%040d\\trefs/tags/%s\\n" 0 "$tag"; done\n'
+        'cat "$FAKE_TAGS"\n'
     )
     (tools / "git").chmod(0o755)
+    tags = ("v2.1.6", "v2.1.7", "v2.1.7rc1", *newest.split(), "v2.1.10-beta")
+    (tmp_path / "tags").write_text("".join(f"{0:040d}\trefs/tags/{tag}\n" for tag in tags))
     env = {
         **os.environ,
         "PATH": f"{tools}:{os.environ['PATH']}",
@@ -565,9 +568,10 @@ def release_hive(
         "FAKE_NEWEST": newest,
         "FAKE_NEWER": newer,
         "FAKE_PUBLISHED": " ".join(published),
+        "FAKE_TAGS": str(tmp_path / "tags"),
     }
     result = subprocess.run(
-        ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", "abc123"],
+        ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", release, "abc123"],
         env=env,
         capture_output=True,
         text=True,
@@ -673,6 +677,19 @@ def test_a_release_stops_at_the_newest_published_release_past_newer_unpublished_
         "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
     ]
     assert "the newest published release is v2.1.8, not v2.1.7; leaving the release tag where it is" in result.stdout
+
+
+@pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
+def test_a_prerelease_leaves_the_release_tag_without_reading_tags_and_still_tags_its_version(tmp_path: Path) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate="published", release="v2.1.7rc1")
+    assert result.returncode == 0, result.stderr
+    assert commands == [
+        "docker buildx imagetools inspect registry/hive:2.1.7rc1",
+        "docker buildx imagetools inspect registry/hive:abc123",
+        "docker buildx imagetools create --tag registry/hive:2.1.7rc1 registry/hive:abc123",
+    ]
+    assert "v2.1.7rc1 is not a stable release; leaving the release tag where it is" in result.stdout
+    assert not (tmp_path / "git").exists()
 
 
 def test_a_failed_newest_release_read_fails_before_moving_any_tag(tmp_path: Path) -> None:

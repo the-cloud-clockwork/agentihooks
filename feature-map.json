@@ -5519,13 +5519,14 @@
       "id": "hive-worker-release-tag-moves-on-every-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
-      "behaviour": "Each release's hive job moves the hive worker release tag onto its own image unless a newer release has already published its hive version image, so a newer release that is only tagged never holds the tag on an older release; a registry error on a newer release image fails the job before any tag moves, and the workflow passes no checkout time newest flag.",
+      "behaviour": "Each release's hive job moves the hive worker release tag onto its own image unless a newer release has already published its hive version image, so a newer release that is only tagged never holds the tag on an older release; a registry error on a newer release image fails the job before any tag moves, a prerelease never moves the tag, and the workflow passes no newest flag to the script.",
       "seam": "release-hive.sh release tag move and the Swarm worker image hive job arguments",
       "tests": [
         "tests/deployment/test_worker_hive_image.py::test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image",
         "tests/deployment/test_worker_hive_image.py::test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version",
         "tests/deployment/test_worker_hive_image.py::test_a_release_stops_at_the_newest_published_release_past_newer_unpublished_ones",
         "tests/deployment/test_worker_hive_image.py::test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag",
+        "tests/deployment/test_worker_hive_image.py::test_a_prerelease_leaves_the_release_tag_without_reading_tags_and_still_tags_its_version",
         "tests/deployment/test_worker_hive_image.py::test_a_release_builds_the_hive_worker_on_its_released_worker_and_lets_the_script_decide_the_release_tag"
       ]
     },
