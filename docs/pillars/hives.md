@@ -2394,7 +2394,9 @@ itself, whose target names only its process.
 
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
-the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+the local folder. These lines are what the ledger page shows in the task's Contract and proof fold. The controller
+finds that hive from the host target alone. An execution with no host id in its target, such as a hub admission,
+counts as run on the controller's machine, so its lines are read from the controller's own folder.
 
 ### Work folder files on any host
 
@@ -2407,13 +2409,15 @@ leaves the task's own key as it was. The table below lists what travels.
 
 Two paths carry these files to a successor:
 
-- On each status publish the controller writes each task's copy, from the first key of the hive running its latest
-  execution, into its own folder. A launch the controller orders carries the controller's folder to the next hive,
-  added files included, and a file the hive already holds is replaced unless it already contains what was sent.
+- On each status publish the controller writes each task's copy, from the first key of the hive its latest execution's
+  host target names, into its own folder. A task whose latest execution has no host id, such as a hub admission, is
+  not mirrored. A launch the controller orders carries the controller's folder to the next hive, added files included,
+  and a file the hive already holds is replaced unless it already contains what was sent.
 - A successor the hub admits never reads the controller's folder. The hub seeds it from the task's own key on the hive
   that last launched the task, as [Work folder seeds on hub admission](#work-folder-seeds-on-hub-admission) describes.
 
-On either path a successor on any host reads what its predecessor wrote.
+The first path carries the files of executions with a host target, and the second those of any predecessor whose hive
+synced its folder, hub admissions included.
 
 What travels from a task folder:
 
@@ -2477,8 +2481,9 @@ At admission the hub looks for a copy in this order and takes the first one it f
 
 1. The task's own key on the hive the work folder key names.
 2. The task's own key on the hive of the task's previous agent. That is the agent of the task started last, other
-   than the one being admitted, that the swarm still lists. A retired agent is no longer listed. This covers a task
-   last launched before the hub recorded launch hives.
+   than the one being admitted, that the swarm still lists. An agent is retired when the swarm drops its record:
+   its executions end and it leaves the list. This covers a task last launched
+   before the hub recorded launch hives.
 
 A missing hive id, because the work folder key is absent or no previous agent is listed, is skipped rather than read
 as an empty name. `steering.md` is always rebuilt from the ledger task and replaces any steering in the copy. It holds
@@ -2491,13 +2496,13 @@ The sequence for a task whose hive rolls, with the default `agentihooks` root:
 
 1. The hub admits agent A for task `t945` onto hive `lab-vm`. When `lab-vm` reports the launch, the hub sets
    `agentihooks:swarm:rig-grade-swarm:work-folder:t945` to `lab-vm`.
-2. A appends to `progress.md` and `proof.md`. Every fifteen seconds `lab-vm` writes them to
+2. Agent A appends to `progress.md` and `proof.md`. Every fifteen seconds `lab-vm` writes them to
    `agentihooks:hive:lab-vm:workspaces:files:rig-grade-swarm:t945`.
 3. `lab-vm` rolls. A stops and is retired, and `lab-vm`'s next beats leave `t945` out of
    `agentihooks:hive:lab-vm:workspaces:files`. The task's own key keeps its last copy for a day.
 4. The hub admits successor B onto hive `lab-vm-2`. The work folder key names `lab-vm`, so the seeds are that copy
-   plus fresh steering. `lab-vm-2` writes them before B starts, and B's folder holds every line A wrote up to `lab-vm`'s
-   last beat before the admission.
+   plus fresh steering. `lab-vm-2` writes them before B starts, and B's folder holds what A wrote up to `lab-vm`'s last
+   beat before the admission, up to the last 65,536 characters of each of `progress.md` and `proof.md`.
 5. When `lab-vm-2` reports B's launch, the work folder key moves to `lab-vm-2`, and `lab-vm-2`'s beats start writing
    its own copy of the task.
 
@@ -2523,7 +2528,10 @@ Limits:
 
 - The seeds are taken at admission. A line written in the last beat, fifteen seconds, before the admission can miss
   them, and a line the predecessor writes after the admission never follows.
-- A successor admitted more than a day after the hive last wrote the task's copy starts from steering alone.
+- A successor starts from steering alone when neither the hive the work folder key names nor the previous agent's hive
+  wrote the task's copy in the last day.
+- `progress.md` and `proof.md` travel as their last 65,536 characters, so a longer file loses its oldest lines, as on
+  the controller path.
 - A launch the hub did not admit, such as a controller order or a session a hive started itself, never moves the work
   folder key. Its successor reads the copy of the hive the key still names when that copy is under a day old, even
   when it is older than the predecessor's lines. When the key names no hive, the successor reads the predecessor's
@@ -2545,13 +2553,14 @@ hive's home, instead of the controller's absolute path.
 A hive refuses a launch payload without `hive_opening` and its digest, so an older controller cannot launch on a
 newer hive. Deploy the controller first, then the hives.
 
-Hub admission seeds need the hub and the hives on a release that carries pull request
-[#11644](https://github.com/the-cloud-clockwork/agentihooks/pull/11644). The hub reads only the copies per task, and
-only hives on that release write them. Until the hive a predecessor ran on moves to that release, a successor of that
-predecessor gets steering alone, as it did before. Roll the hub, then roll the pod hives, and restart the
-`agentihooks-hive` service on a workstation hive once its checkout carries the change. To roll back, revert the
-change. Older code never reads the new keys, the copies per task expire within a day, and removing a swarm deletes
-its work folder keys.
+Hub admission seeds change with pull request [#11644](https://github.com/the-cloud-clockwork/agentihooks/pull/11644).
+A hub on that release reads only the copies per task, and only hives on that release write them. A hub before it read
+the first key of the previous agent's hive, which every hive writes. Roll the hives first: restart the pod hives onto
+the release and the `agentihooks-hive` service on a workstation hive once its checkout carries the change, then roll
+the hub. A hub rolled first gives steering alone to a successor whose predecessor still runs on an older hive, even a
+predecessor with a host target whose lines the older hub would have carried. To roll back, revert the change. Older
+code never reads the new keys. Removing a swarm deletes its `<root>:swarm:<slug>:work-folder:<task id>` keys, and the
+hive copies per task expire within a day.
 
 ### Troubleshooting
 
