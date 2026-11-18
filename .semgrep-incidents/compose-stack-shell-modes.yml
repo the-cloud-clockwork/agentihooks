@@ -11,4 +11,4 @@ rules:
         - /compose.yaml
         - /scripts/swarm/stack/**/*.yaml
         - '**/compose-stack-shell-modes.test.yaml'
-    pattern-regex: '\$\{AGENTIHOOKS_(DEPLOYMENT|SCHEDULER_STATE_BACKEND)\b'
+    pattern-regex: '(?<!\$)\$\{?AGENTIHOOKS_(DEPLOYMENT|SCHEDULER_STATE_BACKEND)\b'

@@ -172,8 +172,7 @@ def test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats
 )
 def test_the_stack_never_reads_the_deployment_or_scheduler_backend_of_the_shell(compose_file: str) -> None:
     text = (ROOT / compose_file).read_text()
-    assert "${AGENTIHOOKS_DEPLOYMENT" not in text, compose_file
-    assert "${AGENTIHOOKS_SCHEDULER_STATE_BACKEND" not in text, compose_file
+    assert not re.search(r"(?<!\$)\$\{?AGENTIHOOKS_(DEPLOYMENT|SCHEDULER_STATE_BACKEND)\b", text), compose_file
 
 
 @pytest.mark.feature("compose-stack-own-modes")
