@@ -1135,6 +1135,7 @@ def test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_f
         },
     }
     assert ci_select.recorded_tests(manifest, ["docs/a.md"]) == {"tests/test_a.py"}
+    assert ci_select.recorded_tests(manifest, ["docs/b.md"]) == {"tests/test_b.py"}
     assert ci_select.recorded_tests(manifest, ["docs/other.md"]) == set()
 
 
