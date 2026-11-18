@@ -9,11 +9,12 @@ from scripts.events.config import BusConfig
 
 
 @pytest.mark.parametrize("provision", [False, True])
-def test_bus_provisions_only_when_requested(monkeypatch, provision):
+def test_bus_provisions_only_when_requested(monkeypatch: pytest.MonkeyPatch, provision: bool) -> None:
     js = SimpleNamespace(
         stream_info=AsyncMock(side_effect=nats.NotFoundError()),
         streams_info=AsyncMock(return_value=[]),
         add_stream=AsyncMock(),
+        add_consumer=AsyncMock(),
         create_key_value=AsyncMock(),
         key_value=AsyncMock(),
     )
@@ -30,6 +31,9 @@ def test_bus_provisions_only_when_requested(monkeypatch, provision):
                 name="AGENTIHOOKS-CI-LAB-HEADS",
                 num_replicas=1,
             )
+        lab_consumer = nats._consumer_config("ci-lab-scheduler", "ci.lab.head.>", BusConfig().queue)
+        wanted = [call("AGENTIHOOKS-CI-LAB-HEADS", config=lab_consumer)] if provision else []
+        assert js.add_consumer.await_args_list == wanted
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
         if provision:
