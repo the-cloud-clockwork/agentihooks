@@ -8821,6 +8821,26 @@
       ]
     },
     {
+      "id": "events-smoke-mismatch-retire",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-retire",
+      "behaviour": "On a real nats-server and Redis, an agent the hub admitted for a hive spoke, whose claim life the hub claim lives reactor counted, is retired by the tick verify step when its live binding reports another account: the tick runtime retires it, the store drops it and refunds its claim life to zero, the task reopens unclaimed, and the hub execution stop reaches the hive that started it, which reaps it and publishes its exit with stop reason mismatch.",
+      "seam": "observe._verify over reconciler.admitted_agents, through tick._drop with refund and tick._stop_hive to execution_stop.Stopper.poll on the hive bus",
+      "tests": [
+        "tests/events_smoke/test_launch_path.py::test_a_hub_admitted_agent_bound_to_another_account_is_retired_stopped_on_its_hive_and_refunded"
+      ]
+    },
+    {
+      "id": "events-smoke-idle-retire",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-retire",
+      "behaviour": "On a real nats-server and Redis, an agent the hub admitted for a hive spoke, whose claim life the hub claim lives reactor counted, stays seated on a first reap pass that finds its pane idle and is retired as stalled on a pass the idle kill time later: the tick runtime retires it, the store drops it and refunds its claim life to zero, the task reopens unclaimed, and the hub execution stop reaches the hive that started it, which reaps it and publishes its exit with stop reason idle.",
+      "seam": "agents._reap through _reap_admitted and _watch_idle, then tick._drop with refund and tick._stop_hive to execution_stop.Stopper.poll on the hive bus",
+      "tests": [
+        "tests/events_smoke/test_launch_path.py::test_a_hub_admitted_agent_idle_for_the_kill_time_is_retired_stopped_on_its_hive_and_refunded"
+      ]
+    },
+    {
       "id": "events-smoke-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-smoke-guard",
