@@ -43,3 +43,19 @@ def test_the_ledger_probe_sends_a_host_header_the_server_allows():
     assert "httpHeaders" in healthz
     assert "name: Host" in healthz
     assert "127.0.0.1:" in healthz
+
+
+@pytest.mark.feature("ledger-rolls-before-deployments")
+def test_every_service_deployment_rolls_in_a_sync_wave_after_the_ledger() -> None:
+    texts = {path.name: path.read_text() for path in sorted((CHART / "templates").glob("*.yaml"))}
+    services = {
+        name: text for name, text in texts.items() if "kind: Deployment" in text and "not .Values.hiveOnly" in text
+    }
+    metadata = {
+        name: text.split("kind: Deployment\nmetadata:\n", 1)[1].split("\nspec:\n", 1)[0]
+        for name, text in services.items()
+    }
+
+    assert len(services) >= 6
+    assert {name for name, block in metadata.items() if 'argocd.argoproj.io/sync-wave: "1"' not in block} == set()
+    assert "sync-wave" not in texts["ledger.yaml"]

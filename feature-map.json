@@ -200,6 +200,16 @@
       ]
     },
     {
+      "id": "ledger-rolls-before-deployments",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2610",
+      "behaviour": "Every swarm chart service Deployment that renders beside the ledger carries Argo CD sync wave 1 while the ledger StatefulSet stays at wave 0, so a release rolls both ledger replicas to Ready before any Deployment creates a pod, and no new Deployment pod can take the room a rolling ledger replica frees on the node its local-path volume pins.",
+      "seam": "argocd.argoproj.io/sync-wave on the api, auth, controller, github-webhook, hive-join and hub Deployments of the swarm chart",
+      "tests": [
+        "tests/test_swarm_chart_ledger_rollout.py::test_every_service_deployment_rolls_in_a_sync_wave_after_the_ledger"
+      ]
+    },
+    {
       "id": "controller-waits-ride-out-redis-outage",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-controller-redis-grace",
