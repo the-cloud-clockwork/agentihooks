@@ -572,8 +572,7 @@ def renderer_verdict(command: str) -> str | None:
     return None
 
 
-KUBECTL_WORDS = re.compile(r"\bkubectl\b([^|<>;&]*)")
-SECRET_TYPES = {"secret", "secrets"}
+KUBECTL_WORDS = re.compile(r"\bkubectl\b([^|<>;&()`]*)")
 VALUELESS_OUTPUTS = {"", "name", "wide"}
 GO_TEMPLATE_OUTPUTS = {"go-template", "template"}
 KEY_LISTING = re.compile(
@@ -581,11 +580,6 @@ KEY_LISTING = re.compile(
     r"(?:[^{}]|\{\{-?\s*(?:\$(?P=key)|\"(?:[^\"\\{}$]|\\.)*\")\s*-?\}\})*"
     r"\{\{-?\s*end\s*-?\}\}"
 )
-
-
-def names_secret_type(word: str) -> bool:
-    """True when a kubectl word names the Secret type: plain, plural, group qualified, in a list or as TYPE/NAME."""
-    return any(part.split("/")[0].split(".")[0] in SECRET_TYPES for part in word.split(","))
 
 
 def output_of(words: list[str]) -> tuple[str, str]:
@@ -613,7 +607,7 @@ def lists_keys_only(template: str) -> bool:
 
 def prints_secret_values(words: list[str]) -> bool:
     """True when kubectl words get the Secret type with an output that can print a data or stringData value."""
-    if "get" not in words or not any(names_secret_type(word) for word in words):
+    if "get" not in words or not any(names_secret(word) for word in words):
         return False
     output, template = output_of(words)
     name, _, inline = output.partition("=")

@@ -378,6 +378,7 @@ GET_SECRET_VALUE_RENDERERS = [
     "kubectl get secrets.v1. db --output=yaml",
     "kubectl get secret db \\\n  --output yaml",
     "kubectl get secret db -o=json | jq .data",
+    'echo "$(kubectl get secret db -o=json)"',
     "ssh hive-002 'kubectl get secret db --output=yaml'",
     "kubectl get pods && kubectl get secret db -o=yaml",
 ]
@@ -394,6 +395,7 @@ GET_SECRET_KEYS_AND_NAMES = [
     "kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'",
     "kubectl get secret db -o template --template '{{range $key, $_ := .data}}{{$key}}{{\"\\n\"}}{{end}}'",
     "kubectl get secrets -o name | xargs -n1 echo",
+    "echo $(kubectl get secrets -o name)",
     "kubectl get pods -o yaml",
     "kubectl get configmap app -o jsonpath={.data}",
     "kubectl get pod secret-store-0 -o yaml",
