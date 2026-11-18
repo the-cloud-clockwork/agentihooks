@@ -301,10 +301,13 @@ def _destinations(refspecs: list[str]) -> tuple[str, ...]:
 
 def _routed(cwd: str) -> bool:
     """Return whether git config may send a push from the checkout to another remote or ref: a push refspec, push url
-    or mirror on origin, a push url rewrite, tag following, a push or tracking remote other than origin, or a push
-    default other than simple or current; a config that cannot be read counts as routed."""
+    or mirror on origin, a push url rewrite, tag following, a push or tracking remote other than origin, a push default
+    other than simple or current, or more than one push url on origin, since git pushes to every one; a config that
+    cannot be read counts as routed."""
     lines = _git(cwd, "config", "--list").splitlines()
-    return not lines or any(_ROUTED.fullmatch(line) for line in lines)
+    if not lines or any(_ROUTED.fullmatch(line) for line in lines):
+        return True
+    return len(_git(cwd, "remote", "get-url", "--push", "--all", "origin").splitlines()) > 1
 
 
 def _git(cwd: str, *args: str) -> str:
