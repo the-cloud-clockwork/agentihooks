@@ -1431,6 +1431,56 @@ def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancesto
     assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
 
 
+def _batch_keys(manifest: dict[str, Any] | None, note: bytes) -> dict[tuple[str, ...], str]:
+    assert manifest is not None
+    tree = {"scripts/alpha.py": ALPHA.encode(), "docs/p.md": note}
+    blobs = {path: content.hex() for path, content in tree.items()}
+    chain = Toolchain("3.12", {}, "", "", "image", {})
+    return {batch.members: batch.key for batch in expand_tests.units(manifest, tree, blobs, {}, chain)}
+
+
+@pytest.mark.feature("lab-verdict-outside-to-manifest")
+def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key(
+    lab: Callable[..., Run],
+) -> None:
+    members = (OTHER_TEST, SECOND_TEST, "tests/test_gone.py::test_gone")
+    first, again, plain = (
+        Unit(expand_tests.KIND, key(expand_tests.KIND, number), tests)
+        for number, tests in ((1, members), (2, members), (3, (FIRST_TEST,)))
+    )
+    run = lab({HEAD_A: plan({"unit": (first, again, plain)})})
+    folder = manifest_folder(SLUG)
+    packed = dep_manifest.pack(copy.deepcopy(SUITE_MANIFEST))
+    run.lab.objects.write_once(f"{folder}dev.json", json.dumps(packed).encode())
+    stored = scheduler.StoredManifests(run.lab.objects)
+    before = stored(REPO, ["dev"])
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=3)}
+    run.finish(grants[first], "passed", {"seconds": 1.0, "outside": ["docs/p.md", "docs/c.md"]})
+    run.finish(grants[again], "failed", {"seconds": 1.0, "outside": ["docs/c.md", "docs/p.md"]})
+    run.finish(grants[plain], "passed", {"seconds": 1.0, "outside": []})
+    run.tick(1100)
+    after = stored(REPO, ["dev"])
+    records = SUITE_MANIFEST["tests"]
+    both = ["docs/c.md", "docs/p.md"]
+    assert before == SUITE_MANIFEST
+    assert after == {
+        **SUITE_MANIFEST,
+        "tests": {
+            FIRST_TEST: records[FIRST_TEST],
+            OTHER_TEST: {**records[OTHER_TEST], "outside": both},
+            SECOND_TEST: {**records[SECOND_TEST], "outside": both},
+        },
+    }
+    assert [path.removeprefix(folder).partition("/")[0] for path in run.lab.objects.keys(folder)] == [
+        "dev.json",
+        "outside",
+    ]
+    assert _batch_keys(before, b"p\n") == _batch_keys(before, b"q\n")
+    assert _batch_keys(after, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(after, b"q\n")[(FIRST_TEST, OTHER_TEST)]
+
+
 @pytest.mark.feature("lab-control-routes")
 def test_the_hotfix_port_reads_the_heads_the_control_routes_marked() -> None:
     client = fake_redis()
