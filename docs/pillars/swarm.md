@@ -4520,7 +4520,7 @@ merge queue`. A new claimant does not require a replacement pull request.
 The ready merge pass handles red checks without waiting for the watchdog's
 red limit. Its checks stage uses [the same head and resolution rules as a checks wait](#when-a-checks-wait-ends).
 Unavailable GitHub reads and unresolved checks hold the ready record for a
-later tick. Closure without merge, conflicts and queue exits can also need
+later tick, and each hold writes a [merge pass hold line](#merge-pass-hold-lines). Closure without merge, conflicts and queue exits can also need
 repair; green queue exits can be retried automatically. See [ready merge pass
 queue exits](#ready-merge-pass-queue-exits) for those outcomes.
 
@@ -4560,6 +4560,7 @@ hold the unmergeable case. Outage time is excluded.
 | Observation | Check and action |
 |---|---|
 | Released task shows `MERGE` while checks run | Expected. Read the current head's required checks; an unresolved result holds the merge pass. |
+| Released task stays `MERGE` after its checks turn green | Read the task's [merge pass hold lines](#merge-pass-hold-lines) in the tick process log; each names why the pass did not queue it. |
 | Red checks, but no successor yet | Read the task comment, current claimant and swarm capacity. The merge pass waits for an existing owner to end and preserves a changed claim. |
 | Task reopens with `FIX` | Read the handoff and failure reason, prepare the continuation and repair the existing pull request. |
 | Watchdog alerts without reopening | Inspect `stall-gate`; `log only` is the default and `skip` also preserves the task. Alerts remain active. |
@@ -4716,6 +4717,127 @@ From the merge of pull request 5049 to 23 October, the ledgers hold six `its unm
 | A task reopened with `stayed unmergeable after leaving the merge queue` | Five attempts were spent across its episodes. Read the pull request's queue state with `agentihooks swarm <id> merge state <url>`; when it is mergeable and green, queue it with `agentihooks swarm <id> merge queue <url>`. |
 | A `requeue` alert names a queue error | Read the alert text and the matching journal record's `errors`; the pass retries at the next due time until the attempt count runs out. |
 | A dequeue left no journal record | The record write failed on that machine; the tick process printed `merge queue record not written: <error>` on stderr. |
+
+#### Merge pass hold lines
+
+Each time the merge pass leaves a task as it is for one tick, it writes one line to stderr naming the swarm, the task, its pull request and the reason:
+
+```text
+<swarm>: merge pass holds task <task id> <pull request url>: <reason>
+```
+
+For example:
+
+```text
+example: merge pass holds task t31 https://github.com/o/r/pull/812: its required checks have not all finished
+```
+
+A hold line changes nothing. The task stays as it was, and the next tick judges it again, so a wait that lasts several ticks writes the same line once per tick. The merge pass runs as the tick step `merge pass` every 60 seconds (see the [tick step catalogue](../reference/tick-step-catalogue.md)). Nothing reads the line back; it is there so an operator or an agent can see why a released pull request has not moved.
+
+The reasons, in the order the pass checks them:
+
+| Reason | Written when | What to do |
+|---|---|---|
+| `GitHub did not answer a read of its pull request` | The tick's read of the pull request returned nothing. A checks wait also writes it when its fresh read returned nothing or carried no head, which happens when the newest commit in the reading is not the head. The unmergeable and `recover` paths write it when their fresh read fails. | Nothing when it clears on a later tick. On every tick, check that the tick process reaches GitHub and holds a working token; see [Signed GitHub calls in the merge pass](#signed-github-calls-in-the-merge-pass). |
+| `it waits on its dependency <target>` | The engineer had a declared wait on another task or pull request when it ran `swarm ready`. The ready record keeps that wait, and the pass holds until the task ends or the pull request is no longer open. | Follow the named task or pull request. |
+| `its required checks have not all finished` | A checks wait: a required check on the head is still queued, pending, expected or running. | Expected while checks run. Read `gh pr checks <url>`. |
+| `its <gate> never passed` | The checks resolved and no check failed, but the gate, for example `Gate — Required`, did not pass. A gate that ended skipped holds this way. | Read the gate job's run and rerun it when it was skipped or cancelled. |
+| `its head moved, so its checks are read again on the new head` | The head differs from the one the checks wait recorded, after a push or between the pass's two reads. The pass records the new head and holds for that tick. | Expected once per push. Only the new head's checks count from then on. |
+| `GitHub does not read every required check green on its head` | Both reads resolved green, but the [branch rule confirmation](#when-a-checks-wait-ends) did not confirm the head. Either a check the base branch rules require has not reported or passed, or the rules read failed. A failed read is logged first, on its own line (see below). | With an `unread` line before it, fix the error that line names. Without one, compare the required checks with `gh pr checks <url>` as [Troubleshooting a checks wait](#troubleshooting-a-checks-wait) shows. |
+| `it waits in the merge queue` | The pass queued the pull request and the merge wait has no outcome yet. Either the pull request is still in the queue, or it is not yet judged, as described under [Ready merge pass queue exits](#ready-merge-pass-queue-exits). | Expected while queued. Read `agentihooks swarm <id> merge state <url>`. |
+| `it queues again after its backoff` | A `recover` wait whose `retry_at` has not come yet. | Expected. Read `retry_at` and `recoveries` in the ready record, as [Unmergeable entries](#unmergeable-entries) shows. |
+| `its owner was told to restack it: <cause>` | GitHub marks the pull request unmergeable while an agent of the task is still running. That agent gets the restack inbox item. | The owner restacks and publishes. |
+| `its merge problem cleared on a fresh read` | The tick's snapshot read the pull request as unmergeable, and the fresh read shows no cause. | Nothing. The next tick judges the pull request as mergeable. |
+| `a live agent still owns it` | The pass was going to reopen the task or release it to its proof, but an agent of the task is still running. | The pass acts once that agent ends. Read the task's claimant and its agents. |
+| `the ledger or its ready record changed before the swarm could release it` | The pass's guarded release changed nothing. The ledger task no longer matched what the pass read, for example after a new claim, or the ready record changed under it. | Read the task on the ledger. A new claimant owns the work from then on. |
+| `the done gate refuses its split pull requests` | The pull request merged, but the task is split and the done gate refuses to close it. | See [Ready handoffs for split tasks](#ready-handoffs-for-split-tasks). |
+
+Not all of these lines come from released tasks. The pass also reads every task in `pr` state that has a pull request for an unmergeable state. A task that never ran `swarm ready` can therefore write the restack, cleared, unread, owner and release lines too.
+
+When the branch rule confirmation cannot read the rules, `waits.required_green` writes the GitHub error on stderr before it returns not green:
+
+```text
+required checks of <pull request url> unread: <error>
+```
+
+That line comes from every caller of the confirmation, including `wait --on checks`. Before pull request [11992](https://github.com/the-cloud-clockwork/agentihooks/pull/11992), the confirmation swallowed this error and the merge pass returned no line, so a held task left no trace.
+
+A released pull request that stays green, resolved, out of draft and out of the queue while the pass cannot queue it does not wait forever. After 20 minutes, not counting outage time, the task reopens with the action line `task <id> reopened, <url> stayed green and unqueued for <minutes> minutes while the merge pass could not queue it`. The hold lines written before it show why the pass could not queue it.
+
+In the swarm controller, the hold lines and the pass's action lines go to the same container log. Action lines go to stdout as `<swarm>: <action>`, for example `example: queued https://github.com/o/r/pull/812 for task t31`. The controller deployment's first container is `jump`, so name the `controller` container when reading its log:
+
+```bash
+kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller -c controller --since=1h \
+  | grep -E 'merge pass holds|required checks of|: queued https'
+```
+
+To count the holds of the last day for each task and reason:
+
+```bash
+kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller -c controller --since=24h \
+  | grep ' merge pass holds task ' \
+  | sed -E 's/^.*: merge pass holds task ([^ ]+) [^ ]+: /\1\t/' \
+  | sort | uniq -c | sort -rn
+```
+
+When more than one controller pod is running, `deploy/` picks one of them. Read each pod by name from `kubectl -n agentihooks-swarm get pods` when the line you expect is missing. A tick run by the `agentihooks-swarm.service` user unit writes the same lines to its journal; read them with `journalctl --user -u agentihooks-swarm.service`.
+
+| Symptom | Check and action |
+|---|---|
+| A released green pull request is never queued, and each tick writes `GitHub does not read every required check green on its head` after `required checks of <url> unread: To get started with GitHub CLI, please run:  gh auth login` | The merge queue's gh calls ran without the signed token. See [Signed GitHub calls in the merge pass](#signed-github-calls-in-the-merge-pass). |
+| The same reason with no `unread` line before it | A check the base branch rules require has not reported or passed on the head. Compare the rules with `gh pr checks <url>`. |
+| A released task writes no hold line and no action line | The task is outside the pass. Check that its `state` is `pr`, its `awaiting` is `merge`, and its ready record names its claimant. Otherwise the pass removes it with `task <id> left the merge pass`. |
+| `a live agent still owns it` on every tick | An agent of the task is still running. Read the task's claimant and its agents; the pass reopens or releases the task once that agent ends. |
+| A task reopened with `stayed green and unqueued for <minutes> minutes` | Read the hold lines of the ticks before the reopen for the reason the pass could not queue it, then queue the head with `agentihooks swarm <id> merge queue <url>` once that reason is fixed. |
+
+`tests/swarm/test_ready.py` pins a line for every reason: `test_a_released_checks_wait_logs_why_it_holds`, `test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot`, `test_a_green_head_github_does_not_read_green_logs_its_hold`, `test_a_moved_head_logs_that_its_checks_are_read_again`, `test_an_unread_pull_request_logs_its_hold`, `test_a_queued_pull_request_logs_that_it_waits_in_the_queue`, `test_a_dependency_wait_logs_its_target`, `test_a_recovery_wait_logs_why_it_holds`, `test_an_unmergeable_pull_request_with_a_working_owner_logs_the_restack`, `test_an_unmergeable_pull_request_without_an_owner_logs_why_it_holds`, `test_a_red_pull_request_a_live_agent_owns_logs_its_hold`, `test_a_red_pull_request_whose_ready_record_moved_logs_its_hold`, `test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold` and `test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold`. `tests/swarm/test_waits.py::test_required_green_logs_the_github_error_it_holds_on` pins the `unread` line. The feature map entry `merge-pass-hold-reasons` lists them all.
+
+#### Signed GitHub calls in the merge pass
+
+The merge pass reads required checks and queues pull requests through the merge queue client in `scripts.swarm.merge_queue`. That client hands its GraphQL and REST calls to the GitHub adapter in `scripts.swarm.github_reads`. Whether a call is signed depends on the process:
+
+| Process environment | How gh runs |
+|---|---|
+| `HIVE_GITHUB_AUTH_MODE=app` and `GITHUB_APP_PRIVATE_KEY` set, as in the swarm controller | The adapter signs the call in the process. It mints an installation token, switches the command to the gh client at `/usr/bin/gh`, and passes the token in the call's `env` option as `GH_TOKEN`. When the process cannot mint a token, or a read finds the token's remaining budget below the shared read reserve (`AGENTIHOOKS_GITHUB_READ_RESERVE`), the call keeps its command and goes to the gh wrapper. |
+| Anything else, such as a workstation | The call keeps its plain `gh` command and the machine's own gh login. |
+
+`merge_queue._port` builds the gh runner the adapter calls. It forwards the caller's `env` option to the runner whenever the adapter sets one, so a signed call runs gh with the token.
+
+Before pull request [11992](https://github.com/the-cloud-clockwork/agentihooks/pull/11992), the runner forwarded only the timeout. In the controller, every merge queue read and queue call then ran the bare gh client with no token and failed with `gh auth login`. The branch rule confirmation swallowed that error, the checks wait never ended green, and the merge pass saved the ready record and wrote nothing, every tick. On 18 November three pull requests released through `swarm ready` while their checks ran sat green and unqueued until a master queued them by hand. A replay of the same code on a workstation queued each at once: a workstation holds no App key, so its calls kept plain gh and its login. A read only probe in the controller's environment, against pull request 11927, showed the failure and the fix side by side:
+
+```text
+A required_view raised SwarmError To get started with GitHub CLI, please run:  gh auth login
+A runner saw [('/usr/bin/gh', False)]
+B _signed command /usr/bin/gh env passed: True
+C required_view with env forwarded ok c05815b3c4 resolved True red False
+```
+
+Three guards keep it fixed:
+
+| Guard | What it holds |
+|---|---|
+| `tests/swarm/test_merge_queue.py::test_a_merge_queue_call_in_a_process_holding_the_app_key_runs_gh_with_its_signed_token` | Two cases, `graph` and `rest`. With the App key environment set, the runner is called with `/usr/bin/gh` and the signed `env`, next to the text output and the 20 second timeout. |
+| Feature map entry `merge-queue-signed-token` | Origin `regression`. Its seam is `merge_queue._port` through `merge_queue.graphql` and `merge_queue.rest`, and it names the test above and the Semgrep rule below. |
+| Semgrep incident rule `gh-runner-drops-signed-env` in `.semgrep-incidents/` | Refuses a gh runner, defined as `def <name>(argv, **options)` under `scripts/` or `hooks/`, that calls the caller's runner with a `timeout` but neither `env=` nor a spread of options. Its fixture `.semgrep-incidents/gh-runner-drops-signed-env.py` holds one refused runner and two accepted forms. |
+
+The accepted form forwards `env` only when the adapter set it:
+
+```python
+signed = {"env": options["env"]} if "env" in options else {}
+done = run(argv, capture_output=True, text=True, timeout=round(options["timeout"]), **signed)
+```
+
+The Semgrep workflow's step `Outage rules fire on their planted faults and pass their clean cases` runs `semgrep --test` over the incident rules and their fixtures. The new tests failed first on the tests only commit `31ced793a1`, in Tests run [44279662914](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44279662914). The fix merged as `1aa8d666aa`. Release 2.17.1041, which the controller ran on 19 November, carries it, and that day the log of a controller pod running it held the hold line `rig-grade-swarm: merge pass holds task doc-b139f26a200d33df https://github.com/the-cloud-clockwork/agentihooks/pull/12223: it waits in the merge queue`.
+
+To check that a running controller carries the fix, read its image tag and look for the rule file in that release's tree:
+
+```bash
+kubectl -n agentihooks-swarm get deploy agentihooks-swarm-controller \
+  -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.image}{"\n"}{end}'
+gh api "repos/the-cloud-clockwork/agentihooks/contents/.semgrep-incidents/gh-runner-drops-signed-env.yml?ref=v<version>" --jq .path
+```
+
+A path in the answer means the release carries the fix. A 404 means the controller runs an older release; roll it forward.
 
 ### When a checks wait ends
 
