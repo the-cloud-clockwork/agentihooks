@@ -121,6 +121,7 @@ MINIO_SECRET_KEY = f"{contract.MINIO_PREFIX}SECRET_KEY"
 MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
+REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
 
 Needs = Mapping[str, Mapping[str, Any]]
 Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
@@ -1038,6 +1039,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
     consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer)
+    if environ.get(REINDEX_ON_START) == "true":
+        print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))

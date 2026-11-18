@@ -1,4 +1,5 @@
 import copy
+import io
 import json
 import logging
 import subprocess
@@ -1619,6 +1620,107 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     with pytest.raises(delivery.DeliveryError):
         scheduler.main([], environ)
     assert calls == {}
+
+
+@pytest.mark.feature("lab-scheduler-reindex-on-start")
+@pytest.mark.parametrize(
+    ("setting", "printed"),
+    [
+        ({"CI_LAB_REINDEX_ON_START": "true"}, "reindexed 1 verdicts\n"),
+        ({"CI_LAB_REINDEX_ON_START": "false"}, ""),
+        ({}, ""),
+    ],
+)
+def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: dict[str, str], printed: str
+) -> None:
+    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    import redis
+
+    from scripts.events import config, factory
+
+    client = fake_redis()
+    objects = LocalObjects(tmp_path / "objects")
+    verdict = Verdict(kind="test", key=key("test", 1), passed=True, flaky=False, seconds=1.0)
+    Store(client, objects).put(verdict, {}, b"ok\n")
+    client.flushall()
+    served: list[scheduler.Scheduler] = []
+
+    class Stdout(io.StringIO):
+        def __init__(self) -> None:
+            super().__init__()
+            self.flushed: list[str] = []
+
+        def flush(self) -> None:
+            self.flushed.append(self.getvalue())
+            super().flush()
+
+    class Events:
+        def consumer(self, durable: str, subject: str) -> str:
+            return f"{durable} {subject}"
+
+    class Bus:
+        lab_heads = Events()
+
+    def from_url(_url: str, **_options: Any) -> Any:
+        return client
+
+    def s3(name: str, **_options: Any) -> str:
+        return name
+
+    def from_environ(_cls: type[Any], _found: Any) -> config.BusConfig:
+        return config.BusConfig(backend="nats", url="nats://lab")
+
+    def open_bus(_found: Any) -> Bus:
+        return Bus()
+
+    def poster(_repo: str) -> Poster:
+        return Poster()
+
+    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any) -> scheduler.Scheduler:
+        ports = scheduler.Ports(Inbox(), Expander({}), poster, frozenset[str])
+        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
+
+    def listen(*_arguments: Any) -> list[Any]:
+        return []
+
+    def serve(found: scheduler.Scheduler, *_arguments: Any) -> int:
+        served.append(found)
+        return 0
+
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "classes": list(CLASSES),
+                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5}},
+                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
+            }
+        )
+    )
+    environ = {
+        scheduler.contract.REDIS_URL: "redis://lab",
+        scheduler.contract.RUNTIME_CONFIG: str(runtime),
+        scheduler.MINIO_ENDPOINT: "endpoint",
+        scheduler.MINIO_ACCESS_KEY: "access",
+        scheduler.MINIO_SECRET_KEY: "secret",
+        scheduler.MINIO_BUCKET: "bucket",
+    } | setting
+    stdout = Stdout()
+    monkeypatch.setattr(redis.Redis, "from_url", from_url)
+    monkeypatch.setattr(boto3, "client", s3)
+    monkeypatch.setattr(config.BusConfig, "from_environ", classmethod(from_environ))
+    monkeypatch.setattr(factory, "open_bus", open_bus)
+    monkeypatch.setattr(scheduler, "build", build)
+    monkeypatch.setattr(scheduler, "listen", listen)
+    monkeypatch.setattr(scheduler, "serve", serve)
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    assert scheduler.main([], environ) == 0
+
+    assert stdout.getvalue() == printed
+    assert stdout.flushed == ([printed] if printed else [])
+    assert served[0].store.get("test", verdict.key) == (verdict if printed else None)
 
 
 def test_the_service_names_its_command_in_its_usage(capsys: pytest.CaptureFixture[str]) -> None:
