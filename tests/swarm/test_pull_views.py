@@ -801,7 +801,7 @@ def test_a_kept_entry_with_other_fields_is_read_again_and_replaced(
     assert json.loads(str(cache.get(key)))["head"] == "h2"
 
 
-def test_an_empty_read_with_a_cache_never_launches_a_command() -> None:
-    import fakeredis
+def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
+    refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
 
-    assert views([], lambda *a, **k: pytest.fail("empty request"), fakeredis.FakeRedis(decode_responses=True)) == {}
+    assert views([], lambda *a, **k: pytest.fail("empty request"), refusing) == {}
