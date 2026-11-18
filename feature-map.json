@@ -19,6 +19,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-runs-relay",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-in-scheduler",
+      "behaviour": "The lab scheduler service builds the lab relay once at start on its own lab heads consumer, the ci-lab-relay durable on ci.lab.head.notice that bus provisioning creates, and ticks it after each scheduler pass, printing every action the relay returns after the pass's own; the scheduler service contract names CI_LAB_URL, the lab url the relay builds its grade links from.",
+      "seam": "scripts.ci_lab.scheduler.serve and main, scripts.ci_lab.contract.SCHEDULER, scripts.events.nats.NatsBus provisioning",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_serve_ticks_the_relay_after_each_pass_and_prints_its_actions"
+      ]
+    },
+    {
       "id": "tick-status-publish-last-findings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",

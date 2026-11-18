@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import budget, control, delivery, evidence, expand_tests, lease_api, queue, scheduler
+from scripts.ci_lab import budget, control, delivery, evidence, expand_tests, lease_api, queue, relay, scheduler
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
@@ -952,6 +952,32 @@ class Stdout:
         self.events.append(FLUSHED)
 
 
+@dataclass
+class CountingRelay:
+    """A relay stand in that writes each tick to the output and returns one action naming it."""
+
+    out: Stdout
+    ticks: int = 0
+
+    def tick(self) -> list[str]:
+        self.ticks += 1
+        self.out.events.append(f"tick {self.ticks}")
+        return [f"relayed {self.ticks}"]
+
+
+@dataclass
+class RelayBuilds:
+    """A relay build stand in recording the environment, scheduler and consumer of each build."""
+
+    builds: list[tuple[Any, scheduler.Scheduler, Any]] = field(
+        default_factory=list[tuple[Any, scheduler.Scheduler, Any]]
+    )
+
+    def __call__(self, environ: Any, found: scheduler.Scheduler, consumer: Any) -> str:
+        self.builds.append((environ, found, consumer))
+        return "relay"
+
+
 def test_serve_runs_the_given_passes_and_prints_each_action(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -965,10 +991,42 @@ def test_serve_runs_the_given_passes_and_prints_each_action(
         slept.append(seconds)
         assert len(slept) <= 2
 
-    assert scheduler.serve(run.engine, 0.25, 2, lambda: 2.5, sleep) == 0
+    assert scheduler.serve(run.engine, CountingRelay(Stdout()), 0.25, 2, lambda: 2.5, sleep) == 0
     assert slept == [0.25, 0.25]
-    assert out.events == [f"received {HEAD_A} on feature", "\n", FLUSHED]
+    assert out.events[:3] == [f"received {HEAD_A} on feature", "\n", FLUSHED]
     assert json.loads(run.lab.client.hget(scheduler.WAITING, f"{REPO}|feature|3"))["since"] == 2500
+
+
+@pytest.mark.feature("lab-scheduler-runs-relay")
+def test_serve_ticks_the_relay_after_each_pass_and_prints_its_actions(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=60_000)
+    run.push(HEAD_A)
+    out = Stdout()
+    monkeypatch.setattr(sys, "stdout", out)
+    relaying = CountingRelay(out)
+
+    def sleep(seconds: float) -> None:
+        out.events.append(f"slept {seconds}")
+
+    assert scheduler.serve(run.engine, relaying, 0.25, 2, lambda: 2.5, sleep) == 0
+    assert relaying.ticks == 2
+    assert out.events == [
+        f"received {HEAD_A} on feature",
+        "\n",
+        FLUSHED,
+        "tick 1",
+        "relayed 1",
+        "\n",
+        FLUSHED,
+        "slept 0.25",
+        "tick 2",
+        "relayed 2",
+        "\n",
+        FLUSHED,
+        "slept 0.25",
+    ]
 
 
 def test_serve_without_a_pass_count_runs_until_stopped(lab: Callable[..., Run]) -> None:
@@ -981,7 +1039,7 @@ def test_serve_without_a_pass_count_runs_until_stopped(lab: Callable[..., Run]) 
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        scheduler.serve(run.engine, 1.0, 0, lambda: 1.0, sleep)
+        scheduler.serve(run.engine, CountingRelay(Stdout()), 1.0, 0, lambda: 1.0, sleep)
     assert passes == [1.0, 1.0, 1.0]
 
 
@@ -1508,8 +1566,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
 
     class Events:
         def consumer(self, durable: str, subject: str) -> str:
-            calls["consumer"] = (durable, subject)
-            return "consumer"
+            calls.setdefault("consumers", []).append((durable, subject))
+            return f"{durable} consumer"
 
     class Bus:
         lab_heads = Events()
@@ -1553,8 +1611,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         def sleep(seconds: float) -> None:
             Clock.slept.append(seconds)
 
-    def serve(found: scheduler.Scheduler, interval: float, passes: int, clock: Any, sleep: Any) -> int:
-        calls["serve"] = (found, interval, passes, clock, sleep)
+    builds = RelayBuilds()
+
+    def serve(found: scheduler.Scheduler, relaying: Any, interval: float, passes: int, clock: Any, sleep: Any) -> int:
+        calls["serve"] = (found, relaying, interval, passes, clock, sleep)
         return 7
 
     runtime = tmp_path / "runtime.yaml"
@@ -1589,14 +1649,17 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     monkeypatch.setattr(scheduler, "Thread", Thread)
     monkeypatch.setattr(scheduler, "time", Clock)
     monkeypatch.setattr(scheduler, "serve", serve)
+    monkeypatch.setattr(relay, "build", builds)
     assert scheduler.main(["--interval", "0.5", "--passes", "3"], environ) == 7
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
     options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
     assert calls["s3"] == ("s3", options)
     built_from, redis_client, objects, consumer = calls["build"]
-    assert (built_from, redis_client, consumer) == (environ, client, "consumer")
+    assert (built_from, redis_client, consumer) == (environ, client, "ci-lab-scheduler consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
-    assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
+    assert calls["consumers"] == [("ci-lab-scheduler", "ci.lab.head.>"), ("ci-lab-relay", "ci.lab.head.notice")]
+    relayed_from, relayed, relay_consumer = builds.builds[0]
+    assert (relayed_from, relayed.queue.client, relay_consumer) == (environ, client, "ci-lab-relay consumer")
     found, leases, routes, spending, clock, ports = calls["listen"]
     assert found.queue.client is client and leases.queue is found.queue
     assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
@@ -1608,10 +1671,11 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert spending.policy == budget.Policy(600, {"backfill": 0.5})
     assert ports == (8800, 9108)
     assert calls["thread"] is True and calls["served"] == 2
-    found, interval, passes, clock, sleep = calls["serve"]
+    found, relaying, interval, passes, clock, sleep = calls["serve"]
+    assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
     assert scheduler.main([], environ) == 7
-    assert calls["serve"][1:3] == (scheduler.INTERVAL_S, 0)
+    assert calls["serve"][2:4] == (scheduler.INTERVAL_S, 0)
     del environ[scheduler.contract.CONTROL_TOKEN]
     assert scheduler.main([], environ) == 7
     assert calls["listen"][2].token == ""
@@ -1714,6 +1778,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)
     monkeypatch.setattr(scheduler, "serve", serve)
+    monkeypatch.setattr(relay, "build", RelayBuilds())
     monkeypatch.setattr(sys, "stdout", stdout)
 
     assert scheduler.main([], environ) == 0

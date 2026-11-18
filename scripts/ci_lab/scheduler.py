@@ -316,6 +316,14 @@ class Poster(Protocol):
         ...
 
 
+class Relaying(Protocol):
+    """What the service ticks after each pass: `relay.Relay.tick`."""
+
+    def tick(self) -> list[str]:
+        """Relay what the closed grades answer and return the actions taken."""
+        ...
+
+
 @dataclass(frozen=True)
 class Ports:
     """The scheduler's outside world: heads in, plans, check runs out per repository, and the heads marked hotfix."""
@@ -973,7 +981,12 @@ def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: C
 
 
 def serve(
-    scheduler: Scheduler, interval_s: float, passes: int, clock: Callable[[], float], sleep: Callable[[float], None]
+    scheduler: Scheduler,
+    relaying: Relaying,
+    interval_s: float,
+    passes: int,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
 ) -> int:
     """Run passes every interval, forever when passes is zero, printing each action; return 0."""
     done = 0
@@ -1021,6 +1034,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
+    from scripts.ci_lab import relay
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
@@ -1037,8 +1051,9 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         aws_secret_access_key=environ[MINIO_SECRET_KEY],
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
-    consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
-    scheduler = build(environ, client, objects, consumer)
+    heads = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads
+    scheduler = build(environ, client, objects, heads.consumer(DURABLE, SUBJECT))
+    relaying = relay.build(environ, scheduler, heads.consumer(relay.DURABLE, relay.SUBJECT))
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
@@ -1047,4 +1062,4 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
         Thread(target=server.serve_forever, daemon=True).start()
-    return serve(scheduler, arguments.interval, arguments.passes, time.time, time.sleep)
+    return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)
