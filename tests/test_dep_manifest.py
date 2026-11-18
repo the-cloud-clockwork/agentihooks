@@ -6,6 +6,7 @@ import subprocess
 import sys
 import sysconfig
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -814,6 +815,129 @@ def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_u
     assert upload["with"]["name"] == "dep-manifest-packed"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/packed.json"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def _history(root: Path) -> tuple[str, str]:
+    """Commit a base, a source change on the first parent and a merged side commit; return the merge and change."""
+
+    def git(*args: str, when: int = 0) -> str:
+        stamp = {"GIT_AUTHOR_DATE": f"{when} +0000", "GIT_COMMITTER_DATE": f"{when} +0000"}
+        identity = ["-c", "user.name=t", "-c", "user.email=t@t"]
+        command = ["git", "-C", str(root), *identity, *args]
+        return subprocess.run(command, check=True, capture_output=True, text=True, env={**os.environ, **stamp}).stdout
+
+    git("init", "-q", "-b", "main")
+    (root / "hooks").mkdir()
+    (root / "hooks" / "sample.py").write_text(SOURCE)
+    (root / "notes.md").write_text("a")
+    git("add", ".")
+    git("commit", "-qm", "base", when=1000)
+    git("checkout", "-qb", "side")
+    (root / "notes.md").write_text("b")
+    git("commit", "-qam", "side", when=3000)
+    git("checkout", "-q", "main")
+    (root / "hooks" / "sample.py").write_text(SOURCE.replace("value * 2", "value * 3"))
+    git("commit", "-qam", "change", when=2000)
+    change = git("rev-parse", "HEAD").strip()
+    git("merge", "-q", "--no-ff", "-m", "merge", "side", when=4000)
+    return git("rev-parse", "HEAD").strip(), change
+
+
+def _history_manifest(base: str) -> dict[str, Any]:
+    """Return a manifest whose test a ran the changed function and whose test b read the side commit's file."""
+    tests = {
+        "a": {"units": [0], "files": [], "escapes": False},
+        "b": {"units": [], "files": ["notes.md"], "escapes": False},
+    }
+    return {"version": 2, "commit": base, "units": ["hooks/sample.py::double"], "tests": tests}
+
+
+def test_a_source_hashes_the_same_with_any_line_endings() -> None:
+    assert dep_manifest.unit_hashes(SOURCE.replace("\n", "\r\n")) == dep_manifest.unit_hashes(SOURCE)
+    assert dep_manifest.unit_hashes(SOURCE.replace("\n", "\r")) == dep_manifest.unit_hashes(SOURCE)
+
+
+def test_a_test_that_runs_module_level_code_depends_on_the_module_unit(tmp_path: Path) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "sample.py").write_text(SOURCE)
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_m.py::test_import|run")
+    data.add_arcs({str(package / "sample.py"): [(-1, 1), (1, -1)]})
+    data.write()
+    manifest = dep_manifest.build(tmp_path / ".coverage", [], tmp_path, "abc", "env")
+    assert manifest["version"] == 2
+    assert manifest["units"] == ["hooks/sample.py::<module>"]
+
+
+def test_a_change_to_the_workflow_defaults_changes_how_tests_run() -> None:
+    before = {"jobs": {"unit": {"steps": []}, "split": {"steps": []}}}
+    after = {**before, "defaults": {"run": {"shell": "bash"}}}
+    assert dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(after)) is True
+    assert dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(before)) is False
+
+
+def test_a_change_to_another_workflow_reruns_only_the_tests_that_escape() -> None:
+    tests = {"a": {"units": [], "files": [], "escapes": True}, "b": {"units": [], "files": [], "escapes": False}}
+    manifest = {"version": 2, "commit": "c", "units": [], "tests": tests}
+    assert dep_manifest.invalidated(manifest, [(".github/workflows/other.yml", None, None)]) == ({"a"}, None)
+
+
+def test_the_share_walks_first_parent_merges_and_reports_each_reusable_share(tmp_path: Path) -> None:
+    merge, change = _history(tmp_path)
+    manifest = _history_manifest(change)
+    rows = [
+        {"commit": merge, "invalidated": 1, "reusable": 0.5, "global": None},
+        {"commit": change, "invalidated": 1, "reusable": 0.5, "global": None},
+    ]
+    found = dep_manifest.share(manifest, tmp_path, "HEAD", 2)
+    assert found == {"tests": 2, "merges": 2, "mean": 0.5, "median": 0.5, "rows": rows}
+    empty = {"tests": 2, "merges": 0, "mean": 0.0, "median": 0.0, "rows": []}
+    assert dep_manifest.share(manifest, tmp_path, "HEAD", 0) == empty
+
+
+def test_each_command_refuses_its_missing_required_options(tmp_path: Path) -> None:
+    build = ["build", "--coverage", "c", "--inputs", str(tmp_path), "--out", str(tmp_path / "m.json")]
+    for argv in (
+        [],
+        [*build, "--environment", "e"],
+        [*build, "--commit", "c"],
+        ["invalidated"],
+        ["share"],
+    ):
+        with pytest.raises(SystemExit) as refused:
+            dep_manifest.main(argv)
+        assert refused.value.code == 2
+
+
+def test_the_build_command_passes_its_commit_and_writes_a_compact_packed_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    built = {"version": 2, "commit": "c", "units": [], "tests": {"t": {"units": [], "files": ["x"], "escapes": False}}}
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: called.append(args) or built)
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.jsonl").write_text("")
+    packed = tmp_path / "packed.json"
+    argv = ["build", "--coverage", "c", "--inputs", str(tmp_path / "inputs"), "--commit", "abc", "--environment", "e"]
+    assert dep_manifest.main([*argv, "--out", str(tmp_path / "m.json"), "--packed", str(packed)]) == 0
+    assert called[0][3:] == ("abc", "e")
+    assert packed.read_text() == json.dumps(dep_manifest.pack(dict(built)), separators=(",", ":"))
+
+
+def test_the_invalidated_and_share_commands_read_the_working_repository_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge, change = _history(tmp_path)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_history_manifest(change)))
+    monkeypatch.chdir(tmp_path)
+    assert dep_manifest.main(["invalidated", "--manifest", str(manifest)]) == 0
+    assert capsys.readouterr().out == json.dumps({"global": None, "tests": ["b"]}, indent=2) + "\n"
+    assert dep_manifest.main(["share", "--manifest", str(manifest), "--ref", "HEAD", "--merges", "1"]) == 0
+    row = {"commit": merge, "invalidated": 1, "reusable": 0.5, "global": None}
+    shared = {"tests": 2, "merges": 1, "mean": 0.5, "median": 0.5, "rows": [row]}
+    assert capsys.readouterr().out == json.dumps(shared, indent=2) + "\n"
 
 
 def test_the_inputs_plugin_records_python_files_a_test_reads_as_data_but_not_its_imports(tmp_path):
