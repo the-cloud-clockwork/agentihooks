@@ -1935,6 +1935,22 @@ def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(
     assert after[0].key != before[0].key
 
 
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_lacks(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    changed = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4")})
+    added = _commit(suite.repo, {"tests/test_gamma.py": "def test_third():\n    pass\n"})
+    edited = _commit(suite.repo, {"tests/test_gamma.py": "def test_third():\n    assert True\n"})
+    found = [
+        expander.expand(suite.request(Priority.PROMOTION, head)).gates["mutation"] for head in (changed, added, edited)
+    ]
+    assert [[executors.function_of(unit.members[0]) for unit in units] for units in found] == [[FIRST]] * 3
+    assert len({units[0].key for units in found}) == 3
+
+
 @pytest.mark.feature("lab-scheduler-mutation-units")
 @pytest.mark.usefixtures("staticless")
 def test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_deletes(tmp_path: Path) -> None:
