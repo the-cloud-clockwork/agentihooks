@@ -25,6 +25,7 @@ from scripts.ci_lab import (
     executors,
     expand_mutation,
     expand_tests,
+    interaction,
     lease_api,
     queue,
     scheduler,
@@ -33,7 +34,7 @@ from scripts.ci_lab import (
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
-from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
+from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
@@ -1876,6 +1877,74 @@ def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancesto
     assert stored(REPO, ["head", "older"]) == {**STORED_MANIFEST, "commit": "older"}
     assert stored(REPO, ["head"]) is None
     assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
+
+
+@pytest.mark.feature("lab-verdict-outside-to-manifest")
+def test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    objects.write_once(f"{manifest_folder(SLUG)}older.json", packed_file(SUITE_MANIFEST, "older"))
+    stored = scheduler.StoredManifests(objects, Fetches({"newer": packed_file(SUITE_MANIFEST, "newer")}))
+    scheduler.note_outside(objects, REPO, (SECOND_TEST, "tests/test_gone.py::test_gone"), ["docs/p.md", "docs/a.md"])
+    records = SUITE_MANIFEST["tests"]
+    second = {**records[SECOND_TEST], "outside": ["docs/a.md", "docs/c.md", "docs/p.md"]}
+    for commit in ("newer", "older"):
+        assert stored(REPO, [commit]) == {**SUITE_MANIFEST, "commit": commit, "tests": {**records, SECOND_TEST: second}}
+
+
+def _batch_keys(manifest: dict[str, Any] | None, note: bytes) -> dict[tuple[str, ...], str]:
+    assert manifest is not None
+    tree = {"scripts/alpha.py": ALPHA.encode(), "docs/p.md": note}
+    blobs = {path: content.hex() for path, content in tree.items()}
+    chain = Toolchain("3.12", {}, "", "", "image", {})
+    return {batch.members: batch.key for batch in expand_tests.units(manifest, tree, blobs, {}, chain)}
+
+
+@pytest.mark.feature("lab-verdict-outside-to-manifest")
+def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key(
+    lab: Callable[..., Run],
+) -> None:
+    members = (OTHER_TEST, SECOND_TEST, "tests/test_gone.py::test_gone")
+    first, twin, failed, plain = (
+        Unit(expand_tests.KIND, key(expand_tests.KIND, number), tests)
+        for number, tests in ((1, members), (2, members), (3, (FIRST_TEST,)), (4, (FIRST_TEST,)))
+    )
+    run = lab({HEAD_A: plan({"unit": (first, twin, failed, plain)})})
+    folder = manifest_folder(SLUG)
+    packed = dep_manifest.pack(copy.deepcopy(SUITE_MANIFEST))
+    run.lab.objects.write_once(f"{folder}dev.json", json.dumps(packed).encode())
+    stored = scheduler.StoredManifests(run.lab.objects)
+    before = stored(REPO, ["dev"])
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=4)}
+    run.finish(grants[first], "passed", {"seconds": 1.0, "outside": ["docs/p.md", "docs/c.md"]})
+    run.finish(grants[twin], "passed", {"seconds": 1.0, "outside": ["docs/c.md", "docs/p.md"]})
+    run.finish(grants[failed], "failed", {"seconds": 1.0, "outside": ["docs/c.md"]})
+    run.finish(grants[plain], "passed", {"seconds": 1.0, "outside": []})
+    run.tick(1100)
+    after = stored(REPO, ["dev"])
+    records = SUITE_MANIFEST["tests"]
+    both = ["docs/c.md", "docs/p.md"]
+    assert before == SUITE_MANIFEST
+    assert after == {
+        **SUITE_MANIFEST,
+        "tests": {
+            FIRST_TEST: {**records[FIRST_TEST], "outside": ["docs/c.md"]},
+            OTHER_TEST: {**records[OTHER_TEST], "outside": both},
+            SECOND_TEST: {**records[SECOND_TEST], "outside": both},
+        },
+    }
+    notes = [
+        f"{folder}outside/{digest({'tests': list(tests), 'outside': files})}.json"
+        for tests, files in ((members, both), ((FIRST_TEST,), ["docs/c.md"]))
+    ]
+    assert run.lab.objects.keys(folder) == sorted([f"{folder}dev.json", *notes])
+    change = [[("docs/p.md", "p\n", "q\n")]]
+    assert before is not None and after is not None
+    assert interaction.invalidated(before, change) == frozenset()
+    assert interaction.invalidated(after, change) == {OTHER_TEST, SECOND_TEST}
+    assert _batch_keys(before, b"p\n") == _batch_keys(before, b"q\n")
+    assert _batch_keys(after, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(after, b"q\n")[(FIRST_TEST, OTHER_TEST)]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")

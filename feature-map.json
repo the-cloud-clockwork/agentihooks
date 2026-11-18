@@ -4171,6 +4171,18 @@
       ]
     },
     {
+      "id": "lab-verdict-outside-to-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-outside-to-manifest",
+      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder, whatever its graded outcome. The next stored manifest read that finds or fetches a packed manifest merges every note into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
+        "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
+        "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
+      ]
+    },
+    {
       "id": "gate-required-waits-for-aggregator",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
