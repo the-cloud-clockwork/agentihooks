@@ -11,9 +11,11 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
+from functools import partial
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
+from scripts.ci_lab.remote import checkout
 from scripts.swarm import naming
 from scripts.swarm_v2.filesystem import SEGMENT, Execution
 
@@ -99,7 +101,7 @@ def _environ() -> dict[str, str]:
     return {**environ, "GIT_TERMINAL_PROMPT": "0", **helper}
 
 
-def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess:
+def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess[str]:
     scope = ["--git-dir", str(repo)] if repo else []
     try:
         return subprocess.run(
@@ -202,6 +204,7 @@ def _mirror(execution: Execution, request: Request, project: str, reuse: bool) -
     else:
         _clone(request.origin, mirror, project)
     _fetch(mirror, project)
+    checkout.carry(partial(_git, repo=mirror), os.environ)
     return mirror
 
 
