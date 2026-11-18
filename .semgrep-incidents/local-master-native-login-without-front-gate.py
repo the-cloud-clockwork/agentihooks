@@ -5,7 +5,7 @@ def holds(slug: str, seat: str) -> bool:
     return seat in ("", f"master@{slug}")
 
 
-def ungated(lane: str, harness: str, task: dict, slug: str) -> str:
+def ungated(lane: str, harness: str, task: dict) -> str:
     explicit = task.get("route_kind")
     # ruleid: local-master-native-login-without-front-gate
     if explicit or lane != MASTER or harness not in ("", "claude"):

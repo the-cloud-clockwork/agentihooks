@@ -135,10 +135,7 @@ def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, ki
 
 
 @pytest.mark.parametrize("handoff", [False, True])
-@pytest.mark.parametrize("week_left,route", [(3.0, "open")])
-def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
-    tmp_path, monkeypatch, week_left, route, handoff
-):
+def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(tmp_path, monkeypatch, handoff):
     from scripts.routing import master_account
     from scripts.swarm.capacity import Account
 
@@ -152,7 +149,7 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
     monkeypatch.setattr(master_account, "load", lambda environ: declared)
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
     runtime._quota_accounts = [
-        Account("claude", "main", "OPEN", 0, 90.0, week_left, 6),
+        Account("claude", "main", "OPEN", 0, 90.0, 3.0, 6),
         Account("claude", "open", "OPEN", 0, 90.0, 60.0, 6),
     ]
     config = SimpleNamespace(
@@ -172,8 +169,8 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
         }
     placed = runtime.spawn(config, "master", "agent", task)
     passed = _passed(seen[0])
-    assert passed[passed.index("--route") + 1] == route
-    assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")
+    assert passed[passed.index("--route") + 1] == "open"
+    assert placed.route_kind == "subscription"
 
 
 @pytest.mark.feature("local-master-native-login-without-front-gate")
