@@ -35,7 +35,7 @@ worker start without `--self-test` exits 2 until the worker loop lands.
 |---|---|---|---|
 | `AGENTIHOOKS_BUS*` | yes | yes | Event bus connection settings |
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
-| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs |
+| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
@@ -783,9 +783,8 @@ key of the repository, head, base, class and grader revision. Live grades sit in
 
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
 head supersedes nothing until intake records the branch; expansion keys static gates and test units
-only, so the other jobs the lab does not run yet pass by their frame; no job stores a dev manifest
-under `lab/manifests/` yet, so a merge group, promotion or backfill head cannot expand until one
-does; a rerequested grade reuses the finished jobs of its own head.
+only, so the other jobs the lab does not run yet pass by their frame; a rerequested grade reuses
+the finished jobs of its own head.
 
 ### Test units
 
@@ -804,9 +803,19 @@ list), the pytest invocation and the toolchain. The expander reads every head fi
 
 The manifest comes from `scheduler.StoredManifests`: the packed manifest at
 `lab/manifests/<owner>--<name>/<commit>.json` (`objects.manifest_folder`) of the first commit on
-the first parent chain of the head's base that has one. A head that needs test units and finds
-none fails with `no dependency manifest at or before <base>` and is dropped with that reason, so a
-merge group never folds green on an empty unit job.
+the first parent chain of the head's base that has one. Runners cannot reach the lab store, so the
+lab pulls each manifest itself: a commit among the newest `MANIFEST_DEPTH` (10) of that chain with
+none stored goes through `manifests.fetch`, which finds the commit's dev push run of the Tests
+workflow, lists the run's `dep-manifest-packed` artifact and downloads its archive with a token
+the lab's GitHub App scopes to actions read (`manifests.Actions`, one per repository through
+`manifests.Fetcher`). Its `packed.json` is written once at that commit's key, so a stored commit is
+never fetched again. A commit without such a run or artifact, an expired artifact, an archive
+GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
+request or an archive without a readable `packed.json` raises `manifests.FetchRefused` and drops
+the head with its reason. The dev push artifact is kept 7 days, so a commit older than that is
+answered only from the store. A head that needs test units and finds none fails with
+`no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
+never folds green on an empty unit job.
 
 For a merge group head the expander builds `interaction.Group` from the mirror: the group's
 changes against the base, one entry per first parent commit between base and head with that

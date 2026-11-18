@@ -818,19 +818,26 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
 
 @dataclass(frozen=True)
 class StoredManifests:
-    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
+    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`; one of
+    the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run and stored once."""
 
     objects: Objects
     fetch: Fetch
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
-        """Return the manifest of the first commit that has one stored, None when none has."""
-        folder = manifest_folder(_slug(repo))
+        """Return the manifest of the first commit that has one stored or, among the newest, fetched; None when none
+        has."""
+        slug = _slug(repo)
+        folder = manifest_folder(slug)
         stored = frozenset(self.objects.keys(folder))
-        for commit in commits:
+        for index, commit in enumerate(commits):
             path = f"{folder}{commit}.json"
             if path in stored:
                 return UNPACK(json.loads(self.objects.read(path)))
+            packed = self.fetch(slug, commit) if index < MANIFEST_DEPTH else None
+            if packed is not None:
+                self.objects.write_once(path, packed)
+                return UNPACK(json.loads(packed))
         return None
 
 
