@@ -726,3 +726,9 @@ def test_kind_proof_sets_up_redis_and_tls_while_the_cluster_starts_and_posts_the
     assert text.count("  name: hive-redis\n") == 2
     proof = text[text.index("prove_worker() {") :]
     assert proof.index("orders.command(hive, order)\n") < proof.index("    record = registry.show(redis, hive)")
+
+
+@pytest.mark.feature("hive-release-jobs-run-one-at-a-time")
+def test_every_release_hive_job_queues_behind_the_last_one_in_one_group() -> None:
+    hive = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())["jobs"]["hive"]
+    assert hive["concurrency"] == {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
