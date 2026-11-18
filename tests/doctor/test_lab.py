@@ -184,6 +184,9 @@ def test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_re
     sources = shadow.Sources(frozenset({"lint"}), APP)
     assert lab.mismatches(fetch, REPOSITORY, ("lint",), sources, 2) == {"lint": 1}
     assert asked == list(found)
+    asked.clear()
+    assert lab.mismatches(fetch, REPOSITORY, ("lint",), sources, 1) == {"lint": 1}
+    assert asked == list(found)[:2]
     assert lab.mismatches(fetch, REPOSITORY, ("lint",), shadow.Sources(frozenset({"lint"}), "other"), 2) == {"lint": 0}
     assert lab.mismatches(fetch, REPOSITORY, (), sources, 2) == {}
 
@@ -243,8 +246,8 @@ def test_doctor_findings_prints_a_faked_lab_reading_as_json(
     assert json.loads(capsys.readouterr().out) == json.loads(json.dumps(expected))
     assert doctor.main([SLUG, "findings", "--detector", "lab"]) == 0
     assert capsys.readouterr().out.splitlines() == [f"{f.id} {f.summary}" for f in (behind_finding(), ratio_finding())]
-    assert doctor.main([SLUG, "findings", "--detector", "lab", "--detector", "nothing"]) == 1
+    assert doctor.main([SLUG, "findings", "--detector", "lab", "--detector", "nothing", "--detector", "none"]) == 1
     err = capsys.readouterr().err
-    assert "doctor: no detector nothing; the detectors are " in err
+    assert "doctor: no detector none, nothing; the detectors are " in err
     assert ", lab, lab gate, " in err and "trace" not in err
     assert "run the detectors once and print their findings" in doctor.build_parser().format_help()
