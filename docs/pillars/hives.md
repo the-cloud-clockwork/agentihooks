@@ -1797,13 +1797,13 @@ admission adds them on every claim.
 
 #### What the admission adds
 
-The admission takes the seat of a saved launch assignment; without one, it takes the seat the handoff names, if that
-seat is free. After it occupies the seat, it reads the task's stored handoff.
+The admission takes the seat of a saved launch assignment, else the seat the handoff names; a preferred seat that is
+taken gives way to the lowest free seat of the lane. After it occupies the seat, it reads the task's stored handoff.
 
 | Stored for the task | The spawn task carries |
 |---|---|
 | A handoff text: one written by `agentihooks swarm <slug> handoff`, `ready` or `park`, or the recovery handoff `agentihooks hive remove` stores for each agent that did not hand off within its wait | `handoff`, the text, and `handoff_envelope`, the stored envelope resolved on the claimed row so a cleared protected branch is never continued |
-| No handoff, but earlier lives or a recorded branch | `reclaim`, the continuation verdict on the recorded branch (whether the successor continues from it or starts fresh, and why), also stored for the admitted agent |
+| No handoff, but earlier lives or a recorded branch | `reclaim`, the branch the task continues from, or the decision to start fresh, and why; also stored for the admitted agent |
 | Neither, on a first life | Nothing |
 
 The admission then attaches the transfer. It takes the latest row of the task in the swarm's transfers hash that has
@@ -1817,8 +1817,9 @@ no successor yet, whatever recorded it, and sets on it:
 | `attached_at` | The attach time, in milliseconds |
 
 The attached row is the spawn task's `transfer`. A task with no open transfer carries `"transfer": null`. The
-admission records no transfer row of its own. An attached row stays with its successor until a release detaches it
-(see [Handing the transfer back](#handing-the-transfer-back)), and the next admission then attaches that same row.
+admission records no transfer row of its own. An attached row stays with its successor until a reopen, a launch
+check free or a refused attach detaches it, unless its binding is already `live` (see
+[Handing the transfer back](#handing-the-transfer-back)); the next admission then attaches that same row.
 
 #### What the successor reads
 
@@ -1852,8 +1853,8 @@ Every path that returns an admitted task to `open` detaches its transfer before 
 | Path | When | What happens |
 |---|---|---|
 | `reopen` | The spoke gives the offer back after a failed launch while deliveries remain, or dead letters the final delivery | The admission cancels the pending life, detaches the transfer, drops the claim and the agent, and sets the ledger row back to `open` with `claimed_by` empty. The row keeps its id, handoff text and `pending` binding with an empty `successor`, so the next admission attaches the same row. A repeated `reopen` finds no admission, answers `false` and leaves the transfer as it is; when the repeat is the dead letter of the final delivery, the hub may raise the task's claim generation instead. |
-| Launch check free | The hub launch check halts an admitted agent that no hive started | The same release, after the agent's hive slot is released. |
-| Refused attach | Another writer changed the transfers hash while the admission attached, so attach raised `The transfer changed; retry the command` | The same release, and the admission keeps nothing for the offer. The hive's admit ask is answered with that error; the task is `open` with no claimant, so the next ask for the offer starts clean. |
+| Launch check free | The hub launch check halts an admitted agent that no hive started | The same steps, after the agent's hive slot is freed. |
+| Refused attach | Another writer changed the transfers hash while the admission attached, so attach raised `The transfer changed; retry the command` | The same steps, and the admission keeps nothing for the offer. The hive's admit ask is answered with that error; the task is `open` with no claimant, so the next ask for the offer starts clean. |
 
 Detach clears `successor` only on a row whose binding is not `live`, so a transfer that already bound to a running
 successor stays with it. A launch failure the hive reports with `failed` leaves the transfer attached; the `reopen`
@@ -1916,7 +1917,7 @@ semgrep --test --config .semgrep-incidents/admission-claim-skips-continuity.yml 
 | An events successor's opening has no `confirm-handoff` line, and the task's transfer keeps an empty `successor` while the successor runs | The hub runs a release from before pull request [#11138](https://github.com/the-cloud-clockwork/agentihooks/pull/11138), whose admission attached no transfer | Roll the hub to the newest release. The running successor goes on without the transfer; the open row attaches to the task's next admission. |
 | An events successor reads `1. Handoff document: none was left for this task.` although its predecessor handed off | The hub runs a release from before pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), whose admission read no handoff, or no handoff text is stored for the task | Read the handoff key above. Roll the hub when the text is there. |
 | The hive's admit ask is answered `The transfer changed; retry the command` | Another writer changed the swarm's transfers while the admission attached | Nothing to fix: the admission released its claim, agent and ledger row, and the next ask for the offer admits again. |
-| A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. Otherwise a release hands the transfer back; see [Handing the transfer back](#handing-the-transfer-back). |
+| A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. Otherwise a reopen or a launch check free hands the transfer back; see [Handing the transfer back](#handing-the-transfer-back). |
 
 ### When a hive is lost
 
